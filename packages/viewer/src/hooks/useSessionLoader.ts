@@ -36,6 +36,10 @@ async function loadSession(): Promise<ReplaySession> {
   // 2. Gist parameter — resolve gist ID to raw JSON URL via GitHub API
   const gistId = params.get("gist");
   if (gistId) {
+    // Only allow hex gist IDs (GitHub gist IDs are 32 hex chars)
+    if (!/^[a-f0-9]{20,40}$/.test(gistId)) {
+      throw new Error("Invalid gist ID");
+    }
     const rawUrl = await resolveGistUrl(gistId);
     const session = await fetchJson(rawUrl);
     // Register replay in gallery (fire-and-forget)

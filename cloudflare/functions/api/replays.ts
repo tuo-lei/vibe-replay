@@ -45,6 +45,12 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
 // POST /api/replays — register/upsert a replay
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   try {
+    // Basic size guard — reject bodies over 4KB
+    const contentLength = request.headers.get("content-length");
+    if (contentLength && parseInt(contentLength) > 4096) {
+      return Response.json({ error: "payload too large" }, { status: 413 });
+    }
+
     const body = (await request.json()) as {
       gist_id: string;
       title?: string;
@@ -59,9 +65,20 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
       return Response.json({ error: "gist_id required" }, { status: 400 });
     }
 
-    if (!/^[a-f0-9]+$/.test(body.gist_id)) {
+    // gist_id: hex only, 20-40 chars (real GitHub gist IDs are 32 hex chars)
+    if (!/^[a-f0-9]{20,40}$/.test(body.gist_id)) {
       return Response.json({ error: "invalid gist_id" }, { status: 400 });
     }
+
+    // Truncate string fields to prevent oversized storage
+    const title = (body.title || "Untitled").slice(0, 200);
+    const provider = (body.provider || "claude-code").slice(0, 50);
+    const model = body.model ? body.model.slice(0, 100) : null;
+
+    // Clamp numeric fields to sane ranges
+    const sceneCount = clamp(body.scene_count, 0, 100_000);
+    const userPrompts = clamp(body.user_prompts, 0, 10_000);
+    const durationMs = clamp(body.duration_ms, 0, 86_400_000); // max 24h
 
     const db = drizzle(env.DB);
 
@@ -69,12 +86,12 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
       .insert(replays)
       .values({
         gistId: body.gist_id,
-        title: body.title || "Untitled",
-        provider: body.provider || "claude-code",
-        model: body.model || null,
-        sceneCount: body.scene_count || 0,
-        userPrompts: body.user_prompts || 0,
-        durationMs: body.duration_ms || 0,
+        title,
+        provider,
+        model,
+        sceneCount,
+        userPrompts,
+        durationMs,
       })
       .onConflictDoUpdate({
         target: replays.gistId,
@@ -85,10 +102,15 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
       });
 
     return Response.json({ ok: true }, { headers: corsHeaders });
-  } catch (e: any) {
-    return Response.json({ error: e.message }, { status: 500 });
+  } catch {
+    return Response.json({ error: "internal error" }, { status: 500 });
   }
 };
+
+function clamp(val: number | undefined, min: number, max: number): number {
+  const n = Number(val) || 0;
+  return Math.max(min, Math.min(max, n));
+}
 
 // Handle CORS preflight
 export const onRequestOptions: PagesFunction = async () => {
