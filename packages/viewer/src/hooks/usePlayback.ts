@@ -3,6 +3,16 @@ import type { Scene } from "../types";
 
 export type PlayState = "idle" | "playing" | "paused" | "ended";
 
+function isEditableTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  const tag = el.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  if (el.isContentEditable) return true;
+  const role = el.getAttribute("role");
+  return role === "textbox" || role === "combobox";
+}
+
 /** Check if a tool-call scene is "simple" (batchable — no diff, no bash output) */
 function isBatchable(scene: Scene): boolean {
   return scene.type === "tool-call" && !scene.diff && !scene.bashOutput;
@@ -212,6 +222,8 @@ export function usePlayback(scenes: Scene[], promptsOnly = false, enabled = true
   useEffect(() => {
     if (!enabled) return;
     const handler = (e: KeyboardEvent) => {
+      // Do not hijack keys while user is typing in search/input controls.
+      if (isEditableTarget(e.target)) return;
       // Space — play/pause
       if (e.key === " " || e.key === "k") {
         e.preventDefault();

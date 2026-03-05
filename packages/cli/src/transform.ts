@@ -24,13 +24,12 @@ export function transformToReplay(
     if (turn.role === "user") {
       const textBlocks = turn.blocks.filter((b) => b.type === "text");
       const content = textBlocks.map((b) => (b as any).text || "").join("\n");
-      // Collect user-pasted images
       const imageBlock = turn.blocks.find((b) => (b as any).type === "_user_images") as any;
       const images: string[] | undefined = imageBlock?.images;
       if (content.trim() || (images && images.length > 0)) {
         scenes.push({
           type: "user-prompt",
-          content: content.trim() ? content : "(image)",
+          content: content.trim() ? redactSecrets(redactPath(content)) : "(image)",
           timestamp: turn.timestamp,
           ...(images && images.length > 0 ? { images } : {}),
         });
@@ -43,13 +42,13 @@ export function transformToReplay(
       if (block.type === "thinking") {
         const thinking = (block as any).thinking || "";
         if (thinking.trim()) {
-          scenes.push({ type: "thinking", content: truncate(thinking, 2000), timestamp: turn.timestamp });
+          scenes.push({ type: "thinking", content: truncate(redactPath(thinking), 2000), timestamp: turn.timestamp });
           thinkingBlocks++;
         }
       } else if (block.type === "text") {
         const text = (block as any).text || "";
         if (text.trim()) {
-          scenes.push({ type: "text-response", content: text, timestamp: turn.timestamp });
+          scenes.push({ type: "text-response", content: redactSecrets(redactPath(text)), timestamp: turn.timestamp });
         }
       } else if (block.type === "tool_use") {
         const toolBlock = block as any;
@@ -95,7 +94,7 @@ function buildToolScene(
     type: "tool-call",
     toolName,
     input: sanitizeInput(input),
-    result: truncate(result, 5000),
+    result: truncate(redactPath(result), 5000),
     ...(images && images.length > 0 ? { images } : {}),
   };
 
@@ -113,7 +112,7 @@ function buildToolScene(
     };
   } else if (toolName === "Bash" && input.command) {
     (scene as any).bashOutput = {
-      command: redactPath(input.command),
+      command: redactSecrets(redactPath(input.command)),
       stdout: truncate(redactPath(result), 3000),
     };
   }
@@ -125,12 +124,12 @@ function sanitizeInput(input: Record<string, any>): Record<string, any> {
   const sanitized: Record<string, any> = {};
   for (const [key, value] of Object.entries(input)) {
     if (typeof value === "string" && value.length > 3000) {
-      sanitized[key] = redactSecrets(value.slice(0, 3000) + `\n... (${value.length} chars total)`);
+      sanitized[key] = redactSecrets(redactPath(value.slice(0, 3000) + `\n... (${value.length} chars total)`));
     } else if (typeof value === "string") {
-      sanitized[key] = redactSecrets(value);
+      sanitized[key] = redactSecrets(redactPath(value));
     } else if (Array.isArray(value)) {
       sanitized[key] = value.map((v) =>
-        typeof v === "string" ? redactSecrets(v) :
+        typeof v === "string" ? redactSecrets(redactPath(v)) :
         v && typeof v === "object" ? sanitizeInput(v) : v
       );
     } else if (value && typeof value === "object") {
@@ -192,13 +191,20 @@ const SECRET_PATTERNS = [
   /-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA )?PRIVATE KEY-----/g,
   // Database connection strings with credentials
   /(?:mongodb(?:\+srv)?|postgres(?:ql)?|mysql|redis):\/\/[^:]+:[^@]+@[^\s"']+/gi,
+  // Email addresses
+  /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g,
 ];
 
 function redactSecrets(s: string): string {
   let result = s;
   for (const pattern of SECRET_PATTERNS) {
     result = result.replace(pattern, (match) => {
-      // For the env var pattern, preserve the key name
+      // Email: keep domain for context
+      if (match.includes("@") && /^[a-zA-Z0-9._%+-]+@/.test(match)) {
+        const atIdx = match.indexOf("@");
+        return "[REDACTED]" + match.slice(atIdx);
+      }
+      // Env var pattern: preserve the key name
       const eqIdx = match.search(/[=:]/);
       if (eqIdx > 0) {
         return match.slice(0, eqIdx + 1) + " [REDACTED]";

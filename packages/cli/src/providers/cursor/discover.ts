@@ -21,7 +21,7 @@ export async function discoverCursorSessions(): Promise<SessionInfo[]> {
     const dirStat = await stat(transcriptsDir).catch(() => null);
     if (!dirStat?.isDirectory()) continue;
 
-    const project = decodeProjectDir(projDir);
+    const project = await decodeProjectDir(projDir);
     const transcriptEntries = await collectTranscriptEntries(transcriptsDir);
     if (transcriptEntries.length === 0) continue;
     transcriptEntries.sort((a, b) => a.mtimeMs - b.mtimeMs);
@@ -57,9 +57,30 @@ export async function discoverCursorSessions(): Promise<SessionInfo[]> {
   return sessions;
 }
 
-function decodeProjectDir(encoded: string): string {
-  // Cursor uses similar encoding: "Users-tlei-Code-project" → "/Users/tlei/Code/project"
-  return "/" + encoded.replace(/-/g, "/");
+/**
+ * Cursor encodes workspace paths by replacing `/` with `-`.
+ * But directory names can also contain `-` (e.g. `vibe-replay`),
+ * so we resolve ambiguity by checking which paths actually exist on disk.
+ */
+async function decodeProjectDir(encoded: string): Promise<string> {
+  const parts = encoded.split("-");
+
+  async function resolve(idx: number, current: string): Promise<string | null> {
+    if (idx >= parts.length) {
+      const s = await stat(current).catch(() => null);
+      return s?.isDirectory() ? current : null;
+    }
+    // Try `/` (path separator) first — more common
+    const withSlash = current + "/" + parts[idx];
+    const slashResult = await resolve(idx + 1, withSlash);
+    if (slashResult) return slashResult;
+    // Try `-` (literal hyphen in directory name)
+    const withHyphen = current + "-" + parts[idx];
+    return resolve(idx + 1, withHyphen);
+  }
+
+  const result = await resolve(1, "/" + parts[0]);
+  return result || "/" + encoded.replace(/-/g, "/");
 }
 
 function shortenPath(path: string): string {
