@@ -1,0 +1,57 @@
+{
+  "name": "vibe-replay",
+  "version": "0.1.0",
+  "description": "Turn AI coding sessions into animated, interactive web replays. One command, one HTML file, share anywhere.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Tuo Lei",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tuo-lei/vibe-replay"
+  },
+  "homepage": "https://github.com/tuo-lei/vibe-replay#readme",
+  "bugs": {
+    "url": "https://github.com/tuo-lei/vibe-replay/issues"
+  },
+  "keywords": [
+    "ai",
+    "coding",
+    "replay",
+    "claude",
+    "cursor",
+    "vibe-coding",
+    "session",
+    "demo",
+    "animation",
+    "sharing"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "vibe-replay": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "assets"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx src/index.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^7.2.0",
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "open": "^10.1.0",
+    "ora": "^8.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsup": "^8.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.0.18"
+  }
+}

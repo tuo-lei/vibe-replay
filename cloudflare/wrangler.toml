@@ -1,0 +1,8 @@
+name = "vibe-replay"
+pages_build_output_dir = "../website/dist"
+compatibility_date = "2024-12-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "vibe-replay-db"
+database_id = "c117f92e-921c-44b3-888d-547a860ad1d5"

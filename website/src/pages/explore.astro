@@ -1,0 +1,193 @@
+---
+import Layout from "../layouts/Layout.astro";
+import Footer from "../components/Footer.astro";
+---
+
+<Layout title="Explore Replays - vibe-replay">
+  <div class="min-h-screen flex flex-col">
+    <!-- Header -->
+    <header class="border-b border-border px-6 py-4">
+      <div class="max-w-6xl mx-auto flex items-center justify-between">
+        <div class="flex items-center gap-4">
+          <a href="/" class="font-mono font-bold text-accent hover:text-accent-dim transition-colors">vibe-replay</a>
+          <span class="text-text-muted">/</span>
+          <span class="font-mono text-text-primary">explore</span>
+        </div>
+        <a href="/" class="text-text-muted hover:text-text-primary text-sm transition-colors">&larr; Home</a>
+      </div>
+    </header>
+
+    <!-- Main content -->
+    <main class="flex-1 max-w-6xl mx-auto w-full px-6 py-10">
+      <!-- Title + sort controls -->
+      <div class="flex items-center justify-between mb-8">
+        <div>
+          <h1 class="text-2xl font-bold text-text-primary mb-1">Public Replays</h1>
+          <p class="text-text-muted text-sm font-mono">AI coding sessions shared by the community</p>
+        </div>
+        <div class="flex items-center gap-1 rounded-lg border border-border overflow-hidden">
+          <button
+            id="sort-recent"
+            data-sort="recent"
+            class="sort-btn px-3 py-1.5 text-xs font-mono transition-colors bg-accent/10 text-accent"
+          >
+            Recent
+          </button>
+          <button
+            id="sort-popular"
+            data-sort="popular"
+            class="sort-btn px-3 py-1.5 text-xs font-mono transition-colors text-text-muted hover:text-text-secondary"
+          >
+            Popular
+          </button>
+        </div>
+      </div>
+
+      <!-- Loading state -->
+      <div id="loading" class="text-center py-20">
+        <div class="text-text-muted font-mono text-sm animate-pulse">Loading replays...</div>
+      </div>
+
+      <!-- Empty state -->
+      <div id="empty" class="hidden text-center py-20">
+        <div class="rounded-xl border border-border bg-surface-1 p-10 max-w-md mx-auto">
+          <div class="text-4xl mb-4">&#9654;</div>
+          <h2 class="text-lg font-semibold text-text-primary mb-2">No replays yet</h2>
+          <p class="text-text-muted text-sm mb-6">Be the first to share a replay!</p>
+          <div class="font-mono text-sm bg-surface-2 rounded-lg px-4 py-3 text-text-secondary">
+            <span class="text-accent">$</span> npx vibe-replay --gist
+          </div>
+        </div>
+      </div>
+
+      <!-- Replay grid -->
+      <div id="replay-grid" class="hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      </div>
+    </main>
+
+    <Footer />
+  </div>
+</Layout>
+
+<script>
+  const API_BASE = "/api/replays";
+
+  interface Replay {
+    gist_id: string;
+    title: string;
+    provider: string;
+    model: string | null;
+    scene_count: number;
+    user_prompts: number;
+    duration_ms: number;
+    view_count: number;
+    created_at: string;
+  }
+
+  let currentSort = "recent";
+
+  function formatDuration(ms: number): string {
+    if (!ms) return "";
+    const secs = Math.floor(ms / 1000);
+    if (secs < 60) return `${secs}s`;
+    const mins = Math.floor(secs / 60);
+    if (mins < 60) return `${mins}m ${secs % 60}s`;
+    const hrs = Math.floor(mins / 60);
+    return `${hrs}h ${mins % 60}m`;
+  }
+
+  function formatDate(iso: string): string {
+    const d = new Date(iso + "Z");
+    const now = new Date();
+    const diff = now.getTime() - d.getTime();
+    const hours = Math.floor(diff / 3600000);
+    if (hours < 1) return "just now";
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 30) return `${days}d ago`;
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  }
+
+  function createCard(r: Replay): string {
+    const duration = formatDuration(r.duration_ms);
+    const date = formatDate(r.created_at);
+    return `
+      <a href="/view/?gist=${r.gist_id}" class="group block rounded-xl border border-border bg-surface-1 hover:border-accent/30 hover:bg-surface-2/50 transition-all p-5">
+        <div class="flex items-start justify-between mb-3">
+          <h3 class="font-mono text-sm font-semibold text-text-primary group-hover:text-accent transition-colors truncate pr-2">${escapeHtml(r.title)}</h3>
+          <span class="text-[10px] text-text-muted shrink-0">${date}</span>
+        </div>
+        <div class="flex items-center gap-2 mb-3">
+          ${r.model ? `<span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-2 text-text-secondary border border-border">${escapeHtml(r.model)}</span>` : ""}
+          ${r.provider ? `<span class="text-[10px] font-mono text-text-muted">${escapeHtml(r.provider)}</span>` : ""}
+        </div>
+        <div class="flex items-center gap-3 text-[11px] font-mono text-text-muted">
+          <span>${r.scene_count} scenes</span>
+          <span class="text-border">&middot;</span>
+          <span>${r.user_prompts} prompts</span>
+          ${duration ? `<span class="text-border">&middot;</span><span>${duration}</span>` : ""}
+          <span class="ml-auto flex items-center gap-1">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+            ${r.view_count}
+          </span>
+        </div>
+      </a>
+    `;
+  }
+
+  function escapeHtml(s: string): string {
+    const div = document.createElement("div");
+    div.textContent = s;
+    return div.innerHTML;
+  }
+
+  async function loadReplays(sort: string) {
+    const loading = document.getElementById("loading")!;
+    const empty = document.getElementById("empty")!;
+    const grid = document.getElementById("replay-grid")!;
+
+    loading.classList.remove("hidden");
+    empty.classList.add("hidden");
+    grid.classList.add("hidden");
+
+    try {
+      const resp = await fetch(`${API_BASE}?sort=${sort}&limit=50`);
+      if (!resp.ok) throw new Error("Failed to fetch");
+      const replays: Replay[] = await resp.json();
+
+      loading.classList.add("hidden");
+
+      if (replays.length === 0) {
+        empty.classList.remove("hidden");
+        return;
+      }
+
+      grid.innerHTML = replays.map(createCard).join("");
+      grid.classList.remove("hidden");
+    } catch {
+      loading.classList.add("hidden");
+      empty.classList.remove("hidden");
+    }
+  }
+
+  // Sort button handlers
+  document.querySelectorAll<HTMLButtonElement>(".sort-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const sort = btn.dataset.sort!;
+      if (sort === currentSort) return;
+      currentSort = sort;
+
+      document.querySelectorAll<HTMLButtonElement>(".sort-btn").forEach((b) => {
+        b.classList.remove("bg-accent/10", "text-accent");
+        b.classList.add("text-text-muted", "hover:text-text-secondary");
+      });
+      btn.classList.add("bg-accent/10", "text-accent");
+      btn.classList.remove("text-text-muted", "hover:text-text-secondary");
+
+      loadReplays(sort);
+    });
+  });
+
+  // Initial load
+  loadReplays("recent");
+</script>

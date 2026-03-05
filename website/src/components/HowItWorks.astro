@@ -1,0 +1,104 @@
+---
+---
+
+<section id="how-it-works" class="relative py-32 px-6">
+  <div class="max-w-5xl mx-auto">
+    <!-- Section header -->
+    <div class="text-center mb-20">
+      <p class="text-accent font-mono text-sm font-medium tracking-wider uppercase mb-3">How it works</p>
+      <h2 class="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight">
+        Three steps. Zero config.
+      </h2>
+    </div>
+
+    <!-- Steps -->
+    <div class="space-y-20">
+      <!-- Step 1: Code with AI -->
+      <div class="flex flex-col md:flex-row items-center gap-10">
+        <div class="md:w-2/5">
+          <div class="flex items-center gap-3 mb-4">
+            <span class="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center text-accent font-mono text-sm font-bold">1</span>
+            <h3 class="text-xl font-semibold">Code with AI</h3>
+          </div>
+          <p class="text-text-secondary leading-relaxed">Use Claude Code or Cursor as you normally would. Your session is automatically saved &mdash; no setup needed.</p>
+        </div>
+        <div class="md:w-3/5 rounded-xl border border-border bg-surface-1 p-5 font-mono text-sm">
+          <div class="space-y-2 text-text-secondary">
+            <div><span class="text-accent">$</span> <span class="text-text-primary">claude</span></div>
+            <div class="text-[#58a6ff]">Claude Code v1.0.0</div>
+            <div>&nbsp;</div>
+            <div><span class="text-[#3fb950]">You:</span> <span class="text-text-primary">Refactor auth to use JWT tokens</span></div>
+            <div>&nbsp;</div>
+            <div><span class="text-[#58a6ff]">Claude:</span> I'll analyze the current auth middleware...</div>
+            <div class="text-[#d29922]">  Read src/middleware/auth.ts</div>
+            <div class="text-[#d29922]">  Edit src/middleware/auth.ts</div>
+            <div class="text-[#d29922]">  Edit src/routes/api.ts</div>
+            <div class="text-[#58a6ff]">  Done. Updated 3 files.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 2: Run vibe-replay -->
+      <div class="flex flex-col md:flex-row-reverse items-center gap-10">
+        <div class="md:w-2/5">
+          <div class="flex items-center gap-3 mb-4">
+            <span class="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center text-accent font-mono text-sm font-bold">2</span>
+            <h3 class="text-xl font-semibold">Run vibe-replay</h3>
+          </div>
+          <p class="text-text-secondary leading-relaxed">One command. Pick a session from the interactive list, and a replay is generated instantly as a single HTML file.</p>
+        </div>
+        <div class="md:w-3/5 rounded-xl border border-border bg-surface-1 overflow-hidden">
+          <div class="flex items-center gap-2 px-4 py-2.5 border-b border-border bg-surface-2/50">
+            <div class="flex gap-1.5">
+              <div class="w-2.5 h-2.5 rounded-full bg-[#ff5f57]"></div>
+              <div class="w-2.5 h-2.5 rounded-full bg-[#febc2e]"></div>
+              <div class="w-2.5 h-2.5 rounded-full bg-[#28c840]"></div>
+            </div>
+            <span class="text-[10px] text-text-muted font-mono ml-2">Terminal</span>
+          </div>
+          <div class="p-5 font-mono text-sm space-y-1.5">
+            <div class="text-text-primary"><span class="text-accent">$</span> npx vibe-replay</div>
+            <div>&nbsp;</div>
+            <div class="text-text-secondary">  Found 12 sessions in ~/.claude/projects/</div>
+            <div>&nbsp;</div>
+            <div class="text-cyan-400">  ? Pick a session:</div>
+            <div class="text-text-secondary">    Build landing page with Astro        <span class="text-text-muted">(42 scenes, 2h ago)</span></div>
+            <div class="text-emerald-400">  &gt; Refactor auth middleware              <span class="text-text-muted">(128 scenes, 5h ago)</span></div>
+            <div class="text-text-secondary">    Fix payment webhook handler           <span class="text-text-muted">(67 scenes, 1d ago)</span></div>
+            <div>&nbsp;</div>
+            <div class="text-text-secondary">  Generating replay... 128 scenes</div>
+            <div class="text-emerald-400">  Created <span class="text-text-primary">vibe-replay/refactor-auth-middleware/index.html</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 3: Share -->
+      <div class="flex flex-col md:flex-row items-center gap-10">
+        <div class="md:w-2/5">
+          <div class="flex items-center gap-3 mb-4">
+            <span class="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center text-accent font-mono text-sm font-bold">3</span>
+            <h3 class="text-xl font-semibold">Share anywhere</h3>
+          </div>
+          <p class="text-text-secondary leading-relaxed">Get a self-contained HTML file. Drop it in Slack, email it, push to a gist, host it anywhere &mdash; no server needed.</p>
+        </div>
+        <div class="md:w-3/5 rounded-xl border border-border bg-surface-1 p-5 font-mono text-sm">
+          <div class="space-y-2.5">
+            <div class="flex items-center gap-3 text-text-secondary">
+              <svg class="w-4 h-4 text-accent shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>
+              <span class="text-text-primary">index.html</span>
+              <span class="text-text-muted text-xs">480 KB &middot; Self-contained</span>
+            </div>
+            <div class="border-t border-border pt-2.5 space-y-2">
+              <div><span class="text-accent">$</span> <span class="text-text-primary">npx vibe-replay -s last --gist</span></div>
+              <div class="text-emerald-400">  Published to gist.github.com/abc123</div>
+            </div>
+            <div class="border-t border-border pt-2.5 space-y-2">
+              <div><span class="text-accent">$</span> <span class="text-text-primary">npx vibe-replay -s last --open</span></div>
+              <div class="text-emerald-400">  Opened in browser</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

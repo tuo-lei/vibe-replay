@@ -1,0 +1,25 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.DS_Store
+.astro/
+
+# Generated output
+vibe-replay/*/
+packages/cli/vibe-replay/
+
+# Dev artifacts
+packages/viewer/public/demo.json
+packages/viewer/dist/
+packages/cli/assets/viewer.html
+plan/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.*

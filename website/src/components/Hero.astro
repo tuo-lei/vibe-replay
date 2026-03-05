@@ -1,0 +1,273 @@
+---
+const DEMO_URL = "/view/?gist=741fb4ce6491e11ca0e03c042384ac8b";
+---
+
+<!-- Top nav -->
+<nav class="relative z-20 border-b border-border/50 px-6 py-3">
+  <div class="max-w-6xl mx-auto flex items-center justify-between">
+    <div class="flex items-center gap-4">
+      <a href="/" class="font-mono font-bold text-accent text-lg">vibe-replay</a>
+      <span class="text-border hidden sm:inline">|</span>
+      <a href="/explore" class="text-text-muted hover:text-text-primary text-sm transition-colors hidden sm:inline">Explore</a>
+    </div>
+    <div class="flex items-center gap-4">
+      <a href="https://github.com/tuo-lei/vibe-replay" target="_blank" rel="noopener" class="text-text-muted hover:text-text-primary transition-colors" title="GitHub">
+        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+      </a>
+      <a href="https://www.npmjs.com/package/vibe-replay" target="_blank" rel="noopener" class="text-text-muted hover:text-text-primary transition-colors" title="npm">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M0 7.334v8h6.666v1.332H12v-1.332h12v-8H0zm6.666 6.664H5.334v-4H3.999v4H1.335V8.667h5.331v5.331zm4 0v1.336H8.001V8.667h5.334v5.332h-2.669v-.001zm12.001 0h-1.33v-4h-1.336v4h-1.335v-4h-1.33v4h-2.671V8.667h8.002v5.331zM10.665 10H12v2.667h-1.335V10z"/></svg>
+      </a>
+    </div>
+  </div>
+</nav>
+
+<section class="relative overflow-hidden pt-16 pb-8">
+  <!-- Grid background -->
+  <div class="absolute inset-0 bg-[linear-gradient(rgba(42,42,62,0.3)_1px,transparent_1px),linear-gradient(90deg,rgba(42,42,62,0.3)_1px,transparent_1px)] bg-[size:64px_64px] [mask-image:radial-gradient(ellipse_60%_60%_at_50%_40%,black_20%,transparent_100%)]"></div>
+
+  <!-- Glow orb -->
+  <div class="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-accent/5 rounded-full blur-[120px] pointer-events-none"></div>
+
+  <div class="relative z-10 max-w-6xl mx-auto px-6 text-center">
+    <!-- Badge -->
+    <div class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-border bg-surface-1/80 backdrop-blur-sm text-sm text-text-secondary mb-8 animate-fade-in">
+      <span class="w-2 h-2 rounded-full bg-accent animate-pulse"></span>
+      Open Source &middot; MIT License
+    </div>
+
+    <!-- Headline -->
+    <h1 class="text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-extrabold tracking-tight leading-[1.05] mb-6 animate-slide-up">
+      <span class="bg-gradient-to-r from-accent via-emerald-400 to-cyan-400 bg-clip-text text-transparent">
+        vibe-replay
+      </span>
+      <br />
+      <span class="text-text-primary text-4xl sm:text-5xl md:text-6xl lg:text-7xl">
+        Replay your AI coding sessions
+      </span>
+    </h1>
+
+    <!-- Subheadline -->
+    <p class="text-lg sm:text-xl text-text-secondary max-w-2xl mx-auto mb-10 animate-slide-up" style="animation-delay: 0.1s">
+      Turn your Claude Code and Cursor sessions into interactive, shareable web replays &mdash; as single, self-contained HTML files.
+    </p>
+
+    <!-- Install command -->
+    <div class="flex items-center justify-center mb-14 animate-slide-up" style="animation-delay: 0.2s">
+      <div class="group relative">
+        <div class="absolute -inset-0.5 bg-gradient-to-r from-accent/50 to-cyan-400/50 rounded-lg blur opacity-40 group-hover:opacity-60 transition"></div>
+        <button
+          id="copy-btn"
+          class="relative flex items-center gap-3 px-6 py-3.5 bg-surface-1 border border-border rounded-lg font-mono text-base hover:border-accent/50 transition-all cursor-pointer"
+        >
+          <span class="text-text-muted select-none">$</span>
+          <span class="text-text-primary">npx vibe-replay</span>
+          <svg id="copy-icon" class="w-4 h-4 text-text-muted hover:text-accent transition-colors ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" stroke-width="2"/>
+            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" stroke-width="2"/>
+          </svg>
+          <svg id="check-icon" class="w-4 h-4 text-accent ml-2 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <polyline points="20 6 9 17 4 12" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Product mockup with hover overlay -->
+    <a href={DEMO_URL} class="block max-w-5xl mx-auto animate-slide-up group relative" style="animation-delay: 0.3s">
+      <!-- Hover overlay: "See it live" -->
+      <div class="absolute inset-0 z-10 rounded-xl bg-black/60 backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-all duration-300 flex items-center justify-center">
+        <div class="flex flex-col items-center gap-3">
+          <div class="w-16 h-16 rounded-full bg-accent/20 border-2 border-accent flex items-center justify-center">
+            <svg class="w-7 h-7 text-accent ml-1" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+          </div>
+          <span class="text-white font-mono text-lg font-semibold">See it live</span>
+          <span class="text-white/60 text-sm">A real vibe-replay session</span>
+        </div>
+      </div>
+
+      <div class="rounded-xl border border-border group-hover:border-accent/40 bg-[#0d1117] shadow-2xl shadow-black/60 overflow-hidden transition-all duration-300">
+        <!-- Viewer header bar -->
+        <div class="flex items-center justify-between px-4 py-2.5 border-b border-[#30363d] bg-[#161b22] text-xs font-mono">
+          <div class="flex items-center gap-3">
+            <span class="text-[#3fb950] font-semibold">vibe-replay</span>
+            <span class="text-[#8b949e]">~/Code/vibe-replay</span>
+            <span class="text-[#8b949e]">&middot;</span>
+            <span class="text-[#e6edf3]">Build the vibe-replay website</span>
+          </div>
+          <div class="hidden sm:flex items-center gap-3 text-[#8b949e]">
+            <span class="px-1.5 py-0.5 rounded bg-[#3fb950]/15 text-[#3fb950]">All</span>
+            <span class="px-1.5 py-0.5 rounded bg-[#1a1a24] text-[#8b949e]">Prompts</span>
+            <span class="text-[#e6edf3]/60">claude-sonnet-4-20250514</span>
+            <span class="text-[#8b949e]">&middot;</span>
+            <span>12T / 186S</span>
+          </div>
+        </div>
+
+        <!-- Main area: sidebar + content -->
+        <div class="flex" style="height: 440px;">
+          <!-- Sidebar minimap -->
+          <div class="hidden md:block w-44 border-r border-[#30363d] bg-[#0d1117] p-3 overflow-hidden">
+            <div class="text-[10px] font-mono text-[#8b949e] uppercase tracking-wider mb-2">Outline</div>
+            <div class="space-y-[3px]">
+              <div class="h-1.5 rounded-sm bg-[#3fb950]/60 w-full"></div>
+              <div class="h-1.5 rounded-sm bg-[#bc8cff]/40 w-3/4"></div>
+              <div class="h-1.5 rounded-sm bg-[#58a6ff]/50 w-full"></div>
+              <div class="h-1.5 rounded-sm bg-[#d29922]/50 w-2/3"></div>
+              <div class="h-1.5 rounded-sm bg-[#d29922]/50 w-4/5"></div>
+              <div class="h-1.5 rounded-sm bg-[#d29922]/50 w-1/2"></div>
+              <div class="h-1.5 rounded-sm bg-[#58a6ff]/50 w-full"></div>
+              <div class="h-1.5 rounded-sm bg-[#d29922]/50 w-2/3"></div>
+              <div class="h-1.5 rounded-sm bg-[#3fb950]/60 w-full"></div>
+              <div class="h-1.5 rounded-sm bg-[#bc8cff]/40 w-2/3"></div>
+              <div class="h-1.5 rounded-sm bg-[#58a6ff]/50 w-full"></div>
+              <div class="h-1.5 rounded-sm bg-[#d29922]/50 w-3/4"></div>
+              <div class="h-1.5 rounded-sm bg-[#d29922]/50 w-1/2"></div>
+              <div class="h-1.5 rounded-sm bg-[#d29922]/50 w-2/3"></div>
+              <div class="h-1.5 rounded-sm bg-[#3fb950]/60 w-full ring-1 ring-[#3fb950]"></div>
+              <div class="h-1.5 rounded-sm bg-[#bc8cff]/40 w-1/2"></div>
+              <div class="h-1.5 rounded-sm bg-[#58a6ff]/50 w-full"></div>
+              <div class="h-1.5 rounded-sm bg-[#d29922]/50 w-3/5"></div>
+              <div class="h-1.5 rounded-sm bg-[#d29922]/50 w-4/5"></div>
+              <div class="h-1.5 rounded-sm bg-[#58a6ff]/50 w-full"></div>
+              <div class="h-1.5 rounded-sm bg-[#d29922]/50 w-2/3"></div>
+              <div class="h-1.5 rounded-sm bg-[#3fb950]/60 w-full"></div>
+              <div class="h-1.5 rounded-sm bg-[#bc8cff]/40 w-3/4"></div>
+              <div class="h-1.5 rounded-sm bg-[#58a6ff]/50 w-full"></div>
+            </div>
+            <!-- Legend -->
+            <div class="mt-4 space-y-1.5 text-[10px] font-mono text-[#8b949e]">
+              <div class="flex items-center gap-1.5"><div class="w-2 h-2 rounded-sm bg-[#3fb950]"></div> Prompt</div>
+              <div class="flex items-center gap-1.5"><div class="w-2 h-2 rounded-sm bg-[#58a6ff]"></div> Response</div>
+              <div class="flex items-center gap-1.5"><div class="w-2 h-2 rounded-sm bg-[#d29922]"></div> Tool call</div>
+              <div class="flex items-center gap-1.5"><div class="w-2 h-2 rounded-sm bg-[#bc8cff]"></div> Thinking</div>
+            </div>
+          </div>
+
+          <!-- Content area -->
+          <div class="flex-1 overflow-hidden p-4 sm:p-6 space-y-4 font-mono text-sm text-left">
+            <!-- User prompt -->
+            <div class="rounded-lg bg-[#3fb950]/5 border border-[#3fb950]/15 p-4">
+              <div class="flex items-center gap-2 mb-2">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-[#3fb950]">You</span>
+                <span class="text-[10px] text-[#8b949e]">3:12 PM</span>
+              </div>
+              <p class="text-[#3fb950]/90 text-sm leading-relaxed">Build a landing page website for vibe-replay.com. Astro + Tailwind, dark theme, terminal aesthetic. Deploy to Cloudflare Pages.</p>
+            </div>
+
+            <!-- Thinking block -->
+            <div class="rounded-lg bg-[#bc8cff]/[0.03] border border-[#bc8cff]/10 p-4">
+              <div class="flex items-center gap-2 mb-2">
+                <span class="text-[10px] font-bold uppercase tracking-wider text-[#bc8cff]/60">Thinking</span>
+              </div>
+              <p class="text-[#8b949e] text-xs leading-relaxed">I'll create an Astro project with Tailwind CSS in the existing monorepo. The design should showcase the product with a hero section, feature grid, and how-it-works flow...</p>
+            </div>
+
+            <!-- Tool call: Write file -->
+            <div class="rounded-lg bg-[#d29922]/[0.03] border border-[#d29922]/10 p-4">
+              <div class="flex items-center gap-2">
+                <svg class="w-3.5 h-3.5 text-[#d29922]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+                <span class="text-[10px] font-bold uppercase tracking-wider text-[#d29922]">Write</span>
+                <span class="text-[#8b949e] text-xs">website/src/pages/index.astro</span>
+              </div>
+            </div>
+
+            <!-- Tool call: Edit file with diff -->
+            <div class="rounded-lg bg-[#d29922]/[0.03] border border-[#d29922]/10 p-4">
+              <div class="flex items-center gap-2 mb-3">
+                <svg class="w-3.5 h-3.5 text-[#d29922]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
+                <span class="text-[10px] font-bold uppercase tracking-wider text-[#d29922]">Edit</span>
+                <span class="text-[#8b949e] text-xs">website/tailwind.config.cjs</span>
+              </div>
+              <!-- Mini diff -->
+              <div class="rounded bg-[#0d1117] border border-[#30363d] text-xs overflow-hidden">
+                <div class="px-3 py-1 bg-[#3fb950]/10 text-[#3fb950]">
+                  <span class="select-none text-[#3fb950]/40">+ </span>accent: "#00e5a0",
+                </div>
+                <div class="px-3 py-1 bg-[#3fb950]/10 text-[#3fb950]">
+                  <span class="select-none text-[#3fb950]/40">+ </span>surface: "#0a0a0f",
+                </div>
+                <div class="px-3 py-1 bg-[#3fb950]/10 text-[#3fb950]">
+                  <span class="select-none text-[#3fb950]/40">+ </span>"surface-1": "#111118",
+                </div>
+              </div>
+            </div>
+
+            <!-- Bash command -->
+            <div class="rounded-lg bg-[#d29922]/[0.03] border border-[#d29922]/10 p-4">
+              <div class="flex items-center gap-2 mb-2">
+                <svg class="w-3.5 h-3.5 text-[#d29922]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" /></svg>
+                <span class="text-[10px] font-bold uppercase tracking-wider text-[#d29922]">Bash</span>
+                <span class="text-[#8b949e] text-xs">wrangler pages deploy</span>
+              </div>
+              <div class="rounded bg-[#0d1117] border border-[#30363d] text-xs p-2 text-[#8b949e]">
+                <div>✨ Deployment complete!</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Playback controls bar -->
+        <div class="border-t border-[#30363d] bg-[#161b22]/90">
+          <!-- Timeline -->
+          <div class="h-2 flex gap-[1px] px-3 pt-2">
+            <div class="flex-[3] rounded-sm bg-[#3fb950]/60"></div>
+            <div class="flex-[2] rounded-sm bg-[#bc8cff]/40"></div>
+            <div class="flex-[5] rounded-sm bg-[#58a6ff]/50"></div>
+            <div class="flex-[2] rounded-sm bg-[#d29922]/50"></div>
+            <div class="flex-[3] rounded-sm bg-[#d29922]/50"></div>
+            <div class="flex-[4] rounded-sm bg-[#58a6ff]/50"></div>
+            <div class="flex-[2] rounded-sm bg-[#d29922]/50"></div>
+            <div class="flex-[3] rounded-sm bg-[#3fb950]/60 ring-1 ring-white/60"></div>
+            <div class="flex-[2] rounded-sm bg-[#bc8cff]/30"></div>
+            <div class="flex-[4] rounded-sm bg-[#58a6ff]/30"></div>
+            <div class="flex-[2] rounded-sm bg-[#d29922]/30"></div>
+            <div class="flex-[3] rounded-sm bg-[#58a6ff]/30"></div>
+          </div>
+          <!-- Controls -->
+          <div class="flex items-center justify-between px-4 py-2 text-xs font-mono text-[#8b949e]">
+            <div class="flex items-center gap-4">
+              <div class="w-7 h-7 flex items-center justify-center rounded border border-[#30363d] text-[#e6edf3]">
+                <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+              </div>
+              <span class="text-[#e6edf3]">1x</span>
+              <span>&lt; Turn <span class="text-[#e6edf3]">5</span>/12 &gt;</span>
+            </div>
+            <div class="flex items-center gap-3">
+              <span>Scene <span class="text-[#e6edf3]">78</span>/186</span>
+              <span class="text-[10px] text-[#8b949e]/50 hidden sm:inline">Space to play &middot; Arrow keys to navigate</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </a>
+
+    <!-- Big CTA below mockup -->
+    <div class="mt-10 animate-slide-up" style="animation-delay: 0.5s">
+      <a href={DEMO_URL} class="group inline-flex items-center gap-3 px-8 py-4 rounded-xl bg-accent hover:bg-accent-dim text-surface font-semibold text-lg transition-all shadow-lg shadow-accent/20 hover:shadow-accent/30">
+        <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+        Watch a real session
+        <svg class="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"/></svg>
+      </a>
+      <p class="text-text-muted text-sm mt-3 font-mono">This website was built in the session above</p>
+    </div>
+  </div>
+</section>
+
+<script>
+  // Copy button — stop propagation so it doesn't follow the <a> if nested
+  document.getElementById("copy-btn")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    navigator.clipboard.writeText("npx vibe-replay");
+    const copyIcon = document.getElementById("copy-icon");
+    const checkIcon = document.getElementById("check-icon");
+    if (copyIcon && checkIcon) {
+      copyIcon.classList.add("hidden");
+      checkIcon.classList.remove("hidden");
+      setTimeout(() => {
+        copyIcon.classList.remove("hidden");
+        checkIcon.classList.add("hidden");
+      }, 2000);
+    }
+  });
+</script>

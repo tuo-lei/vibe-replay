@@ -1,0 +1,35 @@
+---
+import Layout from "../layouts/Layout.astro";
+---
+
+<Layout title="404 - vibe-replay">
+  <div class="min-h-screen flex items-center justify-center px-6">
+    <div class="text-center max-w-md">
+      <!-- Terminal-style 404 -->
+      <div class="rounded-xl border border-border bg-surface-1 overflow-hidden mb-10 text-left">
+        <div class="flex items-center gap-2 px-4 py-2.5 border-b border-border bg-surface-2/50">
+          <div class="flex gap-1.5">
+            <div class="w-2.5 h-2.5 rounded-full bg-[#ff5f57]"></div>
+            <div class="w-2.5 h-2.5 rounded-full bg-[#febc2e]"></div>
+            <div class="w-2.5 h-2.5 rounded-full bg-[#28c840]"></div>
+          </div>
+          <span class="text-[10px] text-text-muted font-mono ml-2">vibe-replay</span>
+        </div>
+        <div class="p-5 font-mono text-sm space-y-1.5">
+          <div><span class="text-accent">$</span> <span class="text-text-primary">curl {Astro.url.pathname}</span></div>
+          <div>&nbsp;</div>
+          <div class="text-[#f85149]">  error: page not found (404)</div>
+          <div class="text-text-muted">  This scene doesn't exist in the replay.</div>
+          <div>&nbsp;</div>
+          <div class="text-text-secondary">  Try one of these:</div>
+          <div class="text-accent">    /           <span class="text-text-muted">- home</span></div>
+          <div class="text-accent">    /view/      <span class="text-text-muted">- replay viewer</span></div>
+        </div>
+      </div>
+
+      <a href="/" class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-mono text-accent border border-accent/30 rounded-lg hover:bg-accent/10 transition-colors">
+        <span>&larr;</span> Back to home
+      </a>
+    </div>
+  </div>
+</Layout>

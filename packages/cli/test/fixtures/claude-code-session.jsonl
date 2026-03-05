@@ -1,0 +1,17 @@
+{"type": "system", "subtype": "init", "sessionId": "test-session-123", "slug": "test-slug", "cwd": "/Users/test/project", "version": "1.0.0", "timestamp": "2025-01-15T10:00:00Z"}
+{"type": "file-history-snapshot", "snapshot": {"timestamp": "2025-01-15T10:00:00Z"}}
+{"type": "user", "message": {"role": "user", "content": "Fix the bug in auth.ts", "id": "msg_user1"}, "timestamp": "2025-01-15T10:00:01Z", "sessionId": "test-session-123", "slug": "test-slug", "cwd": "/Users/test/project"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "thinking", "thinking": "Let me look at auth.ts to find the bug."}], "id": "msg_asst1", "model": "claude-sonnet-4-20250514"}, "timestamp": "2025-01-15T10:00:02Z"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "I'll read the auth file first."}], "id": "msg_asst1", "model": "claude-sonnet-4-20250514"}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "tool_1", "name": "Read", "input": {"file_path": "/Users/test/project/auth.ts"}}], "id": "msg_asst1", "model": "claude-sonnet-4-20250514"}}
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "tool_1", "content": "export function login() {\n  return null; // BUG: should return token\n}"}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "I found the bug. The login function returns null instead of a token. Let me fix it."}, {"type": "tool_use", "id": "tool_2", "name": "Edit", "input": {"file_path": "/Users/test/project/auth.ts", "old_string": "return null; // BUG: should return token", "new_string": "return generateToken(user);"}}], "id": "msg_asst2", "model": "claude-sonnet-4-20250514"}, "timestamp": "2025-01-15T10:00:05Z"}
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "tool_2", "content": "File edited successfully."}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "tool_3", "name": "Bash", "input": {"command": "npm test"}}], "id": "msg_asst3", "model": "claude-sonnet-4-20250514"}, "timestamp": "2025-01-15T10:00:06Z"}
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "tool_3", "content": "All 5 tests passed."}]}}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "The bug is fixed. All tests pass now."}], "id": "msg_asst3", "model": "claude-sonnet-4-20250514"}, "timestamp": "2025-01-15T10:00:07Z"}
+{"type": "user", "message": {"role": "user", "content": "Can you also add input validation?", "id": "msg_user2"}, "timestamp": "2025-01-15T10:00:10Z", "sessionId": "test-session-123", "slug": "test-slug", "cwd": "/Users/test/project"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Sure, I'll add input validation to the login function."}], "id": "msg_asst4", "model": "claude-sonnet-4-20250514"}, "timestamp": "2025-01-15T10:00:11Z"}
+{"type": "system", "subtype": "turn_duration", "durationMs": 5000, "timestamp": "2025-01-15T10:00:12Z"}
+{"type": "system", "subtype": "turn_duration", "durationMs": 3000, "timestamp": "2025-01-15T10:00:15Z"}
+{"type": "progress", "data": "streaming..."}

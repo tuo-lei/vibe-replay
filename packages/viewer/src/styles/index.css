@@ -1,0 +1,154 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Theme CSS variables */
+:root,
+.dark {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --border: #30363d;
+  --text: #e6edf3;
+  --dim: #8b949e;
+  --green: #3fb950;
+  --blue: #58a6ff;
+  --orange: #d29922;
+  --red: #f85149;
+  --purple: #bc8cff;
+}
+
+.light {
+  --bg: #ffffff;
+  --surface: #f6f8fa;
+  --border: #d0d7de;
+  --text: #1f2328;
+  --dim: #656d76;
+  --green: #1a7f37;
+  --blue: #0969da;
+  --orange: #9a6700;
+  --red: #cf222e;
+  --purple: #8250df;
+}
+
+/* Smooth theme transition — scoped to avoid interfering with animations */
+html.theme-transition,
+html.theme-transition *,
+html.theme-transition *::before,
+html.theme-transition *::after {
+  transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease !important;
+}
+
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) var(--bg);
+  }
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--bg);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 3px;
+  }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.typing-cursor::after {
+  content: "\2588";
+  animation: blink 1s step-end infinite;
+  color: var(--green);
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.scene-enter {
+  animation: fade-in 0.3s ease-out;
+}
+
+/* Pause overlay */
+@keyframes pulse-border {
+  0%, 100% { border-color: rgba(210, 153, 34, 0.3); }
+  50% { border-color: rgba(210, 153, 34, 0.6); }
+}
+
+.pause-overlay {
+  animation: pulse-border 2s ease-in-out infinite;
+}
+
+/* Landing page start button pulse */
+@keyframes landing-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0); }
+  50% { box-shadow: 0 0 20px 2px rgba(63, 185, 80, 0.15); }
+}
+.landing-pulse {
+  animation: landing-glow 2.5s ease-in-out infinite;
+}
+
+/* Minimap */
+.minimap-item {
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+/* Markdown prose styles */
+.prose-terminal {
+  line-height: 1.6;
+}
+.prose-terminal p {
+  margin: 0.5em 0;
+}
+.prose-terminal code {
+  background: var(--surface);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+.prose-terminal pre {
+  background: var(--surface);
+  padding: 0.75em 1em;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+.prose-terminal pre code {
+  background: none;
+  padding: 0;
+}
+.prose-terminal ul, .prose-terminal ol {
+  padding-left: 1.5em;
+  margin: 0.5em 0;
+}
+.prose-terminal li {
+  margin: 0.25em 0;
+}
+.prose-terminal h1, .prose-terminal h2, .prose-terminal h3 {
+  margin: 0.75em 0 0.5em;
+  font-weight: 600;
+}
+.prose-terminal blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 1em;
+  color: var(--dim);
+  margin: 0.5em 0;
+}
+.prose-terminal a {
+  color: var(--blue);
+  text-decoration: underline;
+}
+.prose-terminal table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+}
+.prose-terminal th, .prose-terminal td {
+  border: 1px solid var(--border);
+  padding: 0.4em 0.8em;
+}
