@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { stat, readFile } from "node:fs/promises";
+import { stat, readFile, readdir } from "node:fs/promises";
 import type { ParsedTurn, ContentBlock } from "../../types.js";
 import type { ProviderParseResult } from "../types.js";
 
@@ -15,10 +15,29 @@ export function storeDbPath(workspacePath: string, sessionId: string): string {
   return join(CURSOR_CHATS_DIR, workspaceHash(workspacePath), sessionId, "store.db");
 }
 
-export async function storeDbExists(workspacePath: string, sessionId: string): Promise<boolean> {
-  const dbPath = storeDbPath(workspacePath, sessionId);
-  const s = await stat(dbPath).catch(() => null);
-  return !!s?.isFile();
+/**
+ * Find the store.db for a session by scanning all workspace hash dirs.
+ * Session UUIDs are unique across workspaces, so we can match by UUID alone
+ * without needing to correctly decode the workspace path.
+ */
+async function findStoreDb(sessionId: string): Promise<string | null> {
+  let workspaceDirs: string[];
+  try {
+    workspaceDirs = await readdir(CURSOR_CHATS_DIR);
+  } catch {
+    return null;
+  }
+  for (const wsHash of workspaceDirs) {
+    const dbPath = join(CURSOR_CHATS_DIR, wsHash, sessionId, "store.db");
+    const s = await stat(dbPath).catch(() => null);
+    if (s?.isFile()) return dbPath;
+  }
+  return null;
+}
+
+export async function storeDbExists(_workspacePath: string, sessionId: string): Promise<boolean> {
+  const dbPath = await findStoreDb(sessionId);
+  return dbPath !== null;
 }
 
 interface ChatMeta {
@@ -64,7 +83,7 @@ function extractChildBlobIds(data: Uint8Array): string[] {
 }
 
 export async function parseCursorSqlite(
-  workspacePath: string,
+  _workspacePath: string,
   sessionId: string,
 ): Promise<ProviderParseResult | null> {
   let initSqlJs: any;
@@ -74,9 +93,8 @@ export async function parseCursorSqlite(
     return null;
   }
 
-  const dbPath = storeDbPath(workspacePath, sessionId);
-  const s = await stat(dbPath).catch(() => null);
-  if (!s?.isFile()) return null;
+  const dbPath = await findStoreDb(sessionId);
+  if (!dbPath) return null;
 
   const dbBuffer = await readFile(dbPath);
   const SQL = await initSqlJs();

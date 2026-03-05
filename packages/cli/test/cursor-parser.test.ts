@@ -50,12 +50,14 @@ describe("Cursor parser", () => {
 });
 
 describe("Cursor → transform", () => {
-  it("produces user prompts, text responses, and inferred tool calls", async () => {
+  it("unpaired markers become thinking, not tool calls", async () => {
     const parsed = await parseCursorSession(FIXTURE);
     const replay = transformToReplay(parsed, "cursor", "~/test/project");
 
     const types = new Set(replay.scenes.map((s) => s.type));
-    expect(types).toEqual(new Set(["user-prompt", "text-response", "tool-call"]));
+    expect(types).toEqual(new Set(["user-prompt", "text-response", "thinking"]));
+    expect(replay.meta.stats.toolCalls).toBe(0);
+    expect(replay.meta.stats.thinkingBlocks).toBe(1);
   });
 
   it("creates correct scene count", async () => {
@@ -63,7 +65,8 @@ describe("Cursor → transform", () => {
     const replay = transformToReplay(parsed, "cursor", "~/test/project");
 
     expect(replay.meta.stats.userPrompts).toBe(3);
-    expect(replay.meta.stats.toolCalls).toBe(1);
+    expect(replay.meta.stats.toolCalls).toBe(0);
+    expect(replay.meta.stats.thinkingBlocks).toBe(1);
     expect(replay.meta.stats.sceneCount).toBe(replay.scenes.length);
   });
 
@@ -82,7 +85,6 @@ describe("Cursor → transform", () => {
 
     expect(replay.meta.provider).toBe("cursor");
     expect(replay.meta.project).toBe("~/test/project");
-    // Cursor has no duration info
     expect(replay.meta.stats.durationMs).toBeUndefined();
   });
 });
@@ -110,12 +112,13 @@ describe("Cursor parser — tool outputs", () => {
     expect(toolScenes[1].result).toContain("https://example.com/docs");
   });
 
-  it("keeps inferred marker tool when no explicit output is provided", async () => {
+  it("converts unpaired marker to thinking when no tool output matches", async () => {
     const parsed = await parseCursorSession(FIXTURE);
     const replay = transformToReplay(parsed, "cursor", "~/test/project");
     const toolScenes = replay.scenes.filter((s) => s.type === "tool-call");
-    expect(toolScenes.length).toBe(1);
-    expect(toolScenes[0].toolName).toBe("Searching for auth files");
-    expect(toolScenes[0].result).toBe("");
+    expect(toolScenes.length).toBe(0);
+    const thinking = replay.scenes.filter((s) => s.type === "thinking");
+    expect(thinking.length).toBe(1);
+    expect(thinking[0].content).toBe("Searching for auth files");
   });
 });

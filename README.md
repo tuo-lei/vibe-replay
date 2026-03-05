@@ -76,6 +76,19 @@ https://your-host/viewer.html?url=https://example.com/replay.json
 
 Host the viewer once and load different replays via URL parameter.
 
+## Replay Metadata
+
+`replay.json` (used by both Local HTML and Gist mode) includes a `meta` object with:
+
+- `sessionId`, `slug`, `title`
+- `provider` (`claude-code` or `cursor`)
+- `dataSource` (`sqlite`, `jsonl`, or `jsonl+tools` when available)
+- `startTime`, `endTime`, `model`
+- `cwd`, `project`
+- `stats` (`sceneCount`, `userPrompts`, `toolCalls`, `thinkingBlocks`, `durationMs`)
+
+Current limitation: replay metadata does **not** yet include generator/build metadata like CLI version, schema version, or generated timestamp.
+
 ## Supported Providers
 
 | Provider | Status |

@@ -98,6 +98,20 @@ packages/cli/src/
 Scene types: `user-prompt`, `thinking`, `text-response`, `tool-call`
 Tool enrichment: Edit/Write → diff, Bash → command+stdout, screenshots → images, others → generic
 
+## Replay Metadata
+
+Both local HTML output and Gist output use the same `ReplaySession.meta` payload from `replay.json`.
+
+Current `meta` fields include:
+- `sessionId`, `slug`, `title`
+- `provider`, `dataSource`
+- `startTime`, `endTime`, `model`
+- `cwd`, `project`
+- `stats`: `sceneCount`, `userPrompts`, `toolCalls`, `thinkingBlocks`, `durationMs`
+
+Current limitation:
+- No generator metadata yet (e.g. CLI version, schema version, generated timestamp).
+
 ## Conventions
 
 - Always use **pnpm**

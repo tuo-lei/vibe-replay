@@ -63,22 +63,23 @@ export async function parseCursorSession(
       const markerName = markerParsed?.markerName;
       const markerTextBody = markerParsed?.textBody;
 
-      allTurns.push({
-        role,
-        blocks: markerName
-          ? [
-              ...(markerTextBody
-                ? [{ type: "text", text: markerTextBody } as any]
-                : []),
-              {
-                type: "tool_use",
-                id: `cursor-marker-${syntheticToolId++}`,
-                name: markerName,
-                input: { marker: markerName },
-              } as any,
-            ]
-          : [{ type: "text", text: fullText }],
-      });
+      if (markerName) {
+        // Markers are status indicators — store as a placeholder that
+        // attachToolEvents() can upgrade to a real tool_use if an
+        // agent-tools file matches, otherwise convert to thinking.
+        const blocks: any[] = [];
+        if (markerTextBody) blocks.push({ type: "text", text: markerTextBody });
+        blocks.push({
+          type: "tool_use",
+          id: `cursor-marker-${syntheticToolId++}`,
+          name: markerName,
+          input: { marker: markerName },
+          _isPendingMarker: true,
+        });
+        allTurns.push({ role, blocks });
+      } else {
+        allTurns.push({ role, blocks: [{ type: "text", text: fullText }] });
+      }
     }
   }
 
@@ -250,16 +251,18 @@ function inferToolName(result: string): string {
 }
 
 function attachToolEvents(turns: ParsedTurn[], tools: ToolEvent[]): void {
-  const markerBlocks: Array<{ block: any; turn: ParsedTurn }> = [];
+  const markerBlocks: Array<{ block: any; turn: ParsedTurn; blockIndex: number }> = [];
   for (const turn of turns) {
     if (turn.role !== "assistant") continue;
-    for (const block of turn.blocks as any[]) {
-      if (block?.type === "tool_use" && typeof block.id === "string" && block.id.startsWith("cursor-marker-")) {
-        markerBlocks.push({ block, turn });
+    for (let bi = 0; bi < turn.blocks.length; bi++) {
+      const block = turn.blocks[bi] as any;
+      if (block?._isPendingMarker) {
+        markerBlocks.push({ block, turn, blockIndex: bi });
       }
     }
   }
 
+  // Pair markers with real tool outputs (chronological order)
   const paired = Math.min(markerBlocks.length, tools.length);
   for (let i = 0; i < paired; i++) {
     const marker = markerBlocks[i];
@@ -270,15 +273,23 @@ function attachToolEvents(turns: ParsedTurn[], tools: ToolEvent[]): void {
       ...(tool.input || {}),
     };
     marker.block._result = tool.result;
+    delete marker.block._isPendingMarker;
     if (!marker.turn.timestamp && tool.timestamp) {
       marker.turn.timestamp = tool.timestamp;
     }
   }
 
+  // Unpaired markers → convert to thinking (they're just status text, not tool calls)
   for (let i = paired; i < markerBlocks.length; i++) {
-    markerBlocks[i].block._result = "";
+    const { turn, blockIndex, block } = markerBlocks[i];
+    const thinkingBlock = {
+      type: "thinking",
+      thinking: block.name || block.input?.marker || "",
+    };
+    (turn.blocks as any[])[blockIndex] = thinkingBlock;
   }
 
+  // Extra tool outputs with no matching marker → append as real tool calls
   for (let i = paired; i < tools.length; i++) {
     const tool = tools[i];
     turns.push({
