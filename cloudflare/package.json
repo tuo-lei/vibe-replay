@@ -4,7 +4,7 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "deploy": "wrangler pages deploy",
+    "deploy": "wrangler deploy",
     "db:migrate": "wrangler d1 execute vibe-replay-db --remote --file=./schema.sql"
   },
   "dependencies": {
