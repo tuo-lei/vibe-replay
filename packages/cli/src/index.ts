@@ -12,12 +12,12 @@ import type { SessionInfo } from "./types.js";
 program
   .name("vibe-replay")
   .description("AI Coding Session Replay & Sharing Tool")
-  .version("0.1.0")
+  .version("0.0.2")
   .option("-s, --session <path>", "Path to a specific JSONL session file")
   .option("-p, --provider <name>", "Provider name (default: claude-code)", "claude-code")
   .option("--dev", "Write demo.json to viewer public/ for HMR development")
   .action(async (opts) => {
-    console.log(chalk.bold.cyan("\n  vibe-replay") + chalk.dim(" v0.1.0\n"));
+    console.log(chalk.bold.cyan("\n  vibe-replay") + chalk.dim(" v0.0.2\n"));
 
     let sessionInfo: SessionInfo | undefined;
     let sessionPaths: string | string[];

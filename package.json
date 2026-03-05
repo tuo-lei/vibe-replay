@@ -1,7 +1,7 @@
 {
   "name": "vibe-replay-monorepo",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.0.2",
   "description": "Turn AI coding sessions into animated, interactive web replays",
   "license": "MIT",
   "repository": {
