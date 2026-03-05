@@ -184,7 +184,8 @@ const SECRET_PATTERNS = [
   // Hashicorp Vault tokens
   /hvs\.[a-zA-Z0-9_-]{24,}/g,
   // Generic env var patterns: KEY=value, SECRET=value, TOKEN=value, PASSWORD=value
-  /((?:API_?KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|AUTH)[_A-Z]*\s*[=:]\s*["']?)[^\s"'\n]{8,}/gi,
+  // (?![a-zA-Z]) prevents matching words like "Author:", "Secretary:", "Tokenize:" etc.
+  /((?:API_?KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|AUTH)(?![a-zA-Z])[_A-Z]*\s*[=:]\s*["']?)[^\s"'\n]{8,}/gi,
   // npm tokens
   /npm_[a-zA-Z0-9]{36,}/g,
   // PEM private keys

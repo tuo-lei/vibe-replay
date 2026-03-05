@@ -68,13 +68,17 @@ export async function publishGist(
 
   const jsonPath = join(outputDir, "replay.json");
   const overwrite = opts?.overwrite;
-  const filename = overwrite?.filename || `${sanitizeFilename(title)}.json`;
+  const requestedFilename = `${sanitizeFilename(title)}.json`;
+  let filename = overwrite?.filename || requestedFilename;
   const desc = `vibe-replay: ${title}`;
   let gistId = "";
   let gistUrl = "";
   let mode: GistResult["mode"] = "created";
 
   if (overwrite) {
+    // Saved metadata can drift (manual gist edits/renames). Resolve a valid
+    // current gist filename before calling `gh gist edit`.
+    filename = await resolveEditableFilename(overwrite.gistId, overwrite.filename || requestedFilename);
     await exec("gh", [
       "gist",
       "edit",
@@ -116,6 +120,24 @@ export async function publishGist(
   });
 
   return { gistId, filename, gistUrl, viewerUrl, mode };
+}
+
+async function resolveEditableFilename(gistId: string, preferred: string): Promise<string> {
+  try {
+    const { stdout } = await exec("gh", ["api", `gists/${gistId}`]);
+    const payload = JSON.parse(stdout) as {
+      files?: Record<string, { filename?: string }>;
+    };
+    const names = Object.values(payload.files || {})
+      .map((f) => f.filename)
+      .filter((v): v is string => typeof v === "string" && v.length > 0);
+    if (names.length === 0) return preferred;
+    if (names.includes(preferred)) return preferred;
+    const jsonName = names.find((n) => n.endsWith(".json"));
+    return jsonName || names[0];
+  } catch {
+    return preferred;
+  }
 }
 
 export async function loadSavedGistInfo(

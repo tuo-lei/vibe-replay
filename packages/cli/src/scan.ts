@@ -58,7 +58,7 @@ const SCAN_RULES: { id: string; label: string; pattern: RegExp }[] = [
   // Database URIs with credentials
   { id: "db-uri",          label: "Database Connection URI",  pattern: /(?:mongodb(?:\+srv)?|postgres(?:ql)?|mysql|redis):\/\/[^:]+:[^@]+@[^\s"']+/gi },
   // Generic high-value env vars
-  { id: "env-secret",      label: "Environment Secret",      pattern: /(?:API_?KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|AUTH)[_A-Z]*\s*[=:]\s*["']?[^\s"'\n]{8,}/gi },
+  { id: "env-secret",      label: "Environment Secret",      pattern: /(?:API_?KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|AUTH)(?![a-zA-Z])[_A-Z]*\s*[=:]\s*["']?[^\s"'\n]{8,}/gi },
 ];
 
 /**
