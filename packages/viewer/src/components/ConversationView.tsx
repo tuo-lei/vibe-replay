@@ -11,6 +11,7 @@ interface Props {
   visibleCount: number;
   currentIndex: number;
   viewPrefs: ViewPrefs;
+  focusIndex?: number;
 }
 
 interface TurnGroup {
@@ -39,6 +40,7 @@ export default function ConversationView({
   visibleCount,
   currentIndex,
   viewPrefs,
+  focusIndex,
 }: Props) {
   // Pre-compute ALL groups once — stable across playback ticks
   const allGroups = useMemo(() => {
@@ -105,6 +107,7 @@ export default function ConversationView({
             currentIndex={currentIndex}
             visibleCount={visibleCount}
             viewPrefs={viewPrefs}
+            focusIndex={focusIndex}
           />
         </LazyGroup>
       ))}
@@ -174,11 +177,13 @@ const GroupCard = memo(function GroupCard({
   currentIndex,
   visibleCount,
   viewPrefs,
+  focusIndex,
 }: {
   group: TurnGroup;
   currentIndex: number;
   visibleCount: number;
   viewPrefs: ViewPrefs;
+  focusIndex?: number;
 }) {
   // Only include scenes that are visible so far
   const visibleScenes = useMemo(
@@ -187,6 +192,9 @@ const GroupCard = memo(function GroupCard({
   );
 
   const groupHasCurrent = visibleScenes.some(({ index }) => index === currentIndex);
+  const groupHasFocusedTarget =
+    typeof focusIndex === "number" &&
+    visibleScenes.some(({ index }) => index === focusIndex);
   const firstIndex = visibleScenes[0]?.index;
 
   if (visibleScenes.length === 0) return null;
@@ -197,15 +205,26 @@ const GroupCard = memo(function GroupCard({
         id={`scene-${firstIndex}`}
         data-scene-index={firstIndex}
         className={`rounded-lg px-4 py-3 transition-colors duration-200 ${
-          groupHasCurrent
-            ? "bg-terminal-green/10 border-2 border-terminal-green/30 shadow-sm shadow-terminal-green/5"
-            : "bg-terminal-green/5 border border-terminal-green/15"
+          groupHasFocusedTarget
+            ? "scene-nav-focused bg-terminal-green/30 border-2 border-terminal-green ring-2 ring-terminal-green/60 shadow-lg shadow-terminal-green/30"
+            : groupHasCurrent
+              ? "bg-terminal-green/20 border-2 border-terminal-green/60 ring-1 ring-terminal-green/40 shadow-md shadow-terminal-green/20"
+              : "bg-terminal-green/5 border border-terminal-green/15"
         }`}
       >
         <div className="flex items-center gap-2 mb-2">
           <span className="text-[11px] font-mono font-semibold text-terminal-green uppercase tracking-wider">
             You
           </span>
+          {groupHasFocusedTarget ? (
+            <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-terminal-green text-terminal-green bg-terminal-green/20">
+              Jump Target
+            </span>
+          ) : groupHasCurrent && (
+            <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-terminal-green/50 text-terminal-green bg-terminal-green/10">
+              Focused
+            </span>
+          )}
           {group.timestamp && (
             <span className="text-[11px] font-mono text-terminal-dim">
               {formatTime(group.timestamp)}
@@ -237,15 +256,26 @@ const GroupCard = memo(function GroupCard({
       id={`scene-${firstIndex}`}
       data-scene-index={firstIndex}
       className={`rounded-lg px-4 py-3 transition-colors duration-200 ${
-        groupHasCurrent
-          ? "bg-terminal-blue/[0.06] border-2 border-terminal-blue/20 shadow-sm shadow-terminal-blue/5"
-          : "bg-terminal-blue/[0.03] border border-terminal-blue/10"
+        groupHasFocusedTarget
+          ? "scene-nav-focused bg-terminal-blue/20 border-2 border-terminal-blue ring-2 ring-terminal-blue/60 shadow-lg shadow-terminal-blue/30"
+          : groupHasCurrent
+            ? "bg-terminal-blue/15 border-2 border-terminal-blue/45 ring-1 ring-terminal-blue/35 shadow-md shadow-terminal-blue/20"
+            : "bg-terminal-blue/[0.03] border border-terminal-blue/10"
       }`}
     >
       <div className="flex items-center gap-2 mb-2">
         <span className="text-[11px] font-mono font-semibold text-terminal-blue/70 uppercase tracking-wider">
           Assistant
         </span>
+        {groupHasFocusedTarget ? (
+          <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-terminal-blue text-terminal-blue bg-terminal-blue/20">
+            Jump Target
+          </span>
+        ) : groupHasCurrent && (
+          <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-terminal-blue/50 text-terminal-blue bg-terminal-blue/10">
+            Focused
+          </span>
+        )}
         {group.timestamp && (
           <span className="text-[11px] font-mono text-terminal-dim">
             {formatTime(group.timestamp)}

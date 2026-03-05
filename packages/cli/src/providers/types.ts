@@ -4,8 +4,10 @@ export interface Provider {
   name: string;
   displayName: string;
   discover(): Promise<SessionInfo[]>;
-  parse(filePaths: string | string[]): Promise<ProviderParseResult>;
+  parse(filePaths: string | string[], sessionInfo?: SessionInfo): Promise<ProviderParseResult>;
 }
+
+export type DataSource = "jsonl" | "sqlite" | "jsonl+tools";
 
 export interface ProviderParseResult {
   sessionId: string;
@@ -17,4 +19,5 @@ export interface ProviderParseResult {
   endTime?: string;
   totalDurationMs?: number;
   turns: ParsedTurn[];
+  dataSource?: DataSource;
 }

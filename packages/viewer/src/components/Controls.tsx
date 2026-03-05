@@ -12,6 +12,7 @@ interface Props {
   onChangeSpeed: (speed: number) => void;
   onPrevPrompt: () => void;
   onNextPrompt: () => void;
+  onOpenSearch: () => void;
 }
 
 const SPEEDS = [1, 5, 10];
@@ -27,6 +28,7 @@ export default function Controls({
   onChangeSpeed,
   onPrevPrompt,
   onNextPrompt,
+  onOpenSearch,
 }: Props) {
   const isPlaying = state === "playing";
   const playIcon = isPlaying ? "\u23F8" : "\u25B6";
@@ -90,6 +92,15 @@ export default function Controls({
             {">"}
           </button>
         </div>
+
+        <button
+          onClick={() => { flash("search"); onOpenSearch(); }}
+          className={`h-8 flex items-center gap-1.5 px-3 rounded-md bg-terminal-surface border border-terminal-border/60 hover:border-terminal-blue hover:text-terminal-blue text-xs font-mono ${btnBase} ${flashClass("search")}`}
+          title="Search (Cmd/Ctrl+K)"
+        >
+          <span>{"\uD83D\uDD0D"}</span>
+          <span>Search</span>
+        </button>
       </div>
 
       <div className="flex items-center gap-3 text-xs text-terminal-dim font-mono">

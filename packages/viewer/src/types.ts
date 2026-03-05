@@ -19,6 +19,7 @@ export interface ReplaySession {
     slug: string;
     title?: string;
     provider: string;
+    dataSource?: string;
     startTime: string;
     endTime?: string;
     model?: string;
@@ -28,6 +29,7 @@ export interface ReplaySession {
       sceneCount: number;
       userPrompts: number;
       toolCalls: number;
+      thinkingBlocks?: number;
       durationMs?: number;
     };
   };

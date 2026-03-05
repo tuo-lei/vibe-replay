@@ -18,6 +18,7 @@ export function transformToReplay(
   const scenes: Scene[] = [];
   let userPrompts = 0;
   let toolCalls = 0;
+  let thinkingBlocks = 0;
 
   for (const turn of parsed.turns) {
     if (turn.role === "user") {
@@ -43,6 +44,7 @@ export function transformToReplay(
         const thinking = (block as any).thinking || "";
         if (thinking.trim()) {
           scenes.push({ type: "thinking", content: truncate(thinking, 2000), timestamp: turn.timestamp });
+          thinkingBlocks++;
         }
       } else if (block.type === "text") {
         const text = (block as any).text || "";
@@ -65,6 +67,7 @@ export function transformToReplay(
       slug: parsed.slug,
       title: parsed.title,
       provider,
+      dataSource: parsed.dataSource,
       startTime: parsed.startTime || new Date().toISOString(),
       endTime: parsed.endTime,
       model: parsed.model,
@@ -74,6 +77,7 @@ export function transformToReplay(
         sceneCount: scenes.length,
         userPrompts,
         toolCalls,
+        thinkingBlocks,
         durationMs: parsed.totalDurationMs,
       },
     },

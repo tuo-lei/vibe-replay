@@ -4,6 +4,8 @@ import { transformToReplay } from "../src/transform.js";
 import { join } from "node:path";
 
 const FIXTURE = join(import.meta.dirname, "fixtures/cursor-session.jsonl");
+const TOOL_FIXTURE_1 = join(import.meta.dirname, "fixtures/cursor-tool-1.txt");
+const TOOL_FIXTURE_2 = join(import.meta.dirname, "fixtures/cursor-tool-2.txt");
 
 describe("Cursor parser", () => {
   it("parses all turns", async () => {
@@ -48,12 +50,12 @@ describe("Cursor parser", () => {
 });
 
 describe("Cursor → transform", () => {
-  it("produces only user-prompt and text-response scenes", async () => {
+  it("produces user prompts, text responses, and inferred tool calls", async () => {
     const parsed = await parseCursorSession(FIXTURE);
     const replay = transformToReplay(parsed, "cursor", "~/test/project");
 
     const types = new Set(replay.scenes.map((s) => s.type));
-    expect(types).toEqual(new Set(["user-prompt", "text-response"]));
+    expect(types).toEqual(new Set(["user-prompt", "text-response", "tool-call"]));
   });
 
   it("creates correct scene count", async () => {
@@ -61,7 +63,7 @@ describe("Cursor → transform", () => {
     const replay = transformToReplay(parsed, "cursor", "~/test/project");
 
     expect(replay.meta.stats.userPrompts).toBe(3);
-    expect(replay.meta.stats.toolCalls).toBe(0);
+    expect(replay.meta.stats.toolCalls).toBe(1);
     expect(replay.meta.stats.sceneCount).toBe(replay.scenes.length);
   });
 
@@ -70,7 +72,7 @@ describe("Cursor → transform", () => {
     const replay = transformToReplay(parsed, "cursor", "~/test/project");
 
     const responses = replay.scenes.filter((s) => s.type === "text-response");
-    expect(responses.length).toBe(7);
+    expect(responses.length).toBe(6);
     expect(responses[0].content).toContain("look at the auth.ts file");
   });
 
@@ -91,5 +93,29 @@ describe("Cursor parser — multi-file", () => {
     const result = await parseCursorSession([FIXTURE, FIXTURE]);
     const userTurns = result.turns.filter((t) => t.role === "user");
     expect(userTurns.length).toBe(6); // 3 * 2
+  });
+});
+
+describe("Cursor parser — tool outputs", () => {
+  it("maps explicit tool output files into tool-call scenes", async () => {
+    const parsed = await parseCursorSession([FIXTURE, TOOL_FIXTURE_1, TOOL_FIXTURE_2]);
+    const replay = transformToReplay(parsed, "cursor", "~/test/project");
+
+    const toolScenes = replay.scenes.filter((s) => s.type === "tool-call");
+    expect(toolScenes.length).toBe(2);
+    expect(replay.meta.stats.toolCalls).toBe(2);
+    expect(toolScenes[0].toolName).toBe("Diff");
+    expect(toolScenes[0].result).toContain("diff --git");
+    expect(toolScenes[1].toolName).toBe("WebFetch");
+    expect(toolScenes[1].result).toContain("https://example.com/docs");
+  });
+
+  it("keeps inferred marker tool when no explicit output is provided", async () => {
+    const parsed = await parseCursorSession(FIXTURE);
+    const replay = transformToReplay(parsed, "cursor", "~/test/project");
+    const toolScenes = replay.scenes.filter((s) => s.type === "tool-call");
+    expect(toolScenes.length).toBe(1);
+    expect(toolScenes[0].toolName).toBe("Searching for auth files");
+    expect(toolScenes[0].result).toBe("");
   });
 });
