@@ -3,6 +3,16 @@ import type { Scene } from "../types";
 
 export type PlayState = "idle" | "playing" | "paused" | "ended";
 
+function isEditableTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  const tag = el.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  if (el.isContentEditable) return true;
+  const role = el.getAttribute("role");
+  return role === "textbox" || role === "combobox";
+}
+
 /** Check if a tool-call scene is "simple" (batchable — no diff, no bash output) */
 function isBatchable(scene: Scene): boolean {
   return scene.type === "tool-call" && !scene.diff && !scene.bashOutput;
@@ -26,28 +36,29 @@ function findBatchEnd(scenes: Scene[], idx: number): number {
 }
 
 function sceneDuration(scene: Scene, speed: number): number {
-  // Base durations calibrated for 1x = comfortable reading speed
+  // Base durations calibrated for 1x = smooth reading pace (no jumping feel)
   const base = (() => {
     switch (scene.type) {
       case "user-prompt":
-        return 500;
+        return 1200;
       case "thinking":
-        return 350;
+        return 600;
       case "text-response": {
         const chars = scene.content.length;
-        return Math.max(200, Math.min(chars / 60, 3) * 500);
+        // Short text: 800ms, long text: up to 3s
+        return Math.max(800, Math.min(chars / 40, 5) * 600);
       }
       case "tool-call": {
-        if (scene.diff) return 600;
-        if (scene.bashOutput) return 450;
-        return 300;
+        if (scene.diff) return 1200;
+        if (scene.bashOutput) return 900;
+        return 400;
       }
     }
   })();
   return base / speed;
 }
 
-export function usePlayback(scenes: Scene[], promptsOnly = false) {
+export function usePlayback(scenes: Scene[], promptsOnly = false, enabled = true) {
   const [state, setState] = useState<PlayState>("idle");
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [speed, setSpeed] = useState(1);
@@ -207,9 +218,12 @@ export function usePlayback(scenes: Scene[], promptsOnly = false) {
 
   useEffect(() => clearTimer, [clearTimer]);
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts — only when enabled (after landing page dismissed)
   useEffect(() => {
+    if (!enabled) return;
     const handler = (e: KeyboardEvent) => {
+      // Do not hijack keys while user is typing in search/input controls.
+      if (isEditableTarget(e.target)) return;
       // Space — play/pause
       if (e.key === " " || e.key === "k") {
         e.preventDefault();
@@ -248,7 +262,7 @@ export function usePlayback(scenes: Scene[], promptsOnly = false) {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [togglePlayPause, seekTo, jumpToNextUserPrompt, jumpToPrevUserPrompt, scenes.length]);
+  }, [enabled, togglePlayPause, seekTo, jumpToNextUserPrompt, jumpToPrevUserPrompt, scenes.length]);
 
   return {
     state,

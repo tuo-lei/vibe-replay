@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -9,7 +9,7 @@ interface Props {
 
 const COLLAPSE_THRESHOLD = 600;
 
-export default function TextResponseBlock({ content, isActive }: Props) {
+export default memo(function TextResponseBlock({ content, isActive }: Props) {
   const isLong = content.length > COLLAPSE_THRESHOLD;
   const [expanded, setExpanded] = useState(false);
 
@@ -38,4 +38,4 @@ export default function TextResponseBlock({ content, isActive }: Props) {
       )}
     </div>
   );
-}
+});

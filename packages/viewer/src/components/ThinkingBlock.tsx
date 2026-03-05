@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useState, memo } from "react";
 
 interface Props {
   content: string;
   isActive: boolean;
 }
 
-export default function ThinkingBlock({ content, isActive }: Props) {
+export default memo(function ThinkingBlock({ content, isActive }: Props) {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -33,4 +33,4 @@ export default function ThinkingBlock({ content, isActive }: Props) {
       )}
     </div>
   );
-}
+});

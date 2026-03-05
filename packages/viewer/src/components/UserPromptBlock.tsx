@@ -1,10 +1,24 @@
+import { memo, useMemo, useState } from "react";
+
 interface Props {
   content: string;
   images?: string[];
   isActive: boolean;
 }
 
-export default function UserPromptBlock({ content, images, isActive }: Props) {
+const COLLAPSE_LINES = 8;
+const COLLAPSE_CHARS = 900;
+
+export default memo(function UserPromptBlock({ content, images, isActive }: Props) {
+  const [expanded, setExpanded] = useState(false);
+  const lines = useMemo(() => content.split("\n"), [content]);
+  const isLong = lines.length > COLLAPSE_LINES || content.length > COLLAPSE_CHARS;
+
+  const preview = useMemo(() => {
+    if (!isLong || expanded) return content;
+    return lines.slice(0, COLLAPSE_LINES).join("\n");
+  }, [content, expanded, isLong, lines]);
+
   return (
     <div>
       <div
@@ -12,8 +26,21 @@ export default function UserPromptBlock({ content, images, isActive }: Props) {
           isActive ? "typing-cursor" : ""
         }`}
       >
-        {content}
+        {preview}
+        {isLong && !expanded && (
+          <span className="text-terminal-dim">{`\n...`}</span>
+        )}
       </div>
+      {isLong && (
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-1 text-[11px] font-mono text-terminal-green/80 hover:text-terminal-green transition-colors"
+        >
+          {expanded
+            ? "Show less"
+            : `Show more (${lines.length} lines)`}
+        </button>
+      )}
       {images && images.length > 0 && (
         <div className="flex gap-2 mt-2 flex-wrap">
           {images.map((src, i) => (
@@ -28,4 +55,4 @@ export default function UserPromptBlock({ content, images, isActive }: Props) {
       )}
     </div>
   );
-}
+});

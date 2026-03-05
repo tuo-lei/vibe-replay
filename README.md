@@ -21,6 +21,23 @@ Or specify a session directly:
 npx vibe-replay --session ~/.claude/projects/<project>/<session>.jsonl
 ```
 
+## Command Cheat Sheet
+
+Use this map if you do not want to think about tooling:
+
+```bash
+pnpm start       # Final output mode (build + generate local HTML)
+pnpm dev         # Daily dev mode (starts viewer + CLI together)
+pnpm viewer:dev  # Viewer-only mode (Vite hot reload)
+pnpm cli:dev     # CLI-only mode (run CLI source directly)
+pnpm test        # Run CLI tests
+```
+
+Most people only need:
+
+- `pnpm start` when testing the real user flow
+- `pnpm dev` when iterating quickly during development
+
 ## What It Does
 
 Reads AI coding session files (supports Claude Code and Cursor), parses the conversation data, and generates a **self-contained single HTML file** (~0.5-4MB) with:
@@ -44,8 +61,9 @@ Reads AI coding session files (supports Claude Code and Cursor), parses the conv
 Output: `./vibe-replay/<session-slug>/index.html`
 
 After generation, choose to:
+- **Dump to demo.json** *(dev mode only)* — fastest dev loop for viewer (`pnpm viewer:dev`)
 - **Open in browser** — instant local preview
-- **Publish to GitHub Gist** — shareable URL (requires `gh` CLI)
+- **Publish to GitHub Gist** — shareable URL (requires `gh` CLI, supports overwriting a previously published gist for the same replay folder)
 - **Done** — keep the file, deploy manually
 
 ## URL-based Loading
@@ -58,12 +76,25 @@ https://your-host/viewer.html?url=https://example.com/replay.json
 
 Host the viewer once and load different replays via URL parameter.
 
+## Replay Metadata
+
+`replay.json` (used by both Local HTML and Gist mode) includes a `meta` object with:
+
+- `sessionId`, `slug`, `title`
+- `provider` (`claude-code` or `cursor`)
+- `dataSource` (`sqlite`, `jsonl`, or `jsonl+tools` when available)
+- `startTime`, `endTime`, `model`
+- `cwd`, `project`
+- `stats` (`sceneCount`, `userPrompts`, `toolCalls`, `thinkingBlocks`, `durationMs`)
+
+Current limitation: replay metadata does **not** yet include generator/build metadata like CLI version, schema version, or generated timestamp.
+
 ## Supported Providers
 
 | Provider | Status |
 |----------|--------|
 | Claude Code | Supported |
-| Cursor | Supported |
+| Cursor | Supported (transcripts + `agent-tools` outputs) |
 | Codex | Planned |
 | Gemini CLI | Planned |
 
@@ -101,25 +132,30 @@ Then run:
 ```bash
 pnpm start                    # Build + interactive picker
 pnpm start -- -s <session>    # Build + specific session
-pnpm dev                      # Dev mode, no build needed (uses tsx)
+pnpm dev                      # Full dev mode: start viewer (Vite) + CLI together
+pnpm viewer:dev               # Viewer only (Vite HMR)
+pnpm cli:dev                  # CLI only (tsx, no build)
 pnpm test                     # Run tests
 ```
 
 ## Development
 
-For working on the viewer with hot reload:
+For daily development (one command):
 
 ```bash
-# 1. Generate a demo.json from a real session
-npx tsx packages/cli/src/index.ts -s <session> --dev
+# Starts:
+# - viewer dev server (http://localhost:5173)
+# - CLI interactive picker
+pnpm dev
+# In CLI menu (dev-only option), choose: "Dump to demo.json"
 
-# 2. Start viewer dev server
-cd packages/viewer && pnpm dev
-
-# 3. Open http://localhost:5173/?file=/demo.json
+# Open (or refresh): http://localhost:5173/?file=/demo.json
+# Viewer logs: /tmp/vibe-replay-viewer.log
 ```
 
-Changes to viewer components will hot-reload instantly. After you're done, run `pnpm build` from the root to produce the final single-file HTML.
+Viewer code changes hot-reload instantly. CLI/parser changes require dumping again to refresh `demo.json`.
+After CLI exits, `pnpm dev` keeps viewer running so you can preview; press Ctrl+C to stop it.
+After you're done, run `pnpm build` from the root to produce the final single-file HTML.
 
 ## Tech Stack
 

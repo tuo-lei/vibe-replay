@@ -12,6 +12,9 @@ export interface SessionInfo {
   fileSize: number;
   filePath: string;       // primary file (most recent)
   filePaths: string[];    // all JSONL files for this session (sorted by timestamp asc)
+  toolPaths?: string[];   // cursor tool outputs associated with this session
+  workspacePath?: string; // absolute workspace path for SQLite lookup (Cursor)
+  hasSqlite?: boolean;    // true if store.db exists for this session
   firstPrompt: string;
 }
 
@@ -79,6 +82,7 @@ export interface ReplaySession {
     slug: string;
     title?: string;
     provider: string;
+    dataSource?: string;
     startTime: string;
     endTime?: string;
     model?: string;
@@ -88,6 +92,7 @@ export interface ReplaySession {
       sceneCount: number;
       userPrompts: number;
       toolCalls: number;
+      thinkingBlocks?: number;
       durationMs?: number;
     };
   };

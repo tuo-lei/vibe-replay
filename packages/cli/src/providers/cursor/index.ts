@@ -6,5 +6,5 @@ export const cursorProvider: Provider = {
   name: "cursor",
   displayName: "Cursor",
   discover: discoverCursorSessions,
-  parse: parseCursorSession,
+  parse: (filePaths, sessionInfo) => parseCursorSession(filePaths, sessionInfo),
 };

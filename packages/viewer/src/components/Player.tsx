@@ -1,5 +1,5 @@
-import { useRef, useEffect, useState, useMemo, useCallback } from "react";
-import type { ReplaySession, Scene } from "../types";
+import { useRef, useEffect, useState, useCallback } from "react";
+import type { ReplaySession } from "../types";
 import type { ViewPrefs } from "../hooks/useViewPrefs";
 import { usePlayback } from "../hooks/usePlayback";
 import Timeline from "./Timeline";
@@ -7,56 +7,108 @@ import Controls from "./Controls";
 import ConversationView from "./ConversationView";
 import Minimap from "./Minimap";
 import StatsPanel from "./StatsPanel";
+import SearchOverlay from "./SearchOverlay";
+import LandingHero from "./LandingHero";
 
 interface Props {
   session: ReplaySession;
   viewPrefs: ViewPrefs;
 }
 
-function formatDuration(ms?: number): string {
-  if (!ms) return "";
-  const secs = Math.floor(ms / 1000);
-  if (secs < 60) return `${secs}s`;
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m ${secs % 60}s`;
-  const hrs = Math.floor(mins / 60);
-  return `${hrs}h ${mins % 60}m`;
+function flashJumpTarget(el: HTMLElement) {
+  el.classList.remove("jump-target-flash");
+  // Force reflow so repeated clicks on the same target still retrigger animation.
+  void el.offsetWidth;
+  el.classList.add("jump-target-flash");
+  window.setTimeout(() => {
+    el.classList.remove("jump-target-flash");
+  }, 900);
 }
 
 export default function Player({ session, viewPrefs }: Props) {
+  const [landed, setLanded] = useState(false);
+  const [navFocusIndex, setNavFocusIndex] = useState<number | undefined>(undefined);
+  const [navJumpSeq, setNavJumpSeq] = useState(0);
+
   const {
     state,
     currentIndex,
     visibleCount,
     speed,
     play,
+    pause,
     togglePlayPause,
     seekTo,
     changeSpeed,
     totalScenes,
-    jumpToNextUserPrompt,
-    jumpToPrevUserPrompt,
     userPromptIndices,
-  } = usePlayback(session.scenes, viewPrefs.promptsOnly);
+  } = usePlayback(session.scenes, viewPrefs.promptsOnly, landed);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [sidebarTab, setSidebarTab] = useState<"outline" | "stats">("outline");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const pendingSeekRef = useRef<number | null>(null);
+  const navFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cmd+K / Ctrl+K to open search
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setSearchOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, []);
 
   const currentTurn =
     userPromptIndices.filter((i) => i <= currentIndex).length || 0;
   const userPromptCount = userPromptIndices.length;
 
-  // Auto-play after 1.5s delay
-  useEffect(() => {
-    const timer = setTimeout(play, 1500);
-    return () => clearTimeout(timer);
+  // Start playback when user dismisses landing page
+  const handleStart = useCallback(() => {
+    setLanded(true);
+    setTimeout(play, 300);
   }, [play]);
 
-  // Auto-scroll to current scene (skip when user is scrolling to reveal)
-  const userScrollingRef = useRef(false);
+  const seekFromNavigation = useCallback(
+    (index: number) => {
+      const clamped = Math.max(0, Math.min(index, session.scenes.length - 1));
+      // Manual jumps should pause playback so focus doesn't move away immediately.
+      pause();
+      pendingSeekRef.current = clamped;
+      setNavJumpSeq((n) => n + 1);
+      setNavFocusIndex(clamped);
+      if (navFocusTimerRef.current) clearTimeout(navFocusTimerRef.current);
+      navFocusTimerRef.current = setTimeout(() => setNavFocusIndex(undefined), 2500);
+      seekTo(clamped);
+    },
+    [pause, seekTo, session.scenes.length],
+  );
+
+  const seekToNextPromptWithFeedback = useCallback(() => {
+    const next = userPromptIndices.find((i) => i > currentIndex);
+    if (next !== undefined) {
+      seekFromNavigation(next);
+    }
+  }, [userPromptIndices, currentIndex, seekFromNavigation]);
+
+  const seekToPrevPromptWithFeedback = useCallback(() => {
+    const prev = [...userPromptIndices].reverse().find((i) => i < currentIndex);
+    if (prev !== undefined) {
+      seekFromNavigation(prev);
+    }
+  }, [userPromptIndices, currentIndex, seekFromNavigation]);
+
+  // Track whether auto-scroll is active (programmatic) vs user-initiated
+  const programScrollRef = useRef(false);
+
+  // Auto-scroll to current scene — only during playback
   useEffect(() => {
-    if (!scrollRef.current || currentIndex < 0 || userScrollingRef.current) return;
+    if (!scrollRef.current || currentIndex < 0 || state !== "playing") return;
     const el = scrollRef.current;
+    programScrollRef.current = true;
     requestAnimationFrame(() => {
       const sceneEl = el.querySelector(`[data-scene-index="${currentIndex}"]`);
       if (sceneEl) {
@@ -64,8 +116,33 @@ export default function Player({ session, viewPrefs }: Props) {
       } else {
         el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
       }
+      // Clear flag after smooth scroll settles
+      setTimeout(() => { programScrollRef.current = false; }, 400);
     });
-  }, [currentIndex]);
+  }, [currentIndex, state]);
+
+  // User scroll/touch → auto-pause + enter infinite scroll mode
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const handleUserScroll = () => {
+      // Ignore programmatic scrolls
+      if (programScrollRef.current) return;
+      // Pause if playing
+      if (state === "playing") {
+        pause();
+      }
+    };
+
+    // wheel = mouse/trackpad, touchmove = mobile
+    el.addEventListener("wheel", handleUserScroll, { passive: true });
+    el.addEventListener("touchmove", handleUserScroll, { passive: true });
+    return () => {
+      el.removeEventListener("wheel", handleUserScroll);
+      el.removeEventListener("touchmove", handleUserScroll);
+    };
+  }, [state, pause]);
 
   // Scroll-to-reveal: when paused and user scrolls near bottom, advance scenes
   useEffect(() => {
@@ -73,26 +150,77 @@ export default function Player({ session, viewPrefs }: Props) {
     if (!el) return;
 
     let throttle = false;
-    const handleScroll = () => {
+    const advance = () => {
       if (state !== "paused" || throttle) return;
       if (currentIndex >= session.scenes.length - 1) return;
 
       const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
       if (nearBottom) {
         throttle = true;
-        userScrollingRef.current = true;
         seekTo(currentIndex + 1);
-        // Reset after a brief delay to allow new content to render
-        setTimeout(() => {
-          throttle = false;
-          userScrollingRef.current = false;
-        }, 150);
+        setTimeout(() => { throttle = false; }, 150);
       }
     };
 
-    el.addEventListener("scroll", handleScroll, { passive: true });
-    return () => el.removeEventListener("scroll", handleScroll);
+    // wheel covers the case where content is shorter than viewport (no scroll events fire)
+    const handleWheel = (e: WheelEvent) => {
+      if (e.deltaY > 0) advance();
+    };
+
+    el.addEventListener("scroll", advance, { passive: true });
+    el.addEventListener("wheel", handleWheel, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", advance);
+      el.removeEventListener("wheel", handleWheel);
+    };
   }, [state, currentIndex, session.scenes.length, seekTo]);
+
+  // Manual navigation (outline/timeline/search): always center + flash the target scene.
+  useEffect(() => {
+    const targetIndex = pendingSeekRef.current;
+    const el = scrollRef.current;
+    if (targetIndex === null || !el || currentIndex !== targetIndex) return;
+
+    let cancelled = false;
+    let attempts = 0;
+    const tryLocateAndFocus = () => {
+      if (cancelled) return;
+      const sceneEl = el.querySelector(
+        `[data-scene-index="${targetIndex}"]`,
+      ) as HTMLElement | null;
+      if (sceneEl) {
+        programScrollRef.current = true;
+        sceneEl.scrollIntoView({ behavior: "smooth", block: "center" });
+        flashJumpTarget(sceneEl);
+        setTimeout(() => { programScrollRef.current = false; }, 450);
+        pendingSeekRef.current = null;
+        return;
+      }
+
+      attempts += 1;
+      if (attempts < 12) {
+        setTimeout(tryLocateAndFocus, 80);
+      } else {
+        pendingSeekRef.current = null;
+      }
+    };
+
+    requestAnimationFrame(tryLocateAndFocus);
+    return () => {
+      cancelled = true;
+    };
+  }, [navJumpSeq, currentIndex, visibleCount]);
+
+  useEffect(() => {
+    return () => {
+      if (navFocusTimerRef.current) clearTimeout(navFocusTimerRef.current);
+    };
+  }, []);
+
+  // Show landing page before playback starts
+  if (!landed) {
+    return <LandingHero session={session} onStart={handleStart} />;
+  }
 
   return (
     <div className="flex flex-1 min-h-0 relative">
@@ -125,7 +253,7 @@ export default function Player({ session, viewPrefs }: Props) {
             <Minimap
               scenes={session.scenes}
               currentIndex={currentIndex}
-              onSeek={seekTo}
+              onSeek={seekFromNavigation}
             />
           ) : (
             <StatsPanel session={session} />
@@ -141,8 +269,20 @@ export default function Player({ session, viewPrefs }: Props) {
             visibleCount={visibleCount}
             currentIndex={currentIndex}
             viewPrefs={viewPrefs}
+            focusIndex={navFocusIndex}
           />
         </div>
+
+        {/* Search overlay */}
+        <SearchOverlay
+          scenes={session.scenes}
+          open={searchOpen}
+          onClose={() => setSearchOpen(false)}
+          onSeek={(i) => {
+            seekFromNavigation(i);
+            setSearchOpen(false);
+          }}
+        />
 
         {/* Pause overlay */}
         {state === "paused" && visibleCount > 0 && (
@@ -156,7 +296,7 @@ export default function Player({ session, viewPrefs }: Props) {
           <Timeline
             scenes={session.scenes}
             currentIndex={currentIndex}
-            onSeek={seekTo}
+            onSeek={seekFromNavigation}
           />
           <Controls
             state={state}
@@ -167,8 +307,9 @@ export default function Player({ session, viewPrefs }: Props) {
             currentTurn={currentTurn}
             onTogglePlayPause={togglePlayPause}
             onChangeSpeed={changeSpeed}
-            onPrevPrompt={jumpToPrevUserPrompt}
-            onNextPrompt={jumpToNextUserPrompt}
+            onPrevPrompt={seekToPrevPromptWithFeedback}
+            onNextPrompt={seekToNextPromptWithFeedback}
+            onOpenSearch={() => setSearchOpen(true)}
           />
         </div>
       </div>

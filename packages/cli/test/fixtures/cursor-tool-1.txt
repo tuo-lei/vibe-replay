@@ -1,0 +1,7 @@
+diff --git a/src/auth.ts b/src/auth.ts
+index 1111111..2222222 100644
+--- a/src/auth.ts
++++ b/src/auth.ts
+@@ -1,4 +1,4 @@
+-return null;
++return generateToken(user);

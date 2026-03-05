@@ -6,8 +6,11 @@ import { getAllProviders, getProvider } from "./providers/index.js";
 import { transformToReplay } from "./transform.js";
 import { generateOutput, generateDevJson } from "./generator.js";
 import { publishLocal } from "./publishers/local.js";
-import { publishGist, checkGhStatus } from "./publishers/gist.js";
-import type { SessionInfo } from "./types.js";
+import { publishGist, checkGhStatus, loadSavedGistInfo } from "./publishers/gist.js";
+import { scanForSecrets } from "./scan.js";
+import type { SessionInfo, ReplaySession } from "./types.js";
+
+const DEV_MENU_ENABLED = process.env.VIBE_REPLAY_DEV_MENU === "1";
 
 program
   .name("vibe-replay")
@@ -15,7 +18,8 @@ program
   .version("0.0.2")
   .option("-s, --session <path>", "Path to a specific JSONL session file")
   .option("-p, --provider <name>", "Provider name (default: claude-code)", "claude-code")
-  .option("--dev", "Write demo.json to viewer public/ for HMR development")
+  .option("-t, --title <name>", "Custom title for the replay (shown on landing page & shared links)")
+  .option("--dev", "Write demo.json to viewer public/ for HMR development and exit")
   .action(async (opts) => {
     console.log(chalk.bold.cyan("\n  vibe-replay") + chalk.dim(" v0.0.2\n"));
 
@@ -57,7 +61,9 @@ program
 
       const info = allSessions.find((s) => s.filePath === chosen);
       sessionInfo = info;
-      sessionPaths = info?.filePaths || [chosen];
+      sessionPaths = info
+        ? [...info.filePaths, ...(info.toolPaths || [])]
+        : [chosen];
       providerName = info?.provider || opts.provider;
     }
 
@@ -69,7 +75,7 @@ program
     }
 
     const spinner = ora("Parsing session...").start();
-    const parsed = await provider.parse(sessionPaths);
+    const parsed = await provider.parse(sessionPaths, sessionInfo);
     spinner.text = "Transforming to replay...";
 
     const rawProject = sessionInfo?.project || parsed.cwd;
@@ -78,17 +84,35 @@ program
       ? "~" + rawProject.slice(home.length)
       : rawProject;
     const replay = transformToReplay(parsed, providerName, project);
+
+    const thinkingStr = replay.meta.stats.thinkingBlocks
+      ? `, ${replay.meta.stats.thinkingBlocks} thinking`
+      : "";
+    const sourceStr = replay.meta.dataSource
+      ? chalk.dim(` [${replay.meta.dataSource}]`)
+      : "";
     spinner.succeed(
-      `${replay.scenes.length} scenes (${replay.meta.stats.userPrompts} prompts, ${replay.meta.stats.toolCalls} tool calls)`,
+      `${replay.scenes.length} scenes (${replay.meta.stats.userPrompts} prompts, ${replay.meta.stats.toolCalls} tool calls${thinkingStr})${sourceStr}`,
     );
+
+    // Title: CLI flag > interactive prompt > auto-detected > slug
+    if (opts.title) {
+      replay.meta.title = opts.title;
+    } else if (!opts.dev) {
+      const { input } = await import("@inquirer/prompts");
+      const defaultTitle = replay.meta.title || replay.meta.slug;
+      const userTitle = await input({
+        message: "Replay title (shown on landing page & shared links):",
+        default: defaultTitle,
+      });
+      if (userTitle.trim()) {
+        replay.meta.title = userTitle.trim();
+      }
+    }
 
     // Dev mode: write demo.json to viewer public/ and exit
     if (opts.dev) {
-      const viewerPublic = new URL("../../viewer/public", import.meta.url).pathname;
-      const devPath = await generateDevJson(replay, viewerPublic);
-      console.log(chalk.green(`\n  Dev JSON written to ${devPath}`));
-      console.log(chalk.dim("  Open viewer dev server: ") + chalk.white("cd packages/viewer && pnpm dev"));
-      console.log(chalk.dim("  Then visit: ") + chalk.white("http://localhost:5173/?file=/demo.json\n"));
+      await dumpReplayToDemoJson(replay);
       return;
     }
 
@@ -103,6 +127,33 @@ program
     const size = await fsStat(outputPath).then((s) => (s.size / 1024 / 1024).toFixed(1));
     genSpinner.succeed(`${outputPath} (${size} MB)`);
 
+    // Second-layer leak detection: scan the serialized replay for secrets
+    const scanSpinner = ora("Scanning for secrets...").start();
+    const findings = scanForSecrets(JSON.stringify(replay));
+    if (findings.length === 0) {
+      scanSpinner.succeed("No secrets detected");
+    } else {
+      scanSpinner.warn(`${findings.length} potential secret(s) found`);
+      console.log();
+      for (let i = 0; i < findings.length; i++) {
+        const f = findings[i];
+        console.log(chalk.yellow(`  ${i + 1}. [${f.rule}]`));
+        console.log(chalk.dim(`     ${f.match}`));
+      }
+      console.log();
+
+      const { confirm } = await import("@inquirer/prompts");
+      const ok = await confirm({
+        message: "These may be false alarms (e.g. example keys in docs). Continue anyway?",
+        default: false,
+      });
+      if (!ok) {
+        console.log(chalk.red("\n  Aborted — review the session and re-run.\n"));
+        process.exit(1);
+      }
+      console.log(chalk.dim("  Continuing — user confirmed findings are safe.\n"));
+    }
+
     // Check gh availability for gist option
     const ghStatus = await checkGhStatus();
     const gistLabel = ghStatus.available
@@ -113,16 +164,26 @@ program
 
     // Publish target
     console.log();
+    const choices: { name: string; value: "demo" | "local" | "gist" | "exit" }[] = [
+      ...(DEV_MENU_ENABLED
+        ? [{
+            name: `${chalk.cyan("⚡")} Dump to demo.json ${chalk.dim("(for pnpm viewer:dev)")}`,
+            value: "demo" as const,
+          }]
+        : []),
+      { name: `${chalk.green("▶")} Open in browser`, value: "local" as const },
+      { name: gistLabel, value: "gist" as const },
+      { name: `${chalk.dim("✕")} Exit`, value: "exit" as const },
+    ];
+
     const target = await select({
       message: "Replay is ready! How would you like to share it?",
-      choices: [
-        { name: `${chalk.green("▶")} Open in browser`, value: "local" },
-        { name: gistLabel, value: "gist" },
-        { name: `${chalk.dim("✕")} Exit`, value: "exit" },
-      ],
+      choices,
     });
 
-    if (target === "local") {
+    if (target === "demo") {
+      await dumpReplayToDemoJson(replay);
+    } else if (target === "local") {
       await publishLocal(outputPath);
     } else if (target === "gist") {
       if (!ghStatus.available) {
@@ -146,14 +207,37 @@ program
           console.log(chalk.dim("\n  Gist publish cancelled."));
         } else {
           const title = replay.meta.title || slug;
-          const gistSpinner = ora("Publishing to Gist...").start();
-          try {
-            const result = await publishGist(outputDir, title);
-            gistSpinner.succeed("Published!");
-            console.log(chalk.dim("  Gist:   ") + chalk.white(result.gistUrl));
-            console.log(chalk.dim("  Viewer: ") + chalk.cyan(result.viewerUrl));
-          } catch (err: any) {
-            gistSpinner.fail(err.message);
+          const savedGist = await loadSavedGistInfo(outputDir);
+          let shouldPublish = true;
+          let overwriteGist = undefined;
+          if (savedGist) {
+            const publishMode = await select<"overwrite" | "create" | "cancel">({
+              message: `Previous gist found (${savedGist.gistId}). How to publish this replay?`,
+              choices: [
+                { name: `${chalk.cyan("↻")} Overwrite previous gist`, value: "overwrite" },
+                { name: `${chalk.green("+")} Create a new gist`, value: "create" },
+                { name: `${chalk.dim("✕")} Cancel`, value: "cancel" },
+              ],
+            });
+            if (publishMode === "cancel") {
+              console.log(chalk.dim("\n  Gist publish cancelled."));
+              shouldPublish = false;
+            } else {
+              overwriteGist = publishMode === "overwrite" ? savedGist : undefined;
+            }
+          }
+          if (shouldPublish) {
+            const gistSpinner = ora("Publishing to Gist...").start();
+            try {
+              const result = await publishGist(outputDir, title, {
+                overwrite: overwriteGist,
+              });
+              gistSpinner.succeed(result.mode === "updated" ? "Gist updated!" : "Published!");
+              console.log(chalk.dim("  Gist:   ") + chalk.white(result.gistUrl));
+              console.log(chalk.dim("  Viewer: ") + chalk.cyan(result.viewerUrl));
+            } catch (err: any) {
+              gistSpinner.fail(err.message);
+            }
           }
         }
       }
@@ -167,6 +251,14 @@ program
   });
 
 program.parse();
+
+async function dumpReplayToDemoJson(replay: ReplaySession) {
+  const viewerPublic = new URL("../../viewer/public", import.meta.url).pathname;
+  const devPath = await generateDevJson(replay, viewerPublic);
+  console.log(chalk.green(`\n  Dev JSON written to ${devPath}`));
+  console.log(chalk.dim("  Open viewer dev server: ") + chalk.white("pnpm viewer:dev"));
+  console.log(chalk.dim("  Then visit: ") + chalk.white("http://localhost:5173/?file=/demo.json\n"));
+}
 
 function formatSessionChoices(sessions: SessionInfo[]) {
   // Merge sessions with the same slug under the same project
@@ -214,10 +306,11 @@ function formatSessionChoices(sessions: SessionInfo[]) {
         : "";
 
       const fileCount = s.filePaths.length > 1 ? chalk.dim(` [${s.filePaths.length} parts]`) : "";
+      const sqliteBadge = s.hasSqlite ? chalk.green(" db") : "";
       const line = [
         providerBadge,
         chalk.dim(`[${timeStr}]`),
-        chalk.cyan(s.slug),
+        chalk.cyan(s.slug) + sqliteBadge,
         titleStr,
         fileCount,
         chalk.dim("—"),
@@ -268,6 +361,7 @@ function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
       lineCount: group.reduce((sum, s) => sum + s.lineCount, 0),
       fileSize: group.reduce((sum, s) => sum + s.fileSize, 0),
       filePaths: allPaths,
+      toolPaths: [...new Set(group.flatMap((s) => s.toolPaths || []))],
     });
   }
 
@@ -275,3 +369,4 @@ function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
   result.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   return result;
 }
+

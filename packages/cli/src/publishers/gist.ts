@@ -1,10 +1,12 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
+import { readFile, writeFile } from "node:fs/promises";
 
 const exec = promisify(execFile);
 
 const VIEWER_BASE_URL = "https://vibe-replay.com/view";
+const GIST_META_FILE = ".vibe-replay-gist.json";
 
 export type GhStatus =
   | { available: true }
@@ -29,13 +31,29 @@ export async function checkGhStatus(): Promise<GhStatus> {
 }
 
 export interface GistResult {
+  gistId: string;
+  filename: string;
   gistUrl: string;
   viewerUrl: string;
+  mode: "created" | "updated";
+}
+
+export interface SavedGistInfo {
+  gistId: string;
+  filename: string;
+  gistUrl: string;
+  viewerUrl: string;
+  updatedAt: string;
+}
+
+export interface PublishGistOptions {
+  overwrite?: SavedGistInfo;
 }
 
 export async function publishGist(
   outputDir: string,
   title: string,
+  opts?: PublishGistOptions,
 ): Promise<GistResult> {
   // Check if gh CLI is available
   try {
@@ -49,27 +67,101 @@ export async function publishGist(
   }
 
   const jsonPath = join(outputDir, "replay.json");
-  const filename = `${sanitizeFilename(title)}.json`;
+  const overwrite = opts?.overwrite;
+  const requestedFilename = `${sanitizeFilename(title)}.json`;
+  let filename = overwrite?.filename || requestedFilename;
+  const desc = `vibe-replay: ${title}`;
+  let gistId = "";
+  let gistUrl = "";
+  let mode: GistResult["mode"] = "created";
 
-  // Upload replay.json to gist
-  const { stdout } = await exec("gh", [
-    "gist",
-    "create",
-    "--public",
-    "--desc",
-    `vibe-replay: ${title}`,
-    "--filename",
-    filename,
-    jsonPath,
-  ]);
-
-  const gistUrl = stdout.trim();
-  const gistId = gistUrl.split("/").pop();
+  if (overwrite) {
+    // Saved metadata can drift (manual gist edits/renames). Resolve a valid
+    // current gist filename before calling `gh gist edit`.
+    filename = await resolveEditableFilename(overwrite.gistId, overwrite.filename || requestedFilename);
+    await exec("gh", [
+      "gist",
+      "edit",
+      overwrite.gistId,
+      jsonPath,
+      "--filename",
+      filename,
+      "--desc",
+      desc,
+    ]);
+    gistId = overwrite.gistId;
+    gistUrl = overwrite.gistUrl || `https://gist.github.com/${gistId}`;
+    mode = "updated";
+  } else {
+    // Upload replay.json to gist
+    const { stdout } = await exec("gh", [
+      "gist",
+      "create",
+      "--public",
+      "--desc",
+      desc,
+      "--filename",
+      filename,
+      jsonPath,
+    ]);
+    gistUrl = stdout.trim();
+    gistId = extractGistId(stdout.trim());
+  }
 
   // Construct viewer URL — clean gist ID link
   const viewerUrl = `${VIEWER_BASE_URL}/?gist=${gistId}`;
+  if (!gistUrl) gistUrl = `https://gist.github.com/${gistId}`;
+  await saveGistInfo(outputDir, {
+    gistId,
+    filename,
+    gistUrl,
+    viewerUrl,
+    updatedAt: new Date().toISOString(),
+  });
 
-  return { gistUrl, viewerUrl };
+  return { gistId, filename, gistUrl, viewerUrl, mode };
+}
+
+async function resolveEditableFilename(gistId: string, preferred: string): Promise<string> {
+  try {
+    const { stdout } = await exec("gh", ["api", `gists/${gistId}`]);
+    const payload = JSON.parse(stdout) as {
+      files?: Record<string, { filename?: string }>;
+    };
+    const names = Object.values(payload.files || {})
+      .map((f) => f.filename)
+      .filter((v): v is string => typeof v === "string" && v.length > 0);
+    if (names.length === 0) return preferred;
+    if (names.includes(preferred)) return preferred;
+    const jsonName = names.find((n) => n.endsWith(".json"));
+    return jsonName || names[0];
+  } catch {
+    return preferred;
+  }
+}
+
+export async function loadSavedGistInfo(
+  outputDir: string,
+): Promise<SavedGistInfo | undefined> {
+  try {
+    const raw = await readFile(join(outputDir, GIST_META_FILE), "utf-8");
+    const parsed = JSON.parse(raw) as SavedGistInfo;
+    if (!parsed?.gistId || !parsed?.filename) return undefined;
+    return parsed;
+  } catch {
+    return undefined;
+  }
+}
+
+async function saveGistInfo(outputDir: string, info: SavedGistInfo): Promise<void> {
+  await writeFile(join(outputDir, GIST_META_FILE), JSON.stringify(info, null, 2), "utf-8");
+}
+
+function extractGistId(gistUrlOrId: string): string {
+  const trimmed = gistUrlOrId.trim();
+  const urlMatch = trimmed.match(/([a-f0-9]{20,40})$/i);
+  if (urlMatch) return urlMatch[1].toLowerCase();
+  throw new Error(`Unexpected gist output: ${gistUrlOrId}`);
 }
 
 function sanitizeFilename(s: string): string {

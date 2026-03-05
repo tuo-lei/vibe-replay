@@ -85,6 +85,36 @@ html.theme-transition *::after {
   animation: pulse-border 2s ease-in-out infinite;
 }
 
+/* Flash target card after outline/timeline/search jump */
+@keyframes jump-target-flash {
+  0% {
+    box-shadow: 0 0 0 0 rgba(63, 185, 80, 0);
+    outline-color: rgba(63, 185, 80, 0);
+  }
+  30% {
+    box-shadow: 0 0 0 3px rgba(63, 185, 80, 0.25);
+    outline-color: rgba(63, 185, 80, 0.6);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(63, 185, 80, 0);
+    outline-color: rgba(63, 185, 80, 0);
+  }
+}
+
+.jump-target-flash {
+  outline: 1px solid transparent;
+  animation: jump-target-flash 0.85s ease-out;
+}
+
+@keyframes nav-focus-pulse {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-1px); }
+}
+
+.scene-nav-focused {
+  animation: nav-focus-pulse 0.9s ease-in-out 2;
+}
+
 /* Landing page start button pulse */
 @keyframes landing-glow {
   0%, 100% { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0); }

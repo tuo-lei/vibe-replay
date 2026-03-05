@@ -16,13 +16,24 @@ pnpm monorepo:
 pnpm install
 pnpm build                 # Full build (viewer → CLI)
 pnpm start                 # Build + run interactive picker
-pnpm dev                   # Dev mode (uses tsx, no build)
+pnpm dev                   # Full dev mode (viewer + CLI together)
+# pnpm dev runs viewer in background; logs: /tmp/vibe-replay-viewer.log
+# After CLI exits, viewer stays alive for preview until Ctrl+C
+pnpm viewer:dev            # Viewer-only dev server (Vite)
+pnpm cli:dev               # CLI-only dev mode (tsx)
 pnpm test                  # Run tests
 npx tsx packages/cli/src/index.ts -s <path> --dev  # Write demo.json for HMR
+# Or run `pnpm dev` and choose "Dump to demo.json" in the share menu (dev-only option)
 # After npm publish: npx vibe-replay
 ```
 
 Output: `./vibe-replay/<slug>/index.html`
+
+Quick intent map:
+- Use `pnpm start` for final-user flow validation (fresh build + output HTML)
+- Use `pnpm dev` for daily iteration (viewer + CLI together, choose "Dump to demo.json" dev-only option)
+- Use `pnpm viewer:dev` when only touching UI
+- Use `pnpm cli:dev` when only touching parser/CLI behavior
 
 ## Architecture
 
@@ -39,8 +50,9 @@ packages/cli/src/
 │   │   └── parser.ts           # JSONL → ParsedTurn[]
 │   └── cursor/                 # Cursor provider
 │       ├── index.ts
-│       ├── discover.ts         # Scan ~/.cursor/projects/
-│       └── parser.ts           # JSONL → ParsedTurn[]
+│       ├── discover.ts         # Scan ~/.cursor/projects/ + detect store.db
+│       ├── parser.ts           # JSONL fallback parser
+│       └── sqlite-reader.ts    # SQLite store.db parser (primary)
 ├── transform.ts                # Provider-agnostic: turns → Scene[] + secret redaction
 ├── generator.ts                # Inject JSON into viewer HTML
 └── publishers/                 # Publish targets
@@ -58,6 +70,9 @@ packages/cli/src/
 - **Single HTML output**: viewer built to one file via vite-plugin-singlefile (~480KB), CLI injects `window.__VIBE_REPLAY_DATA__` JSON into `<head>`
 - **`</` escaping**: JSON data in `<script>` MUST escape `</` as `<\/` (see generator.ts)
 - **JSONL grouping**: Assistant messages split across multiple lines sharing same `message.id` — parser groups them. Tool results matched by `tool_use_id`
+- **Cursor dual data source**: Primary: `~/.cursor/chats/<MD5(workspace_path)>/<session-uuid>/store.db` (SQLite with protobuf blob tree — has reasoning, tool-call, tool-result blocks). Fallback: `~/.cursor/projects/<path>/agent-transcripts/*.jsonl` (text-only, uses marker inference + `agent-tools/*.txt` mtime windows). Workspace hash = `MD5(absolute_workspace_path)`
+- **`sql.js` for portability**: SQLite parsing uses sql.js (WASM) instead of native bindings — no C++ compiler needed, works everywhere via `npx`
+- **`dataSource` metadata**: `ReplaySession.meta.dataSource` tracks which source was used (`sqlite`, `jsonl`, `jsonl+tools`) for diagnostics and transparency
 - **Skip `progress` lines**: Subagent streaming artifacts
 - **Provider adapter pattern**: Each IDE/tool has its own discover + parser, transform is shared
 - **Package name `vibe-replay`**: CLI package name enables `npx vibe-replay` directly
@@ -66,20 +81,36 @@ packages/cli/src/
 - **Path redaction**: transform.ts replaces user home dir with `~` in cwd, tool paths, bash commands
 - **Multi-file sessions**: Claude Code `/resume` creates new JSONL files — CLI merges them by slug+project, `parse()` accepts `string | string[]`
 - **URL loading**: Viewer supports `?url=<json-url>` and `?gist=<id>` via hosted viewer at vibe-replay.com
+- **Gist republish UX**: CLI stores gist metadata per replay output folder (`.vibe-replay-gist.json`) so users can overwrite an existing gist on subsequent publishes
 
 ## Data Flow
 
 ```
-~/.claude/projects/<path>/<session>.jsonl   (Claude Code)
-~/.cursor/projects/<path>/agent-transcripts/*.jsonl  (Cursor)
-  → providers/<name>/parser.ts → ProviderParseResult (grouped turns, timestamps, images)
-  → transform.ts → ReplaySession (scenes, redacted secrets + paths)
+~/.claude/projects/<path>/<session>.jsonl                          (Claude Code — JSONL)
+~/.cursor/chats/<md5>/<uuid>/store.db                              (Cursor — SQLite, primary)
+~/.cursor/projects/<path>/agent-transcripts/*.jsonl + agent-tools/  (Cursor — JSONL, fallback)
+  → providers/<name>/parser.ts → ProviderParseResult (turns, timestamps, dataSource)
+  → transform.ts → ReplaySession (scenes, redacted secrets + paths, metadata)
   → generator.ts → inject into viewer.html → vibe-replay/<slug>/index.html + replay.json
   → publishers/ → local (open browser) | gist (gh gist create → vibe-replay.com viewer)
 ```
 
 Scene types: `user-prompt`, `thinking`, `text-response`, `tool-call`
 Tool enrichment: Edit/Write → diff, Bash → command+stdout, screenshots → images, others → generic
+
+## Replay Metadata
+
+Both local HTML output and Gist output use the same `ReplaySession.meta` payload from `replay.json`.
+
+Current `meta` fields include:
+- `sessionId`, `slug`, `title`
+- `provider`, `dataSource`
+- `startTime`, `endTime`, `model`
+- `cwd`, `project`
+- `stats`: `sceneCount`, `userPrompts`, `toolCalls`, `thinkingBlocks`, `durationMs`
+
+Current limitation:
+- No generator metadata yet (e.g. CLI version, schema version, generated timestamp).
 
 ## Conventions
 

@@ -4,6 +4,8 @@ import { transformToReplay } from "../src/transform.js";
 import { join } from "node:path";
 
 const FIXTURE = join(import.meta.dirname, "fixtures/cursor-session.jsonl");
+const TOOL_FIXTURE_1 = join(import.meta.dirname, "fixtures/cursor-tool-1.txt");
+const TOOL_FIXTURE_2 = join(import.meta.dirname, "fixtures/cursor-tool-2.txt");
 
 describe("Cursor parser", () => {
   it("parses all turns", async () => {
@@ -48,12 +50,14 @@ describe("Cursor parser", () => {
 });
 
 describe("Cursor → transform", () => {
-  it("produces only user-prompt and text-response scenes", async () => {
+  it("unpaired markers become thinking, not tool calls", async () => {
     const parsed = await parseCursorSession(FIXTURE);
     const replay = transformToReplay(parsed, "cursor", "~/test/project");
 
     const types = new Set(replay.scenes.map((s) => s.type));
-    expect(types).toEqual(new Set(["user-prompt", "text-response"]));
+    expect(types).toEqual(new Set(["user-prompt", "text-response", "thinking"]));
+    expect(replay.meta.stats.toolCalls).toBe(0);
+    expect(replay.meta.stats.thinkingBlocks).toBe(1);
   });
 
   it("creates correct scene count", async () => {
@@ -62,6 +66,7 @@ describe("Cursor → transform", () => {
 
     expect(replay.meta.stats.userPrompts).toBe(3);
     expect(replay.meta.stats.toolCalls).toBe(0);
+    expect(replay.meta.stats.thinkingBlocks).toBe(1);
     expect(replay.meta.stats.sceneCount).toBe(replay.scenes.length);
   });
 
@@ -70,7 +75,7 @@ describe("Cursor → transform", () => {
     const replay = transformToReplay(parsed, "cursor", "~/test/project");
 
     const responses = replay.scenes.filter((s) => s.type === "text-response");
-    expect(responses.length).toBe(7);
+    expect(responses.length).toBe(6);
     expect(responses[0].content).toContain("look at the auth.ts file");
   });
 
@@ -80,7 +85,6 @@ describe("Cursor → transform", () => {
 
     expect(replay.meta.provider).toBe("cursor");
     expect(replay.meta.project).toBe("~/test/project");
-    // Cursor has no duration info
     expect(replay.meta.stats.durationMs).toBeUndefined();
   });
 });
@@ -91,5 +95,30 @@ describe("Cursor parser — multi-file", () => {
     const result = await parseCursorSession([FIXTURE, FIXTURE]);
     const userTurns = result.turns.filter((t) => t.role === "user");
     expect(userTurns.length).toBe(6); // 3 * 2
+  });
+});
+
+describe("Cursor parser — tool outputs", () => {
+  it("maps explicit tool output files into tool-call scenes", async () => {
+    const parsed = await parseCursorSession([FIXTURE, TOOL_FIXTURE_1, TOOL_FIXTURE_2]);
+    const replay = transformToReplay(parsed, "cursor", "~/test/project");
+
+    const toolScenes = replay.scenes.filter((s) => s.type === "tool-call");
+    expect(toolScenes.length).toBe(2);
+    expect(replay.meta.stats.toolCalls).toBe(2);
+    expect(toolScenes[0].toolName).toBe("Diff");
+    expect(toolScenes[0].result).toContain("diff --git");
+    expect(toolScenes[1].toolName).toBe("WebFetch");
+    expect(toolScenes[1].result).toContain("https://example.com/docs");
+  });
+
+  it("converts unpaired marker to thinking when no tool output matches", async () => {
+    const parsed = await parseCursorSession(FIXTURE);
+    const replay = transformToReplay(parsed, "cursor", "~/test/project");
+    const toolScenes = replay.scenes.filter((s) => s.type === "tool-call");
+    expect(toolScenes.length).toBe(0);
+    const thinking = replay.scenes.filter((s) => s.type === "thinking");
+    expect(thinking.length).toBe(1);
+    expect(thinking[0].content).toBe("Searching for auth files");
   });
 });
