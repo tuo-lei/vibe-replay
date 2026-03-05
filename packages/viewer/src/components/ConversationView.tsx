@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef, useEffect, memo } from "react";
 import type { Scene } from "../types";
 import type { ViewPrefs } from "../hooks/useViewPrefs";
 import UserPromptBlock from "./UserPromptBlock";
@@ -40,29 +40,24 @@ export default function ConversationView({
   currentIndex,
   viewPrefs,
 }: Props) {
-  const visible = scenes.slice(0, visibleCount);
-
-  const groups = useMemo(() => {
+  // Pre-compute ALL groups once — stable across playback ticks
+  const allGroups = useMemo(() => {
     const result: TurnGroup[] = [];
     let current: TurnGroup | null = null;
 
-    for (let i = 0; i < visible.length; i++) {
-      const scene = visible[i];
-      if (viewPrefs.promptsOnly && scene.type !== "user-prompt") continue;
-      if (viewPrefs.hideThinking && scene.type === "thinking") continue;
-
+    for (let i = 0; i < scenes.length; i++) {
+      const scene = scenes[i];
       if (scene.type === "user-prompt") {
-        if (current) result.push(current);
-        current = {
+        if (current && current.scenes.length > 0) result.push(current);
+        result.push({
           type: "user",
           timestamp: scene.timestamp,
           scenes: [{ scene, index: i }],
-        };
-        result.push(current);
+        });
         current = null;
       } else {
         if (!current || current.type !== "assistant") {
-          if (current) result.push(current);
+          if (current && current.scenes.length > 0) result.push(current);
           current = {
             type: "assistant",
             timestamp: scene.timestamp,
@@ -74,81 +69,199 @@ export default function ConversationView({
     }
     if (current && current.scenes.length > 0) result.push(current);
     return result;
-  }, [visible, viewPrefs]);
+  }, [scenes]);
+
+  // Only show groups that have visible scenes, filtered by viewPrefs
+  const displayGroups = useMemo(() => {
+    if (viewPrefs.promptsOnly) {
+      return allGroups
+        .filter(
+          (g) =>
+            g.type === "user" && g.scenes[0].index < visibleCount,
+        );
+    }
+    return allGroups.filter((g) => g.scenes[0].index < visibleCount);
+  }, [allGroups, visibleCount, viewPrefs.promptsOnly]);
+
+  // Find which group contains the currentIndex
+  const currentGroupIdx = useMemo(() => {
+    for (let i = displayGroups.length - 1; i >= 0; i--) {
+      if (displayGroups[i].scenes.some((s) => s.index <= currentIndex)) {
+        return i;
+      }
+    }
+    return displayGroups.length - 1;
+  }, [displayGroups, currentIndex]);
 
   return (
     <div className="max-w-4xl mx-auto space-y-3 pb-4">
-      {groups.map((group, gi) => {
-        const groupHasCurrent = group.scenes.some(({ index }) => index === currentIndex);
-
-        return (
-          <div key={gi}>
-            {group.type === "user" ? (
-              <div
-                data-scene-index={group.scenes[0]?.index}
-                className={`rounded-lg px-4 py-3 transition-colors duration-200 ${
-                  groupHasCurrent
-                    ? "bg-terminal-green/10 border-2 border-terminal-green/30 shadow-sm shadow-terminal-green/5"
-                    : "bg-terminal-green/5 border border-terminal-green/15"
-                }`}
-              >
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-[11px] font-mono font-semibold text-terminal-green uppercase tracking-wider">
-                    You
-                  </span>
-                  {group.timestamp && (
-                    <span className="text-[11px] font-mono text-terminal-dim">
-                      {formatTime(group.timestamp)}
-                    </span>
-                  )}
-                </div>
-                {group.scenes.map(({ scene, index }) => (
-                  <div
-                    key={index}
-                    className="scene-enter"
-                  >
-                    <SceneBlock
-                      scene={scene}
-                      isActive={index === currentIndex}
-                      collapseTools={viewPrefs.collapseAllTools}
-                    />
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div
-                data-scene-index={group.scenes[0]?.index}
-                className={`rounded-lg px-4 py-3 transition-colors duration-200 ${
-                  groupHasCurrent
-                    ? "bg-terminal-blue/[0.06] border-2 border-terminal-blue/20 shadow-sm shadow-terminal-blue/5"
-                    : "bg-terminal-blue/[0.03] border border-terminal-blue/10"
-                }`}
-              >
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-[11px] font-mono font-semibold text-terminal-blue/70 uppercase tracking-wider">
-                    Assistant
-                  </span>
-                  {group.timestamp && (
-                    <span className="text-[11px] font-mono text-terminal-dim">
-                      {formatTime(group.timestamp)}
-                    </span>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  <BatchedScenes
-                    scenes={group.scenes}
-                    currentIndex={currentIndex}
-                    collapseTools={viewPrefs.collapseAllTools}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-        );
-      })}
+      {displayGroups.map((group, gi) => (
+        <LazyGroup
+          key={gi}
+          forceRender={Math.abs(gi - currentGroupIdx) <= 5}
+        >
+          <GroupCard
+            group={group}
+            currentIndex={currentIndex}
+            visibleCount={visibleCount}
+            viewPrefs={viewPrefs}
+          />
+        </LazyGroup>
+      ))}
     </div>
   );
 }
+
+/**
+ * IntersectionObserver-based lazy renderer.
+ * Only mounts children when near the viewport or forceRender is true.
+ */
+const LazyGroup = memo(function LazyGroup({
+  children,
+  forceRender,
+}: {
+  children: React.ReactNode;
+  forceRender: boolean;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [inView, setInView] = useState(false);
+  const heightRef = useRef(0);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      ([e]) => {
+        setInView(e.isIntersecting);
+        if (e.isIntersecting && el.offsetHeight > 0) {
+          heightRef.current = el.offsetHeight;
+        }
+      },
+      { rootMargin: "800px 0px" },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
+  const shouldRender = inView || forceRender;
+
+  // Cache height when rendered
+  useEffect(() => {
+    if (shouldRender && ref.current && ref.current.offsetHeight > 0) {
+      heightRef.current = ref.current.offsetHeight;
+    }
+  });
+
+  return (
+    <div
+      ref={ref}
+      style={
+        !shouldRender && heightRef.current > 0
+          ? { minHeight: heightRef.current }
+          : undefined
+      }
+    >
+      {shouldRender ? children : null}
+    </div>
+  );
+});
+
+/**
+ * Renders a single user or assistant group card.
+ */
+const GroupCard = memo(function GroupCard({
+  group,
+  currentIndex,
+  visibleCount,
+  viewPrefs,
+}: {
+  group: TurnGroup;
+  currentIndex: number;
+  visibleCount: number;
+  viewPrefs: ViewPrefs;
+}) {
+  // Only include scenes that are visible so far
+  const visibleScenes = useMemo(
+    () => group.scenes.filter((s) => s.index < visibleCount),
+    [group.scenes, visibleCount],
+  );
+
+  const groupHasCurrent = visibleScenes.some(({ index }) => index === currentIndex);
+  const firstIndex = visibleScenes[0]?.index;
+
+  if (visibleScenes.length === 0) return null;
+
+  if (group.type === "user") {
+    return (
+      <div
+        id={`scene-${firstIndex}`}
+        data-scene-index={firstIndex}
+        className={`rounded-lg px-4 py-3 transition-colors duration-200 ${
+          groupHasCurrent
+            ? "bg-terminal-green/10 border-2 border-terminal-green/30 shadow-sm shadow-terminal-green/5"
+            : "bg-terminal-green/5 border border-terminal-green/15"
+        }`}
+      >
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-[11px] font-mono font-semibold text-terminal-green uppercase tracking-wider">
+            You
+          </span>
+          {group.timestamp && (
+            <span className="text-[11px] font-mono text-terminal-dim">
+              {formatTime(group.timestamp)}
+            </span>
+          )}
+        </div>
+        {visibleScenes.map(({ scene, index }) => (
+          <div key={index} className="scene-enter">
+            <SceneBlock
+              scene={scene}
+              isActive={index === currentIndex}
+              collapseTools={viewPrefs.collapseAllTools}
+            />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // Assistant group — filter by viewPrefs
+  const filteredScenes = viewPrefs.hideThinking
+    ? visibleScenes.filter((s) => s.scene.type !== "thinking")
+    : visibleScenes;
+
+  if (filteredScenes.length === 0) return null;
+
+  return (
+    <div
+      id={`scene-${firstIndex}`}
+      data-scene-index={firstIndex}
+      className={`rounded-lg px-4 py-3 transition-colors duration-200 ${
+        groupHasCurrent
+          ? "bg-terminal-blue/[0.06] border-2 border-terminal-blue/20 shadow-sm shadow-terminal-blue/5"
+          : "bg-terminal-blue/[0.03] border border-terminal-blue/10"
+      }`}
+    >
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-[11px] font-mono font-semibold text-terminal-blue/70 uppercase tracking-wider">
+          Assistant
+        </span>
+        {group.timestamp && (
+          <span className="text-[11px] font-mono text-terminal-dim">
+            {formatTime(group.timestamp)}
+          </span>
+        )}
+      </div>
+      <div className="space-y-2">
+        <BatchedScenes
+          scenes={filteredScenes}
+          currentIndex={currentIndex}
+          collapseTools={viewPrefs.collapseAllTools}
+        />
+      </div>
+    </div>
+  );
+});
 
 /**
  * Batch consecutive tool calls of the same type into a collapsible group.
@@ -296,7 +409,7 @@ function summarizeToolInput(name: string, input: Record<string, any>): string {
   }
 }
 
-function SceneBlock({
+const SceneBlock = memo(function SceneBlock({
   scene,
   isActive,
   collapseTools,
@@ -327,4 +440,4 @@ function SceneBlock({
         />
       );
   }
-}
+});

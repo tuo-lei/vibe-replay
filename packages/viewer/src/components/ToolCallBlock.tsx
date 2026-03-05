@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, memo } from "react";
 import type { Scene } from "../types";
 import CodeDiffBlock from "./CodeDiffBlock";
 import BashBlock from "./BashBlock";
@@ -24,7 +24,7 @@ function toolIcon(name: string): string {
   }
 }
 
-export default function ToolCallBlock({ scene, isActive, forceCollapse }: Props) {
+export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: Props) {
   const [expanded, setExpanded] = useState(false);
 
   // When force-collapsing, show a one-liner summary for all tool types
@@ -120,7 +120,7 @@ export default function ToolCallBlock({ scene, isActive, forceCollapse }: Props)
       </div>
     </div>
   );
-}
+});
 
 function summarizeInput(name: string, input: Record<string, any>): string {
   switch (name) {

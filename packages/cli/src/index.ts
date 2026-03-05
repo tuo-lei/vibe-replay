@@ -7,6 +7,7 @@ import { transformToReplay } from "./transform.js";
 import { generateOutput, generateDevJson } from "./generator.js";
 import { publishLocal } from "./publishers/local.js";
 import { publishGist, checkGhStatus } from "./publishers/gist.js";
+import { scanForSecrets } from "./scan.js";
 import type { SessionInfo } from "./types.js";
 
 program
@@ -15,6 +16,7 @@ program
   .version("0.0.2")
   .option("-s, --session <path>", "Path to a specific JSONL session file")
   .option("-p, --provider <name>", "Provider name (default: claude-code)", "claude-code")
+  .option("-t, --title <name>", "Custom title for the replay (shown on landing page & shared links)")
   .option("--dev", "Write demo.json to viewer public/ for HMR development")
   .action(async (opts) => {
     console.log(chalk.bold.cyan("\n  vibe-replay") + chalk.dim(" v0.0.2\n"));
@@ -78,9 +80,25 @@ program
       ? "~" + rawProject.slice(home.length)
       : rawProject;
     const replay = transformToReplay(parsed, providerName, project);
+
     spinner.succeed(
       `${replay.scenes.length} scenes (${replay.meta.stats.userPrompts} prompts, ${replay.meta.stats.toolCalls} tool calls)`,
     );
+
+    // Title: CLI flag > interactive prompt > auto-detected > slug
+    if (opts.title) {
+      replay.meta.title = opts.title;
+    } else if (!opts.dev) {
+      const { input } = await import("@inquirer/prompts");
+      const defaultTitle = replay.meta.title || replay.meta.slug;
+      const userTitle = await input({
+        message: "Replay title (shown on landing page & shared links):",
+        default: defaultTitle,
+      });
+      if (userTitle.trim()) {
+        replay.meta.title = userTitle.trim();
+      }
+    }
 
     // Dev mode: write demo.json to viewer public/ and exit
     if (opts.dev) {
@@ -102,6 +120,33 @@ program
     const { stat: fsStat } = await import("node:fs/promises");
     const size = await fsStat(outputPath).then((s) => (s.size / 1024 / 1024).toFixed(1));
     genSpinner.succeed(`${outputPath} (${size} MB)`);
+
+    // Second-layer leak detection: scan the serialized replay for secrets
+    const scanSpinner = ora("Scanning for secrets...").start();
+    const findings = scanForSecrets(JSON.stringify(replay));
+    if (findings.length === 0) {
+      scanSpinner.succeed("No secrets detected");
+    } else {
+      scanSpinner.warn(`${findings.length} potential secret(s) found`);
+      console.log();
+      for (let i = 0; i < findings.length; i++) {
+        const f = findings[i];
+        console.log(chalk.yellow(`  ${i + 1}. [${f.rule}]`));
+        console.log(chalk.dim(`     ${f.match}`));
+      }
+      console.log();
+
+      const { confirm } = await import("@inquirer/prompts");
+      const ok = await confirm({
+        message: "These may be false alarms (e.g. example keys in docs). Continue anyway?",
+        default: false,
+      });
+      if (!ok) {
+        console.log(chalk.red("\n  Aborted — review the session and re-run.\n"));
+        process.exit(1);
+      }
+      console.log(chalk.dim("  Continuing — user confirmed findings are safe.\n"));
+    }
 
     // Check gh availability for gist option
     const ghStatus = await checkGhStatus();
@@ -275,3 +320,4 @@ function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
   result.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   return result;
 }
+

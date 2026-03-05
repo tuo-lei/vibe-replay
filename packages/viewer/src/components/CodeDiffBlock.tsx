@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, memo } from "react";
 import { Highlight, themes } from "prism-react-renderer";
 import { diffLines as computeLineDiff } from "diff";
 
@@ -64,7 +64,7 @@ function guessLanguage(filePath: string): string {
   return map[ext] || "text";
 }
 
-export default function CodeDiffBlock({
+export default memo(function CodeDiffBlock({
   toolName,
   filePath,
   oldContent,
@@ -148,4 +148,4 @@ export default function CodeDiffBlock({
       </div>
     </div>
   );
-}
+});

@@ -7,6 +7,8 @@ import Controls from "./Controls";
 import ConversationView from "./ConversationView";
 import Minimap from "./Minimap";
 import StatsPanel from "./StatsPanel";
+import SearchOverlay from "./SearchOverlay";
+import LandingHero from "./LandingHero";
 
 interface Props {
   session: ReplaySession;
@@ -24,12 +26,15 @@ function formatDuration(ms?: number): string {
 }
 
 export default function Player({ session, viewPrefs }: Props) {
+  const [landed, setLanded] = useState(false);
+
   const {
     state,
     currentIndex,
     visibleCount,
     speed,
     play,
+    pause,
     togglePlayPause,
     seekTo,
     changeSpeed,
@@ -37,26 +42,42 @@ export default function Player({ session, viewPrefs }: Props) {
     jumpToNextUserPrompt,
     jumpToPrevUserPrompt,
     userPromptIndices,
-  } = usePlayback(session.scenes, viewPrefs.promptsOnly);
+  } = usePlayback(session.scenes, viewPrefs.promptsOnly, landed);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [sidebarTab, setSidebarTab] = useState<"outline" | "stats">("outline");
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  // Cmd+K / Ctrl+K to open search
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setSearchOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, []);
 
   const currentTurn =
     userPromptIndices.filter((i) => i <= currentIndex).length || 0;
   const userPromptCount = userPromptIndices.length;
 
-  // Auto-play after 1.5s delay
-  useEffect(() => {
-    const timer = setTimeout(play, 1500);
-    return () => clearTimeout(timer);
+  // Start playback when user dismisses landing page
+  const handleStart = useCallback(() => {
+    setLanded(true);
+    setTimeout(play, 300);
   }, [play]);
 
-  // Auto-scroll to current scene (skip when user is scrolling to reveal)
-  const userScrollingRef = useRef(false);
+  // Track whether auto-scroll is active (programmatic) vs user-initiated
+  const programScrollRef = useRef(false);
+
+  // Auto-scroll to current scene — only during playback
   useEffect(() => {
-    if (!scrollRef.current || currentIndex < 0 || userScrollingRef.current) return;
+    if (!scrollRef.current || currentIndex < 0 || state !== "playing") return;
     const el = scrollRef.current;
+    programScrollRef.current = true;
     requestAnimationFrame(() => {
       const sceneEl = el.querySelector(`[data-scene-index="${currentIndex}"]`);
       if (sceneEl) {
@@ -64,8 +85,33 @@ export default function Player({ session, viewPrefs }: Props) {
       } else {
         el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
       }
+      // Clear flag after smooth scroll settles
+      setTimeout(() => { programScrollRef.current = false; }, 400);
     });
-  }, [currentIndex]);
+  }, [currentIndex, state]);
+
+  // User scroll/touch → auto-pause + enter infinite scroll mode
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const handleUserScroll = () => {
+      // Ignore programmatic scrolls
+      if (programScrollRef.current) return;
+      // Pause if playing
+      if (state === "playing") {
+        pause();
+      }
+    };
+
+    // wheel = mouse/trackpad, touchmove = mobile
+    el.addEventListener("wheel", handleUserScroll, { passive: true });
+    el.addEventListener("touchmove", handleUserScroll, { passive: true });
+    return () => {
+      el.removeEventListener("wheel", handleUserScroll);
+      el.removeEventListener("touchmove", handleUserScroll);
+    };
+  }, [state, pause]);
 
   // Scroll-to-reveal: when paused and user scrolls near bottom, advance scenes
   useEffect(() => {
@@ -73,26 +119,35 @@ export default function Player({ session, viewPrefs }: Props) {
     if (!el) return;
 
     let throttle = false;
-    const handleScroll = () => {
+    const advance = () => {
       if (state !== "paused" || throttle) return;
       if (currentIndex >= session.scenes.length - 1) return;
 
       const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
       if (nearBottom) {
         throttle = true;
-        userScrollingRef.current = true;
         seekTo(currentIndex + 1);
-        // Reset after a brief delay to allow new content to render
-        setTimeout(() => {
-          throttle = false;
-          userScrollingRef.current = false;
-        }, 150);
+        setTimeout(() => { throttle = false; }, 150);
       }
     };
 
-    el.addEventListener("scroll", handleScroll, { passive: true });
-    return () => el.removeEventListener("scroll", handleScroll);
+    // wheel covers the case where content is shorter than viewport (no scroll events fire)
+    const handleWheel = (e: WheelEvent) => {
+      if (e.deltaY > 0) advance();
+    };
+
+    el.addEventListener("scroll", advance, { passive: true });
+    el.addEventListener("wheel", handleWheel, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", advance);
+      el.removeEventListener("wheel", handleWheel);
+    };
   }, [state, currentIndex, session.scenes.length, seekTo]);
+
+  // Show landing page before playback starts
+  if (!landed) {
+    return <LandingHero session={session} onStart={handleStart} />;
+  }
 
   return (
     <div className="flex flex-1 min-h-0 relative">
@@ -143,6 +198,17 @@ export default function Player({ session, viewPrefs }: Props) {
             viewPrefs={viewPrefs}
           />
         </div>
+
+        {/* Search overlay */}
+        <SearchOverlay
+          scenes={session.scenes}
+          open={searchOpen}
+          onClose={() => setSearchOpen(false)}
+          onSeek={(i) => {
+            seekTo(i);
+            setSearchOpen(false);
+          }}
+        />
 
         {/* Pause overlay */}
         {state === "paused" && visibleCount > 0 && (

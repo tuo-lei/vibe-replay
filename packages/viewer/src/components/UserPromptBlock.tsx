@@ -1,10 +1,12 @@
+import { memo } from "react";
+
 interface Props {
   content: string;
   images?: string[];
   isActive: boolean;
 }
 
-export default function UserPromptBlock({ content, images, isActive }: Props) {
+export default memo(function UserPromptBlock({ content, images, isActive }: Props) {
   return (
     <div>
       <div
@@ -28,4 +30,4 @@ export default function UserPromptBlock({ content, images, isActive }: Props) {
       )}
     </div>
   );
-}
+});

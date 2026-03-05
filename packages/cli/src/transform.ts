@@ -166,6 +166,20 @@ const SECRET_PATTERNS = [
   /pypi-[a-zA-Z0-9_-]{50,}/g,
   // Bearer tokens
   /Bearer\s+[a-zA-Z0-9_\-.]{20,}/g,
+  // JWTs (three base64url segments separated by dots)
+  /eyJ[a-zA-Z0-9_-]{10,}\.eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}/g,
+  // SendGrid
+  /SG\.[a-zA-Z0-9_-]{22,}\.[a-zA-Z0-9_-]{22,}/g,
+  // Twilio
+  /SK[0-9a-fA-F]{32}/g,
+  // Mailgun
+  /key-[a-zA-Z0-9]{32}/g,
+  // Heroku (only when in heroku context — too broad to match all UUIDs)
+  /(?:heroku[_-]?api[_-]?key|HEROKU_API_KEY)\s*[=:]\s*["']?[0-9a-f-]{36}/gi,
+  // Age secret keys
+  /AGE-SECRET-KEY-[A-Z0-9]{59}/g,
+  // Hashicorp Vault tokens
+  /hvs\.[a-zA-Z0-9_-]{24,}/g,
   // Generic env var patterns: KEY=value, SECRET=value, TOKEN=value, PASSWORD=value
   /((?:API_?KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|AUTH)[_A-Z]*\s*[=:]\s*["']?)[^\s"'\n]{8,}/gi,
   // npm tokens

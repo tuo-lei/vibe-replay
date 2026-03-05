@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, memo } from "react";
 
 interface Props {
   command: string;
@@ -6,7 +6,7 @@ interface Props {
   isActive: boolean;
 }
 
-export default function BashBlock({ command, stdout, isActive }: Props) {
+export default memo(function BashBlock({ command, stdout, isActive }: Props) {
   const [expanded, setExpanded] = useState(true);
   const hasOutput = stdout.trim().length > 0;
 
@@ -39,4 +39,4 @@ export default function BashBlock({ command, stdout, isActive }: Props) {
       )}
     </div>
   );
-}
+});
