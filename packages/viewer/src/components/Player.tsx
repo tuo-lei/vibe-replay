@@ -48,6 +48,7 @@ export default function Player({ session, viewPrefs }: Props) {
   const [sidebarTab, setSidebarTab] = useState<"outline" | "stats">("outline");
   const [searchOpen, setSearchOpen] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [scrollHintDismissed, setScrollHintDismissed] = useState(false);
   const pendingSeekRef = useRef<number | null>(null);
   const navFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -111,6 +112,11 @@ export default function Player({ session, viewPrefs }: Props) {
   // Track whether auto-scroll is active (programmatic) vs user-initiated
   const programScrollRef = useRef(false);
 
+  // Reset scroll hint when playback resumes
+  useEffect(() => {
+    if (state === "playing") setScrollHintDismissed(false);
+  }, [state]);
+
   // Auto-scroll to current scene — only during playback
   useEffect(() => {
     if (!scrollRef.current || currentIndex < 0 || state !== "playing") return;
@@ -136,6 +142,8 @@ export default function Player({ session, viewPrefs }: Props) {
     const handleUserScroll = () => {
       // Ignore programmatic scrolls
       if (programScrollRef.current) return;
+      // Dismiss scroll hint on first user scroll
+      setScrollHintDismissed(true);
       // Pause if playing
       if (state === "playing") {
         pause();
@@ -293,6 +301,16 @@ export default function Player({ session, viewPrefs }: Props) {
             focusIndex={navFocusIndex}
           />
         </div>
+
+        {/* Scroll-to-reveal hint */}
+        {state === "paused" && currentIndex < session.scenes.length - 1 && !scrollHintDismissed && (
+          <div className="absolute bottom-[72px] left-1/2 -translate-x-1/2 z-10 pointer-events-none animate-bounce">
+            <div className="px-4 py-1.5 rounded-full bg-terminal-surface/90 border border-terminal-border/60 backdrop-blur-sm text-xs font-mono text-terminal-dim flex items-center gap-2 shadow-lg">
+              <span className="text-terminal-green">{"\u2193"}</span>
+              scroll for more
+            </div>
+          </div>
+        )}
 
         {/* Search overlay */}
         <SearchOverlay
