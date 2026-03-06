@@ -47,24 +47,31 @@ export default function Controls({
   const flashClass = (id: string) =>
     flashId === id ? "ring-2 ring-terminal-green/50 scale-105" : "";
 
+  const groupStyle = "flex items-center border border-terminal-border/60 rounded-md overflow-hidden";
+  const cellStyle = "px-2.5 md:px-2.5 py-2 md:py-1 text-xs font-mono";
+
   return (
     <div className="flex items-center justify-between px-3 md:px-4 py-2">
       <div className="flex items-center gap-1.5 md:gap-3">
-        <button
-          onClick={() => { flash("play"); onTogglePlayPause(); }}
-          className={`h-9 md:h-8 flex items-center gap-1.5 px-3 rounded-md bg-terminal-surface border border-terminal-border/60 hover:border-terminal-green hover:text-terminal-green text-xs font-mono ${btnBase} ${flashClass("play")}`}
-          title="Play/Pause (Space)"
-        >
-          <span>{playIcon}</span>
-          <span className="hidden sm:inline">{playLabel}</span>
-        </button>
+        {/* Play/Pause */}
+        <div className={groupStyle}>
+          <button
+            onClick={() => { flash("play"); onTogglePlayPause(); }}
+            className={`${cellStyle} hover:text-terminal-green bg-terminal-surface ${btnBase} ${flashClass("play")}`}
+            title="Play/Pause (Space)"
+          >
+            <span>{playIcon}</span>
+            <span className="hidden sm:inline ml-1.5">{playLabel}</span>
+          </button>
+        </div>
 
-        <div className="flex items-center border border-terminal-border/60 rounded-md overflow-hidden">
+        {/* Speed */}
+        <div className={groupStyle}>
           {SPEEDS.map((s) => (
             <button
               key={s}
               onClick={() => { flash(`speed-${s}`); onChangeSpeed(s); }}
-              className={`px-2 md:px-2.5 py-1.5 md:py-1 text-xs font-mono ${btnBase} ${
+              className={`${cellStyle} ${btnBase} ${
                 speed === s
                   ? "bg-terminal-green/15 text-terminal-green"
                   : "text-terminal-dim hover:text-terminal-text bg-terminal-surface"
@@ -75,43 +82,50 @@ export default function Controls({
           ))}
         </div>
 
-        <div className="flex items-center gap-0.5 md:gap-1 ml-0.5 md:ml-1">
+        {/* Turn navigation */}
+        <div className={groupStyle}>
           <button
             onClick={() => { flash("prev"); onPrevPrompt(); }}
-            className={`px-2 py-1.5 md:py-1 text-xs font-mono text-terminal-dim hover:text-terminal-green ${btnBase} ${flashClass("prev")}`}
+            className={`${cellStyle} text-terminal-dim hover:text-terminal-green bg-terminal-surface ${btnBase} ${flashClass("prev")}`}
             title="Previous turn (p)"
           >
-            {"<"}
+            {"\u2039"}
           </button>
-          <span className="text-xs font-mono text-terminal-dim px-0.5 md:px-1 tabular-nums">
+          <span className={`${cellStyle} text-terminal-dim tabular-nums bg-terminal-surface border-x border-terminal-border/60`}>
             <span className="hidden sm:inline">Turn </span>{currentTurn}/{userPromptCount}
           </span>
           <button
             onClick={() => { flash("next"); onNextPrompt(); }}
-            className={`px-2 py-1.5 md:py-1 text-xs font-mono text-terminal-dim hover:text-terminal-green ${btnBase} ${flashClass("next")}`}
+            className={`${cellStyle} text-terminal-dim hover:text-terminal-green bg-terminal-surface ${btnBase} ${flashClass("next")}`}
             title="Next turn (n)"
           >
-            {">"}
+            {"\u203A"}
           </button>
         </div>
 
-        <button
-          onClick={() => { flash("search"); onOpenSearch(); }}
-          className={`h-9 md:h-8 flex items-center gap-1.5 px-2.5 md:px-3 rounded-md bg-terminal-surface border border-terminal-border/60 hover:border-terminal-blue hover:text-terminal-blue text-xs font-mono ${btnBase} ${flashClass("search")}`}
-          title="Search (Cmd/Ctrl+K)"
-        >
-          <span>{"\uD83D\uDD0D"}</span>
-          <span className="hidden sm:inline">Search</span>
-        </button>
-
-        {onOpenOutline && (
+        {/* Search */}
+        <div className={groupStyle}>
           <button
-            onClick={() => { flash("outline"); onOpenOutline(); }}
-            className={`md:hidden h-9 flex items-center px-2.5 rounded-md bg-terminal-surface border border-terminal-border/60 hover:border-terminal-text text-xs font-mono ${btnBase} ${flashClass("outline")}`}
-            title="Outline"
+            onClick={() => { flash("search"); onOpenSearch(); }}
+            className={`${cellStyle} hover:text-terminal-blue bg-terminal-surface ${btnBase} ${flashClass("search")}`}
+            title="Search (Cmd/Ctrl+K)"
           >
-            {"\u2630"}
+            <span>{"\uD83D\uDD0D"}</span>
+            <span className="hidden sm:inline ml-1.5">Search</span>
           </button>
+        </div>
+
+        {/* Outline (mobile only) */}
+        {onOpenOutline && (
+          <div className={`${groupStyle} md:hidden`}>
+            <button
+              onClick={() => { flash("outline"); onOpenOutline(); }}
+              className={`${cellStyle} hover:text-terminal-text bg-terminal-surface ${btnBase} ${flashClass("outline")}`}
+              title="Outline"
+            >
+              {"\u2630"}
+            </button>
+          </div>
         )}
       </div>
 
