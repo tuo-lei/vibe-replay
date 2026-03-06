@@ -9,6 +9,19 @@ export interface Provider {
 
 export type DataSource = "jsonl" | "sqlite" | "jsonl+tools";
 
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+}
+
+export interface Compaction {
+  timestamp: string;
+  trigger: string;
+  preTokens?: number;
+}
+
 export interface ProviderParseResult {
   sessionId: string;
   slug: string;
@@ -20,4 +33,6 @@ export interface ProviderParseResult {
   totalDurationMs?: number;
   turns: ParsedTurn[];
   dataSource?: DataSource;
+  tokenUsage?: TokenUsage;
+  compactions?: Compaction[];
 }

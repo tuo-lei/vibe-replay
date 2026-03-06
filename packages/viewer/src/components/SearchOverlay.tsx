@@ -19,6 +19,8 @@ function getSceneText(scene: Scene): string {
   switch (scene.type) {
     case "user-prompt":
       return scene.content;
+    case "compaction-summary":
+      return scene.content;
     case "thinking":
       return scene.content;
     case "text-response":
@@ -47,6 +49,7 @@ function highlightMatch(text: string, query: string): string {
 
 const TYPE_LABELS: Record<string, string> = {
   "user-prompt": "User",
+  "compaction-summary": "Compaction",
   thinking: "Thinking",
   "text-response": "Response",
   "tool-call": "Tool",
@@ -54,6 +57,7 @@ const TYPE_LABELS: Record<string, string> = {
 
 const TYPE_COLORS: Record<string, string> = {
   "user-prompt": "text-terminal-green",
+  "compaction-summary": "text-terminal-dim",
   thinking: "text-terminal-purple",
   "text-response": "text-terminal-blue",
   "tool-call": "text-terminal-orange",

@@ -20,6 +20,7 @@ export interface SessionInfo {
 
 export interface ParsedTurn {
   role: "user" | "assistant";
+  subtype?: string;
   messageId?: string;
   model?: string;
   timestamp?: string;
@@ -63,6 +64,7 @@ export type ToolResultContent =
 
 export type Scene =
   | { type: "user-prompt"; content: string; timestamp?: string; images?: string[] }
+  | { type: "compaction-summary"; content: string; timestamp?: string }
   | { type: "thinking"; content: string; timestamp?: string }
   | { type: "text-response"; content: string; timestamp?: string }
   | {
@@ -75,6 +77,17 @@ export type Scene =
       bashOutput?: { command: string; stdout: string };
       images?: string[];
     };
+
+export interface Annotation {
+  id: string;
+  sceneIndex: number;
+  selectedText?: string;
+  body: string;
+  author: string;
+  createdAt: string;
+  updatedAt: string;
+  resolved: boolean;
+}
 
 export interface ReplaySession {
   meta: {
@@ -94,7 +107,20 @@ export interface ReplaySession {
       toolCalls: number;
       thinkingBlocks?: number;
       durationMs?: number;
+      tokenUsage?: {
+        inputTokens: number;
+        outputTokens: number;
+        cacheCreationTokens: number;
+        cacheReadTokens: number;
+      };
+      costEstimate?: number;
     };
+    compactions?: Array<{
+      timestamp: string;
+      trigger: string;
+      preTokens?: number;
+    }>;
   };
   scenes: Scene[];
+  annotations?: Annotation[];
 }

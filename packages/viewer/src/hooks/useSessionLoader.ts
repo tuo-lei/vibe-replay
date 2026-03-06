@@ -1,23 +1,31 @@
 import { useState, useEffect } from "react";
 import type { ReplaySession } from "../types";
 
+export type ViewerMode = "embedded" | "editor" | "readonly";
+
 type LoadState =
   | { status: "loading" }
-  | { status: "ready"; session: ReplaySession }
+  | { status: "ready"; session: ReplaySession; mode: ViewerMode }
   | { status: "error"; message: string };
+
+interface LoadResult {
+  session: ReplaySession;
+  mode: ViewerMode;
+}
 
 /**
  * Load session data from one of:
  * 1. window.__VIBE_REPLAY_DATA__ (embedded by CLI)
- * 2. ?url=<jsonl-or-json-url> (fetch from URL, e.g., raw gist)
- * 3. ?file=<local-path> (dev mode, fetch from Vite public/)
+ * 2. Editor mode (served by local CLI server)
+ * 3. ?url=<jsonl-or-json-url> (fetch from URL, e.g., raw gist)
+ * 4. ?file=<local-path> (dev mode, fetch from Vite public/)
  */
 export function useSessionLoader(): LoadState {
   const [state, setState] = useState<LoadState>({ status: "loading" });
 
   useEffect(() => {
     loadSession().then(
-      (session) => setState({ status: "ready", session }),
+      (result) => setState({ status: "ready", session: result.session, mode: result.mode }),
       (err) => setState({ status: "error", message: String(err.message || err) }),
     );
   }, []);
@@ -25,15 +33,27 @@ export function useSessionLoader(): LoadState {
   return state;
 }
 
-async function loadSession(): Promise<ReplaySession> {
+function isEditorMode(): boolean {
+  return !!window.__VIBE_REPLAY_EDITOR__;
+}
+
+async function loadSession(): Promise<LoadResult> {
   // 1. Embedded data (from CLI generator)
   if (window.__VIBE_REPLAY_DATA__) {
-    return window.__VIBE_REPLAY_DATA__;
+    return { session: window.__VIBE_REPLAY_DATA__, mode: "embedded" };
+  }
+
+  // 2. Editor mode (served by CLI local server)
+  if (isEditorMode()) {
+    const resp = await fetch("/api/session");
+    if (!resp.ok) throw new Error(`Editor API error: ${resp.status}`);
+    const session = (await resp.json()) as ReplaySession;
+    return { session, mode: "editor" };
   }
 
   const params = new URLSearchParams(window.location.search);
 
-  // 2. Gist parameter — resolve gist ID to raw JSON URL via GitHub API
+  // 3. Gist parameter — resolve gist ID to raw JSON URL via GitHub API
   const gistId = params.get("gist");
   if (gistId) {
     // Only allow hex gist IDs (GitHub gist IDs are 32 hex chars)
@@ -44,21 +64,21 @@ async function loadSession(): Promise<ReplaySession> {
     const session = await fetchJson(rawUrl);
     // Register replay in gallery (fire-and-forget)
     registerReplay(gistId, session).catch(() => {});
-    return session;
+    return { session, mode: "readonly" };
   }
 
-  // 3. URL parameter — fetch JSON from a remote URL
+  // 4. URL parameter — fetch JSON from a remote URL (read-only)
   const url = params.get("url");
   if (url) {
-    return await fetchJson(url);
+    return { session: await fetchJson(url), mode: "readonly" };
   }
 
-  // 3. Local file parameter — for dev mode
+  // 5. Local file parameter — for dev mode
   const file = params.get("file");
   if (file) {
     const resp = await fetch(file);
     if (!resp.ok) throw new Error(`Failed to load file: ${resp.status}`);
-    return (await resp.json()) as ReplaySession;
+    return { session: (await resp.json()) as ReplaySession, mode: "embedded" };
   }
 
   throw new Error(

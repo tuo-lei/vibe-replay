@@ -7,6 +7,7 @@ import { transformToReplay } from "./transform.js";
 import { generateOutput, generateDevJson } from "./generator.js";
 import { publishLocal } from "./publishers/local.js";
 import { publishGist, checkGhStatus, loadSavedGistInfo } from "./publishers/gist.js";
+import { startEditor } from "./server.js";
 import { scanForSecrets } from "./scan.js";
 import type { SessionInfo, ReplaySession } from "./types.js";
 
@@ -157,21 +158,22 @@ program
     // Check gh availability for gist option
     const ghStatus = await checkGhStatus();
     const gistLabel = ghStatus.available
-      ? `${chalk.blue("↑")} Publish to GitHub Gist ${chalk.yellow("(public — anyone with the link can view)")}`
+      ? `${chalk.blue("↑")} Publish to Gist now ${chalk.dim("(skip editor, publish directly)")}`
       : ghStatus.reason === "not-installed"
-        ? `${chalk.dim("↑ Publish to GitHub Gist")} ${chalk.dim("(requires gh CLI)")}`
-        : `${chalk.dim("↑ Publish to GitHub Gist")} ${chalk.dim("(gh not logged in)")}`;
+        ? `${chalk.dim("↑ Publish to Gist now")} ${chalk.red("(gh CLI not installed)")}`
+        : `${chalk.dim("↑ Publish to Gist now")} ${chalk.red("(gh not logged in)")}`;
 
     // Publish target
     console.log();
-    const choices: { name: string; value: "demo" | "local" | "gist" | "exit" }[] = [
+    const choices: { name: string; value: "demo" | "local" | "editor" | "gist" | "exit" }[] = [
       ...(DEV_MENU_ENABLED
         ? [{
             name: `${chalk.cyan("⚡")} Dump to demo.json ${chalk.dim("(for pnpm viewer:dev)")}`,
             value: "demo" as const,
           }]
         : []),
-      { name: `${chalk.green("▶")} Open in browser`, value: "local" as const },
+      { name: `${chalk.magenta("✎")} Open in Editor ${chalk.dim("(annotate, publish, export)")}`, value: "editor" as const },
+      { name: `${chalk.green("▶")} Quick preview ${chalk.dim("(open HTML in browser, no editing)")}`, value: "local" as const },
       { name: gistLabel, value: "gist" as const },
       { name: `${chalk.dim("✕")} Exit`, value: "exit" as const },
     ];
@@ -185,6 +187,9 @@ program
       await dumpReplayToDemoJson(replay);
     } else if (target === "local") {
       await publishLocal(outputPath);
+    } else if (target === "editor") {
+      await startEditor(replay, outputDir);
+      return; // startEditor blocks until Ctrl+C
     } else if (target === "gist") {
       if (!ghStatus.available) {
         if (ghStatus.reason === "not-installed") {

@@ -2,6 +2,8 @@ import { useRef, useEffect, useState, useCallback } from "react";
 import type { ReplaySession } from "../types";
 import type { ViewPrefs } from "../hooks/useViewPrefs";
 import { usePlayback } from "../hooks/usePlayback";
+import { useAnnotations } from "../hooks/useAnnotations";
+import type { ViewerMode } from "../hooks/useSessionLoader";
 import Timeline from "./Timeline";
 import Controls from "./Controls";
 import ConversationView from "./ConversationView";
@@ -9,10 +11,12 @@ import Minimap from "./Minimap";
 import StatsPanel from "./StatsPanel";
 import SearchOverlay from "./SearchOverlay";
 import LandingHero from "./LandingHero";
+import AnnotationPanel from "./AnnotationPanel";
 
 interface Props {
   session: ReplaySession;
   viewPrefs: ViewPrefs;
+  viewerMode?: ViewerMode;
 }
 
 function flashJumpTarget(el: HTMLElement) {
@@ -25,10 +29,27 @@ function flashJumpTarget(el: HTMLElement) {
   }, 900);
 }
 
-export default function Player({ session, viewPrefs }: Props) {
+export default function Player({ session, viewPrefs, viewerMode = "embedded" }: Props) {
+  const isReadOnly = viewerMode === "readonly";
   const [landed, setLanded] = useState(false);
   const [navFocusIndex, setNavFocusIndex] = useState<number | undefined>(undefined);
   const [navJumpSeq, setNavJumpSeq] = useState(0);
+  const [annotationPanelOpen, setAnnotationPanelOpen] = useState(() => {
+    // Check embedded annotations
+    if ((session.annotations?.length ?? 0) > 0) return true;
+    // Check localStorage draft (useAnnotations loads from here too)
+    try {
+      const key = "vibe-replay-annotations-" + session.meta.sessionId;
+      const draft = localStorage.getItem(key);
+      if (draft) {
+        const parsed = JSON.parse(draft);
+        return Array.isArray(parsed) && parsed.length > 0;
+      }
+    } catch { /* ignore */ }
+    return false;
+  });
+  const [commentTargetScene, setCommentTargetScene] = useState<number | null>(null);
+  const annotationActions = useAnnotations(session, viewerMode);
 
   const {
     state,
@@ -45,7 +66,7 @@ export default function Player({ session, viewPrefs }: Props) {
   } = usePlayback(session.scenes, viewPrefs.promptsOnly, landed);
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [sidebarTab, setSidebarTab] = useState<"outline" | "stats">("outline");
+  const [sidebarTab, setSidebarTab] = useState<"outline" | "stats" | "comments">("outline");
   const [searchOpen, setSearchOpen] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [scrollHintDismissed, setScrollHintDismissed] = useState(false);
@@ -284,57 +305,83 @@ export default function Player({ session, viewPrefs }: Props) {
           </button>
         </div>
         <div className="flex-1 overflow-y-auto">
-          {sidebarTab === "outline" ? (
+          {sidebarTab === "stats" ? (
+            <StatsPanel session={session} />
+          ) : (
             <Minimap
               scenes={session.scenes}
               currentIndex={currentIndex}
               onSeek={seekFromNavigation}
             />
-          ) : (
-            <StatsPanel session={session} />
           )}
         </div>
       </div>
 
       {/* Main content */}
       <div className="flex flex-col flex-1 min-h-0 min-w-0">
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 pb-8 overscroll-contain">
-          <ConversationView
-            scenes={session.scenes}
-            visibleCount={visibleCount}
-            currentIndex={currentIndex}
-            viewPrefs={viewPrefs}
-            focusIndex={navFocusIndex}
-          />
-        </div>
-
-        {/* Scroll-to-reveal hint */}
-        {state === "paused" && currentIndex < session.scenes.length - 1 && !scrollHintDismissed && (
-          <div className="absolute bottom-[72px] left-1/2 -translate-x-1/2 z-10 pointer-events-none animate-bounce">
-            <div className="px-4 py-1.5 rounded-full bg-terminal-surface/90 border border-terminal-border/60 backdrop-blur-sm text-xs font-mono text-terminal-dim flex items-center gap-2 shadow-lg">
-              <span className="text-terminal-green">{"\u2193"}</span>
-              scroll for more
+        <div className="flex flex-1 min-h-0">
+          <div className="flex flex-col flex-1 min-h-0 min-w-0 relative">
+            <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 pb-8 overscroll-contain">
+              <ConversationView
+                scenes={session.scenes}
+                visibleCount={visibleCount}
+                currentIndex={currentIndex}
+                viewPrefs={viewPrefs}
+                focusIndex={navFocusIndex}
+                annotatedScenes={annotationActions.annotatedScenes}
+                annotationCounts={annotationActions.annotationCounts}
+                onComment={isReadOnly ? undefined : (sceneIndex) => {
+                  setAnnotationPanelOpen(true);
+                  setCommentTargetScene(sceneIndex);
+                }}
+              />
             </div>
-          </div>
-        )}
 
-        {/* Search overlay */}
-        <SearchOverlay
-          scenes={session.scenes}
-          open={searchOpen}
-          onClose={() => setSearchOpen(false)}
-          onSeek={(i) => {
-            seekFromNavigation(i);
-            setSearchOpen(false);
-          }}
-        />
+            {/* Scroll-to-reveal hint */}
+            {state === "paused" && currentIndex < session.scenes.length - 1 && !scrollHintDismissed && (
+              <div className="absolute bottom-[72px] left-1/2 -translate-x-1/2 z-10 pointer-events-none animate-bounce">
+                <div className="px-4 py-1.5 rounded-full bg-terminal-surface/90 border border-terminal-border/60 backdrop-blur-sm text-xs font-mono text-terminal-dim flex items-center gap-2 shadow-lg">
+                  <span className="text-terminal-green">{"\u2193"}</span>
+                  scroll for more
+                </div>
+              </div>
+            )}
 
-        {/* Pause overlay — hidden on mobile (shown in controls bar instead) */}
-        {state === "paused" && visibleCount > 0 && (
-          <div className="hidden md:block absolute top-3 right-3 px-3 py-1.5 rounded-md bg-terminal-orange/10 border border-terminal-orange/20 text-terminal-orange text-xs font-mono pause-overlay pointer-events-none backdrop-blur-sm">
-            PAUSED
+            {/* Search overlay */}
+            <SearchOverlay
+              scenes={session.scenes}
+              open={searchOpen}
+              onClose={() => setSearchOpen(false)}
+              onSeek={(i) => {
+                seekFromNavigation(i);
+                setSearchOpen(false);
+              }}
+            />
+
+            {/* Pause overlay — hidden on mobile (shown in controls bar instead) */}
+            {state === "paused" && visibleCount > 0 && (
+              <div className="hidden md:block absolute top-3 right-3 px-3 py-1.5 rounded-md bg-terminal-orange/10 border border-terminal-orange/20 text-terminal-orange text-xs font-mono pause-overlay pointer-events-none backdrop-blur-sm">
+                PAUSED
+              </div>
+            )}
           </div>
-        )}
+
+          {/* Annotation panel — right sidebar */}
+          {annotationPanelOpen && (
+            <div className="hidden md:flex w-72 shrink-0 flex-col border-l border-terminal-border/50 bg-terminal-bg">
+              <AnnotationPanel
+                actions={annotationActions}
+                scenes={session.scenes}
+                currentIndex={currentIndex}
+                totalScenes={totalScenes}
+                onSeek={seekFromNavigation}
+                addingForScene={commentTargetScene}
+                onClearAddingTarget={() => setCommentTargetScene(null)}
+                readOnly={isReadOnly}
+              />
+            </div>
+          )}
+        </div>
 
         {/* Playback bar */}
         <div className="shrink-0 border-t border-terminal-border/50 bg-terminal-surface/80 backdrop-blur-sm sticky bottom-0 safe-bottom">
@@ -342,6 +389,7 @@ export default function Player({ session, viewPrefs }: Props) {
             scenes={session.scenes}
             currentIndex={currentIndex}
             onSeek={seekFromNavigation}
+            annotatedScenes={annotationActions.annotatedScenes}
           />
           <Controls
             state={state}
@@ -356,6 +404,10 @@ export default function Player({ session, viewPrefs }: Props) {
             onNextPrompt={seekToNextPromptWithFeedback}
             onOpenSearch={() => setSearchOpen(true)}
             onOpenOutline={() => setMobileDrawerOpen(true)}
+            annotationCount={annotationActions.annotations.length}
+            annotationPanelOpen={annotationPanelOpen}
+            onToggleAnnotations={() => setAnnotationPanelOpen((v) => !v)}
+            hasUnsavedAnnotations={annotationActions.hasUnsaved}
           />
         </div>
       </div>
@@ -400,6 +452,16 @@ export default function Player({ session, viewPrefs }: Props) {
             >
               Stats
             </button>
+            <button
+              onClick={() => setSidebarTab("comments")}
+              className={`flex-1 px-3 py-2.5 text-xs font-mono uppercase tracking-wider transition-colors ${
+                sidebarTab === "comments"
+                  ? "text-terminal-blue border-b-2 border-terminal-blue"
+                  : "text-terminal-dim"
+              }`}
+            >
+              Comments{annotationActions.annotations.length > 0 ? ` (${annotationActions.annotations.length})` : ""}
+            </button>
           </div>
           {/* Content */}
           <div className="flex-1 overflow-y-auto overscroll-contain">
@@ -412,8 +474,22 @@ export default function Player({ session, viewPrefs }: Props) {
                   setMobileDrawerOpen(false);
                 }}
               />
-            ) : (
+            ) : sidebarTab === "stats" ? (
               <StatsPanel session={session} />
+            ) : (
+              <AnnotationPanel
+                actions={annotationActions}
+                scenes={session.scenes}
+                currentIndex={currentIndex}
+                totalScenes={totalScenes}
+                onSeek={(i) => {
+                  seekFromNavigation(i);
+                  setMobileDrawerOpen(false);
+                }}
+                addingForScene={commentTargetScene}
+                onClearAddingTarget={() => setCommentTargetScene(null)}
+                readOnly={isReadOnly}
+              />
             )}
           </div>
         </div>

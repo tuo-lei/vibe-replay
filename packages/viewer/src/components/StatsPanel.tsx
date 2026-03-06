@@ -56,13 +56,29 @@ export default function StatsPanel({ session }: Props) {
       filesModified: filesModified.size,
       topTools,
       durationMs: meta.stats.durationMs,
+      tokenUsage: meta.stats.tokenUsage,
+      costEstimate: meta.stats.costEstimate,
+      compactions: meta.compactions,
     };
   }, [session]);
 
+  const { meta } = session;
+
   return (
     <div className="p-3 space-y-4 text-xs font-mono">
-      <div className="text-terminal-dim uppercase tracking-wider text-[11px] font-semibold">
-        Stats
+      {/* Session info */}
+      <div>
+        <div className="text-terminal-dim uppercase tracking-wider text-[11px] font-semibold mb-1.5">
+          Session
+        </div>
+        {meta.title && (
+          <div className="text-terminal-text text-xs mb-0.5 truncate" title={meta.title}>{meta.title}</div>
+        )}
+        <div className="text-terminal-dim truncate" title={meta.cwd}>{meta.project}</div>
+        <div className="text-terminal-dim mt-0.5 flex items-center gap-1.5 flex-wrap">
+          {meta.model && <span className="text-terminal-text/60">{meta.model}</span>}
+          {meta.provider && <span>{meta.provider}</span>}
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
@@ -72,9 +88,37 @@ export default function StatsPanel({ session }: Props) {
         <StatCard label="Files Modified" value={stats.filesModified} color="text-terminal-blue" />
       </div>
 
-      {stats.durationMs && (
-        <div className="text-terminal-dim">
-          Duration: <span className="text-terminal-text">{formatDuration(stats.durationMs)}</span>
+      {(stats.durationMs || stats.costEstimate !== undefined) && (
+        <div className="text-terminal-dim space-y-0.5">
+          {stats.durationMs && (
+            <div>
+              Duration: <span className="text-terminal-text">{formatDuration(stats.durationMs)}</span>
+            </div>
+          )}
+          {stats.costEstimate !== undefined && (
+            <div>
+              Cost: <span className="text-terminal-green">${stats.costEstimate < 0.01 ? stats.costEstimate.toFixed(4) : stats.costEstimate.toFixed(2)}</span>
+              <span className="text-terminal-dim/60"> (estimate)</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {stats.tokenUsage && (
+        <div>
+          <div className="text-terminal-dim mb-1.5 text-[11px] font-semibold uppercase tracking-wider">Tokens</div>
+          <div className="text-terminal-dim leading-relaxed space-y-0.5">
+            <div>
+              In: <span className="text-terminal-blue">{fmtNum(stats.tokenUsage.inputTokens)}</span>
+              {" / "}
+              Out: <span className="text-terminal-green">{fmtNum(stats.tokenUsage.outputTokens)}</span>
+            </div>
+            <div>
+              Cache: <span className="text-terminal-purple">{fmtNum(stats.tokenUsage.cacheReadTokens)}</span> read
+              {" / "}
+              <span className="text-terminal-orange">{fmtNum(stats.tokenUsage.cacheCreationTokens)}</span> created
+            </div>
+          </div>
         </div>
       )}
 
@@ -85,6 +129,25 @@ export default function StatsPanel({ session }: Props) {
         {" / "}
         <span className="text-terminal-blue">{fmtNum(stats.responseChars)}</span> response
       </div>
+
+      {stats.compactions && stats.compactions.length > 0 && (
+        <div>
+          <div className="text-terminal-dim mb-1.5 text-[11px] font-semibold uppercase tracking-wider">
+            Context Compactions ({stats.compactions.length})
+          </div>
+          <div className="space-y-1">
+            {stats.compactions.map((c, i) => (
+              <div key={i} className="text-terminal-dim text-[11px] flex items-baseline gap-1.5">
+                <span className="text-terminal-orange">●</span>
+                <span>{c.trigger}</span>
+                {c.preTokens && (
+                  <span className="text-terminal-text">{fmtNum(c.preTokens)} tokens</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {stats.topTools.length > 0 && (
         <div>

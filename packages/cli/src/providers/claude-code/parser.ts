@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import type { RawMessage, ContentBlock, ParsedTurn } from "../../types.js";
-import type { ProviderParseResult } from "../types.js";
+import type { ProviderParseResult, TokenUsage, Compaction } from "../types.js";
 
 export async function parseClaudeCodeSession(filePaths: string | string[]): Promise<ProviderParseResult> {
   const paths = Array.isArray(filePaths) ? filePaths : [filePaths];
@@ -22,6 +22,13 @@ export async function parseClaudeCodeSession(filePaths: string | string[]): Prom
   let startTime: string | undefined;
   let endTime: string | undefined;
   let totalDurationMs = 0;
+
+  // Token usage: track last usage per message ID to avoid double-counting
+  // (each message.id appears in multiple JSONL lines with the same cumulative usage)
+  const usageByMsgId = new Map<string, { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number }>();
+
+  // Compaction events
+  const compactions: Compaction[] = [];
 
   // Group assistant messages by message.id
   const assistantBlocks = new Map<string, ContentBlock[]>();
@@ -68,6 +75,14 @@ export async function parseClaudeCodeSession(filePaths: string | string[]): Prom
         totalDurationMs += obj.durationMs;
         if (obj.timestamp) endTime = obj.timestamp;
       }
+      if (obj.subtype === "compact_boundary" && obj.timestamp) {
+        const cm = (obj as any).compactMetadata;
+        compactions.push({
+          timestamp: obj.timestamp,
+          trigger: cm?.trigger || "unknown",
+          preTokens: cm?.preTokens,
+        });
+      }
       continue;
     }
 
@@ -75,21 +90,29 @@ export async function parseClaudeCodeSession(filePaths: string | string[]): Prom
 
     const { role, content: msgContent, id: msgId } = obj.message;
 
-    // User message with string content = human prompt
+    // User message with string content = human prompt (or compaction summary)
     if (role === "user" && typeof msgContent === "string") {
-      userTurns.push({ role: "user", timestamp: obj.timestamp, blocks: [{ type: "text", text: msgContent }] });
+      const isCompaction = msgContent.startsWith("This session is being continued from a previous conversation");
+      userTurns.push({
+        role: "user",
+        ...(isCompaction ? { subtype: "compaction-summary" } : {}),
+        timestamp: obj.timestamp,
+        blocks: [{ type: "text", text: msgContent }],
+      });
       continue;
     }
 
     // User message with array content (may contain text + images, or tool_results)
     if (role === "user" && Array.isArray(msgContent)) {
+      // ToolSearch automated responses have sourceToolAssistantUUID on the raw object.
+      // Process tool_result blocks for result matching, but skip emitting a user turn.
+      const isToolSearchResponse = !!(obj as any).sourceToolAssistantUUID;
+
       const textParts: string[] = [];
       const userImages: string[] = [];
-      let hasToolResult = false;
 
       for (const block of msgContent as ContentBlock[]) {
         if (block.type === "tool_result") {
-          hasToolResult = true;
           const resultText = extractToolResultText(block);
           toolResults.set(block.tool_use_id, resultText);
           const images = extractImages(block);
@@ -108,8 +131,8 @@ export async function parseClaudeCodeSession(filePaths: string | string[]): Prom
         }
       }
 
-      // If user message has text or images (not just tool_results), emit as user turn
-      if (textParts.length > 0 || userImages.length > 0) {
+      // Skip emitting user turn for automated ToolSearch responses
+      if (!isToolSearchResponse && (textParts.length > 0 || userImages.length > 0)) {
         const blocks: ContentBlock[] = textParts.map((t) => ({ type: "text", text: t } as ContentBlock));
         if (userImages.length > 0) {
           blocks.push({ type: "_user_images", images: userImages } as any);
@@ -123,6 +146,12 @@ export async function parseClaudeCodeSession(filePaths: string | string[]): Prom
     // Assistant message — group by message.id
     if (role === "assistant" && msgId && Array.isArray(msgContent)) {
       if (!model && obj.message.model) model = obj.message.model;
+
+      // Track usage per message ID — overwrite so we keep the last (final) value
+      const usage = (obj.message as any).usage;
+      if (usage && msgId) {
+        usageByMsgId.set(msgId, usage);
+      }
 
       if (!assistantBlocks.has(msgId)) {
         assistantBlocks.set(msgId, []);
@@ -202,6 +231,19 @@ export async function parseClaudeCodeSession(filePaths: string | string[]): Prom
     });
   }
 
+  // Aggregate token usage from deduplicated per-message data
+  let tokenUsage: TokenUsage | undefined;
+  if (usageByMsgId.size > 0) {
+    const totals: TokenUsage = { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 };
+    for (const u of usageByMsgId.values()) {
+      totals.inputTokens += u.input_tokens || 0;
+      totals.outputTokens += u.output_tokens || 0;
+      totals.cacheCreationTokens += u.cache_creation_input_tokens || 0;
+      totals.cacheReadTokens += u.cache_read_input_tokens || 0;
+    }
+    tokenUsage = totals;
+  }
+
   return {
     sessionId,
     slug,
@@ -212,6 +254,8 @@ export async function parseClaudeCodeSession(filePaths: string | string[]): Prom
     endTime,
     totalDurationMs: totalDurationMs || undefined,
     turns: finalTurns,
+    tokenUsage,
+    compactions: compactions.length > 0 ? compactions : undefined,
   };
 }
 

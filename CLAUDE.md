@@ -34,6 +34,7 @@ Quick intent map:
 - Use `pnpm dev` for daily iteration (viewer + CLI together, choose "Dump to demo.json" dev-only option)
 - Use `pnpm viewer:dev` when only touching UI
 - Use `pnpm cli:dev` when only touching parser/CLI behavior
+- Choose "Open in Editor" in CLI menu for annotation editing, HTML export, and gist publishing via local server
 
 ## Architecture
 
@@ -41,6 +42,7 @@ Quick intent map:
 packages/cli/src/
 ├── index.ts                    # CLI entry
 ├── types.ts                    # Core types (Scene, ReplaySession, SessionInfo)
+├── server.ts                   # Editor mode: Hono HTTP server (annotations, export, gist)
 ├── providers/                  # Provider adapters (pluggable)
 │   ├── types.ts                # Provider interface
 │   ├── index.ts                # Provider registry
@@ -67,7 +69,7 @@ packages/cli/src/
 
 ## Key Architecture Decisions
 
-- **Single HTML output**: viewer built to one file via vite-plugin-singlefile (~480KB), CLI injects `window.__VIBE_REPLAY_DATA__` JSON into `<head>`
+- **Single HTML output**: viewer built to one file via vite-plugin-singlefile (~430KB), CLI injects `window.__VIBE_REPLAY_DATA__` JSON into `<head>` via `<script id="vibe-replay-data">`
 - **`</` escaping**: JSON data in `<script>` MUST escape `</` as `<\/` (see generator.ts)
 - **JSONL grouping**: Assistant messages split across multiple lines sharing same `message.id` — parser groups them. Tool results matched by `tool_use_id`
 - **Cursor dual data source**: Primary: `~/.cursor/chats/<MD5(workspace_path)>/<session-uuid>/store.db` (SQLite with protobuf blob tree — has reasoning, tool-call, tool-result blocks). Fallback: `~/.cursor/projects/<path>/agent-transcripts/*.jsonl` (text-only, uses marker inference + `agent-tools/*.txt` mtime windows). Workspace hash = `MD5(absolute_workspace_path)`
@@ -82,6 +84,9 @@ packages/cli/src/
 - **Multi-file sessions**: Claude Code `/resume` creates new JSONL files — CLI merges them by slug+project, `parse()` accepts `string | string[]`
 - **URL loading**: Viewer supports `?url=<json-url>` and `?gist=<id>` via hosted viewer at vibe-replay.com
 - **Gist republish UX**: CLI stores gist metadata per replay output folder (`.vibe-replay-gist.json`) so users can overwrite an existing gist on subsequent publishes
+- **Editor mode**: "Open in Editor" starts a Hono localhost server (port 3456-3466) serving the viewer with `__VIBE_REPLAY_EDITOR__` flag. Viewer fetches session from `/api/session`, annotations POST to `/api/annotations` (debounced 1s) and persist to `{outputDir}/annotations.json`. Server also handles gist publishing and HTML export via API routes
+- **ViewerMode**: Three-mode enum (`embedded | editor | readonly`) drives viewer behavior — embedded for self-contained HTML, editor for local server, readonly for `?gist=` / `?url=` URLs
+- **Markdown rendering**: Uses `marked` (lightweight, ~37KB) instead of `react-markdown` + `remark-gfm` to keep viewer under 500KB
 
 ## Data Flow
 
@@ -93,6 +98,7 @@ packages/cli/src/
   → transform.ts → ReplaySession (scenes, redacted secrets + paths, metadata)
   → generator.ts → inject into viewer.html → vibe-replay/<slug>/index.html + replay.json
   → publishers/ → local (open browser) | gist (gh gist create → vibe-replay.com viewer)
+  → server.ts → editor mode (localhost Hono server → viewer fetches /api/session, saves annotations via API)
 ```
 
 Scene types: `user-prompt`, `thinking`, `text-response`, `tool-call`
@@ -107,7 +113,10 @@ Current `meta` fields include:
 - `provider`, `dataSource`
 - `startTime`, `endTime`, `model`
 - `cwd`, `project`
-- `stats`: `sceneCount`, `userPrompts`, `toolCalls`, `thinkingBlocks`, `durationMs`
+- `stats`: `sceneCount`, `userPrompts`, `toolCalls`, `thinkingBlocks`, `durationMs`, `tokenUsage`, `costEstimate`
+- `compactions`: Array of context window compaction events
+
+`ReplaySession` also has optional `annotations` array (id, sceneIndex, body, author, timestamps, resolved).
 
 Current limitation:
 - No generator metadata yet (e.g. CLI version, schema version, generated timestamp).
@@ -116,7 +125,7 @@ Current limitation:
 
 - Always use **pnpm**
 - TypeScript strict mode, ESM throughout
-- Viewer must remain < 500KB after build (currently ~480KB)
+- Viewer must remain < 500KB after build (currently ~430KB)
 - Output HTML must be fully self-contained (no external requests)
 - Test with real sessions from `~/.claude/projects/`
 - Output path: `vibe-replay/<slug>/index.html`

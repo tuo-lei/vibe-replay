@@ -20,6 +20,7 @@ export default function App() {
   const { prefs, togglePref } = useViewPrefs();
 
   const session = loadState.status === "ready" ? loadState.session : null;
+  const viewerMode = loadState.status === "ready" ? loadState.mode : "embedded";
 
   const hasThinking = useMemo(
     () => session?.scenes.some((s) => s.type === "thinking") ?? false,
@@ -183,7 +184,7 @@ export default function App() {
 
         </div>
       </header>
-      <Player session={session!} viewPrefs={prefs} />
+      <Player session={session!} viewPrefs={prefs} viewerMode={viewerMode} />
     </div>
   );
 }

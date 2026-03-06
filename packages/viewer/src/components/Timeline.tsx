@@ -5,12 +5,15 @@ interface Props {
   scenes: Scene[];
   currentIndex: number;
   onSeek: (index: number) => void;
+  annotatedScenes?: Set<number>;
 }
 
 function sceneColor(type: Scene["type"]): string {
   switch (type) {
     case "user-prompt":
       return "#3fb950";
+    case "compaction-summary":
+      return "#666666";
     case "thinking":
       return "#bc8cff";
     case "text-response":
@@ -20,7 +23,7 @@ function sceneColor(type: Scene["type"]): string {
   }
 }
 
-export default function Timeline({ scenes, currentIndex, onSeek }: Props) {
+export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes }: Props) {
   if (scenes.length === 0) return null;
 
   // For large sessions (>200 scenes), bucket into segments to avoid rendering 700+ divs
@@ -42,6 +45,7 @@ export default function Timeline({ scenes, currentIndex, onSeek }: Props) {
       // Use the most "interesting" type in the bucket (user > tool > text > thinking)
       const typePriority: Record<Scene["type"], number> = {
         "user-prompt": 4,
+        "compaction-summary": 1,
         "tool-call": 3,
         "text-response": 2,
         thinking: 1,
@@ -75,8 +79,32 @@ export default function Timeline({ scenes, currentIndex, onSeek }: Props) {
     onSeek(idx);
   }, [scenes.length, onSeek]);
 
+  // Compute annotation dot positions
+  const annotationDots = useMemo(() => {
+    if (!annotatedScenes || annotatedScenes.size === 0) return [];
+    const dots: number[] = [];
+    annotatedScenes.forEach((idx) => {
+      if (idx >= 0 && idx < scenes.length) {
+        dots.push(((idx + 0.5) / scenes.length) * 100);
+      }
+    });
+    return dots;
+  }, [annotatedScenes, scenes.length]);
+
   return (
     <div className="px-4 pt-3 pb-1 cursor-pointer" onClick={handleSeekClick}>
+      {/* Annotation dots above timeline */}
+      {annotationDots.length > 0 && (
+        <div className="relative h-2 mb-0.5">
+          {annotationDots.map((pct, i) => (
+            <div
+              key={i}
+              className="absolute w-1.5 h-1.5 rounded-full bg-terminal-blue shadow-sm shadow-terminal-blue/50"
+              style={{ left: `${pct}%`, top: "50%", transform: "translate(-50%, -50%)" }}
+            />
+          ))}
+        </div>
+      )}
       <div
         ref={barRef}
         className="relative flex h-2 rounded overflow-hidden bg-terminal-border/30"

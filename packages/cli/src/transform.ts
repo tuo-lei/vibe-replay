@@ -27,13 +27,21 @@ export function transformToReplay(
       const imageBlock = turn.blocks.find((b) => (b as any).type === "_user_images") as any;
       const images: string[] | undefined = imageBlock?.images;
       if (content.trim() || (images && images.length > 0)) {
-        scenes.push({
-          type: "user-prompt",
-          content: content.trim() ? redactSecrets(redactPath(content)) : "(image)",
-          timestamp: turn.timestamp,
-          ...(images && images.length > 0 ? { images } : {}),
-        });
-        userPrompts++;
+        if (turn.subtype === "compaction-summary") {
+          scenes.push({
+            type: "compaction-summary",
+            content: redactSecrets(redactPath(content)),
+            timestamp: turn.timestamp,
+          });
+        } else {
+          scenes.push({
+            type: "user-prompt",
+            content: content.trim() ? redactSecrets(redactPath(content)) : "(image)",
+            timestamp: turn.timestamp,
+            ...(images && images.length > 0 ? { images } : {}),
+          });
+          userPrompts++;
+        }
       }
       continue;
     }
@@ -60,6 +68,35 @@ export function transformToReplay(
     }
   }
 
+  // Estimate cost based on model pricing (USD)
+  let costEstimate: number | undefined;
+  if (parsed.tokenUsage) {
+    const u = parsed.tokenUsage;
+    const model = parsed.model || "";
+    // Default to Opus pricing; adjust for other models
+    let inputRate = 15; // $/M tokens
+    let outputRate = 75;
+    let cacheCreateRate = 18.75;
+    let cacheReadRate = 1.875;
+    if (model.includes("haiku")) {
+      inputRate = 0.80;
+      outputRate = 4;
+      cacheCreateRate = 1;
+      cacheReadRate = 0.08;
+    } else if (model.includes("sonnet")) {
+      inputRate = 3;
+      outputRate = 15;
+      cacheCreateRate = 3.75;
+      cacheReadRate = 0.30;
+    }
+    costEstimate = (
+      u.inputTokens * inputRate +
+      u.outputTokens * outputRate +
+      u.cacheCreationTokens * cacheCreateRate +
+      u.cacheReadTokens * cacheReadRate
+    ) / 1_000_000;
+  }
+
   return {
     meta: {
       sessionId: parsed.sessionId,
@@ -78,7 +115,10 @@ export function transformToReplay(
         toolCalls,
         thinkingBlocks,
         durationMs: parsed.totalDurationMs,
+        tokenUsage: parsed.tokenUsage,
+        costEstimate,
       },
+      compactions: parsed.compactions,
     },
     scenes,
   };

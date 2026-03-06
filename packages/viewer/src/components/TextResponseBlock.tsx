@@ -1,6 +1,5 @@
-import { useState, memo } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { useState, memo, useMemo } from "react";
+import { marked } from "marked";
 
 interface Props {
   content: string;
@@ -16,6 +15,8 @@ export default memo(function TextResponseBlock({ content, isActive }: Props) {
   const displayContent =
     isLong && !expanded ? content.slice(0, COLLAPSE_THRESHOLD) + "..." : content;
 
+  const html = useMemo(() => marked.parse(displayContent) as string, [displayContent]);
+
   return (
     <div>
       <div
@@ -23,7 +24,7 @@ export default memo(function TextResponseBlock({ content, isActive }: Props) {
           isActive ? "typing-cursor" : ""
         } ${isLong && !expanded ? "max-h-[200px] overflow-hidden relative" : ""}`}
       >
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
+        <div dangerouslySetInnerHTML={{ __html: html }} />
         {isLong && !expanded && (
           <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-terminal-bg to-transparent" />
         )}
