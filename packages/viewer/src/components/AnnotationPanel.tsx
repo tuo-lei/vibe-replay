@@ -287,7 +287,11 @@ export default function AnnotationPanel({
           )}
           {statusMsg && (
             <div className={`text-[9px] font-mono text-center mb-1 ${statusMsg.type === "success" ? "text-terminal-green" : "text-terminal-red"}`}>
-              {statusMsg.text}
+              {statusMsg.type === "success" && statusMsg.text.startsWith("http") ? (
+                <a href={statusMsg.text} target="_blank" rel="noopener noreferrer" className="underline hover:text-terminal-text transition-colors">
+                  {statusMsg.text}
+                </a>
+              ) : statusMsg.text}
             </div>
           )}
 
@@ -327,8 +331,10 @@ export default function AnnotationPanel({
             </button>
           )}
           {publishGist && ghAvailable === false && (
-            <div className="text-[9px] font-mono text-terminal-dim/60 text-center px-2 py-1">
-              Gist requires gh CLI (gh auth login)
+            <div className="text-[9px] font-mono text-terminal-orange/70 text-center px-2 py-1.5 border border-terminal-orange/20 rounded bg-terminal-orange/5">
+              Gist publishing requires{" "}
+              <a href="https://cli.github.com/" target="_blank" rel="noopener noreferrer" className="underline">gh CLI</a>
+              {" "}— install then run <span className="text-terminal-text/70">gh auth login</span>
             </div>
           )}
 

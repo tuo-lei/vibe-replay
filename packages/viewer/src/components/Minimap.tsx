@@ -8,6 +8,7 @@ interface Props {
 }
 
 interface TurnOutline {
+  kind: "turn";
   turnNumber: number;
   promptIndex: number;
   prompt: string;
@@ -18,19 +19,30 @@ interface TurnOutline {
   endIndex: number;
 }
 
+interface CompactionOutline {
+  kind: "compaction";
+  promptIndex: number;
+  preview: string;
+}
+
+type OutlineItem = TurnOutline | CompactionOutline;
+
 export default function Minimap({ scenes, currentIndex, onSeek }: Props) {
-  const turns = useMemo(() => {
-    const groups: TurnOutline[] = [];
+  const items = useMemo(() => {
+    const result: OutlineItem[] = [];
     let current: TurnOutline | null = null;
+    let turnCount = 0;
 
     scenes.forEach((scene, i) => {
       if (scene.type === "user-prompt") {
         if (current) {
           current.endIndex = i - 1;
-          groups.push(current);
+          result.push(current);
         }
+        turnCount++;
         current = {
-          turnNumber: groups.length + 1,
+          kind: "turn",
+          turnNumber: turnCount,
           promptIndex: i,
           prompt: scene.content.replace(/\n/g, " ").slice(0, 120),
           toolCalls: 0,
@@ -40,7 +52,16 @@ export default function Minimap({ scenes, currentIndex, onSeek }: Props) {
           endIndex: i,
         };
       } else if (scene.type === "compaction-summary") {
-        // Compaction summaries don't create new turns in the minimap
+        if (current) {
+          current.endIndex = i - 1;
+          result.push(current);
+          current = null;
+        }
+        result.push({
+          kind: "compaction",
+          promptIndex: i,
+          preview: scene.content.replace(/\n/g, " ").slice(0, 80),
+        });
       } else if (current) {
         current.endIndex = i;
         if (scene.type === "tool-call") {
@@ -53,27 +74,48 @@ export default function Minimap({ scenes, currentIndex, onSeek }: Props) {
         else if (scene.type === "text-response") current.textBlocks++;
       }
     });
-    if (current) groups.push(current);
-    return groups;
+    if (current) result.push(current);
+    return result;
   }, [scenes]);
 
-  const activeTurnIdx = useMemo(() => {
-    for (let i = turns.length - 1; i >= 0; i--) {
-      if (currentIndex >= turns[i].promptIndex) return i;
+  const activeIdx = useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i--) {
+      if (currentIndex >= items[i].promptIndex) return i;
     }
     return -1;
-  }, [turns, currentIndex]);
+  }, [items, currentIndex]);
 
   return (
     <div className="flex flex-col gap-px p-2 overflow-y-auto">
-      {turns.map((turn, i) => {
-        const isActive = i === activeTurnIdx;
-        const isPast = i < activeTurnIdx;
+      {items.map((item, i) => {
+        const isActive = i === activeIdx;
+        const isPast = i < activeIdx;
+
+        if (item.kind === "compaction") {
+          return (
+            <button
+              key={`c-${item.promptIndex}`}
+              onClick={() => onSeek(item.promptIndex)}
+              className={`text-left px-3 py-2 rounded-md transition-all border border-dashed ${
+                isActive
+                  ? "border-terminal-dim/40 bg-terminal-dim/10"
+                  : "border-terminal-border/30 hover:bg-terminal-surface/50 opacity-60 hover:opacity-100"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-mono text-terminal-dim/60 shrink-0">{"⟳"}</span>
+                <span className="text-[11px] font-mono text-terminal-dim/70 italic truncate">
+                  Context compacted
+                </span>
+              </div>
+            </button>
+          );
+        }
 
         return (
           <button
-            key={i}
-            onClick={() => onSeek(turn.promptIndex)}
+            key={`t-${item.promptIndex}`}
+            onClick={() => onSeek(item.promptIndex)}
             className={`group text-left px-3 py-2.5 rounded-md transition-all ${
               isActive
                 ? "bg-terminal-green/8 border border-terminal-green/25"
@@ -87,28 +129,28 @@ export default function Minimap({ scenes, currentIndex, onSeek }: Props) {
               <span className={`text-xs font-mono font-semibold shrink-0 mt-px tabular-nums ${
                 isActive ? "text-terminal-green" : "text-terminal-dim"
               }`}>
-                {String(turn.turnNumber).padStart(2, "0")}
+                {String(item.turnNumber).padStart(2, "0")}
               </span>
               <span className={`text-[13px] font-mono leading-snug line-clamp-2 ${
                 isActive ? "text-terminal-text" : "text-terminal-text/80"
               }`}>
-                {turn.prompt}
+                {item.prompt}
               </span>
             </div>
 
             {/* Summary line */}
             <div className="flex items-center gap-2 mt-1.5 ml-6 flex-wrap">
-              {turn.toolCalls > 0 && (
+              {item.toolCalls > 0 && (
                 <span className="text-[11px] font-mono px-1.5 py-px rounded-sm bg-terminal-orange/10 text-terminal-orange/80">
-                  {turn.toolCalls} tool{turn.toolCalls > 1 ? "s" : ""}
+                  {item.toolCalls} tool{item.toolCalls > 1 ? "s" : ""}
                 </span>
               )}
-              {turn.textBlocks > 0 && (
+              {item.textBlocks > 0 && (
                 <span className="text-[11px] font-mono px-1.5 py-px rounded-sm bg-terminal-blue/10 text-terminal-blue/80">
-                  {turn.textBlocks} resp
+                  {item.textBlocks} resp
                 </span>
               )}
-              {turn.thinkingBlocks > 0 && (
+              {item.thinkingBlocks > 0 && (
                 <span className="text-[11px] font-mono px-1.5 py-px rounded-sm bg-terminal-purple/10 text-terminal-purple/80">
                   think
                 </span>
@@ -116,9 +158,9 @@ export default function Minimap({ scenes, currentIndex, onSeek }: Props) {
             </div>
 
             {/* Tool names (only for active turn) */}
-            {isActive && turn.toolNames.length > 0 && (
+            {isActive && item.toolNames.length > 0 && (
               <div className="mt-1.5 ml-6 text-[11px] font-mono text-terminal-dim truncate">
-                {turn.toolNames.join(", ")}
+                {item.toolNames.join(", ")}
               </div>
             )}
           </button>

@@ -158,10 +158,10 @@ program
     // Check gh availability for gist option
     const ghStatus = await checkGhStatus();
     const gistLabel = ghStatus.available
-      ? `${chalk.blue("↑")} Publish to GitHub Gist ${chalk.yellow("(public — anyone with the link can view)")}`
+      ? `${chalk.blue("↑")} Publish to Gist now ${chalk.dim("(skip editor, publish directly)")}`
       : ghStatus.reason === "not-installed"
-        ? `${chalk.dim("↑ Publish to GitHub Gist")} ${chalk.dim("(requires gh CLI)")}`
-        : `${chalk.dim("↑ Publish to GitHub Gist")} ${chalk.dim("(gh not logged in)")}`;
+        ? `${chalk.dim("↑ Publish to Gist now")} ${chalk.red("(gh CLI not installed)")}`
+        : `${chalk.dim("↑ Publish to Gist now")} ${chalk.red("(gh not logged in)")}`;
 
     // Publish target
     console.log();
@@ -172,8 +172,8 @@ program
             value: "demo" as const,
           }]
         : []),
-      { name: `${chalk.green("▶")} Open in browser`, value: "local" as const },
       { name: `${chalk.magenta("✎")} Open in Editor ${chalk.dim("(annotate, publish, export)")}`, value: "editor" as const },
+      { name: `${chalk.green("▶")} Quick preview ${chalk.dim("(open HTML in browser, no editing)")}`, value: "local" as const },
       { name: gistLabel, value: "gist" as const },
       { name: `${chalk.dim("✕")} Exit`, value: "exit" as const },
     ];
