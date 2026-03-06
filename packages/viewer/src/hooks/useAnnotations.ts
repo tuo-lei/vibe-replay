@@ -201,11 +201,10 @@ export function useAnnotations(
             body: JSON.stringify(annotations),
           });
           const resp = await fetch("/api/publish/gist", { method: "POST" });
-          if (!resp.ok) {
-            const err = await resp.text();
-            throw new Error(err || `Server error: ${resp.status}`);
-          }
           const result = await resp.json();
+          if (!resp.ok) {
+            throw new Error(result.error || `Server error: ${resp.status}`);
+          }
           setSavedSnapshot(JSON.stringify(annotations));
           return result as { gistUrl: string; viewerUrl: string };
         } finally {
@@ -226,8 +225,9 @@ export function useAnnotations(
             body: JSON.stringify(annotations),
           });
           const resp = await fetch("/api/export/html", { method: "POST" });
-          if (!resp.ok) throw new Error(`Export failed: ${resp.status}`);
-          const { path } = await resp.json();
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data.error || `Export failed: ${resp.status}`);
+          const { path } = data;
           setSavedSnapshot(JSON.stringify(annotations));
           return path as string;
         } finally {

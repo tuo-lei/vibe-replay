@@ -10,11 +10,10 @@
   },
   "dependencies": {
     "diff": "^7.0.0",
+    "marked": "^17.0.4",
     "prism-react-renderer": "^2.4.1",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "react-markdown": "^9.0.1",
-    "remark-gfm": "^4.0.0"
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@types/diff": "^6.0.0",

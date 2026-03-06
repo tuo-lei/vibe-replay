@@ -104,24 +104,32 @@ export async function startEditor(
 
   // Publish to Gist
   app.post("/api/publish/gist", async (c) => {
-    // Write replay.json with current annotations before publishing
-    const replayWithAnnotations = { ...session, annotations };
-    const jsonPath = join(outputDir, "replay.json");
-    await writeFile(jsonPath, JSON.stringify(replayWithAnnotations), "utf-8");
+    try {
+      // Write replay.json with current annotations before publishing
+      const replayWithAnnotations = { ...session, annotations };
+      const jsonPath = join(outputDir, "replay.json");
+      await writeFile(jsonPath, JSON.stringify(replayWithAnnotations), "utf-8");
 
-    const title = session.meta.title || session.meta.slug;
-    const savedGist = await loadSavedGistInfo(outputDir);
-    const result = await publishGist(outputDir, title, {
-      overwrite: savedGist || undefined,
-    });
-    return c.json(result);
+      const title = session.meta.title || session.meta.slug;
+      const savedGist = await loadSavedGistInfo(outputDir);
+      const result = await publishGist(outputDir, title, {
+        overwrite: savedGist || undefined,
+      });
+      return c.json(result);
+    } catch (err: any) {
+      return c.json({ error: err.message || "Gist publish failed" }, 500);
+    }
   });
 
   // Export HTML
   app.post("/api/export/html", async (c) => {
-    const replayWithAnnotations = { ...session, annotations };
-    const outputPath = await generateOutput(replayWithAnnotations, outputDir);
-    return c.json({ path: outputPath });
+    try {
+      const replayWithAnnotations = { ...session, annotations };
+      const outputPath = await generateOutput(replayWithAnnotations, outputDir);
+      return c.json({ path: outputPath });
+    } catch (err: any) {
+      return c.json({ error: err.message || "HTML export failed" }, 500);
+    }
   });
 
   const port = await findFreePort(3456, 3466);

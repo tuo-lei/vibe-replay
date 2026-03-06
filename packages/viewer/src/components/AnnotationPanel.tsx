@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect, useMemo, memo, useCallback } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { marked } from "marked";
 import type { Annotation, Scene } from "../types";
+
+// Configure marked for short-form annotation text
+marked.setOptions({ breaks: true, gfm: true });
 import type { AnnotationActions } from "../hooks/useAnnotations";
 
 interface Props {
@@ -472,9 +474,10 @@ const AnnotationCard = memo(function AnnotationCard({
               </div>
             </div>
           ) : (
-            <div className="prose-terminal text-xs text-terminal-text/90 leading-relaxed">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{annotation.body}</ReactMarkdown>
-            </div>
+            <div
+              className="prose-terminal text-xs text-terminal-text/90 leading-relaxed"
+              dangerouslySetInnerHTML={{ __html: marked.parse(annotation.body) as string }}
+            />
           )}
         </div>
 
