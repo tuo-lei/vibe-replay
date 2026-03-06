@@ -9,6 +9,7 @@ import { publishLocal } from "./publishers/local.js";
 import { publishGist, checkGhStatus, loadSavedGistInfo } from "./publishers/gist.js";
 import { startEditor } from "./server.js";
 import { scanForSecrets } from "./scan.js";
+import { detectFeedbackTools, generateFeedback } from "./feedback.js";
 import type { SessionInfo, ReplaySession } from "./types.js";
 
 const DEV_MENU_ENABLED = process.env.VIBE_REPLAY_DEV_MENU === "1";
@@ -153,6 +154,48 @@ program
         process.exit(1);
       }
       console.log(chalk.dim("  Continuing — user confirmed findings are safe.\n"));
+    }
+
+    // AI Feedback (experimental) — detect CLI tools and offer analysis
+    const feedbackTool = await detectFeedbackTools();
+    if (feedbackTool) {
+      console.log();
+      console.log(
+        chalk.dim("  [experimental]") +
+          ` AI Coding Coach available ${chalk.dim(`(${feedbackTool.name} detected)`)}`,
+      );
+
+      const { confirm } = await import("@inquirer/prompts");
+      const wantFeedback = await confirm({
+        message:
+          "Get AI feedback on your prompting? (may take a few minutes)",
+        default: false,
+      });
+
+      if (wantFeedback) {
+        const fbSpinner = ora(
+          "Analyzing your prompting patterns...",
+        ).start();
+        try {
+          const fb = await generateFeedback(replay, feedbackTool);
+          if (fb) {
+            replay.annotations = [
+              ...(replay.annotations || []),
+              ...fb.annotations,
+            ];
+            // Re-generate output with feedback annotations baked in
+            await generateOutput(replay, outputDir);
+
+            fbSpinner.succeed(
+              `Score: ${fb.result.score}/10 — ${fb.result.feedbackItems.length} feedback item(s) added as annotations`,
+            );
+          } else {
+            fbSpinner.warn("Could not parse AI feedback (invalid output)");
+          }
+        } catch (err: any) {
+          fbSpinner.fail(`Feedback failed: ${err.message}`);
+        }
+      }
     }
 
     // Check gh availability for gist option

@@ -57,6 +57,7 @@ packages/cli/src/
 │       └── sqlite-reader.ts    # SQLite store.db parser (primary)
 ├── transform.ts                # Provider-agnostic: turns → Scene[] + secret redaction
 ├── generator.ts                # Inject JSON into viewer HTML
+├── feedback.ts                 # AI feedback: detect CLI tools, run headlessly, parse results
 └── publishers/                 # Publish targets
     ├── local.ts                # Open in browser
     └── gist.ts                 # Publish to GitHub Gist
@@ -87,6 +88,7 @@ packages/cli/src/
 - **Editor mode**: "Open in Editor" starts a Hono localhost server (port 3456-3466) serving the viewer with `__VIBE_REPLAY_EDITOR__` flag. Viewer fetches session from `/api/session`, annotations POST to `/api/annotations` (debounced 1s) and persist to `{outputDir}/annotations.json`. Server also handles gist publishing and HTML export via API routes
 - **ViewerMode**: Three-mode enum (`embedded | editor | readonly`) drives viewer behavior — embedded for self-contained HTML, editor for local server, readonly for `?gist=` / `?url=` URLs
 - **Markdown rendering**: Uses `marked` (lightweight, ~37KB) instead of `react-markdown` + `remark-gfm` to keep viewer under 500KB
+- **vibe-feedback (experimental)**: AI-powered prompting feedback. Detects `claude` or `opencode` CLI tools, runs headlessly with structured prompt, parses JSON output (with repair for truncated/malformed responses), generates annotations with `author: "vibe-feedback"`. Skips `claude` when inside a Claude Code session (env `CLAUDECODE`). Uses stdin pipe for opencode, stdin for claude. Viewer shows AI feedback annotations with purple "AI Coach" badge
 
 ## Data Flow
 
@@ -99,6 +101,7 @@ packages/cli/src/
   → generator.ts → inject into viewer.html → vibe-replay/<slug>/index.html + replay.json
   → publishers/ → local (open browser) | gist (gh gist create → vibe-replay.com viewer)
   → server.ts → editor mode (localhost Hono server → viewer fetches /api/session, saves annotations via API)
+  → feedback.ts → (optional) detect CLI tool → headless AI analysis → annotations with author "vibe-feedback"
 ```
 
 Scene types: `user-prompt`, `thinking`, `text-response`, `tool-call`

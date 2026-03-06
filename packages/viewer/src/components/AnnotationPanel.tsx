@@ -415,17 +415,32 @@ const AnnotationCard = memo(function AnnotationCard({
     }
   }, [annotation.createdAt]);
 
+  const isAiFeedback = annotation.author === "vibe-feedback";
+
   return (
     <div
       data-annotation-scene={annotation.sceneIndex}
       className={`px-3 py-2 border-b border-terminal-border/30 transition-colors ${
-        isCurrent
-          ? "bg-terminal-blue/10 border-l-2 border-l-terminal-blue"
-          : "hover:bg-terminal-surface/50"
+        isAiFeedback
+          ? isCurrent
+            ? "bg-terminal-purple/10 border-l-2 border-l-terminal-purple"
+            : "bg-terminal-purple/[0.03] hover:bg-terminal-purple/[0.06]"
+          : isCurrent
+            ? "bg-terminal-blue/10 border-l-2 border-l-terminal-blue"
+            : "hover:bg-terminal-surface/50"
       }`}
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
     >
+      {/* AI Feedback badge */}
+      {isAiFeedback && (
+        <div className="flex items-center gap-1.5 mb-1">
+          <span className="text-[9px] font-mono font-semibold uppercase tracking-wider text-terminal-purple px-1.5 py-0.5 rounded border border-terminal-purple/30 bg-terminal-purple/10">
+            AI Coach
+          </span>
+        </div>
+      )}
+
       {/* Scene reference — click to navigate */}
       <button
         onClick={onSeek}
