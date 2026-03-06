@@ -115,12 +115,12 @@ export default function Controls({
         )}
       </div>
 
-      <div className="flex items-center gap-2 md:gap-3 text-xs text-terminal-dim font-mono shrink-0">
+      <div className="hidden sm:flex items-center gap-2 md:gap-3 text-xs text-terminal-dim font-mono shrink-0">
         {state === "paused" && (
-          <span className="hidden sm:inline text-terminal-orange">PAUSED</span>
+          <span className="text-terminal-orange">PAUSED</span>
         )}
         <span className="tabular-nums">
-          {Math.max(0, currentIndex + 1)}<span className="hidden sm:inline"> </span>/<span className="hidden sm:inline"> </span>{totalScenes}
+          {Math.max(0, currentIndex + 1)} / {totalScenes}
         </span>
         {/* Keyboard hints — desktop only */}
         <span className="hidden lg:inline-flex items-center gap-2 text-terminal-dim/50 border-l border-terminal-border/40 pl-3">
