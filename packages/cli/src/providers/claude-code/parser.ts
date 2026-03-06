@@ -92,6 +92,7 @@ export async function parseClaudeCodeSession(filePaths: string | string[]): Prom
 
     // User message with string content = human prompt (or compaction summary)
     if (role === "user" && typeof msgContent === "string") {
+      if (isSystemGeneratedMessage(msgContent)) continue;
       const isCompaction = msgContent.startsWith("This session is being continued from a previous conversation");
       userTurns.push({
         role: "user",
@@ -131,8 +132,9 @@ export async function parseClaudeCodeSession(filePaths: string | string[]): Prom
         }
       }
 
-      // Skip emitting user turn for automated ToolSearch responses
-      if (!isToolSearchResponse && (textParts.length > 0 || userImages.length > 0)) {
+      // Skip emitting user turn for automated ToolSearch responses and system-generated messages
+      const combinedText = textParts.join("").trim();
+      if (!isToolSearchResponse && !isSystemGeneratedMessage(combinedText) && (textParts.length > 0 || userImages.length > 0)) {
         const blocks: ContentBlock[] = textParts.map((t) => ({ type: "text", text: t } as ContentBlock));
         if (userImages.length > 0) {
           blocks.push({ type: "_user_images", images: userImages } as any);
@@ -172,48 +174,10 @@ export async function parseClaudeCodeSession(filePaths: string | string[]): Prom
     }
   }
 
-  // Interleave user turns with assistant messages
-  const finalTurns: ParsedTurn[] = [];
-  let assistantIdx = 0;
-
-  for (const turn of userTurns) {
-    finalTurns.push(turn);
-
-    // After each user prompt, emit assistant messages until we hit text-only end
-    while (assistantIdx < assistantOrder.length) {
-      const msgId = assistantOrder[assistantIdx];
-      const blocks = assistantBlocks.get(msgId)!;
-      assistantIdx++;
-
-      const enrichedBlocks = blocks.map((block) => {
-        if (block.type === "tool_use") {
-          const result = toolResults.get(block.id) || "";
-          const images = toolImages.get(block.id);
-          return { ...block, _result: result, _images: images };
-        }
-        return block;
-      });
-
-      finalTurns.push({
-        role: "assistant",
-        messageId: msgId,
-        model,
-        timestamp: assistantTimestamps.get(msgId),
-        blocks: enrichedBlocks,
-      });
-
-      // If last block is text (not tool_use), this assistant turn is complete
-      const lastBlock = blocks[blocks.length - 1];
-      if (lastBlock && lastBlock.type === "text") break;
-    }
-  }
-
-  // Emit remaining assistant messages
-  while (assistantIdx < assistantOrder.length) {
-    const msgId = assistantOrder[assistantIdx];
+  // Build assistant turns with enriched blocks
+  const assistantTurns: { turn: ParsedTurn; timestamp: string }[] = [];
+  for (const msgId of assistantOrder) {
     const blocks = assistantBlocks.get(msgId)!;
-    assistantIdx++;
-
     const enrichedBlocks = blocks.map((block) => {
       if (block.type === "tool_use") {
         const result = toolResults.get(block.id) || "";
@@ -222,14 +186,30 @@ export async function parseClaudeCodeSession(filePaths: string | string[]): Prom
       }
       return block;
     });
-
-    finalTurns.push({
-      role: "assistant",
-      messageId: msgId,
-      model,
-      blocks: enrichedBlocks,
+    assistantTurns.push({
+      turn: {
+        role: "assistant",
+        messageId: msgId,
+        model,
+        timestamp: assistantTimestamps.get(msgId),
+        blocks: enrichedBlocks,
+      },
+      timestamp: assistantTimestamps.get(msgId) || "",
     });
   }
+
+  // Timestamp-based pairing: merge user and assistant turns chronologically
+  type Entry = { type: "user" | "assistant"; turn: ParsedTurn; timestamp: string };
+  const entries: Entry[] = [];
+  for (const turn of userTurns) {
+    entries.push({ type: "user", turn, timestamp: turn.timestamp || "" });
+  }
+  for (const at of assistantTurns) {
+    entries.push({ type: "assistant", turn: at.turn, timestamp: at.timestamp });
+  }
+  entries.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+
+  const finalTurns: ParsedTurn[] = entries.map((e) => e.turn);
 
   // Aggregate token usage from deduplicated per-message data
   let tokenUsage: TokenUsage | undefined;
@@ -257,6 +237,17 @@ export async function parseClaudeCodeSession(filePaths: string | string[]): Prom
     tokenUsage,
     compactions: compactions.length > 0 ? compactions : undefined,
   };
+}
+
+/** Detect system-generated user messages that aren't real human prompts */
+function isSystemGeneratedMessage(text: string): boolean {
+  return (
+    text.startsWith("[Request interrupted by user") ||
+    text.startsWith("<command-name>") ||
+    text.startsWith("<local-command-caveat>") ||
+    text.startsWith("<local-command-stdout>") ||
+    text.startsWith("<task-notification>")
+  );
 }
 
 function extractImages(block: ContentBlock): string[] {

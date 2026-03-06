@@ -1,5 +1,5 @@
 ---
-const DEMO_URL = "/view/?gist=741fb4ce6491e11ca0e03c042384ac8b";
+const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
 ---
 
 <!-- Top nav -->
@@ -88,68 +88,106 @@ const DEMO_URL = "/view/?gist=741fb4ce6491e11ca0e03c042384ac8b";
         <div class="flex items-center justify-between px-4 py-2.5 border-b border-[#30363d] bg-[#161b22] text-xs font-mono">
           <div class="flex items-center gap-3">
             <span class="text-[#3fb950] font-semibold">vibe-replay</span>
-            <span class="text-[#8b949e]">~/Code/vibe-replay</span>
-            <span class="text-[#8b949e]">&middot;</span>
-            <span class="text-[#e6edf3]">Build the vibe-replay website</span>
+            <span class="text-[#e6edf3] hidden sm:inline">Annotations, editor mode, token tracking</span>
+            <span class="text-[#8b949e] hidden sm:inline">&middot;</span>
+            <span class="text-[#e6edf3]/60 hidden sm:inline">claude-opus-4-20250514 &middot; 1h 24m</span>
           </div>
           <div class="hidden sm:flex items-center gap-3 text-[#8b949e]">
             <span class="px-1.5 py-0.5 rounded bg-[#3fb950]/15 text-[#3fb950]">All</span>
             <span class="px-1.5 py-0.5 rounded bg-[#1a1a24] text-[#8b949e]">Prompts</span>
-            <span class="text-[#e6edf3]/60">claude-sonnet-4-20250514</span>
-            <span class="text-[#8b949e]">&middot;</span>
-            <span>12T / 186S</span>
+            <!-- Settings gear -->
+            <svg class="w-3.5 h-3.5 text-[#8b949e]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
           </div>
         </div>
 
-        <!-- Main area: sidebar + content -->
-        <div class="flex" style="height: 440px;">
+        <!-- Main area: sidebar + content + comments -->
+        <div class="flex" style="height: 460px;">
           <!-- Sidebar minimap -->
           <div class="hidden md:block w-44 border-r border-[#30363d] bg-[#0d1117] p-3 overflow-hidden">
-            <div class="text-[10px] font-mono text-[#8b949e] uppercase tracking-wider mb-2">Outline</div>
-            <div class="space-y-[3px]">
-              <div class="h-1.5 rounded-sm bg-[#3fb950]/60 w-full"></div>
-              <div class="h-1.5 rounded-sm bg-[#bc8cff]/40 w-3/4"></div>
-              <div class="h-1.5 rounded-sm bg-[#58a6ff]/50 w-full"></div>
-              <div class="h-1.5 rounded-sm bg-[#d29922]/50 w-2/3"></div>
-              <div class="h-1.5 rounded-sm bg-[#d29922]/50 w-4/5"></div>
-              <div class="h-1.5 rounded-sm bg-[#d29922]/50 w-1/2"></div>
-              <div class="h-1.5 rounded-sm bg-[#58a6ff]/50 w-full"></div>
-              <div class="h-1.5 rounded-sm bg-[#d29922]/50 w-2/3"></div>
-              <div class="h-1.5 rounded-sm bg-[#3fb950]/60 w-full"></div>
-              <div class="h-1.5 rounded-sm bg-[#bc8cff]/40 w-2/3"></div>
-              <div class="h-1.5 rounded-sm bg-[#58a6ff]/50 w-full"></div>
-              <div class="h-1.5 rounded-sm bg-[#d29922]/50 w-3/4"></div>
-              <div class="h-1.5 rounded-sm bg-[#d29922]/50 w-1/2"></div>
-              <div class="h-1.5 rounded-sm bg-[#d29922]/50 w-2/3"></div>
-              <div class="h-1.5 rounded-sm bg-[#3fb950]/60 w-full ring-1 ring-[#3fb950]"></div>
-              <div class="h-1.5 rounded-sm bg-[#bc8cff]/40 w-1/2"></div>
-              <div class="h-1.5 rounded-sm bg-[#58a6ff]/50 w-full"></div>
-              <div class="h-1.5 rounded-sm bg-[#d29922]/50 w-3/5"></div>
-              <div class="h-1.5 rounded-sm bg-[#d29922]/50 w-4/5"></div>
-              <div class="h-1.5 rounded-sm bg-[#58a6ff]/50 w-full"></div>
-              <div class="h-1.5 rounded-sm bg-[#d29922]/50 w-2/3"></div>
-              <div class="h-1.5 rounded-sm bg-[#3fb950]/60 w-full"></div>
-              <div class="h-1.5 rounded-sm bg-[#bc8cff]/40 w-3/4"></div>
-              <div class="h-1.5 rounded-sm bg-[#58a6ff]/50 w-full"></div>
+            <div class="flex items-center gap-2 mb-2">
+              <div class="text-[10px] font-mono text-[#3fb950] uppercase tracking-wider border-b border-[#3fb950] pb-1">Outline</div>
+              <div class="text-[10px] font-mono text-[#8b949e] uppercase tracking-wider pb-1">Stats</div>
             </div>
-            <!-- Legend -->
-            <div class="mt-4 space-y-1.5 text-[10px] font-mono text-[#8b949e]">
-              <div class="flex items-center gap-1.5"><div class="w-2 h-2 rounded-sm bg-[#3fb950]"></div> Prompt</div>
-              <div class="flex items-center gap-1.5"><div class="w-2 h-2 rounded-sm bg-[#58a6ff]"></div> Response</div>
-              <div class="flex items-center gap-1.5"><div class="w-2 h-2 rounded-sm bg-[#d29922]"></div> Tool call</div>
-              <div class="flex items-center gap-1.5"><div class="w-2 h-2 rounded-sm bg-[#bc8cff]"></div> Thinking</div>
+            <!-- Turn entries -->
+            <div class="space-y-2">
+              <!-- Turn 1 -->
+              <div class="rounded px-2 py-1.5 bg-[#3fb950]/5 border-l-2 border-[#3fb950]">
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[10px] font-mono text-[#3fb950] font-bold">01</span>
+                  <span class="text-[10px] text-[#e6edf3] truncate">Implement annotations...</span>
+                </div>
+                <div class="flex gap-1 mt-1">
+                  <span class="text-[8px] px-1 py-0.5 rounded bg-[#d29922]/15 text-[#d29922]">42 tools</span>
+                  <span class="text-[8px] px-1 py-0.5 rounded bg-[#58a6ff]/15 text-[#58a6ff]">8 resp</span>
+                  <span class="text-[8px] px-1 py-0.5 rounded bg-[#bc8cff]/15 text-[#bc8cff]">think</span>
+                </div>
+              </div>
+              <!-- Turn 2 -->
+              <div class="rounded px-2 py-1.5 opacity-70">
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[10px] font-mono text-[#8b949e]">02</span>
+                  <span class="text-[10px] text-[#8b949e] truncate">Fix the editor mode...</span>
+                </div>
+                <div class="flex gap-1 mt-1">
+                  <span class="text-[8px] px-1 py-0.5 rounded bg-[#d29922]/15 text-[#d29922]">18 tools</span>
+                  <span class="text-[8px] px-1 py-0.5 rounded bg-[#58a6ff]/15 text-[#58a6ff]">5 resp</span>
+                </div>
+              </div>
+              <!-- Compaction marker -->
+              <div class="rounded px-2 py-1.5 border border-dashed border-[#30363d] opacity-60">
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[10px] text-[#8b949e]">&#8635;</span>
+                  <span class="text-[9px] text-[#8b949e] italic">Context compacted</span>
+                </div>
+              </div>
+              <!-- Turn 3 -->
+              <div class="rounded px-2 py-1.5 opacity-70">
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[10px] font-mono text-[#8b949e]">03</span>
+                  <span class="text-[10px] text-[#8b949e] truncate">Add token tracking...</span>
+                </div>
+                <div class="flex gap-1 mt-1">
+                  <span class="text-[8px] px-1 py-0.5 rounded bg-[#d29922]/15 text-[#d29922]">35 tools</span>
+                  <span class="text-[8px] px-1 py-0.5 rounded bg-[#58a6ff]/15 text-[#58a6ff]">6 resp</span>
+                  <span class="text-[8px] px-1 py-0.5 rounded bg-[#bc8cff]/15 text-[#bc8cff]">think</span>
+                </div>
+              </div>
+              <!-- Turn 4 -->
+              <div class="rounded px-2 py-1.5 opacity-70">
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[10px] font-mono text-[#8b949e]">04</span>
+                  <span class="text-[10px] text-[#8b949e] truncate">Compaction summaries...</span>
+                </div>
+                <div class="flex gap-1 mt-1">
+                  <span class="text-[8px] px-1 py-0.5 rounded bg-[#d29922]/15 text-[#d29922]">28 tools</span>
+                  <span class="text-[8px] px-1 py-0.5 rounded bg-[#58a6ff]/15 text-[#58a6ff]">4 resp</span>
+                </div>
+              </div>
+              <!-- Turn 5 -->
+              <div class="rounded px-2 py-1.5 opacity-70">
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[10px] font-mono text-[#8b949e]">05</span>
+                  <span class="text-[10px] text-[#8b949e] truncate">Fix viewer mode enum...</span>
+                </div>
+                <div class="flex gap-1 mt-1">
+                  <span class="text-[8px] px-1 py-0.5 rounded bg-[#d29922]/15 text-[#d29922]">12 tools</span>
+                  <span class="text-[8px] px-1 py-0.5 rounded bg-[#58a6ff]/15 text-[#58a6ff]">3 resp</span>
+                </div>
+              </div>
             </div>
           </div>
 
           <!-- Content area -->
           <div class="flex-1 overflow-hidden p-4 sm:p-6 space-y-4 font-mono text-sm text-left">
-            <!-- User prompt -->
-            <div class="rounded-lg bg-[#3fb950]/5 border border-[#3fb950]/15 p-4">
+            <!-- User prompt with comment badge -->
+            <div class="rounded-lg bg-[#3fb950]/5 border border-[#3fb950]/15 p-4 relative">
+              <!-- Comment badge -->
+              <div class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[#58a6ff] text-white text-[9px] font-bold flex items-center justify-center shadow-sm">2</div>
               <div class="flex items-center gap-2 mb-2">
                 <span class="text-[10px] font-bold uppercase tracking-wider text-[#3fb950]">You</span>
-                <span class="text-[10px] text-[#8b949e]">3:12 PM</span>
+                <span class="text-[10px] text-[#8b949e]">10:21 PM</span>
               </div>
-              <p class="text-[#3fb950]/90 text-sm leading-relaxed">Build a landing page website for vibe-replay.com. Astro + Tailwind, dark theme, terminal aesthetic. Deploy to Cloudflare Pages.</p>
+              <p class="text-[#3fb950]/90 text-sm leading-relaxed">Implement annotations system — users should be able to add comments to any scene, with a comments panel, persistence, and export support.</p>
             </div>
 
             <!-- Thinking block -->
@@ -157,7 +195,7 @@ const DEMO_URL = "/view/?gist=741fb4ce6491e11ca0e03c042384ac8b";
               <div class="flex items-center gap-2 mb-2">
                 <span class="text-[10px] font-bold uppercase tracking-wider text-[#bc8cff]/60">Thinking</span>
               </div>
-              <p class="text-[#8b949e] text-xs leading-relaxed">I'll create an Astro project with Tailwind CSS in the existing monorepo. The design should showcase the product with a hero section, feature grid, and how-it-works flow...</p>
+              <p class="text-[#8b949e] text-xs leading-relaxed">I need to design an annotation system that works across all three viewer modes: embedded HTML, editor mode with local server, and readonly gist/URL viewing. Let me plan the data model first...</p>
             </div>
 
             <!-- Tool call: Write file -->
@@ -165,27 +203,29 @@ const DEMO_URL = "/view/?gist=741fb4ce6491e11ca0e03c042384ac8b";
               <div class="flex items-center gap-2">
                 <svg class="w-3.5 h-3.5 text-[#d29922]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
                 <span class="text-[10px] font-bold uppercase tracking-wider text-[#d29922]">Write</span>
-                <span class="text-[#8b949e] text-xs">website/src/pages/index.astro</span>
+                <span class="text-[#8b949e] text-xs">packages/viewer/src/AnnotationPanel.tsx</span>
               </div>
             </div>
 
             <!-- Tool call: Edit file with diff -->
-            <div class="rounded-lg bg-[#d29922]/[0.03] border border-[#d29922]/10 p-4">
+            <div class="rounded-lg bg-[#d29922]/[0.03] border border-[#d29922]/10 p-4 relative">
+              <!-- Comment badge on tool call -->
+              <div class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[#58a6ff] text-white text-[9px] font-bold flex items-center justify-center shadow-sm">1</div>
               <div class="flex items-center gap-2 mb-3">
                 <svg class="w-3.5 h-3.5 text-[#d29922]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
                 <span class="text-[10px] font-bold uppercase tracking-wider text-[#d29922]">Edit</span>
-                <span class="text-[#8b949e] text-xs">website/tailwind.config.cjs</span>
+                <span class="text-[#8b949e] text-xs">packages/cli/src/types.ts</span>
               </div>
               <!-- Mini diff -->
               <div class="rounded bg-[#0d1117] border border-[#30363d] text-xs overflow-hidden">
                 <div class="px-3 py-1 bg-[#3fb950]/10 text-[#3fb950]">
-                  <span class="select-none text-[#3fb950]/40">+ </span>accent: "#00e5a0",
+                  <span class="select-none text-[#3fb950]/40">+ </span>annotations?: Annotation[];
                 </div>
                 <div class="px-3 py-1 bg-[#3fb950]/10 text-[#3fb950]">
-                  <span class="select-none text-[#3fb950]/40">+ </span>surface: "#0a0a0f",
+                  <span class="select-none text-[#3fb950]/40">+ </span>interface Annotation &#123;
                 </div>
                 <div class="px-3 py-1 bg-[#3fb950]/10 text-[#3fb950]">
-                  <span class="select-none text-[#3fb950]/40">+ </span>"surface-1": "#111118",
+                  <span class="select-none text-[#3fb950]/40">+ </span>&nbsp; id: string; sceneIndex: number;
                 </div>
               </div>
             </div>
@@ -195,44 +235,93 @@ const DEMO_URL = "/view/?gist=741fb4ce6491e11ca0e03c042384ac8b";
               <div class="flex items-center gap-2 mb-2">
                 <svg class="w-3.5 h-3.5 text-[#d29922]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" /></svg>
                 <span class="text-[10px] font-bold uppercase tracking-wider text-[#d29922]">Bash</span>
-                <span class="text-[#8b949e] text-xs">wrangler pages deploy</span>
+                <span class="text-[#8b949e] text-xs">pnpm build</span>
               </div>
               <div class="rounded bg-[#0d1117] border border-[#30363d] text-xs p-2 text-[#8b949e]">
-                <div>✨ Deployment complete!</div>
+                <div>✓ viewer: 435.85 kB &middot; built in 665ms</div>
               </div>
+            </div>
+          </div>
+
+          <!-- Comments sidebar (desktop only) -->
+          <div class="hidden lg:block w-52 border-l border-[#30363d] bg-[#0d1117] p-3 overflow-hidden">
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-[10px] font-mono text-[#e6edf3] uppercase tracking-wider font-semibold">Comments <span class="text-[#8b949e]">(3)</span></span>
+            </div>
+            <!-- Comment 1 -->
+            <div class="rounded-lg bg-[#161b22] border border-[#30363d] p-2.5 mb-2">
+              <div class="text-[9px] text-[#58a6ff] mb-1 truncate">You &mdash; Implement annotations...</div>
+              <p class="text-[10px] text-[#e6edf3]/80 leading-relaxed mb-1.5">Great starting prompt. The three-mode architecture was the key insight here.</p>
+              <div class="text-[8px] text-[#8b949e]">Mar 5, 2026</div>
+            </div>
+            <!-- Comment 2 -->
+            <div class="rounded-lg bg-[#161b22] border border-[#30363d] p-2.5 mb-2">
+              <div class="text-[9px] text-[#58a6ff] mb-1 truncate">You &mdash; Implement annotations...</div>
+              <p class="text-[10px] text-[#e6edf3]/80 leading-relaxed mb-1.5">Notice how it planned the Hono server routes before touching the viewer.</p>
+              <div class="text-[8px] text-[#8b949e]">Mar 5, 2026</div>
+            </div>
+            <!-- Comment 3 -->
+            <div class="rounded-lg bg-[#161b22] border border-[#30363d] p-2.5">
+              <div class="text-[9px] text-[#d29922] mb-1 truncate">Edit &mdash; types.ts</div>
+              <p class="text-[10px] text-[#e6edf3]/80 leading-relaxed mb-1.5">The annotation type design is clean &mdash; `sceneIndex` makes lookup O(1).</p>
+              <div class="text-[8px] text-[#8b949e]">Mar 5, 2026</div>
             </div>
           </div>
         </div>
 
         <!-- Playback controls bar -->
         <div class="border-t border-[#30363d] bg-[#161b22]/90">
-          <!-- Timeline -->
-          <div class="h-2 flex gap-[1px] px-3 pt-2">
-            <div class="flex-[3] rounded-sm bg-[#3fb950]/60"></div>
-            <div class="flex-[2] rounded-sm bg-[#bc8cff]/40"></div>
-            <div class="flex-[5] rounded-sm bg-[#58a6ff]/50"></div>
-            <div class="flex-[2] rounded-sm bg-[#d29922]/50"></div>
-            <div class="flex-[3] rounded-sm bg-[#d29922]/50"></div>
-            <div class="flex-[4] rounded-sm bg-[#58a6ff]/50"></div>
-            <div class="flex-[2] rounded-sm bg-[#d29922]/50"></div>
-            <div class="flex-[3] rounded-sm bg-[#3fb950]/60 ring-1 ring-white/60"></div>
-            <div class="flex-[2] rounded-sm bg-[#bc8cff]/30"></div>
-            <div class="flex-[4] rounded-sm bg-[#58a6ff]/30"></div>
-            <div class="flex-[2] rounded-sm bg-[#d29922]/30"></div>
-            <div class="flex-[3] rounded-sm bg-[#58a6ff]/30"></div>
+          <!-- Timeline with annotation dots -->
+          <div class="relative h-2 px-3 pt-2">
+            <!-- Annotation dots -->
+            <div class="absolute top-0 left-[8%] w-1.5 h-1.5 rounded-full bg-[#58a6ff]"></div>
+            <div class="absolute top-0 left-[35%] w-1.5 h-1.5 rounded-full bg-[#58a6ff]"></div>
+            <!-- Timeline segments -->
+            <div class="flex gap-[1px] h-full">
+              <div class="flex-[3] rounded-sm bg-[#3fb950]/60"></div>
+              <div class="flex-[2] rounded-sm bg-[#bc8cff]/40"></div>
+              <div class="flex-[5] rounded-sm bg-[#58a6ff]/50"></div>
+              <div class="flex-[2] rounded-sm bg-[#d29922]/50"></div>
+              <div class="flex-[3] rounded-sm bg-[#d29922]/50"></div>
+              <div class="flex-[4] rounded-sm bg-[#58a6ff]/50"></div>
+              <div class="flex-[2] rounded-sm bg-[#d29922]/50"></div>
+              <div class="flex-[3] rounded-sm bg-[#3fb950]/60 ring-1 ring-white/60"></div>
+              <div class="flex-[2] rounded-sm bg-[#bc8cff]/30"></div>
+              <div class="flex-[4] rounded-sm bg-[#58a6ff]/30"></div>
+              <div class="flex-[2] rounded-sm bg-[#d29922]/30"></div>
+              <div class="flex-[3] rounded-sm bg-[#58a6ff]/30"></div>
+            </div>
           </div>
           <!-- Controls -->
           <div class="flex items-center justify-between px-4 py-2 text-xs font-mono text-[#8b949e]">
-            <div class="flex items-center gap-4">
+            <div class="flex items-center gap-3">
+              <!-- Play button -->
               <div class="w-7 h-7 flex items-center justify-center rounded border border-[#30363d] text-[#e6edf3]">
                 <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
               </div>
-              <span class="text-[#e6edf3]">1x</span>
-              <span>&lt; Turn <span class="text-[#e6edf3]">5</span>/12 &gt;</span>
+              <!-- Speed buttons -->
+              <div class="hidden sm:flex items-center gap-1">
+                <span class="px-1.5 py-0.5 rounded bg-[#3fb950]/15 text-[#3fb950] text-[10px]">1x</span>
+                <span class="px-1.5 py-0.5 rounded text-[#8b949e] text-[10px]">5x</span>
+                <span class="px-1.5 py-0.5 rounded text-[#8b949e] text-[10px]">10x</span>
+              </div>
+              <span class="text-[#8b949e] hidden sm:inline">|</span>
+              <!-- Turn nav -->
+              <span>&lt; Turn <span class="text-[#e6edf3]">3</span>/9 &gt;</span>
+              <span class="text-[#8b949e] hidden sm:inline">|</span>
+              <!-- Search -->
+              <span class="hidden sm:flex items-center gap-1 text-[#8b949e]">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+              </span>
+              <!-- Comments toggle -->
+              <span class="hidden sm:flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#58a6ff]/15 text-[#58a6ff] text-[10px]">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"/></svg>
+                3
+              </span>
             </div>
             <div class="flex items-center gap-3">
-              <span>Scene <span class="text-[#e6edf3]">78</span>/186</span>
-              <span class="text-[10px] text-[#8b949e]/50 hidden sm:inline">Space to play &middot; Arrow keys to navigate</span>
+              <span>Scene <span class="text-[#e6edf3]">124</span>/512</span>
+              <span class="text-[10px] text-[#8b949e]/50 hidden sm:inline">Space &middot; ←→ &middot; ⌘K</span>
             </div>
           </div>
         </div>
@@ -246,7 +335,7 @@ const DEMO_URL = "/view/?gist=741fb4ce6491e11ca0e03c042384ac8b";
         Watch a real session
         <svg class="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"/></svg>
       </a>
-      <p class="text-text-muted text-sm mt-3 font-mono">This website was built in the session above</p>
+      <p class="text-text-muted text-sm mt-3 font-mono">Annotations, editor mode &amp; token tracking — built in this session</p>
     </div>
   </div>
 </section>
