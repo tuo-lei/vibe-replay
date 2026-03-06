@@ -68,10 +68,16 @@ export default function Player({ session, viewPrefs }: Props) {
   const userPromptCount = userPromptIndices.length;
 
   // Start playback when user dismisses landing page
-  const handleStart = useCallback(() => {
+  // autoPlay=true (button click) → play immediately
+  // autoPlay=false (scroll/swipe) → show first scene paused, let user control
+  const handleStart = useCallback((autoPlay = true) => {
     setLanded(true);
-    setTimeout(play, 300);
-  }, [play]);
+    if (autoPlay) {
+      setTimeout(play, 300);
+    } else {
+      setTimeout(() => seekTo(0), 100);
+    }
+  }, [play, seekTo]);
 
   const seekFromNavigation = useCallback(
     (index: number) => {

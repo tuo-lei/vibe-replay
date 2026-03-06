@@ -3,7 +3,7 @@ import type { ReplaySession } from "../types";
 
 interface Props {
   session: ReplaySession;
-  onStart: () => void;
+  onStart: (autoPlay?: boolean) => void;
 }
 
 function formatDuration(ms?: number): string {
@@ -54,7 +54,7 @@ export default function LandingHero({ session, onStart }: Props) {
       if (firedRef.current) return;
       if (e.deltaY > 0) {
         firedRef.current = true;
-        onStart();
+        onStart(false);
       }
     };
     const handleTouchStart = (e: TouchEvent) => {
@@ -65,7 +65,7 @@ export default function LandingHero({ session, onStart }: Props) {
       const deltaY = touchStartYRef.current - e.touches[0].clientY;
       if (deltaY > 15) {
         firedRef.current = true;
-        onStart();
+        onStart(false);
       }
     };
     window.addEventListener("wheel", handleWheel, { passive: true });
