@@ -1,6 +1,14 @@
-import { useMemo, memo } from "react";
+import { useMemo, memo, useSyncExternalStore } from "react";
 import { Highlight, themes } from "prism-react-renderer";
 import { diffLines as computeLineDiff } from "diff";
+
+// Subscribe to dark/light class changes on <html> for prism theme switching
+const subscribe = (cb: () => void) => {
+  const observer = new MutationObserver(cb);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+  return () => observer.disconnect();
+};
+const getIsDark = () => document.documentElement.classList.contains("dark");
 
 interface Props {
   toolName: string;
@@ -76,6 +84,7 @@ export default memo(function CodeDiffBlock({
     [oldContent, newContent],
   );
   const language = guessLanguage(filePath);
+  const isDark = useSyncExternalStore(subscribe, getIsDark);
   const isNewFile = !oldContent;
 
   return (
@@ -95,7 +104,7 @@ export default memo(function CodeDiffBlock({
       </div>
       <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
         <Highlight
-          theme={themes.nightOwl}
+          theme={isDark ? themes.nightOwl : themes.nightOwlLight}
           code={diffLines.map((l) => l.content).join("\n")}
           language={language}
         >
@@ -106,9 +115,9 @@ export default memo(function CodeDiffBlock({
                 if (!diffLine) return null;
                 const bgClass =
                   diffLine.type === "add"
-                    ? "bg-green-900/30"
+                    ? "bg-green-100 dark:bg-green-900/30"
                     : diffLine.type === "remove"
-                      ? "bg-red-900/30"
+                      ? "bg-red-100 dark:bg-red-900/30"
                       : "";
                 const prefix =
                   diffLine.type === "add"
