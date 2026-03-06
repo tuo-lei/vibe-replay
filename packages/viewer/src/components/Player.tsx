@@ -219,7 +219,13 @@ export default function Player({ session, viewPrefs }: Props) {
       ) as HTMLElement | null;
       if (sceneEl) {
         programScrollRef.current = true;
-        sceneEl.scrollIntoView({ behavior: "smooth", block: "center" });
+        // Manual center: place top of target at ~35% from viewport top
+        // (slightly above center feels more natural for reading)
+        const containerRect = el.getBoundingClientRect();
+        const sceneRect = sceneEl.getBoundingClientRect();
+        const offset = sceneRect.top - containerRect.top + el.scrollTop;
+        const target = offset - containerRect.height * 0.35;
+        el.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
         flashJumpTarget(sceneEl);
         setTimeout(() => { programScrollRef.current = false; }, 450);
         pendingSeekRef.current = null;
