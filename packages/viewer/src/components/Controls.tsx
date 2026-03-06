@@ -14,6 +14,10 @@ interface Props {
   onNextPrompt: () => void;
   onOpenSearch: () => void;
   onOpenOutline?: () => void;
+  annotationCount?: number;
+  annotationPanelOpen?: boolean;
+  onToggleAnnotations?: () => void;
+  hasUnsavedAnnotations?: boolean;
 }
 
 const SPEEDS = [1, 5, 10];
@@ -31,6 +35,10 @@ export default function Controls({
   onNextPrompt,
   onOpenSearch,
   onOpenOutline,
+  annotationCount = 0,
+  annotationPanelOpen = false,
+  onToggleAnnotations,
+  hasUnsavedAnnotations = false,
 }: Props) {
   const isPlaying = state === "playing";
   const playIcon = isPlaying ? "\u23F8" : "\u25B6";
@@ -114,6 +122,29 @@ export default function Controls({
             <span className="hidden sm:inline ml-1.5">Search</span>
           </button>
         </div>
+
+        {/* Annotations toggle */}
+        {onToggleAnnotations && (
+          <div className={`${groupStyle} hidden md:flex`}>
+            <button
+              onClick={() => { flash("annotate"); onToggleAnnotations(); }}
+              className={`${cellStyle} ${btnBase} ${
+                annotationPanelOpen
+                  ? "bg-terminal-blue/15 text-terminal-blue"
+                  : "hover:text-terminal-blue bg-terminal-surface"
+              } ${flashClass("annotate")} relative`}
+              title="Toggle comments panel"
+            >
+              <span>{"\uD83D\uDCAC"}</span>
+              {annotationCount > 0 && (
+                <span className="hidden sm:inline ml-1.5">{annotationCount}</span>
+              )}
+              {hasUnsavedAnnotations && (
+                <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-terminal-orange" />
+              )}
+            </button>
+          </div>
+        )}
 
         {/* Outline (mobile only) */}
         {onOpenOutline && (

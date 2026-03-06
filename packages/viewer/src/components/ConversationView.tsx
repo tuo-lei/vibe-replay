@@ -12,6 +12,9 @@ interface Props {
   currentIndex: number;
   viewPrefs: ViewPrefs;
   focusIndex?: number;
+  annotatedScenes?: Set<number>;
+  annotationCounts?: Map<number, number>;
+  onComment?: (sceneIndex: number) => void;
 }
 
 interface TurnGroup {
@@ -41,6 +44,9 @@ export default function ConversationView({
   currentIndex,
   viewPrefs,
   focusIndex,
+  annotatedScenes,
+  annotationCounts,
+  onComment,
 }: Props) {
   // Pre-compute ALL groups once — stable across playback ticks
   const allGroups = useMemo(() => {
@@ -108,6 +114,9 @@ export default function ConversationView({
             visibleCount={visibleCount}
             viewPrefs={viewPrefs}
             focusIndex={focusIndex}
+            annotatedScenes={annotatedScenes}
+            annotationCounts={annotationCounts}
+            onComment={onComment}
           />
         </LazyGroup>
       ))}
@@ -178,13 +187,21 @@ const GroupCard = memo(function GroupCard({
   visibleCount,
   viewPrefs,
   focusIndex,
+  annotatedScenes,
+  annotationCounts,
+  onComment,
 }: {
   group: TurnGroup;
   currentIndex: number;
   visibleCount: number;
   viewPrefs: ViewPrefs;
   focusIndex?: number;
+  annotatedScenes?: Set<number>;
+  annotationCounts?: Map<number, number>;
+  onComment?: (sceneIndex: number) => void;
 }) {
+  const [hovered, setHovered] = useState(false);
+
   // Only include scenes that are visible so far
   const visibleScenes = useMemo(
     () => group.scenes.filter((s) => s.index < visibleCount),
@@ -199,19 +216,42 @@ const GroupCard = memo(function GroupCard({
 
   if (visibleScenes.length === 0) return null;
 
+  // User groups get a group-level comment button (single scene)
+  const userCommentCount = group.type === "user" ? (annotationCounts?.get(firstIndex) || 0) : 0;
+  const userCommentButton = group.type === "user" && onComment && (userCommentCount > 0 || hovered) ? (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        onComment(firstIndex);
+      }}
+      className={`absolute -right-3 top-3 z-10 flex items-center gap-1 px-1.5 py-1 rounded-md border text-[10px] font-mono transition-all duration-150 ${
+        userCommentCount > 0
+          ? "bg-terminal-blue border-terminal-blue text-white shadow-sm"
+          : "bg-terminal-bg border-terminal-border text-terminal-dim hover:text-terminal-blue hover:border-terminal-blue/40 opacity-0 group-hover:opacity-100"
+      }`}
+      title={userCommentCount > 0 ? `${userCommentCount} comment${userCommentCount > 1 ? "s" : ""}` : "Add comment"}
+    >
+      {"\uD83D\uDCAC"}
+      {userCommentCount > 0 && <span>{userCommentCount}</span>}
+    </button>
+  ) : null;
+
   if (group.type === "user") {
     return (
       <div
         id={`scene-${firstIndex}`}
         data-scene-index={firstIndex}
-        className={`rounded-lg px-4 py-3 transition-colors duration-200 ${
+        className={`group relative rounded-lg px-4 py-3 transition-colors duration-200 ${
           groupHasFocusedTarget
             ? "scene-nav-focused bg-terminal-green/30 border-2 border-terminal-green ring-2 ring-terminal-green/60 shadow-lg shadow-terminal-green/30"
             : groupHasCurrent
               ? "bg-terminal-green/20 border-2 border-terminal-green/60 ring-1 ring-terminal-green/40 shadow-md shadow-terminal-green/20"
               : "bg-terminal-green/5 border border-terminal-green/15"
         }`}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
       >
+        {userCommentButton}
         <div className="flex items-center gap-2 mb-2">
           <span className="text-[11px] font-mono font-semibold text-terminal-green uppercase tracking-wider">
             You
@@ -255,7 +295,7 @@ const GroupCard = memo(function GroupCard({
     <div
       id={`scene-${firstIndex}`}
       data-scene-index={firstIndex}
-      className={`rounded-lg px-4 py-3 transition-colors duration-200 ${
+      className={`relative rounded-lg px-4 py-3 transition-colors duration-200 ${
         groupHasFocusedTarget
           ? "scene-nav-focused bg-terminal-blue/20 border-2 border-terminal-blue ring-2 ring-terminal-blue/60 shadow-lg shadow-terminal-blue/30"
           : groupHasCurrent
@@ -287,6 +327,8 @@ const GroupCard = memo(function GroupCard({
           scenes={filteredScenes}
           currentIndex={currentIndex}
           collapseTools={viewPrefs.collapseAllTools}
+          annotationCounts={annotationCounts}
+          onComment={onComment}
         />
       </div>
     </div>
@@ -301,10 +343,14 @@ function BatchedScenes({
   scenes,
   currentIndex,
   collapseTools,
+  annotationCounts,
+  onComment,
 }: {
   scenes: { scene: Scene; index: number }[];
   currentIndex: number;
   collapseTools: boolean;
+  annotationCounts?: Map<number, number>;
+  onComment?: (sceneIndex: number) => void;
 }) {
   // Group consecutive tool calls with the same toolName (only batchable ones)
   const batches: { scene: Scene; index: number }[][] = [];
@@ -334,17 +380,32 @@ function BatchedScenes({
         // Single item or non-batchable
         if (batch.length <= 1) {
           const { scene, index } = batch[0];
+          const count = annotationCounts?.get(index) || 0;
           return (
             <div
               key={index}
               data-scene-index={index}
-              className={`scene-enter ${index === currentIndex ? "" : "opacity-90"}`}
+              className={`group/scene relative scene-enter ${index === currentIndex ? "" : "opacity-90"}`}
             >
               <SceneBlock
                 scene={scene}
                 isActive={index === currentIndex}
                 collapseTools={collapseTools}
               />
+              {onComment && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onComment(index); }}
+                  className={`absolute -right-2 top-1 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border text-[10px] font-mono transition-all duration-150 ${
+                    count > 0
+                      ? "bg-terminal-blue border-terminal-blue text-white shadow-sm"
+                      : "bg-terminal-bg border-terminal-border text-terminal-dim hover:text-terminal-blue hover:border-terminal-blue/40 opacity-0 group-hover/scene:opacity-100"
+                  }`}
+                  title={count > 0 ? `${count} comment${count > 1 ? "s" : ""}` : "Add comment"}
+                >
+                  {"\uD83D\uDCAC"}
+                  {count > 0 && <span>{count}</span>}
+                </button>
+              )}
             </div>
           );
         }
@@ -359,6 +420,8 @@ function BatchedScenes({
             toolName={toolName}
             currentIndex={currentIndex}
             collapseTools={collapseTools}
+            annotationCounts={annotationCounts}
+            onComment={onComment}
           />
         );
       })}
@@ -371,13 +434,22 @@ function ToolBatch({
   toolName,
   currentIndex,
   collapseTools,
+  annotationCounts,
+  onComment,
 }: {
   batch: { scene: Scene; index: number }[];
   toolName: string;
   currentIndex: number;
   collapseTools: boolean;
+  annotationCounts?: Map<number, number>;
+  onComment?: (sceneIndex: number) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+
+  // Total comment count across all items in batch
+  const batchCommentCount = annotationCounts
+    ? batch.reduce((sum, { index }) => sum + (annotationCounts.get(index) || 0), 0)
+    : 0;
 
   // Collapsed view: always show summary
   const summaries = batch.map(({ scene }) => {
@@ -388,7 +460,7 @@ function ToolBatch({
   });
 
   return (
-    <div data-scene-index={batch[0].index}>
+    <div data-scene-index={batch[0].index} className="group/batch relative">
       {/* Collapsed summary — always visible */}
       <button
         onClick={() => setExpanded(!expanded)}
@@ -406,23 +478,55 @@ function ToolBatch({
           </span>
         )}
       </button>
+      {/* Batch-level comment button (visible when collapsed) */}
+      {onComment && !expanded && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onComment(batch[0].index); }}
+          className={`absolute -right-2 top-1 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border text-[10px] font-mono transition-all duration-150 ${
+            batchCommentCount > 0
+              ? "bg-terminal-blue border-terminal-blue text-white shadow-sm"
+              : "bg-terminal-bg border-terminal-border text-terminal-dim hover:text-terminal-blue hover:border-terminal-blue/40 opacity-0 group-hover/batch:opacity-100"
+          }`}
+          title={batchCommentCount > 0 ? `${batchCommentCount} comment${batchCommentCount > 1 ? "s" : ""}` : "Add comment"}
+        >
+          {"\uD83D\uDCAC"}
+          {batchCommentCount > 0 && <span>{batchCommentCount}</span>}
+        </button>
+      )}
 
-      {/* Expanded: show all individual tool calls */}
+      {/* Expanded: show all individual tool calls with per-scene comment buttons */}
       {expanded && (
         <div className="mt-1 ml-4 space-y-2 border-l border-terminal-border/30 pl-3">
-          {batch.map(({ scene, index }) => (
-            <div
-              key={index}
-              data-scene-index={index}
-              className={`scene-enter ${index === currentIndex ? "" : "opacity-90"}`}
-            >
-              <SceneBlock
-                scene={scene}
-                isActive={index === currentIndex}
-                collapseTools={collapseTools}
-              />
-            </div>
-          ))}
+          {batch.map(({ scene, index }) => {
+            const count = annotationCounts?.get(index) || 0;
+            return (
+              <div
+                key={index}
+                data-scene-index={index}
+                className={`group/scene relative scene-enter ${index === currentIndex ? "" : "opacity-90"}`}
+              >
+                <SceneBlock
+                  scene={scene}
+                  isActive={index === currentIndex}
+                  collapseTools={collapseTools}
+                />
+                {onComment && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onComment(index); }}
+                    className={`absolute -right-2 top-1 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border text-[10px] font-mono transition-all duration-150 ${
+                      count > 0
+                        ? "bg-terminal-blue border-terminal-blue text-white shadow-sm"
+                        : "bg-terminal-bg border-terminal-border text-terminal-dim hover:text-terminal-blue hover:border-terminal-blue/40 opacity-0 group-hover/scene:opacity-100"
+                    }`}
+                    title={count > 0 ? `${count} comment${count > 1 ? "s" : ""}` : "Add comment"}
+                  >
+                    {"\uD83D\uDCAC"}
+                    {count > 0 && <span>{count}</span>}
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

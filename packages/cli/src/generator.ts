@@ -36,8 +36,11 @@ export async function generateOutput(
 
   // Inject session data — escape </ to prevent browser from closing the script tag
   const jsonData = JSON.stringify(session).replace(/<\//g, "<\\/");
-  const dataScript = `<script>window.__VIBE_REPLAY_DATA__ = ${jsonData};</script>`;
-  const outputHtml = viewerHtml.replace("</head>", `${dataScript}\n</head>`);
+  const dataScript = `<script id="vibe-replay-data">window.__VIBE_REPLAY_DATA__ = ${jsonData};</script>`;
+  // Use lastIndexOf to find the ACTUAL </head> HTML tag, not a "</head>" string
+  // that may appear inside minified JS code within the viewer bundle.
+  const headIdx = viewerHtml.lastIndexOf("</head>");
+  const outputHtml = viewerHtml.slice(0, headIdx) + dataScript + "\n" + viewerHtml.slice(headIdx);
 
   // Update title
   const title = session.meta.title || session.meta.slug;

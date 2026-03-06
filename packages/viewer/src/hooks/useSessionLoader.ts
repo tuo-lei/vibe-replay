@@ -3,8 +3,13 @@ import type { ReplaySession } from "../types";
 
 type LoadState =
   | { status: "loading" }
-  | { status: "ready"; session: ReplaySession }
+  | { status: "ready"; session: ReplaySession; isReadOnly: boolean }
   | { status: "error"; message: string };
+
+interface LoadResult {
+  session: ReplaySession;
+  isReadOnly: boolean;
+}
 
 /**
  * Load session data from one of:
@@ -17,7 +22,7 @@ export function useSessionLoader(): LoadState {
 
   useEffect(() => {
     loadSession().then(
-      (session) => setState({ status: "ready", session }),
+      (result) => setState({ status: "ready", session: result.session, isReadOnly: result.isReadOnly }),
       (err) => setState({ status: "error", message: String(err.message || err) }),
     );
   }, []);
@@ -25,10 +30,10 @@ export function useSessionLoader(): LoadState {
   return state;
 }
 
-async function loadSession(): Promise<ReplaySession> {
+async function loadSession(): Promise<LoadResult> {
   // 1. Embedded data (from CLI generator)
   if (window.__VIBE_REPLAY_DATA__) {
-    return window.__VIBE_REPLAY_DATA__;
+    return { session: window.__VIBE_REPLAY_DATA__, isReadOnly: false };
   }
 
   const params = new URLSearchParams(window.location.search);
@@ -44,21 +49,21 @@ async function loadSession(): Promise<ReplaySession> {
     const session = await fetchJson(rawUrl);
     // Register replay in gallery (fire-and-forget)
     registerReplay(gistId, session).catch(() => {});
-    return session;
+    return { session, isReadOnly: true };
   }
 
-  // 3. URL parameter — fetch JSON from a remote URL
+  // 3. URL parameter — fetch JSON from a remote URL (read-only)
   const url = params.get("url");
   if (url) {
-    return await fetchJson(url);
+    return { session: await fetchJson(url), isReadOnly: true };
   }
 
-  // 3. Local file parameter — for dev mode
+  // 4. Local file parameter — for dev mode
   const file = params.get("file");
   if (file) {
     const resp = await fetch(file);
     if (!resp.ok) throw new Error(`Failed to load file: ${resp.status}`);
-    return (await resp.json()) as ReplaySession;
+    return { session: (await resp.json()) as ReplaySession, isReadOnly: false };
   }
 
   throw new Error(
