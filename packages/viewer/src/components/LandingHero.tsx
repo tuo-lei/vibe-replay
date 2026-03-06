@@ -100,7 +100,15 @@ export default function LandingHero({ session, onStart }: Props) {
 
       <div className="max-w-2xl w-full px-6 text-center space-y-5 md:space-y-8 z-10 shrink-0">
         {/* Title */}
-        <div className="space-y-2 md:space-y-3">
+        <div className="space-y-3 md:space-y-4">
+          <a
+            href="https://vibe-replay.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-block text-lg sm:text-xl font-mono font-bold hover:opacity-80 transition-opacity bg-gradient-to-r from-[#3fb950] to-[#58a6ff] bg-clip-text text-transparent"
+          >
+            vibe-replay
+          </a>
           <h2 className="text-2xl sm:text-3xl font-mono font-bold text-terminal-text leading-tight">
             {title}
           </h2>
@@ -172,6 +180,19 @@ export default function LandingHero({ session, onStart }: Props) {
           </div>
         </div>
       )}
+
+      {/* Explore link */}
+      <div className="px-6 py-4 z-10 shrink-0">
+        <a
+          href="https://vibe-replay.com/explore"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 text-xs font-mono text-terminal-dim hover:text-terminal-text transition-colors border border-terminal-border/40 rounded-full px-4 py-1.5 hover:border-terminal-border"
+        >
+          Explore more replays
+          <span className="text-terminal-green">{"\u2192"}</span>
+        </a>
+      </div>
 
       {/* Bottom spacer — shrinks to 0 when content exceeds viewport */}
       <div className="flex-1 min-h-0" />

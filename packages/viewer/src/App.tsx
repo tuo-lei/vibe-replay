@@ -73,9 +73,14 @@ export default function App() {
       <header className="border-b border-terminal-border/50 px-3 md:px-4 py-2 md:py-2.5 flex items-center justify-between shrink-0 bg-terminal-surface/30 safe-top">
         {/* Left: branding + project */}
         <div className="flex items-center gap-3 min-w-0">
-          <h1 className="text-sm font-mono font-bold text-terminal-green shrink-0">
+          <a
+            href="https://vibe-replay.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm font-mono font-bold shrink-0 hover:opacity-80 transition-opacity bg-gradient-to-r from-[#3fb950] to-[#58a6ff] bg-clip-text text-transparent"
+          >
             vibe-replay
-          </h1>
+          </a>
           <span className="hidden md:inline text-terminal-dim text-xs font-mono truncate">
             {meta.project}
           </span>
