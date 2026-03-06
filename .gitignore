@@ -20,6 +20,9 @@ plan/
 *.swp
 *.swo
 
+# Cloudflare
+cloudflare/.wrangler/
+
 # Environment
 .env
 .env.*
