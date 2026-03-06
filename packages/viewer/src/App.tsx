@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 import Player from "./components/Player";
 import { useSessionLoader } from "./hooks/useSessionLoader";
 import { useTheme } from "./hooks/useTheme";
@@ -25,6 +25,20 @@ export default function App() {
     () => session?.scenes.some((s) => s.type === "thinking") ?? false,
     [session],
   );
+
+  // Mobile filter dropdown
+  const [filterOpen, setFilterOpen] = useState(false);
+  const filterRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!filterOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (filterRef.current && !filterRef.current.contains(e.target as Node)) {
+        setFilterOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [filterOpen]);
 
   if (loadState.status === "loading") {
     return (
@@ -56,13 +70,13 @@ export default function App() {
 
   return (
     <div className="h-screen bg-terminal-bg flex flex-col overflow-hidden">
-      <header className="border-b border-terminal-border/50 px-4 py-2.5 flex items-center justify-between shrink-0 bg-terminal-surface/30 safe-top">
+      <header className="border-b border-terminal-border/50 px-3 md:px-4 py-2 md:py-2.5 flex items-center justify-between shrink-0 bg-terminal-surface/30 safe-top">
         {/* Left: branding + project */}
         <div className="flex items-center gap-3 min-w-0">
           <h1 className="text-sm font-mono font-bold text-terminal-green shrink-0">
             vibe-replay
           </h1>
-          <span className="text-terminal-dim text-xs font-mono truncate">
+          <span className="hidden md:inline text-terminal-dim text-xs font-mono truncate">
             {meta.project}
           </span>
           {meta.title && (
@@ -72,72 +86,110 @@ export default function App() {
           )}
         </div>
 
-        <div className="flex items-center gap-3 shrink-0">
-          {/* View controls — interactive, visually distinct */}
-          <div className="flex items-center gap-2">
-            {/* View mode: segmented control */}
-            <div className="flex items-center rounded-md overflow-hidden border border-terminal-border/60">
-              <button
-                onClick={() => { if (prefs.promptsOnly) togglePref("promptsOnly"); }}
-                className={`px-2.5 py-1 text-xs font-mono transition-colors ${
-                  !prefs.promptsOnly
-                    ? "bg-terminal-green/15 text-terminal-green"
-                    : "bg-terminal-surface text-terminal-dim hover:text-terminal-text"
-                }`}
-              >
-                All
-              </button>
-              <button
-                onClick={() => { if (!prefs.promptsOnly) togglePref("promptsOnly"); }}
-                className={`px-2.5 py-1 text-xs font-mono transition-colors ${
-                  prefs.promptsOnly
-                    ? "bg-terminal-green/15 text-terminal-green"
-                    : "bg-terminal-surface text-terminal-dim hover:text-terminal-text"
-                }`}
-              >
-                Prompts
-              </button>
-            </div>
-
-            {/* Tool collapse toggle — only relevant in All mode, hidden on mobile */}
-            {!prefs.promptsOnly && (
-              <button
-                onClick={() => togglePref("collapseAllTools")}
-                className={`hidden md:inline-flex px-2.5 py-1 text-xs font-mono rounded-md border transition-colors ${
-                  prefs.collapseAllTools
-                    ? "bg-terminal-orange/10 text-terminal-orange border-terminal-orange/30"
-                    : "bg-terminal-surface text-terminal-dim border-terminal-border/60 hover:text-terminal-text"
-                }`}
-              >
-                {prefs.collapseAllTools ? "Expand Tools" : "Collapse Tools"}
-              </button>
-            )}
-
-            {/* Thinking toggle — hidden on mobile */}
-            {hasThinking && !prefs.promptsOnly && (
-              <button
-                onClick={() => togglePref("hideThinking")}
-                className={`hidden md:inline-flex px-2.5 py-1 text-xs font-mono rounded-md border transition-colors ${
-                  prefs.hideThinking
-                    ? "bg-terminal-purple/10 text-terminal-purple border-terminal-purple/30"
-                    : "bg-terminal-surface text-terminal-dim border-terminal-border/60 hover:text-terminal-text"
-                }`}
-              >
-                {prefs.hideThinking ? "Show Thinking" : "Hide Thinking"}
-              </button>
-            )}
-
-            {/* Theme toggle */}
+        <div className="flex items-center gap-1.5 md:gap-3 shrink-0">
+          {/* View mode: segmented control */}
+          <div className="flex items-center rounded-md overflow-hidden border border-terminal-border/60">
             <button
-              onClick={toggleTheme}
-              className="w-8 h-8 flex items-center justify-center rounded-md bg-terminal-surface border border-terminal-border/60 hover:border-terminal-text transition-colors text-sm"
-              title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+              onClick={() => { if (prefs.promptsOnly) togglePref("promptsOnly"); }}
+              className={`px-2.5 py-1 text-xs font-mono transition-colors ${
+                !prefs.promptsOnly
+                  ? "bg-terminal-green/15 text-terminal-green"
+                  : "bg-terminal-surface text-terminal-dim hover:text-terminal-text"
+              }`}
             >
-              {theme === "dark" ? "\u263E" : "\u2600"}
+              All
+            </button>
+            <button
+              onClick={() => { if (!prefs.promptsOnly) togglePref("promptsOnly"); }}
+              className={`px-2.5 py-1 text-xs font-mono transition-colors ${
+                prefs.promptsOnly
+                  ? "bg-terminal-green/15 text-terminal-green"
+                  : "bg-terminal-surface text-terminal-dim hover:text-terminal-text"
+              }`}
+            >
+              Prompts
             </button>
           </div>
 
-          {/* Session info — plain text, hidden on mobile */}
+          {/* Desktop: inline filter buttons */}
+          {!prefs.promptsOnly && (
+            <button
+              onClick={() => togglePref("collapseAllTools")}
+              className={`hidden md:inline-flex px-2.5 py-1 text-xs font-mono rounded-md border transition-colors ${
+                prefs.collapseAllTools
+                  ? "bg-terminal-orange/10 text-terminal-orange border-terminal-orange/30"
+                  : "bg-terminal-surface text-terminal-dim border-terminal-border/60 hover:text-terminal-text"
+              }`}
+            >
+              {prefs.collapseAllTools ? "Expand Tools" : "Collapse Tools"}
+            </button>
+          )}
+          {hasThinking && !prefs.promptsOnly && (
+            <button
+              onClick={() => togglePref("hideThinking")}
+              className={`hidden md:inline-flex px-2.5 py-1 text-xs font-mono rounded-md border transition-colors ${
+                prefs.hideThinking
+                  ? "bg-terminal-purple/10 text-terminal-purple border-terminal-purple/30"
+                  : "bg-terminal-surface text-terminal-dim border-terminal-border/60 hover:text-terminal-text"
+              }`}
+            >
+              {prefs.hideThinking ? "Show Thinking" : "Hide Thinking"}
+            </button>
+          )}
+
+          {/* Mobile: filter dropdown */}
+          {!prefs.promptsOnly && (
+            <div ref={filterRef} className="relative md:hidden">
+              <button
+                onClick={() => setFilterOpen((v) => !v)}
+                className={`w-8 h-8 flex items-center justify-center rounded-md border transition-colors text-xs ${
+                  prefs.collapseAllTools || prefs.hideThinking
+                    ? "bg-terminal-orange/10 text-terminal-orange border-terminal-orange/30"
+                    : "bg-terminal-surface text-terminal-dim border-terminal-border/60"
+                }`}
+                title="View filters"
+              >
+                {"\u2699"}
+              </button>
+              {filterOpen && (
+                <div className="absolute right-0 top-full mt-1.5 w-44 bg-terminal-bg border border-terminal-border rounded-lg shadow-xl z-50 py-1 overflow-hidden">
+                  <button
+                    onClick={() => { togglePref("collapseAllTools"); setFilterOpen(false); }}
+                    className={`w-full text-left px-3 py-2.5 text-xs font-mono transition-colors ${
+                      prefs.collapseAllTools
+                        ? "text-terminal-orange bg-terminal-orange/5"
+                        : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50"
+                    }`}
+                  >
+                    {prefs.collapseAllTools ? "\u2713 Collapse Tools" : "Collapse Tools"}
+                  </button>
+                  {hasThinking && (
+                    <button
+                      onClick={() => { togglePref("hideThinking"); setFilterOpen(false); }}
+                      className={`w-full text-left px-3 py-2.5 text-xs font-mono transition-colors ${
+                        prefs.hideThinking
+                          ? "text-terminal-purple bg-terminal-purple/5"
+                          : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50"
+                      }`}
+                    >
+                      {prefs.hideThinking ? "\u2713 Hide Thinking" : "Hide Thinking"}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Theme toggle */}
+          <button
+            onClick={toggleTheme}
+            className="w-8 h-8 flex items-center justify-center rounded-md bg-terminal-surface border border-terminal-border/60 hover:border-terminal-text transition-colors text-sm"
+            title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+          >
+            {theme === "dark" ? "\u263E" : "\u2600"}
+          </button>
+
+          {/* Session info — desktop only */}
           <div className="hidden md:flex items-center gap-1.5 text-xs font-mono text-terminal-dim">
             {meta.model && (
               <span className="text-terminal-text/60">{meta.model}</span>
