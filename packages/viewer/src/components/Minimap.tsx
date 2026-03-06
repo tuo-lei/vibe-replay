@@ -39,6 +39,8 @@ export default function Minimap({ scenes, currentIndex, onSeek }: Props) {
           textBlocks: 0,
           endIndex: i,
         };
+      } else if (scene.type === "compaction-summary") {
+        // Compaction summaries don't create new turns in the minimap
       } else if (current) {
         current.endIndex = i;
         if (scene.type === "tool-call") {

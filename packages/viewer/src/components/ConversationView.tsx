@@ -2,6 +2,7 @@ import { useMemo, useState, useRef, useEffect, memo } from "react";
 import type { Scene } from "../types";
 import type { ViewPrefs } from "../hooks/useViewPrefs";
 import UserPromptBlock from "./UserPromptBlock";
+import CompactionSummaryBlock from "./CompactionSummaryBlock";
 import ThinkingBlock from "./ThinkingBlock";
 import TextResponseBlock from "./TextResponseBlock";
 import ToolCallBlock from "./ToolCallBlock";
@@ -18,7 +19,7 @@ interface Props {
 }
 
 interface TurnGroup {
-  type: "user" | "assistant";
+  type: "user" | "assistant" | "compaction";
   timestamp?: string;
   scenes: { scene: Scene; index: number }[];
 }
@@ -55,10 +56,10 @@ export default function ConversationView({
 
     for (let i = 0; i < scenes.length; i++) {
       const scene = scenes[i];
-      if (scene.type === "user-prompt") {
+      if (scene.type === "user-prompt" || scene.type === "compaction-summary") {
         if (current && current.scenes.length > 0) result.push(current);
         result.push({
-          type: "user",
+          type: scene.type === "compaction-summary" ? "compaction" : "user",
           timestamp: scene.timestamp,
           scenes: [{ scene, index: i }],
         });
@@ -85,7 +86,7 @@ export default function ConversationView({
       return allGroups
         .filter(
           (g) =>
-            g.type === "user" && g.scenes[0].index < visibleCount,
+            (g.type === "user" || g.type === "compaction") && g.scenes[0].index < visibleCount,
         );
     }
     return allGroups.filter((g) => g.scenes[0].index < visibleCount);
@@ -280,6 +281,36 @@ const GroupCard = memo(function GroupCard({
             />
           </div>
         ))}
+      </div>
+    );
+  }
+
+  if (group.type === "compaction") {
+    const scene = visibleScenes[0]?.scene;
+    if (!scene || scene.type !== "compaction-summary") return null;
+    return (
+      <div
+        id={`scene-${firstIndex}`}
+        data-scene-index={firstIndex}
+        className={`group relative rounded-lg px-4 py-3 transition-colors duration-200 ${
+          groupHasFocusedTarget
+            ? "scene-nav-focused bg-terminal-dim/20 border-2 border-terminal-dim ring-2 ring-terminal-dim/60"
+            : groupHasCurrent
+              ? "bg-terminal-dim/10 border-2 border-terminal-dim/40"
+              : "bg-terminal-dim/[0.03] border border-terminal-border/30 border-dashed"
+        }`}
+      >
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-[11px] font-mono font-semibold text-terminal-dim uppercase tracking-wider">
+            Context Compaction
+          </span>
+          {group.timestamp && (
+            <span className="text-[11px] font-mono text-terminal-dim/60">
+              {formatTime(group.timestamp)}
+            </span>
+          )}
+        </div>
+        <CompactionSummaryBlock content={scene.content} isActive={firstIndex === currentIndex} />
       </div>
     );
   }
@@ -561,6 +592,8 @@ const SceneBlock = memo(function SceneBlock({
           isActive={isActive}
         />
       );
+    case "compaction-summary":
+      return <CompactionSummaryBlock content={scene.content} isActive={isActive} />;
     case "thinking":
       return <ThinkingBlock content={scene.content} isActive={isActive} />;
     case "text-response":

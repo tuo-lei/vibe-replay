@@ -27,13 +27,21 @@ export function transformToReplay(
       const imageBlock = turn.blocks.find((b) => (b as any).type === "_user_images") as any;
       const images: string[] | undefined = imageBlock?.images;
       if (content.trim() || (images && images.length > 0)) {
-        scenes.push({
-          type: "user-prompt",
-          content: content.trim() ? redactSecrets(redactPath(content)) : "(image)",
-          timestamp: turn.timestamp,
-          ...(images && images.length > 0 ? { images } : {}),
-        });
-        userPrompts++;
+        if (turn.subtype === "compaction-summary") {
+          scenes.push({
+            type: "compaction-summary",
+            content: redactSecrets(redactPath(content)),
+            timestamp: turn.timestamp,
+          });
+        } else {
+          scenes.push({
+            type: "user-prompt",
+            content: content.trim() ? redactSecrets(redactPath(content)) : "(image)",
+            timestamp: turn.timestamp,
+            ...(images && images.length > 0 ? { images } : {}),
+          });
+          userPrompts++;
+        }
       }
       continue;
     }

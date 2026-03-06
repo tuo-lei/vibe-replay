@@ -24,6 +24,8 @@ function scenePreview(scene: Scene): { label: string; text: string } {
       const first = scene.content.split("\n").find((l) => l.trim()) || "";
       return { label: "You", text: first.slice(0, 100) };
     }
+    case "compaction-summary":
+      return { label: "Compaction", text: scene.content.slice(0, 80) };
     case "thinking":
       return { label: "Thinking", text: scene.content.slice(0, 80) };
     case "text-response": {
@@ -41,6 +43,7 @@ function scenePreview(scene: Scene): { label: string; text: string } {
 function sceneLabelColor(scene: Scene): string {
   switch (scene.type) {
     case "user-prompt": return "text-terminal-green";
+    case "compaction-summary": return "text-terminal-dim";
     case "thinking": return "text-terminal-purple";
     case "text-response": return "text-terminal-blue";
     case "tool-call": return "text-terminal-orange";

@@ -12,6 +12,8 @@ function sceneColor(type: Scene["type"]): string {
   switch (type) {
     case "user-prompt":
       return "#3fb950";
+    case "compaction-summary":
+      return "#666666";
     case "thinking":
       return "#bc8cff";
     case "text-response":
@@ -43,6 +45,7 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
       // Use the most "interesting" type in the bucket (user > tool > text > thinking)
       const typePriority: Record<Scene["type"], number> = {
         "user-prompt": 4,
+        "compaction-summary": 1,
         "tool-call": 3,
         "text-response": 2,
         thinking: 1,

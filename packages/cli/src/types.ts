@@ -20,6 +20,7 @@ export interface SessionInfo {
 
 export interface ParsedTurn {
   role: "user" | "assistant";
+  subtype?: string;
   messageId?: string;
   model?: string;
   timestamp?: string;
@@ -63,6 +64,7 @@ export type ToolResultContent =
 
 export type Scene =
   | { type: "user-prompt"; content: string; timestamp?: string; images?: string[] }
+  | { type: "compaction-summary"; content: string; timestamp?: string }
   | { type: "thinking"; content: string; timestamp?: string }
   | { type: "text-response"; content: string; timestamp?: string }
   | {

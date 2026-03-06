@@ -90,21 +90,29 @@ export async function parseClaudeCodeSession(filePaths: string | string[]): Prom
 
     const { role, content: msgContent, id: msgId } = obj.message;
 
-    // User message with string content = human prompt
+    // User message with string content = human prompt (or compaction summary)
     if (role === "user" && typeof msgContent === "string") {
-      userTurns.push({ role: "user", timestamp: obj.timestamp, blocks: [{ type: "text", text: msgContent }] });
+      const isCompaction = msgContent.startsWith("This session is being continued from a previous conversation");
+      userTurns.push({
+        role: "user",
+        ...(isCompaction ? { subtype: "compaction-summary" } : {}),
+        timestamp: obj.timestamp,
+        blocks: [{ type: "text", text: msgContent }],
+      });
       continue;
     }
 
     // User message with array content (may contain text + images, or tool_results)
     if (role === "user" && Array.isArray(msgContent)) {
+      // ToolSearch automated responses have sourceToolAssistantUUID on the raw object.
+      // Process tool_result blocks for result matching, but skip emitting a user turn.
+      const isToolSearchResponse = !!(obj as any).sourceToolAssistantUUID;
+
       const textParts: string[] = [];
       const userImages: string[] = [];
-      let hasToolResult = false;
 
       for (const block of msgContent as ContentBlock[]) {
         if (block.type === "tool_result") {
-          hasToolResult = true;
           const resultText = extractToolResultText(block);
           toolResults.set(block.tool_use_id, resultText);
           const images = extractImages(block);
@@ -123,8 +131,8 @@ export async function parseClaudeCodeSession(filePaths: string | string[]): Prom
         }
       }
 
-      // If user message has text or images (not just tool_results), emit as user turn
-      if (textParts.length > 0 || userImages.length > 0) {
+      // Skip emitting user turn for automated ToolSearch responses
+      if (!isToolSearchResponse && (textParts.length > 0 || userImages.length > 0)) {
         const blocks: ContentBlock[] = textParts.map((t) => ({ type: "text", text: t } as ContentBlock));
         if (userImages.length > 0) {
           blocks.push({ type: "_user_images", images: userImages } as any);

@@ -1,5 +1,6 @@
 export type Scene =
   | { type: "user-prompt"; content: string; timestamp?: string; images?: string[] }
+  | { type: "compaction-summary"; content: string; timestamp?: string }
   | { type: "thinking"; content: string; timestamp?: string }
   | { type: "text-response"; content: string; timestamp?: string }
   | {
