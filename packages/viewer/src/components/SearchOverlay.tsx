@@ -137,12 +137,12 @@ export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) 
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]"
+      className="fixed inset-0 z-50 flex items-start justify-center pt-[8vh] sm:pt-[15vh]"
       onClick={onClose}
     >
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
       <div
-        className="relative w-full max-w-xl bg-terminal-bg border border-terminal-border rounded-xl shadow-2xl overflow-hidden"
+        className="relative w-full max-w-xl mx-3 sm:mx-0 bg-terminal-bg border border-terminal-border rounded-xl shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >

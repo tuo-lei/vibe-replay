@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef, useCallback } from "react";
 import type { Scene } from "../types";
 
 interface Props {
@@ -63,22 +63,28 @@ export default function Timeline({ scenes, currentIndex, onSeek }: Props) {
   const progressPct =
     scenes.length > 0 ? ((currentIndex + 1) / scenes.length) * 100 : 0;
 
+  const barRef = useRef<HTMLDivElement>(null);
+
+  const handleSeekClick = useCallback((e: React.MouseEvent) => {
+    const bar = barRef.current;
+    if (!bar) return;
+    const rect = bar.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const pct = Math.max(0, Math.min(1, x / rect.width));
+    const idx = Math.floor(pct * scenes.length);
+    onSeek(idx);
+  }, [scenes.length, onSeek]);
+
   return (
-    <div className="px-4 pt-2">
+    <div className="px-4 pt-3 pb-1 cursor-pointer" onClick={handleSeekClick}>
       <div
-        className="relative flex h-2 rounded overflow-hidden cursor-pointer bg-terminal-border/30"
-        onClick={(e) => {
-          const rect = e.currentTarget.getBoundingClientRect();
-          const x = e.clientX - rect.left;
-          const pct = x / rect.width;
-          const idx = Math.floor(pct * scenes.length);
-          onSeek(idx);
-        }}
+        ref={barRef}
+        className="relative flex h-2 rounded overflow-hidden bg-terminal-border/30"
       >
         {segments.map((seg, i) => (
           <div
             key={i}
-            className="flex-1 transition-opacity duration-150 hover:opacity-80"
+            className="flex-1 transition-opacity duration-150"
             style={{
               backgroundColor: sceneColor(seg.type),
               opacity: seg.startIndex <= currentIndex ? 1 : 0.15,

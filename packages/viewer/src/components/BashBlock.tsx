@@ -11,7 +11,7 @@ export default memo(function BashBlock({ command, stdout, isActive }: Props) {
   const hasOutput = stdout.trim().length > 0;
 
   return (
-    <div className="border border-terminal-border rounded-lg overflow-hidden bg-[#0a0e14]">
+    <div className="border border-terminal-border rounded-lg overflow-hidden bg-terminal-surface">
       <button
         onClick={() => hasOutput && setExpanded(!expanded)}
         className="w-full flex items-center gap-2 px-3 py-2 bg-terminal-surface/50 hover:bg-terminal-border/20 transition-colors text-left border-b border-terminal-border"

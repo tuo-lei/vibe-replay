@@ -3,7 +3,7 @@ import type { ReplaySession } from "../types";
 
 interface Props {
   session: ReplaySession;
-  onStart: () => void;
+  onStart: (autoPlay?: boolean) => void;
 }
 
 function formatDuration(ms?: number): string {
@@ -48,19 +48,33 @@ export default function LandingHero({ session, onStart }: Props) {
 
   // Scroll/swipe down triggers start
   const firedRef = useRef(false);
+  const touchStartYRef = useRef(0);
   useEffect(() => {
-    const handler = (e: WheelEvent | TouchEvent) => {
+    const handleWheel = (e: WheelEvent) => {
       if (firedRef.current) return;
-      // Only trigger on downward scroll
-      if (e instanceof WheelEvent && e.deltaY <= 0) return;
-      firedRef.current = true;
-      onStart();
+      if (e.deltaY > 0) {
+        firedRef.current = true;
+        onStart(false);
+      }
     };
-    window.addEventListener("wheel", handler, { passive: true });
-    window.addEventListener("touchmove", handler, { passive: true });
+    const handleTouchStart = (e: TouchEvent) => {
+      touchStartYRef.current = e.touches[0].clientY;
+    };
+    const handleTouchMove = (e: TouchEvent) => {
+      if (firedRef.current) return;
+      const deltaY = touchStartYRef.current - e.touches[0].clientY;
+      if (deltaY > 15) {
+        firedRef.current = true;
+        onStart(false);
+      }
+    };
+    window.addEventListener("wheel", handleWheel, { passive: true });
+    window.addEventListener("touchstart", handleTouchStart, { passive: true });
+    window.addEventListener("touchmove", handleTouchMove, { passive: true });
     return () => {
-      window.removeEventListener("wheel", handler);
-      window.removeEventListener("touchmove", handler);
+      window.removeEventListener("wheel", handleWheel);
+      window.removeEventListener("touchstart", handleTouchStart);
+      window.removeEventListener("touchmove", handleTouchMove);
     };
   }, [onStart]);
 
@@ -77,13 +91,24 @@ export default function LandingHero({ session, onStart }: Props) {
   }, [onStart]);
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center relative overflow-hidden">
+    <div className="flex-1 flex flex-col items-center overflow-y-auto relative">
       {/* Background glow */}
       <div className="absolute inset-0 bg-gradient-to-b from-terminal-green/[0.03] via-transparent to-transparent pointer-events-none" />
 
-      <div className="max-w-2xl w-full px-6 text-center space-y-8 z-10">
+      {/* Top spacer — shrinks to 0 when content exceeds viewport */}
+      <div className="flex-1 min-h-0" />
+
+      <div className="max-w-2xl w-full px-6 text-center space-y-5 md:space-y-8 z-10 shrink-0">
         {/* Title */}
-        <div className="space-y-3">
+        <div className="space-y-3 md:space-y-4">
+          <a
+            href="https://vibe-replay.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-block text-lg sm:text-xl font-mono font-bold hover:opacity-80 transition-opacity bg-gradient-to-r from-[#3fb950] to-[#58a6ff] bg-clip-text text-transparent"
+          >
+            vibe-replay
+          </a>
           <h2 className="text-2xl sm:text-3xl font-mono font-bold text-terminal-text leading-tight">
             {title}
           </h2>
@@ -98,9 +123,13 @@ export default function LandingHero({ session, onStart }: Props) {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-lg mx-auto">
           <StatPill label="Turns" value={meta.stats.userPrompts} color="text-terminal-green" />
           <StatPill label="Tool Calls" value={meta.stats.toolCalls} color="text-terminal-orange" />
-          <StatPill label="Files" value={stats.filesModified} color="text-terminal-blue" />
           {duration ? (
             <StatPill label="Duration" value={duration} color="text-terminal-text" />
+          ) : (
+            <StatPill label="Files" value={stats.filesModified} color="text-terminal-blue" />
+          )}
+          {meta.stats.costEstimate !== undefined ? (
+            <StatPill label="Cost" value={`$${meta.stats.costEstimate < 0.01 ? meta.stats.costEstimate.toFixed(4) : meta.stats.costEstimate.toFixed(2)}`} color="text-terminal-green" />
           ) : (
             <StatPill label="Scenes" value={meta.stats.sceneCount} color="text-terminal-text" />
           )}
@@ -127,9 +156,9 @@ export default function LandingHero({ session, onStart }: Props) {
         </button>
       </div>
 
-      {/* First prompt teaser at the bottom */}
+      {/* First prompt teaser — normal flow, not absolute */}
       {firstPrompt && (
-        <div className="absolute bottom-0 left-0 right-0 px-6 pb-6">
+        <div className="w-full px-6 mt-6 md:mt-8 pb-6 z-10 shrink-0">
           <div
             onClick={onStart}
             className="max-w-2xl mx-auto cursor-pointer group"
@@ -151,6 +180,22 @@ export default function LandingHero({ session, onStart }: Props) {
           </div>
         </div>
       )}
+
+      {/* Explore link */}
+      <div className="px-6 py-4 z-10 shrink-0">
+        <a
+          href="https://vibe-replay.com/explore"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 text-xs font-mono text-terminal-dim hover:text-terminal-text transition-colors border border-terminal-border/40 rounded-full px-4 py-1.5 hover:border-terminal-border"
+        >
+          Explore more replays
+          <span className="text-terminal-green">{"\u2192"}</span>
+        </a>
+      </div>
+
+      {/* Bottom spacer — shrinks to 0 when content exceeds viewport */}
+      <div className="flex-1 min-h-0" />
     </div>
   );
 }
