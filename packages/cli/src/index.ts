@@ -15,13 +15,13 @@ const DEV_MENU_ENABLED = process.env.VIBE_REPLAY_DEV_MENU === "1";
 program
   .name("vibe-replay")
   .description("AI Coding Session Replay & Sharing Tool")
-  .version("0.0.2")
+  .version("0.0.3")
   .option("-s, --session <path>", "Path to a specific JSONL session file")
   .option("-p, --provider <name>", "Provider name (default: claude-code)", "claude-code")
   .option("-t, --title <name>", "Custom title for the replay (shown on landing page & shared links)")
   .option("--dev", "Write demo.json to viewer public/ for HMR development and exit")
   .action(async (opts) => {
-    console.log(chalk.bold.cyan("\n  vibe-replay") + chalk.dim(" v0.0.2\n"));
+    console.log(chalk.bold.cyan("\n  vibe-replay") + chalk.dim(" v0.0.3\n"));
 
     let sessionInfo: SessionInfo | undefined;
     let sessionPaths: string | string[];
