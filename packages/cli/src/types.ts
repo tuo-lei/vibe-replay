@@ -76,6 +76,17 @@ export type Scene =
       images?: string[];
     };
 
+export interface Annotation {
+  id: string;
+  sceneIndex: number;
+  selectedText?: string;
+  body: string;
+  author: string;
+  createdAt: string;
+  updatedAt: string;
+  resolved: boolean;
+}
+
 export interface ReplaySession {
   meta: {
     sessionId: string;
@@ -94,7 +105,20 @@ export interface ReplaySession {
       toolCalls: number;
       thinkingBlocks?: number;
       durationMs?: number;
+      tokenUsage?: {
+        inputTokens: number;
+        outputTokens: number;
+        cacheCreationTokens: number;
+        cacheReadTokens: number;
+      };
+      costEstimate?: number;
     };
+    compactions?: Array<{
+      timestamp: string;
+      trigger: string;
+      preTokens?: number;
+    }>;
   };
   scenes: Scene[];
+  annotations?: Annotation[];
 }
