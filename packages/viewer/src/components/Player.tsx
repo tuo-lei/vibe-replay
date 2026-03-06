@@ -3,6 +3,7 @@ import type { ReplaySession } from "../types";
 import type { ViewPrefs } from "../hooks/useViewPrefs";
 import { usePlayback } from "../hooks/usePlayback";
 import { useAnnotations } from "../hooks/useAnnotations";
+import type { ViewerMode } from "../hooks/useSessionLoader";
 import Timeline from "./Timeline";
 import Controls from "./Controls";
 import ConversationView from "./ConversationView";
@@ -15,7 +16,7 @@ import AnnotationPanel from "./AnnotationPanel";
 interface Props {
   session: ReplaySession;
   viewPrefs: ViewPrefs;
-  isReadOnly?: boolean;
+  viewerMode?: ViewerMode;
 }
 
 function flashJumpTarget(el: HTMLElement) {
@@ -28,7 +29,8 @@ function flashJumpTarget(el: HTMLElement) {
   }, 900);
 }
 
-export default function Player({ session, viewPrefs, isReadOnly = false }: Props) {
+export default function Player({ session, viewPrefs, viewerMode = "embedded" }: Props) {
+  const isReadOnly = viewerMode === "readonly";
   const [landed, setLanded] = useState(false);
   const [navFocusIndex, setNavFocusIndex] = useState<number | undefined>(undefined);
   const [navJumpSeq, setNavJumpSeq] = useState(0);
@@ -47,7 +49,7 @@ export default function Player({ session, viewPrefs, isReadOnly = false }: Props
     return false;
   });
   const [commentTargetScene, setCommentTargetScene] = useState<number | null>(null);
-  const annotationActions = useAnnotations(session);
+  const annotationActions = useAnnotations(session, viewerMode);
 
   const {
     state,

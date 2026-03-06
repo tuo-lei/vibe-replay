@@ -1,5 +1,6 @@
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import type { Annotation, ReplaySession } from "../types";
+import type { ViewerMode } from "./useSessionLoader";
 
 export interface AnnotationActions {
   annotations: Annotation[];
@@ -12,6 +13,12 @@ export interface AnnotationActions {
   canSaveHtml: boolean;
   downloadHtml: () => void;
   downloadJson: () => void;
+  /** Editor mode: publish to gist via server API */
+  publishGist: (() => Promise<{ gistUrl: string; viewerUrl: string }>) | null;
+  /** Editor mode: export HTML via server API */
+  exportHtml: (() => Promise<string>) | null;
+  gistPublishing: boolean;
+  htmlExporting: boolean;
 }
 
 const LS_PREFIX = "vibe-replay-annotations-";
@@ -20,41 +27,63 @@ function storageKey(sessionId: string): string {
   return LS_PREFIX + sessionId;
 }
 
-export function useAnnotations(session: ReplaySession): AnnotationActions {
+export function useAnnotations(
+  session: ReplaySession,
+  mode: ViewerMode = "embedded",
+): AnnotationActions {
   const sessionId = session.meta.sessionId;
+  const isEditor = mode === "editor";
 
-  // Save HTML only works from self-contained production builds (data embedded inline).
-  // In dev mode (?file=), document.documentElement.outerHTML captures Vite dev scripts
-  // that won't work standalone. Use Export JSON instead.
-  const canSaveHtml = !!window.__VIBE_REPLAY_DATA__;
+  // Save HTML only works from self-contained production builds (data embedded inline)
+  // or in editor mode (server generates it).
+  const canSaveHtml = !!window.__VIBE_REPLAY_DATA__ || isEditor;
 
   // Initialize from embedded data, then overlay localStorage draft
   const [annotations, setAnnotations] = useState<Annotation[]>(() => {
     const embedded = session.annotations ?? [];
+    if (isEditor) return embedded; // Editor mode: server is source of truth
     try {
       const draft = localStorage.getItem(storageKey(sessionId));
       if (draft) {
         const parsed = JSON.parse(draft) as Annotation[];
-        // Draft takes precedence if it has content
         if (parsed.length > 0 || embedded.length === 0) return parsed;
       }
     } catch { /* ignore */ }
     return embedded;
   });
 
-  // Track whether we've diverged from embedded
+  // Track whether we've diverged from embedded/server state
   const [savedSnapshot, setSavedSnapshot] = useState(() =>
     JSON.stringify(session.annotations ?? []),
   );
 
   const hasUnsaved = JSON.stringify(annotations) !== savedSnapshot;
 
-  // Autosave to localStorage on changes
+  // Autosave: localStorage for embedded/readonly, API for editor
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
+    if (isEditor) {
+      // Debounced save to server API
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        fetch("/api/annotations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(annotations),
+        }).then(() => {
+          setSavedSnapshot(JSON.stringify(annotations));
+        }).catch(() => { /* silent */ });
+      }, 1000);
+      return () => {
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      };
+    }
+    // Non-editor: save to localStorage
     try {
       localStorage.setItem(storageKey(sessionId), JSON.stringify(annotations));
     } catch { /* quota exceeded — silent */ }
-  }, [annotations, sessionId]);
+  }, [annotations, sessionId, isEditor]);
 
   const annotatedScenes = useMemo(
     () => new Set(annotations.map((a) => a.sceneIndex)),
@@ -96,24 +125,23 @@ export function useAnnotations(session: ReplaySession): AnnotationActions {
   }, []);
 
   const downloadHtml = useCallback(() => {
+    if (isEditor) return; // Editor mode uses exportHtml instead
+
     // Build the updated data assignment (escape </ for safe embedding in <script>)
     const updatedSession: ReplaySession = { ...session, annotations };
     const jsonData = JSON.stringify(updatedSession).replace(/<\//g, "<\\/");
     const dataAssignment = "window.__VIBE_REPLAY_DATA__ = " + jsonData + ";";
 
     // Use DOM manipulation to update the data script — no fragile regex needed.
-    // generator.ts injects <script id="vibe-replay-data">, so we can find it by ID.
     const dataEl = document.getElementById("vibe-replay-data");
     if (dataEl) {
-      // Swap content, serialize, restore (so the running page isn't affected)
       const original = dataEl.textContent;
       dataEl.textContent = dataAssignment;
       const updatedHtml = "<!DOCTYPE html>\n" + document.documentElement.outerHTML;
       dataEl.textContent = original;
       triggerDownload(updatedHtml);
     } else {
-      // Legacy fallback for HTML generated before the id attribute was added:
-      // Insert a new identified script into <head>, serialize, then remove it.
+      // Legacy fallback
       const script = document.createElement("script");
       script.id = "vibe-replay-data";
       script.textContent = dataAssignment;
@@ -135,12 +163,11 @@ export function useAnnotations(session: ReplaySession): AnnotationActions {
       URL.revokeObjectURL(url);
     }
 
-    // Mark as saved
     setSavedSnapshot(JSON.stringify(annotations));
     try {
       localStorage.removeItem(storageKey(sessionId));
     } catch { /* ignore */ }
-  }, [session, annotations, sessionId]);
+  }, [session, annotations, sessionId, isEditor]);
 
   const downloadJson = useCallback(() => {
     const updatedSession: ReplaySession = { ...session, annotations };
@@ -155,12 +182,65 @@ export function useAnnotations(session: ReplaySession): AnnotationActions {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 
-    // Mark as saved
     setSavedSnapshot(JSON.stringify(annotations));
     try {
       localStorage.removeItem(storageKey(sessionId));
     } catch { /* ignore */ }
   }, [session, annotations, sessionId]);
 
-  return { annotations, annotatedScenes, annotationCounts, add, update, remove, hasUnsaved, canSaveHtml, downloadHtml, downloadJson };
+  // Editor mode: server-side gist publishing
+  const [gistPublishing, setGistPublishing] = useState(false);
+  const publishGist = isEditor
+    ? async () => {
+        setGistPublishing(true);
+        try {
+          // Ensure latest annotations are saved first
+          await fetch("/api/annotations", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(annotations),
+          });
+          const resp = await fetch("/api/publish/gist", { method: "POST" });
+          if (!resp.ok) {
+            const err = await resp.text();
+            throw new Error(err || `Server error: ${resp.status}`);
+          }
+          const result = await resp.json();
+          setSavedSnapshot(JSON.stringify(annotations));
+          return result as { gistUrl: string; viewerUrl: string };
+        } finally {
+          setGistPublishing(false);
+        }
+      }
+    : null;
+
+  // Editor mode: server-side HTML export
+  const [htmlExporting, setHtmlExporting] = useState(false);
+  const exportHtml = isEditor
+    ? async () => {
+        setHtmlExporting(true);
+        try {
+          await fetch("/api/annotations", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(annotations),
+          });
+          const resp = await fetch("/api/export/html", { method: "POST" });
+          if (!resp.ok) throw new Error(`Export failed: ${resp.status}`);
+          const { path } = await resp.json();
+          setSavedSnapshot(JSON.stringify(annotations));
+          return path as string;
+        } finally {
+          setHtmlExporting(false);
+        }
+      }
+    : null;
+
+  return {
+    annotations, annotatedScenes, annotationCounts,
+    add, update, remove, hasUnsaved, canSaveHtml,
+    downloadHtml, downloadJson,
+    publishGist, exportHtml,
+    gistPublishing, htmlExporting,
+  };
 }

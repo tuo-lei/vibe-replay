@@ -55,9 +55,20 @@ export default function AnnotationPanel({
   onClearAddingTarget,
   readOnly = false,
 }: Props) {
-  const { annotations, add, update, remove, hasUnsaved, canSaveHtml, downloadHtml, downloadJson } = actions;
+  const { annotations, add, update, remove, hasUnsaved, canSaveHtml, downloadHtml, downloadJson, publishGist, exportHtml, gistPublishing, htmlExporting } = actions;
   const [internalAdding, setInternalAdding] = useState<number | null>(null);
   const [newBody, setNewBody] = useState("");
+  const [statusMsg, setStatusMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [ghAvailable, setGhAvailable] = useState<boolean | null>(null);
+
+  // Check gh status in editor mode
+  useEffect(() => {
+    if (!publishGist) return;
+    fetch("/api/gh-status")
+      .then((r) => r.json())
+      .then((data) => setGhAvailable(data.available ?? false))
+      .catch(() => setGhAvailable(false));
+  }, [publishGist]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editBody, setEditBody] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -261,15 +272,63 @@ export default function AnnotationPanel({
         )}
       </div>
 
-      {/* Footer: Save/export buttons — always visible when annotations exist */}
+      {/* Footer: Save/export/publish buttons */}
       {!readOnly && annotations.length > 0 && (
         <div className="shrink-0 border-t border-terminal-border/50 px-3 py-2 space-y-1.5">
-          {hasUnsaved && (
+          {hasUnsaved && !publishGist && (
             <div className="text-[9px] font-mono text-terminal-orange text-center mb-1">
               Unsaved changes
             </div>
           )}
-          {canSaveHtml ? (
+          {statusMsg && (
+            <div className={`text-[9px] font-mono text-center mb-1 ${statusMsg.type === "success" ? "text-terminal-green" : "text-terminal-red"}`}>
+              {statusMsg.text}
+            </div>
+          )}
+
+          {/* Editor mode: server-side actions */}
+          {exportHtml && (
+            <button
+              onClick={async () => {
+                setStatusMsg(null);
+                try {
+                  const path = await exportHtml();
+                  setStatusMsg({ type: "success", text: `Saved: ${path}` });
+                } catch (e: any) {
+                  setStatusMsg({ type: "error", text: e.message });
+                }
+              }}
+              disabled={htmlExporting}
+              className="w-full px-2 py-1.5 text-[10px] font-mono bg-terminal-green/15 text-terminal-green rounded hover:bg-terminal-green/25 transition-colors text-center border border-terminal-green/30 disabled:opacity-50"
+            >
+              {htmlExporting ? "Exporting..." : "Export HTML"}
+            </button>
+          )}
+          {publishGist && ghAvailable && (
+            <button
+              onClick={async () => {
+                setStatusMsg(null);
+                try {
+                  const result = await publishGist();
+                  setStatusMsg({ type: "success", text: result.viewerUrl });
+                } catch (e: any) {
+                  setStatusMsg({ type: "error", text: e.message });
+                }
+              }}
+              disabled={gistPublishing}
+              className="w-full px-2 py-1.5 text-[10px] font-mono bg-terminal-purple/15 text-terminal-purple rounded hover:bg-terminal-purple/25 transition-colors text-center border border-terminal-purple/30 disabled:opacity-50"
+            >
+              {gistPublishing ? "Publishing..." : "Publish to Gist"}
+            </button>
+          )}
+          {publishGist && ghAvailable === false && (
+            <div className="text-[9px] font-mono text-terminal-dim/60 text-center px-2 py-1">
+              Gist requires gh CLI (gh auth login)
+            </div>
+          )}
+
+          {/* Non-editor: client-side actions */}
+          {!exportHtml && canSaveHtml && (
             <button
               onClick={downloadHtml}
               className="w-full px-2 py-1.5 text-[10px] font-mono bg-terminal-green/15 text-terminal-green rounded hover:bg-terminal-green/25 transition-colors text-center border border-terminal-green/30"
@@ -277,18 +336,21 @@ export default function AnnotationPanel({
             >
               Save HTML with Comments
             </button>
-          ) : (
+          )}
+          {!exportHtml && !canSaveHtml && (
             <div className="text-[9px] font-mono text-terminal-dim/60 text-center px-2 py-1">
               Save HTML requires a production build (use CLI output)
             </div>
           )}
-          <button
-            onClick={downloadJson}
-            className="w-full px-2 py-1.5 text-[10px] font-mono bg-terminal-blue/10 text-terminal-blue rounded hover:bg-terminal-blue/20 transition-colors text-center border border-terminal-blue/20"
-            title="Download replay.json for re-publishing to gist"
-          >
-            Export JSON (for gist re-publish)
-          </button>
+          {!publishGist && (
+            <button
+              onClick={downloadJson}
+              className="w-full px-2 py-1.5 text-[10px] font-mono bg-terminal-blue/10 text-terminal-blue rounded hover:bg-terminal-blue/20 transition-colors text-center border border-terminal-blue/20"
+              title="Download replay.json for re-publishing to gist"
+            >
+              Export JSON (for gist re-publish)
+            </button>
+          )}
         </div>
       )}
     </div>

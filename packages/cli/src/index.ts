@@ -7,6 +7,7 @@ import { transformToReplay } from "./transform.js";
 import { generateOutput, generateDevJson } from "./generator.js";
 import { publishLocal } from "./publishers/local.js";
 import { publishGist, checkGhStatus, loadSavedGistInfo } from "./publishers/gist.js";
+import { startEditor } from "./server.js";
 import { scanForSecrets } from "./scan.js";
 import type { SessionInfo, ReplaySession } from "./types.js";
 
@@ -164,7 +165,7 @@ program
 
     // Publish target
     console.log();
-    const choices: { name: string; value: "demo" | "local" | "gist" | "exit" }[] = [
+    const choices: { name: string; value: "demo" | "local" | "editor" | "gist" | "exit" }[] = [
       ...(DEV_MENU_ENABLED
         ? [{
             name: `${chalk.cyan("⚡")} Dump to demo.json ${chalk.dim("(for pnpm viewer:dev)")}`,
@@ -172,6 +173,7 @@ program
           }]
         : []),
       { name: `${chalk.green("▶")} Open in browser`, value: "local" as const },
+      { name: `${chalk.magenta("✎")} Open in Editor ${chalk.dim("(annotate, publish, export)")}`, value: "editor" as const },
       { name: gistLabel, value: "gist" as const },
       { name: `${chalk.dim("✕")} Exit`, value: "exit" as const },
     ];
@@ -185,6 +187,9 @@ program
       await dumpReplayToDemoJson(replay);
     } else if (target === "local") {
       await publishLocal(outputPath);
+    } else if (target === "editor") {
+      await startEditor(replay, outputDir);
+      return; // startEditor blocks until Ctrl+C
     } else if (target === "gist") {
       if (!ghStatus.available) {
         if (ghStatus.reason === "not-installed") {

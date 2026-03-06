@@ -63,5 +63,6 @@ export interface ReplaySession {
 declare global {
   interface Window {
     __VIBE_REPLAY_DATA__?: ReplaySession;
+    __VIBE_REPLAY_EDITOR__?: boolean;
   }
 }
