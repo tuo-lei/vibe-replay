@@ -47,6 +47,7 @@ export default function Player({ session, viewPrefs }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [sidebarTab, setSidebarTab] = useState<"outline" | "stats">("outline");
   const [searchOpen, setSearchOpen] = useState(false);
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const pendingSeekRef = useRef<number | null>(null);
   const navFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -167,11 +168,25 @@ export default function Player({ session, viewPrefs }: Props) {
       if (e.deltaY > 0) advance();
     };
 
+    // Touch gesture for scroll-to-reveal when content is shorter than viewport
+    let touchStartY = 0;
+    const handleTouchStart = (e: TouchEvent) => {
+      touchStartY = e.touches[0].clientY;
+    };
+    const handleTouchEnd = (e: TouchEvent) => {
+      const deltaY = touchStartY - e.changedTouches[0].clientY;
+      if (deltaY > 20) advance();
+    };
+
     el.addEventListener("scroll", advance, { passive: true });
     el.addEventListener("wheel", handleWheel, { passive: true });
+    el.addEventListener("touchstart", handleTouchStart, { passive: true });
+    el.addEventListener("touchend", handleTouchEnd, { passive: true });
     return () => {
       el.removeEventListener("scroll", advance);
       el.removeEventListener("wheel", handleWheel);
+      el.removeEventListener("touchstart", handleTouchStart);
+      el.removeEventListener("touchend", handleTouchEnd);
     };
   }, [state, currentIndex, session.scenes.length, seekTo]);
 
@@ -263,7 +278,7 @@ export default function Player({ session, viewPrefs }: Props) {
 
       {/* Main content */}
       <div className="flex flex-col flex-1 min-h-0 min-w-0">
-        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 pb-8 overscroll-contain">
           <ConversationView
             scenes={session.scenes}
             visibleCount={visibleCount}
@@ -284,15 +299,15 @@ export default function Player({ session, viewPrefs }: Props) {
           }}
         />
 
-        {/* Pause overlay */}
+        {/* Pause overlay — hidden on mobile (shown in controls bar instead) */}
         {state === "paused" && visibleCount > 0 && (
-          <div className="absolute top-3 right-3 md:right-3 px-3 py-1.5 rounded-md bg-terminal-orange/10 border border-terminal-orange/20 text-terminal-orange text-xs font-mono pause-overlay pointer-events-none backdrop-blur-sm">
+          <div className="hidden md:block absolute top-3 right-3 px-3 py-1.5 rounded-md bg-terminal-orange/10 border border-terminal-orange/20 text-terminal-orange text-xs font-mono pause-overlay pointer-events-none backdrop-blur-sm">
             PAUSED
           </div>
         )}
 
         {/* Playback bar */}
-        <div className="shrink-0 border-t border-terminal-border/50 bg-terminal-surface/80 backdrop-blur-sm sticky bottom-0">
+        <div className="shrink-0 border-t border-terminal-border/50 bg-terminal-surface/80 backdrop-blur-sm sticky bottom-0 safe-bottom">
           <Timeline
             scenes={session.scenes}
             currentIndex={currentIndex}
@@ -310,7 +325,67 @@ export default function Player({ session, viewPrefs }: Props) {
             onPrevPrompt={seekToPrevPromptWithFeedback}
             onNextPrompt={seekToNextPromptWithFeedback}
             onOpenSearch={() => setSearchOpen(true)}
+            onOpenOutline={() => setMobileDrawerOpen(true)}
           />
+        </div>
+      </div>
+
+      {/* Mobile sidebar drawer */}
+      <div
+        className={`fixed inset-0 z-40 md:hidden transition-opacity duration-300 ${
+          mobileDrawerOpen ? "opacity-100" : "opacity-0 pointer-events-none"
+        }`}
+        onClick={() => setMobileDrawerOpen(false)}
+      >
+        <div className="absolute inset-0 bg-black/40" />
+        <div
+          className={`absolute bottom-0 left-0 right-0 h-[65vh] bg-terminal-bg border-t border-terminal-border rounded-t-2xl flex flex-col transition-transform duration-300 safe-bottom ${
+            mobileDrawerOpen ? "translate-y-0" : "translate-y-full"
+          }`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Drag handle */}
+          <div className="flex justify-center py-2.5 shrink-0">
+            <div className="w-10 h-1 rounded-full bg-terminal-border" />
+          </div>
+          {/* Tabs */}
+          <div className="flex border-b border-terminal-border/50 shrink-0">
+            <button
+              onClick={() => setSidebarTab("outline")}
+              className={`flex-1 px-3 py-2.5 text-xs font-mono uppercase tracking-wider transition-colors ${
+                sidebarTab === "outline"
+                  ? "text-terminal-green border-b-2 border-terminal-green"
+                  : "text-terminal-dim"
+              }`}
+            >
+              Outline
+            </button>
+            <button
+              onClick={() => setSidebarTab("stats")}
+              className={`flex-1 px-3 py-2.5 text-xs font-mono uppercase tracking-wider transition-colors ${
+                sidebarTab === "stats"
+                  ? "text-terminal-green border-b-2 border-terminal-green"
+                  : "text-terminal-dim"
+              }`}
+            >
+              Stats
+            </button>
+          </div>
+          {/* Content */}
+          <div className="flex-1 overflow-y-auto overscroll-contain">
+            {sidebarTab === "outline" ? (
+              <Minimap
+                scenes={session.scenes}
+                currentIndex={currentIndex}
+                onSeek={(i) => {
+                  seekFromNavigation(i);
+                  setMobileDrawerOpen(false);
+                }}
+              />
+            ) : (
+              <StatsPanel session={session} />
+            )}
+          </div>
         </div>
       </div>
     </div>

@@ -48,19 +48,33 @@ export default function LandingHero({ session, onStart }: Props) {
 
   // Scroll/swipe down triggers start
   const firedRef = useRef(false);
+  const touchStartYRef = useRef(0);
   useEffect(() => {
-    const handler = (e: WheelEvent | TouchEvent) => {
+    const handleWheel = (e: WheelEvent) => {
       if (firedRef.current) return;
-      // Only trigger on downward scroll
-      if (e instanceof WheelEvent && e.deltaY <= 0) return;
-      firedRef.current = true;
-      onStart();
+      if (e.deltaY > 0) {
+        firedRef.current = true;
+        onStart();
+      }
     };
-    window.addEventListener("wheel", handler, { passive: true });
-    window.addEventListener("touchmove", handler, { passive: true });
+    const handleTouchStart = (e: TouchEvent) => {
+      touchStartYRef.current = e.touches[0].clientY;
+    };
+    const handleTouchMove = (e: TouchEvent) => {
+      if (firedRef.current) return;
+      const deltaY = touchStartYRef.current - e.touches[0].clientY;
+      if (deltaY > 15) {
+        firedRef.current = true;
+        onStart();
+      }
+    };
+    window.addEventListener("wheel", handleWheel, { passive: true });
+    window.addEventListener("touchstart", handleTouchStart, { passive: true });
+    window.addEventListener("touchmove", handleTouchMove, { passive: true });
     return () => {
-      window.removeEventListener("wheel", handler);
-      window.removeEventListener("touchmove", handler);
+      window.removeEventListener("wheel", handleWheel);
+      window.removeEventListener("touchstart", handleTouchStart);
+      window.removeEventListener("touchmove", handleTouchMove);
     };
   }, [onStart]);
 

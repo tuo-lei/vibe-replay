@@ -56,7 +56,7 @@ export default function App() {
 
   return (
     <div className="h-screen bg-terminal-bg flex flex-col overflow-hidden">
-      <header className="border-b border-terminal-border/50 px-4 py-2.5 flex items-center justify-between shrink-0 bg-terminal-surface/30">
+      <header className="border-b border-terminal-border/50 px-4 py-2.5 flex items-center justify-between shrink-0 bg-terminal-surface/30 safe-top">
         {/* Left: branding + project */}
         <div className="flex items-center gap-3 min-w-0">
           <h1 className="text-sm font-mono font-bold text-terminal-green shrink-0">
@@ -99,11 +99,11 @@ export default function App() {
               </button>
             </div>
 
-            {/* Tool collapse toggle — only relevant in All mode */}
+            {/* Tool collapse toggle — only relevant in All mode, hidden on mobile */}
             {!prefs.promptsOnly && (
               <button
                 onClick={() => togglePref("collapseAllTools")}
-                className={`px-2.5 py-1 text-xs font-mono rounded-md border transition-colors ${
+                className={`hidden md:inline-flex px-2.5 py-1 text-xs font-mono rounded-md border transition-colors ${
                   prefs.collapseAllTools
                     ? "bg-terminal-orange/10 text-terminal-orange border-terminal-orange/30"
                     : "bg-terminal-surface text-terminal-dim border-terminal-border/60 hover:text-terminal-text"
@@ -113,11 +113,11 @@ export default function App() {
               </button>
             )}
 
-            {/* Thinking toggle — only show if session has thinking blocks */}
+            {/* Thinking toggle — hidden on mobile */}
             {hasThinking && !prefs.promptsOnly && (
               <button
                 onClick={() => togglePref("hideThinking")}
-                className={`px-2.5 py-1 text-xs font-mono rounded-md border transition-colors ${
+                className={`hidden md:inline-flex px-2.5 py-1 text-xs font-mono rounded-md border transition-colors ${
                   prefs.hideThinking
                     ? "bg-terminal-purple/10 text-terminal-purple border-terminal-purple/30"
                     : "bg-terminal-surface text-terminal-dim border-terminal-border/60 hover:text-terminal-text"
@@ -137,8 +137,8 @@ export default function App() {
             </button>
           </div>
 
-          {/* Session info — plain text, non-interactive */}
-          <div className="flex items-center gap-1.5 text-xs font-mono text-terminal-dim">
+          {/* Session info — plain text, hidden on mobile */}
+          <div className="hidden md:flex items-center gap-1.5 text-xs font-mono text-terminal-dim">
             {meta.model && (
               <span className="text-terminal-text/60">{meta.model}</span>
             )}

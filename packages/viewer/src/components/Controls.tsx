@@ -13,6 +13,7 @@ interface Props {
   onPrevPrompt: () => void;
   onNextPrompt: () => void;
   onOpenSearch: () => void;
+  onOpenOutline?: () => void;
 }
 
 const SPEEDS = [1, 5, 10];
@@ -29,6 +30,7 @@ export default function Controls({
   onPrevPrompt,
   onNextPrompt,
   onOpenSearch,
+  onOpenOutline,
 }: Props) {
   const isPlaying = state === "playing";
   const playIcon = isPlaying ? "\u23F8" : "\u25B6";
@@ -46,15 +48,15 @@ export default function Controls({
     flashId === id ? "ring-2 ring-terminal-green/50 scale-105" : "";
 
   return (
-    <div className="flex items-center justify-between px-4 py-2">
-      <div className="flex items-center gap-3">
+    <div className="flex items-center justify-between px-3 md:px-4 py-2">
+      <div className="flex items-center gap-1.5 md:gap-3">
         <button
           onClick={() => { flash("play"); onTogglePlayPause(); }}
-          className={`h-8 flex items-center gap-1.5 px-3 rounded-md bg-terminal-surface border border-terminal-border/60 hover:border-terminal-green hover:text-terminal-green text-xs font-mono ${btnBase} ${flashClass("play")}`}
+          className={`h-9 md:h-8 flex items-center gap-1.5 px-3 rounded-md bg-terminal-surface border border-terminal-border/60 hover:border-terminal-green hover:text-terminal-green text-xs font-mono ${btnBase} ${flashClass("play")}`}
           title="Play/Pause (Space)"
         >
           <span>{playIcon}</span>
-          <span>{playLabel}</span>
+          <span className="hidden sm:inline">{playLabel}</span>
         </button>
 
         <div className="flex items-center border border-terminal-border/60 rounded-md overflow-hidden">
@@ -62,7 +64,7 @@ export default function Controls({
             <button
               key={s}
               onClick={() => { flash(`speed-${s}`); onChangeSpeed(s); }}
-              className={`px-2.5 py-1 text-xs font-mono ${btnBase} ${
+              className={`px-2 md:px-2.5 py-1.5 md:py-1 text-xs font-mono ${btnBase} ${
                 speed === s
                   ? "bg-terminal-green/15 text-terminal-green"
                   : "text-terminal-dim hover:text-terminal-text bg-terminal-surface"
@@ -73,20 +75,20 @@ export default function Controls({
           ))}
         </div>
 
-        <div className="flex items-center gap-1 ml-1">
+        <div className="flex items-center gap-0.5 md:gap-1 ml-0.5 md:ml-1">
           <button
             onClick={() => { flash("prev"); onPrevPrompt(); }}
-            className={`px-2 py-1 text-xs font-mono text-terminal-dim hover:text-terminal-green ${btnBase} ${flashClass("prev")}`}
+            className={`px-2 py-1.5 md:py-1 text-xs font-mono text-terminal-dim hover:text-terminal-green ${btnBase} ${flashClass("prev")}`}
             title="Previous turn (p)"
           >
             {"<"}
           </button>
-          <span className="text-xs font-mono text-terminal-dim px-1 tabular-nums">
-            Turn {currentTurn}/{userPromptCount}
+          <span className="text-xs font-mono text-terminal-dim px-0.5 md:px-1 tabular-nums">
+            <span className="hidden sm:inline">Turn </span>{currentTurn}/{userPromptCount}
           </span>
           <button
             onClick={() => { flash("next"); onNextPrompt(); }}
-            className={`px-2 py-1 text-xs font-mono text-terminal-dim hover:text-terminal-green ${btnBase} ${flashClass("next")}`}
+            className={`px-2 py-1.5 md:py-1 text-xs font-mono text-terminal-dim hover:text-terminal-green ${btnBase} ${flashClass("next")}`}
             title="Next turn (n)"
           >
             {">"}
@@ -95,20 +97,30 @@ export default function Controls({
 
         <button
           onClick={() => { flash("search"); onOpenSearch(); }}
-          className={`h-8 flex items-center gap-1.5 px-3 rounded-md bg-terminal-surface border border-terminal-border/60 hover:border-terminal-blue hover:text-terminal-blue text-xs font-mono ${btnBase} ${flashClass("search")}`}
+          className={`h-9 md:h-8 flex items-center gap-1.5 px-2.5 md:px-3 rounded-md bg-terminal-surface border border-terminal-border/60 hover:border-terminal-blue hover:text-terminal-blue text-xs font-mono ${btnBase} ${flashClass("search")}`}
           title="Search (Cmd/Ctrl+K)"
         >
           <span>{"\uD83D\uDD0D"}</span>
-          <span>Search</span>
+          <span className="hidden sm:inline">Search</span>
         </button>
+
+        {onOpenOutline && (
+          <button
+            onClick={() => { flash("outline"); onOpenOutline(); }}
+            className={`md:hidden h-9 flex items-center px-2.5 rounded-md bg-terminal-surface border border-terminal-border/60 hover:border-terminal-text text-xs font-mono ${btnBase} ${flashClass("outline")}`}
+            title="Outline"
+          >
+            {"\u2630"}
+          </button>
+        )}
       </div>
 
-      <div className="flex items-center gap-3 text-xs text-terminal-dim font-mono">
+      <div className="flex items-center gap-2 md:gap-3 text-xs text-terminal-dim font-mono shrink-0">
         {state === "paused" && (
-          <span className="text-terminal-orange">PAUSED</span>
+          <span className="hidden sm:inline text-terminal-orange">PAUSED</span>
         )}
         <span className="tabular-nums">
-          {Math.max(0, currentIndex + 1)} / {totalScenes}
+          {Math.max(0, currentIndex + 1)}<span className="hidden sm:inline"> </span>/<span className="hidden sm:inline"> </span>{totalScenes}
         </span>
         {/* Keyboard hints — desktop only */}
         <span className="hidden lg:inline-flex items-center gap-2 text-terminal-dim/50 border-l border-terminal-border/40 pl-3">
