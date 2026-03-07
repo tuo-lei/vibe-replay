@@ -40,7 +40,7 @@ Most people only need:
 
 ## What It Does
 
-Reads AI coding session files (supports Claude Code and Cursor), parses the conversation data, and generates a **self-contained single HTML file** (~0.5-4MB) with:
+Reads AI coding session files (supports Claude Code and Cursor), parses the conversation data, and generates a **self-contained single HTML file** (~0.5-4MB for typical sessions, larger when many images are embedded) with:
 
 - Animated replay with play/pause/seek controls
 - Speed control (1x / 5x / 10x)
@@ -82,21 +82,26 @@ Host the viewer once and load different replays via URL parameter.
 
 - `sessionId`, `slug`, `title`
 - `provider` (`claude-code` or `cursor`)
-- `dataSource` (`sqlite`, `jsonl`, or `jsonl+tools` when available)
+- `dataSource` (`sqlite`, `global-state`, `jsonl`, or `jsonl+tools` when available)
+- `dataSourceInfo` (debug details: primary source, source list, supplements, notes)
 - `startTime`, `endTime`, `model`
 - `cwd`, `project`
+- `generator` (`name`, `version`, `generatedAt`)
 - `stats` (`sceneCount`, `userPrompts`, `toolCalls`, `thinkingBlocks`, `durationMs`)
-
-Current limitation: replay metadata does **not** yet include generator/build metadata like CLI version, schema version, or generated timestamp.
 
 ## Supported Providers
 
 | Provider | Status |
 |----------|--------|
 | Claude Code | Supported |
-| Cursor | Supported (transcripts + `agent-tools` outputs) |
+| Cursor | Supported (`store.db`, `globalStorage/state.vscdb`, transcripts + `agent-tools`) |
 | Codex | Planned |
 | Gemini CLI | Planned |
+
+Cursor parsing behavior:
+- Prefers DB-backed sources (`store.db` / `globalStorage.state.vscdb`) for rich tool data
+- Uses JSONL as fallback
+- Supplements missing assistant thinking markers and user image attachments from JSONL when DB-backed parsing is available
 
 Adding a new provider means implementing `discover()` and `parse()` in a new directory under `packages/cli/src/providers/`.
 

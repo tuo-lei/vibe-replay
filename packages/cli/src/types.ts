@@ -13,8 +13,8 @@ export interface SessionInfo {
   filePath: string;       // primary file (most recent)
   filePaths: string[];    // all JSONL files for this session (sorted by timestamp asc)
   toolPaths?: string[];   // cursor tool outputs associated with this session
-  workspacePath?: string; // absolute workspace path for SQLite lookup (Cursor)
-  hasSqlite?: boolean;    // true if store.db exists for this session
+  workspacePath?: string; // absolute workspace path for Cursor lookup
+  hasSqlite?: boolean;    // true if any Cursor SQLite source exists (store.db or global state DB)
   firstPrompt: string;
 }
 
@@ -89,6 +89,13 @@ export interface Annotation {
   resolved: boolean;
 }
 
+export interface DataSourceInfo {
+  primary: string;
+  sources: string[];
+  supplements?: string[];
+  notes?: string[];
+}
+
 export interface ReplaySession {
   meta: {
     sessionId: string;
@@ -96,11 +103,17 @@ export interface ReplaySession {
     title?: string;
     provider: string;
     dataSource?: string;
+    dataSourceInfo?: DataSourceInfo;
     startTime: string;
     endTime?: string;
     model?: string;
     cwd: string;
     project: string;
+    generator?: {
+      name: string;
+      version: string;
+      generatedAt: string;
+    };
     stats: {
       sceneCount: number;
       userPrompts: number;

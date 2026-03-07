@@ -60,7 +60,27 @@ export default function AnnotationPanel({
   onClearAddingTarget,
   readOnly = false,
 }: Props) {
-  const { annotations, add, update, remove, hasUnsaved, canSaveHtml, downloadHtml, downloadJson, publishGist, exportHtml, gistPublishing, htmlExporting, aiCoachTool, runAiCoach, cancelAiCoach, aiCoachRunning } = actions;
+  const {
+    annotations,
+    add,
+    update,
+    remove,
+    hasUnsaved,
+    canSaveHtml,
+    downloadHtml,
+    downloadJson,
+    publishGist,
+    exportHtml,
+    gistPublishing,
+    htmlExporting,
+    aiCoachTool,
+    aiCoachTools,
+    aiCoachToolName,
+    setAiCoachToolName,
+    runAiCoach,
+    cancelAiCoach,
+    aiCoachRunning,
+  } = actions;
   const [internalAdding, setInternalAdding] = useState<number | null>(null);
   const [newBody, setNewBody] = useState("");
   const [statusMsg, setStatusMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -325,6 +345,22 @@ export default function AnnotationPanel({
                     </span>
                   )}
                 </div>
+                {aiCoachTools.length > 1 && setAiCoachToolName && (
+                  <label className="block text-[9px] font-mono text-terminal-dim">
+                    Tool:
+                    <select
+                      value={aiCoachToolName || ""}
+                      onChange={(e) => setAiCoachToolName(e.target.value)}
+                      className="ml-1 bg-terminal-surface border border-terminal-border/50 rounded px-1.5 py-0.5 text-[9px] font-mono text-terminal-text"
+                    >
+                      {aiCoachTools.map((tool) => (
+                        <option key={tool.name} value={tool.name}>
+                          {tool.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <div className="flex gap-1.5 justify-end">
                   <button
                     onClick={() => setShowAiCoachConfirm(false)}

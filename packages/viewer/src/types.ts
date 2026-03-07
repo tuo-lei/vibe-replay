@@ -25,6 +25,13 @@ export interface Annotation {
   resolved: boolean;
 }
 
+export interface DataSourceInfo {
+  primary: string;
+  sources: string[];
+  supplements?: string[];
+  notes?: string[];
+}
+
 export interface ReplaySession {
   meta: {
     sessionId: string;
@@ -32,11 +39,17 @@ export interface ReplaySession {
     title?: string;
     provider: string;
     dataSource?: string;
+    dataSourceInfo?: DataSourceInfo;
     startTime: string;
     endTime?: string;
     model?: string;
     cwd: string;
     project: string;
+    generator?: {
+      name: string;
+      version: string;
+      generatedAt: string;
+    };
     stats: {
       sceneCount: number;
       userPrompts: number;

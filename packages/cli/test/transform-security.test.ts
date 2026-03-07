@@ -692,6 +692,58 @@ describe("combined path + secret redaction", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Tool diff generation edge cases
+// ---------------------------------------------------------------------------
+
+describe("tool diff generation", () => {
+  it("creates Edit diff even when old_string is missing", () => {
+    const parsed = makeParsed([
+      {
+        role: "assistant",
+        blocks: [
+          {
+            type: "tool_use",
+            id: "t1",
+            name: "Edit",
+            input: {
+              file_path: "/project/src/app.ts",
+              new_string: "console.log('updated')",
+            },
+            _result: "ok",
+          } as any,
+        ],
+      },
+    ]);
+    const replay = transform(parsed);
+    const toolScene = replay.scenes.find((s) => s.type === "tool-call") as any;
+    expect(toolScene?.diff).toBeTruthy();
+    expect(toolScene.diff.filePath).toBe("/project/src/app.ts");
+    expect(toolScene.diff.oldContent).toBe("");
+    expect(toolScene.diff.newContent).toContain("updated");
+  });
+});
+
+describe("replay generator metadata", () => {
+  it("includes generator info when provided", () => {
+    const parsed = makeParsed([
+      { role: "user", blocks: [{ type: "text", text: "hello" }] },
+    ]);
+    const replay = transformToReplay(parsed, "test-provider", "~/test", {
+      generator: {
+        name: "vibe-replay",
+        version: "0.0.4",
+        generatedAt: "2026-03-07T00:00:00.000Z",
+      },
+    });
+    expect(replay.meta.generator).toEqual({
+      name: "vibe-replay",
+      version: "0.0.4",
+      generatedAt: "2026-03-07T00:00:00.000Z",
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Edge cases
 // ---------------------------------------------------------------------------
 

@@ -7,7 +7,14 @@ export interface Provider {
   parse(filePaths: string | string[], sessionInfo?: SessionInfo): Promise<ProviderParseResult>;
 }
 
-export type DataSource = "jsonl" | "sqlite" | "jsonl+tools";
+export type DataSource = "jsonl" | "sqlite" | "jsonl+tools" | "global-state";
+
+export interface DataSourceInfo {
+  primary: DataSource;
+  sources: string[];
+  supplements?: string[];
+  notes?: string[];
+}
 
 export interface TokenUsage {
   inputTokens: number;
@@ -33,6 +40,7 @@ export interface ProviderParseResult {
   totalDurationMs?: number;
   turns: ParsedTurn[];
   dataSource?: DataSource;
+  dataSourceInfo?: DataSourceInfo;
   tokenUsage?: TokenUsage;
   compactions?: Compaction[];
 }

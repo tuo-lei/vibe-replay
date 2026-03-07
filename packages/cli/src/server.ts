@@ -136,9 +136,14 @@ export async function startEditor(
   // AI Feedback — detect available CLI tools
   app.get("/api/feedback/detect", async (c) => {
     try {
-      const tool = await detectFeedbackTools();
-      if (tool) {
-        return c.json({ available: true, tool: { name: tool.name } });
+      const detected = await detectFeedbackTools();
+      if (detected.tools.length > 0 && detected.defaultTool) {
+        return c.json({
+          available: true,
+          tool: { name: detected.defaultTool.name },
+          tools: detected.tools.map((t) => ({ name: t.name })),
+          defaultTool: { name: detected.defaultTool.name },
+        });
       }
       return c.json({ available: false });
     } catch {
@@ -149,9 +154,17 @@ export async function startEditor(
   // AI Feedback — generate feedback annotations
   app.post("/api/feedback/generate", async (c) => {
     try {
-      const tool = await detectFeedbackTools();
+      const body = await c.req.json<{ toolName?: string }>().catch(() => ({}));
+      const requestedToolName = typeof body.toolName === "string" ? body.toolName : undefined;
+      const detected = await detectFeedbackTools();
+      if (detected.tools.length === 0) {
+        return c.json({ error: "No AI CLI tool available (claude, agent, or opencode)" }, 400);
+      }
+      const tool = requestedToolName
+        ? detected.tools.find((t) => t.name === requestedToolName) || null
+        : detected.defaultTool;
       if (!tool) {
-        return c.json({ error: "No AI CLI tool available (claude or opencode)" }, 400);
+        return c.json({ error: `Requested AI Coach tool is not available: ${requestedToolName}` }, 400);
       }
       const fb = await generateFeedback({ ...session, annotations }, tool);
       if (!fb) {

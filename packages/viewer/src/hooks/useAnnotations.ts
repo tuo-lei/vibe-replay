@@ -21,6 +21,12 @@ export interface AnnotationActions {
   htmlExporting: boolean;
   /** Editor mode: detected AI Coach tool info (null if unavailable) */
   aiCoachTool: { name: string } | null;
+  /** Editor mode: available AI Coach tool options */
+  aiCoachTools: Array<{ name: string }>;
+  /** Editor mode: selected AI Coach tool name */
+  aiCoachToolName: string | null;
+  /** Editor mode: update selected AI Coach tool */
+  setAiCoachToolName: ((toolName: string) => void) | null;
   /** Editor mode: run AI Coach to generate feedback annotations */
   runAiCoach: (() => Promise<{ score: number; itemCount: number }>) | null;
   /** Editor mode: cancel a running AI Coach operation */
@@ -221,21 +227,38 @@ export function useAnnotations(
     : null;
 
   // AI Coach (editor mode)
-  const [aiCoachTool, setAiCoachTool] = useState<{ name: string } | null>(null);
+  const [aiCoachTools, setAiCoachTools] = useState<Array<{ name: string }>>([]);
+  const [aiCoachToolName, setAiCoachToolNameState] = useState<string | null>(null);
   const [aiCoachRunning, setAiCoachRunning] = useState(false);
   const aiCoachAbortRef = useRef<AbortController | null>(null);
+  const aiCoachTool = useMemo(
+    () => (aiCoachToolName ? aiCoachTools.find((t) => t.name === aiCoachToolName) || null : null),
+    [aiCoachToolName, aiCoachTools],
+  );
 
   useEffect(() => {
     if (!isEditor) return;
     fetch("/api/feedback/detect")
       .then((r) => r.json())
       .then((data) => {
-        if (data.available && data.tool) setAiCoachTool(data.tool);
+        if (!data.available) return;
+        const tools: Array<{ name: string }> = Array.isArray(data.tools)
+          ? data.tools
+          : data.tool
+          ? [data.tool]
+          : [];
+        setAiCoachTools(tools);
+        const defaultToolName =
+          data.defaultTool?.name ||
+          data.tool?.name ||
+          tools[0]?.name ||
+          null;
+        setAiCoachToolNameState(defaultToolName);
       })
       .catch(() => {});
   }, [isEditor]);
 
-  const runAiCoach = isEditor && aiCoachTool
+  const runAiCoach = isEditor && aiCoachToolName
     ? async () => {
         const controller = new AbortController();
         aiCoachAbortRef.current = controller;
@@ -250,6 +273,8 @@ export function useAnnotations(
           });
           const resp = await fetch("/api/feedback/generate", {
             method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ toolName: aiCoachToolName }),
             signal: controller.signal,
           });
           const data = await resp.json();
@@ -261,6 +286,12 @@ export function useAnnotations(
           aiCoachAbortRef.current = null;
           setAiCoachRunning(false);
         }
+      }
+    : null;
+
+  const setAiCoachToolName = isEditor
+    ? (toolName: string) => {
+        setAiCoachToolNameState(toolName);
       }
     : null;
 
@@ -301,6 +332,6 @@ export function useAnnotations(
     downloadHtml, downloadJson,
     publishGist, exportHtml,
     gistPublishing, htmlExporting,
-    aiCoachTool, runAiCoach, cancelAiCoach, aiCoachRunning,
+    aiCoachTool, aiCoachTools, aiCoachToolName, setAiCoachToolName, runAiCoach, cancelAiCoach, aiCoachRunning,
   };
 }
