@@ -344,6 +344,7 @@ export async function startServer(
         filePaths: s.filePaths,
         toolPaths: s.toolPaths,
         hasSqlite: s.hasSqlite,
+        gitBranch: s.gitBranch,
         existingReplay: replaySlugSet.has(s.slug) ? s.slug : null,
       }));
 

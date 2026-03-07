@@ -106,6 +106,7 @@ export interface SourceSession {
   filePaths: string[];
   toolPaths?: string[];
   hasSqlite?: boolean;
+  gitBranch?: string;
   existingReplay: string | null;
 }
 

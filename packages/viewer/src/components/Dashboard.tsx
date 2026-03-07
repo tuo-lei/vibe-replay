@@ -215,6 +215,190 @@ function navigateTo(params: Record<string, string | null>) {
 
 // ─── Sessions Tab (source sessions from providers) ─────────────────
 
+/** Relative time like "2h ago", "3d ago" */
+function timeAgo(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(ms / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return `${days}d ago`;
+  return formatDate(iso);
+}
+
+/** Extract the short project name from a path like ~/Code/vibe-replay */
+function projectName(project: string): string {
+  const parts = project.replace(/\/$/, "").split("/");
+  return parts[parts.length - 1] || project;
+}
+
+/** Build a human-readable session label from available data */
+function sessionLabel(s: SourceSession): { primary: string; secondary?: string } {
+  // Best: custom title set by user
+  if (s.title && s.title !== s.slug) {
+    return { primary: s.title, secondary: s.slug };
+  }
+  // Good: git branch tells you what you were working on
+  if (s.gitBranch && s.gitBranch !== "main" && s.gitBranch !== "master") {
+    return { primary: s.gitBranch, secondary: s.slug };
+  }
+  // Fallback: slug (Claude Code generates descriptive ones)
+  return { primary: s.slug };
+}
+
+function ProjectGroup({
+  project,
+  sessions,
+  defaultOpen,
+  generatingSlug,
+  onGenerate,
+  onViewReplay,
+}: {
+  project: string;
+  sessions: SourceSession[];
+  defaultOpen: boolean;
+  generatingSlug: string | null;
+  onGenerate: (s: SourceSession) => void;
+  onViewReplay: (slug: string) => void;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const replayCount = sessions.filter((s) => s.existingReplay).length;
+
+  return (
+    <div className="border border-terminal-border/40 rounded-lg overflow-hidden">
+      {/* Project header — clickable to collapse */}
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-3 px-4 py-2.5 bg-terminal-surface/40 hover:bg-terminal-surface/60 transition-colors text-left"
+      >
+        <svg
+          width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+          className={`shrink-0 text-terminal-dim transition-transform ${open ? "rotate-90" : ""}`}
+        >
+          <path d="M6 4l4 4-4 4" />
+        </svg>
+        <span className="text-sm font-mono font-medium text-terminal-text truncate">
+          {projectName(project)}
+        </span>
+        <span className="text-xs font-mono text-terminal-dim/60 truncate hidden sm:inline">
+          {project}
+        </span>
+        <div className="ml-auto flex items-center gap-2 shrink-0">
+          {replayCount > 0 && (
+            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-green-500/10 text-green-400">
+              {replayCount} replay{replayCount !== 1 ? "s" : ""}
+            </span>
+          )}
+          <span className="text-xs font-mono text-terminal-dim">
+            {sessions.length}
+          </span>
+        </div>
+      </button>
+
+      {/* Session list */}
+      {open && (
+        <div className="divide-y divide-terminal-border/30">
+          {sessions.map((s) => {
+            const label = sessionLabel(s);
+            return (
+              <div
+                key={`${s.provider}-${s.slug}`}
+                className="px-4 py-3 hover:bg-terminal-surface/30 transition-colors"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  {/* Left: session info */}
+                  <div className="min-w-0 space-y-1">
+                    {/* Primary label + badges */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-mono text-terminal-text">
+                        {label.primary}
+                      </span>
+                      {label.secondary && (
+                        <span className="text-xs font-mono text-terminal-dim/50">
+                          {label.secondary}
+                        </span>
+                      )}
+                      {s.existingReplay && (
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border bg-green-500/10 text-green-400 border-green-500/20">
+                          has replay
+                        </span>
+                      )}
+                    </div>
+                    {/* First prompt */}
+                    {s.firstPrompt && (
+                      <p className="text-[13px] text-terminal-text/50 line-clamp-2 leading-relaxed">
+                        {s.firstPrompt}
+                      </p>
+                    )}
+                    {/* Meta row */}
+                    <div className="flex items-center gap-2 text-[11px] font-mono text-terminal-dim/60 flex-wrap">
+                      <ProviderBadge provider={s.provider} />
+                      <span>{timeAgo(s.timestamp)}</span>
+                      {s.gitBranch && (
+                        <span className="flex items-center gap-0.5">
+                          <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                            <circle cx="5" cy="4" r="2" /><circle cx="11" cy="12" r="2" /><path d="M5 6v4c0 1.1.9 2 2 2h2" />
+                          </svg>
+                          {s.gitBranch}
+                        </span>
+                      )}
+                      <span>{formatSize(s.fileSize)}</span>
+                      {s.filePaths.length > 1 && (
+                        <span>{s.filePaths.length} parts</span>
+                      )}
+                      {s.hasSqlite && <span className="text-green-400/60">db</span>}
+                    </div>
+                  </div>
+                  {/* Right: action buttons */}
+                  <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
+                    {s.existingReplay ? (
+                      <>
+                        <button
+                          onClick={() => onViewReplay(s.existingReplay!)}
+                          className="px-3 py-1.5 text-xs font-mono rounded-md bg-terminal-green/10 text-terminal-green border border-terminal-green/20 hover:bg-terminal-green/20 transition-colors"
+                        >
+                          View
+                        </button>
+                        <button
+                          onClick={() => onGenerate(s)}
+                          disabled={generatingSlug === s.slug}
+                          className="px-2 py-1.5 text-xs font-mono rounded-md text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface transition-colors disabled:opacity-50"
+                          title="Re-generate replay"
+                        >
+                          {generatingSlug === s.slug ? (
+                            <span className="animate-pulse text-terminal-green">...</span>
+                          ) : (
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                              <path d="M2.5 8a5.5 5.5 0 019.3-4M13.5 8a5.5 5.5 0 01-9.3 4" />
+                              <path d="M12.5 1v3h-3M3.5 15v-3h3" />
+                            </svg>
+                          )}
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        onClick={() => onGenerate(s)}
+                        disabled={generatingSlug === s.slug}
+                        className="px-3 py-1.5 text-xs font-mono rounded-md bg-terminal-green/10 text-terminal-green border border-terminal-green/20 hover:bg-terminal-green/20 transition-colors disabled:opacity-50"
+                      >
+                        {generatingSlug === s.slug ? (
+                          <span className="animate-pulse">Generating...</span>
+                        ) : "Generate"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SessionsPanel() {
   const [sources, setSources] = useState<SourceSession[]>([]);
   const [loading, setLoading] = useState(true);
@@ -247,8 +431,7 @@ function SessionsPanel() {
     if (titleInput) titleInputRef.current?.focus();
   }, [titleInput]);
 
-  const handleGenerate = async (source: SourceSession) => {
-    // Show title input first
+  const handleGenerate = (source: SourceSession) => {
     setTitleInput({ slug: source.slug, defaultTitle: source.title || source.slug });
     setTitleValue(source.title || source.slug);
   };
@@ -278,7 +461,6 @@ function SessionsPanel() {
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || "Generation failed");
 
-      // Navigate to the generated replay
       navigateTo({ view: null, session: data.slug });
     } catch (err: any) {
       setGenerateError(err.message);
@@ -287,7 +469,11 @@ function SessionsPanel() {
     }
   };
 
-  // Group by project
+  const handleViewReplay = (slug: string) => {
+    navigateTo({ view: null, session: slug });
+  };
+
+  // Filter
   const filtered = filter
     ? sources.filter(
         (s) =>
@@ -295,15 +481,22 @@ function SessionsPanel() {
           s.project.toLowerCase().includes(filter.toLowerCase()) ||
           s.provider.toLowerCase().includes(filter.toLowerCase()) ||
           s.firstPrompt.toLowerCase().includes(filter.toLowerCase()) ||
-          (s.title || "").toLowerCase().includes(filter.toLowerCase()),
+          (s.title || "").toLowerCase().includes(filter.toLowerCase()) ||
+          (s.gitBranch || "").toLowerCase().includes(filter.toLowerCase()),
       )
     : sources;
 
+  // Group by project, sorted by most recent session timestamp
   const byProject = new Map<string, SourceSession[]>();
   for (const s of filtered) {
     if (!byProject.has(s.project)) byProject.set(s.project, []);
     byProject.get(s.project)!.push(s);
   }
+  const projectEntries = [...byProject.entries()].sort((a, b) => {
+    const aTime = a[1][0]?.timestamp || "";
+    const bTime = b[1][0]?.timestamp || "";
+    return bTime.localeCompare(aTime);
+  });
 
   if (loading) {
     return (
@@ -331,10 +524,10 @@ function SessionsPanel() {
 
   return (
     <div className="space-y-4">
-      {/* Header with refresh */}
+      {/* Header with count + refresh */}
       <div className="flex items-center justify-between">
         <div className="text-xs font-mono text-terminal-dim">
-          {filtered.length} session{filtered.length !== 1 ? "s" : ""} found
+          {filtered.length} session{filtered.length !== 1 ? "s" : ""} across {projectEntries.length} project{projectEntries.length !== 1 ? "s" : ""}
           {filter && filtered.length !== sources.length && (
             <span className="text-terminal-dim/50"> (of {sources.length} total)</span>
           )}
@@ -364,13 +557,13 @@ function SessionsPanel() {
           <input
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter sessions..."
+            placeholder="Filter by project, branch, prompt..."
             className="w-full bg-terminal-surface border border-terminal-border rounded-lg pl-9 pr-3 py-2 text-sm font-mono text-terminal-text placeholder:text-terminal-dim/50 outline-none focus:border-terminal-green/50"
           />
         </div>
       )}
 
-      {/* Generate error toast */}
+      {/* Error toast */}
       {generateError && (
         <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 text-xs font-mono text-red-400">
           <span>{generateError}</span>
@@ -413,85 +606,17 @@ function SessionsPanel() {
         </div>
       )}
 
-      {/* Session cards grouped by project */}
-      {[...byProject.entries()].map(([project, projectSessions]) => (
-        <div key={project} className="space-y-2">
-          <div className="text-xs font-mono text-terminal-text/60 px-1">
-            {project}
-          </div>
-          {projectSessions.map((s) => (
-            <div
-              key={`${s.provider}-${s.slug}`}
-              className="bg-terminal-surface/50 border border-terminal-border/50 rounded-lg px-4 py-3 hover:bg-terminal-surface/80 transition-colors space-y-1.5"
-            >
-              {/* Title + actions */}
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-sm font-mono text-terminal-text truncate">
-                    {s.title || s.slug}
-                  </span>
-                  {s.existingReplay && (
-                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border bg-green-500/15 text-green-400 border-green-500/30 shrink-0">
-                      Has Replay
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {s.existingReplay ? (
-                    <>
-                      <button
-                        onClick={() => navigateTo({ view: null, session: s.existingReplay! })}
-                        className="px-3 py-1.5 text-xs font-mono rounded-md bg-terminal-green/10 text-terminal-green border border-terminal-green/20 hover:bg-terminal-green/20 transition-colors"
-                      >
-                        View Replay
-                      </button>
-                      <button
-                        onClick={() => handleGenerate(s)}
-                        disabled={generatingSlug === s.slug}
-                        className="px-2.5 py-1.5 text-xs font-mono rounded-md text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface transition-colors disabled:opacity-50"
-                      >
-                        {generatingSlug === s.slug ? (
-                          <span className="animate-pulse">Generating...</span>
-                        ) : "Re-generate"}
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      onClick={() => handleGenerate(s)}
-                      disabled={generatingSlug === s.slug}
-                      className="px-3 py-1.5 text-xs font-mono rounded-md bg-terminal-green/10 text-terminal-green border border-terminal-green/20 hover:bg-terminal-green/20 transition-colors disabled:opacity-50"
-                    >
-                      {generatingSlug === s.slug ? (
-                        <span className="animate-pulse">Generating...</span>
-                      ) : "Generate Replay"}
-                    </button>
-                  )}
-                </div>
-              </div>
-              {/* First prompt preview */}
-              {s.firstPrompt && (
-                <p className="text-[13px] text-terminal-text/70 line-clamp-2">
-                  &ldquo;{s.firstPrompt}&rdquo;
-                </p>
-              )}
-              {/* Metadata */}
-              <div className="flex items-center gap-2 text-xs font-mono text-terminal-dim flex-wrap">
-                <ProviderBadge provider={s.provider} />
-                <span>{formatDate(s.timestamp)}</span>
-                <span className="text-terminal-border">&middot;</span>
-                <span>{s.lineCount}L</span>
-                <span className="text-terminal-border">&middot;</span>
-                <span>{formatSize(s.fileSize)}</span>
-                {s.filePaths.length > 1 && (
-                  <><span className="text-terminal-border">&middot;</span><span>{s.filePaths.length} parts</span></>
-                )}
-                {s.hasSqlite && (
-                  <span className="text-green-400">db</span>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
+      {/* Project groups */}
+      {projectEntries.map(([project, projectSessions], i) => (
+        <ProjectGroup
+          key={project}
+          project={project}
+          sessions={projectSessions}
+          defaultOpen={i < 3}
+          generatingSlug={generatingSlug}
+          onGenerate={handleGenerate}
+          onViewReplay={handleViewReplay}
+        />
       ))}
 
       {/* Empty states */}
