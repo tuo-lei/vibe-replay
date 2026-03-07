@@ -494,7 +494,7 @@ function SessionsPanel() {
                     isActive
                       ? "text-terminal-green"
                       : !exists
-                        ? "text-terminal-dim line-through decoration-terminal-dim/30"
+                        ? "text-terminal-dim"
                         : "text-terminal-text/80 group-hover:text-terminal-text"
                   }`}>
                     {label}
@@ -511,12 +511,7 @@ function SessionsPanel() {
                   </span>
                   {replayCount > 0 && (
                     <span className="text-[9px] font-mono text-green-400/50">
-                      {replayCount}r
-                    </span>
-                  )}
-                  {!exists && (
-                    <span className="text-[9px] font-mono text-terminal-dim/40">
-                      gone
+                      {replayCount} {replayCount === 1 ? "replay" : "replays"}
                     </span>
                   )}
                 </div>
