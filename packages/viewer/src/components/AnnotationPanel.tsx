@@ -60,11 +60,12 @@ export default function AnnotationPanel({
   onClearAddingTarget,
   readOnly = false,
 }: Props) {
-  const { annotations, add, update, remove, hasUnsaved, canSaveHtml, downloadHtml, downloadJson, publishGist, exportHtml, gistPublishing, htmlExporting } = actions;
+  const { annotations, add, update, remove, hasUnsaved, canSaveHtml, downloadHtml, downloadJson, publishGist, exportHtml, gistPublishing, htmlExporting, aiCoachTool, runAiCoach, cancelAiCoach, aiCoachRunning } = actions;
   const [internalAdding, setInternalAdding] = useState<number | null>(null);
   const [newBody, setNewBody] = useState("");
   const [statusMsg, setStatusMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [ghAvailable, setGhAvailable] = useState<boolean | null>(null);
+  const [showAiCoachConfirm, setShowAiCoachConfirm] = useState(false);
 
   // Check gh status in editor mode
   useEffect(() => {
@@ -277,8 +278,8 @@ export default function AnnotationPanel({
         )}
       </div>
 
-      {/* Footer: Save/export/publish buttons */}
-      {!readOnly && annotations.length > 0 && (
+      {/* Footer: Save/export/publish buttons + AI Coach */}
+      {!readOnly && (annotations.length > 0 || runAiCoach) && (
         <div className="shrink-0 border-t border-terminal-border/50 px-3 py-2 space-y-1.5">
           {hasUnsaved && !publishGist && (
             <div className="text-[9px] font-mono text-terminal-orange text-center mb-1">
@@ -292,6 +293,77 @@ export default function AnnotationPanel({
                   {statusMsg.text}
                 </a>
               ) : statusMsg.text}
+            </div>
+          )}
+
+          {/* AI Coach (editor mode only) */}
+          {runAiCoach && !showAiCoachConfirm && !aiCoachRunning && (() => {
+            const hasExisting = annotations.some((a) => a.author === "vibe-feedback");
+            return (
+              <button
+                onClick={() => setShowAiCoachConfirm(true)}
+                className="w-full px-2 py-1.5 text-[10px] font-mono bg-terminal-purple/15 text-terminal-purple rounded hover:bg-terminal-purple/25 transition-colors text-center border border-terminal-purple/30"
+              >
+                {hasExisting ? "Re-run AI Coach (beta)" : "AI Coach (beta)"}
+              </button>
+            );
+          })()}
+          {showAiCoachConfirm && !aiCoachRunning && (() => {
+            const hasExisting = annotations.some((a) => a.author === "vibe-feedback");
+            return (
+              <div className="space-y-1.5 p-2 rounded border border-terminal-purple/30 bg-terminal-purple/5">
+                <div className="text-[10px] font-mono text-terminal-purple font-semibold">
+                  AI Coach (beta)
+                </div>
+                <div className="text-[9px] font-mono text-terminal-dim leading-relaxed">
+                  Uses <span className="text-terminal-text">{aiCoachTool?.name}</span> CLI to analyze your prompting technique.
+                  This will make API calls using your configured credentials and may use tokens/cost money.
+                  Typically takes 1-3 minutes.
+                  {hasExisting && (
+                    <span className="block mt-1 text-terminal-orange">
+                      This will replace existing AI Coach comments.
+                    </span>
+                  )}
+                </div>
+                <div className="flex gap-1.5 justify-end">
+                  <button
+                    onClick={() => setShowAiCoachConfirm(false)}
+                    className="px-2 py-1 text-[10px] font-mono text-terminal-dim hover:text-terminal-text transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={async () => {
+                      setShowAiCoachConfirm(false);
+                      try {
+                        const result = await runAiCoach!();
+                        setStatusMsg({ type: "success", text: `Score: ${result.score}/10 — ${result.itemCount} comment(s) added` });
+                      } catch (e: any) {
+                        if (e.name === "AbortError") return;
+                        setStatusMsg({ type: "error", text: e.message });
+                      }
+                    }}
+                    className="px-2 py-1 text-[10px] font-mono bg-terminal-purple/20 text-terminal-purple rounded hover:bg-terminal-purple/30 transition-colors"
+                  >
+                    Run
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+          {aiCoachRunning && (
+            <div className="flex items-center justify-center gap-2 py-2">
+              <span className="text-[10px] font-mono text-terminal-purple animate-pulse">
+                Analyzing your prompting patterns...
+              </span>
+              {cancelAiCoach && (
+                <button
+                  onClick={cancelAiCoach}
+                  className="px-1.5 py-0.5 text-[9px] font-mono text-terminal-dim hover:text-terminal-red border border-terminal-border/40 rounded transition-colors"
+                >
+                  Cancel
+                </button>
+              )}
             </div>
           )}
 
@@ -415,17 +487,32 @@ const AnnotationCard = memo(function AnnotationCard({
     }
   }, [annotation.createdAt]);
 
+  const isAiFeedback = annotation.author === "vibe-feedback";
+
   return (
     <div
       data-annotation-scene={annotation.sceneIndex}
       className={`px-3 py-2 border-b border-terminal-border/30 transition-colors ${
-        isCurrent
-          ? "bg-terminal-blue/10 border-l-2 border-l-terminal-blue"
-          : "hover:bg-terminal-surface/50"
+        isAiFeedback
+          ? isCurrent
+            ? "bg-terminal-purple/10 border-l-2 border-l-terminal-purple"
+            : "bg-terminal-purple/[0.03] hover:bg-terminal-purple/[0.06]"
+          : isCurrent
+            ? "bg-terminal-blue/10 border-l-2 border-l-terminal-blue"
+            : "hover:bg-terminal-surface/50"
       }`}
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
     >
+      {/* AI Feedback badge */}
+      {isAiFeedback && (
+        <div className="flex items-center gap-1.5 mb-1">
+          <span className="text-[9px] font-mono font-semibold uppercase tracking-wider text-terminal-purple px-1.5 py-0.5 rounded border border-terminal-purple/30 bg-terminal-purple/10">
+            AI Coach
+          </span>
+        </div>
+      )}
+
       {/* Scene reference — click to navigate */}
       <button
         onClick={onSeek}

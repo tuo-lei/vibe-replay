@@ -9,6 +9,7 @@ import chalk from "chalk";
 import type { ReplaySession, Annotation } from "./types.js";
 import { generateOutput } from "./generator.js";
 import { checkGhStatus, publishGist, loadSavedGistInfo } from "./publishers/gist.js";
+import { detectFeedbackTools, generateFeedback } from "./feedback.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -132,10 +133,53 @@ export async function startEditor(
     }
   });
 
+  // AI Feedback — detect available CLI tools
+  app.get("/api/feedback/detect", async (c) => {
+    try {
+      const tool = await detectFeedbackTools();
+      if (tool) {
+        return c.json({ available: true, tool: { name: tool.name } });
+      }
+      return c.json({ available: false });
+    } catch {
+      return c.json({ available: false });
+    }
+  });
+
+  // AI Feedback — generate feedback annotations
+  app.post("/api/feedback/generate", async (c) => {
+    try {
+      const tool = await detectFeedbackTools();
+      if (!tool) {
+        return c.json({ error: "No AI CLI tool available (claude or opencode)" }, 400);
+      }
+      const fb = await generateFeedback({ ...session, annotations }, tool);
+      if (!fb) {
+        return c.json({ error: "Could not generate feedback (invalid AI output)" }, 500);
+      }
+      // Replace any previous vibe-feedback annotations and merge new ones
+      annotations = [
+        ...annotations.filter((a) => a.author !== "vibe-feedback"),
+        ...fb.annotations,
+      ];
+      // Persist to disk
+      try {
+        await writeFile(annotationsPath, JSON.stringify(annotations, null, 2), "utf-8");
+      } catch { /* ignore write errors */ }
+      return c.json({
+        annotations,
+        score: fb.result.score,
+        itemCount: fb.result.feedbackItems.length,
+      });
+    } catch (err: any) {
+      return c.json({ error: err.message || "Feedback generation failed" }, 500);
+    }
+  });
+
   const port = await findFreePort(3456, 3466);
   const url = `http://localhost:${port}`;
 
-  serve({ fetch: app.fetch, port }, () => {
+  serve({ fetch: app.fetch, port, hostname: "127.0.0.1" }, () => {
     console.log(
       chalk.bold.cyan("\n  Editor running at ") +
         chalk.white(url) +

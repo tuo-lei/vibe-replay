@@ -173,7 +173,7 @@ program
           }]
         : []),
       { name: `${chalk.magenta("✎")} Open in Editor ${chalk.dim("(annotate, publish, export)")}`, value: "editor" as const },
-      { name: `${chalk.green("▶")} Quick preview ${chalk.dim("(open HTML in browser, no editing)")}`, value: "local" as const },
+      { name: `${chalk.green("●")} Quick preview ${chalk.dim("(open HTML in browser, no editing)")}`, value: "local" as const },
       { name: gistLabel, value: "gist" as const },
       { name: `${chalk.dim("✕")} Exit`, value: "exit" as const },
     ];
