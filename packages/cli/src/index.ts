@@ -64,34 +64,49 @@ program
       // Group by project for display
       const choices = formatSessionChoices(allSessions);
 
-      // Dashboard at the top, but cursor starts on first session
       const { join: pathJoin } = await import("node:path");
       const { homedir } = await import("node:os");
       const replayBaseDir = pathJoin(homedir(), ".vibe-replay");
-      const firstSessionValue = choices.find((c: any) => c.value)?.value;
-      choices.unshift(
-        {
-          name: `${chalk.magenta("◆")} ${chalk.bold("Open Dashboard")} ${chalk.dim("— manage replays, annotate, publish")}`,
-          value: "__dashboard__",
-        },
-        new Separator(""),
-      );
+
+      // Listen for 'd' keypress to open dashboard
+      const ac = new AbortController();
+      let dashboardRequested = false;
+      const { emitKeypressEvents } = await import("node:readline");
+      if (!process.stdin.listenerCount("keypress")) {
+        emitKeypressEvents(process.stdin);
+      }
+      const onKeypress = (_str: string, key: { name?: string }) => {
+        if (key?.name === "d") {
+          dashboardRequested = true;
+          ac.abort();
+        }
+      };
+      process.stdin.on("keypress", onKeypress);
+      ac.signal.addEventListener("abort", () => {
+        process.stdin.off("keypress", onKeypress);
+      });
 
       let chosen: string;
       try {
         chosen = await select<string>({
           message: "Pick a session to replay:",
           choices,
-          default: firstSessionValue,
           pageSize: 20,
-        });
+          theme: {
+            style: {
+              keysHelpTip: (keys: [string, string][]) =>
+                [...keys, ["d", "dashboard"]]
+                  .map(([k, v]) => `${chalk.bold(k)} ${chalk.dim(v)}`)
+                  .join(chalk.dim(" \u00b7 ")),
+            },
+          },
+        }, { signal: ac.signal });
       } catch {
+        if (dashboardRequested) {
+          await startDashboard(replayBaseDir, DEV_MENU_ENABLED ? { externalViewerUrl: "http://localhost:5173" } : undefined);
+          return;
+        }
         process.exit(0);
-      }
-
-      if (chosen === "__dashboard__") {
-        await startDashboard(replayBaseDir, DEV_MENU_ENABLED ? { externalViewerUrl: "http://localhost:5173" } : undefined);
-        return;
       }
 
       const info = allSessions.find((s) => s.filePath === chosen);
