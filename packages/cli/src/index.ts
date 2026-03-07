@@ -64,16 +64,17 @@ program
       // Group by project for display
       const choices = formatSessionChoices(allSessions);
 
-      // Dashboard always available at the bottom
+      // Dashboard at the top, but cursor starts on first session
       const { join: pathJoin } = await import("node:path");
       const { homedir } = await import("node:os");
       const replayBaseDir = pathJoin(homedir(), ".vibe-replay");
-      choices.push(
-        new Separator(""),
+      const firstSessionValue = choices.find((c: any) => c.value)?.value;
+      choices.unshift(
         {
           name: `${chalk.magenta("◆")} ${chalk.bold("Open Dashboard")} ${chalk.dim("— manage replays, annotate, publish")}`,
           value: "__dashboard__",
         },
+        new Separator(""),
       );
 
       let chosen: string;
@@ -81,6 +82,7 @@ program
         chosen = await select<string>({
           message: "Pick a session to replay:",
           choices,
+          default: firstSessionValue,
           pageSize: 20,
         });
       } catch {
