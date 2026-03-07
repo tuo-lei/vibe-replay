@@ -9,6 +9,13 @@ export interface Provider {
 
 export type DataSource = "jsonl" | "sqlite" | "jsonl+tools" | "global-state";
 
+export interface DataSourceInfo {
+  primary: DataSource;
+  sources: string[];
+  supplements?: string[];
+  notes?: string[];
+}
+
 export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
@@ -33,6 +40,7 @@ export interface ProviderParseResult {
   totalDurationMs?: number;
   turns: ParsedTurn[];
   dataSource?: DataSource;
+  dataSourceInfo?: DataSourceInfo;
   tokenUsage?: TokenUsage;
   compactions?: Compaction[];
 }

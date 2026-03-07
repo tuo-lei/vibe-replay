@@ -505,6 +505,10 @@ async function parseCursorStoreDb(sessionId: string): Promise<ProviderParseResul
       startTime: metaJson.createdAt ? new Date(metaJson.createdAt).toISOString() : undefined,
       turns,
       dataSource: "sqlite",
+      dataSourceInfo: {
+        primary: "sqlite",
+        sources: ["cursor/chats/<workspace-hash>/<session-id>/store.db"],
+      },
     };
   } finally {
     db.close();
@@ -696,6 +700,11 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
       endTime: toIsoTimestamp(composer.lastUpdatedAt),
       turns,
       dataSource: "global-state",
+      dataSourceInfo: {
+        primary: "global-state",
+        sources: ["cursor/user/globalStorage/state.vscdb"],
+        notes: ["cursorDiskKV keys: composerData:* + bubbleId:*"],
+      },
     };
   } catch {
     return null;

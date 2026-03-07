@@ -78,6 +78,7 @@ packages/cli/src/
 - **Cursor thinking supplement**: When parsing DB-backed Cursor sessions, parser overlays missing assistant thinking markers from JSONL transcripts (if present) while keeping DB tool-call/tool-result payloads as source of truth.
 - **`sql.js` for portability**: SQLite parsing uses sql.js (WASM) instead of native bindings — no C++ compiler needed, works everywhere via `npx`
 - **`dataSource` metadata**: `ReplaySession.meta.dataSource` tracks which source was used (`sqlite`, `global-state`, `jsonl`, `jsonl+tools`) for diagnostics and transparency
+- **`dataSourceInfo` metadata**: `ReplaySession.meta.dataSourceInfo` carries debug-friendly source details (primary source, source list, supplements, notes)
 - **Skip `progress` lines**: Subagent streaming artifacts
 - **Provider adapter pattern**: Each IDE/tool has its own discover + parser, transform is shared
 - **Package name `vibe-replay`**: CLI package name enables `npx vibe-replay` directly
@@ -117,6 +118,7 @@ Both local HTML output and Gist output use the same `ReplaySession.meta` payload
 Current `meta` fields include:
 - `sessionId`, `slug`, `title`
 - `provider`, `dataSource`
+- `dataSourceInfo` (`primary`, `sources`, optional `supplements`, optional `notes`)
 - `startTime`, `endTime`, `model`
 - `cwd`, `project`
 - `stats`: `sceneCount`, `userPrompts`, `toolCalls`, `thinkingBlocks`, `durationMs`, `tokenUsage`, `costEstimate`

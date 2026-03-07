@@ -83,6 +83,7 @@ Host the viewer once and load different replays via URL parameter.
 - `sessionId`, `slug`, `title`
 - `provider` (`claude-code` or `cursor`)
 - `dataSource` (`sqlite`, `global-state`, `jsonl`, or `jsonl+tools` when available)
+- `dataSourceInfo` (debug details: primary source, source list, supplements, notes)
 - `startTime`, `endTime`, `model`
 - `cwd`, `project`
 - `stats` (`sceneCount`, `userPrompts`, `toolCalls`, `thinkingBlocks`, `durationMs`)

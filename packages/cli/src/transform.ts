@@ -104,6 +104,7 @@ export function transformToReplay(
       title: parsed.title,
       provider,
       dataSource: parsed.dataSource,
+      dataSourceInfo: parsed.dataSourceInfo,
       startTime: parsed.startTime || new Date().toISOString(),
       endTime: parsed.endTime,
       model: parsed.model,

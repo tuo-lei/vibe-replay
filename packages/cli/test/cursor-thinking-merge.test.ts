@@ -173,6 +173,10 @@ describe("parseCursorSession + JSONL thinking supplement", () => {
     expect((assistant.blocks[0] as any).type).toBe("thinking");
     expect((assistant.blocks[0] as any).thinking).toBe("Inspecting logs");
     expect((assistant.blocks[1] as any).type).toBe("text");
+    expect(result.dataSourceInfo?.primary).toBe("global-state");
+    expect(result.dataSourceInfo?.supplements).toContain(
+      "cursor/projects/agent-transcripts/*.jsonl (thinking +1)",
+    );
   });
 
   it("returns SQLite result directly when no transcript is provided", async () => {
@@ -194,5 +198,6 @@ describe("parseCursorSession + JSONL thinking supplement", () => {
     expect(result.dataSource).toBe("sqlite");
     expect(result.turns).toHaveLength(1);
     expect((result.turns[0].blocks[0] as any).text).toBe("DB only data");
+    expect(result.dataSourceInfo).toBeUndefined();
   });
 });

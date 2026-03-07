@@ -1,7 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import type { ParsedTurn, SessionInfo } from "../../types.js";
-import type { ProviderParseResult } from "../types.js";
+import type { DataSourceInfo, ProviderParseResult } from "../types.js";
 import { parseCursorSqlite } from "./sqlite-reader.js";
 
 export async function parseCursorSession(
@@ -22,10 +22,19 @@ export async function parseCursorSession(
       // Keep SQLite/global-state as source of truth, but supplement missing
       // thinking markers from JSONL when transcript files are available.
       if (transcriptPaths.length > 0) {
+        const thinkingBefore = countThinkingBlocks(sqliteResult.turns);
         const jsonlThinking = await parseCursorJsonl(transcriptPaths, [], { inferToolPaths: false });
         sqliteResult.turns = mergeJsonlThinkingIntoCursorTurns(
           sqliteResult.turns,
           jsonlThinking.turns,
+        );
+        const thinkingAfter = countThinkingBlocks(sqliteResult.turns);
+        const supplementedThinkingBlocks = Math.max(0, thinkingAfter - thinkingBefore);
+        sqliteResult.dataSourceInfo = withSupplement(
+          sqliteResult.dataSourceInfo || defaultDataSourceInfo(sqliteResult.dataSource),
+          supplementedThinkingBlocks > 0
+            ? `cursor/projects/agent-transcripts/*.jsonl (thinking +${supplementedThinkingBlocks})`
+            : "cursor/projects/agent-transcripts/*.jsonl (thinking +0)",
         );
       }
       return sqliteResult;
@@ -41,6 +50,24 @@ export async function parseCursorSession(
 
 interface ParseJsonlOptions {
   inferToolPaths: boolean;
+}
+
+function defaultDataSourceInfo(dataSource?: ProviderParseResult["dataSource"]): DataSourceInfo | undefined {
+  if (!dataSource) return undefined;
+  return {
+    primary: dataSource,
+    sources: [],
+  };
+}
+
+function withSupplement(
+  info: DataSourceInfo | undefined,
+  supplement: string,
+): DataSourceInfo | undefined {
+  if (!info) return undefined;
+  const supplements = [...(info.supplements || [])];
+  if (!supplements.includes(supplement)) supplements.push(supplement);
+  return { ...info, supplements };
 }
 
 async function parseCursorJsonl(
@@ -131,6 +158,13 @@ async function parseCursorJsonl(
     cwd: "",
     turns: allTurns,
     dataSource: hasToolData ? "jsonl+tools" : "jsonl",
+    dataSourceInfo: {
+      primary: hasToolData ? "jsonl+tools" : "jsonl",
+      sources: [
+        "cursor/projects/agent-transcripts/*.jsonl",
+        ...(hasToolData ? ["cursor/projects/agent-tools/*.txt"] : []),
+      ],
+    },
   };
 }
 
@@ -146,6 +180,16 @@ function collectThinkingTexts(turn: ParsedTurn): string[] {
 
 function buildThinkingBlocks(texts: string[]): any[] {
   return texts.map((thinking) => ({ type: "thinking", thinking }));
+}
+
+function countThinkingBlocks(turns: ParsedTurn[]): number {
+  let count = 0;
+  for (const turn of turns) {
+    for (const block of turn.blocks as any[]) {
+      if (block?.type === "thinking") count++;
+    }
+  }
+  return count;
 }
 
 /**
