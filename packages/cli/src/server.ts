@@ -1,4 +1,3 @@
-import { createServer } from "node:net";
 import { createHash } from "node:crypto";
 import { readFile, writeFile, mkdir, readdir, stat } from "node:fs/promises";
 import { join, dirname, resolve, basename } from "node:path";
@@ -32,22 +31,6 @@ function requireSlug(raw: string | undefined): { slug: string } | { error: strin
   const slug = safeSlug(raw);
   if (!slug) return { error: "slug parameter is required" };
   return { slug };
-}
-
-async function findFreePort(start: number, end: number): Promise<number> {
-  for (let port = start; port <= end; port++) {
-    const available = await new Promise<boolean>((resolve) => {
-      const server = createServer();
-      server.once("error", () => resolve(false));
-      server.once("listening", () => {
-        server.close();
-        resolve(true);
-      });
-      server.listen(port, "127.0.0.1");
-    });
-    if (available) return port;
-  }
-  throw new Error(`No free port found in range ${start}-${end}`);
 }
 
 async function loadViewerHtml(): Promise<string> {
@@ -553,22 +536,25 @@ export async function startServer(
     }
   });
 
-  // In dev mode (externalViewerUrl), use fixed port 3456 to match Vite proxy config
-  const port = opts?.externalViewerUrl ? 3456 : await findFreePort(3456, 3466);
-  const url = `http://localhost:${port}`;
+  // Dev mode: fixed port 3456 to match Vite proxy config
+  // Production: port 0 lets the OS pick a free port (no conflicts)
+  const requestedPort = opts?.externalViewerUrl ? 3456 : 0;
 
-  // Build the URL to open in the browser
-  let browseUrl: string;
-  const viewerBase = opts?.externalViewerUrl || url;
-  if (opts?.openDashboard) {
-    browseUrl = `${viewerBase}/?view=dashboard`;
-  } else if (opts?.openSlug) {
-    browseUrl = `${viewerBase}/?session=${encodeURIComponent(opts.openSlug)}`;
-  } else {
-    browseUrl = `${viewerBase}/?view=dashboard`;
-  }
+  const server = serve({ fetch: app.fetch, port: requestedPort, hostname: "127.0.0.1" }, (info) => {
+    const port = info.port;
+    const url = `http://localhost:${port}`;
 
-  serve({ fetch: app.fetch, port, hostname: "127.0.0.1" }, () => {
+    // Build the URL to open in the browser
+    let browseUrl: string;
+    const viewerBase = opts?.externalViewerUrl || url;
+    if (opts?.openDashboard) {
+      browseUrl = `${viewerBase}/?view=dashboard`;
+    } else if (opts?.openSlug) {
+      browseUrl = `${viewerBase}/?session=${encodeURIComponent(opts.openSlug)}`;
+    } else {
+      browseUrl = `${viewerBase}/?view=dashboard`;
+    }
+
     const label = opts?.openDashboard || !opts?.openSlug ? "Dashboard" : "Editor";
     if (opts?.externalViewerUrl) {
       console.log(
