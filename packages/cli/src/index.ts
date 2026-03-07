@@ -4,10 +4,10 @@ import chalk from "chalk";
 import ora from "ora";
 import { getAllProviders, getProvider } from "./providers/index.js";
 import { transformToReplay } from "./transform.js";
-import { generateOutput, generateDevJson } from "./generator.js";
+import { generateOutput } from "./generator.js";
 import { publishLocal } from "./publishers/local.js";
 import { publishGist, checkGhStatus, loadSavedGistInfo } from "./publishers/gist.js";
-import { startEditor } from "./server.js";
+import { startEditor, startDashboard } from "./server.js";
 import { scanForSecrets } from "./scan.js";
 import type { SessionInfo, ReplaySession } from "./types.js";
 import { CLI_VERSION } from "./version.js";
@@ -21,7 +21,6 @@ program
   .option("-s, --session <path>", "Path to a specific JSONL session file")
   .option("-p, --provider <name>", "Provider name (default: claude-code)", "claude-code")
   .option("-t, --title <name>", "Custom title for the replay (shown on landing page & shared links)")
-  .option("--dev", "Write demo.json to viewer public/ for HMR development and exit")
   .action(async (opts) => {
     console.log(chalk.bold.cyan("\n  vibe-replay") + chalk.dim(` v${CLI_VERSION}\n`));
 
@@ -55,11 +54,64 @@ program
       // Group by project for display
       const choices = formatSessionChoices(allSessions);
 
-      const chosen = await select<string>({
-        message: "Pick a session to replay:",
-        choices,
-        pageSize: 20,
-      });
+      // Check if there are existing replays for dashboard
+      const { resolve, join: pathJoin } = await import("node:path");
+      const { homedir } = await import("node:os");
+      const replayBaseDir = pathJoin(homedir(), ".vibe-replay");
+      let hasReplays = false;
+      try {
+        const { readdir, stat: fsStat2 } = await import("node:fs/promises");
+        const dirEntries = await readdir(replayBaseDir);
+        for (const e of dirEntries) {
+          try {
+            const s = await fsStat2(resolve(replayBaseDir, e, "replay.json"));
+            if (s.isFile()) { hasReplays = true; break; }
+          } catch { continue; }
+        }
+      } catch { /* no output dir */ }
+
+      // Listen for 'd' keypress to open dashboard
+      const ac = hasReplays ? new AbortController() : null;
+      let dashboardRequested = false;
+      if (ac) {
+        const { emitKeypressEvents } = await import("node:readline");
+        if (!process.stdin.listenerCount("keypress")) {
+          emitKeypressEvents(process.stdin);
+        }
+        const onKeypress = (_str: string, key: { name?: string }) => {
+          if (key?.name === "d") {
+            dashboardRequested = true;
+            ac.abort();
+          }
+        };
+        process.stdin.on("keypress", onKeypress);
+        ac.signal.addEventListener("abort", () => {
+          process.stdin.off("keypress", onKeypress);
+        });
+      }
+
+      let chosen: string;
+      try {
+        chosen = await select<string>({
+          message: "Pick a session to replay:",
+          choices,
+          pageSize: 20,
+          theme: hasReplays ? {
+            style: {
+              keysHelpTip: (keys: [string, string][]) =>
+                [...keys, ["d", "dashboard"]]
+                  .map(([k, v]) => `${chalk.bold(k)} ${chalk.dim(v)}`)
+                  .join(chalk.dim(" \u00b7 ")),
+            },
+          } : undefined,
+        }, ac ? { signal: ac.signal } : undefined);
+      } catch {
+        if (dashboardRequested) {
+          await startDashboard(replayBaseDir, DEV_MENU_ENABLED ? { externalViewerUrl: "http://localhost:5173" } : undefined);
+          return;
+        }
+        process.exit(0);
+      }
 
       const info = allSessions.find((s) => s.filePath === chosen);
       sessionInfo = info;
@@ -106,7 +158,7 @@ program
     // Title: CLI flag > interactive prompt > auto-detected > slug
     if (opts.title) {
       replay.meta.title = opts.title;
-    } else if (!opts.dev) {
+    } else {
       const { input } = await import("@inquirer/prompts");
       const defaultTitle = replay.meta.title || replay.meta.slug;
       const userTitle = await input({
@@ -118,16 +170,11 @@ program
       }
     }
 
-    // Dev mode: write demo.json to viewer public/ and exit
-    if (opts.dev) {
-      await dumpReplayToDemoJson(replay);
-      return;
-    }
-
-    // Output path: vibe-replay/<slug>/index.html
+    // Output path: ~/.vibe-replay/<slug>/index.html
     const rawSlug = replay.meta.slug || replay.meta.sessionId.slice(0, 8);
     const slug = rawSlug.replace(/[^a-zA-Z0-9_-]/g, "-");
-    const outputDir = `./vibe-replay/${slug}`;
+    const { join } = await import("node:path");
+    const outputDir = join(home, ".vibe-replay", slug);
 
     const genSpinner = ora("Generating replay...").start();
     const outputPath = await generateOutput(replay, outputDir);
@@ -172,13 +219,7 @@ program
 
     // Publish target
     console.log();
-    const choices: { name: string; value: "demo" | "local" | "editor" | "gist" | "exit" }[] = [
-      ...(DEV_MENU_ENABLED
-        ? [{
-            name: `${chalk.cyan("⚡")} Dump to demo.json ${chalk.dim("(for pnpm viewer:dev)")}`,
-            value: "demo" as const,
-          }]
-        : []),
+    const choices: { name: string; value: "local" | "editor" | "gist" | "exit" }[] = [
       { name: `${chalk.magenta("✎")} Open in Editor ${chalk.dim("(annotate, publish, export)")}`, value: "editor" as const },
       { name: `${chalk.green("●")} Quick preview ${chalk.dim("(open HTML in browser, no editing)")}`, value: "local" as const },
       { name: gistLabel, value: "gist" as const },
@@ -190,12 +231,10 @@ program
       choices,
     });
 
-    if (target === "demo") {
-      await dumpReplayToDemoJson(replay);
-    } else if (target === "local") {
+    if (target === "local") {
       await publishLocal(outputPath);
     } else if (target === "editor") {
-      await startEditor(replay, outputDir);
+      await startEditor(replay, outputDir, DEV_MENU_ENABLED ? { externalViewerUrl: "http://localhost:5173" } : undefined);
       return; // startEditor blocks until Ctrl+C
     } else if (target === "gist") {
       if (!ghStatus.available) {
@@ -263,14 +302,6 @@ program
   });
 
 program.parse();
-
-async function dumpReplayToDemoJson(replay: ReplaySession) {
-  const viewerPublic = new URL("../../viewer/public", import.meta.url).pathname;
-  const devPath = await generateDevJson(replay, viewerPublic);
-  console.log(chalk.green(`\n  Dev JSON written to ${devPath}`));
-  console.log(chalk.dim("  Open viewer dev server: ") + chalk.white("pnpm viewer:dev"));
-  console.log(chalk.dim("  Then visit: ") + chalk.white("http://localhost:5173/?file=/demo.json\n"));
-}
 
 function formatSessionChoices(sessions: SessionInfo[]) {
   // Merge sessions with the same slug under the same project
@@ -381,4 +412,3 @@ function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
   result.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   return result;
 }
-

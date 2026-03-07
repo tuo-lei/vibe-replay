@@ -40,6 +40,14 @@ function storageKey(sessionId: string): string {
   return LS_PREFIX + sessionId;
 }
 
+/** Build API URL with slug query param when viewing a different session */
+function apiUrl(path: string): string {
+  const slug = new URLSearchParams(window.location.search).get("session");
+  if (!slug) return path;
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}slug=${encodeURIComponent(slug)}`;
+}
+
 export function useAnnotations(
   session: ReplaySession,
   mode: ViewerMode = "embedded",
@@ -80,7 +88,7 @@ export function useAnnotations(
       // Debounced save to server API
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
-        fetch("/api/annotations", {
+        fetch(apiUrl("/api/annotations"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(annotations),
@@ -208,12 +216,12 @@ export function useAnnotations(
         setGistPublishing(true);
         try {
           // Ensure latest annotations are saved first
-          await fetch("/api/annotations", {
+          await fetch(apiUrl("/api/annotations"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(annotations),
           });
-          const resp = await fetch("/api/publish/gist", { method: "POST" });
+          const resp = await fetch(apiUrl("/api/publish/gist"), { method: "POST" });
           const result = await resp.json();
           if (!resp.ok) {
             throw new Error(result.error || `Server error: ${resp.status}`);
@@ -238,7 +246,7 @@ export function useAnnotations(
 
   useEffect(() => {
     if (!isEditor) return;
-    fetch("/api/feedback/detect")
+    fetch(apiUrl("/api/feedback/detect"))
       .then((r) => r.json())
       .then((data) => {
         if (!data.available) return;
@@ -265,13 +273,13 @@ export function useAnnotations(
         setAiCoachRunning(true);
         try {
           // Flush current annotations to server first (debounce may not have fired yet)
-          await fetch("/api/annotations", {
+          await fetch(apiUrl("/api/annotations"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(annotations),
             signal: controller.signal,
           });
-          const resp = await fetch("/api/feedback/generate", {
+          const resp = await fetch(apiUrl("/api/feedback/generate"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ toolName: aiCoachToolName }),
@@ -309,12 +317,12 @@ export function useAnnotations(
     ? async () => {
         setHtmlExporting(true);
         try {
-          await fetch("/api/annotations", {
+          await fetch(apiUrl("/api/annotations"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(annotations),
           });
-          const resp = await fetch("/api/export/html", { method: "POST" });
+          const resp = await fetch(apiUrl("/api/export/html"), { method: "POST" });
           const data = await resp.json();
           if (!resp.ok) throw new Error(data.error || `Export failed: ${resp.status}`);
           const { path } = data;
