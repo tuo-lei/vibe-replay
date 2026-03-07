@@ -19,6 +19,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+          registry-url: 'https://registry.npmjs.org'
 
       - run: pnpm install --frozen-lockfile
 
@@ -32,5 +33,8 @@ jobs:
 
       - name: Publish to npm
         run: |
+          # Remove setup-node's GITHUB_TOKEN auth so npm uses OIDC trusted publisher
+          npm config delete //registry.npmjs.org/:_authToken --location=user 2>/dev/null || true
+          echo "npm version: $(npm --version)"
           cd packages/cli
           npm publish --provenance --access public
