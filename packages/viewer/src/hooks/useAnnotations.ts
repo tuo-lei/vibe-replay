@@ -19,6 +19,11 @@ export interface AnnotationActions {
   exportHtml: (() => Promise<string>) | null;
   gistPublishing: boolean;
   htmlExporting: boolean;
+  /** Editor mode: detected AI Coach tool info (null if unavailable) */
+  aiCoachTool: { name: string } | null;
+  /** Editor mode: run AI Coach to generate feedback annotations */
+  runAiCoach: (() => Promise<{ score: number; itemCount: number }>) | null;
+  aiCoachRunning: boolean;
 }
 
 const LS_PREFIX = "vibe-replay-annotations-";
@@ -213,6 +218,36 @@ export function useAnnotations(
       }
     : null;
 
+  // AI Coach (editor mode)
+  const [aiCoachTool, setAiCoachTool] = useState<{ name: string } | null>(null);
+  const [aiCoachRunning, setAiCoachRunning] = useState(false);
+
+  useEffect(() => {
+    if (!isEditor) return;
+    fetch("/api/feedback/detect")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.available && data.tool) setAiCoachTool(data.tool);
+      })
+      .catch(() => {});
+  }, [isEditor]);
+
+  const runAiCoach = isEditor && aiCoachTool
+    ? async () => {
+        setAiCoachRunning(true);
+        try {
+          const resp = await fetch("/api/feedback/generate", { method: "POST" });
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data.error || "AI Coach failed");
+          setAnnotations(data.annotations);
+          setSavedSnapshot(JSON.stringify(data.annotations));
+          return { score: data.score as number, itemCount: data.itemCount as number };
+        } finally {
+          setAiCoachRunning(false);
+        }
+      }
+    : null;
+
   // Editor mode: server-side HTML export
   const [htmlExporting, setHtmlExporting] = useState(false);
   const exportHtml = isEditor
@@ -242,5 +277,6 @@ export function useAnnotations(
     downloadHtml, downloadJson,
     publishGist, exportHtml,
     gistPublishing, htmlExporting,
+    aiCoachTool, runAiCoach, aiCoachRunning,
   };
 }
