@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 
 const exec = promisify(execFile);
 
@@ -44,6 +45,7 @@ export interface SavedGistInfo {
   gistUrl: string;
   viewerUrl: string;
   updatedAt: string;
+  contentHash?: string;
 }
 
 export interface PublishGistOptions {
@@ -111,12 +113,15 @@ export async function publishGist(
   // Construct viewer URL — clean gist ID link
   const viewerUrl = `${VIEWER_BASE_URL}/?gist=${gistId}`;
   if (!gistUrl) gistUrl = `https://gist.github.com/${gistId}`;
+  const replayContent = await readFile(jsonPath, "utf-8");
+  const contentHash = createHash("sha256").update(replayContent).digest("hex").slice(0, 16);
   await saveGistInfo(outputDir, {
     gistId,
     filename,
     gistUrl,
     viewerUrl,
     updatedAt: new Date().toISOString(),
+    contentHash,
   });
 
   // Register/refresh metadata on vibe-replay.com (worker fetches from gist)

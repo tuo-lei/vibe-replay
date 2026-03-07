@@ -203,6 +203,7 @@ export default function Dashboard() {
   const [ghAvailable, setGhAvailable] = useState<boolean | null>(null);
   const [filter, setFilter] = useState("");
   const [deletingSlug, setDeletingSlug] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [publishingSlug, setPublishingSlug] = useState<string | null>(null);
 
   useEffect(() => {
@@ -247,12 +248,20 @@ export default function Dashboard() {
   };
 
   const confirmDelete = async (slug: string) => {
+    setDeleteError(null);
     try {
       const resp = await fetch(`/api/sessions/${encodeURIComponent(slug)}`, {
         method: "DELETE",
       });
-      if (!resp.ok) throw new Error("Failed to delete session");
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        setDeleteError(data.error || "Failed to delete session");
+        setDeletingSlug(null);
+        return;
+      }
       setSessions((prev) => prev.filter((s) => s.slug !== slug));
+    } catch {
+      setDeleteError("Failed to delete session");
     } finally {
       setDeletingSlug(null);
     }
@@ -334,6 +343,14 @@ export default function Dashboard() {
                 className="w-full bg-terminal-surface border border-terminal-border rounded-lg pl-9 pr-3 py-2 text-sm font-mono text-terminal-text placeholder:text-terminal-dim/50 outline-none focus:border-terminal-green/50"
               />
             </div>
+
+            {/* Error toast */}
+            {deleteError && (
+              <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 text-xs font-mono text-red-400">
+                <span>{deleteError}</span>
+                <button onClick={() => setDeleteError(null)} className="ml-auto text-red-400/60 hover:text-red-400">&times;</button>
+              </div>
+            )}
 
             {/* Stats bar */}
             <div className="flex items-center gap-3 text-xs font-mono text-terminal-dim">

@@ -1,6 +1,7 @@
 import { createServer } from "node:net";
+import { createHash } from "node:crypto";
 import { readFile, writeFile, mkdir, readdir, stat } from "node:fs/promises";
-import { join, dirname, resolve } from "node:path";
+import { join, dirname, resolve, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
@@ -12,6 +13,14 @@ import { checkGhStatus, publishGist, loadSavedGistInfo, type SavedGistInfo } fro
 import { detectFeedbackTools, generateFeedback } from "./feedback.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/** Sanitize slug to prevent path traversal — rejects anything that isn't a simple name */
+function safeSlug(raw: string | undefined): string | null {
+  if (!raw) return null;
+  const clean = basename(raw);
+  if (!clean || clean !== raw || clean === "." || clean === "..") return null;
+  return clean;
+}
 
 async function findFreePort(start: number, end: number): Promise<number> {
   for (let port = start; port <= end; port++) {
@@ -91,10 +100,13 @@ async function scanSessionsFromDir(baseDir: string): Promise<any[]> {
         firstMessage,
         gist: gist ? await (async () => {
           let outdated = false;
-          try {
-            const replayStat = await stat(replayPath);
-            outdated = replayStat.mtimeMs > new Date(gist!.updatedAt).getTime();
-          } catch { /* ignore */ }
+          if (gist!.contentHash) {
+            try {
+              const content = await readFile(replayPath, "utf-8");
+              const currentHash = createHash("sha256").update(content).digest("hex").slice(0, 16);
+              outdated = currentHash !== gist!.contentHash;
+            } catch { /* ignore */ }
+          }
           return { gistId: gist!.gistId, viewerUrl: gist!.viewerUrl, updatedAt: gist!.updatedAt, outdated };
         })() : undefined,
       });
@@ -198,7 +210,7 @@ export async function startEditor(
   // Without slug: returns the current (initially loaded) session
   // With slug: loads any session from disk (for dashboard navigation)
   app.get("/api/session", async (c) => {
-    const slug = c.req.query("slug");
+    const slug = safeSlug(c.req.query("slug"));
     if (!slug || slug === currentSlug) {
       return c.json({ ...session, annotations });
     }
@@ -219,7 +231,8 @@ export async function startEditor(
 
   // --- Dashboard: update title ---
   app.patch("/api/sessions/:slug", async (c) => {
-    const slug = c.req.param("slug");
+    const slug = safeSlug(c.req.param("slug"));
+    if (!slug) return c.json({ error: "invalid slug" }, 400);
     const body = await c.req.json<{ title: string }>();
     if (!body.title && body.title !== "") {
       return c.json({ error: "title field required" }, 400);
@@ -246,10 +259,8 @@ export async function startEditor(
 
   // --- Dashboard: delete session ---
   app.delete("/api/sessions/:slug", async (c) => {
-    const slug = c.req.param("slug");
-    if (slug === currentSlug) {
-      return c.json({ error: "Cannot delete the currently active session" }, 400);
-    }
+    const slug = safeSlug(c.req.param("slug"));
+    if (!slug) return c.json({ error: "invalid slug" }, 400);
     try {
       const { rm } = await import("node:fs/promises");
       await rm(join(baseDir, slug), { recursive: true });
@@ -262,7 +273,7 @@ export async function startEditor(
   // --- Annotations ---
   // slug query param: operate on a specific session; no slug: current session
   app.get("/api/annotations", async (c) => {
-    const slug = c.req.query("slug");
+    const slug = safeSlug(c.req.query("slug"));
     if (slug && slug !== currentSlug) {
       const annPath = join(baseDir, slug, "annotations.json");
       try {
@@ -276,7 +287,7 @@ export async function startEditor(
   });
 
   app.post("/api/annotations", async (c) => {
-    const slug = c.req.query("slug");
+    const slug = safeSlug(c.req.query("slug"));
     const body = await c.req.json<Annotation[]>();
 
     if (slug && slug !== currentSlug) {
@@ -304,7 +315,7 @@ export async function startEditor(
 
   // Publish to Gist
   app.post("/api/publish/gist", async (c) => {
-    const slug = c.req.query("slug");
+    const slug = safeSlug(c.req.query("slug"));
     const targetSlug = slug || currentSlug;
     const targetDir = join(baseDir, targetSlug);
 
@@ -328,7 +339,7 @@ export async function startEditor(
 
   // Export HTML
   app.post("/api/export/html", async (c) => {
-    const slug = c.req.query("slug");
+    const slug = safeSlug(c.req.query("slug"));
     const targetSlug = slug || currentSlug;
     const targetDir = join(baseDir, targetSlug);
 
@@ -364,7 +375,7 @@ export async function startEditor(
 
   // AI Feedback — generate feedback annotations
   app.post("/api/feedback/generate", async (c) => {
-    const slug = c.req.query("slug");
+    const slug = safeSlug(c.req.query("slug"));
     const targetSlug = slug || currentSlug;
 
     try {
@@ -417,7 +428,8 @@ export async function startEditor(
     }
   });
 
-  const port = await findFreePort(3456, 3466);
+  // In dev mode (externalViewerUrl), use fixed port 3456 to match Vite proxy config
+  const port = opts?.externalViewerUrl ? 3456 : await findFreePort(3456, 3466);
   const url = `http://localhost:${port}`;
   const browseUrl = opts?.externalViewerUrl
     ? opts.openDashboard ? `${opts.externalViewerUrl}/?view=dashboard` : opts.externalViewerUrl
