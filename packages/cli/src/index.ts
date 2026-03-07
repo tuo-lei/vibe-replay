@@ -7,7 +7,7 @@ import { transformToReplay } from "./transform.js";
 import { generateOutput } from "./generator.js";
 import { publishLocal } from "./publishers/local.js";
 import { publishGist, checkGhStatus, loadSavedGistInfo } from "./publishers/gist.js";
-import { startEditor, startDashboard } from "./server.js";
+import { startServer, startDashboard } from "./server.js";
 import { scanForSecrets } from "./scan.js";
 import type { SessionInfo, ReplaySession } from "./types.js";
 import { CLI_VERSION } from "./version.js";
@@ -21,8 +21,18 @@ program
   .option("-s, --session <path>", "Path to a specific JSONL session file")
   .option("-p, --provider <name>", "Provider name (default: claude-code)", "claude-code")
   .option("-t, --title <name>", "Custom title for the replay (shown on landing page & shared links)")
+  .option("-d, --dashboard", "Open Dashboard directly (skip session picker)")
   .action(async (opts) => {
     console.log(chalk.bold.cyan("\n  vibe-replay") + chalk.dim(` v${CLI_VERSION}\n`));
+
+    // --dashboard: open Dashboard directly
+    if (opts.dashboard) {
+      const { join: pathJoin } = await import("node:path");
+      const { homedir } = await import("node:os");
+      const replayBaseDir = pathJoin(homedir(), ".vibe-replay");
+      await startDashboard(replayBaseDir, DEV_MENU_ENABLED ? { externalViewerUrl: "http://localhost:5173" } : undefined);
+      return;
+    }
 
     let sessionInfo: SessionInfo | undefined;
     let sessionPaths: string | string[];
@@ -70,24 +80,15 @@ program
         }
       } catch { /* no output dir */ }
 
-      // Listen for 'd' keypress to open dashboard
-      const ac = hasReplays ? new AbortController() : null;
-      let dashboardRequested = false;
-      if (ac) {
-        const { emitKeypressEvents } = await import("node:readline");
-        if (!process.stdin.listenerCount("keypress")) {
-          emitKeypressEvents(process.stdin);
-        }
-        const onKeypress = (_str: string, key: { name?: string }) => {
-          if (key?.name === "d") {
-            dashboardRequested = true;
-            ac.abort();
-          }
-        };
-        process.stdin.on("keypress", onKeypress);
-        ac.signal.addEventListener("abort", () => {
-          process.stdin.off("keypress", onKeypress);
-        });
+      // Add Dashboard as first choice when replays exist
+      if (hasReplays) {
+        choices.unshift(
+          {
+            name: `${chalk.magenta("◆")} ${chalk.bold("Open Dashboard")} ${chalk.dim("— manage replays, annotate, publish")}`,
+            value: "__dashboard__",
+          },
+          new Separator(""),
+        );
       }
 
       let chosen: string;
@@ -96,21 +97,14 @@ program
           message: "Pick a session to replay:",
           choices,
           pageSize: 20,
-          theme: hasReplays ? {
-            style: {
-              keysHelpTip: (keys: [string, string][]) =>
-                [...keys, ["d", "dashboard"]]
-                  .map(([k, v]) => `${chalk.bold(k)} ${chalk.dim(v)}`)
-                  .join(chalk.dim(" \u00b7 ")),
-            },
-          } : undefined,
-        }, ac ? { signal: ac.signal } : undefined);
+        });
       } catch {
-        if (dashboardRequested) {
-          await startDashboard(replayBaseDir, DEV_MENU_ENABLED ? { externalViewerUrl: "http://localhost:5173" } : undefined);
-          return;
-        }
         process.exit(0);
+      }
+
+      if (chosen === "__dashboard__") {
+        await startDashboard(replayBaseDir, DEV_MENU_ENABLED ? { externalViewerUrl: "http://localhost:5173" } : undefined);
+        return;
       }
 
       const info = allSessions.find((s) => s.filePath === chosen);
@@ -234,8 +228,11 @@ program
     if (target === "local") {
       await publishLocal(outputPath);
     } else if (target === "editor") {
-      await startEditor(replay, outputDir, DEV_MENU_ENABLED ? { externalViewerUrl: "http://localhost:5173" } : undefined);
-      return; // startEditor blocks until Ctrl+C
+      await startServer(join(home, ".vibe-replay"), {
+        openSlug: slug,
+        externalViewerUrl: DEV_MENU_ENABLED ? "http://localhost:5173" : undefined,
+      });
+      return; // startServer blocks until Ctrl+C
     } else if (target === "gist") {
       if (!ghStatus.available) {
         if (ghStatus.reason === "not-installed") {

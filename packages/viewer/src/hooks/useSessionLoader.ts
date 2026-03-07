@@ -77,16 +77,8 @@ async function loadSession(): Promise<LoadResult | "dashboard"> {
       return { session, mode: "editor" };
     }
 
-    // Default: load the current session
-    try {
-      const resp = await fetch("/api/session");
-      if (!resp.ok) throw new Error("fetch failed");
-      const session = (await resp.json()) as ReplaySession;
-      return { session, mode: "editor" };
-    } catch {
-      // Server not reachable or session missing — fall back to dashboard
-      return "dashboard";
-    }
+    // No slug specified — show dashboard
+    return "dashboard";
   }
 
   const params = new URLSearchParams(window.location.search);

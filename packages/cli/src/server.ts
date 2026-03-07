@@ -22,6 +22,13 @@ function safeSlug(raw: string | undefined): string | null {
   return clean;
 }
 
+/** Require a valid slug from query param, returning 400 if missing */
+function requireSlug(raw: string | undefined): { slug: string } | { error: string } {
+  const slug = safeSlug(raw);
+  if (!slug) return { error: "slug parameter is required" };
+  return { slug };
+}
+
 async function findFreePort(start: number, end: number): Promise<number> {
   for (let port = start; port <= end; port++) {
     const available = await new Promise<boolean>((resolve) => {
@@ -170,29 +177,34 @@ async function loadSessionFromDisk(baseDir: string, slug: string): Promise<Repla
   return session;
 }
 
-export async function startEditor(
-  session: ReplaySession,
-  outputDir: string,
-  opts?: { openDashboard?: boolean; externalViewerUrl?: string },
+/** Load annotations from disk for a given slug */
+async function loadAnnotations(baseDir: string, slug: string): Promise<Annotation[]> {
+  const dirs = [join(baseDir, slug), resolve("./vibe-replay", slug)];
+  for (const dir of dirs) {
+    try {
+      const raw = await readFile(join(dir, "annotations.json"), "utf-8");
+      const anns = JSON.parse(raw) as Annotation[];
+      if (Array.isArray(anns)) return anns;
+    } catch { continue; }
+  }
+  return [];
+}
+
+/** Save annotations to disk for a given slug */
+async function saveAnnotations(baseDir: string, slug: string, annotations: Annotation[]): Promise<void> {
+  const annPath = join(baseDir, slug, "annotations.json");
+  await writeFile(annPath, JSON.stringify(annotations, null, 2), "utf-8");
+}
+
+export async function startServer(
+  baseDir: string,
+  opts?: {
+    openDashboard?: boolean;
+    openSlug?: string;
+    externalViewerUrl?: string;
+  },
 ): Promise<void> {
-  await mkdir(outputDir, { recursive: true });
-
-  // Base directory for dashboard (parent of outputDir, e.g. ~/.vibe-replay/)
-  const baseDir = dirname(outputDir);
-  const currentSlug = outputDir.split("/").pop()!;
-
-  // Load existing annotations from disk
-  const annotationsPath = join(outputDir, "annotations.json");
-  try {
-    const raw = await readFile(annotationsPath, "utf-8");
-    const saved = JSON.parse(raw) as Annotation[];
-    if (Array.isArray(saved) && saved.length > 0) {
-      session = { ...session, annotations: saved };
-    }
-  } catch { /* no saved annotations */ }
-
-  // In-memory annotations state (for the initially-loaded session)
-  let annotations: Annotation[] = session.annotations ?? [];
+  await mkdir(baseDir, { recursive: true });
 
   const viewerHtml = await loadViewerHtml();
 
@@ -206,20 +218,15 @@ export async function startEditor(
     return c.html(html);
   });
 
-  // --- Session data ---
-  // Without slug: returns the current (initially loaded) session
-  // With slug: loads any session from disk (for dashboard navigation)
+  // --- Session data (requires slug) ---
   app.get("/api/session", async (c) => {
-    const slug = safeSlug(c.req.query("slug"));
-    if (!slug || slug === currentSlug) {
-      return c.json({ ...session, annotations });
-    }
-    // Load a different session from disk
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
     try {
-      const other = await loadSessionFromDisk(baseDir, slug);
-      return c.json(other);
+      const session = await loadSessionFromDisk(baseDir, result.slug);
+      return c.json(session);
     } catch {
-      return c.json({ error: `Session not found: ${slug}` }, 404);
+      return c.json({ error: `Session not found: ${result.slug}` }, 404);
     }
   });
 
@@ -246,11 +253,6 @@ export async function startEditor(
       await writeFile(join(targetDir, "replay.json"), JSON.stringify(target), "utf-8");
       await generateOutput(target, targetDir);
 
-      // Update in-memory session if it's the current one
-      if (slug === currentSlug) {
-        session = { ...session, meta: { ...session.meta, title: target.meta.title } };
-      }
-
       return c.json({ ok: true, title: target.meta.title });
     } catch (err: any) {
       return c.json({ error: err.message || "Update failed" }, 500);
@@ -270,40 +272,21 @@ export async function startEditor(
     }
   });
 
-  // --- Annotations ---
-  // slug query param: operate on a specific session; no slug: current session
+  // --- Annotations (requires slug) ---
   app.get("/api/annotations", async (c) => {
-    const slug = safeSlug(c.req.query("slug"));
-    if (slug && slug !== currentSlug) {
-      const annPath = join(baseDir, slug, "annotations.json");
-      try {
-        const raw = await readFile(annPath, "utf-8");
-        return c.json(JSON.parse(raw));
-      } catch {
-        return c.json([]);
-      }
-    }
-    return c.json(annotations);
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+    const anns = await loadAnnotations(baseDir, result.slug);
+    return c.json(anns);
   });
 
   app.post("/api/annotations", async (c) => {
-    const slug = safeSlug(c.req.query("slug"));
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
     const body = await c.req.json<Annotation[]>();
-
-    if (slug && slug !== currentSlug) {
-      // Save annotations for a different session
-      const annPath = join(baseDir, slug, "annotations.json");
-      try {
-        await writeFile(annPath, JSON.stringify(body, null, 2), "utf-8");
-      } catch { /* ignore */ }
-      return c.json({ ok: true });
-    }
-
-    // Current session
-    annotations = body;
     try {
-      await writeFile(annotationsPath, JSON.stringify(annotations, null, 2), "utf-8");
-    } catch { /* ignore write errors */ }
+      await saveAnnotations(baseDir, result.slug, body);
+    } catch { /* ignore */ }
     return c.json({ ok: true });
   });
 
@@ -313,41 +296,36 @@ export async function startEditor(
     return c.json(status);
   });
 
-  // Publish to Gist
+  // Publish to Gist (requires slug)
   app.post("/api/publish/gist", async (c) => {
-    const slug = safeSlug(c.req.query("slug"));
-    const targetSlug = slug || currentSlug;
-    const targetDir = join(baseDir, targetSlug);
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetDir = join(baseDir, result.slug);
 
     try {
-      const targetSession = (targetSlug === currentSlug)
-        ? { ...session, annotations }
-        : await loadSessionFromDisk(baseDir, targetSlug);
+      const targetSession = await loadSessionFromDisk(baseDir, result.slug);
 
       await writeFile(join(targetDir, "replay.json"), JSON.stringify(targetSession), "utf-8");
 
       const title = targetSession.meta.title || targetSession.meta.slug;
       const savedGist = await loadSavedGistInfo(targetDir);
-      const result = await publishGist(targetDir, title, {
+      const gistResult = await publishGist(targetDir, title, {
         overwrite: savedGist || undefined,
       });
-      return c.json(result);
+      return c.json(gistResult);
     } catch (err: any) {
       return c.json({ error: err.message || "Gist publish failed" }, 500);
     }
   });
 
-  // Export HTML
+  // Export HTML (requires slug)
   app.post("/api/export/html", async (c) => {
-    const slug = safeSlug(c.req.query("slug"));
-    const targetSlug = slug || currentSlug;
-    const targetDir = join(baseDir, targetSlug);
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetDir = join(baseDir, result.slug);
 
     try {
-      const targetSession = (targetSlug === currentSlug)
-        ? { ...session, annotations }
-        : await loadSessionFromDisk(baseDir, targetSlug);
-
+      const targetSession = await loadSessionFromDisk(baseDir, result.slug);
       const outputPath = await generateOutput(targetSession, targetDir);
       return c.json({ path: outputPath });
     } catch (err: any) {
@@ -373,10 +351,10 @@ export async function startEditor(
     }
   });
 
-  // AI Feedback — generate feedback annotations
+  // AI Feedback — generate feedback annotations (requires slug)
   app.post("/api/feedback/generate", async (c) => {
-    const slug = safeSlug(c.req.query("slug"));
-    const targetSlug = slug || currentSlug;
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
 
     try {
       const body = await c.req.json<{ toolName?: string }>().catch(() => ({}));
@@ -392,9 +370,7 @@ export async function startEditor(
         return c.json({ error: `Requested AI Coach tool is not available: ${requestedToolName}` }, 400);
       }
 
-      const targetSession = (targetSlug === currentSlug)
-        ? { ...session, annotations }
-        : await loadSessionFromDisk(baseDir, targetSlug);
+      const targetSession = await loadSessionFromDisk(baseDir, result.slug);
 
       const fb = await generateFeedback(targetSession, tool);
       if (!fb) {
@@ -407,15 +383,9 @@ export async function startEditor(
         ...fb.annotations,
       ];
 
-      // Update in-memory if current session
-      if (targetSlug === currentSlug) {
-        annotations = newAnnotations;
-      }
-
       // Persist
-      const annPath = join(baseDir, targetSlug, "annotations.json");
       try {
-        await writeFile(annPath, JSON.stringify(newAnnotations, null, 2), "utf-8");
+        await saveAnnotations(baseDir, result.slug, newAnnotations);
       } catch { /* ignore */ }
 
       return c.json({
@@ -431,12 +401,20 @@ export async function startEditor(
   // In dev mode (externalViewerUrl), use fixed port 3456 to match Vite proxy config
   const port = opts?.externalViewerUrl ? 3456 : await findFreePort(3456, 3466);
   const url = `http://localhost:${port}`;
-  const browseUrl = opts?.externalViewerUrl
-    ? opts.openDashboard ? `${opts.externalViewerUrl}/?view=dashboard` : opts.externalViewerUrl
-    : opts?.openDashboard ? `${url}/?view=dashboard` : url;
+
+  // Build the URL to open in the browser
+  let browseUrl: string;
+  const viewerBase = opts?.externalViewerUrl || url;
+  if (opts?.openDashboard) {
+    browseUrl = `${viewerBase}/?view=dashboard`;
+  } else if (opts?.openSlug) {
+    browseUrl = `${viewerBase}/?session=${encodeURIComponent(opts.openSlug)}`;
+  } else {
+    browseUrl = `${viewerBase}/?view=dashboard`;
+  }
 
   serve({ fetch: app.fetch, port, hostname: "127.0.0.1" }, () => {
-    const label = opts?.openDashboard ? "Dashboard" : "Editor";
+    const label = opts?.openDashboard || !opts?.openSlug ? "Dashboard" : "Editor";
     if (opts?.externalViewerUrl) {
       console.log(
         chalk.bold.cyan(`\n  ${label} API running on port ${port}`) +
@@ -457,7 +435,7 @@ export async function startEditor(
   // Keep alive until Ctrl+C
   await new Promise<void>((resolve) => {
     process.on("SIGINT", () => {
-      console.log(chalk.dim("\n  Editor stopped.\n"));
+      console.log(chalk.dim("\n  Server stopped.\n"));
       resolve();
       process.exit(0);
     });
@@ -465,22 +443,8 @@ export async function startEditor(
 }
 
 /**
- * Start dashboard mode — finds first existing replay and opens dashboard view.
+ * Start dashboard mode — no existing replays required.
  */
 export async function startDashboard(baseDir: string, opts?: { externalViewerUrl?: string }): Promise<void> {
-  await mkdir(baseDir, { recursive: true });
-
-  // Find first replay to use as the "current" session
-  const sessions = await scanSessions(baseDir);
-  if (sessions.length === 0) {
-    console.log(chalk.red("  No replays found in " + baseDir));
-    console.log(chalk.dim("  Run vibe-replay first to create a replay.\n"));
-    process.exit(1);
-  }
-
-  const firstSlug = sessions[0].slug;
-  const session = await loadSessionFromDisk(baseDir, firstSlug);
-  const outputDir = join(baseDir, firstSlug);
-
-  await startEditor(session, outputDir, { openDashboard: true, externalViewerUrl: opts?.externalViewerUrl });
+  await startServer(baseDir, { openDashboard: true, externalViewerUrl: opts?.externalViewerUrl });
 }
