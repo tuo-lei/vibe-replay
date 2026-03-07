@@ -12,7 +12,7 @@ import { scanForSecrets } from "./scan.js";
 import type { SessionInfo, ReplaySession } from "./types.js";
 import { CLI_VERSION } from "./version.js";
 
-const DEV_MENU_ENABLED = process.env.VIBE_REPLAY_DEV_MENU === "1";
+const IS_DEV_MODE = process.env.VIBE_REPLAY_DEV === "1";
 
 program
   .name("vibe-replay")
@@ -107,7 +107,7 @@ program
         }, ac ? { signal: ac.signal } : undefined);
       } catch {
         if (dashboardRequested) {
-          await startDashboard(replayBaseDir, DEV_MENU_ENABLED ? { externalViewerUrl: "http://localhost:5173" } : undefined);
+          await startDashboard(replayBaseDir, IS_DEV_MODE ? { externalViewerUrl: "http://localhost:5173" } : undefined);
           return;
         }
         process.exit(0);
@@ -234,7 +234,7 @@ program
     if (target === "local") {
       await publishLocal(outputPath);
     } else if (target === "editor") {
-      await startEditor(replay, outputDir, DEV_MENU_ENABLED ? { externalViewerUrl: "http://localhost:5173" } : undefined);
+      await startEditor(replay, outputDir, IS_DEV_MODE ? { externalViewerUrl: "http://localhost:5173" } : undefined);
       return; // startEditor blocks until Ctrl+C
     } else if (target === "gist") {
       if (!ghStatus.available) {

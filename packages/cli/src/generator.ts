@@ -59,20 +59,6 @@ export async function generateOutput(
   return outputPath;
 }
 
-/**
- * Write replay JSON to the viewer's public/ dir for HMR dev mode.
- * Usage: vite dev server auto-serves public/, so ?file=/demo.json works.
- */
-export async function generateDevJson(
-  session: ReplaySession,
-  viewerPublicDir: string,
-): Promise<string> {
-  await mkdir(viewerPublicDir, { recursive: true });
-  const outputPath = join(viewerPublicDir, "demo.json");
-  await writeFile(outputPath, JSON.stringify(session, null, 2), "utf-8");
-  return outputPath;
-}
-
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")

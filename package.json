@@ -14,7 +14,7 @@
     "start": "pnpm build && node packages/cli/dist/index.js",
     "dev": "sh -c 'pnpm viewer:dev >/tmp/vibe-replay-viewer.log 2>&1 & VITE_PID=$!; cleanup(){ kill $VITE_PID 2>/dev/null; }; trap \"cleanup; exit 130\" INT TERM; echo \"[vibe-replay] viewer: http://localhost:5173  logs: /tmp/vibe-replay-viewer.log\"; pnpm cli:dev; CLI_EXIT=$?; if [ $CLI_EXIT -ne 0 ]; then cleanup; exit $CLI_EXIT; fi; echo \"[vibe-replay] CLI exited. Viewer is still running for preview.\"; echo \"[vibe-replay] Press Ctrl+C to stop viewer.\"; wait $VITE_PID'",
     "viewer:dev": "pnpm --filter @vibe-replay/viewer dev",
-    "cli:dev": "VIBE_REPLAY_DEV_MENU=1 npx tsx packages/cli/src/index.ts",
+    "cli:dev": "VIBE_REPLAY_DEV=1 npx tsx packages/cli/src/index.ts",
     "test": "pnpm --filter vibe-replay test"
   },
   "pnpm": {
