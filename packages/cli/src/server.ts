@@ -332,26 +332,40 @@ export async function startServer(
         }
       }
 
-      // Check which source sessions already have replays
+      // Check which source sessions already have replays, and build stats map
       const existingReplays = await scanSessions(baseDir);
-      const replaySlugSet = new Set(existingReplays.map((r) => r.slug as string));
+      const replayMap = new Map<string, any>();
+      for (const r of existingReplays) {
+        replayMap.set(r.slug as string, r);
+      }
 
-      const result = merged.map((s) => ({
-        provider: s.provider,
-        slug: s.slug,
-        title: s.title,
-        project: s.project,
-        timestamp: s.timestamp,
-        fileSize: s.fileSize,
-        lineCount: s.lineCount,
-        firstPrompt: s.firstPrompt.replace(/\n/g, " ").slice(0, 200),
-        filePaths: s.filePaths,
-        toolPaths: s.toolPaths,
-        hasSqlite: s.hasSqlite,
-        gitBranch: s.gitBranch,
-        existingReplay: replaySlugSet.has(s.slug) ? s.slug : null,
-        projectExists: projectExistsMap.get(s.project) ?? false,
-      }));
+      const result = merged.map((s) => {
+        const replay = replayMap.get(s.slug);
+        return {
+          provider: s.provider,
+          slug: s.slug,
+          title: s.title,
+          project: s.project,
+          timestamp: s.timestamp,
+          fileSize: s.fileSize,
+          lineCount: s.lineCount,
+          firstPrompt: s.firstPrompt.replace(/\n/g, " ").slice(0, 200),
+          filePaths: s.filePaths,
+          toolPaths: s.toolPaths,
+          hasSqlite: s.hasSqlite,
+          gitBranch: s.gitBranch,
+          existingReplay: replay ? s.slug : null,
+          projectExists: projectExistsMap.get(s.project) ?? false,
+          replayStats: replay ? {
+            sceneCount: replay.stats?.sceneCount,
+            userPrompts: replay.stats?.userPrompts,
+            toolCalls: replay.stats?.toolCalls,
+            durationMs: replay.stats?.durationMs,
+            costEstimate: replay.stats?.costEstimate,
+            model: replay.model,
+          } : undefined,
+        };
+      });
 
       return c.json({ sessions: result });
     } catch (err: any) {
