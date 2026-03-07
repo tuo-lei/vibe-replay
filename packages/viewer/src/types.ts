@@ -108,6 +108,7 @@ export interface SourceSession {
   hasSqlite?: boolean;
   gitBranch?: string;
   existingReplay: string | null;
+  projectExists?: boolean;
 }
 
 declare global {

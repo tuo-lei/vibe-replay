@@ -237,8 +237,8 @@ function projectName(project: string): string {
 /**
  * Compute short but unambiguous display labels for project paths.
  * - Unique & meaningful last segment → "vibe-replay"
- * - Ambiguous (short, numeric, duplicate, "~") → show more path: "~/Code" or "~/4"
- * - Long paths truncated from middle: "~/…/parent/child"
+ * - Ambiguous (short ≤3 chars, numeric, duplicate, "~") → show parent: "~/Code/cli"
+ * - Long paths truncated: "~/…/parent/child"
  */
 function computeProjectLabels(projects: string[]): Map<string, string> {
   const labels = new Map<string, string>();
@@ -253,7 +253,7 @@ function computeProjectLabels(projects: string[]): Map<string, string> {
   for (const p of projects) {
     const name = projectName(p);
     const isDuplicate = (nameCount.get(name) || 0) > 1;
-    const isAmbiguous = name.length <= 2 || /^\d+$/.test(name) || name === "~";
+    const isAmbiguous = name.length <= 3 || /^\d+$/.test(name) || name === "~";
 
     if (isDuplicate || isAmbiguous) {
       labels.set(p, shortenPath(p));
@@ -265,21 +265,23 @@ function computeProjectLabels(projects: string[]): Map<string, string> {
   return labels;
 }
 
-/** Shorten a path to fit the sidebar, keeping first + last meaningful segments */
+/** Shorten a path to fit the sidebar, keeping meaningful segments */
 function shortenPath(path: string): string {
-  const MAX = 28;
+  const MAX = 26;
   if (path.length <= MAX) return path;
 
   const parts = path.split("/");
   if (parts.length <= 2) return path;
 
-  // Try first + last two segments: ~/parent/name
-  const first = parts[0];
+  // Try last two segments with ~: ~/parent/name
   const lastTwo = parts.slice(-2).join("/");
-  const candidate = `${first}/\u2026/${lastTwo}`;
-  if (candidate.length <= MAX) return candidate;
+  if (parts[0] === "~") {
+    const candidate = `~/\u2026/${lastTwo}`;
+    if (candidate.length <= MAX) return candidate;
+  }
 
   // Just first + last
+  const first = parts[0];
   const last = parts[parts.length - 1];
   return `${first}/\u2026/${last}`;
 }
@@ -475,6 +477,7 @@ function SessionsPanel() {
             const replayCount = sessions.filter((s) => s.existingReplay).length;
             const isActive = selectedProject === project;
             const label = projectLabels.get(project) || projectName(project);
+            const exists = sessions[0]?.projectExists !== false;
             return (
               <button
                 key={project}
@@ -484,11 +487,15 @@ function SessionsPanel() {
                   isActive
                     ? "bg-terminal-green/10"
                     : "hover:bg-terminal-surface/50"
-                }`}
+                } ${!exists ? "opacity-50" : ""}`}
               >
                 <div className="flex items-center justify-between gap-1">
                   <span className={`text-xs font-mono truncate ${
-                    isActive ? "text-terminal-green" : "text-terminal-text/80 group-hover:text-terminal-text"
+                    isActive
+                      ? "text-terminal-green"
+                      : !exists
+                        ? "text-terminal-dim line-through decoration-terminal-dim/30"
+                        : "text-terminal-text/80 group-hover:text-terminal-text"
                   }`}>
                     {label}
                   </span>
@@ -505,6 +512,11 @@ function SessionsPanel() {
                   {replayCount > 0 && (
                     <span className="text-[9px] font-mono text-green-400/50">
                       {replayCount}r
+                    </span>
+                  )}
+                  {!exists && (
+                    <span className="text-[9px] font-mono text-terminal-dim/40">
+                      gone
                     </span>
                   )}
                 </div>

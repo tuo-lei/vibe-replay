@@ -311,6 +311,27 @@ export async function startServer(
       // Merge multi-file sessions (Claude Code /resume creates new JSONL files)
       const merged = mergeSameSessions(allSessions);
 
+      // Normalize project paths: /Users/xxx/... → ~/...
+      const home = homedir();
+      for (const s of merged) {
+        if (s.project.startsWith(home)) {
+          s.project = "~" + s.project.slice(home.length);
+        }
+      }
+
+      // Check which project directories still exist on disk
+      const uniqueProjects = [...new Set(merged.map((s) => s.project))];
+      const projectExistsMap = new Map<string, boolean>();
+      for (const p of uniqueProjects) {
+        const resolved = p.startsWith("~/") ? join(home, p.slice(2)) : p === "~" ? home : p;
+        try {
+          const s = await stat(resolved);
+          projectExistsMap.set(p, s.isDirectory());
+        } catch {
+          projectExistsMap.set(p, false);
+        }
+      }
+
       // Check which source sessions already have replays
       const existingReplays = await scanSessions(baseDir);
       const replaySlugSet = new Set(existingReplays.map((r) => r.slug as string));
@@ -329,6 +350,7 @@ export async function startServer(
         hasSqlite: s.hasSqlite,
         gitBranch: s.gitBranch,
         existingReplay: replaySlugSet.has(s.slug) ? s.slug : null,
+        projectExists: projectExistsMap.get(s.project) ?? false,
       }));
 
       return c.json({ sessions: result });
