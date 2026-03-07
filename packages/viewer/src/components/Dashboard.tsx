@@ -234,38 +234,16 @@ function projectName(project: string): string {
   return parts[parts.length - 1] || project;
 }
 
-/**
- * Compute short but unambiguous display labels for project paths.
- * - Unique & meaningful last segment → "vibe-replay"
- * - Ambiguous (short ≤3 chars, numeric, duplicate, "~") → show parent: "~/Code/cli"
- * - Long paths truncated: "~/…/parent/child"
- */
+/** Compute display labels for project paths — always show path, truncated if needed */
 function computeProjectLabels(projects: string[]): Map<string, string> {
   const labels = new Map<string, string>();
-
-  // Count how many projects share the same last-segment name
-  const nameCount = new Map<string, number>();
   for (const p of projects) {
-    const name = projectName(p);
-    nameCount.set(name, (nameCount.get(name) || 0) + 1);
+    labels.set(p, shortenPath(p));
   }
-
-  for (const p of projects) {
-    const name = projectName(p);
-    const isDuplicate = (nameCount.get(name) || 0) > 1;
-    const isAmbiguous = name.length <= 3 || /^\d+$/.test(name) || name === "~";
-
-    if (isDuplicate || isAmbiguous) {
-      labels.set(p, shortenPath(p));
-    } else {
-      labels.set(p, name);
-    }
-  }
-
   return labels;
 }
 
-/** Shorten a path to fit the sidebar, keeping meaningful segments */
+/** Shorten a path to fit the sidebar, keeping first + last meaningful segments */
 function shortenPath(path: string): string {
   const MAX = 26;
   if (path.length <= MAX) return path;
@@ -273,15 +251,13 @@ function shortenPath(path: string): string {
   const parts = path.split("/");
   if (parts.length <= 2) return path;
 
-  // Try last two segments with ~: ~/parent/name
+  // Try first + last two segments: ~/…/parent/name
+  const first = parts[0];
   const lastTwo = parts.slice(-2).join("/");
-  if (parts[0] === "~") {
-    const candidate = `~/\u2026/${lastTwo}`;
-    if (candidate.length <= MAX) return candidate;
-  }
+  const candidate = `${first}/\u2026/${lastTwo}`;
+  if (candidate.length <= MAX) return candidate;
 
   // Just first + last
-  const first = parts[0];
   const last = parts[parts.length - 1];
   return `${first}/\u2026/${last}`;
 }
