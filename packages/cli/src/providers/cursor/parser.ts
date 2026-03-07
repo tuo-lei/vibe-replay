@@ -8,23 +8,46 @@ export async function parseCursorSession(
   filePaths: string | string[],
   sessionInfo?: SessionInfo,
 ): Promise<ProviderParseResult> {
-  // Try SQLite first if session info with workspace path is available
-  if (sessionInfo?.workspacePath && sessionInfo.sessionId) {
-    const sqliteResult = await parseCursorSqlite(
-      sessionInfo.workspacePath,
-      sessionInfo.sessionId,
-    );
-    if (sqliteResult) return sqliteResult;
-  }
-
-  // Fallback to JSONL parsing
   const paths = Array.isArray(filePaths) ? filePaths : [filePaths];
   const transcriptPaths = paths.filter((p) => p.endsWith(".jsonl"));
   const explicitToolPaths = paths.filter((p) => p.endsWith(".txt"));
+
+  // Try SQLite first if session info is available
+  if (sessionInfo?.sessionId) {
+    const sqliteResult = await parseCursorSqlite(
+      sessionInfo.workspacePath || "",
+      sessionInfo.sessionId,
+    );
+    if (sqliteResult) {
+      // Keep SQLite/global-state as source of truth, but supplement missing
+      // thinking markers from JSONL when transcript files are available.
+      if (transcriptPaths.length > 0) {
+        const jsonlThinking = await parseCursorJsonl(transcriptPaths, [], { inferToolPaths: false });
+        sqliteResult.turns = mergeJsonlThinkingIntoCursorTurns(
+          sqliteResult.turns,
+          jsonlThinking.turns,
+        );
+      }
+      return sqliteResult;
+    }
+  }
+
+  // Fallback to JSONL parsing
   if (transcriptPaths.length === 0) {
     throw new Error("Cursor parse requires at least one transcript .jsonl path");
   }
+  return parseCursorJsonl(transcriptPaths, explicitToolPaths, { inferToolPaths: true });
+}
 
+interface ParseJsonlOptions {
+  inferToolPaths: boolean;
+}
+
+async function parseCursorJsonl(
+  transcriptPaths: string[],
+  explicitToolPaths: string[],
+  options: ParseJsonlOptions,
+): Promise<ProviderParseResult> {
   const allTurns: ParsedTurn[] = [];
   let syntheticToolId = 0;
   const sortedTranscriptPaths = await sortByMtime(transcriptPaths);
@@ -85,7 +108,9 @@ export async function parseCursorSession(
 
   const toolPaths = explicitToolPaths.length > 0
     ? await sortByMtime(explicitToolPaths)
-    : await inferToolPaths(sortedTranscriptPaths);
+    : options.inferToolPaths
+    ? await inferToolPaths(sortedTranscriptPaths)
+    : [];
   const toolEvents = await loadToolEvents(toolPaths);
   attachToolEvents(allTurns, toolEvents);
 
@@ -107,6 +132,69 @@ export async function parseCursorSession(
     turns: allTurns,
     dataSource: hasToolData ? "jsonl+tools" : "jsonl",
   };
+}
+
+function collectThinkingTexts(turn: ParsedTurn): string[] {
+  const texts: string[] = [];
+  for (const block of turn.blocks as any[]) {
+    if (block?.type !== "thinking") continue;
+    const text = typeof block.thinking === "string" ? block.thinking.trim() : "";
+    if (text) texts.push(text);
+  }
+  return texts;
+}
+
+function buildThinkingBlocks(texts: string[]): any[] {
+  return texts.map((thinking) => ({ type: "thinking", thinking }));
+}
+
+/**
+ * Merge JSONL-only thinking markers into DB-derived turns.
+ * We align assistant turns by index and only add missing thinking blocks.
+ */
+export function mergeJsonlThinkingIntoCursorTurns(
+  primaryTurns: ParsedTurn[],
+  jsonlTurns: ParsedTurn[],
+): ParsedTurn[] {
+  if (primaryTurns.length === 0 || jsonlTurns.length === 0) return primaryTurns;
+
+  const merged = primaryTurns.map((turn) => ({
+    ...turn,
+    blocks: [...turn.blocks],
+  }));
+
+  const primaryAssistantIndices = merged
+    .map((turn, index) => ({ turn, index }))
+    .filter(({ turn }) => turn.role === "assistant")
+    .map(({ index }) => index);
+  const jsonlAssistantTurns = jsonlTurns.filter((turn) => turn.role === "assistant");
+
+  const paired = Math.min(primaryAssistantIndices.length, jsonlAssistantTurns.length);
+  for (let i = 0; i < paired; i++) {
+    const targetTurn = merged[primaryAssistantIndices[i]];
+    const candidateThinking = collectThinkingTexts(jsonlAssistantTurns[i]);
+    if (candidateThinking.length === 0) continue;
+
+    const existingThinking = new Set(collectThinkingTexts(targetTurn));
+    const missingThinking = candidateThinking.filter((text) => !existingThinking.has(text));
+    if (missingThinking.length === 0) continue;
+
+    targetTurn.blocks = [...buildThinkingBlocks(missingThinking), ...targetTurn.blocks] as any;
+  }
+
+  // If JSONL has extra assistant thinking turns (common with marker-only lines),
+  // preserve them as standalone assistant thinking turns.
+  for (let i = paired; i < jsonlAssistantTurns.length; i++) {
+    const extraThinking = collectThinkingTexts(jsonlAssistantTurns[i]);
+    if (extraThinking.length === 0) continue;
+    merged.push({
+      role: "assistant",
+      timestamp: jsonlAssistantTurns[i].timestamp,
+      blocks: buildThinkingBlocks(extraThinking) as any,
+    });
+  }
+
+  return merged;
 }
 
 interface TimestampedPath {

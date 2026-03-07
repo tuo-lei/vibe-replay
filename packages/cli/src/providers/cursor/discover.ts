@@ -2,7 +2,11 @@ import { readdir, stat, readFile } from "node:fs/promises";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import type { SessionInfo } from "../../types.js";
-import { storeDbExists } from "./sqlite-reader.js";
+import {
+  storeDbExists,
+  discoverSqliteOnlySessions,
+  discoverGlobalStateOnlySessions,
+} from "./sqlite-reader.js";
 
 const CURSOR_DIR = join(homedir(), ".cursor", "projects");
 
@@ -45,12 +49,28 @@ export async function discoverCursorSessions(): Promise<SessionInfo[]> {
       );
       if (!info) continue;
 
-      // Check if SQLite store.db is available for richer data
-      const hasSqlite = await storeDbExists(project, info.sessionId);
       info.workspacePath = project;
-      info.hasSqlite = hasSqlite;
+      info.hasSqlite = false;
       sessions.push(info);
     }
+  }
+
+  // Discover SQLite-only sessions (devcontainer, SSH-remote, etc.)
+  const transcriptSessions = sessions.slice();
+  const knownIds = new Set(transcriptSessions.map((s) => s.sessionId));
+  const decodedPaths = [...new Set(sessions.map((s) => s.cwd).filter(Boolean))];
+  const sqliteOnly = await discoverSqliteOnlySessions(knownIds, decodedPaths);
+  sessions.push(...sqliteOnly);
+  for (const s of sqliteOnly) knownIds.add(s.sessionId);
+
+  // Discover sessions kept in Cursor global state DB (composerData/bubbleId).
+  const globalState = await discoverGlobalStateOnlySessions(knownIds, decodedPaths);
+  sessions.push(...globalState.sessions);
+
+  // Mark transcript-discovered sessions that have any SQLite-backed rich data.
+  for (const session of transcriptSessions) {
+    const hasStoreDb = await storeDbExists(session.workspacePath || "", session.sessionId);
+    session.hasSqlite = hasStoreDb || globalState.sessionIds.has(session.sessionId);
   }
 
   sessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));

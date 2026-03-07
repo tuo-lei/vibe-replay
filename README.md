@@ -82,7 +82,7 @@ Host the viewer once and load different replays via URL parameter.
 
 - `sessionId`, `slug`, `title`
 - `provider` (`claude-code` or `cursor`)
-- `dataSource` (`sqlite`, `jsonl`, or `jsonl+tools` when available)
+- `dataSource` (`sqlite`, `global-state`, `jsonl`, or `jsonl+tools` when available)
 - `startTime`, `endTime`, `model`
 - `cwd`, `project`
 - `stats` (`sceneCount`, `userPrompts`, `toolCalls`, `thinkingBlocks`, `durationMs`)
@@ -94,9 +94,14 @@ Current limitation: replay metadata does **not** yet include generator/build met
 | Provider | Status |
 |----------|--------|
 | Claude Code | Supported |
-| Cursor | Supported (transcripts + `agent-tools` outputs) |
+| Cursor | Supported (`store.db`, `globalStorage/state.vscdb`, transcripts + `agent-tools`) |
 | Codex | Planned |
 | Gemini CLI | Planned |
+
+Cursor parsing behavior:
+- Prefers DB-backed sources (`store.db` / `globalStorage.state.vscdb`) for rich tool data
+- Uses JSONL as fallback
+- Supplements missing assistant thinking markers from JSONL when DB-backed parsing is available
 
 Adding a new provider means implementing `discover()` and `parse()` in a new directory under `packages/cli/src/providers/`.
 

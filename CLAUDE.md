@@ -52,9 +52,9 @@ packages/cli/src/
 │   │   └── parser.ts           # JSONL → ParsedTurn[]
 │   └── cursor/                 # Cursor provider
 │       ├── index.ts
-│       ├── discover.ts         # Scan ~/.cursor/projects/ + detect store.db
+│       ├── discover.ts         # Scan JSONL + detect SQLite/globalState sessions
 │       ├── parser.ts           # JSONL fallback parser
-│       └── sqlite-reader.ts    # SQLite store.db parser (primary)
+│       └── sqlite-reader.ts    # Cursor SQLite readers (store.db + global state.vscdb)
 ├── transform.ts                # Provider-agnostic: turns → Scene[] + secret redaction
 ├── generator.ts                # Inject JSON into viewer HTML
 ├── feedback.ts                 # AI feedback: detect CLI tools, run headlessly, parse results
@@ -73,9 +73,11 @@ packages/cli/src/
 - **Single HTML output**: viewer built to one file via vite-plugin-singlefile (~430KB), CLI injects `window.__VIBE_REPLAY_DATA__` JSON into `<head>` via `<script id="vibe-replay-data">`
 - **`</` escaping**: JSON data in `<script>` MUST escape `</` as `<\/` (see generator.ts)
 - **JSONL grouping**: Assistant messages split across multiple lines sharing same `message.id` — parser groups them. Tool results matched by `tool_use_id`
-- **Cursor dual data source**: Primary: `~/.cursor/chats/<MD5(workspace_path)>/<session-uuid>/store.db` (SQLite with protobuf blob tree — has reasoning, tool-call, tool-result blocks). Fallback: `~/.cursor/projects/<path>/agent-transcripts/*.jsonl` (text-only, uses marker inference + `agent-tools/*.txt` mtime windows). Workspace hash = `MD5(absolute_workspace_path)`
+- **Cursor tri-source ingestion**: Cursor sessions may come from three sources: `~/.cursor/chats/<MD5(workspace_path)>/<session-uuid>/store.db` (protobuf blob tree), `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` (`cursorDiskKV` keys `composerData:*` + `bubbleId:*`), or `~/.cursor/projects/<path>/agent-transcripts/*.jsonl` (+ `agent-tools/*.txt`). Workspace hash = `MD5(absolute_workspace_path)`.
+- **Cursor devcontainer/SSH-remote behavior**: Devcontainer sessions can miss `~/.cursor/chats/*/store.db` but still exist in host `globalStorage/state.vscdb`; JSONL may live only inside the container. Discovery merges all host-visible sources and marks sessions with DB-backed rich data.
+- **Cursor thinking supplement**: When parsing DB-backed Cursor sessions, parser overlays missing assistant thinking markers from JSONL transcripts (if present) while keeping DB tool-call/tool-result payloads as source of truth.
 - **`sql.js` for portability**: SQLite parsing uses sql.js (WASM) instead of native bindings — no C++ compiler needed, works everywhere via `npx`
-- **`dataSource` metadata**: `ReplaySession.meta.dataSource` tracks which source was used (`sqlite`, `jsonl`, `jsonl+tools`) for diagnostics and transparency
+- **`dataSource` metadata**: `ReplaySession.meta.dataSource` tracks which source was used (`sqlite`, `global-state`, `jsonl`, `jsonl+tools`) for diagnostics and transparency
 - **Skip `progress` lines**: Subagent streaming artifacts
 - **Provider adapter pattern**: Each IDE/tool has its own discover + parser, transform is shared
 - **Package name `vibe-replay`**: CLI package name enables `npx vibe-replay` directly
@@ -95,6 +97,7 @@ packages/cli/src/
 ```
 ~/.claude/projects/<path>/<session>.jsonl                          (Claude Code — JSONL)
 ~/.cursor/chats/<md5>/<uuid>/store.db                              (Cursor — SQLite, primary)
+~/Library/Application Support/Cursor/User/globalStorage/state.vscdb (Cursor — SQLite global state)
 ~/.cursor/projects/<path>/agent-transcripts/*.jsonl + agent-tools/  (Cursor — JSONL, fallback)
   → providers/<name>/parser.ts → ProviderParseResult (turns, timestamps, dataSource)
   → transform.ts → ReplaySession (scenes, redacted secrets + paths, metadata)
