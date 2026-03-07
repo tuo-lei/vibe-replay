@@ -23,6 +23,10 @@ plan/
 # Cloudflare
 cloudflare/.wrangler/
 
+# Lockfiles (pnpm only)
+package-lock.json
+yarn.lock
+
 # Environment
 .env
 .env.*
