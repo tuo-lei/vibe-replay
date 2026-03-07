@@ -332,7 +332,7 @@ export async function startServer(
         }
       }
 
-      // Check which source sessions already have replays, and build stats map
+      // Check which source sessions already have replays
       const existingReplays = await scanSessions(baseDir);
       const replayMap = new Map<string, any>();
       for (const r of existingReplays) {
@@ -356,13 +356,19 @@ export async function startServer(
           gitBranch: s.gitBranch,
           existingReplay: replay ? s.slug : null,
           projectExists: projectExistsMap.get(s.project) ?? false,
-          replayStats: replay ? {
-            sceneCount: replay.stats?.sceneCount,
-            userPrompts: replay.stats?.userPrompts,
-            toolCalls: replay.stats?.toolCalls,
-            durationMs: replay.stats?.durationMs,
-            costEstimate: replay.stats?.costEstimate,
+          replay: replay ? {
+            slug: replay.slug,
+            title: replay.title,
+            provider: replay.provider,
             model: replay.model,
+            project: replay.project,
+            startTime: replay.startTime,
+            endTime: replay.endTime,
+            stats: replay.stats,
+            hasAnnotations: replay.hasAnnotations,
+            annotationCount: replay.annotationCount,
+            firstMessage: replay.firstMessage,
+            gist: replay.gist,
           } : undefined,
         };
       });

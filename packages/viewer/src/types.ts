@@ -109,14 +109,7 @@ export interface SourceSession {
   gitBranch?: string;
   existingReplay: string | null;
   projectExists?: boolean;
-  replayStats?: {
-    sceneCount?: number;
-    userPrompts?: number;
-    toolCalls?: number;
-    durationMs?: number;
-    costEstimate?: number;
-    model?: string;
-  };
+  replay?: SessionSummary;
 }
 
 declare global {

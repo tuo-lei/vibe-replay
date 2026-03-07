@@ -134,6 +134,161 @@ function EditableTitle({
   );
 }
 
+/** Shared card for displaying a replay — used by both Sessions and Replays tabs */
+function ReplayCard({
+  summary: s,
+  onOpen,
+  onTitleSave,
+  onDelete,
+  onPublishGist,
+  onRegenerate,
+  ghAvailable,
+  isPublishing,
+  isDeleting,
+  isRegenerating,
+}: {
+  summary: SessionSummary;
+  onOpen: () => void;
+  onTitleSave?: (slug: string, title: string) => Promise<void>;
+  onDelete?: () => void;
+  onPublishGist?: () => void;
+  onRegenerate?: () => void;
+  ghAvailable?: boolean;
+  isPublishing?: boolean;
+  isDeleting?: boolean;
+  isRegenerating?: boolean;
+}) {
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  return (
+    <div className="bg-terminal-surface/50 border border-terminal-border/50 rounded-lg px-4 py-3 hover:bg-terminal-surface/80 transition-colors space-y-1.5">
+      {/* Row 1: title + badges + actions */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          {onTitleSave ? (
+            <EditableTitle slug={s.slug} title={s.title} onSave={onTitleSave} />
+          ) : (
+            <span className="text-sm font-mono text-terminal-text truncate">
+              {s.title || s.slug}
+            </span>
+          )}
+          {s.gist && !s.gist.outdated && (
+            <a
+              href={s.gist.viewerUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded border bg-purple-500/15 text-purple-400 border-purple-500/30 hover:bg-purple-500/25 transition-colors shrink-0"
+              title={`View on vibe-replay.com`}
+            >
+              <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 3H3v10h10v-3M9 2h5v5M14 2L7 9" /></svg>
+              Synced
+            </a>
+          )}
+          {s.gist?.outdated && onPublishGist && (
+            <button
+              onClick={onPublishGist}
+              disabled={isPublishing}
+              className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded border bg-yellow-500/15 text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/25 transition-colors disabled:opacity-50 shrink-0"
+            >
+              {isPublishing ? "Syncing..." : "Out of sync"}
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            onClick={onOpen}
+            className="px-3 py-1.5 text-xs font-mono rounded-md bg-terminal-green/10 text-terminal-green border border-terminal-green/20 hover:bg-terminal-green/20 transition-colors"
+          >
+            Open
+          </button>
+          {onRegenerate && (
+            <button
+              onClick={onRegenerate}
+              disabled={isRegenerating}
+              className="px-2 py-1.5 text-[11px] font-mono rounded-md text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/80 transition-colors disabled:opacity-50"
+            >
+              {isRegenerating ? <span className="animate-pulse text-terminal-green">...</span> : "Redo"}
+            </button>
+          )}
+          {ghAvailable && onPublishGist && !s.gist?.gistId && (
+            <button
+              onClick={onPublishGist}
+              disabled={isPublishing}
+              className="px-2 py-1.5 text-xs font-mono rounded-md text-terminal-dim hover:text-purple-400 hover:bg-purple-500/10 transition-colors disabled:opacity-50"
+              title="Publish to Gist"
+            >
+              {isPublishing ? (
+                <span className="text-purple-400 animate-pulse">...</span>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8 2v8M5 5l3-3 3 3M3 11v2h10v-2" /></svg>
+              )}
+            </button>
+          )}
+          {onDelete && (
+            confirmingDelete ? (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => { onDelete(); setConfirmingDelete(false); }}
+                  className="px-2 py-1.5 text-xs font-mono rounded-md bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors"
+                >
+                  Confirm
+                </button>
+                <button
+                  onClick={() => setConfirmingDelete(false)}
+                  className="px-2 py-1.5 text-xs font-mono rounded-md text-terminal-dim hover:text-terminal-text transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmingDelete(true)}
+                className="px-2 py-1.5 text-xs font-mono rounded-md text-terminal-dim hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                title="Delete"
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M3 4h10M5.5 4V3a1 1 0 011-1h3a1 1 0 011 1v1M6.5 7v4M9.5 7v4M4.5 4l.5 9a1 1 0 001 1h4a1 1 0 001-1l.5-9" />
+                </svg>
+              </button>
+            )
+          )}
+        </div>
+      </div>
+      {/* Row 2: first message */}
+      {s.firstMessage && (
+        <p className="text-[13px] text-terminal-text/50 line-clamp-2 leading-relaxed">{s.firstMessage}</p>
+      )}
+      {/* Row 3: identity */}
+      <div className="flex items-center gap-1.5 text-[11px] font-mono text-terminal-dim/50 flex-wrap">
+        <ProviderBadge provider={s.provider} />
+        <span>{s.slug}</span>
+        <span className="text-terminal-dim/30">&middot;</span>
+        <span>{s.project}</span>
+        <span className="text-terminal-dim/30">&middot;</span>
+        <span>{formatDate(s.startTime)}</span>
+        {s.model && (
+          <><span className="text-terminal-dim/30">&middot;</span><span>{s.model}</span></>
+        )}
+      </div>
+      {/* Row 4: stats */}
+      <div className="flex items-center gap-1.5 text-[11px] font-mono text-terminal-dim/40 flex-wrap">
+        <span>{s.stats.sceneCount} scenes</span>
+        <span>{s.stats.userPrompts} prompts</span>
+        <span>{s.stats.toolCalls} tools</span>
+        {s.stats.durationMs && (
+          <><span className="text-terminal-dim/30">&middot;</span><span>{formatDuration(s.stats.durationMs)}</span></>
+        )}
+        {s.stats.costEstimate && (
+          <><span className="text-terminal-dim/30">&middot;</span><span>{formatCost(s.stats.costEstimate)}</span></>
+        )}
+        {s.hasAnnotations && (
+          <><span className="text-terminal-dim/30">&middot;</span><span className="text-terminal-orange">{s.annotationCount} annotation{s.annotationCount !== 1 ? "s" : ""}</span></>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** Open a replay by URL or Gist ID */
 function OpenReplayForm() {
   const [input, setInput] = useState("");
@@ -607,15 +762,27 @@ function SessionsPanel() {
               {filter ? "No sessions match your filter" : "No sessions in this project"}
             </div>
           ) : (
-            <div className="divide-y divide-terminal-border/30">
+            <div className="space-y-2 px-3 py-2">
               {filtered.map((s) => {
+                // Sessions with replay: use the shared ReplayCard
+                if (s.replay) {
+                  return (
+                    <ReplayCard
+                      key={`${s.provider}-${s.slug}`}
+                      summary={s.replay}
+                      onOpen={() => navigateTo({ view: null, session: s.existingReplay! })}
+                      onRegenerate={() => handleGenerate(s)}
+                      isRegenerating={generatingSlug === s.slug}
+                    />
+                  );
+                }
+                // Sessions without replay: simpler card with Generate
                 const label = sessionLabel(s);
                 const prompt = s.firstPrompt ? cleanPrompt(s.firstPrompt) : "";
-                const rs = s.replayStats;
                 return (
                   <div
                     key={`${s.provider}-${s.slug}`}
-                    className="px-4 py-3 hover:bg-terminal-surface/30 transition-colors space-y-1.5"
+                    className="bg-terminal-surface/30 border border-terminal-border/30 rounded-lg px-4 py-3 hover:bg-terminal-surface/50 transition-colors space-y-1.5"
                   >
                     {/* Row 1: slug + branch + time + action */}
                     <div className="flex items-center gap-2">
@@ -630,44 +797,19 @@ function SessionsPanel() {
                           {label.branch}
                         </span>
                       )}
-                      {s.existingReplay && (
-                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border bg-green-500/10 text-green-400 border-green-500/20 shrink-0">
-                          replay
-                        </span>
-                      )}
                       <div className="flex items-center gap-2 shrink-0 ml-auto">
                         <span className="text-[11px] font-mono text-terminal-dim/40">
                           {timeAgo(s.timestamp)}
                         </span>
-                        {s.existingReplay ? (
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => navigateTo({ view: null, session: s.existingReplay! })}
-                              className="px-3 py-1 text-xs font-mono rounded-md bg-terminal-green/10 text-terminal-green border border-terminal-green/20 hover:bg-terminal-green/20 transition-colors"
-                            >
-                              View
-                            </button>
-                            <button
-                              onClick={() => handleGenerate(s)}
-                              disabled={generatingSlug === s.slug}
-                              className="px-2 py-1 text-[11px] font-mono rounded-md text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/80 transition-colors disabled:opacity-50"
-                            >
-                              {generatingSlug === s.slug ? (
-                                <span className="animate-pulse text-terminal-green">...</span>
-                              ) : "Redo"}
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => handleGenerate(s)}
-                            disabled={generatingSlug === s.slug}
-                            className="px-3 py-1 text-xs font-mono rounded-md bg-terminal-green/10 text-terminal-green border border-terminal-green/20 hover:bg-terminal-green/20 transition-colors disabled:opacity-50"
-                          >
-                            {generatingSlug === s.slug ? (
-                              <span className="animate-pulse">Generating...</span>
-                            ) : "Generate"}
-                          </button>
-                        )}
+                        <button
+                          onClick={() => handleGenerate(s)}
+                          disabled={generatingSlug === s.slug}
+                          className="px-3 py-1 text-xs font-mono rounded-md bg-terminal-green/10 text-terminal-green border border-terminal-green/20 hover:bg-terminal-green/20 transition-colors disabled:opacity-50"
+                        >
+                          {generatingSlug === s.slug ? (
+                            <span className="animate-pulse">Generating...</span>
+                          ) : "Generate"}
+                        </button>
                       </div>
                     </div>
                     {/* Row 2: first prompt */}
@@ -687,15 +829,6 @@ function SessionsPanel() {
                       <span>{formatSize(s.fileSize)}</span>
                       {s.filePaths.length > 1 && <span>{s.filePaths.length} parts</span>}
                       {s.hasSqlite && <span className="text-green-400/60">db</span>}
-                      {rs && (
-                        <>
-                          <span className="text-terminal-dim/30">&middot;</span>
-                          <span>{rs.userPrompts} prompts</span>
-                          <span>{rs.toolCalls} tools</span>
-                          {rs.durationMs && <span>{formatDuration(rs.durationMs)}</span>}
-                          {rs.costEstimate && <span>{formatCost(rs.costEstimate)}</span>}
-                        </>
-                      )}
                     </div>
                   </div>
                 );
@@ -716,7 +849,6 @@ function ReplaysPanel() {
   const [serverAvailable, setServerAvailable] = useState(false);
   const [ghAvailable, setGhAvailable] = useState<boolean | null>(null);
   const [filter, setFilter] = useState("");
-  const [deletingSlug, setDeletingSlug] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [publishingSlug, setPublishingSlug] = useState<string | null>(null);
 
@@ -766,14 +898,11 @@ function ReplaysPanel() {
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}));
         setDeleteError(data.error || "Failed to delete session");
-        setDeletingSlug(null);
         return;
       }
       setSessions((prev) => prev.filter((s) => s.slug !== slug));
     } catch {
       setDeleteError("Failed to delete session");
-    } finally {
-      setDeletingSlug(null);
     }
   };
 
@@ -873,126 +1002,19 @@ function ReplaysPanel() {
             )}
           </div>
 
-          {/* Session cards */}
+          {/* Replay cards */}
           <div className="space-y-2">
             {filtered.map((s) => (
-              <div
+              <ReplayCard
                 key={s.slug}
-                className="bg-terminal-surface/50 border border-terminal-border/50 rounded-lg px-4 py-3 hover:bg-terminal-surface/80 transition-colors space-y-1.5"
-              >
-                {/* Primary: title + actions */}
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <EditableTitle
-                      slug={s.slug}
-                      title={s.title}
-                      onSave={handleTitleSave}
-                    />
-                    {s.gist && !s.gist.outdated && (
-                      <a
-                        href={s.gist.viewerUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded border bg-purple-500/15 text-purple-400 border-purple-500/30 hover:bg-purple-500/25 transition-colors shrink-0"
-                        title={`View on vibe-replay.com · synced ${new Date(s.gist.updatedAt).toLocaleDateString()}`}
-                      >
-                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 3H3v10h10v-3M9 2h5v5M14 2L7 9" /></svg>
-                        Synced
-                      </a>
-                    )}
-                    {s.gist?.outdated && (
-                      <button
-                        onClick={() => handlePublishGist(s.slug)}
-                        disabled={publishingSlug === s.slug}
-                        className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded border bg-yellow-500/15 text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/25 transition-colors disabled:opacity-50 shrink-0"
-                        title={`Local changes since last sync (${new Date(s.gist.updatedAt).toLocaleDateString()}) · click to update`}
-                      >
-                        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 2v8M5 5l3-3 3 3M3 11v2h10v-2" /></svg>
-                        {publishingSlug === s.slug ? "Syncing..." : "Out of sync"}
-                      </button>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      onClick={() => handleOpen(s.slug)}
-                      className="px-3 py-1.5 text-xs font-mono rounded-md bg-terminal-green/10 text-terminal-green border border-terminal-green/20 hover:bg-terminal-green/20 transition-colors"
-                    >
-                      Open
-                    </button>
-                    {ghAvailable && !s.gist?.gistId && (
-                      <button
-                        onClick={() => handlePublishGist(s.slug)}
-                        disabled={publishingSlug === s.slug}
-                        className="px-2 py-1.5 text-xs font-mono rounded-md text-terminal-dim hover:text-purple-400 hover:bg-purple-500/10 transition-colors disabled:opacity-50"
-                        title="Publish to GitHub Gist"
-                      >
-                        {publishingSlug === s.slug ? (
-                          <span className="text-purple-400 animate-pulse">Publishing...</span>
-                        ) : (
-                          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8 2v8M5 5l3-3 3 3M3 11v2h10v-2" /></svg>
-                        )}
-                      </button>
-                    )}
-                    {deletingSlug === s.slug ? (
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => confirmDelete(s.slug)}
-                          className="px-2 py-1.5 text-xs font-mono rounded-md bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors"
-                        >
-                          Confirm
-                        </button>
-                        <button
-                          onClick={() => setDeletingSlug(null)}
-                          className="px-2 py-1.5 text-xs font-mono rounded-md text-terminal-dim hover:text-terminal-text transition-colors"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => setDeletingSlug(s.slug)}
-                        className="px-2 py-1.5 text-xs font-mono rounded-md text-terminal-dim hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                        title="Delete replay"
-                      >
-                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                          <path d="M3 4h10M5.5 4V3a1 1 0 011-1h3a1 1 0 011 1v1M6.5 7v4M9.5 7v4M4.5 4l.5 9a1 1 0 001 1h4a1 1 0 001-1l.5-9" />
-                        </svg>
-                      </button>
-                    )}
-                  </div>
-                </div>
-                {/* Context: first message */}
-                {s.firstMessage && (
-                  <p className="text-[13px] text-terminal-text/50 line-clamp-2 leading-relaxed">{s.firstMessage}</p>
-                )}
-                {/* Identity: provider + slug + project + date */}
-                <div className="flex items-center gap-1.5 text-[11px] font-mono text-terminal-dim/50 flex-wrap">
-                  <ProviderBadge provider={s.provider} />
-                  <span>{s.slug}</span>
-                  <span className="text-terminal-dim/30">&middot;</span>
-                  <span>{s.project}</span>
-                  <span className="text-terminal-dim/30">&middot;</span>
-                  <span>{formatDate(s.startTime)}</span>
-                  {s.model && (
-                    <><span className="text-terminal-dim/30">&middot;</span><span>{s.model}</span></>
-                  )}
-                </div>
-                {/* Stats: scenes + prompts + tools + duration + cost + annotations */}
-                <div className="flex items-center gap-1.5 text-[11px] font-mono text-terminal-dim/40 flex-wrap">
-                  <span>{s.stats.sceneCount} scenes</span>
-                  <span>{s.stats.userPrompts} prompts</span>
-                  <span>{s.stats.toolCalls} tools</span>
-                  {s.stats.durationMs && (
-                    <><span className="text-terminal-dim/30">&middot;</span><span>{formatDuration(s.stats.durationMs)}</span></>
-                  )}
-                  {s.stats.costEstimate && (
-                    <><span className="text-terminal-dim/30">&middot;</span><span>{formatCost(s.stats.costEstimate)}</span></>
-                  )}
-                  {s.hasAnnotations && (
-                    <><span className="text-terminal-dim/30">&middot;</span><span className="text-terminal-orange">{s.annotationCount} annotation{s.annotationCount !== 1 ? "s" : ""}</span></>
-                  )}
-                </div>
-              </div>
+                summary={s}
+                onOpen={() => handleOpen(s.slug)}
+                onTitleSave={handleTitleSave}
+                onDelete={() => confirmDelete(s.slug)}
+                onPublishGist={() => handlePublishGist(s.slug)}
+                ghAvailable={ghAvailable === true}
+                isPublishing={publishingSlug === s.slug}
+              />
             ))}
           </div>
         </>
