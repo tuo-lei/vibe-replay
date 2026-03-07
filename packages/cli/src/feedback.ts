@@ -471,11 +471,27 @@ function extractJson(raw: string): string | null {
 function findBalancedJson(str: string): string | null {
   let depth = 0;
   let start = -1;
+  let inString = false;
+  let escaped = false;
   for (let i = 0; i < str.length; i++) {
-    if (str[i] === "{") {
+    const ch = str[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === "{") {
       if (start === -1) start = i;
       depth++;
-    } else if (str[i] === "}") {
+    } else if (ch === "}") {
       depth--;
       if (depth === 0 && start !== -1) {
         const candidate = str.slice(start, i + 1);
@@ -510,13 +526,7 @@ function repairTruncatedJson(str: string): string | null {
   const lastGood = Math.max(...lastGoodPoints);
 
   if (lastGood > candidate.length * 0.5) {
-    // Check what comes after the last good point
-    const afterChar = candidate[lastGood];
-    if (afterChar === "}") {
-      candidate = candidate.slice(0, lastGood + 1);
-    } else {
-      candidate = candidate.slice(0, lastGood + 1);
-    }
+    candidate = candidate.slice(0, lastGood + 1);
   }
 
   // Count unclosed brackets and add closing ones

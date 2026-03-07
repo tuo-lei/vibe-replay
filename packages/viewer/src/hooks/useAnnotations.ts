@@ -23,6 +23,8 @@ export interface AnnotationActions {
   aiCoachTool: { name: string } | null;
   /** Editor mode: run AI Coach to generate feedback annotations */
   runAiCoach: (() => Promise<{ score: number; itemCount: number }>) | null;
+  /** Editor mode: cancel a running AI Coach operation */
+  cancelAiCoach: (() => void) | null;
   aiCoachRunning: boolean;
 }
 
@@ -221,6 +223,7 @@ export function useAnnotations(
   // AI Coach (editor mode)
   const [aiCoachTool, setAiCoachTool] = useState<{ name: string } | null>(null);
   const [aiCoachRunning, setAiCoachRunning] = useState(false);
+  const aiCoachAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!isEditor) return;
@@ -234,16 +237,37 @@ export function useAnnotations(
 
   const runAiCoach = isEditor && aiCoachTool
     ? async () => {
+        const controller = new AbortController();
+        aiCoachAbortRef.current = controller;
         setAiCoachRunning(true);
         try {
-          const resp = await fetch("/api/feedback/generate", { method: "POST" });
+          // Flush current annotations to server first (debounce may not have fired yet)
+          await fetch("/api/annotations", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(annotations),
+            signal: controller.signal,
+          });
+          const resp = await fetch("/api/feedback/generate", {
+            method: "POST",
+            signal: controller.signal,
+          });
           const data = await resp.json();
           if (!resp.ok) throw new Error(data.error || "AI Coach failed");
           setAnnotations(data.annotations);
           setSavedSnapshot(JSON.stringify(data.annotations));
           return { score: data.score as number, itemCount: data.itemCount as number };
         } finally {
+          aiCoachAbortRef.current = null;
           setAiCoachRunning(false);
+        }
+      }
+    : null;
+
+  const cancelAiCoach = isEditor
+    ? () => {
+        if (aiCoachAbortRef.current) {
+          aiCoachAbortRef.current.abort();
         }
       }
     : null;
@@ -277,6 +301,6 @@ export function useAnnotations(
     downloadHtml, downloadJson,
     publishGist, exportHtml,
     gistPublishing, htmlExporting,
-    aiCoachTool, runAiCoach, aiCoachRunning,
+    aiCoachTool, runAiCoach, cancelAiCoach, aiCoachRunning,
   };
 }
