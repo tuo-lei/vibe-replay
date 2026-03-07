@@ -234,6 +234,56 @@ function projectName(project: string): string {
   return parts[parts.length - 1] || project;
 }
 
+/**
+ * Compute short but unambiguous display labels for project paths.
+ * - Unique & meaningful last segment → "vibe-replay"
+ * - Ambiguous (short, numeric, duplicate, "~") → show more path: "~/Code" or "~/4"
+ * - Long paths truncated from middle: "~/…/parent/child"
+ */
+function computeProjectLabels(projects: string[]): Map<string, string> {
+  const labels = new Map<string, string>();
+
+  // Count how many projects share the same last-segment name
+  const nameCount = new Map<string, number>();
+  for (const p of projects) {
+    const name = projectName(p);
+    nameCount.set(name, (nameCount.get(name) || 0) + 1);
+  }
+
+  for (const p of projects) {
+    const name = projectName(p);
+    const isDuplicate = (nameCount.get(name) || 0) > 1;
+    const isAmbiguous = name.length <= 2 || /^\d+$/.test(name) || name === "~";
+
+    if (isDuplicate || isAmbiguous) {
+      labels.set(p, shortenPath(p));
+    } else {
+      labels.set(p, name);
+    }
+  }
+
+  return labels;
+}
+
+/** Shorten a path to fit the sidebar, keeping first + last meaningful segments */
+function shortenPath(path: string): string {
+  const MAX = 28;
+  if (path.length <= MAX) return path;
+
+  const parts = path.split("/");
+  if (parts.length <= 2) return path;
+
+  // Try first + last two segments: ~/parent/name
+  const first = parts[0];
+  const lastTwo = parts.slice(-2).join("/");
+  const candidate = `${first}/\u2026/${lastTwo}`;
+  if (candidate.length <= MAX) return candidate;
+
+  // Just first + last
+  const last = parts[parts.length - 1];
+  return `${first}/\u2026/${last}`;
+}
+
 /** Build a human-readable session label from available data */
 function sessionLabel(s: SourceSession): { primary: string; secondary?: string } {
   if (s.title && s.title !== s.slug) {
@@ -330,6 +380,9 @@ function SessionsPanel() {
     return bTime.localeCompare(aTime);
   });
 
+  // Compute disambiguated labels for projects
+  const projectLabels = computeProjectLabels(projectEntries.map(([p]) => p));
+
   // Filter sessions within selected project
   const projectSessions = selectedProject === ALL_PROJECTS
     ? sources
@@ -387,7 +440,7 @@ function SessionsPanel() {
   return (
     <div className="flex flex-1 min-h-0">
       {/* ─── Left sidebar: project navigation (hidden on mobile) ─── */}
-      <div className="hidden md:flex w-52 shrink-0 flex-col border-r border-terminal-border/50 bg-terminal-bg">
+      <div className="hidden md:flex w-56 shrink-0 flex-col border-r border-terminal-border/50 bg-terminal-bg">
         <div className="flex items-center justify-between px-3 py-2 border-b border-terminal-border/30">
           <span className="text-[11px] font-mono text-terminal-dim uppercase tracking-wider">Projects</span>
           <button
@@ -421,10 +474,12 @@ function SessionsPanel() {
           {projectEntries.map(([project, sessions]) => {
             const replayCount = sessions.filter((s) => s.existingReplay).length;
             const isActive = selectedProject === project;
+            const label = projectLabels.get(project) || projectName(project);
             return (
               <button
                 key={project}
                 onClick={() => setSelectedProject(project)}
+                title={project}
                 className={`w-full text-left px-3 py-2 transition-colors group ${
                   isActive
                     ? "bg-terminal-green/10"
@@ -435,7 +490,7 @@ function SessionsPanel() {
                   <span className={`text-xs font-mono truncate ${
                     isActive ? "text-terminal-green" : "text-terminal-text/80 group-hover:text-terminal-text"
                   }`}>
-                    {projectName(project)}
+                    {label}
                   </span>
                   <span className={`text-[10px] font-mono shrink-0 ${
                     isActive ? "text-terminal-green/60" : "text-terminal-dim/50"
@@ -471,7 +526,7 @@ function SessionsPanel() {
             <option value={ALL_PROJECTS}>All projects ({sources.length})</option>
             {projectEntries.map(([project, sessions]) => (
               <option key={project} value={project}>
-                {projectName(project)} ({sessions.length})
+                {projectLabels.get(project) || projectName(project)} ({sessions.length})
               </option>
             ))}
           </select>
@@ -481,12 +536,14 @@ function SessionsPanel() {
         <div className="px-4 pt-3 pb-2 space-y-2 shrink-0">
           {/* Project title for desktop */}
           <div className="hidden md:flex items-center justify-between">
-            <div>
-              <span className="text-sm font-mono text-terminal-text">
-                {selectedProject === ALL_PROJECTS ? "All projects" : projectName(selectedProject)}
+            <div className="min-w-0">
+              <span className="text-sm font-mono text-terminal-text truncate block">
+                {selectedProject === ALL_PROJECTS
+                  ? "All projects"
+                  : (projectLabels.get(selectedProject) || projectName(selectedProject))}
               </span>
               {selectedProject !== ALL_PROJECTS && (
-                <span className="text-xs font-mono text-terminal-dim/50 ml-2">{selectedProject}</span>
+                <span className="text-[11px] font-mono text-terminal-dim/40 truncate block">{selectedProject}</span>
               )}
             </div>
             <span className="text-xs font-mono text-terminal-dim">
@@ -600,7 +657,9 @@ function SessionsPanel() {
                             </span>
                           )}
                           {selectedProject === ALL_PROJECTS && (
-                            <span className="text-terminal-text/40">{projectName(s.project)}</span>
+                            <span className="text-terminal-text/40" title={s.project}>
+                              {projectLabels.get(s.project) || projectName(s.project)}
+                            </span>
                           )}
                           <span>{formatSize(s.fileSize)}</span>
                           {s.filePaths.length > 1 && <span>{s.filePaths.length} parts</span>}
