@@ -1,11 +1,15 @@
 import { describe, it, expect } from "vitest";
 import { parseCursorSession } from "../src/providers/cursor/parser.js";
 import { transformToReplay } from "../src/transform.js";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const FIXTURE = join(import.meta.dirname, "fixtures/cursor-session.jsonl");
 const TOOL_FIXTURE_1 = join(import.meta.dirname, "fixtures/cursor-tool-1.txt");
 const TOOL_FIXTURE_2 = join(import.meta.dirname, "fixtures/cursor-tool-2.txt");
+const ONE_BY_ONE_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO8B6v8AAAAASUVORK5CYII=";
 
 describe("Cursor parser", () => {
   it("parses all turns", async () => {
@@ -28,6 +32,41 @@ describe("Cursor parser", () => {
     expect(text).not.toContain("<user_query>");
     expect(text).not.toContain("</user_query>");
     expect(text).toBe("Fix the login bug in auth.ts");
+  });
+
+  it("extracts <image_files> into _user_images and removes image markers", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-cursor-images-"));
+    const imagePath = join(tempDir, "shot.png");
+    const jsonlPath = join(tempDir, "image-session.jsonl");
+    await writeFile(imagePath, Buffer.from(ONE_BY_ONE_PNG_BASE64, "base64"));
+    await writeFile(
+      jsonlPath,
+      JSON.stringify({
+        role: "user",
+        message: {
+          content: [
+            {
+              type: "text",
+              text: `<user_query>\n[Image]\nPlease investigate this bug\n<image_files>\n1. ${imagePath}\n</image_files>\n</user_query>`,
+            },
+          ],
+        },
+      }),
+      "utf-8",
+    );
+
+    try {
+      const result = await parseCursorSession(jsonlPath);
+      const firstUser = result.turns.find((t) => t.role === "user")!;
+      const textBlock = (firstUser.blocks as any[]).find((b) => b.type === "text");
+      const imageBlock = (firstUser.blocks as any[]).find((b) => b.type === "_user_images");
+      expect(textBlock.text).toBe("Please investigate this bug");
+      expect(imageBlock).toBeTruthy();
+      expect(imageBlock.images).toHaveLength(1);
+      expect(imageBlock.images[0]).toMatch(/^data:image\/png;base64,/);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   });
 
   it("handles prompts without <user_query> wrapper", async () => {

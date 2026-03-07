@@ -79,41 +79,14 @@ export default function StatsPanel({ session }: Props) {
           {meta.model && <span className="text-terminal-text/60">{meta.model}</span>}
           {meta.provider && <span>{meta.provider}</span>}
         </div>
-        {(meta.dataSource || meta.dataSourceInfo) && (
-          <div className="mt-1.5">
-            <div className="text-terminal-dim">
-              Data Source:{" "}
-              <span className="text-terminal-blue">
-                {formatDataSourceLabel(meta.dataSourceInfo?.primary || meta.dataSource)}
-              </span>
-            </div>
-            {meta.dataSourceInfo?.sources && meta.dataSourceInfo.sources.length > 0 && (
-              <div className="mt-0.5 space-y-0.5">
-                {meta.dataSourceInfo.sources.map((source) => (
-                  <div key={source} className="text-terminal-dim/80 truncate" title={source}>
-                    <span className="text-terminal-green">source:</span> {source}
-                  </div>
-                ))}
-              </div>
-            )}
-            {meta.dataSourceInfo?.supplements && meta.dataSourceInfo.supplements.length > 0 && (
-              <div className="mt-0.5 space-y-0.5">
-                {meta.dataSourceInfo.supplements.map((source) => (
-                  <div key={source} className="text-terminal-dim/80 truncate" title={source}>
-                    <span className="text-terminal-purple">supplement:</span> {source}
-                  </div>
-                ))}
-              </div>
-            )}
-            {meta.dataSourceInfo?.notes && meta.dataSourceInfo.notes.length > 0 && (
-              <div className="mt-0.5 space-y-0.5">
-                {meta.dataSourceInfo.notes.map((note) => (
-                  <div key={note} className="text-terminal-dim/80 truncate" title={note}>
-                    <span className="text-terminal-orange">note:</span> {note}
-                  </div>
-                ))}
-              </div>
-            )}
+        {meta.generator?.version && (
+          <div className="text-terminal-dim/80 mt-0.5 truncate">
+            replay: <span className="text-terminal-text/80">{meta.generator.name} v{meta.generator.version}</span>
+          </div>
+        )}
+        {meta.generator?.generatedAt && (
+          <div className="text-terminal-dim/80 mt-0.5 truncate" title={meta.generator.generatedAt}>
+            generated: <span className="text-terminal-text/80">{formatGeneratedAt(meta.generator.generatedAt)}</span>
           </div>
         )}
       </div>
@@ -205,6 +178,46 @@ export default function StatsPanel({ session }: Props) {
           </div>
         </div>
       )}
+
+      {(meta.dataSource || meta.dataSourceInfo) && (
+        <div className="pt-1 border-t border-terminal-border/30">
+          <div className="text-terminal-dim mb-1.5 text-[11px] font-semibold uppercase tracking-wider">
+            Data Source
+          </div>
+          <div className="text-terminal-dim">
+            <span className="text-terminal-blue">
+              {formatDataSourceLabel(meta.dataSourceInfo?.primary || meta.dataSource)}
+            </span>
+          </div>
+          {meta.dataSourceInfo?.sources && meta.dataSourceInfo.sources.length > 0 && (
+            <div className="mt-0.5 space-y-0.5">
+              {meta.dataSourceInfo.sources.map((source) => (
+                <div key={source} className="text-terminal-dim/80 truncate" title={source}>
+                  <span className="text-terminal-green">source:</span> {source}
+                </div>
+              ))}
+            </div>
+          )}
+          {meta.dataSourceInfo?.supplements && meta.dataSourceInfo.supplements.length > 0 && (
+            <div className="mt-0.5 space-y-0.5">
+              {meta.dataSourceInfo.supplements.map((source) => (
+                <div key={source} className="text-terminal-dim/80 truncate" title={source}>
+                  <span className="text-terminal-purple">supplement:</span> {source}
+                </div>
+              ))}
+            </div>
+          )}
+          {meta.dataSourceInfo?.notes && meta.dataSourceInfo.notes.length > 0 && (
+            <div className="mt-0.5 space-y-0.5">
+              {meta.dataSourceInfo.notes.map((note) => (
+                <div key={note} className="text-terminal-dim/80 truncate" title={note}>
+                  <span className="text-terminal-orange">note:</span> {note}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -250,4 +263,17 @@ function formatDataSourceLabel(source?: string): string {
     "jsonl+tools": "JSONL + agent-tools",
   };
   return labels[source] || source;
+}
+
+function formatGeneratedAt(iso?: string): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }

@@ -1,7 +1,7 @@
 /**
  * vibe-feedback: AI-powered prompting feedback for coding sessions.
  *
- * Detects available AI CLI tools (claude, opencode) and runs them headlessly
+ * Detects available AI CLI tools (claude, agent, opencode) and runs them headlessly
  * to analyze a replay session and generate structured feedback on the user's
  * prompting technique. Feedback is returned as Annotation[] that merges
  * directly into the replay.
@@ -18,7 +18,7 @@ import type { ReplaySession, Scene, Annotation } from "./types.js";
 // ---------------------------------------------------------------------------
 
 export interface FeedbackTool {
-  name: "claude" | "opencode";
+  name: "claude" | "agent" | "opencode";
   command: string;
 }
 
@@ -48,25 +48,37 @@ export interface FeedbackResult {
 // Detection
 // ---------------------------------------------------------------------------
 
-/** Detect which AI CLI tool is available (prefer claude, fallback opencode). */
-export async function detectFeedbackTools(): Promise<FeedbackTool | null> {
+const TOOL_PRIORITY: FeedbackTool["name"][] = ["claude", "agent", "opencode"];
+
+/** Detect available AI CLI tools and pick a default by priority. */
+export async function detectFeedbackTools(): Promise<{
+  tools: FeedbackTool[];
+  defaultTool: FeedbackTool | null;
+}> {
   // Skip claude when running inside a Claude Code session (nested sessions crash)
   const insideClaude = !!process.env.CLAUDECODE;
 
   const candidates: { name: FeedbackTool["name"]; cmd: string }[] = [
     ...(!insideClaude ? [{ name: "claude" as const, cmd: "claude" }] : []),
+    { name: "agent" as const, cmd: "agent" },
     { name: "opencode" as const, cmd: "opencode" },
   ];
 
+  const tools: FeedbackTool[] = [];
   for (const tool of candidates) {
     try {
       const path = await shell(`which ${tool.cmd}`);
-      if (path.trim()) return { name: tool.name, command: path.trim() };
+      if (path.trim()) tools.push({ name: tool.name, command: path.trim() });
     } catch {
       /* not found */
     }
   }
-  return null;
+
+  const defaultTool = TOOL_PRIORITY
+    .map((name) => tools.find((t) => t.name === name))
+    .find((tool): tool is FeedbackTool => !!tool) || null;
+
+  return { tools, defaultTool };
 }
 
 // ---------------------------------------------------------------------------
@@ -275,6 +287,9 @@ async function executeFeedback(
   if (tool.name === "claude") {
     return runClaude(prompt, tool.command);
   }
+  if (tool.name === "agent") {
+    return runAgent(prompt, tool.command);
+  }
   return runOpencode(prompt, tool.command);
 }
 
@@ -339,6 +354,45 @@ function runOpencode(prompt: string, cmd: string): Promise<string> {
 
     proc.on("error", (err) =>
       reject(new Error(`Failed to start opencode: ${err.message}`)),
+    );
+
+    proc.stdin.write(prompt);
+    proc.stdin.end();
+  });
+}
+
+function runAgent(prompt: string, cmd: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(
+      cmd,
+      ["-p", "--output-format", "json", "--mode", "ask", "--trust"],
+      {
+        env: { ...process.env, NO_COLOR: "1" },
+        timeout: 600_000,
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
+
+    let stdout = "";
+    let stderr = "";
+    proc.stdout.on("data", (d) => (stdout += d.toString()));
+    proc.stderr.on("data", (d) => (stderr += d.toString()));
+
+    proc.on("close", (code) => {
+      if (code === 0) {
+        try {
+          const parsed = JSON.parse(stdout);
+          resolve(typeof parsed.result === "string" ? parsed.result : stdout);
+        } catch {
+          resolve(stdout);
+        }
+      } else {
+        reject(new Error(`agent exited ${code}: ${stderr.slice(0, 500)}`));
+      }
+    });
+
+    proc.on("error", (err) =>
+      reject(new Error(`Failed to start agent: ${err.message}`)),
     );
 
     proc.stdin.write(prompt);

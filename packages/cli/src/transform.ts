@@ -14,6 +14,9 @@ export function transformToReplay(
   parsed: ProviderParseResult,
   provider: string,
   project: string,
+  options?: {
+    generator?: ReplaySession["meta"]["generator"];
+  },
 ): ReplaySession {
   const scenes: Scene[] = [];
   let userPrompts = 0;
@@ -110,6 +113,7 @@ export function transformToReplay(
       model: parsed.model,
       cwd: redactPath(parsed.cwd),
       project,
+      ...(options?.generator ? { generator: options.generator } : {}),
       stats: {
         sceneCount: scenes.length,
         userPrompts,
@@ -139,11 +143,11 @@ function buildToolScene(
     ...(images && images.length > 0 ? { images } : {}),
   };
 
-  if (toolName === "Edit" && input.file_path && input.old_string !== undefined) {
+  if (toolName === "Edit" && input.file_path) {
     (scene as any).diff = {
       filePath: redactPath(input.file_path),
-      oldContent: input.old_string || "",
-      newContent: input.new_string || "",
+      oldContent: input.old_string ?? "",
+      newContent: input.new_string ?? "",
     };
   } else if (toolName === "Write" && input.file_path) {
     (scene as any).diff = {

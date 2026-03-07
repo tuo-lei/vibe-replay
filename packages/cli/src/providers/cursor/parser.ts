@@ -1,5 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
+import { homedir } from "node:os";
 import type { ParsedTurn, SessionInfo } from "../../types.js";
 import type { DataSourceInfo, ProviderParseResult } from "../types.js";
 import { parseCursorSqlite } from "./sqlite-reader.js";
@@ -20,21 +21,22 @@ export async function parseCursorSession(
     );
     if (sqliteResult) {
       // Keep SQLite/global-state as source of truth, but supplement missing
-      // thinking markers from JSONL when transcript files are available.
+      // thinking markers and user images from JSONL when transcript files are available.
       if (transcriptPaths.length > 0) {
         const thinkingBefore = countThinkingBlocks(sqliteResult.turns);
+        const userImagesBefore = countUserImages(sqliteResult.turns);
         const jsonlThinking = await parseCursorJsonl(transcriptPaths, [], { inferToolPaths: false });
-        sqliteResult.turns = mergeJsonlThinkingIntoCursorTurns(
+        sqliteResult.turns = mergeJsonlSupplementsIntoCursorTurns(
           sqliteResult.turns,
           jsonlThinking.turns,
         );
         const thinkingAfter = countThinkingBlocks(sqliteResult.turns);
+        const userImagesAfter = countUserImages(sqliteResult.turns);
         const supplementedThinkingBlocks = Math.max(0, thinkingAfter - thinkingBefore);
+        const supplementedUserImages = Math.max(0, userImagesAfter - userImagesBefore);
         sqliteResult.dataSourceInfo = withSupplement(
           sqliteResult.dataSourceInfo || defaultDataSourceInfo(sqliteResult.dataSource),
-          supplementedThinkingBlocks > 0
-            ? `cursor/projects/agent-transcripts/*.jsonl (thinking +${supplementedThinkingBlocks})`
-            : "cursor/projects/agent-transcripts/*.jsonl (thinking +0)",
+          `cursor/projects/agent-transcripts/*.jsonl (thinking +${supplementedThinkingBlocks}, images +${supplementedUserImages})`,
         );
       }
       return sqliteResult;
@@ -97,21 +99,48 @@ async function parseCursorJsonl(
       if (!Array.isArray(contentBlocks)) continue;
 
       const textParts: string[] = [];
+      const userImages: string[] = [];
+      const imageFilePaths = new Set<string>();
       for (const block of contentBlocks) {
         if (block.type === "text" && block.text) {
-          let text = block.text;
-          // Strip Cursor's <user_query> wrapper
-          text = text.replace(/<\/?user_query>/g, "").trim();
+          let text = stripUserQueryWrapper(block.text);
+          const extracted = extractImageFilePathsFromText(text);
+          text = normalizeImagePlaceholderLines(extracted.cleanedText);
+          for (const imagePath of extracted.paths) imageFilePaths.add(imagePath);
           if (text) textParts.push(text);
+        } else if (block.type === "image") {
+          const source = (block as any).source;
+          if (source?.data) {
+            const mediaType = source.media_type || "image/png";
+            userImages.push(`data:${mediaType};base64,${source.data}`);
+          }
         }
       }
 
-      if (textParts.length === 0) continue;
+      for (const imagePath of imageFilePaths) {
+        const dataUrl = await readImageFileAsDataUrl(imagePath);
+        if (dataUrl) userImages.push(dataUrl);
+      }
+
+      if (textParts.length === 0 && userImages.length === 0) continue;
 
       const fullText = textParts.join("\n");
       const markerParsed = role === "assistant" ? splitToolMarker(fullText) : undefined;
       const markerName = markerParsed?.markerName;
       const markerTextBody = markerParsed?.textBody;
+
+      if (role === "user") {
+        const blocks: any[] = [];
+        if (fullText) blocks.push({ type: "text", text: fullText });
+        const dedupedImages = [...new Set(userImages)];
+        if (dedupedImages.length > 0) {
+          blocks.push({ type: "_user_images", images: dedupedImages });
+        }
+        if (blocks.length > 0) {
+          allTurns.push({ role, blocks });
+        }
+        continue;
+      }
 
       if (markerName) {
         // Markers are status indicators — store as a placeholder that
@@ -168,6 +197,55 @@ async function parseCursorJsonl(
   };
 }
 
+function stripUserQueryWrapper(text: string): string {
+  return text.replace(/<\/?user_query>/g, "").trim();
+}
+
+function normalizeImagePlaceholderLines(text: string): string {
+  const lines = text.split("\n");
+  const filtered = lines.filter((line) => !/^\s*\[Image\]\s*$/i.test(line.trim()));
+  return filtered.join("\n").trim();
+}
+
+function resolveImagePath(pathValue: string): string {
+  if (pathValue.startsWith("~/")) return join(homedir(), pathValue.slice(2));
+  return pathValue;
+}
+
+function imageMediaType(pathValue: string): string {
+  const lower = pathValue.toLowerCase();
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".gif")) return "image/gif";
+  return "image/png";
+}
+
+function extractImageFilePathsFromText(text: string): { cleanedText: string; paths: string[] } {
+  const blockPattern = /<image_files>([\s\S]*?)<\/image_files>/gi;
+  const paths = new Set<string>();
+  let match: RegExpExecArray | null;
+  while ((match = blockPattern.exec(text)) !== null) {
+    const blockContent = match[1];
+    const pathRegex = /(?:^|\n)\s*(?:\d+\.\s*)?((?:~\/|\/)[^\n]+\.(?:png|jpe?g|gif|webp))/gi;
+    let pathMatch: RegExpExecArray | null;
+    while ((pathMatch = pathRegex.exec(blockContent)) !== null) {
+      const pathValue = pathMatch[1].trim();
+      if (pathValue) paths.add(resolveImagePath(pathValue));
+    }
+  }
+  const cleanedText = text.replace(blockPattern, "").trim();
+  return { cleanedText, paths: [...paths] };
+}
+
+async function readImageFileAsDataUrl(pathValue: string): Promise<string | null> {
+  try {
+    const data = await readFile(pathValue);
+    return `data:${imageMediaType(pathValue)};base64,${data.toString("base64")}`;
+  } catch {
+    return null;
+  }
+}
+
 function collectThinkingTexts(turn: ParsedTurn): string[] {
   const texts: string[] = [];
   for (const block of turn.blocks as any[]) {
@@ -188,6 +266,26 @@ function countThinkingBlocks(turns: ParsedTurn[]): number {
     for (const block of turn.blocks as any[]) {
       if (block?.type === "thinking") count++;
     }
+  }
+  return count;
+}
+
+function collectUserImages(turn: ParsedTurn): string[] {
+  const imageBlocks = (turn.blocks as any[]).filter((block) => block?.type === "_user_images");
+  const images: string[] = [];
+  for (const block of imageBlocks) {
+    if (!Array.isArray(block.images)) continue;
+    for (const image of block.images) {
+      if (typeof image === "string" && image.trim()) images.push(image);
+    }
+  }
+  return images;
+}
+
+function countUserImages(turns: ParsedTurn[]): number {
+  let count = 0;
+  for (const turn of turns) {
+    count += collectUserImages(turn).length;
   }
   return count;
 }
@@ -239,6 +337,48 @@ export function mergeJsonlThinkingIntoCursorTurns(
   }
 
   return merged;
+}
+
+function mergeJsonlUserImagesIntoCursorTurns(
+  primaryTurns: ParsedTurn[],
+  jsonlTurns: ParsedTurn[],
+): ParsedTurn[] {
+  if (primaryTurns.length === 0 || jsonlTurns.length === 0) return primaryTurns;
+
+  const merged = primaryTurns.map((turn) => ({
+    ...turn,
+    blocks: [...turn.blocks],
+  }));
+
+  const primaryUserIndices = merged
+    .map((turn, index) => ({ turn, index }))
+    .filter(({ turn }) => turn.role === "user")
+    .map(({ index }) => index);
+  const jsonlUserTurns = jsonlTurns.filter((turn) => turn.role === "user");
+  const paired = Math.min(primaryUserIndices.length, jsonlUserTurns.length);
+
+  for (let i = 0; i < paired; i++) {
+    const targetTurn = merged[primaryUserIndices[i]];
+    const candidateImages = collectUserImages(jsonlUserTurns[i]);
+    if (candidateImages.length === 0) continue;
+
+    const existingImages = collectUserImages(targetTurn);
+    const mergedImages = [...new Set([...existingImages, ...candidateImages])];
+    if (mergedImages.length === existingImages.length) continue;
+
+    const nonImageBlocks = (targetTurn.blocks as any[]).filter((block) => block?.type !== "_user_images");
+    targetTurn.blocks = [...nonImageBlocks, { type: "_user_images", images: mergedImages }] as any;
+  }
+
+  return merged;
+}
+
+export function mergeJsonlSupplementsIntoCursorTurns(
+  primaryTurns: ParsedTurn[],
+  jsonlTurns: ParsedTurn[],
+): ParsedTurn[] {
+  const withThinking = mergeJsonlThinkingIntoCursorTurns(primaryTurns, jsonlTurns);
+  return mergeJsonlUserImagesIntoCursorTurns(withThinking, jsonlTurns);
 }
 
 interface TimestampedPath {

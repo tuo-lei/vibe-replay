@@ -75,7 +75,7 @@ packages/cli/src/
 - **JSONL grouping**: Assistant messages split across multiple lines sharing same `message.id` — parser groups them. Tool results matched by `tool_use_id`
 - **Cursor tri-source ingestion**: Cursor sessions may come from three sources: `~/.cursor/chats/<MD5(workspace_path)>/<session-uuid>/store.db` (protobuf blob tree), `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` (`cursorDiskKV` keys `composerData:*` + `bubbleId:*`), or `~/.cursor/projects/<path>/agent-transcripts/*.jsonl` (+ `agent-tools/*.txt`). Workspace hash = `MD5(absolute_workspace_path)`.
 - **Cursor devcontainer/SSH-remote behavior**: Devcontainer sessions can miss `~/.cursor/chats/*/store.db` but still exist in host `globalStorage/state.vscdb`; JSONL may live only inside the container. Discovery merges all host-visible sources and marks sessions with DB-backed rich data.
-- **Cursor thinking supplement**: When parsing DB-backed Cursor sessions, parser overlays missing assistant thinking markers from JSONL transcripts (if present) while keeping DB tool-call/tool-result payloads as source of truth.
+- **Cursor JSONL supplements**: When parsing DB-backed Cursor sessions, parser overlays missing assistant thinking markers and user image attachments from JSONL transcripts (if present) while keeping DB tool-call/tool-result payloads as source of truth.
 - **`sql.js` for portability**: SQLite parsing uses sql.js (WASM) instead of native bindings — no C++ compiler needed, works everywhere via `npx`
 - **`dataSource` metadata**: `ReplaySession.meta.dataSource` tracks which source was used (`sqlite`, `global-state`, `jsonl`, `jsonl+tools`) for diagnostics and transparency
 - **`dataSourceInfo` metadata**: `ReplaySession.meta.dataSourceInfo` carries debug-friendly source details (primary source, source list, supplements, notes)
@@ -91,7 +91,7 @@ packages/cli/src/
 - **Editor mode**: "Open in Editor" starts a Hono localhost server (port 3456-3466) serving the viewer with `__VIBE_REPLAY_EDITOR__` flag. Viewer fetches session from `/api/session`, annotations POST to `/api/annotations` (debounced 1s) and persist to `{outputDir}/annotations.json`. Server also handles gist publishing and HTML export via API routes
 - **ViewerMode**: Three-mode enum (`embedded | editor | readonly`) drives viewer behavior — embedded for self-contained HTML, editor for local server, readonly for `?gist=` / `?url=` URLs
 - **Markdown rendering**: Uses `marked` (lightweight, ~37KB) instead of `react-markdown` + `remark-gfm` to keep viewer under 500KB
-- **vibe-feedback (experimental)**: AI-powered prompting feedback. Detects `claude` or `opencode` CLI tools, runs headlessly with structured prompt, parses JSON output (with repair for truncated/malformed responses), generates annotations with `author: "vibe-feedback"`. Skips `claude` when inside a Claude Code session (env `CLAUDECODE`). Uses stdin pipe for opencode, stdin for claude. Viewer shows AI feedback annotations with purple "AI Coach" badge
+- **vibe-feedback (experimental)**: AI-powered prompting feedback. Detects `claude`, `agent` (Cursor Agent CLI), or `opencode`, runs headlessly with structured prompt, parses JSON output (with repair for truncated/malformed responses), and generates annotations with `author: "vibe-feedback"`. Skips `claude` when inside a Claude Code session (env `CLAUDECODE`). Viewer can choose among available AI Coach tools in editor mode.
 
 ## Data Flow
 
@@ -121,13 +121,11 @@ Current `meta` fields include:
 - `dataSourceInfo` (`primary`, `sources`, optional `supplements`, optional `notes`)
 - `startTime`, `endTime`, `model`
 - `cwd`, `project`
+- `generator`: replay generator metadata (`name`, `version`, `generatedAt`)
 - `stats`: `sceneCount`, `userPrompts`, `toolCalls`, `thinkingBlocks`, `durationMs`, `tokenUsage`, `costEstimate`
 - `compactions`: Array of context window compaction events
 
 `ReplaySession` also has optional `annotations` array (id, sceneIndex, body, author, timestamps, resolved).
-
-Current limitation:
-- No generator metadata yet (e.g. CLI version, schema version, generated timestamp).
 
 ## Conventions
 

@@ -14,8 +14,12 @@ vi.mock("../src/providers/cursor/sqlite-reader.js", () => ({
 
 import {
   parseCursorSession,
+  mergeJsonlSupplementsIntoCursorTurns,
   mergeJsonlThinkingIntoCursorTurns,
 } from "../src/providers/cursor/parser.js";
+
+const ONE_BY_ONE_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO8B6v8AAAAASUVORK5CYII=";
 
 describe("mergeJsonlThinkingIntoCursorTurns", () => {
   it("prepends missing JSONL thinking into matched assistant turn", () => {
@@ -93,9 +97,34 @@ describe("mergeJsonlThinkingIntoCursorTurns", () => {
   });
 });
 
+describe("mergeJsonlSupplementsIntoCursorTurns", () => {
+  it("merges missing user images from JSONL into primary user turns", () => {
+    const primaryTurns: ParsedTurn[] = [
+      { role: "user", blocks: [{ type: "text", text: "Investigate issue" }] as any },
+      { role: "assistant", blocks: [{ type: "text", text: "I will check logs." }] as any },
+    ];
+    const jsonlTurns: ParsedTurn[] = [
+      {
+        role: "user",
+        blocks: [
+          { type: "text", text: "Investigate issue" },
+          { type: "_user_images", images: ["data:image/png;base64,abc"] },
+        ] as any,
+      },
+    ];
+
+    const merged = mergeJsonlSupplementsIntoCursorTurns(primaryTurns, jsonlTurns);
+    const userTurn = merged.find((t) => t.role === "user")!;
+    const imageBlock = (userTurn.blocks as any[]).find((b) => b.type === "_user_images");
+    expect(imageBlock).toBeTruthy();
+    expect(imageBlock.images).toEqual(["data:image/png;base64,abc"]);
+  });
+});
+
 describe("parseCursorSession + JSONL thinking supplement", () => {
   let tempDir: string;
   let jsonlPath: string;
+  let imagePath: string;
 
   const baseSessionInfo: SessionInfo = {
     provider: "cursor",
@@ -117,11 +146,18 @@ describe("parseCursorSession + JSONL thinking supplement", () => {
     mockParseCursorSqlite.mockReset();
     tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-cursor-thinking-"));
     jsonlPath = join(tempDir, "synthetic-session.jsonl");
+    imagePath = join(tempDir, "shot.png");
+    await writeFile(imagePath, Buffer.from(ONE_BY_ONE_PNG_BASE64, "base64"));
     const content = [
       JSON.stringify({
         role: "user",
         message: {
-          content: [{ type: "text", text: "<user_query>\nInvestigate issue\n</user_query>" }],
+          content: [
+            {
+              type: "text",
+              text: `<user_query>\n[Image]\nInvestigate issue\n<image_files>\n1. ${imagePath}\n</image_files>\n</user_query>`,
+            },
+          ],
         },
       }),
       JSON.stringify({
@@ -173,9 +209,14 @@ describe("parseCursorSession + JSONL thinking supplement", () => {
     expect((assistant.blocks[0] as any).type).toBe("thinking");
     expect((assistant.blocks[0] as any).thinking).toBe("Inspecting logs");
     expect((assistant.blocks[1] as any).type).toBe("text");
+    const user = result.turns.find((t) => t.role === "user")!;
+    const userImageBlock = (user.blocks as any[]).find((b) => b.type === "_user_images");
+    expect(userImageBlock).toBeTruthy();
+    expect(userImageBlock.images).toHaveLength(1);
+    expect(userImageBlock.images[0]).toMatch(/^data:image\/png;base64,/);
     expect(result.dataSourceInfo?.primary).toBe("global-state");
     expect(result.dataSourceInfo?.supplements).toContain(
-      "cursor/projects/agent-transcripts/*.jsonl (thinking +1)",
+      "cursor/projects/agent-transcripts/*.jsonl (thinking +1, images +1)",
     );
   });
 

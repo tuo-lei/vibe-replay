@@ -109,6 +109,11 @@ export interface ReplaySession {
     model?: string;
     cwd: string;
     project: string;
+    generator?: {
+      name: string;
+      version: string;
+      generatedAt: string;
+    };
     stats: {
       sceneCount: number;
       userPrompts: number;
