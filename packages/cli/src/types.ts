@@ -16,6 +16,7 @@ export interface SessionInfo {
   workspacePath?: string; // absolute workspace path for Cursor lookup
   hasSqlite?: boolean;    // true if any Cursor SQLite source exists (store.db or global state DB)
   firstPrompt: string;
+  prompts?: string[];   // first N meaningful user prompts (cleaned)
 }
 
 export interface ParsedTurn {

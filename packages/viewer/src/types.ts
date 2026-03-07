@@ -86,6 +86,7 @@ export interface SessionSummary {
   hasAnnotations: boolean;
   annotationCount: number;
   firstMessage?: string;
+  messages?: string[];
   gist?: {
     gistId: string;
     viewerUrl: string;
@@ -103,12 +104,14 @@ export interface SourceSession {
   fileSize: number;
   lineCount: number;
   firstPrompt: string;
+  prompts?: string[];
   filePaths: string[];
   toolPaths?: string[];
   hasSqlite?: boolean;
   gitBranch?: string;
   existingReplay: string | null;
   projectExists?: boolean;
+  isGitRepo?: boolean;
   replay?: SessionSummary;
 }
 

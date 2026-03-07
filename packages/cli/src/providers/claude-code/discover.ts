@@ -79,12 +79,13 @@ async function extractSessionInfo(
     let version = "";
     let gitBranch: string | undefined;
     let timestamp = "";
-    let firstPrompt = "";
+    const prompts: string[] = [];
     let title: string | undefined;
     let metadataDone = false;
+    const MAX_PROMPTS = 2;
 
-    // Scan lines for metadata (first 30) + first meaningful user prompt (up to 100)
-    const scanLimit = Math.min(lines.length, 100);
+    // Scan lines for metadata (first 30) + first meaningful user prompts (up to 150)
+    const scanLimit = Math.min(lines.length, 150);
     for (let i = 0; i < scanLimit; i++) {
       try {
         const obj = JSON.parse(lines[i]);
@@ -107,21 +108,21 @@ async function extractSessionInfo(
           if (i >= 29) metadataDone = true;
         }
 
-        // Look for user prompts — skip boilerplate-only messages
+        // Collect meaningful user prompts (skip boilerplate)
         if (
-          !firstPrompt &&
+          prompts.length < MAX_PROMPTS &&
           obj.type === "user" &&
           obj.message?.role === "user" &&
           typeof obj.message.content === "string"
         ) {
           const cleaned = cleanPromptText(obj.message.content);
           if (cleaned.length >= 10) {
-            firstPrompt = cleaned.slice(0, 200);
+            prompts.push(cleaned.slice(0, 200));
           }
         }
 
         // Stop early if we have everything
-        if (firstPrompt && metadataDone) break;
+        if (prompts.length >= MAX_PROMPTS && metadataDone) break;
       } catch {
         continue;
       }
@@ -163,7 +164,8 @@ async function extractSessionInfo(
       fileSize,
       filePath,
       filePaths: [filePath],
-      firstPrompt: firstPrompt || "(no prompt found)",
+      firstPrompt: prompts[0] || "(no prompt found)",
+      prompts: prompts.length > 0 ? prompts : undefined,
     };
   } catch {
     return null;

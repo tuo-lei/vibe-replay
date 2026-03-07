@@ -92,8 +92,12 @@ async function scanSessionsFromDir(baseDir: string): Promise<any[]> {
         gist = await loadSavedGistInfo(join(baseDir, entry));
       } catch { /* no gist info */ }
 
-      const firstPrompt = session.scenes?.find((sc) => sc.type === "user-prompt");
-      const firstMessage = firstPrompt?.content?.slice(0, 200) || undefined;
+      const userPrompts = (session.scenes || [])
+        .filter((sc) => sc.type === "user-prompt")
+        .map((sc) => cleanFirstPrompt(sc.content).slice(0, 200))
+        .filter((m) => m.length >= 10);
+      const firstMessage = userPrompts[0] || undefined;
+      const messages = userPrompts.length > 0 ? userPrompts.slice(0, 2) : undefined;
 
       results.push({
         slug: entry,
@@ -108,6 +112,7 @@ async function scanSessionsFromDir(baseDir: string): Promise<any[]> {
         hasAnnotations: annotationCount > 0,
         annotationCount,
         firstMessage,
+        messages,
         gist: gist ? await (async () => {
           let outdated = false;
           if (gist!.contentHash) {
@@ -334,14 +339,23 @@ export async function startServer(
         }
       }
 
-      // Check which project directories still exist on disk
+      // Check which project directories still exist on disk + are git repos
       const uniqueProjects = [...new Set(merged.map((s) => s.project))];
       const projectExistsMap = new Map<string, boolean>();
+      const projectIsGitMap = new Map<string, boolean>();
       for (const p of uniqueProjects) {
         const resolved = p.startsWith("~/") ? join(home, p.slice(2)) : p === "~" ? home : p;
         try {
           const s = await stat(resolved);
           projectExistsMap.set(p, s.isDirectory());
+          if (s.isDirectory()) {
+            try {
+              await stat(join(resolved, ".git"));
+              projectIsGitMap.set(p, true);
+            } catch {
+              projectIsGitMap.set(p, false);
+            }
+          }
         } catch {
           projectExistsMap.set(p, false);
         }
@@ -365,12 +379,14 @@ export async function startServer(
           fileSize: s.fileSize,
           lineCount: s.lineCount,
           firstPrompt: cleanFirstPrompt(s.firstPrompt).slice(0, 200),
+          prompts: s.prompts?.map((p) => cleanFirstPrompt(p).slice(0, 200)),
           filePaths: s.filePaths,
           toolPaths: s.toolPaths,
           hasSqlite: s.hasSqlite,
           gitBranch: s.gitBranch,
           existingReplay: replay ? s.slug : null,
           projectExists: projectExistsMap.get(s.project) ?? false,
+          isGitRepo: projectIsGitMap.get(s.project) ?? false,
           replay: replay ? {
             slug: replay.slug,
             title: replay.title,
@@ -383,6 +399,7 @@ export async function startServer(
             hasAnnotations: replay.hasAnnotations,
             annotationCount: replay.annotationCount,
             firstMessage: replay.firstMessage,
+            messages: replay.messages,
             gist: replay.gist,
           } : undefined,
         };
