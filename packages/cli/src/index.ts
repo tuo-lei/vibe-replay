@@ -64,32 +64,17 @@ program
       // Group by project for display
       const choices = formatSessionChoices(allSessions);
 
-      // Check if there are existing replays for dashboard
-      const { resolve, join: pathJoin } = await import("node:path");
+      // Dashboard is always available as first choice
+      const { join: pathJoin } = await import("node:path");
       const { homedir } = await import("node:os");
       const replayBaseDir = pathJoin(homedir(), ".vibe-replay");
-      let hasReplays = false;
-      try {
-        const { readdir, stat: fsStat2 } = await import("node:fs/promises");
-        const dirEntries = await readdir(replayBaseDir);
-        for (const e of dirEntries) {
-          try {
-            const s = await fsStat2(resolve(replayBaseDir, e, "replay.json"));
-            if (s.isFile()) { hasReplays = true; break; }
-          } catch { continue; }
-        }
-      } catch { /* no output dir */ }
-
-      // Add Dashboard as first choice when replays exist
-      if (hasReplays) {
-        choices.unshift(
-          {
-            name: `${chalk.magenta("◆")} ${chalk.bold("Open Dashboard")} ${chalk.dim("— manage replays, annotate, publish")}`,
-            value: "__dashboard__",
-          },
-          new Separator(""),
-        );
-      }
+      choices.unshift(
+        {
+          name: `${chalk.magenta("◆")} ${chalk.bold("Open Dashboard")} ${chalk.dim("— manage replays, annotate, publish")}`,
+          value: "__dashboard__",
+        },
+        new Separator(""),
+      );
 
       let chosen: string;
       try {
