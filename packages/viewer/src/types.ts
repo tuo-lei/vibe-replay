@@ -94,6 +94,21 @@ export interface SessionSummary {
   };
 }
 
+export interface SourceSession {
+  provider: string;
+  slug: string;
+  title?: string;
+  project: string;
+  timestamp: string;
+  fileSize: number;
+  lineCount: number;
+  firstPrompt: string;
+  filePaths: string[];
+  toolPaths?: string[];
+  hasSqlite?: boolean;
+  existingReplay: string | null;
+}
+
 declare global {
   interface Window {
     __VIBE_REPLAY_DATA__?: ReplaySession;

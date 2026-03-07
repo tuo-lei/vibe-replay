@@ -7,10 +7,15 @@ import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import open from "open";
 import chalk from "chalk";
-import type { ReplaySession, Annotation } from "./types.js";
+import { homedir } from "node:os";
+import type { ReplaySession, Annotation, SessionInfo } from "./types.js";
 import { generateOutput } from "./generator.js";
 import { checkGhStatus, publishGist, loadSavedGistInfo, type SavedGistInfo } from "./publishers/gist.js";
 import { detectFeedbackTools, generateFeedback } from "./feedback.js";
+import { getAllProviders, getProvider } from "./providers/index.js";
+import { transformToReplay } from "./transform.js";
+import { scanForSecrets } from "./scan.js";
+import { CLI_VERSION } from "./version.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -177,6 +182,44 @@ async function loadSessionFromDisk(baseDir: string, slug: string): Promise<Repla
   return session;
 }
 
+/**
+ * Merge multiple JSONL files that share the same slug + project into one entry.
+ * Claude Code creates a new file per /resume, but they're the same logical session.
+ */
+function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
+  const groups = new Map<string, SessionInfo[]>();
+  for (const s of sessions) {
+    const key = `${s.project}::${s.slug}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(s);
+  }
+
+  const result: SessionInfo[] = [];
+  for (const group of groups.values()) {
+    if (group.length === 1) {
+      result.push(group[0]);
+      continue;
+    }
+    group.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    const latest = group[0];
+    const allPaths = group
+      .slice()
+      .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+      .flatMap((s) => s.filePaths);
+
+    result.push({
+      ...latest,
+      lineCount: group.reduce((sum, s) => sum + s.lineCount, 0),
+      fileSize: group.reduce((sum, s) => sum + s.fileSize, 0),
+      filePaths: allPaths,
+      toolPaths: [...new Set(group.flatMap((s) => s.toolPaths || []))],
+    });
+  }
+
+  result.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  return result;
+}
+
 /** Load annotations from disk for a given slug */
 async function loadAnnotations(baseDir: string, slug: string): Promise<Annotation[]> {
   const dirs = [join(baseDir, slug), resolve("./vibe-replay", slug)];
@@ -269,6 +312,117 @@ export async function startServer(
       return c.json({ ok: true });
     } catch (err: any) {
       return c.json({ error: err.message || "Delete failed" }, 500);
+    }
+  });
+
+  // --- Sources: discover AI coding sessions from all providers ---
+  app.get("/api/sources", async (c) => {
+    try {
+      const providers = getAllProviders();
+      const allSessions: SessionInfo[] = [];
+      for (const provider of providers) {
+        const sessions = await provider.discover();
+        allSessions.push(...sessions);
+      }
+
+      // Merge multi-file sessions (Claude Code /resume creates new JSONL files)
+      const merged = mergeSameSessions(allSessions);
+
+      // Check which source sessions already have replays
+      const existingReplays = await scanSessions(baseDir);
+      const replaySlugSet = new Set(existingReplays.map((r) => r.slug as string));
+
+      const result = merged.map((s) => ({
+        provider: s.provider,
+        slug: s.slug,
+        title: s.title,
+        project: s.project,
+        timestamp: s.timestamp,
+        fileSize: s.fileSize,
+        lineCount: s.lineCount,
+        firstPrompt: s.firstPrompt.replace(/\n/g, " ").slice(0, 200),
+        filePaths: s.filePaths,
+        toolPaths: s.toolPaths,
+        hasSqlite: s.hasSqlite,
+        existingReplay: replaySlugSet.has(s.slug) ? s.slug : null,
+      }));
+
+      return c.json({ sessions: result });
+    } catch (err: any) {
+      return c.json({ error: err.message || "Source discovery failed" }, 500);
+    }
+  });
+
+  // --- Generate: parse a source session into a replay ---
+  app.post("/api/generate", async (c) => {
+    try {
+      const body = await c.req.json<{
+        provider: string;
+        filePaths: string[];
+        toolPaths?: string[];
+        title?: string;
+        sessionSlug?: string;
+        sessionProject?: string;
+      }>();
+
+      const provider = getProvider(body.provider);
+      if (!provider) {
+        return c.json({ error: `Unknown provider: ${body.provider}` }, 400);
+      }
+
+      const paths = [...body.filePaths, ...(body.toolPaths || [])];
+      if (paths.length === 0) {
+        return c.json({ error: "filePaths is required" }, 400);
+      }
+
+      // Build partial SessionInfo for providers that need it
+      const sessionInfo: Partial<SessionInfo> | undefined = body.sessionSlug
+        ? { slug: body.sessionSlug, project: body.sessionProject || "" } as any
+        : undefined;
+
+      const parsed = await provider.parse(paths, sessionInfo as SessionInfo | undefined);
+
+      const home = homedir();
+      const rawProject = sessionInfo?.project || parsed.cwd;
+      const project = rawProject.startsWith(home)
+        ? "~" + rawProject.slice(home.length)
+        : rawProject;
+
+      const replay = transformToReplay(parsed, body.provider, project, {
+        generator: {
+          name: "vibe-replay",
+          version: CLI_VERSION,
+          generatedAt: new Date().toISOString(),
+        },
+      });
+
+      if (body.title) {
+        replay.meta.title = body.title;
+      }
+
+      // Save replay
+      const rawSlug = replay.meta.slug || replay.meta.sessionId.slice(0, 8);
+      const slug = rawSlug.replace(/[^a-zA-Z0-9_-]/g, "-");
+      const outputDir = join(baseDir, slug);
+      await generateOutput(replay, outputDir);
+
+      // Secret scanning
+      const findings = scanForSecrets(JSON.stringify(replay));
+      const warnings = findings.map((f) => `[${f.rule}] ${f.match}`);
+
+      return c.json({
+        slug,
+        title: replay.meta.title || slug,
+        sceneCount: replay.scenes.length,
+        stats: {
+          userPrompts: replay.meta.stats.userPrompts,
+          toolCalls: replay.meta.stats.toolCalls,
+          thinkingBlocks: replay.meta.stats.thinkingBlocks,
+        },
+        warnings: warnings.length > 0 ? warnings : undefined,
+      });
+    } catch (err: any) {
+      return c.json({ error: err.message || "Generation failed" }, 500);
     }
   });
 
