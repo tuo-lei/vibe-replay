@@ -119,6 +119,11 @@ export async function publishGist(
     updatedAt: new Date().toISOString(),
   });
 
+  // Register/refresh metadata on vibe-replay.com (worker fetches from gist)
+  try {
+    await registerReplayMetadata(gistId);
+  } catch { /* non-critical */ }
+
   return { gistId, filename, gistUrl, viewerUrl, mode };
 }
 
@@ -169,4 +174,13 @@ function sanitizeFilename(s: string): string {
     .replace(/[^a-zA-Z0-9_-]/g, "-")
     .replace(/-+/g, "-")
     .slice(0, 60);
+}
+
+/** Register/refresh replay metadata on vibe-replay.com. Worker fetches from gist. */
+async function registerReplayMetadata(gistId: string): Promise<void> {
+  await fetch("https://vibe-replay.com/api/replays", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ gist_id: gistId }),
+  });
 }

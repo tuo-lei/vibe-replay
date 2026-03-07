@@ -74,6 +74,26 @@ export interface ReplaySession {
   annotations?: Annotation[];
 }
 
+export interface SessionSummary {
+  slug: string;
+  title?: string;
+  provider: string;
+  model?: string;
+  project: string;
+  startTime: string;
+  endTime?: string;
+  stats: ReplaySession["meta"]["stats"];
+  hasAnnotations: boolean;
+  annotationCount: number;
+  firstMessage?: string;
+  gist?: {
+    gistId: string;
+    viewerUrl: string;
+    updatedAt: string;
+    outdated?: boolean;
+  };
+}
+
 declare global {
   interface Window {
     __VIBE_REPLAY_DATA__?: ReplaySession;

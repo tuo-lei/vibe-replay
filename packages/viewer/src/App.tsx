@@ -1,5 +1,6 @@
 import { useMemo, useState, useRef, useEffect } from "react";
 import Player from "./components/Player";
+import Dashboard from "./components/Dashboard";
 import { useSessionLoader } from "./hooks/useSessionLoader";
 import { useTheme } from "./hooks/useTheme";
 import { useViewPrefs } from "./hooks/useViewPrefs";
@@ -14,6 +15,16 @@ function formatDuration(ms?: number): string {
   return `${hrs}h ${mins % 60}m`;
 }
 
+function navigateTo(params: Record<string, string | null>) {
+  const url = new URL(window.location.href);
+  for (const [key, value] of Object.entries(params)) {
+    if (value === null) url.searchParams.delete(key);
+    else url.searchParams.set(key, value);
+  }
+  window.history.pushState({}, "", url.toString());
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
 export default function App() {
   const loadState = useSessionLoader();
   const { theme, toggleTheme } = useTheme();
@@ -21,6 +32,8 @@ export default function App() {
 
   const session = loadState.status === "ready" ? loadState.session : null;
   const viewerMode = loadState.status === "ready" ? loadState.mode : "embedded";
+  const gistOwner = loadState.status === "ready" ? loadState.gistOwner : undefined;
+  const isEditor = viewerMode === "editor";
 
   const hasThinking = useMemo(
     () => session?.scenes.some((s) => s.type === "thinking") ?? false,
@@ -66,8 +79,36 @@ export default function App() {
     );
   }
 
+  if (loadState.status === "dashboard") {
+    return (
+      <div className="h-screen bg-terminal-bg flex flex-col overflow-hidden">
+        <header className="border-b border-terminal-border/50 px-3 md:px-4 py-2 md:py-2.5 flex items-center justify-between shrink-0 bg-terminal-surface/30 safe-top">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => navigateTo({ view: null, session: null })}
+              className="text-sm font-mono font-bold bg-gradient-to-r from-[#3fb950] to-[#58a6ff] bg-clip-text text-transparent hover:opacity-80 transition-opacity"
+            >
+              vibe-replay
+            </button>
+            <span className="text-terminal-border/60 text-sm select-none">|</span>
+            <span className="text-sm font-mono text-terminal-text/80">Dashboard</span>
+          </div>
+          <button
+            onClick={toggleTheme}
+            className="h-7 w-7 flex items-center justify-center rounded-md border border-terminal-border/60 bg-terminal-surface text-terminal-dim hover:text-terminal-text text-xs transition-colors"
+          >
+            {theme === "dark" ? "\u263E" : "\u2600"}
+          </button>
+        </header>
+        <Dashboard />
+      </div>
+    );
+  }
+
   const { meta } = session!;
   const duration = formatDuration(meta.stats.durationMs);
+  // Show back-to-dashboard button when viewing a session via ?session= param
+  const showDashboardBack = isEditor && new URLSearchParams(window.location.search).has("session");
 
   return (
     <div className="h-screen bg-terminal-bg flex flex-col overflow-hidden">
@@ -82,12 +123,38 @@ export default function App() {
           >
             vibe-replay
           </a>
+          {showDashboardBack && (
+            <>
+              <span className="text-terminal-border/60 text-sm select-none">|</span>
+              <button
+                onClick={() => navigateTo({ view: "dashboard", session: null })}
+                className="flex items-center gap-0.5 text-sm font-mono text-terminal-text/80 hover:text-terminal-text transition-colors"
+              >
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10 3L5 8l5 5" />
+                </svg>
+                Dashboard
+              </button>
+            </>
+          )}
           {meta.title && (
-            <span className="hidden md:inline text-terminal-text text-xs font-mono truncate max-w-[300px]" title={meta.project}>
-              {meta.title}
-            </span>
+            <>
+              <span className="hidden md:inline text-terminal-border/60 text-sm select-none">|</span>
+              <span className="hidden md:inline text-terminal-text/80 text-xs font-mono truncate max-w-[300px]" title={meta.project}>
+                {meta.title}
+              </span>
+            </>
           )}
           <div className="hidden sm:flex items-center gap-1.5 text-xs font-mono text-terminal-dim">
+            {gistOwner && (
+              <><span className="text-terminal-border">&middot;</span>
+              <a
+                href={`https://github.com/${gistOwner}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-terminal-text/60 hover:text-terminal-text transition-colors"
+              >@{gistOwner}</a></>
+            )}
             {meta.model && (
               <><span className="text-terminal-border">&middot;</span><span className="text-terminal-text/60">{meta.model}</span></>
             )}
@@ -98,6 +165,21 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-1.5 md:gap-2 shrink-0">
+          {/* Dashboard button (editor mode only, when not already navigated from dashboard) */}
+          {isEditor && !showDashboardBack && (
+            <button
+              onClick={() => navigateTo({ view: "dashboard" })}
+              className="h-7 px-2.5 flex items-center gap-1.5 rounded-md border border-terminal-border/60 bg-terminal-surface text-terminal-dim hover:text-terminal-text text-xs font-mono transition-colors"
+              title="All replays"
+            >
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                <rect x="1" y="1" width="6" height="6" rx="1" /><rect x="9" y="1" width="6" height="6" rx="1" />
+                <rect x="1" y="9" width="6" height="6" rx="1" /><rect x="9" y="9" width="6" height="6" rx="1" />
+              </svg>
+              <span className="hidden sm:inline">Dashboard</span>
+            </button>
+          )}
+
           {/* View mode: segmented control */}
           <div className="flex items-center h-7 rounded-md overflow-hidden border border-terminal-border/60">
             <button

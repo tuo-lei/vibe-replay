@@ -79,7 +79,11 @@ import Footer from "../components/Footer.astro";
     model: string | null;
     scene_count: number;
     user_prompts: number;
+    tool_calls: number;
     duration_ms: number;
+    cost_estimate: string | null;
+    first_message: string | null;
+    gist_owner: string | null;
     view_count: number;
     created_at: string;
   }
@@ -114,24 +118,29 @@ import Footer from "../components/Footer.astro";
     // Sanitize gist_id for href — only allow hex chars
     const safeGistId = r.gist_id.replace(/[^a-f0-9]/g, "");
     // Force numbers to int to prevent injection via numeric fields
-    const scenes = parseInt(String(r.scene_count)) || 0;
     const prompts = parseInt(String(r.user_prompts)) || 0;
+    const tools = parseInt(String(r.tool_calls)) || 0;
     const views = parseInt(String(r.view_count)) || 0;
+    const cost = r.cost_estimate ? `$${parseFloat(r.cost_estimate).toFixed(2)}` : "";
+    const firstMsg = r.first_message ? escapeHtml(r.first_message.slice(0, 120)) : "";
     return `
       <a href="/view/?gist=${safeGistId}" class="group block rounded-xl border border-border bg-surface-1 hover:border-accent/30 hover:bg-surface-2/50 transition-all p-5">
-        <div class="flex items-start justify-between mb-3">
+        <div class="flex items-start justify-between mb-1">
           <h3 class="font-mono text-sm font-semibold text-text-primary group-hover:text-accent transition-colors truncate pr-2">${escapeHtml(r.title)}</h3>
           <span class="text-[10px] text-text-muted shrink-0">${escapeHtml(date)}</span>
         </div>
+        ${r.gist_owner ? `<div class="text-[11px] font-mono text-text-muted mb-1"><span class="text-accent/70">@${escapeHtml(r.gist_owner)}</span></div>` : ""}
+        ${firstMsg ? `<p class="text-xs text-text-muted truncate mb-3">${firstMsg}</p>` : `<div class="mb-3"></div>`}
         <div class="flex items-center gap-2 mb-3">
           ${r.model ? `<span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-2 text-text-secondary border border-border">${escapeHtml(r.model)}</span>` : ""}
           ${r.provider ? `<span class="text-[10px] font-mono text-text-muted">${escapeHtml(r.provider)}</span>` : ""}
         </div>
         <div class="flex items-center gap-3 text-[11px] font-mono text-text-muted">
-          <span>${scenes} scenes</span>
-          <span class="text-border">&middot;</span>
           <span>${prompts} prompts</span>
+          <span class="text-border">&middot;</span>
+          <span>${tools} tools</span>
           ${duration ? `<span class="text-border">&middot;</span><span>${escapeHtml(duration)}</span>` : ""}
+          ${cost ? `<span class="text-border">&middot;</span><span>${cost}</span>` : ""}
           <span class="ml-auto flex items-center gap-1">
             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
             ${views}
