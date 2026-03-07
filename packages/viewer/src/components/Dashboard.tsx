@@ -273,6 +273,17 @@ function sessionLabel(s: SourceSession): { primary: string; secondary?: string }
   return { primary: s.slug };
 }
 
+/** Strip system-injected noise from first prompt for display */
+function cleanPrompt(text: string): string {
+  // Remove <local-command-caveat>...</local-command-caveat> and similar XML wrappers
+  let cleaned = text.replace(/<[^>]+>[^<]*<\/[^>]+>/g, "").trim();
+  // Remove lone opening/closing tags
+  cleaned = cleaned.replace(/<\/?[a-z-]+>/gi, "").trim();
+  // Collapse whitespace
+  cleaned = cleaned.replace(/\s+/g, " ");
+  return cleaned;
+}
+
 /** "All projects" sentinel */
 const ALL_PROJECTS = "__all__";
 
@@ -598,40 +609,41 @@ function SessionsPanel() {
             <div className="divide-y divide-terminal-border/30">
               {filtered.map((s) => {
                 const label = sessionLabel(s);
+                const prompt = s.firstPrompt ? cleanPrompt(s.firstPrompt) : "";
                 return (
                   <div
                     key={`${s.provider}-${s.slug}`}
                     className="px-4 py-3 hover:bg-terminal-surface/30 transition-colors"
                   >
                     <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 space-y-1">
-                        {/* Label + badges */}
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-mono text-terminal-text">
+                      <div className="min-w-0 space-y-1.5">
+                        {/* Line 1: Primary label + time */}
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-mono text-terminal-text font-medium truncate">
                             {label.primary}
                           </span>
-                          {label.secondary && (
-                            <span className="text-xs font-mono text-terminal-dim/50">
-                              {label.secondary}
-                            </span>
-                          )}
                           {s.existingReplay && (
-                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border bg-green-500/10 text-green-400 border-green-500/20">
-                              has replay
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border bg-green-500/10 text-green-400 border-green-500/20 shrink-0">
+                              replay
                             </span>
                           )}
+                          <span className="text-[11px] font-mono text-terminal-dim/50 shrink-0 ml-auto">
+                            {timeAgo(s.timestamp)}
+                          </span>
                         </div>
-                        {/* First prompt */}
-                        {s.firstPrompt && (
+                        {/* Line 2: First prompt (cleaned) */}
+                        {prompt && (
                           <p className="text-[13px] text-terminal-text/50 line-clamp-2 leading-relaxed">
-                            {s.firstPrompt}
+                            {prompt}
                           </p>
                         )}
-                        {/* Meta */}
-                        <div className="flex items-center gap-2 text-[11px] font-mono text-terminal-dim/60 flex-wrap">
+                        {/* Line 3: Meta — provider + slug + project + size */}
+                        <div className="flex items-center gap-1.5 text-[11px] font-mono text-terminal-dim/50 flex-wrap">
                           <ProviderBadge provider={s.provider} />
-                          <span>{timeAgo(s.timestamp)}</span>
-                          {s.gitBranch && (
+                          {label.secondary && (
+                            <span>{label.secondary}</span>
+                          )}
+                          {!label.secondary && s.gitBranch && (
                             <span className="flex items-center gap-0.5">
                               <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                                 <circle cx="5" cy="4" r="2" /><circle cx="11" cy="12" r="2" /><path d="M5 6v4c0 1.1.9 2 2 2h2" />
@@ -649,7 +661,7 @@ function SessionsPanel() {
                           {s.hasSqlite && <span className="text-green-400/60">db</span>}
                         </div>
                       </div>
-                      {/* Actions */}
+                      {/* Action button */}
                       <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
                         {s.existingReplay ? (
                           <>
@@ -952,35 +964,35 @@ function ReplaysPanel() {
                     )}
                   </div>
                 </div>
-                {/* Secondary: first message */}
+                {/* Context: first message */}
                 {s.firstMessage && (
-                  <p className="text-[13px] text-terminal-text/70 line-clamp-3">{s.firstMessage}</p>
+                  <p className="text-[13px] text-terminal-text/50 line-clamp-2 leading-relaxed">{s.firstMessage}</p>
                 )}
-                {/* Tertiary: metadata */}
-                <div className="flex items-center gap-2 text-xs font-mono text-terminal-dim flex-wrap">
+                {/* Identity: provider + slug + project + date */}
+                <div className="flex items-center gap-1.5 text-[11px] font-mono text-terminal-dim/50 flex-wrap">
                   <ProviderBadge provider={s.provider} />
                   <span>{s.slug}</span>
-                  <span className="text-terminal-border">&middot;</span>
+                  <span className="text-terminal-dim/30">&middot;</span>
                   <span>{s.project}</span>
-                  <span className="text-terminal-border">&middot;</span>
+                  <span className="text-terminal-dim/30">&middot;</span>
                   <span>{formatDate(s.startTime)}</span>
                   {s.model && (
-                    <><span className="text-terminal-border">&middot;</span><span>{s.model}</span></>
+                    <><span className="text-terminal-dim/30">&middot;</span><span>{s.model}</span></>
                   )}
-                  {s.stats.durationMs && (
-                    <><span className="text-terminal-border">&middot;</span><span>{formatDuration(s.stats.durationMs)}</span></>
-                  )}
-                  {s.stats.costEstimate && (
-                    <><span className="text-terminal-border">&middot;</span><span>{formatCost(s.stats.costEstimate)}</span></>
-                  )}
-                  <span className="text-terminal-border">&middot;</span>
+                </div>
+                {/* Stats: scenes + prompts + tools + duration + cost + annotations */}
+                <div className="flex items-center gap-1.5 text-[11px] font-mono text-terminal-dim/40 flex-wrap">
                   <span>{s.stats.sceneCount} scenes</span>
                   <span>{s.stats.userPrompts} prompts</span>
                   <span>{s.stats.toolCalls} tools</span>
+                  {s.stats.durationMs && (
+                    <><span className="text-terminal-dim/30">&middot;</span><span>{formatDuration(s.stats.durationMs)}</span></>
+                  )}
+                  {s.stats.costEstimate && (
+                    <><span className="text-terminal-dim/30">&middot;</span><span>{formatCost(s.stats.costEstimate)}</span></>
+                  )}
                   {s.hasAnnotations && (
-                    <span className="text-terminal-orange">
-                      {s.annotationCount} annotation{s.annotationCount !== 1 ? "s" : ""}
-                    </span>
+                    <><span className="text-terminal-dim/30">&middot;</span><span className="text-terminal-orange">{s.annotationCount} annotation{s.annotationCount !== 1 ? "s" : ""}</span></>
                   )}
                 </div>
               </div>
