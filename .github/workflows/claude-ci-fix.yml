@@ -5,6 +5,10 @@ on:
     workflows: ["CI"]
     types: [completed]
 
+concurrency:
+  group: claude-ci-fix-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
 jobs:
   fix-ci:
     # Only run on PR failures, not pushes to main
@@ -12,6 +16,7 @@ jobs:
       github.event.workflow_run.conclusion == 'failure' &&
       github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
       pull-requests: write
@@ -40,9 +45,29 @@ jobs:
             return data.length > 0 ? data[0].number : '';
           result-encoding: string
 
+      - name: Check if last commit was from Claude (prevent loops)
+        id: loop_check
+        if: steps.pr.outputs.result != ''
+        uses: actions/github-script@v7
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        with:
+          script: |
+            const { data: commit } = await github.rest.git.getCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: process.env.HEAD_SHA,
+            });
+            const author = commit.author.name || '';
+            const isClaude = author.toLowerCase().includes('claude');
+            core.setOutput('is_claude', isClaude.toString());
+            if (isClaude) {
+              core.info('Last commit was from Claude — skipping to prevent loop');
+            }
+
       - name: Identify failure type
         id: failure
-        if: steps.pr.outputs.result != ''
+        if: steps.pr.outputs.result != '' && steps.loop_check.outputs.is_claude != 'true'
         uses: actions/github-script@v7
         env:
           RUN_ID: ${{ github.event.workflow_run.id }}
@@ -63,7 +88,7 @@ jobs:
             core.setOutput('failed_jobs', failed.join(', '));
 
       - name: Checkout repository
-        if: steps.pr.outputs.result != '' && steps.failure.outputs.has_lint_or_build == 'true'
+        if: steps.pr.outputs.result != '' && steps.loop_check.outputs.is_claude != 'true' && steps.failure.outputs.has_lint_or_build == 'true'
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_branch }}
@@ -71,7 +96,7 @@ jobs:
 
       # Auto-fix lint and build failures — these are unambiguous
       - name: Auto-fix lint/build failures
-        if: steps.pr.outputs.result != '' && steps.failure.outputs.has_lint_or_build == 'true'
+        if: steps.pr.outputs.result != '' && steps.loop_check.outputs.is_claude != 'true' && steps.failure.outputs.has_lint_or_build == 'true'
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -92,7 +117,7 @@ jobs:
 
       # Test failures get a comment only — human decides whether to fix test or code
       - name: Comment on test failures
-        if: steps.pr.outputs.result != '' && steps.failure.outputs.has_test == 'true'
+        if: steps.pr.outputs.result != '' && steps.loop_check.outputs.is_claude != 'true' && steps.failure.outputs.has_test == 'true'
         uses: actions/github-script@v7
         env:
           RUN_ID: ${{ github.event.workflow_run.id }}
