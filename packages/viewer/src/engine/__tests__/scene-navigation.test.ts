@@ -1,29 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { Scene } from "../../types";
 import {
   computeNextIndex,
   computeUserPromptIndices,
   findNextUserPrompt,
   findPrevUserPrompt,
 } from "../scene-navigation";
-
-// -- Helpers --
-
-function userPrompt(content = "hello"): Scene {
-  return { type: "user-prompt", content };
-}
-
-function thinking(content = "hmm"): Scene {
-  return { type: "thinking", content };
-}
-
-function textResponse(content = "hi"): Scene {
-  return { type: "text-response", content };
-}
-
-function toolCall(toolName = "Read"): Scene {
-  return { type: "tool-call", toolName, input: {}, result: "" };
-}
+import { textResponse, thinking, toolCall, userPrompt } from "./helpers";
 
 // -- computeUserPromptIndices --
 

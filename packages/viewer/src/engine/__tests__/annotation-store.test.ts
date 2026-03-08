@@ -152,24 +152,24 @@ describe("computeAnnotationCounts", () => {
 // -- hasUnsavedChanges --
 
 describe("hasUnsavedChanges", () => {
-  it("returns false when annotations match snapshot", () => {
+  it("returns false when annotations match saved", () => {
     const list = [makeAnnotation()];
-    const snapshot = JSON.stringify(list);
-    expect(hasUnsavedChanges(list, snapshot)).toBe(false);
+    const saved = [makeAnnotation()];
+    expect(hasUnsavedChanges(list, saved)).toBe(false);
   });
 
-  it("returns true when annotations differ from snapshot", () => {
+  it("returns true when annotations differ from saved", () => {
     const list = [makeAnnotation({ body: "changed" })];
-    const snapshot = JSON.stringify([makeAnnotation({ body: "original" })]);
-    expect(hasUnsavedChanges(list, snapshot)).toBe(true);
+    const saved = [makeAnnotation({ body: "original" })];
+    expect(hasUnsavedChanges(list, saved)).toBe(true);
   });
 
-  it("returns false for empty list and empty snapshot", () => {
-    expect(hasUnsavedChanges([], "[]")).toBe(false);
+  it("returns false for empty list and empty saved", () => {
+    expect(hasUnsavedChanges([], [])).toBe(false);
   });
 
   it("returns true when annotation added", () => {
     const list = [makeAnnotation()];
-    expect(hasUnsavedChanges(list, "[]")).toBe(true);
+    expect(hasUnsavedChanges(list, [])).toBe(true);
   });
 });

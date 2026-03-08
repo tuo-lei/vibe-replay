@@ -50,7 +50,7 @@ export function computeAnnotationCounts(annotations: Annotation[]): Map<number, 
   return counts;
 }
 
-/** Check if current annotations differ from a saved snapshot */
-export function hasUnsavedChanges(current: Annotation[], savedSnapshot: string): boolean {
-  return JSON.stringify(current) !== savedSnapshot;
+/** Check if current annotations differ from a saved snapshot (order-sensitive comparison) */
+export function hasUnsavedChanges(current: Annotation[], saved: Annotation[]): boolean {
+  return JSON.stringify(current) !== JSON.stringify(saved);
 }
