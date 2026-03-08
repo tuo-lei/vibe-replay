@@ -1,5 +1,11 @@
 // Shared types — single source of truth
-export type { Annotation, DataSourceInfo, ReplaySession, Scene } from "@vibe-replay/types";
+export type {
+  Annotation,
+  DataSource,
+  DataSourceInfo,
+  ReplaySession,
+  Scene,
+} from "@vibe-replay/types";
 
 // CLI-only types below
 

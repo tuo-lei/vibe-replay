@@ -1,19 +1,12 @@
-import type { ParsedTurn, SessionInfo } from "../types.js";
+import type { DataSource, DataSourceInfo, ParsedTurn, SessionInfo } from "../types.js";
+
+export type { DataSource, DataSourceInfo };
 
 export interface Provider {
   name: string;
   displayName: string;
   discover(): Promise<SessionInfo[]>;
   parse(filePaths: string | string[], sessionInfo?: SessionInfo): Promise<ProviderParseResult>;
-}
-
-export type DataSource = "jsonl" | "sqlite" | "jsonl+tools" | "global-state";
-
-export interface DataSourceInfo {
-  primary: DataSource;
-  sources: string[];
-  supplements?: string[];
-  notes?: string[];
 }
 
 export interface TokenUsage {

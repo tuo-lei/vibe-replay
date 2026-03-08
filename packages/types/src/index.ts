@@ -1,3 +1,5 @@
+export type DataSource = "jsonl" | "sqlite" | "jsonl+tools" | "global-state";
+
 export type Scene =
   | { type: "user-prompt"; content: string; timestamp?: string; images?: string[] }
   | { type: "compaction-summary"; content: string; timestamp?: string }
@@ -26,7 +28,7 @@ export interface Annotation {
 }
 
 export interface DataSourceInfo {
-  primary: string;
+  primary: DataSource;
   sources: string[];
   supplements?: string[];
   notes?: string[];
@@ -38,7 +40,7 @@ export interface ReplaySession {
     slug: string;
     title?: string;
     provider: string;
-    dataSource?: string;
+    dataSource?: DataSource;
     dataSourceInfo?: DataSourceInfo;
     startTime: string;
     endTime?: string;
