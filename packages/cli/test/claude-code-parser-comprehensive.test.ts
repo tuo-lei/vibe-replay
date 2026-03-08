@@ -296,9 +296,19 @@ describe("Claude Code → transform — secret redaction", () => {
   it("redacts emails but preserves domain", async () => {
     const parsed = await parseClaudeCodeSession(SECRETS);
     const replay = transformToReplay(parsed, "claude-code", "~/test/secretproject");
-    const allContent = replay.scenes.map((s) => s.content).join(" ");
-    expect(allContent).not.toContain("admin@example.com");
-    expect(allContent).toContain("[REDACTED]@example.com");
+    // Check text-response scenes
+    const textContent = replay.scenes
+      .filter((s) => s.type === "text-response")
+      .map((s) => s.content)
+      .join(" ");
+    expect(textContent).not.toContain("admin@example.com");
+    expect(textContent).toContain("[REDACTED]@example.com");
+    // Also check tool-call results (tool-call scenes use .result, not .content)
+    const readScene = replay.scenes.find((s) => s.type === "tool-call" && s.toolName === "Read");
+    expect(readScene).toBeDefined();
+    const result = readScene!.type === "tool-call" ? readScene!.result : "";
+    expect(result).not.toContain("admin@example.com");
+    expect(result).toContain("[REDACTED]@example.com");
   });
 
   it("redacts JWTs in Bash tool command", async () => {

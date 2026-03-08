@@ -316,7 +316,7 @@ describe("transform — truncation", () => {
       "claude-code",
       "~/test",
     );
-    expect(replay.scenes[0].content.length).toBeLessThan(5000);
+    expect(replay.scenes[0].content.length).toBeLessThan(2100);
     expect(replay.scenes[0].content).toContain("truncated");
   });
 
