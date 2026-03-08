@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="380" viewBox="0 0 840 380">
+  <style>
+    text { font-family: 'SF Mono','Cascadia Code','Fira Code',Menlo,Consolas,'Liberation Mono',monospace; }
+    @keyframes fadeInOut {
+      0% { opacity: 0 }
+      2% { opacity: 1 }
+      18% { opacity: 1 }
+      20% { opacity: 0 }
+      100% { opacity: 0 }
+    }
+    .frame { opacity: 0; }
+    .frame-0 { animation: fadeInOut 25s 0s infinite; }
+    .frame-1 { animation: fadeInOut 25s 5s infinite; }
+    .frame-2 { animation: fadeInOut 25s 10s infinite; }
+    .frame-3 { animation: fadeInOut 25s 15s infinite; }
+    .frame-4 { animation: fadeInOut 25s 20s infinite; }
+  </style>
+
+  <defs>
+    <clipPath id="content-clip">
+      <rect x="0" y="36" width="840" height="304"/>
+    </clipPath>
+  </defs>
+
+  <!-- Background -->
+  <rect width="840" height="380" rx="12" fill="#0d1117"/>
+
+  <!-- Header bar -->
+  <path d="M0,12 Q0,0 12,0 H828 Q840,0 840,12 V36 H0 Z" fill="#161b22"/>
+  <circle cx="24" cy="18" r="5" fill="#ff7b72" opacity="0.9"/>
+  <circle cx="42" cy="18" r="5" fill="#d29922" opacity="0.9"/>
+  <circle cx="60" cy="18" r="5" fill="#3fb950" opacity="0.9"/>
+  <text x="420" y="23" text-anchor="middle" fill="#7d8590" font-size="12" letter-spacing="0.5">vibe-replay</text>
+
+  <!-- Footer bar -->
+  <path d="M0,340 H840 V368 Q840,380 828,380 H12 Q0,380 0,368 Z" fill="#161b22"/>
+  <line x1="0" y1="340" x2="840" y2="340" stroke="#30363d" stroke-width="1"/>
+  <text x="40" y="364" fill="#7d8590" font-size="11">19 min · 259 steps</text>
+  <text x="800" y="364" text-anchor="end" fill="#7d8590" font-size="11">vibe-replay.com</text>
+
+  <!-- Animated content frames (clipped to content area) -->
+  <g clip-path="url(#content-clip)">
+  <g class="frame frame-0">
+    <text x="40" y="60" fill="#7d8590" font-size="11" letter-spacing="1.5">TASK</text>
+    <line x1="40" y1="70" x2="800" y2="70" stroke="#30363d" stroke-width="1"/>
+    <text x="40" y="98" fill="#58a6ff" font-size="15" font-weight="600">你有比较丰富的claude session，我需要你看看有没有claude</text>
+    <text x="40" y="122" fill="#58a6ff" font-size="15" font-weight="600">telemetry里边比较有用的信息但是我们的产品完全没有显示和…</text>
+    <text x="40" y="158" fill="#bc8cff" font-size="13">claude-opus-4-6</text>
+    <text x="40" y="182" fill="#7d8590" font-size="13">19 min  ·  259 steps</text>
+    <text x="40" y="206" fill="#7d8590" font-size="13">~/Code/vibe-replay</text>
+  </g>
+
+  <g class="frame frame-1">
+    <text x="40" y="60" fill="#7d8590" font-size="11" letter-spacing="1.5">STEP 1 OF 15</text>
+    <line x1="40" y1="70" x2="800" y2="70" stroke="#30363d" stroke-width="1"/>
+    <text x="40" y="98" fill="#58a6ff" font-size="15" font-weight="600">你有比较丰富的claude</text>
+    <text x="40" y="122" fill="#58a6ff" font-size="15" font-weight="600">session，我需要你看看有没有claude telemetry里边比较…</text>
+    <text x="40" y="158" fill="#e6edf3" font-size="13">    $ ls ~/.claude/projects/ | head -30</text>
+    <text x="40" y="182" fill="#e6edf3" font-size="13">    $ ls ~/.claude/projects/-Users-tuo-Code-vibe-replay…</text>
+    <text x="40" y="206" fill="#e6edf3" font-size="13">    $ ls ~/.claude/projects/-Users-tuo-Code/ 2&gt;/dev/nul…</text>
+    <text x="40" y="230" fill="#e6edf3" font-size="13">    $ # Count total JSONL files across all projects and…</text>
+    <text x="40" y="254" fill="#e6edf3" font-size="13">    $ # Find all jsonl files properly</text>
+    <text x="40" y="278" fill="#7d8590" font-size="13">    ... +30 more</text>
+  </g>
+
+  <g class="frame frame-2">
+    <text x="40" y="60" fill="#7d8590" font-size="11" letter-spacing="1.5">STEP 2 OF 15</text>
+    <line x1="40" y1="70" x2="800" y2="70" stroke="#30363d" stroke-width="1"/>
+    <text x="40" y="98" fill="#58a6ff" font-size="15" font-weight="600">我觉得有一些比较适合加在stats里边，比如成本，turns</text>
+    <text x="40" y="122" fill="#58a6ff" font-size="15" font-weight="600">time spent. compaction比较适合单独列出来</text>
+    <text x="40" y="158" fill="#7d8590" font-size="13">    parser.ts, transform.ts, types.ts +1</text>
+    <text x="40" y="182" fill="#7d8590" font-size="13">    Good, now I have the full picture. Let me imple…</text>
+    <text x="40" y="206" fill="#7d8590" font-size="13">    StatsPanel.tsx, LandingHero.tsx</text>
+    <text x="40" y="230" fill="#e6edf3" font-size="13">    Edit types.ts</text>
+    <text x="40" y="254" fill="#e6edf3" font-size="13">    Edit types.ts</text>
+    <text x="40" y="278" fill="#7d8590" font-size="13">    ... +30 more</text>
+  </g>
+
+  <g class="frame frame-3">
+    <text x="40" y="60" fill="#7d8590" font-size="11" letter-spacing="1.5">STEP 12 OF 15</text>
+    <line x1="40" y1="70" x2="800" y2="70" stroke="#30363d" stroke-width="1"/>
+    <text x="40" y="98" fill="#58a6ff" font-size="15" font-weight="600">替换掉741fb4ce — &quot;buzzing-cooking-harbor&quot;</text>
+    <text x="40" y="122" fill="#58a6ff" font-size="15" font-weight="600">这个，因为这个我link成默认跳转的那个了，我想保留</text>
+    <text x="40" y="158" fill="#e6edf3" font-size="13">    $ # Download the new gist content</text>
+    <text x="40" y="182" fill="#e6edf3" font-size="13">    $ # Update the old gist with new content, keeping t…</text>
+    <text x="40" y="206" fill="#f85149" font-size="13">    $ # Verify the update  [fail]</text>
+    <text x="40" y="230" fill="#e6edf3" font-size="13">    $ # gh gist view -r might be truncating large files…</text>
+    <text x="40" y="254" fill="#e6edf3" font-size="13">    $ # Check if the file content is truncated - large …</text>
+    <text x="40" y="278" fill="#7d8590" font-size="13">    ... +12 more</text>
+  </g>
+
+  <g class="frame frame-4">
+    <text x="40" y="60" fill="#7d8590" font-size="11" letter-spacing="1.5">COMPLETE</text>
+    <line x1="40" y1="70" x2="800" y2="70" stroke="#30363d" stroke-width="1"/>
+    <text x="40" y="98" fill="#58a6ff" font-size="15" font-weight="600">Add auth middleware &amp; stats</text>
+    <text x="40" y="134" fill="#3fb950" font-size="13">6 files changed  ·  259 steps  ·  15 prompts  ·  19 min</text>
+    <text x="40" y="158" fill="#7d8590" font-size="13">164 tool calls</text>
+    <text x="40" y="194" fill="#58a6ff" font-size="13" font-weight="600">View full replay  →</text>
+    <text x="40" y="218" fill="#7d8590" font-size="13">vibe-replay.com</text>
+  </g>
+  </g>
+</svg>
