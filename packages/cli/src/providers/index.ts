@@ -1,6 +1,6 @@
-import type { Provider } from "./types.js";
 import { claudeCodeProvider } from "./claude-code/index.js";
 import { cursorProvider } from "./cursor/index.js";
+import type { Provider } from "./types.js";
 
 const providers: Provider[] = [claudeCodeProvider, cursorProvider];
 

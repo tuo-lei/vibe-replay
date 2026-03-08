@@ -16,6 +16,8 @@ pnpm dev                   # Viewer (Vite HMR) + CLI together
 pnpm viewer:dev            # Viewer only
 pnpm cli:dev               # CLI only (tsx)
 pnpm test                  # Run tests
+pnpm lint                  # Lint + format (auto-fix)
+pnpm lint:check            # Lint check (no fix, for CI)
 ```
 
 When to use which:
@@ -40,6 +42,7 @@ When to use which:
 
 - **Always use pnpm** — never npm/yarn
 - **TypeScript strict mode**, ESM throughout
+- **Biome** for linting + formatting — runs automatically via PostToolUse hook and pre-commit hook
 - **Before commit**: security review — check for leaked secrets, API keys, tokens, credentials, .env files
 - **Never bump versions or publish** without explicit user confirmation
 - **After changes**: update CLAUDE.md / README.md / CONTRIBUTING.md if anything becomes outdated

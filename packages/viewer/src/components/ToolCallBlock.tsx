@@ -1,7 +1,7 @@
-import { useState, memo } from "react";
+import { memo, useState } from "react";
 import type { Scene } from "../types";
-import CodeDiffBlock from "./CodeDiffBlock";
 import BashBlock from "./BashBlock";
+import CodeDiffBlock from "./CodeDiffBlock";
 
 type ToolScene = Extract<Scene, { type: "tool-call" }>;
 
@@ -13,14 +13,22 @@ interface Props {
 
 function toolIcon(name: string): string {
   switch (name) {
-    case "Read": return "\uD83D\uDCC4";
-    case "Write": return "\u270F\uFE0F";
-    case "Edit": return "\u2702\uFE0F";
-    case "Bash": return "$";
-    case "Glob": return "\uD83D\uDD0D";
-    case "Grep": return "\uD83D\uDD0E";
-    case "Agent": return "\uD83E\uDD16";
-    default: return "\u2699\uFE0F";
+    case "Read":
+      return "\uD83D\uDCC4";
+    case "Write":
+      return "\u270F\uFE0F";
+    case "Edit":
+      return "\u2702\uFE0F";
+    case "Bash":
+      return "$";
+    case "Glob":
+      return "\uD83D\uDD0D";
+    case "Grep":
+      return "\uD83D\uDD0E";
+    case "Agent":
+      return "\uD83E\uDD16";
+    default:
+      return "\u2699\uFE0F";
   }
 }
 
@@ -65,17 +73,13 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
   // Generic tool call
   return (
     <div>
-      <div
-        className="border border-terminal-border rounded-lg overflow-hidden"
-      >
+      <div className="border border-terminal-border rounded-lg overflow-hidden">
         <button
           onClick={() => setExpanded(!expanded)}
           className="w-full flex items-center gap-2 px-3 py-2 bg-terminal-surface hover:bg-terminal-border/30 transition-colors text-left"
         >
           <span className="text-xs font-mono">{toolIcon(scene.toolName)}</span>
-          <span className="text-xs font-mono font-bold text-terminal-orange">
-            {scene.toolName}
-          </span>
+          <span className="text-xs font-mono font-bold text-terminal-orange">{scene.toolName}</span>
           <span className="text-xs text-terminal-dim font-mono truncate flex-1">
             {summarizeInput(scene.toolName, scene.input)}
           </span>
@@ -141,6 +145,9 @@ function summarizeInput(name: string, input: Record<string, any>): string {
     case "WebFetch":
       return input.url || "";
     default:
-      return Object.values(input).filter(v => typeof v === "string").join(" ").slice(0, 80);
+      return Object.values(input)
+        .filter((v) => typeof v === "string")
+        .join(" ")
+        .slice(0, 80);
   }
 }

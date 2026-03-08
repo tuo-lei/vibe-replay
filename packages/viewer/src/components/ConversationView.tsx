@@ -1,11 +1,11 @@
-import { useMemo, useState, useRef, useEffect, memo } from "react";
-import type { Scene } from "../types";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { ViewPrefs } from "../hooks/useViewPrefs";
-import UserPromptBlock from "./UserPromptBlock";
+import type { Scene } from "../types";
 import CompactionSummaryBlock from "./CompactionSummaryBlock";
-import ThinkingBlock from "./ThinkingBlock";
 import TextResponseBlock from "./TextResponseBlock";
+import ThinkingBlock from "./ThinkingBlock";
 import ToolCallBlock from "./ToolCallBlock";
+import UserPromptBlock from "./UserPromptBlock";
 
 interface Props {
   scenes: Scene[];
@@ -83,11 +83,9 @@ export default function ConversationView({
   // Only show groups that have visible scenes, filtered by viewPrefs
   const displayGroups = useMemo(() => {
     if (viewPrefs.promptsOnly) {
-      return allGroups
-        .filter(
-          (g) =>
-            (g.type === "user" || g.type === "compaction") && g.scenes[0].index < visibleCount,
-        );
+      return allGroups.filter(
+        (g) => (g.type === "user" || g.type === "compaction") && g.scenes[0].index < visibleCount,
+      );
     }
     return allGroups.filter((g) => g.scenes[0].index < visibleCount);
   }, [allGroups, visibleCount, viewPrefs.promptsOnly]);
@@ -105,10 +103,7 @@ export default function ConversationView({
   return (
     <div className="max-w-4xl mx-auto space-y-3 pb-4">
       {displayGroups.map((group, gi) => (
-        <LazyGroup
-          key={gi}
-          forceRender={Math.abs(gi - currentGroupIdx) <= 5}
-        >
+        <LazyGroup key={gi} forceRender={Math.abs(gi - currentGroupIdx) <= 5}>
           <GroupCard
             group={group}
             currentIndex={currentIndex}
@@ -168,11 +163,7 @@ const LazyGroup = memo(function LazyGroup({
   return (
     <div
       ref={ref}
-      style={
-        !shouldRender && heightRef.current > 0
-          ? { minHeight: heightRef.current }
-          : undefined
-      }
+      style={!shouldRender && heightRef.current > 0 ? { minHeight: heightRef.current } : undefined}
     >
       {shouldRender ? children : null}
     </div>
@@ -188,7 +179,7 @@ const GroupCard = memo(function GroupCard({
   visibleCount,
   viewPrefs,
   focusIndex,
-  annotatedScenes,
+  annotatedScenes: _annotatedScenes,
   annotationCounts,
   onComment,
 }: {
@@ -211,31 +202,35 @@ const GroupCard = memo(function GroupCard({
 
   const groupHasCurrent = visibleScenes.some(({ index }) => index === currentIndex);
   const groupHasFocusedTarget =
-    typeof focusIndex === "number" &&
-    visibleScenes.some(({ index }) => index === focusIndex);
+    typeof focusIndex === "number" && visibleScenes.some(({ index }) => index === focusIndex);
   const firstIndex = visibleScenes[0]?.index;
 
   if (visibleScenes.length === 0) return null;
 
   // User groups get a group-level comment button (single scene)
-  const userCommentCount = group.type === "user" ? (annotationCounts?.get(firstIndex) || 0) : 0;
-  const userCommentButton = group.type === "user" && onComment && (userCommentCount > 0 || hovered) ? (
-    <button
-      onClick={(e) => {
-        e.stopPropagation();
-        onComment(firstIndex);
-      }}
-      className={`absolute -right-3 top-3 z-10 flex items-center gap-1 px-1.5 py-1 rounded-md border text-[10px] font-mono transition-all duration-150 ${
-        userCommentCount > 0
-          ? "bg-terminal-blue border-terminal-blue text-white shadow-sm"
-          : "bg-terminal-bg border-terminal-border text-terminal-dim hover:text-terminal-blue hover:border-terminal-blue/40 opacity-0 group-hover:opacity-100"
-      }`}
-      title={userCommentCount > 0 ? `${userCommentCount} comment${userCommentCount > 1 ? "s" : ""}` : "Add comment"}
-    >
-      {"\uD83D\uDCAC"}
-      {userCommentCount > 0 && <span>{userCommentCount}</span>}
-    </button>
-  ) : null;
+  const userCommentCount = group.type === "user" ? annotationCounts?.get(firstIndex) || 0 : 0;
+  const userCommentButton =
+    group.type === "user" && onComment && (userCommentCount > 0 || hovered) ? (
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onComment(firstIndex);
+        }}
+        className={`absolute -right-3 top-3 z-10 flex items-center gap-1 px-1.5 py-1 rounded-md border text-[10px] font-mono transition-all duration-150 ${
+          userCommentCount > 0
+            ? "bg-terminal-blue border-terminal-blue text-white shadow-sm"
+            : "bg-terminal-bg border-terminal-border text-terminal-dim hover:text-terminal-blue hover:border-terminal-blue/40 opacity-0 group-hover:opacity-100"
+        }`}
+        title={
+          userCommentCount > 0
+            ? `${userCommentCount} comment${userCommentCount > 1 ? "s" : ""}`
+            : "Add comment"
+        }
+      >
+        {"\uD83D\uDCAC"}
+        {userCommentCount > 0 && <span>{userCommentCount}</span>}
+      </button>
+    ) : null;
 
   if (group.type === "user") {
     return (
@@ -261,10 +256,12 @@ const GroupCard = memo(function GroupCard({
             <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-terminal-green text-terminal-green bg-terminal-green/20">
               Jump Target
             </span>
-          ) : groupHasCurrent && (
-            <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-terminal-green/50 text-terminal-green bg-terminal-green/10">
-              Focused
-            </span>
+          ) : (
+            groupHasCurrent && (
+              <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-terminal-green/50 text-terminal-green bg-terminal-green/10">
+                Focused
+              </span>
+            )
           )}
           {group.timestamp && (
             <span className="text-[11px] font-mono text-terminal-dim">
@@ -342,10 +339,12 @@ const GroupCard = memo(function GroupCard({
           <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-terminal-blue text-terminal-blue bg-terminal-blue/20">
             Jump Target
           </span>
-        ) : groupHasCurrent && (
-          <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-terminal-blue/50 text-terminal-blue bg-terminal-blue/10">
-            Focused
-          </span>
+        ) : (
+          groupHasCurrent && (
+            <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-terminal-blue/50 text-terminal-blue bg-terminal-blue/10">
+              Focused
+            </span>
+          )
         )}
         {group.timestamp && (
           <span className="text-[11px] font-mono text-terminal-dim">
@@ -394,8 +393,10 @@ function BatchedScenes({
       prev.scene.type === "tool-call" &&
       item.scene.type === "tool-call" &&
       prev.scene.toolName === item.scene.toolName &&
-      !item.scene.diff && !item.scene.bashOutput &&
-      !prev.scene.diff && !prev.scene.bashOutput
+      !item.scene.diff &&
+      !item.scene.bashOutput &&
+      !prev.scene.diff &&
+      !prev.scene.bashOutput
     ) {
       currentBatch.push(item);
     } else {
@@ -425,7 +426,10 @@ function BatchedScenes({
               />
               {onComment && (
                 <button
-                  onClick={(e) => { e.stopPropagation(); onComment(index); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onComment(index);
+                  }}
                   className={`absolute -right-2 top-1 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border text-[10px] font-mono transition-all duration-150 ${
                     count > 0
                       ? "bg-terminal-blue border-terminal-blue text-white shadow-sm"
@@ -501,7 +505,9 @@ function ToolBatch({
           {"\u25B6"}
         </span>
         <span className="text-terminal-orange font-semibold">{toolName}</span>
-        <span className="text-terminal-dim/70">{batch.length} call{batch.length > 1 ? "s" : ""}</span>
+        <span className="text-terminal-dim/70">
+          {batch.length} call{batch.length > 1 ? "s" : ""}
+        </span>
         {!expanded && (
           <span className="truncate text-terminal-dim/50 ml-1">
             {summaries.filter(Boolean).slice(0, 3).join(", ")}
@@ -512,13 +518,20 @@ function ToolBatch({
       {/* Batch-level comment button (visible when collapsed) */}
       {onComment && !expanded && (
         <button
-          onClick={(e) => { e.stopPropagation(); onComment(batch[0].index); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onComment(batch[0].index);
+          }}
           className={`absolute -right-2 top-1 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border text-[10px] font-mono transition-all duration-150 ${
             batchCommentCount > 0
               ? "bg-terminal-blue border-terminal-blue text-white shadow-sm"
               : "bg-terminal-bg border-terminal-border text-terminal-dim hover:text-terminal-blue hover:border-terminal-blue/40 opacity-0 group-hover/batch:opacity-100"
           }`}
-          title={batchCommentCount > 0 ? `${batchCommentCount} comment${batchCommentCount > 1 ? "s" : ""}` : "Add comment"}
+          title={
+            batchCommentCount > 0
+              ? `${batchCommentCount} comment${batchCommentCount > 1 ? "s" : ""}`
+              : "Add comment"
+          }
         >
           {"\uD83D\uDCAC"}
           {batchCommentCount > 0 && <span>{batchCommentCount}</span>}
@@ -543,7 +556,10 @@ function ToolBatch({
                 />
                 {onComment && (
                   <button
-                    onClick={(e) => { e.stopPropagation(); onComment(index); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onComment(index);
+                    }}
                     className={`absolute -right-2 top-1 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border text-[10px] font-mono transition-all duration-150 ${
                       count > 0
                         ? "bg-terminal-blue border-terminal-blue text-white shadow-sm"
@@ -566,11 +582,16 @@ function ToolBatch({
 
 function summarizeToolInput(name: string, input: Record<string, any>): string {
   switch (name) {
-    case "Read": return input.file_path || "";
-    case "Glob": return input.pattern || "";
-    case "Grep": return input.pattern || "";
-    case "Agent": return input.description || "";
-    default: return "";
+    case "Read":
+      return input.file_path || "";
+    case "Glob":
+      return input.pattern || "";
+    case "Grep":
+      return input.pattern || "";
+    case "Agent":
+      return input.description || "";
+    default:
+      return "";
   }
 }
 
@@ -585,13 +606,7 @@ const SceneBlock = memo(function SceneBlock({
 }) {
   switch (scene.type) {
     case "user-prompt":
-      return (
-        <UserPromptBlock
-          content={scene.content}
-          images={scene.images}
-          isActive={isActive}
-        />
-      );
+      return <UserPromptBlock content={scene.content} images={scene.images} isActive={isActive} />;
     case "compaction-summary":
       return <CompactionSummaryBlock content={scene.content} isActive={isActive} />;
     case "thinking":
@@ -599,12 +614,6 @@ const SceneBlock = memo(function SceneBlock({
     case "text-response":
       return <TextResponseBlock content={scene.content} isActive={isActive} />;
     case "tool-call":
-      return (
-        <ToolCallBlock
-          scene={scene}
-          isActive={isActive}
-          forceCollapse={collapseTools}
-        />
-      );
+      return <ToolCallBlock scene={scene} isActive={isActive} forceCollapse={collapseTools} />;
   }
 });

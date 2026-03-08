@@ -1,21 +1,26 @@
 import { createHash } from "node:crypto";
-import { readFile, writeFile, mkdir, readdir, stat, unlink } from "node:fs/promises";
-import { join, dirname, resolve, basename } from "node:path";
-import { fileURLToPath } from "node:url";
-import { Hono } from "hono";
-import { serve } from "@hono/node-server";
-import open from "open";
-import chalk from "chalk";
+import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import type { ReplaySession, Annotation, SessionInfo } from "./types.js";
-import { generateOutput } from "./generator.js";
-import { checkGhStatus, publishGist, loadSavedGistInfo, type SavedGistInfo } from "./publishers/gist.js";
-import { detectFeedbackTools, generateFeedback } from "./feedback.js";
-import { getAllProviders, getProvider } from "./providers/index.js";
-import { transformToReplay } from "./transform.js";
-import { scanForSecrets } from "./scan.js";
-import { CLI_VERSION } from "./version.js";
+import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { serve } from "@hono/node-server";
+import chalk from "chalk";
+import { Hono } from "hono";
+import open from "open";
 import { cleanPromptText } from "./clean-prompt.js";
+import { detectFeedbackTools, generateFeedback } from "./feedback.js";
+import { generateOutput } from "./generator.js";
+import { getAllProviders, getProvider } from "./providers/index.js";
+import {
+  checkGhStatus,
+  loadSavedGistInfo,
+  publishGist,
+  type SavedGistInfo,
+} from "./publishers/gist.js";
+import { scanForSecrets } from "./scan.js";
+import { transformToReplay } from "./transform.js";
+import type { Annotation, ReplaySession, SessionInfo } from "./types.js";
+import { CLI_VERSION } from "./version.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -56,7 +61,9 @@ async function archiveSlug(baseDir: string, slug: string): Promise<void> {
 async function unarchiveSlug(baseDir: string, slug: string): Promise<void> {
   try {
     await unlink(join(baseDir, ARCHIVE_DIR, slug));
-  } catch { /* already gone */ }
+  } catch {
+    /* already gone */
+  }
 }
 
 async function loadViewerHtml(): Promise<string> {
@@ -68,9 +75,7 @@ async function loadViewerHtml(): Promise<string> {
   for (const p of assetsPaths) {
     try {
       return await readFile(p, "utf-8");
-    } catch {
-      continue;
-    }
+    } catch {}
   }
   throw new Error("Could not find viewer.html. Run `pnpm build` first.");
 }
@@ -96,12 +101,16 @@ async function scanSessionsFromDir(baseDir: string): Promise<any[]> {
         const annRaw = await readFile(annotationsPath, "utf-8");
         const anns = JSON.parse(annRaw) as Annotation[];
         annotationCount = Array.isArray(anns) ? anns.length : 0;
-      } catch { /* no annotations */ }
+      } catch {
+        /* no annotations */
+      }
 
       let gist: SavedGistInfo | undefined;
       try {
         gist = await loadSavedGistInfo(join(baseDir, entry));
-      } catch { /* no gist info */ }
+      } catch {
+        /* no gist info */
+      }
 
       const userPrompts = (session.scenes || [])
         .filter((sc) => sc.type === "user-prompt")
@@ -124,21 +133,31 @@ async function scanSessionsFromDir(baseDir: string): Promise<any[]> {
         annotationCount,
         firstMessage,
         messages,
-        gist: gist ? await (async () => {
-          let outdated = false;
-          if (gist!.contentHash) {
-            try {
-              const content = await readFile(replayPath, "utf-8");
-              const currentHash = createHash("sha256").update(content).digest("hex").slice(0, 16);
-              outdated = currentHash !== gist!.contentHash;
-            } catch { /* ignore */ }
-          }
-          return { gistId: gist!.gistId, viewerUrl: gist!.viewerUrl, updatedAt: gist!.updatedAt, outdated };
-        })() : undefined,
+        gist: gist
+          ? await (async () => {
+              let outdated = false;
+              if (gist?.contentHash) {
+                try {
+                  const content = await readFile(replayPath, "utf-8");
+                  const currentHash = createHash("sha256")
+                    .update(content)
+                    .digest("hex")
+                    .slice(0, 16);
+                  outdated = currentHash !== gist?.contentHash;
+                } catch {
+                  /* ignore */
+                }
+              }
+              return {
+                gistId: gist?.gistId,
+                viewerUrl: gist?.viewerUrl,
+                updatedAt: gist?.updatedAt,
+                outdated,
+              };
+            })()
+          : undefined,
       });
-    } catch {
-      continue;
-    }
+    } catch {}
   }
 
   return results;
@@ -191,7 +210,9 @@ async function loadSessionFromDisk(baseDir: string, slug: string): Promise<Repla
     if (Array.isArray(anns) && anns.length > 0) {
       session.annotations = anns;
     }
-  } catch { /* no annotations */ }
+  } catch {
+    /* no annotations */
+  }
 
   return session;
 }
@@ -205,7 +226,7 @@ function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
   for (const s of sessions) {
     const key = `${s.project}::${s.slug}`;
     if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(s);
+    groups.get(key)?.push(s);
   }
 
   const result: SessionInfo[] = [];
@@ -242,13 +263,17 @@ async function loadAnnotations(baseDir: string, slug: string): Promise<Annotatio
       const raw = await readFile(join(dir, "annotations.json"), "utf-8");
       const anns = JSON.parse(raw) as Annotation[];
       if (Array.isArray(anns)) return anns;
-    } catch { continue; }
+    } catch {}
   }
   return [];
 }
 
 /** Save annotations to disk for a given slug */
-async function saveAnnotations(baseDir: string, slug: string, annotations: Annotation[]): Promise<void> {
+async function saveAnnotations(
+  baseDir: string,
+  slug: string,
+  annotations: Annotation[],
+): Promise<void> {
   const annPath = join(baseDir, slug, "annotations.json");
   await writeFile(annPath, JSON.stringify(annotations, null, 2), "utf-8");
 }
@@ -271,7 +296,7 @@ export async function startServer(
   app.get("/", (c) => {
     const flag = `<script>window.__VIBE_REPLAY_EDITOR__ = true;</script>`;
     const headIdx = viewerHtml.lastIndexOf("</head>");
-    const html = viewerHtml.slice(0, headIdx) + flag + "\n" + viewerHtml.slice(headIdx);
+    const html = `${viewerHtml.slice(0, headIdx) + flag}\n${viewerHtml.slice(headIdx)}`;
     return c.html(html);
   });
 
@@ -366,7 +391,7 @@ export async function startServer(
       const home = homedir();
       for (const s of merged) {
         if (s.project.startsWith(home)) {
-          s.project = "~" + s.project.slice(home.length);
+          s.project = `~${s.project.slice(home.length)}`;
         }
       }
 
@@ -418,21 +443,23 @@ export async function startServer(
           existingReplay: replay ? s.slug : null,
           projectExists: projectExistsMap.get(s.project) ?? false,
           isGitRepo: projectIsGitMap.get(s.project) ?? false,
-          replay: replay ? {
-            slug: replay.slug,
-            title: replay.title,
-            provider: replay.provider,
-            model: replay.model,
-            project: replay.project,
-            startTime: replay.startTime,
-            endTime: replay.endTime,
-            stats: replay.stats,
-            hasAnnotations: replay.hasAnnotations,
-            annotationCount: replay.annotationCount,
-            firstMessage: replay.firstMessage,
-            messages: replay.messages,
-            gist: replay.gist,
-          } : undefined,
+          replay: replay
+            ? {
+                slug: replay.slug,
+                title: replay.title,
+                provider: replay.provider,
+                model: replay.model,
+                project: replay.project,
+                startTime: replay.startTime,
+                endTime: replay.endTime,
+                stats: replay.stats,
+                hasAnnotations: replay.hasAnnotations,
+                annotationCount: replay.annotationCount,
+                firstMessage: replay.firstMessage,
+                messages: replay.messages,
+                gist: replay.gist,
+              }
+            : undefined,
         };
       });
 
@@ -469,7 +496,7 @@ export async function startServer(
       const home = homedir();
       const rawProject = body.sessionProject || parsed.cwd;
       const project = rawProject.startsWith(home)
-        ? "~" + rawProject.slice(home.length)
+        ? `~${rawProject.slice(home.length)}`
         : rawProject;
 
       const replay = transformToReplay(parsed, body.provider, project, {
@@ -524,7 +551,9 @@ export async function startServer(
     const body = await c.req.json<Annotation[]>();
     try {
       await saveAnnotations(baseDir, result.slug, body);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     return c.json({ ok: true });
   });
 
@@ -605,7 +634,10 @@ export async function startServer(
         ? detected.tools.find((t) => t.name === requestedToolName) || null
         : detected.defaultTool;
       if (!tool) {
-        return c.json({ error: `Requested AI Coach tool is not available: ${requestedToolName}` }, 400);
+        return c.json(
+          { error: `Requested AI Coach tool is not available: ${requestedToolName}` },
+          400,
+        );
       }
 
       const targetSession = await loadSessionFromDisk(baseDir, result.slug);
@@ -624,7 +656,9 @@ export async function startServer(
       // Persist
       try {
         await saveAnnotations(baseDir, result.slug, newAnnotations);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
 
       return c.json({
         annotations: newAnnotations,
@@ -640,38 +674,41 @@ export async function startServer(
   // Production: port 0 lets the OS pick a free port (no conflicts)
   const requestedPort = opts?.externalViewerUrl ? 3456 : 0;
 
-  const server = serve({ fetch: app.fetch, port: requestedPort, hostname: "127.0.0.1" }, (info) => {
-    const port = info.port;
-    const url = `http://localhost:${port}`;
+  const _server = serve(
+    { fetch: app.fetch, port: requestedPort, hostname: "127.0.0.1" },
+    (info) => {
+      const port = info.port;
+      const url = `http://localhost:${port}`;
 
-    // Build the URL to open in the browser
-    let browseUrl: string;
-    const viewerBase = opts?.externalViewerUrl || url;
-    if (opts?.openDashboard) {
-      browseUrl = `${viewerBase}/?view=dashboard`;
-    } else if (opts?.openSlug) {
-      browseUrl = `${viewerBase}/?session=${encodeURIComponent(opts.openSlug)}`;
-    } else {
-      browseUrl = `${viewerBase}/?view=dashboard`;
-    }
+      // Build the URL to open in the browser
+      let browseUrl: string;
+      const viewerBase = opts?.externalViewerUrl || url;
+      if (opts?.openDashboard) {
+        browseUrl = `${viewerBase}/?view=dashboard`;
+      } else if (opts?.openSlug) {
+        browseUrl = `${viewerBase}/?session=${encodeURIComponent(opts.openSlug)}`;
+      } else {
+        browseUrl = `${viewerBase}/?view=dashboard`;
+      }
 
-    const label = opts?.openDashboard || !opts?.openSlug ? "Dashboard" : "Editor";
-    if (opts?.externalViewerUrl) {
-      console.log(
-        chalk.bold.cyan(`\n  ${label} API running on port ${port}`) +
-          chalk.dim(" → ") +
-          chalk.white(browseUrl) +
-          chalk.dim("\n  Press Ctrl+C to stop\n"),
-      );
-    } else {
-      console.log(
-        chalk.bold.cyan(`\n  ${label} running at `) +
-          chalk.white(browseUrl) +
-          chalk.dim("\n  Press Ctrl+C to stop\n"),
-      );
-    }
-    open(browseUrl);
-  });
+      const label = opts?.openDashboard || !opts?.openSlug ? "Dashboard" : "Editor";
+      if (opts?.externalViewerUrl) {
+        console.log(
+          chalk.bold.cyan(`\n  ${label} API running on port ${port}`) +
+            chalk.dim(" → ") +
+            chalk.white(browseUrl) +
+            chalk.dim("\n  Press Ctrl+C to stop\n"),
+        );
+      } else {
+        console.log(
+          chalk.bold.cyan(`\n  ${label} running at `) +
+            chalk.white(browseUrl) +
+            chalk.dim("\n  Press Ctrl+C to stop\n"),
+        );
+      }
+      open(browseUrl);
+    },
+  );
 
   // Keep alive until Ctrl+C
   await new Promise<void>((resolve) => {
@@ -686,6 +723,9 @@ export async function startServer(
 /**
  * Start dashboard mode — no existing replays required.
  */
-export async function startDashboard(baseDir: string, opts?: { externalViewerUrl?: string }): Promise<void> {
+export async function startDashboard(
+  baseDir: string,
+  opts?: { externalViewerUrl?: string },
+): Promise<void> {
   await startServer(baseDir, { openDashboard: true, externalViewerUrl: opts?.externalViewerUrl });
 }

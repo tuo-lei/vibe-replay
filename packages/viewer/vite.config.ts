@@ -1,5 +1,5 @@
-import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { defineConfig, type Plugin } from "vite";
 import { viteSingleFile } from "vite-plugin-singlefile";
 
 /** Inject __VIBE_REPLAY_EDITOR__ flag in dev mode so the viewer enters editor mode */
@@ -9,7 +9,7 @@ function editorFlagPlugin(): Plugin {
     apply: "serve",
     transformIndexHtml(html) {
       const flag = `<script>window.__VIBE_REPLAY_EDITOR__ = true;</script>`;
-      return html.replace("</head>", flag + "\n</head>");
+      return html.replace("</head>", `${flag}\n</head>`);
     },
   };
 }

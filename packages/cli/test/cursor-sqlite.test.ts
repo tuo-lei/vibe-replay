@@ -1,10 +1,14 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { join } from "node:path";
-import { mkdtemp, rm, mkdir } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
-import { parseCursorSqlite, workspaceHash, storeDbPath } from "../src/providers/cursor/sqlite-reader.js";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parseCursorSession } from "../src/providers/cursor/parser.js";
+import {
+  parseCursorSqlite,
+  storeDbPath,
+  workspaceHash,
+} from "../src/providers/cursor/sqlite-reader.js";
 import { transformToReplay } from "../src/transform.js";
 
 const FIXTURE_JSONL = join(import.meta.dirname, "fixtures/cursor-session.jsonl");
@@ -213,7 +217,9 @@ describe("parseCursorSqlite", () => {
       },
       {
         role: "tool",
-        content: [{ type: "tool-result", toolCallId: "t1", toolName: "Read", result: "file content" }],
+        content: [
+          { type: "tool-result", toolCallId: "t1", toolName: "Read", result: "file content" },
+        ],
       },
     ];
 
@@ -352,12 +358,14 @@ describe("full SQLite round-trip integration", () => {
         },
         {
           role: "tool",
-          content: [{
-            type: "tool-result",
-            toolCallId: "tool_001",
-            toolName: "Shell",
-            result: "src/auth.ts:  export function login() {",
-          }],
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "tool_001",
+              toolName: "Shell",
+              result: "src/auth.ts:  export function login() {",
+            },
+          ],
         },
         {
           role: "assistant",
@@ -373,12 +381,14 @@ describe("full SQLite round-trip integration", () => {
         },
         {
           role: "tool",
-          content: [{
-            type: "tool-result",
-            toolCallId: "tool_002",
-            toolName: "StrReplace",
-            result: "File edited successfully",
-          }],
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "tool_002",
+              toolName: "StrReplace",
+              result: "File edited successfully",
+            },
+          ],
         },
         {
           role: "user",

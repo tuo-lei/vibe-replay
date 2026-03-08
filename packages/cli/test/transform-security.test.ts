@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
 import { homedir } from "node:os";
-import { transformToReplay } from "../src/transform.js";
+import { describe, expect, it } from "vitest";
 import type { ProviderParseResult } from "../src/providers/types.js";
+import { transformToReplay } from "../src/transform.js";
 import type { ReplaySession } from "../src/types.js";
 
 const HOME = homedir();
@@ -126,8 +126,8 @@ describe("path redaction", () => {
     ]);
     const replay = transform(parsed);
     const scene = replay.scenes.find((s) => s.type === "tool-call")!;
-    expect(scene.input!.file_path).not.toContain(HOME);
-    expect(scene.input!.file_path).toContain("~/project/src/index.ts");
+    expect(scene.input?.file_path).not.toContain(HOME);
+    expect(scene.input?.file_path).toContain("~/project/src/index.ts");
   });
 
   it("redacts home dir in Bash command", () => {
@@ -147,8 +147,8 @@ describe("path redaction", () => {
     ]);
     const replay = transform(parsed);
     const scene = replay.scenes.find((s) => s.type === "tool-call")!;
-    expect(scene.bashOutput!.command).not.toContain(HOME);
-    expect(scene.bashOutput!.command).toContain("~/secrets/env");
+    expect(scene.bashOutput?.command).not.toContain(HOME);
+    expect(scene.bashOutput?.command).toContain("~/secrets/env");
   });
 
   it("redacts home dir in Bash stdout", () => {
@@ -168,8 +168,8 @@ describe("path redaction", () => {
     ]);
     const replay = transform(parsed);
     const scene = replay.scenes.find((s) => s.type === "tool-call")!;
-    expect(scene.bashOutput!.stdout).not.toContain(HOME);
-    expect(scene.bashOutput!.stdout).toContain("~/my-project");
+    expect(scene.bashOutput?.stdout).not.toContain(HOME);
+    expect(scene.bashOutput?.stdout).toContain("~/my-project");
   });
 
   it("redacts home dir in Edit diff filePath", () => {
@@ -193,8 +193,8 @@ describe("path redaction", () => {
     ]);
     const replay = transform(parsed);
     const scene = replay.scenes.find((s) => s.type === "tool-call")!;
-    expect(scene.diff!.filePath).not.toContain(HOME);
-    expect(scene.diff!.filePath).toContain("~/project/auth.ts");
+    expect(scene.diff?.filePath).not.toContain(HOME);
+    expect(scene.diff?.filePath).toContain("~/project/auth.ts");
   });
 
   it("redacts home dir in Write diff filePath", () => {
@@ -217,8 +217,8 @@ describe("path redaction", () => {
     ]);
     const replay = transform(parsed);
     const scene = replay.scenes.find((s) => s.type === "tool-call")!;
-    expect(scene.diff!.filePath).not.toContain(HOME);
-    expect(scene.diff!.filePath).toContain("~/project/new-file.ts");
+    expect(scene.diff?.filePath).not.toContain(HOME);
+    expect(scene.diff?.filePath).toContain("~/project/new-file.ts");
   });
 
   it("redacts home dir in cwd metadata", () => {
@@ -232,9 +232,7 @@ describe("path redaction", () => {
     const parsed = makeParsed([
       {
         role: "assistant",
-        blocks: [
-          { type: "text", text: `cp ${HOME}/a.txt ${HOME}/b.txt` },
-        ],
+        blocks: [{ type: "text", text: `cp ${HOME}/a.txt ${HOME}/b.txt` }],
       },
     ]);
     const replay = transform(parsed);
@@ -312,8 +310,8 @@ describe("secret redaction in transform", () => {
     ]);
     const replay = transform(parsed);
     const scene = replay.scenes.find((s) => s.type === "tool-call")!;
-    expect(scene.bashOutput!.command).not.toContain(jwt);
-    expect(scene.bashOutput!.command).toContain("[REDACTED]");
+    expect(scene.bashOutput?.command).not.toContain(jwt);
+    expect(scene.bashOutput?.command).toContain("[REDACTED]");
   });
 
   it("redacts PEM private key in text response", () => {
@@ -361,9 +359,9 @@ describe("secret redaction in transform", () => {
     ]);
     const replay = transform(parsed);
     const scene = replay.scenes.find((s) => s.type === "tool-call")!;
-    expect(scene.bashOutput!.stdout).not.toContain(EXAMPLE_ENV_KEY);
-    expect(scene.bashOutput!.stdout).not.toContain("myverylongsecretvalue");
-    expect(scene.bashOutput!.stdout).toContain("[REDACTED]");
+    expect(scene.bashOutput?.stdout).not.toContain(EXAMPLE_ENV_KEY);
+    expect(scene.bashOutput?.stdout).not.toContain("myverylongsecretvalue");
+    expect(scene.bashOutput?.stdout).toContain("[REDACTED]");
   });
 
   it("redacts Vault token in thinking block", () => {
@@ -421,7 +419,7 @@ describe("secret redaction in transform", () => {
     const replay = transform(parsed);
     const scene = replay.scenes.find((s) => s.type === "tool-call")!;
     expect(JSON.stringify(scene.input)).not.toContain(token);
-    expect(scene.input!.tokens[1]).toBe("safe-value");
+    expect(scene.input?.tokens[1]).toBe("safe-value");
   });
 });
 
@@ -471,8 +469,8 @@ describe("email redaction", () => {
     ]);
     const replay = transform(parsed);
     const scene = replay.scenes.find((s) => s.type === "tool-call")!;
-    expect(scene.bashOutput!.command).not.toContain("45369003+user@");
-    expect(scene.bashOutput!.command).toContain("[REDACTED]@users.noreply.github.com");
+    expect(scene.bashOutput?.command).not.toContain("45369003+user@");
+    expect(scene.bashOutput?.command).toContain("[REDACTED]@users.noreply.github.com");
   });
 
   it("redacts email in tool result (git log output)", () => {
@@ -492,17 +490,15 @@ describe("email redaction", () => {
     ]);
     const replay = transform(parsed);
     const scene = replay.scenes.find((s) => s.type === "tool-call")!;
-    expect(scene.bashOutput!.stdout).not.toContain("jane@");
-    expect(scene.bashOutput!.stdout).toContain("[REDACTED]@corp.com");
+    expect(scene.bashOutput?.stdout).not.toContain("jane@");
+    expect(scene.bashOutput?.stdout).toContain("[REDACTED]@corp.com");
   });
 
   it("redacts multiple emails in a single string", () => {
     const parsed = makeParsed([
       {
         role: "assistant",
-        blocks: [
-          { type: "text", text: "CC: alice@example.com, bob@example.org" },
-        ],
+        blocks: [{ type: "text", text: "CC: alice@example.com, bob@example.org" }],
       },
     ]);
     const replay = transform(parsed);
@@ -533,8 +529,8 @@ describe("email redaction", () => {
     ]);
     const replay = transform(parsed);
     const scene = replay.scenes.find((s) => s.type === "tool-call")!;
-    expect(scene.input!.content).not.toContain("admin@");
-    expect(scene.input!.content).toContain("[REDACTED]@internal.net");
+    expect(scene.input?.content).not.toContain("admin@");
+    expect(scene.input?.content).toContain("[REDACTED]@internal.net");
   });
 });
 
@@ -561,8 +557,8 @@ describe("sanitizeInput", () => {
     ]);
     const replay = transform(parsed);
     const scene = replay.scenes.find((s) => s.type === "tool-call")!;
-    expect(scene.input!.content.length).toBeLessThan(longStr.length);
-    expect(scene.input!.content).toContain("chars total");
+    expect(scene.input?.content.length).toBeLessThan(longStr.length);
+    expect(scene.input?.content).toContain("chars total");
   });
 
   it("preserves non-string values in tool input", () => {
@@ -582,9 +578,9 @@ describe("sanitizeInput", () => {
     ]);
     const replay = transform(parsed);
     const scene = replay.scenes.find((s) => s.type === "tool-call")!;
-    expect(scene.input!.count).toBe(42);
-    expect(scene.input!.enabled).toBe(true);
-    expect(scene.input!.label).toBe("safe");
+    expect(scene.input?.count).toBe(42);
+    expect(scene.input?.enabled).toBe(true);
+    expect(scene.input?.label).toBe("safe");
   });
 });
 
@@ -611,7 +607,7 @@ describe("tool result truncation", () => {
     ]);
     const replay = transform(parsed);
     const scene = replay.scenes.find((s) => s.type === "tool-call")!;
-    expect(scene.result!.length).toBeLessThan(longResult.length);
+    expect(scene.result?.length).toBeLessThan(longResult.length);
     expect(scene.result).toContain("truncated");
   });
 
@@ -661,10 +657,10 @@ describe("combined path + secret redaction", () => {
     ]);
     const replay = transform(parsed);
     const scene = replay.scenes.find((s) => s.type === "tool-call")!;
-    expect(scene.bashOutput!.command).not.toContain(HOME);
-    expect(scene.bashOutput!.command).not.toContain(key);
-    expect(scene.bashOutput!.command).toContain("~/app/run.js");
-    expect(scene.bashOutput!.command).toContain("[REDACTED]");
+    expect(scene.bashOutput?.command).not.toContain(HOME);
+    expect(scene.bashOutput?.command).not.toContain(key);
+    expect(scene.bashOutput?.command).toContain("~/app/run.js");
+    expect(scene.bashOutput?.command).toContain("[REDACTED]");
   });
 
   it("redacts both home dir and email in git output", () => {
@@ -684,10 +680,10 @@ describe("combined path + secret redaction", () => {
     ]);
     const replay = transform(parsed);
     const scene = replay.scenes.find((s) => s.type === "tool-call")!;
-    expect(scene.bashOutput!.stdout).not.toContain(HOME);
-    expect(scene.bashOutput!.stdout).not.toContain("user@");
-    expect(scene.bashOutput!.stdout).toContain("~/project/file.ts");
-    expect(scene.bashOutput!.stdout).toContain("[REDACTED]@corp.com");
+    expect(scene.bashOutput?.stdout).not.toContain(HOME);
+    expect(scene.bashOutput?.stdout).not.toContain("user@");
+    expect(scene.bashOutput?.stdout).toContain("~/project/file.ts");
+    expect(scene.bashOutput?.stdout).toContain("[REDACTED]@corp.com");
   });
 });
 
@@ -725,9 +721,7 @@ describe("tool diff generation", () => {
 
 describe("replay generator metadata", () => {
   it("includes generator info when provided", () => {
-    const parsed = makeParsed([
-      { role: "user", blocks: [{ type: "text", text: "hello" }] },
-    ]);
+    const parsed = makeParsed([{ role: "user", blocks: [{ type: "text", text: "hello" }] }]);
     const replay = transformToReplay(parsed, "test-provider", "~/test", {
       generator: {
         name: "vibe-replay",
@@ -762,9 +756,7 @@ describe("redaction edge cases", () => {
     const parsed = makeParsed([
       {
         role: "assistant",
-        blocks: [
-          { type: "text", text: "Run sk-command in the terminal" },
-        ],
+        blocks: [{ type: "text", text: "Run sk-command in the terminal" }],
       },
     ]);
     const replay = transform(parsed);
@@ -773,9 +765,7 @@ describe("redaction edge cases", () => {
   });
 
   it("handles strings with only home dir path", () => {
-    const parsed = makeParsed([
-      { role: "user", blocks: [{ type: "text", text: HOME }] },
-    ]);
+    const parsed = makeParsed([{ role: "user", blocks: [{ type: "text", text: HOME }] }]);
     const replay = transform(parsed);
     const scene = replay.scenes.find((s) => s.type === "user-prompt")!;
     expect(scene.content).toBe("~");

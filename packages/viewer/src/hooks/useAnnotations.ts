@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Annotation, ReplaySession } from "../types";
 import type { ViewerMode } from "./useSessionLoader";
 
@@ -69,7 +69,9 @@ export function useAnnotations(
         const parsed = JSON.parse(draft) as Annotation[];
         if (parsed.length > 0 || embedded.length === 0) return parsed;
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     return embedded;
   });
 
@@ -92,9 +94,13 @@ export function useAnnotations(
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(annotations),
-        }).then(() => {
-          setSavedSnapshot(JSON.stringify(annotations));
-        }).catch(() => { /* silent */ });
+        })
+          .then(() => {
+            setSavedSnapshot(JSON.stringify(annotations));
+          })
+          .catch(() => {
+            /* silent */
+          });
       }, 1000);
       return () => {
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -103,7 +109,9 @@ export function useAnnotations(
     // Non-editor: save to localStorage
     try {
       localStorage.setItem(storageKey(sessionId), JSON.stringify(annotations));
-    } catch { /* quota exceeded — silent */ }
+    } catch {
+      /* quota exceeded — silent */
+    }
   }, [annotations, sessionId, isEditor]);
 
   const annotatedScenes = useMemo(
@@ -135,9 +143,7 @@ export function useAnnotations(
 
   const update = useCallback((id: string, body: string) => {
     setAnnotations((prev) =>
-      prev.map((a) =>
-        a.id === id ? { ...a, body, updatedAt: new Date().toISOString() } : a,
-      ),
+      prev.map((a) => (a.id === id ? { ...a, body, updatedAt: new Date().toISOString() } : a)),
     );
   }, []);
 
@@ -151,14 +157,14 @@ export function useAnnotations(
     // Build the updated data assignment (escape </ for safe embedding in <script>)
     const updatedSession: ReplaySession = { ...session, annotations };
     const jsonData = JSON.stringify(updatedSession).replace(/<\//g, "<\\/");
-    const dataAssignment = "window.__VIBE_REPLAY_DATA__ = " + jsonData + ";";
+    const dataAssignment = `window.__VIBE_REPLAY_DATA__ = ${jsonData};`;
 
     // Use DOM manipulation to update the data script — no fragile regex needed.
     const dataEl = document.getElementById("vibe-replay-data");
     if (dataEl) {
       const original = dataEl.textContent;
       dataEl.textContent = dataAssignment;
-      const updatedHtml = "<!DOCTYPE html>\n" + document.documentElement.outerHTML;
+      const updatedHtml = `<!DOCTYPE html>\n${document.documentElement.outerHTML}`;
       dataEl.textContent = original;
       triggerDownload(updatedHtml);
     } else {
@@ -167,7 +173,7 @@ export function useAnnotations(
       script.id = "vibe-replay-data";
       script.textContent = dataAssignment;
       document.head.appendChild(script);
-      const updatedHtml = "<!DOCTYPE html>\n" + document.documentElement.outerHTML;
+      const updatedHtml = `<!DOCTYPE html>\n${document.documentElement.outerHTML}`;
       document.head.removeChild(script);
       triggerDownload(updatedHtml);
     }
@@ -187,7 +193,9 @@ export function useAnnotations(
     setSavedSnapshot(JSON.stringify(annotations));
     try {
       localStorage.removeItem(storageKey(sessionId));
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, [session, annotations, sessionId, isEditor]);
 
   const downloadJson = useCallback(() => {
@@ -206,7 +214,9 @@ export function useAnnotations(
     setSavedSnapshot(JSON.stringify(annotations));
     try {
       localStorage.removeItem(storageKey(sessionId));
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, [session, annotations, sessionId]);
 
   // Editor mode: server-side gist publishing
@@ -253,49 +263,46 @@ export function useAnnotations(
         const tools: Array<{ name: string }> = Array.isArray(data.tools)
           ? data.tools
           : data.tool
-          ? [data.tool]
-          : [];
+            ? [data.tool]
+            : [];
         setAiCoachTools(tools);
-        const defaultToolName =
-          data.defaultTool?.name ||
-          data.tool?.name ||
-          tools[0]?.name ||
-          null;
+        const defaultToolName = data.defaultTool?.name || data.tool?.name || tools[0]?.name || null;
         setAiCoachToolNameState(defaultToolName);
       })
       .catch(() => {});
   }, [isEditor]);
 
-  const runAiCoach = isEditor && aiCoachToolName
-    ? async () => {
-        const controller = new AbortController();
-        aiCoachAbortRef.current = controller;
-        setAiCoachRunning(true);
-        try {
-          // Flush current annotations to server first (debounce may not have fired yet)
-          await fetch(apiUrl("/api/annotations"), {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(annotations),
-            signal: controller.signal,
-          });
-          const resp = await fetch(apiUrl("/api/feedback/generate"), {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ toolName: aiCoachToolName }),
-            signal: controller.signal,
-          });
-          const data = await resp.json();
-          if (!resp.ok) throw new Error(data.error || "AI Coach failed");
-          setAnnotations(data.annotations);
-          setSavedSnapshot(JSON.stringify(data.annotations));
-          return { score: data.score as number, itemCount: data.itemCount as number };
-        } finally {
-          aiCoachAbortRef.current = null;
-          setAiCoachRunning(false);
+  const runAiCoach =
+    isEditor && aiCoachToolName
+      ? async () => {
+          const controller = new AbortController();
+          aiCoachAbortRef.current = controller;
+          setAiCoachRunning(true);
+          try {
+            // Flush current annotations to server first (debounce may not have fired yet)
+            await fetch(apiUrl("/api/annotations"), {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(annotations),
+              signal: controller.signal,
+            });
+            const resp = await fetch(apiUrl("/api/feedback/generate"), {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ toolName: aiCoachToolName }),
+              signal: controller.signal,
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.error || "AI Coach failed");
+            setAnnotations(data.annotations);
+            setSavedSnapshot(JSON.stringify(data.annotations));
+            return { score: data.score as number, itemCount: data.itemCount as number };
+          } finally {
+            aiCoachAbortRef.current = null;
+            setAiCoachRunning(false);
+          }
         }
-      }
-    : null;
+      : null;
 
   const setAiCoachToolName = isEditor
     ? (toolName: string) => {
@@ -335,11 +342,26 @@ export function useAnnotations(
     : null;
 
   return {
-    annotations, annotatedScenes, annotationCounts,
-    add, update, remove, hasUnsaved, canSaveHtml,
-    downloadHtml, downloadJson,
-    publishGist, exportHtml,
-    gistPublishing, htmlExporting,
-    aiCoachTool, aiCoachTools, aiCoachToolName, setAiCoachToolName, runAiCoach, cancelAiCoach, aiCoachRunning,
+    annotations,
+    annotatedScenes,
+    annotationCounts,
+    add,
+    update,
+    remove,
+    hasUnsaved,
+    canSaveHtml,
+    downloadHtml,
+    downloadJson,
+    publishGist,
+    exportHtml,
+    gistPublishing,
+    htmlExporting,
+    aiCoachTool,
+    aiCoachTools,
+    aiCoachToolName,
+    setAiCoachToolName,
+    runAiCoach,
+    cancelAiCoach,
+    aiCoachRunning,
   };
 }

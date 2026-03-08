@@ -69,8 +69,7 @@ export default function Minimap({ scenes, currentIndex, onSeek }: Props) {
           if (!current.toolNames.includes(scene.toolName)) {
             current.toolNames.push(scene.toolName);
           }
-        }
-        else if (scene.type === "thinking") current.thinkingBlocks++;
+        } else if (scene.type === "thinking") current.thinkingBlocks++;
         else if (scene.type === "text-response") current.textBlocks++;
       }
     });
@@ -120,20 +119,24 @@ export default function Minimap({ scenes, currentIndex, onSeek }: Props) {
               isActive
                 ? "bg-terminal-green/8 border border-terminal-green/25"
                 : isPast
-                ? "border border-transparent hover:bg-terminal-surface/80 opacity-70 hover:opacity-100"
-                : "border border-transparent hover:bg-terminal-surface/80"
+                  ? "border border-transparent hover:bg-terminal-surface/80 opacity-70 hover:opacity-100"
+                  : "border border-transparent hover:bg-terminal-surface/80"
             }`}
           >
             {/* Turn header */}
             <div className="flex items-start gap-2">
-              <span className={`text-xs font-mono font-semibold shrink-0 mt-px tabular-nums ${
-                isActive ? "text-terminal-green" : "text-terminal-dim"
-              }`}>
+              <span
+                className={`text-xs font-mono font-semibold shrink-0 mt-px tabular-nums ${
+                  isActive ? "text-terminal-green" : "text-terminal-dim"
+                }`}
+              >
                 {String(item.turnNumber).padStart(2, "0")}
               </span>
-              <span className={`text-[13px] font-mono leading-snug line-clamp-2 ${
-                isActive ? "text-terminal-text" : "text-terminal-text/80"
-              }`}>
+              <span
+                className={`text-[13px] font-mono leading-snug line-clamp-2 ${
+                  isActive ? "text-terminal-text" : "text-terminal-text/80"
+                }`}
+              >
                 {item.prompt}
               </span>
             </div>

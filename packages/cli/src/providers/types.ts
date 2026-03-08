@@ -1,4 +1,4 @@
-import type { SessionInfo, ParsedTurn } from "../types.js";
+import type { ParsedTurn, SessionInfo } from "../types.js";
 
 export interface Provider {
   name: string;

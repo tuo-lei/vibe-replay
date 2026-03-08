@@ -1,4 +1,4 @@
-import { useMemo, useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { ReplaySession } from "../types";
 
 interface Props {
@@ -22,9 +22,7 @@ export default function LandingHero({ session, onStart }: Props) {
   const firstPrompt = useMemo(() => {
     const first = scenes.find((s) => s.type === "user-prompt");
     if (!first || first.type !== "user-prompt") return null;
-    return first.content.length > 300
-      ? first.content.slice(0, 300) + "..."
-      : first.content;
+    return first.content.length > 300 ? `${first.content.slice(0, 300)}...` : first.content;
   }, [scenes]);
 
   const stats = useMemo(() => {
@@ -113,9 +111,7 @@ export default function LandingHero({ session, onStart }: Props) {
             {title}
           </h2>
           {meta.title && meta.project !== meta.title && (
-            <div className="text-sm font-mono text-terminal-dim">
-              {meta.project}
-            </div>
+            <div className="text-sm font-mono text-terminal-dim">{meta.project}</div>
           )}
         </div>
 
@@ -129,7 +125,11 @@ export default function LandingHero({ session, onStart }: Props) {
             <StatPill label="Files" value={stats.filesModified} color="text-terminal-blue" />
           )}
           {meta.stats.costEstimate !== undefined ? (
-            <StatPill label="Cost" value={`$${meta.stats.costEstimate < 0.01 ? meta.stats.costEstimate.toFixed(4) : meta.stats.costEstimate.toFixed(2)}`} color="text-terminal-green" />
+            <StatPill
+              label="Cost"
+              value={`$${meta.stats.costEstimate < 0.01 ? meta.stats.costEstimate.toFixed(4) : meta.stats.costEstimate.toFixed(2)}`}
+              color="text-terminal-green"
+            />
           ) : (
             <StatPill label="Scenes" value={meta.stats.sceneCount} color="text-terminal-text" />
           )}
@@ -150,19 +150,14 @@ export default function LandingHero({ session, onStart }: Props) {
           <span className="text-xl text-terminal-green group-hover:scale-110 transition-transform">
             {"\u25B6"}
           </span>
-          <span className="text-sm font-mono font-semibold text-terminal-green">
-            Start Replay
-          </span>
+          <span className="text-sm font-mono font-semibold text-terminal-green">Start Replay</span>
         </button>
       </div>
 
       {/* First prompt teaser — normal flow, not absolute */}
       {firstPrompt && (
         <div className="w-full px-6 mt-6 md:mt-8 pb-6 z-10 shrink-0">
-          <div
-            onClick={onStart}
-            className="max-w-2xl mx-auto cursor-pointer group"
-          >
+          <div onClick={onStart} className="max-w-2xl mx-auto cursor-pointer group">
             <div className="text-[11px] font-mono text-terminal-dim uppercase tracking-wider mb-2 text-center">
               First message
             </div>
@@ -211,12 +206,8 @@ function StatPill({
 }) {
   return (
     <div className="bg-terminal-surface/80 rounded-lg px-3 py-2.5 border border-terminal-border/40">
-      <div className={`text-lg font-bold font-mono tabular-nums ${color}`}>
-        {value}
-      </div>
-      <div className="text-[11px] font-mono text-terminal-dim uppercase tracking-wide">
-        {label}
-      </div>
+      <div className={`text-lg font-bold font-mono tabular-nums ${color}`}>{value}</div>
+      <div className="text-[11px] font-mono text-terminal-dim uppercase tracking-wide">{label}</div>
     </div>
   );
 }

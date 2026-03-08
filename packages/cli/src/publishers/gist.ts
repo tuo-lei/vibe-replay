@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { join } from "node:path";
-import { readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { promisify } from "node:util";
 
 const exec = promisify(execFile);
 
@@ -80,7 +80,10 @@ export async function publishGist(
   if (overwrite) {
     // Saved metadata can drift (manual gist edits/renames). Resolve a valid
     // current gist filename before calling `gh gist edit`.
-    filename = await resolveEditableFilename(overwrite.gistId, overwrite.filename || requestedFilename);
+    filename = await resolveEditableFilename(
+      overwrite.gistId,
+      overwrite.filename || requestedFilename,
+    );
     await exec("gh", [
       "gist",
       "edit",
@@ -127,7 +130,9 @@ export async function publishGist(
   // Register/refresh metadata on vibe-replay.com (worker fetches from gist)
   try {
     await registerReplayMetadata(gistId);
-  } catch { /* non-critical */ }
+  } catch {
+    /* non-critical */
+  }
 
   return { gistId, filename, gistUrl, viewerUrl, mode };
 }
@@ -150,9 +155,7 @@ async function resolveEditableFilename(gistId: string, preferred: string): Promi
   }
 }
 
-export async function loadSavedGistInfo(
-  outputDir: string,
-): Promise<SavedGistInfo | undefined> {
+export async function loadSavedGistInfo(outputDir: string): Promise<SavedGistInfo | undefined> {
   try {
     const raw = await readFile(join(outputDir, GIST_META_FILE), "utf-8");
     const parsed = JSON.parse(raw) as SavedGistInfo;

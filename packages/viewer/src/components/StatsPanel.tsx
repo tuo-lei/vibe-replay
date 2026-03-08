@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { Scene, ReplaySession } from "../types";
+import type { ReplaySession } from "../types";
 
 interface Props {
   session: ReplaySession;
@@ -14,7 +14,7 @@ export default function StatsPanel({ session }: Props) {
     let responseChars = 0;
     let promptChars = 0;
     let editCount = 0;
-    let filesModified = new Set<string>();
+    const filesModified = new Set<string>();
 
     for (const scene of scenes) {
       switch (scene.type) {
@@ -28,10 +28,7 @@ export default function StatsPanel({ session }: Props) {
           responseChars += scene.content.length;
           break;
         case "tool-call": {
-          toolCounts.set(
-            scene.toolName,
-            (toolCounts.get(scene.toolName) || 0) + 1,
-          );
+          toolCounts.set(scene.toolName, (toolCounts.get(scene.toolName) || 0) + 1);
           if (scene.diff) {
             editCount++;
             filesModified.add(scene.diff.filePath);
@@ -41,9 +38,7 @@ export default function StatsPanel({ session }: Props) {
       }
     }
 
-    const topTools = [...toolCounts.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 6);
+    const topTools = [...toolCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
 
     return {
       totalScenes: scenes.length,
@@ -72,21 +67,31 @@ export default function StatsPanel({ session }: Props) {
           Session
         </div>
         {meta.title && (
-          <div className="text-terminal-text text-xs mb-0.5 truncate" title={meta.title}>{meta.title}</div>
+          <div className="text-terminal-text text-xs mb-0.5 truncate" title={meta.title}>
+            {meta.title}
+          </div>
         )}
-        <div className="text-terminal-dim truncate" title={meta.cwd}>{meta.project}</div>
+        <div className="text-terminal-dim truncate" title={meta.cwd}>
+          {meta.project}
+        </div>
         <div className="text-terminal-dim mt-0.5 flex items-center gap-1.5 flex-wrap">
           {meta.model && <span className="text-terminal-text/60">{meta.model}</span>}
           {meta.provider && <span>{meta.provider}</span>}
         </div>
         {meta.generator?.version && (
           <div className="text-terminal-dim/80 mt-0.5 truncate">
-            replay: <span className="text-terminal-text/80">{meta.generator.name} v{meta.generator.version}</span>
+            replay:{" "}
+            <span className="text-terminal-text/80">
+              {meta.generator.name} v{meta.generator.version}
+            </span>
           </div>
         )}
         {meta.generator?.generatedAt && (
           <div className="text-terminal-dim/80 mt-0.5 truncate" title={meta.generator.generatedAt}>
-            generated: <span className="text-terminal-text/80">{formatGeneratedAt(meta.generator.generatedAt)}</span>
+            generated:{" "}
+            <span className="text-terminal-text/80">
+              {formatGeneratedAt(meta.generator.generatedAt)}
+            </span>
           </div>
         )}
       </div>
@@ -102,12 +107,19 @@ export default function StatsPanel({ session }: Props) {
         <div className="text-terminal-dim space-y-0.5">
           {stats.durationMs && (
             <div>
-              Duration: <span className="text-terminal-text">{formatDuration(stats.durationMs)}</span>
+              Duration:{" "}
+              <span className="text-terminal-text">{formatDuration(stats.durationMs)}</span>
             </div>
           )}
           {stats.costEstimate !== undefined && (
             <div>
-              Cost: <span className="text-terminal-green">${stats.costEstimate < 0.01 ? stats.costEstimate.toFixed(4) : stats.costEstimate.toFixed(2)}</span>
+              Cost:{" "}
+              <span className="text-terminal-green">
+                $
+                {stats.costEstimate < 0.01
+                  ? stats.costEstimate.toFixed(4)
+                  : stats.costEstimate.toFixed(2)}
+              </span>
               <span className="text-terminal-dim/60"> (estimate)</span>
             </div>
           )}
@@ -116,17 +128,27 @@ export default function StatsPanel({ session }: Props) {
 
       {stats.tokenUsage && (
         <div>
-          <div className="text-terminal-dim mb-1.5 text-[11px] font-semibold uppercase tracking-wider">Tokens</div>
+          <div className="text-terminal-dim mb-1.5 text-[11px] font-semibold uppercase tracking-wider">
+            Tokens
+          </div>
           <div className="text-terminal-dim leading-relaxed space-y-0.5">
             <div>
               In: <span className="text-terminal-blue">{fmtNum(stats.tokenUsage.inputTokens)}</span>
               {" / "}
-              Out: <span className="text-terminal-green">{fmtNum(stats.tokenUsage.outputTokens)}</span>
+              Out:{" "}
+              <span className="text-terminal-green">{fmtNum(stats.tokenUsage.outputTokens)}</span>
             </div>
             <div>
-              Cache: <span className="text-terminal-purple">{fmtNum(stats.tokenUsage.cacheReadTokens)}</span> read
+              Cache:{" "}
+              <span className="text-terminal-purple">
+                {fmtNum(stats.tokenUsage.cacheReadTokens)}
+              </span>{" "}
+              read
               {" / "}
-              <span className="text-terminal-orange">{fmtNum(stats.tokenUsage.cacheCreationTokens)}</span> created
+              <span className="text-terminal-orange">
+                {fmtNum(stats.tokenUsage.cacheCreationTokens)}
+              </span>{" "}
+              created
             </div>
           </div>
         </div>
@@ -161,7 +183,9 @@ export default function StatsPanel({ session }: Props) {
 
       {stats.topTools.length > 0 && (
         <div>
-          <div className="text-terminal-dim mb-2 text-[11px] font-semibold uppercase tracking-wider">Top Tools</div>
+          <div className="text-terminal-dim mb-2 text-[11px] font-semibold uppercase tracking-wider">
+            Top Tools
+          </div>
           <div className="space-y-1.5">
             {stats.topTools.map(([name, count]) => (
               <div key={name} className="flex items-center gap-2">
@@ -172,7 +196,9 @@ export default function StatsPanel({ session }: Props) {
                     style={{ width: `${(count / stats.topTools[0][1]) * 100}%` }}
                   />
                 </div>
-                <span className="text-terminal-dim shrink-0 w-6 text-right tabular-nums">{count}</span>
+                <span className="text-terminal-dim shrink-0 w-6 text-right tabular-nums">
+                  {count}
+                </span>
               </div>
             ))}
           </div>
@@ -222,15 +248,7 @@ export default function StatsPanel({ session }: Props) {
   );
 }
 
-function StatCard({
-  label,
-  value,
-  color,
-}: {
-  label: string;
-  value: number;
-  color: string;
-}) {
+function StatCard({ label, value, color }: { label: string; value: number; color: string }) {
   return (
     <div className="bg-terminal-surface/80 rounded-md px-2.5 py-2 border border-terminal-border/40">
       <div className={`text-lg font-bold tabular-nums ${color}`}>{value}</div>
@@ -240,8 +258,8 @@ function StatCard({
 }
 
 function fmtNum(n: number): string {
-  if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
-  if (n >= 1000) return (n / 1000).toFixed(1) + "K";
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
   return n.toString();
 }
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ReplaySession } from "../types";
 
 export type ViewerMode = "embedded" | "editor" | "readonly";
@@ -32,7 +32,12 @@ export function useSessionLoader(): LoadState {
         if (result === "dashboard") {
           setState({ status: "dashboard" });
         } else {
-          setState({ status: "ready", session: result.session, mode: result.mode, gistOwner: result.gistOwner });
+          setState({
+            status: "ready",
+            session: result.session,
+            mode: result.mode,
+            gistOwner: result.gistOwner,
+          });
         }
       },
       (err) => setState({ status: "error", message: String(err.message || err) }),

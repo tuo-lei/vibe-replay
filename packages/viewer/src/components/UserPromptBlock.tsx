@@ -27,18 +27,14 @@ export default memo(function UserPromptBlock({ content, images, isActive }: Prop
         }`}
       >
         {preview}
-        {isLong && !expanded && (
-          <span className="text-terminal-dim">{`\n...`}</span>
-        )}
+        {isLong && !expanded && <span className="text-terminal-dim">{`\n...`}</span>}
       </div>
       {isLong && (
         <button
           onClick={() => setExpanded((v) => !v)}
           className="mt-1 text-[11px] font-mono text-terminal-green/80 hover:text-terminal-green transition-colors"
         >
-          {expanded
-            ? "Show less"
-            : `Show more (${lines.length} lines)`}
+          {expanded ? "Show less" : `Show more (${lines.length} lines)`}
         </button>
       )}
       {images && images.length > 0 && (
@@ -47,7 +43,7 @@ export default memo(function UserPromptBlock({ content, images, isActive }: Prop
             <img
               key={i}
               src={src}
-              alt={`Attached image ${i + 1}`}
+              alt={`Attachment ${i + 1}`}
               className="max-w-[300px] max-h-[200px] rounded border border-terminal-border object-contain"
             />
           ))}

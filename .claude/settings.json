@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "FILE=$(cat - | jq -r '.tool_input.file_path') && cd \"$CLAUDE_PROJECT_DIR\" && pnpm biome check --write \"$FILE\" 2>&1 | tail -20"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "deny": ["Bash(git commit --no-verify:*)", "Bash(git commit -n:*)"]
+  }
+}

@@ -1,7 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
 import { parseClaudeCodeSession } from "../src/providers/claude-code/parser.js";
 import { transformToReplay } from "../src/transform.js";
-import { join } from "node:path";
 
 const FIXTURE = join(import.meta.dirname, "fixtures/claude-code-session.jsonl");
 const IMG_FIXTURE = join(import.meta.dirname, "fixtures/claude-code-images.jsonl");
@@ -118,15 +118,13 @@ describe("Claude Code → transform", () => {
     const parsed = await parseClaudeCodeSession(FIXTURE);
     const replay = transformToReplay(parsed, "claude-code", "~/test/project");
 
-    const editScene = replay.scenes.find(
-      (s) => s.type === "tool-call" && s.toolName === "Edit",
-    );
+    const editScene = replay.scenes.find((s) => s.type === "tool-call" && s.toolName === "Edit");
     expect(editScene).toBeDefined();
     if (editScene?.type === "tool-call") {
       expect(editScene.diff).toBeDefined();
-      expect(editScene.diff!.filePath).toBe("/Users/test/project/auth.ts");
-      expect(editScene.diff!.oldContent).toContain("return null");
-      expect(editScene.diff!.newContent).toContain("generateToken");
+      expect(editScene.diff?.filePath).toBe("/Users/test/project/auth.ts");
+      expect(editScene.diff?.oldContent).toContain("return null");
+      expect(editScene.diff?.newContent).toContain("generateToken");
     }
   });
 
@@ -134,14 +132,12 @@ describe("Claude Code → transform", () => {
     const parsed = await parseClaudeCodeSession(FIXTURE);
     const replay = transformToReplay(parsed, "claude-code", "~/test/project");
 
-    const bashScene = replay.scenes.find(
-      (s) => s.type === "tool-call" && s.toolName === "Bash",
-    );
+    const bashScene = replay.scenes.find((s) => s.type === "tool-call" && s.toolName === "Bash");
     expect(bashScene).toBeDefined();
     if (bashScene?.type === "tool-call") {
       expect(bashScene.bashOutput).toBeDefined();
-      expect(bashScene.bashOutput!.command).toBe("npm test");
-      expect(bashScene.bashOutput!.stdout).toContain("tests passed");
+      expect(bashScene.bashOutput?.command).toBe("npm test");
+      expect(bashScene.bashOutput?.stdout).toContain("tests passed");
     }
   });
 
@@ -153,7 +149,7 @@ describe("Claude Code → transform", () => {
       (s) => s.type === "user-prompt" && s.images && s.images.length > 0,
     );
     expect(promptWithImg).toBeDefined();
-    expect(promptWithImg!.images![0]).toMatch(/^data:image\/png;base64,/);
+    expect(promptWithImg?.images?.[0]).toMatch(/^data:image\/png;base64,/);
   });
 
   it("redacts secrets in output", async () => {

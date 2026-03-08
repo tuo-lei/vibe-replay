@@ -1,4 +1,4 @@
-import { useMemo, useRef, useCallback } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import type { Scene } from "../types";
 
 interface Props {
@@ -24,8 +24,6 @@ function sceneColor(type: Scene["type"]): string {
 }
 
 export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes }: Props) {
-  if (scenes.length === 0) return null;
-
   // For large sessions (>200 scenes), bucket into segments to avoid rendering 700+ divs
   const segments = useMemo(() => {
     const maxSegments = 200;
@@ -64,20 +62,22 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
     return result;
   }, [scenes]);
 
-  const progressPct =
-    scenes.length > 0 ? ((currentIndex + 1) / scenes.length) * 100 : 0;
+  const progressPct = scenes.length > 0 ? ((currentIndex + 1) / scenes.length) * 100 : 0;
 
   const barRef = useRef<HTMLDivElement>(null);
 
-  const handleSeekClick = useCallback((e: React.MouseEvent) => {
-    const bar = barRef.current;
-    if (!bar) return;
-    const rect = bar.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const pct = Math.max(0, Math.min(1, x / rect.width));
-    const idx = Math.floor(pct * scenes.length);
-    onSeek(idx);
-  }, [scenes.length, onSeek]);
+  const handleSeekClick = useCallback(
+    (e: React.MouseEvent) => {
+      const bar = barRef.current;
+      if (!bar) return;
+      const rect = bar.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const pct = Math.max(0, Math.min(1, x / rect.width));
+      const idx = Math.floor(pct * scenes.length);
+      onSeek(idx);
+    },
+    [scenes.length, onSeek],
+  );
 
   // Compute annotation dot positions
   const annotationDots = useMemo(() => {
@@ -90,6 +90,8 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
     });
     return dots;
   }, [annotatedScenes, scenes.length]);
+
+  if (scenes.length === 0) return null;
 
   return (
     <div className="px-4 pt-3 pb-1 cursor-pointer" onClick={handleSeekClick}>
@@ -105,10 +107,7 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
           ))}
         </div>
       )}
-      <div
-        ref={barRef}
-        className="relative flex h-2 rounded overflow-hidden bg-terminal-border/30"
-      >
+      <div ref={barRef} className="relative flex h-2 rounded overflow-hidden bg-terminal-border/30">
         {segments.map((seg, i) => (
           <div
             key={i}

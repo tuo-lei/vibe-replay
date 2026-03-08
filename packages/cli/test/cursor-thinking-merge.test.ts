@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ParsedTurn, SessionInfo } from "../src/types.js";
 
 const { mockParseCursorSqlite } = vi.hoisted(() => ({
@@ -13,9 +13,9 @@ vi.mock("../src/providers/cursor/sqlite-reader.js", () => ({
 }));
 
 import {
-  parseCursorSession,
   mergeJsonlSupplementsIntoCursorTurns,
   mergeJsonlThinkingIntoCursorTurns,
+  parseCursorSession,
 } from "../src/providers/cursor/parser.js";
 
 const ONE_BY_ONE_PNG_BASE64 =

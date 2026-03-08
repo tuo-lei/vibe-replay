@@ -13,7 +13,8 @@ packages/viewer/public/demo.json
 packages/viewer/dist/
 packages/cli/assets/viewer.html
 plan/
-.claude/
+.claude/*
+!.claude/settings.json
 
 # Editor
 .vscode/

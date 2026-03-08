@@ -1,8 +1,8 @@
-import { readdir, stat, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import type { SessionInfo } from "../../types.js";
+import { join } from "node:path";
 import { cleanPromptText } from "../../clean-prompt.js";
+import type { SessionInfo } from "../../types.js";
 
 const CLAUDE_DIR = join(homedir(), ".claude", "projects");
 
@@ -51,7 +51,7 @@ function decodeProjectDir(encoded: string): string {
   // e.g. "-Users-tuo-Code-my-project" → "/Users/tuo/Code/my-project"
   // This is a fallback — we prefer cwd from session metadata (see extractSessionInfo)
   if (encoded.startsWith("-")) {
-    return "/" + encoded.slice(1).replace(/-/g, "/");
+    return `/${encoded.slice(1).replace(/-/g, "/")}`;
   }
   return encoded;
 }
@@ -59,7 +59,7 @@ function decodeProjectDir(encoded: string): string {
 function shortenPath(path: string): string {
   const home = homedir();
   if (path.startsWith(home)) {
-    return "~" + path.slice(home.length);
+    return `~${path.slice(home.length)}`;
   }
   return path;
 }
@@ -124,9 +124,7 @@ export async function extractSessionInfo(
 
         // Stop early if we have everything
         if (prompts.length >= MAX_PROMPTS && metadataDone) break;
-      } catch {
-        continue;
-      }
+      } catch {}
     }
 
     if (!sessionId) return null;
@@ -139,9 +137,7 @@ export async function extractSessionInfo(
           if (obj.type === "system" && obj.timestamp) {
             timestamp = obj.timestamp;
           }
-        } catch {
-          continue;
-        }
+        } catch {}
       }
     }
 
@@ -172,5 +168,3 @@ export async function extractSessionInfo(
     return null;
   }
 }
-
-

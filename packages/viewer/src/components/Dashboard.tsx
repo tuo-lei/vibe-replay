@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { SessionSummary, SourceSession } from "../types";
 
 type Tab = "sessions" | "replays";
@@ -43,9 +43,7 @@ function ProviderBadge({ provider }: { provider: string }) {
   const cls = colors[provider] || "bg-gray-500/15 text-gray-400 border-gray-500/30";
   const label = provider === "claude-code" ? "Claude" : provider === "cursor" ? "Cursor" : provider;
   return (
-    <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${cls}`}>
-      {label}
-    </span>
+    <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${cls}`}>{label}</span>
   );
 }
 
@@ -116,9 +114,7 @@ function EditableTitle({
       className="group flex items-center gap-1 min-w-0 text-left"
       title="Click to edit title"
     >
-      <span className="text-sm font-mono text-terminal-text truncate">
-        {title || slug}
-      </span>
+      <span className="text-sm font-mono text-terminal-text truncate">{title || slug}</span>
       <svg
         width="12"
         height="12"
@@ -145,7 +141,7 @@ function ReplayCard({
   onArchive,
   ghAvailable,
   isPublishing,
-  isDeleting,
+  isDeleting: _isDeleting,
   isRegenerating,
   isArchived,
 }: {
@@ -165,7 +161,9 @@ function ReplayCard({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   return (
-    <div className={`bg-terminal-surface/50 border border-terminal-border/50 rounded-lg px-4 py-3 hover:bg-terminal-surface/80 transition-colors space-y-1.5 ${isArchived ? "opacity-50" : ""}`}>
+    <div
+      className={`bg-terminal-surface/50 border border-terminal-border/50 rounded-lg px-4 py-3 hover:bg-terminal-surface/80 transition-colors space-y-1.5 ${isArchived ? "opacity-50" : ""}`}
+    >
       {/* Row 1: title + badges + actions */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 min-w-0">
@@ -184,7 +182,16 @@ function ReplayCard({
               className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded border bg-purple-500/15 text-purple-400 border-purple-500/30 hover:bg-purple-500/25 transition-colors shrink-0"
               title={`View on vibe-replay.com`}
             >
-              <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 3H3v10h10v-3M9 2h5v5M14 2L7 9" /></svg>
+              <svg
+                width="10"
+                height="10"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path d="M6 3H3v10h10v-3M9 2h5v5M14 2L7 9" />
+              </svg>
               Synced
             </a>
           )}
@@ -211,7 +218,11 @@ function ReplayCard({
               disabled={isRegenerating}
               className="px-2 py-1.5 text-[11px] font-mono rounded-md text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/80 transition-colors disabled:opacity-50"
             >
-              {isRegenerating ? <span className="animate-pulse text-terminal-green">...</span> : "Redo"}
+              {isRegenerating ? (
+                <span className="animate-pulse text-terminal-green">...</span>
+              ) : (
+                "Redo"
+              )}
             </button>
           )}
           {ghAvailable && onPublishGist && !s.gist?.gistId && (
@@ -224,15 +235,27 @@ function ReplayCard({
               {isPublishing ? (
                 <span className="text-purple-400 animate-pulse">...</span>
               ) : (
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8 2v8M5 5l3-3 3 3M3 11v2h10v-2" /></svg>
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                >
+                  <path d="M8 2v8M5 5l3-3 3 3M3 11v2h10v-2" />
+                </svg>
               )}
             </button>
           )}
-          {onDelete && (
-            confirmingDelete ? (
+          {onDelete &&
+            (confirmingDelete ? (
               <div className="flex items-center gap-1">
                 <button
-                  onClick={() => { onDelete(); setConfirmingDelete(false); }}
+                  onClick={() => {
+                    onDelete();
+                    setConfirmingDelete(false);
+                  }}
                   className="px-2 py-1.5 text-xs font-mono rounded-md bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors"
                 >
                   Confirm
@@ -250,19 +273,32 @@ function ReplayCard({
                 className="px-2 py-1.5 text-xs font-mono rounded-md text-terminal-dim hover:text-red-400 hover:bg-red-500/10 transition-colors"
                 title="Delete"
               >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                >
                   <path d="M3 4h10M5.5 4V3a1 1 0 011-1h3a1 1 0 011 1v1M6.5 7v4M9.5 7v4M4.5 4l.5 9a1 1 0 001 1h4a1 1 0 001-1l.5-9" />
                 </svg>
               </button>
-            )
-          )}
+            ))}
           {onArchive && (
             <button
               onClick={onArchive}
               className="p-1.5 text-terminal-dim hover:text-terminal-text transition-colors"
               title={isArchived ? "Unarchive" : "Archive"}
             >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              >
                 <path d="M2 4h12v2H2zM3 6v7h10V6M6.5 8h3" />
               </svg>
             </button>
@@ -272,7 +308,9 @@ function ReplayCard({
       {/* Row 2: user messages */}
       {(s.messages || (s.firstMessage ? [s.firstMessage] : [])).map((msg, i) => (
         <div key={i} className="flex gap-2 items-start">
-          <span className="text-[11px] text-terminal-green/60 shrink-0 mt-px select-none">&gt;</span>
+          <span className="text-[11px] text-terminal-green/60 shrink-0 mt-px select-none">
+            &gt;
+          </span>
           <p className="text-[13px] text-terminal-text/60 line-clamp-1 leading-relaxed">{msg}</p>
         </div>
       ))}
@@ -285,7 +323,10 @@ function ReplayCard({
         <span className="text-terminal-dim/30">&middot;</span>
         <span>{formatDate(s.startTime)}</span>
         {s.model && (
-          <><span className="text-terminal-dim/30">&middot;</span><span>{s.model}</span></>
+          <>
+            <span className="text-terminal-dim/30">&middot;</span>
+            <span>{s.model}</span>
+          </>
         )}
       </div>
       {/* Row 4: stats */}
@@ -294,13 +335,24 @@ function ReplayCard({
         <span>{s.stats.userPrompts} prompts</span>
         <span>{s.stats.toolCalls} tools</span>
         {s.stats.durationMs && (
-          <><span className="text-terminal-dim/30">&middot;</span><span>{formatDuration(s.stats.durationMs)}</span></>
+          <>
+            <span className="text-terminal-dim/30">&middot;</span>
+            <span>{formatDuration(s.stats.durationMs)}</span>
+          </>
         )}
         {s.stats.costEstimate && (
-          <><span className="text-terminal-dim/30">&middot;</span><span>{formatCost(s.stats.costEstimate)}</span></>
+          <>
+            <span className="text-terminal-dim/30">&middot;</span>
+            <span>{formatCost(s.stats.costEstimate)}</span>
+          </>
         )}
         {s.hasAnnotations && (
-          <><span className="text-terminal-dim/30">&middot;</span><span className="text-terminal-orange">{s.annotationCount} annotation{s.annotationCount !== 1 ? "s" : ""}</span></>
+          <>
+            <span className="text-terminal-dim/30">&middot;</span>
+            <span className="text-terminal-orange">
+              {s.annotationCount} annotation{s.annotationCount !== 1 ? "s" : ""}
+            </span>
+          </>
         )}
       </div>
     </div>
@@ -356,7 +408,10 @@ function OpenReplayForm() {
       <div className="flex gap-2">
         <input
           value={input}
-          onChange={(e) => { setInput(e.target.value); setError(null); }}
+          onChange={(e) => {
+            setInput(e.target.value);
+            setError(null);
+          }}
           placeholder="Paste a Gist ID, Gist URL, or replay JSON URL..."
           className="flex-1 bg-terminal-surface border border-terminal-border rounded-lg px-3 py-2 text-sm font-mono text-terminal-text placeholder:text-terminal-dim/50 outline-none focus:border-terminal-green/50"
           disabled={loading}
@@ -369,9 +424,7 @@ function OpenReplayForm() {
           {loading ? "Loading..." : "Open"}
         </button>
       </div>
-      {error && (
-        <div className="text-xs font-mono text-terminal-red">{error}</div>
-      )}
+      {error && <div className="text-xs font-mono text-terminal-red">{error}</div>}
     </form>
   );
 }
@@ -437,8 +490,8 @@ function shortenPath(path: string): string {
 
 /** Build a human-readable session label — slug is always the primary identifier */
 function sessionLabel(s: SourceSession): { primary: string; branch?: string } {
-  const branch = s.gitBranch && s.gitBranch !== "main" && s.gitBranch !== "master"
-    ? s.gitBranch : undefined;
+  const branch =
+    s.gitBranch && s.gitBranch !== "main" && s.gitBranch !== "master" ? s.gitBranch : undefined;
   if (s.title && s.title !== s.slug) {
     return { primary: s.title, branch };
   }
@@ -451,7 +504,10 @@ function cleanPrompt(text: string): string {
   // Strip XML tags (opening and closing, including truncated ones)
   cleaned = cleaned.replace(/<\/?[a-z][a-z0-9-]*>/gi, "");
   // Strip known Claude Code boilerplate from local command injection
-  cleaned = cleaned.replace(/Caveat:\s*The messages below were generated by the user while running local commands\.[^.]*/g, "");
+  cleaned = cleaned.replace(
+    /Caveat:\s*The messages below were generated by the user while running local commands\.[^.]*/g,
+    "",
+  );
   cleaned = cleaned.replace(/DO NOT respond to these messages[^.]*/g, "");
   // Remove slash commands
   cleaned = cleaned.replace(/^\/\w+\s*/g, "");
@@ -485,7 +541,7 @@ function SessionsPanel() {
         if (!r.ok) throw new Error("Failed to load sessions");
         return r.json();
       }),
-      fetch("/api/archived").then((r) => r.ok ? r.json() : { slugs: [] }),
+      fetch("/api/archived").then((r) => (r.ok ? r.json() : { slugs: [] })),
     ])
       .then(([data, archive]: [{ sessions: SourceSession[] }, { slugs: string[] }]) => {
         setSources(data.sessions);
@@ -505,7 +561,9 @@ function SessionsPanel() {
     });
   };
 
-  useEffect(() => { loadSources(); }, [loadSources]);
+  useEffect(() => {
+    loadSources();
+  }, [loadSources]);
 
   useEffect(() => {
     if (titleInput) titleInputRef.current?.focus();
@@ -573,7 +631,7 @@ function SessionsPanel() {
   const byProject = new Map<string, SourceSession[]>();
   for (const s of visibleSources) {
     if (!byProject.has(s.project)) byProject.set(s.project, []);
-    byProject.get(s.project)!.push(s);
+    byProject.get(s.project)?.push(s);
   }
   const projectEntries = [...byProject.entries()].sort((a, b) => {
     const aTime = a[1][0]?.timestamp || "";
@@ -585,9 +643,8 @@ function SessionsPanel() {
   const projectLabels = computeProjectLabels(projectEntries.map(([p]) => p));
 
   // Filter sessions within selected project
-  const projectSessions = selectedProject === ALL_PROJECTS
-    ? visibleSources
-    : (byProject.get(selectedProject) || []);
+  const projectSessions =
+    selectedProject === ALL_PROJECTS ? visibleSources : byProject.get(selectedProject) || [];
 
   const filtered = filter
     ? projectSessions.filter(
@@ -643,13 +700,23 @@ function SessionsPanel() {
       {/* ─── Left sidebar: project navigation (hidden on mobile) ─── */}
       <div className="hidden md:flex w-56 shrink-0 flex-col border-r border-terminal-border/50 bg-terminal-bg">
         <div className="flex items-center justify-between px-3 py-2 border-b border-terminal-border/30">
-          <span className="text-[11px] font-mono text-terminal-dim uppercase tracking-wider">Projects</span>
+          <span className="text-[11px] font-mono text-terminal-dim uppercase tracking-wider">
+            Projects
+          </span>
           <button
             onClick={loadSources}
             className="p-1 text-terminal-dim hover:text-terminal-text transition-colors"
             title="Refresh"
           >
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            >
               <path d="M2.5 8a5.5 5.5 0 019.3-4M13.5 8a5.5 5.5 0 01-9.3 4" />
               <path d="M12.5 1v3h-3M3.5 15v-3h3" />
             </svg>
@@ -684,29 +751,40 @@ function SessionsPanel() {
                 onClick={() => setSelectedProject(project)}
                 title={project}
                 className={`w-full text-left px-3 py-2 transition-colors group ${
-                  isActive
-                    ? "bg-terminal-green/10"
-                    : "hover:bg-terminal-surface/50"
+                  isActive ? "bg-terminal-green/10" : "hover:bg-terminal-surface/50"
                 } ${!exists ? "opacity-50" : ""}`}
               >
                 <div className="flex items-center justify-between gap-1">
-                  <span className={`text-xs font-mono truncate flex items-center gap-1 ${
-                    isActive
-                      ? "text-terminal-green"
-                      : !exists
-                        ? "text-terminal-dim"
-                        : "text-terminal-text/80 group-hover:text-terminal-text"
-                  }`}>
+                  <span
+                    className={`text-xs font-mono truncate flex items-center gap-1 ${
+                      isActive
+                        ? "text-terminal-green"
+                        : !exists
+                          ? "text-terminal-dim"
+                          : "text-terminal-text/80 group-hover:text-terminal-text"
+                    }`}
+                  >
                     {isGit && (
-                      <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" className="shrink-0 opacity-50">
-                        <path fillRule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 16 16"
+                        fill="currentColor"
+                        className="shrink-0 opacity-50"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
+                        />
                       </svg>
                     )}
                     {label}
                   </span>
-                  <span className={`text-[10px] font-mono shrink-0 ${
-                    isActive ? "text-terminal-green/60" : "text-terminal-dim/50"
-                  }`}>
+                  <span
+                    className={`text-[10px] font-mono shrink-0 ${
+                      isActive ? "text-terminal-green/60" : "text-terminal-dim/50"
+                    }`}
+                  >
                     {sessions.length}
                   </span>
                 </div>
@@ -752,10 +830,12 @@ function SessionsPanel() {
               <span className="text-sm font-mono text-terminal-text truncate block">
                 {selectedProject === ALL_PROJECTS
                   ? "All projects"
-                  : (projectLabels.get(selectedProject) || projectName(selectedProject))}
+                  : projectLabels.get(selectedProject) || projectName(selectedProject)}
               </span>
               {selectedProject !== ALL_PROJECTS && (
-                <span className="text-[11px] font-mono text-terminal-dim/40 truncate block">{selectedProject}</span>
+                <span className="text-[11px] font-mono text-terminal-dim/40 truncate block">
+                  {selectedProject}
+                </span>
               )}
             </div>
             <span className="text-xs font-mono text-terminal-dim">
@@ -768,7 +848,12 @@ function SessionsPanel() {
             <div className="relative flex-1">
               <svg
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-terminal-dim"
-                width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
               >
                 <circle cx="7" cy="7" r="5" />
                 <path d="M11 11l3.5 3.5" />
@@ -800,7 +885,12 @@ function SessionsPanel() {
         {generateError && (
           <div className="mx-4 mb-2 flex items-center gap-2 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 text-xs font-mono text-red-400 shrink-0">
             <span>{generateError}</span>
-            <button onClick={() => setGenerateError(null)} className="ml-auto text-red-400/60 hover:text-red-400">&times;</button>
+            <button
+              onClick={() => setGenerateError(null)}
+              className="ml-auto text-red-400/60 hover:text-red-400"
+            >
+              &times;
+            </button>
           </div>
         )}
 
@@ -811,7 +901,10 @@ function SessionsPanel() {
               Title for <span className="text-terminal-text">{titleInput.slug}</span>
             </div>
             <form
-              onSubmit={(e) => { e.preventDefault(); submitGenerate(); }}
+              onSubmit={(e) => {
+                e.preventDefault();
+                submitGenerate();
+              }}
               className="flex gap-2"
             >
               <input
@@ -820,12 +913,21 @@ function SessionsPanel() {
                 onChange={(e) => setTitleValue(e.target.value)}
                 className="flex-1 bg-terminal-bg border border-terminal-border rounded-lg px-3 py-2 text-sm font-mono text-terminal-text placeholder:text-terminal-dim/50 outline-none focus:border-terminal-green/50"
                 placeholder={titleInput.defaultTitle}
-                onKeyDown={(e) => { if (e.key === "Escape") setTitleInput(null); }}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setTitleInput(null);
+                }}
               />
-              <button type="submit" className="px-4 py-2 text-xs font-mono rounded-lg bg-terminal-green/10 text-terminal-green border border-terminal-green/20 hover:bg-terminal-green/20 transition-colors">
+              <button
+                type="submit"
+                className="px-4 py-2 text-xs font-mono rounded-lg bg-terminal-green/10 text-terminal-green border border-terminal-green/20 hover:bg-terminal-green/20 transition-colors"
+              >
                 Generate
               </button>
-              <button type="button" onClick={() => setTitleInput(null)} className="px-3 py-2 text-xs font-mono rounded-lg text-terminal-dim hover:text-terminal-text transition-colors">
+              <button
+                type="button"
+                onClick={() => setTitleInput(null)}
+                className="px-3 py-2 text-xs font-mono rounded-lg text-terminal-dim hover:text-terminal-text transition-colors"
+              >
                 Cancel
               </button>
             </form>
@@ -879,8 +981,17 @@ function SessionsPanel() {
                       </span>
                       {label.branch && (
                         <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-terminal-border/40 text-terminal-dim/70 shrink-0 flex items-center gap-0.5">
-                          <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-                            <circle cx="5" cy="4" r="2" /><circle cx="11" cy="12" r="2" /><path d="M5 6v4c0 1.1.9 2 2 2h2" />
+                          <svg
+                            width="10"
+                            height="10"
+                            viewBox="0 0 16 16"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.5"
+                          >
+                            <circle cx="5" cy="4" r="2" />
+                            <circle cx="11" cy="12" r="2" />
+                            <path d="M5 6v4c0 1.1.9 2 2 2h2" />
                           </svg>
                           {label.branch}
                         </span>
@@ -896,14 +1007,23 @@ function SessionsPanel() {
                         >
                           {generatingSlug === s.slug ? (
                             <span className="animate-pulse">Generating...</span>
-                          ) : "Generate"}
+                          ) : (
+                            "Generate"
+                          )}
                         </button>
                         <button
                           onClick={() => toggleArchive(s.slug)}
                           className="p-1 text-terminal-dim hover:text-terminal-text transition-colors"
                           title={isArchived ? "Unarchive" : "Archive"}
                         >
-                          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 16 16"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.5"
+                          >
                             <path d="M2 4h12v2H2zM3 6v7h10V6M6.5 8h3" />
                           </svg>
                         </button>
@@ -912,8 +1032,12 @@ function SessionsPanel() {
                     {/* Row 2: user prompts */}
                     {prompts.map((p, i) => (
                       <div key={i} className="flex gap-2 items-start">
-                        <span className="text-[11px] text-terminal-green/60 shrink-0 mt-px select-none">&gt;</span>
-                        <p className="text-[13px] text-terminal-text/60 line-clamp-1 leading-relaxed">{p}</p>
+                        <span className="text-[11px] text-terminal-green/60 shrink-0 mt-px select-none">
+                          &gt;
+                        </span>
+                        <p className="text-[13px] text-terminal-text/60 line-clamp-1 leading-relaxed">
+                          {p}
+                        </p>
                       </div>
                     ))}
                     {/* Row 3: meta */}
@@ -958,7 +1082,7 @@ function ReplaysPanel() {
         if (!r.ok) throw new Error();
         return r.json();
       }),
-      fetch("/api/archived").then((r) => r.ok ? r.json() : { slugs: [] }),
+      fetch("/api/archived").then((r) => (r.ok ? r.json() : { slugs: [] })),
     ])
       .then(([data, archive]: [SessionSummary[], { slugs: string[] }]) => {
         setSessions(data);
@@ -1033,7 +1157,15 @@ function ReplaysPanel() {
       setSessions((prev) =>
         prev.map((s) =>
           s.slug === slug
-            ? { ...s, gist: { gistId: result.gistId, viewerUrl: result.viewerUrl, updatedAt: new Date().toISOString(), outdated: false } }
+            ? {
+                ...s,
+                gist: {
+                  gistId: result.gistId,
+                  viewerUrl: result.viewerUrl,
+                  updatedAt: new Date().toISOString(),
+                  outdated: false,
+                },
+              }
             : s,
         ),
       );
@@ -1045,7 +1177,9 @@ function ReplaysPanel() {
   };
 
   const archivedCount = sessions.filter((s) => archivedSlugs.has(s.slug)).length;
-  const visibleSessions = showArchived ? sessions : sessions.filter((s) => !archivedSlugs.has(s.slug));
+  const visibleSessions = showArchived
+    ? sessions
+    : sessions.filter((s) => !archivedSlugs.has(s.slug));
 
   const filtered = filter
     ? visibleSessions.filter(
@@ -1061,9 +1195,7 @@ function ReplaysPanel() {
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center py-12">
-        <div className="text-terminal-dim font-mono text-sm animate-pulse">
-          Loading...
-        </div>
+        <div className="text-terminal-dim font-mono text-sm animate-pulse">Loading...</div>
       </div>
     );
   }
@@ -1080,7 +1212,12 @@ function ReplaysPanel() {
             <div className="relative flex-1">
               <svg
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-terminal-dim"
-                width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
               >
                 <circle cx="7" cy="7" r="5" />
                 <path d="M11 11l3.5 3.5" />
@@ -1111,19 +1248,23 @@ function ReplaysPanel() {
           {deleteError && (
             <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 text-xs font-mono text-red-400">
               <span>{deleteError}</span>
-              <button onClick={() => setDeleteError(null)} className="ml-auto text-red-400/60 hover:text-red-400">&times;</button>
+              <button
+                onClick={() => setDeleteError(null)}
+                className="ml-auto text-red-400/60 hover:text-red-400"
+              >
+                &times;
+              </button>
             </div>
           )}
 
           {/* Stats bar */}
           <div className="flex items-center gap-3 text-xs font-mono text-terminal-dim">
             <span>
-              {filtered.length} <span className="text-terminal-text/70">local</span> replay{filtered.length !== 1 ? "s" : ""}
+              {filtered.length} <span className="text-terminal-text/70">local</span> replay
+              {filtered.length !== 1 ? "s" : ""}
             </span>
             {filter && filtered.length !== sessions.length && (
-              <span className="text-terminal-dim/50">
-                (of {sessions.length} total)
-              </span>
+              <span className="text-terminal-dim/50">(of {sessions.length} total)</span>
             )}
             {ghAvailable === true && (
               <span className="text-terminal-green/70">gh authenticated</span>
@@ -1169,7 +1310,8 @@ function ReplaysPanel() {
       {!serverAvailable && (
         <div className="text-center py-8 space-y-2">
           <div className="text-terminal-dim/50 font-mono text-xs">
-            Or run <span className="text-terminal-green">npx vibe-replay</span> to create a replay from your AI coding sessions
+            Or run <span className="text-terminal-green">npx vibe-replay</span> to create a replay
+            from your AI coding sessions
           </div>
         </div>
       )}

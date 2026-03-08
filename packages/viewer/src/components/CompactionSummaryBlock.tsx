@@ -1,4 +1,4 @@
-import { useState, memo } from "react";
+import { memo, useState } from "react";
 
 interface Props {
   content: string;
@@ -12,9 +12,7 @@ export default memo(function CompactionSummaryBlock({ content, isActive }: Props
   const lines = content.split("\n");
   const isLong = lines.length > PREVIEW_LINES;
 
-  const displayContent = isLong && !expanded
-    ? lines.slice(0, PREVIEW_LINES).join("\n")
-    : content;
+  const displayContent = isLong && !expanded ? lines.slice(0, PREVIEW_LINES).join("\n") : content;
 
   return (
     <div>

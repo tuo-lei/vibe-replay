@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { join } from "node:path";
 import { stat } from "node:fs/promises";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
 import { extractSessionInfo } from "../src/providers/claude-code/discover.js";
 
 const FIXTURE = join(__dirname, "fixtures", "discover-boilerplate.jsonl");
@@ -11,19 +11,19 @@ describe("extractSessionInfo – multi-prompt extraction", () => {
     const info = await extractSessionInfo(FIXTURE, fileStat.size, "/Users/test/project");
 
     expect(info).not.toBeNull();
-    expect(info!.sessionId).toBe("boilerplate-session-1");
-    expect(info!.slug).toBe("test-boilerplate");
-    expect(info!.cwd).toBe("/Users/test/project");
-    expect(info!.version).toBe("2.1.66");
-    expect(info!.gitBranch).toBe("main");
+    expect(info?.sessionId).toBe("boilerplate-session-1");
+    expect(info?.slug).toBe("test-boilerplate");
+    expect(info?.cwd).toBe("/Users/test/project");
+    expect(info?.version).toBe("2.1.66");
+    expect(info?.gitBranch).toBe("main");
 
     // Should have exactly 2 real prompts
-    expect(info!.prompts).toHaveLength(2);
-    expect(info!.prompts![0]).toContain("refactor the authentication module");
-    expect(info!.prompts![1]).toContain("refresh token support");
+    expect(info?.prompts).toHaveLength(2);
+    expect(info?.prompts?.[0]).toContain("refactor the authentication module");
+    expect(info?.prompts?.[1]).toContain("refresh token support");
 
     // firstPrompt should match prompts[0]
-    expect(info!.firstPrompt).toBe(info!.prompts![0]);
+    expect(info?.firstPrompt).toBe(info?.prompts?.[0]);
   });
 
   it("skips tool_result messages (non-string content)", async () => {
@@ -31,7 +31,7 @@ describe("extractSessionInfo – multi-prompt extraction", () => {
     const info = await extractSessionInfo(FIXTURE, fileStat.size, "/Users/test/project");
 
     // Line 9 has content as array (tool_result) — should not appear in prompts
-    for (const p of info!.prompts!) {
+    for (const p of info!.prompts) {
       expect(p).not.toContain("tool_result");
       expect(p).not.toContain("file contents here");
     }
@@ -42,7 +42,7 @@ describe("extractSessionInfo – multi-prompt extraction", () => {
     const info = await extractSessionInfo(FIXTURE, fileStat.size, "/Users/test/project");
 
     // The /clear command and local-command-caveat should be filtered out
-    for (const p of info!.prompts!) {
+    for (const p of info!.prompts) {
       expect(p).not.toContain("/clear");
       expect(p).not.toContain("Caveat:");
     }
@@ -52,7 +52,7 @@ describe("extractSessionInfo – multi-prompt extraction", () => {
     const fileStat = await stat(FIXTURE);
     const info = await extractSessionInfo(FIXTURE, fileStat.size, "/Users/test/project");
 
-    expect(info!.timestamp).toBe("2025-06-01T10:00:00Z");
-    expect(info!.lineCount).toBe(11); // 12 lines minus empty trailing
+    expect(info?.timestamp).toBe("2025-06-01T10:00:00Z");
+    expect(info?.lineCount).toBe(11); // 12 lines minus empty trailing
   });
 });

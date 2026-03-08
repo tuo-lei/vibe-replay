@@ -3,20 +3,20 @@ export interface SessionInfo {
   sessionId: string;
   slug: string;
   title?: string;
-  project: string;       // decoded project path (e.g. "~/Code/my-project")
+  project: string; // decoded project path (e.g. "~/Code/my-project")
   cwd: string;
   version: string;
   gitBranch?: string;
-  timestamp: string;      // ISO string of session start/last update
+  timestamp: string; // ISO string of session start/last update
   lineCount: number;
   fileSize: number;
-  filePath: string;       // primary file (most recent)
-  filePaths: string[];    // all JSONL files for this session (sorted by timestamp asc)
-  toolPaths?: string[];   // cursor tool outputs associated with this session
+  filePath: string; // primary file (most recent)
+  filePaths: string[]; // all JSONL files for this session (sorted by timestamp asc)
+  toolPaths?: string[]; // cursor tool outputs associated with this session
   workspacePath?: string; // absolute workspace path for Cursor lookup
-  hasSqlite?: boolean;    // true if any Cursor SQLite source exists (store.db or global state DB)
+  hasSqlite?: boolean; // true if any Cursor SQLite source exists (store.db or global state DB)
   firstPrompt: string;
-  prompts?: string[];   // first N meaningful user prompts (cleaned)
+  prompts?: string[]; // first N meaningful user prompts (cleaned)
 }
 
 export interface ParsedTurn {

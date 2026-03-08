@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import { dirname, join } from "node:path";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { stat, readFile, readdir } from "node:fs/promises";
-import type { ParsedTurn, ContentBlock, SessionInfo } from "../../types.js";
+import { dirname, join } from "node:path";
+import type { ContentBlock, ParsedTurn, SessionInfo } from "../../types.js";
 import type { ProviderParseResult } from "../types.js";
 
 const CURSOR_CHATS_DIR = join(homedir(), ".cursor", "chats");
@@ -101,7 +101,7 @@ function toIsoTimestamp(value: unknown): string | undefined {
 }
 
 async function resolveProjectRootFromPath(rawPath: string): Promise<string | null> {
-  let candidate = rawPath
+  const candidate = rawPath
     .replaceAll("\\\\", "/")
     .replace(/\\n.*$/, "")
     .replace(/["']+$/g, "")
@@ -156,9 +156,7 @@ async function inferProjectFromComposerData(
  * Build reverse map from workspace MD5 hash → decoded project path.
  * Accepts pre-decoded workspace paths from the JSONL discovery phase.
  */
-function buildHashToProjectMap(
-  decodedWorkspacePaths: string[],
-): Map<string, string> {
+function buildHashToProjectMap(decodedWorkspacePaths: string[]): Map<string, string> {
   const map = new Map<string, string>();
   for (const decoded of decodedWorkspacePaths) {
     if (!decoded) continue;
@@ -172,9 +170,7 @@ function buildHashToProjectMap(
  * Read lightweight metadata from a store.db without full parsing.
  * Returns null if the DB is empty, corrupt, or has no meta table.
  */
-async function readStoreDbMeta(
-  dbPath: string,
-): Promise<ChatMeta | null> {
+async function readStoreDbMeta(dbPath: string): Promise<ChatMeta | null> {
   let initSqlJs: any;
   try {
     initSqlJs = (await import("sql.js")).default;
@@ -320,9 +316,10 @@ export async function discoverGlobalStateOnlySessions(
         toIsoTimestamp(composer.lastUpdatedAt) ||
         toIsoTimestamp(composer.createdAt) ||
         new Date().toISOString();
-      const title = typeof composer.name === "string" && composer.name.trim()
-        ? composer.name.trim()
-        : undefined;
+      const title =
+        typeof composer.name === "string" && composer.name.trim()
+          ? composer.name.trim()
+          : undefined;
       const firstPrompt = title || "(cursor global state session)";
       const headers = Array.isArray(composer.fullConversationHeadersOnly)
         ? composer.fullConversationHeadersOnly
@@ -365,7 +362,7 @@ export async function discoverGlobalStateOnlySessions(
   for (const session of sessions) {
     const key = session.project;
     if (!byProject.has(key)) byProject.set(key, []);
-    byProject.get(key)!.push(session);
+    byProject.get(key)?.push(session);
   }
   const cappedProjectSessions: SessionInfo[] = [];
   for (const projectSessions of byProject.values()) {
@@ -387,7 +384,7 @@ export async function discoverGlobalStateOnlySessions(
 
 function shortenPath(path: string): string {
   const home = homedir();
-  if (path.startsWith(home)) return "~" + path.slice(home.length);
+  if (path.startsWith(home)) return `~${path.slice(home.length)}`;
   return path;
 }
 
@@ -573,7 +570,10 @@ function extractToolResultText(value: unknown): string {
   return JSON.stringify(obj, null, 2);
 }
 
-function parseToolFormerBlock(bubbleId: string, toolFormerData: Record<string, any>): ContentBlock | null {
+function parseToolFormerBlock(
+  bubbleId: string,
+  toolFormerData: Record<string, any>,
+): ContentBlock | null {
   const name = typeof toolFormerData.name === "string" ? toolFormerData.name : "";
   if (!name) return null;
 
@@ -839,7 +839,10 @@ function mapCursorToolName(name: string): string {
 
 function mapToolArgs(toolName: string, args: Record<string, any>): Record<string, any> {
   if (toolName === "Shell" && args.command) {
-    return { command: args.command, ...(args.description ? { description: args.description } : {}) };
+    return {
+      command: args.command,
+      ...(args.description ? { description: args.description } : {}),
+    };
   }
   if (toolName === "StrReplace" && args.path) {
     return {
@@ -884,7 +887,9 @@ function mapToolArgs(toolName: string, args: Record<string, any>): Record<string
       pattern: args.pattern ?? "",
       path: args.path ?? "",
       ...(args.glob ? { glob: args.glob } : {}),
-      ...(args.caseInsensitive !== undefined ? { case_insensitive: Boolean(args.caseInsensitive) } : {}),
+      ...(args.caseInsensitive !== undefined
+        ? { case_insensitive: Boolean(args.caseInsensitive) }
+        : {}),
     };
   }
   if (toolName === "web_search" && args.searchTerm) {
@@ -901,7 +906,7 @@ function mapToolArgs(toolName: string, args: Record<string, any>): Record<string
     const first = args.tools[0] || {};
     const parsedParameters =
       typeof first.parameters === "string"
-        ? parseJson(first.parameters) ?? first.parameters
+        ? (parseJson(first.parameters) ?? first.parameters)
         : first.parameters;
     return {
       ...(first.serverName ? { server: first.serverName } : {}),

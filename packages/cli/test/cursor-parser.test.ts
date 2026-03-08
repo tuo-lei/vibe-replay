@@ -1,9 +1,9 @@
-import { describe, it, expect } from "vitest";
-import { parseCursorSession } from "../src/providers/cursor/parser.js";
-import { transformToReplay } from "../src/transform.js";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { parseCursorSession } from "../src/providers/cursor/parser.js";
+import { transformToReplay } from "../src/transform.js";
 
 const FIXTURE = join(import.meta.dirname, "fixtures/cursor-session.jsonl");
 const TOOL_FIXTURE_1 = join(import.meta.dirname, "fixtures/cursor-tool-1.txt");
