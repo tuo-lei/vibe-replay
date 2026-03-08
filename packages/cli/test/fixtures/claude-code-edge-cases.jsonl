@@ -1,0 +1,18 @@
+{"type": "system", "subtype": "init", "sessionId": "edge-session-001", "slug": "edge-slug", "cwd": "/Users/test/edgeproject", "version": "1.0.0", "timestamp": "2025-01-25T08:00:00Z"}
+{"type": "custom-title", "customTitle": "Fix authentication flow"}
+{"type": "file-history-snapshot", "snapshot": {"timestamp": "2025-01-25T08:00:00Z"}}
+this is not valid json at all!!!
+{"type": "progress", "data": "subagent streaming progress..."}
+{"type": "user", "message": {"role": "user", "content": "[Request interrupted by user", "id": "msg_sys1"}, "timestamp": "2025-01-25T08:00:01Z"}
+{"type": "user", "message": {"role": "user", "content": "<command-name>some command</command-name>", "id": "msg_sys2"}, "timestamp": "2025-01-25T08:00:02Z"}
+{"type": "user", "message": {"role": "user", "content": "<local-command-caveat>some caveat</local-command-caveat>", "id": "msg_sys3"}, "timestamp": "2025-01-25T08:00:03Z"}
+{"type": "user", "message": {"role": "user", "content": "<local-command-stdout>output here</local-command-stdout>", "id": "msg_sys4"}, "timestamp": "2025-01-25T08:00:04Z"}
+{"type": "user", "message": {"role": "user", "content": "<task-notification>notification here</task-notification>", "id": "msg_sys5"}, "timestamp": "2025-01-25T08:00:05Z"}
+{"type": "user", "message": {"role": "user", "content": "This is the real user prompt", "id": "msg_real1"}, "timestamp": "2025-01-25T08:00:06Z"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "   "}], "id": "msg_empty_text", "model": "claude-sonnet-4-20250514"}, "timestamp": "2025-01-25T08:00:07Z"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "thinking", "thinking": "   "}], "id": "msg_empty_think", "model": "claude-sonnet-4-20250514"}, "timestamp": "2025-01-25T08:00:08Z"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Got it, working on the fix."}], "id": "msg_real_asst1", "model": "claude-sonnet-4-20250514"}, "timestamp": "2025-01-25T08:00:09Z"}
+{"type": "user", "message": {"role": "user", "content": "This session is being continued from a previous conversation that hit the context limit. Here is the summary...", "id": "msg_compact1"}, "timestamp": "2025-01-25T08:01:00Z"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "I understand the context. Let me continue where we left off."}], "id": "msg_after_compact", "model": "claude-sonnet-4-20250514"}, "timestamp": "2025-01-25T08:01:01Z"}
+{"type": "system", "subtype": "compact_boundary", "timestamp": "2025-01-25T08:01:02Z", "compactMetadata": {"trigger": "context_limit", "preTokens": 50000}}
+{"type": "system", "subtype": "turn_duration", "durationMs": 3500, "timestamp": "2025-01-25T08:01:03Z"}

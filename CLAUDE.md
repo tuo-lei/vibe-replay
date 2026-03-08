@@ -51,6 +51,7 @@ When to use which:
 - **CLI-only changes** → `pnpm --filter vibe-replay build`
 - **types.ts changes** → sync both copies
 - Test with both small (~30 scenes) and large (~500 scenes) sessions
+- **Test modification policy** — see `packages/cli/test/README.md` before changing any test
 
 ## Key files
 

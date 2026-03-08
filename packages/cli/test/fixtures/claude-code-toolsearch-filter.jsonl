@@ -1,0 +1,6 @@
+{"type": "system", "subtype": "init", "sessionId": "toolsearch-session", "slug": "toolsearch-slug", "cwd": "/Users/test/project", "version": "1.0.0", "timestamp": "2025-02-05T10:00:00Z"}
+{"type": "user", "message": {"role": "user", "content": "Search for the config file", "id": "msg_u1"}, "timestamp": "2025-02-05T10:00:01Z"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "tool_search1", "name": "ToolSearch", "input": {"query": "config"}}], "id": "msg_a1", "model": "claude-sonnet-4-20250514"}, "timestamp": "2025-02-05T10:00:02Z"}
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "tool_search1", "content": "Found: config.ts, config.json"}], "id": "msg_toolsearch_result"}, "sourceToolAssistantUUID": "msg_a1", "timestamp": "2025-02-05T10:00:03Z"}
+{"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "Also check the env files"}, {"type": "tool_result", "tool_use_id": "tool_other", "content": "some other result"}], "id": "msg_mixed"}, "timestamp": "2025-02-05T10:00:04Z"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Found the config file."}], "id": "msg_a2", "model": "claude-sonnet-4-20250514"}, "timestamp": "2025-02-05T10:00:05Z"}

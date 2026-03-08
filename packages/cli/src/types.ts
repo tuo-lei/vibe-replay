@@ -38,7 +38,16 @@ export interface RawMessage {
   version: string;
   gitBranch?: string;
   slug: string;
-  type: "user" | "assistant" | "system" | "progress" | "file-history-snapshot" | "custom-title";
+  type:
+    | "user"
+    | "assistant"
+    | "system"
+    | "progress"
+    | "file-history-snapshot"
+    | "custom-title"
+    | "queue-operation"
+    | "last-prompt"
+    | "pr-link";
   subtype?: string;
   timestamp?: string;
   message?: {
