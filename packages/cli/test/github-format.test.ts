@@ -175,12 +175,12 @@ describe("generateGitHubMarkdown", () => {
       scenes,
       meta: {
         ...makeSession().meta,
-        stats: { sceneCount: 6, userPrompts: 1, toolCalls: 5 },
+        stats: { sceneCount: 6, userPrompts: 1, toolCalls: 5, thinkingBlocks: 0 },
       },
     });
 
     const md = generateGitHubMarkdown(session);
-    expect(md).toContain("`app.ts` modified 5x");
+    expect(md).toContain("`src/app.ts` modified 5x");
   });
 
   it("handles empty sessions gracefully", () => {
@@ -198,6 +198,18 @@ describe("generateGitHubMarkdown", () => {
     expect(md).toContain("</details>");
   });
 
+  it("truncates long CJK prompts correctly", () => {
+    // Each CJK char counts as 2 visual columns — 100 CJK chars = 200 visual columns
+    const longCjk = "修".repeat(100);
+    const session = makeSession({
+      scenes: [{ type: "user-prompt", content: longCjk }],
+    });
+
+    const md = generateGitHubMarkdown(session);
+    expect(md).toContain("…");
+    expect(md).not.toContain(longCjk);
+  });
+
   it("truncates long user prompts", () => {
     const longPrompt = "A".repeat(200);
     const session = makeSession({
@@ -205,8 +217,9 @@ describe("generateGitHubMarkdown", () => {
     });
 
     const md = generateGitHubMarkdown(session);
-    // Should be truncated with ellipsis
-    expect(md.length).toBeLessThan(longPrompt.length + 500);
+    // Should be truncated with ellipsis character
+    expect(md).toContain("…");
+    expect(md).not.toContain(longPrompt);
   });
 });
 
@@ -297,5 +310,112 @@ describe("generateGitHubSvg", () => {
 
     // SVG should be under 50KB for GitHub rendering
     expect(svg.length).toBeLessThan(50_000);
+  });
+
+  it("handles CJK text wrapping correctly", () => {
+    const session = makeSession({
+      scenes: [
+        {
+          type: "user-prompt",
+          content: "请添加用户认证中间件，支持JWT令牌验证和刷新功能",
+        },
+      ],
+    });
+
+    const svg = generateGitHubSvg(session);
+
+    // CJK chars should appear in the SVG (XML-escaped)
+    expect(svg).toContain("请添加用户认证中间件");
+    expect(svg).toContain("</svg>");
+  });
+
+  it("truncates long CJK text with ellipsis", () => {
+    // Each CJK char is 2 visual columns, so 100 chars = 200 visual columns → will be truncated
+    const longCjk = "认".repeat(100);
+    const session = makeSession({
+      scenes: [{ type: "user-prompt", content: longCjk }],
+    });
+
+    const svg = generateGitHubSvg(session);
+    expect(svg).toContain("…");
+    expect(svg).not.toContain(longCjk);
+  });
+
+  it("maintains phase order in selected frames", () => {
+    // Create a session with 5 phases of different importance
+    const scenes: Scene[] = [];
+
+    // Phase 1: simple prompt, few actions
+    scenes.push({ type: "user-prompt", content: "Phase one" });
+    scenes.push({
+      type: "tool-call",
+      toolName: "Read",
+      input: { file_path: "~/src/a.ts" },
+      result: "ok",
+    });
+
+    // Phase 2: has test failure (should be selected)
+    scenes.push({ type: "user-prompt", content: "Phase two" });
+    scenes.push({
+      type: "tool-call",
+      toolName: "Bash",
+      input: { command: "pnpm test" },
+      result: "FAIL: 2 tests failed",
+    });
+
+    // Phase 3: simple
+    scenes.push({ type: "user-prompt", content: "Phase three" });
+    scenes.push({
+      type: "tool-call",
+      toolName: "Read",
+      input: { file_path: "~/src/b.ts" },
+      result: "ok",
+    });
+
+    // Phase 4: has file creation (should be selected)
+    scenes.push({ type: "user-prompt", content: "Phase four" });
+    scenes.push({
+      type: "tool-call",
+      toolName: "Write",
+      input: { file_path: "~/src/new.ts", content: "" },
+      result: "OK",
+    });
+    scenes.push({
+      type: "tool-call",
+      toolName: "Write",
+      input: { file_path: "~/src/new2.ts", content: "" },
+      result: "OK",
+    });
+
+    // Phase 5: simple
+    scenes.push({ type: "user-prompt", content: "Phase five" });
+    scenes.push({
+      type: "tool-call",
+      toolName: "Read",
+      input: { file_path: "~/src/c.ts" },
+      result: "ok",
+    });
+
+    const session = makeSession({
+      scenes,
+      meta: {
+        ...makeSession().meta,
+        stats: { sceneCount: scenes.length, userPrompts: 5, toolCalls: 6 },
+      },
+    });
+
+    const svg = generateGitHubSvg(session);
+
+    // The selected phase frames should appear in original order in the SVG
+    // Phase 1 (always included as first), then phases 2 and 4 (highest scores)
+    const step1Pos = svg.indexOf("STEP 1 OF 5");
+    const step2Pos = svg.indexOf("STEP 2 OF 5");
+    const step4Pos = svg.indexOf("STEP 4 OF 5");
+
+    expect(step1Pos).toBeGreaterThan(-1);
+    expect(step2Pos).toBeGreaterThan(-1);
+    expect(step4Pos).toBeGreaterThan(-1);
+    expect(step1Pos).toBeLessThan(step2Pos);
+    expect(step2Pos).toBeLessThan(step4Pos);
   });
 });

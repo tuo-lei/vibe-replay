@@ -104,7 +104,7 @@ export function generateGitHubMarkdown(
  */
 export function generateGitHubSvg(session: ReplaySession, opts: GitHubFormatOptions = {}): string {
   const phases = extractPhases(session.scenes);
-  const frames = buildSvgFrames(session, phases);
+  const frames = buildSvgFrames(session, phases, opts);
   return renderSvg(frames, session, opts);
 }
 
@@ -415,7 +415,11 @@ interface SvgTextLine {
   bold?: boolean;
 }
 
-function buildSvgFrames(session: ReplaySession, phases: Phase[]): SvgFrame[] {
+function buildSvgFrames(
+  session: ReplaySession,
+  phases: Phase[],
+  opts: GitHubFormatOptions = {},
+): SvgFrame[] {
   const { meta } = session;
   const frames: SvgFrame[] = [];
   const task = phases[0]?.prompt || meta.title || meta.slug;
@@ -480,16 +484,20 @@ function buildSvgFrames(session: ReplaySession, phases: Phase[]): SvgFrame[] {
     .filter(Boolean)
     .join("  ·  ");
 
+  const summaryLines: SvgTextLine[] = [
+    { text: summaryStats, color: C.green },
+    { text: `${meta.stats.toolCalls} tool calls`, color: C.dim },
+    { text: "", color: C.dim }, // spacer
+  ];
+  if (opts.replayUrl) {
+    summaryLines.push({ text: "View full replay  →", color: C.blue, bold: true });
+  }
+  summaryLines.push({ text: "vibe-replay.com", color: C.dim });
+
   const summaryFrame: SvgFrame = {
     label: "COMPLETE",
     title: meta.title || condenseLine(task, 50),
-    lines: [
-      { text: summaryStats, color: C.green },
-      { text: `${meta.stats.toolCalls} tool calls`, color: C.dim },
-      { text: "", color: C.dim }, // spacer
-      { text: "View full replay  →", color: C.blue, bold: true },
-      { text: "vibe-replay.com", color: C.dim },
-    ],
+    lines: summaryLines,
   };
   frames.push(summaryFrame);
 
@@ -564,12 +572,13 @@ function renderSvg(
   const holdEnd = pct - fadeIn;
   const fadeOut = pct;
 
-  // Per-frame animation classes
+  // Per-frame animation classes — frame-0 starts visible (no blank flash)
   const animClasses = frames
-    .map(
-      (_, i) =>
-        `    .frame-${i} { animation: fadeInOut ${cycleDuration}s ${i * secPerFrame}s infinite; }`,
-    )
+    .map((_, i) => {
+      const delay = i * secPerFrame;
+      const fill = i === 0 ? " animation-fill-mode: backwards;" : "";
+      return `    .frame-${i} { animation: fadeInOut ${cycleDuration}s ${delay}s infinite;${fill} }`;
+    })
     .join("\n");
 
   // Footer
@@ -597,7 +606,7 @@ ${animClasses}
   </style>
 
   <defs>
-    <clipPath id="content-clip">
+    <clipPath id="vr-clip-${session.meta.sessionId.slice(0, 8)}">
       <rect x="0" y="${HEADER_H}" width="${SVG_W}" height="${SVG_H - HEADER_H - FOOTER_H}"/>
     </clipPath>
   </defs>
@@ -619,7 +628,7 @@ ${animClasses}
   <text x="${SVG_W - MARGIN}" y="${SVG_H - FOOTER_H / 2 + 4}" text-anchor="end" fill="${C.dim}" font-size="11">${escXml(footerRight)}</text>
 
   <!-- Animated content frames (clipped to content area) -->
-  <g clip-path="url(#content-clip)">
+  <g clip-path="url(#vr-clip-${session.meta.sessionId.slice(0, 8)})">
 ${framesSvg}
   </g>
 </svg>`;
@@ -685,7 +694,7 @@ function collectFilesChanged(scenes: Scene[]): Map<string, number> {
     if (scene.toolName === "Edit" || scene.toolName === "Write") {
       const fp = scene.input.file_path;
       if (fp) {
-        const name = baseName(fp);
+        const name = shortPath(fp);
         files.set(name, (files.get(name) || 0) + 1);
       }
     }
@@ -693,8 +702,15 @@ function collectFilesChanged(scenes: Scene[]): Map<string, number> {
   return files;
 }
 
+/** Show last 2 path segments for disambiguation (avoids basename collisions) */
+function shortPath(fullPath: string): string {
+  const parts = fullPath.split("/");
+  if (parts.length <= 2) return parts.join("/");
+  return parts.slice(-2).join("/");
+}
+
 function formatDuration(ms?: number): string | null {
-  if (!ms) return null;
+  if (ms == null) return null;
   const sec = Math.round(ms / 1000);
   if (sec < 60) return `${sec}s`;
   const min = Math.floor(sec / 60);
@@ -766,7 +782,7 @@ function baseName(p: string): string {
 }
 
 function escMd(s: string): string {
-  return s.replace(/[[\]()]/g, "\\$&");
+  return s.replace(/[[\]()*_`\\]/g, "\\$&");
 }
 
 function escXml(s: string): string {

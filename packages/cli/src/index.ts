@@ -26,12 +26,25 @@ program
     "Custom title for the replay (shown on landing page & shared links)",
   )
   .option("-d, --dashboard", "Open Dashboard directly (skip session picker)")
-  .option("-f, --format <format>", "Output format: html (default), github (markdown + SVG for PRs)")
+  .option("-f, --format <format>", "Output format (choices: html, github)", "html")
   .option("--replay-url <url>", "Full replay URL for GitHub format (e.g. gist viewer link)")
   .option("--no-svg", "Skip SVG generation in GitHub format")
   .option("--copy", "Copy GitHub markdown to clipboard")
   .action(async (opts) => {
     console.log(chalk.bold.cyan("\n  vibe-replay") + chalk.dim(` v${CLI_VERSION}\n`));
+
+    // Validate --format
+    if (opts.format && !["html", "github"].includes(opts.format)) {
+      console.log(chalk.red(`  Unknown format: ${opts.format}. Use "html" or "github".`));
+      process.exit(1);
+    }
+
+    // Validate --replay-url
+    if (opts.replayUrl && !/^https?:\/\//.test(opts.replayUrl)) {
+      console.log(chalk.yellow(`  Warning: --replay-url should start with http:// or https://`));
+      console.log(chalk.yellow(`  Ignoring invalid URL: ${opts.replayUrl}`));
+      opts.replayUrl = undefined;
+    }
 
     // --dashboard: open Dashboard directly
     if (opts.dashboard) {
@@ -177,25 +190,54 @@ program
       }
     }
 
+    // Common output path
+    const { join } = await import("node:path");
+    const rawSlug = replay.meta.slug || replay.meta.sessionId.slice(0, 8);
+    const slug = rawSlug.replace(/[^a-zA-Z0-9_-]/g, "-");
+    const outputDir = join(home, ".vibe-replay", slug);
+
     // --- GitHub format: generate markdown + SVG and exit ---
     if (opts.format === "github") {
-      const { join: pathJoin } = await import("node:path");
       const { mkdir, writeFile } = await import("node:fs/promises");
-      const rawSlug = replay.meta.slug || replay.meta.sessionId.slice(0, 8);
-      const slug = rawSlug.replace(/[^a-zA-Z0-9_-]/g, "-");
-      const outputDir = pathJoin(home, ".vibe-replay", slug);
       await mkdir(outputDir, { recursive: true });
+
+      // Secrets scan — critical for public PR content
+      const scanSpinner = ora("Scanning for secrets...").start();
+      const findings = scanForSecrets(JSON.stringify(replay));
+      if (findings.length === 0) {
+        scanSpinner.succeed("No secrets detected");
+      } else {
+        scanSpinner.warn(`${findings.length} potential secret(s) found`);
+        console.log();
+        for (let i = 0; i < findings.length; i++) {
+          const f = findings[i];
+          console.log(chalk.yellow(`  ${i + 1}. [${f.rule}]`));
+          console.log(chalk.dim(`     ${f.match}`));
+        }
+        console.log();
+
+        const { confirm } = await import("@inquirer/prompts");
+        const ok = await confirm({
+          message: "These may be false alarms (e.g. example keys in docs). Continue anyway?",
+          default: false,
+        });
+        if (!ok) {
+          console.log(chalk.red("\n  Aborted — review the session and re-run.\n"));
+          process.exit(1);
+        }
+        console.log(chalk.dim("  Continuing — user confirmed findings are safe.\n"));
+      }
 
       let svgPath: string | undefined;
 
       // Generate animated SVG unless --no-svg
       if (opts.svg !== false) {
-        const svgSpinner = ora("Generating animated SVG...").start();
+        const svgSpinner2 = ora("Generating animated SVG...").start();
         const svgContent = generateGitHubSvg(replay, { replayUrl: opts.replayUrl });
-        const svgFilePath = pathJoin(outputDir, "session-preview.svg");
+        const svgFilePath = join(outputDir, "session-preview.svg");
         await writeFile(svgFilePath, svgContent, "utf-8");
         svgPath = svgFilePath;
-        svgSpinner.succeed(`SVG: ${svgFilePath}`);
+        svgSpinner2.succeed(`SVG: ${svgFilePath}`);
       }
 
       // Generate markdown
@@ -204,7 +246,7 @@ program
         replayUrl: opts.replayUrl,
         svgPath: svgPath ? "./session-preview.svg" : undefined,
       });
-      const mdFilePath = pathJoin(outputDir, "github-summary.md");
+      const mdFilePath = join(outputDir, "github-summary.md");
       await writeFile(mdFilePath, markdown, "utf-8");
       mdSpinner.succeed(`Markdown: ${mdFilePath}`);
 
@@ -237,12 +279,6 @@ program
       console.log();
       return;
     }
-
-    // Output path: ~/.vibe-replay/<slug>/index.html
-    const rawSlug = replay.meta.slug || replay.meta.sessionId.slice(0, 8);
-    const slug = rawSlug.replace(/[^a-zA-Z0-9_-]/g, "-");
-    const { join } = await import("node:path");
-    const outputDir = join(home, ".vibe-replay", slug);
 
     const genSpinner = ora("Generating replay...").start();
     const outputPath = await generateOutput(replay, outputDir);
