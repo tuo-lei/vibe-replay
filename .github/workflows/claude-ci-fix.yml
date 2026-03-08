@@ -40,27 +40,96 @@ jobs:
             return data.length > 0 ? data[0].number : '';
           result-encoding: string
 
-      - name: Checkout repository
+      - name: Identify failure type
+        id: failure
         if: steps.pr.outputs.result != ''
+        uses: actions/github-script@v7
+        env:
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        with:
+          script: |
+            const { data } = await github.rest.actions.listJobsForWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: parseInt(process.env.RUN_ID),
+            });
+            const failed = data.jobs
+              .filter(j => j.conclusion === 'failure')
+              .map(j => j.name);
+            const hasTest = failed.includes('test');
+            const hasLintOrBuild = failed.some(n => n === 'lint' || n === 'build');
+            core.setOutput('has_test', hasTest.toString());
+            core.setOutput('has_lint_or_build', hasLintOrBuild.toString());
+            core.setOutput('failed_jobs', failed.join(', '));
+
+      - name: Checkout repository
+        if: steps.pr.outputs.result != '' && steps.failure.outputs.has_lint_or_build == 'true'
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_branch }}
           fetch-depth: 1
 
-      - name: Run Claude to fix CI
-        if: steps.pr.outputs.result != ''
+      # Auto-fix lint and build failures — these are unambiguous
+      - name: Auto-fix lint/build failures
+        if: steps.pr.outputs.result != '' && steps.failure.outputs.has_lint_or_build == 'true'
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           use_oauth: true
           direct_prompt: |
             The CI workflow failed on PR #${{ steps.pr.outputs.result }}.
+            Failed jobs: ${{ steps.failure.outputs.failed_jobs }}
 
-            1. Read the failed CI logs using: gh run view ${{ github.event.workflow_run.id }} --log-failed
-            2. Analyze the failure and fix the issue
-            3. Run the failing check locally to verify your fix
-            4. Commit and push the fix
+            1. Read the failed CI logs: gh run view ${{ github.event.workflow_run.id }} --log-failed
+            2. Fix ONLY lint and build errors (formatting, missing imports, type errors, etc.)
+            3. Do NOT modify any test files or test expectations
+            4. Run the failing check locally to verify
+            5. Commit and push the fix
 
-            Be concise. Fix only what's broken, don't refactor unrelated code.
+            Be concise. Fix only what's broken.
           additional_permissions: |
             actions: read
+
+      # Test failures get a comment only — human decides whether to fix test or code
+      - name: Comment on test failures
+        if: steps.pr.outputs.result != '' && steps.failure.outputs.has_test == 'true'
+        uses: actions/github-script@v7
+        env:
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        with:
+          script: |
+            // Get failed log excerpt via CLI
+            const { execSync } = require('child_process');
+            let logs = '';
+            try {
+              logs = execSync(
+                `gh run view ${process.env.RUN_ID} --log-failed 2>&1 | tail -50`,
+                { encoding: 'utf-8', timeout: 30000 }
+              );
+            } catch (e) {
+              logs = '(Could not retrieve logs)';
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: parseInt('${{ steps.pr.outputs.result }}'),
+              body: [
+                '## 🔴 Test failure detected',
+                '',
+                `[CI run](${process.env.RUN_URL})`,
+                '',
+                '<details><summary>Failed test logs</summary>',
+                '',
+                '```',
+                logs.slice(-3000),
+                '```',
+                '</details>',
+                '',
+                'Test failures need human judgement — is the test wrong or is the code wrong?',
+                '',
+                'To have Claude attempt a fix, reply with:',
+                '`@claude Fix the test failure. The intended behavior is: <describe what should happen>`',
+              ].join('\n'),
+            });
