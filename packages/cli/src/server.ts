@@ -48,28 +48,30 @@ function requireSlug(raw: string | undefined): { slug: string } | { error: strin
   return { slug };
 }
 
-// ─── Archive helpers (file-based, lightweight) ─────────────────────
+// ─── Archive helpers (directory-based, one marker file per slug) ────
 
-interface ArchiveData {
-  sessions: string[];  // archived session slugs (source sessions)
-  replays: string[];   // archived replay slugs
-}
+const ARCHIVE_DIR = ".archive";
 
-async function loadArchive(baseDir: string): Promise<ArchiveData> {
+async function getArchivedSlugs(baseDir: string): Promise<Set<string>> {
   try {
-    const raw = await readFile(join(baseDir, ".archived.json"), "utf-8");
-    const data = JSON.parse(raw);
-    return {
-      sessions: Array.isArray(data.sessions) ? data.sessions : [],
-      replays: Array.isArray(data.replays) ? data.replays : [],
-    };
+    const entries = await readdir(join(baseDir, ARCHIVE_DIR));
+    return new Set(entries);
   } catch {
-    return { sessions: [], replays: [] };
+    return new Set();
   }
 }
 
-async function saveArchive(baseDir: string, archive: ArchiveData): Promise<void> {
-  await writeFile(join(baseDir, ".archived.json"), JSON.stringify(archive, null, 2) + "\n");
+async function archiveSlug(baseDir: string, slug: string): Promise<void> {
+  const dir = join(baseDir, ARCHIVE_DIR);
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, slug), "");
+}
+
+async function unarchiveSlug(baseDir: string, slug: string): Promise<void> {
+  try {
+    const { unlink } = await import("node:fs/promises");
+    await unlink(join(baseDir, ARCHIVE_DIR, slug));
+  } catch { /* already gone */ }
 }
 
 async function loadViewerHtml(): Promise<string> {
@@ -342,37 +344,23 @@ export async function startServer(
     }
   });
 
-  // --- Archive: lightweight file-based hide/show ---
+  // --- Archive: directory-based, one marker file per slug ---
   app.get("/api/archived", async (c) => {
-    const archive = await loadArchive(baseDir);
-    return c.json(archive);
+    const slugs = await getArchivedSlugs(baseDir);
+    return c.json({ slugs: [...slugs] });
   });
 
-  app.post("/api/archive/:type/:slug", async (c) => {
-    const type = c.req.param("type") as "sessions" | "replays";
-    if (type !== "sessions" && type !== "replays") {
-      return c.json({ error: "type must be 'sessions' or 'replays'" }, 400);
-    }
+  app.post("/api/archive/:slug", async (c) => {
     const slug = safeSlug(c.req.param("slug"));
     if (!slug) return c.json({ error: "invalid slug" }, 400);
-    const archive = await loadArchive(baseDir);
-    if (!archive[type].includes(slug)) {
-      archive[type].push(slug);
-      await saveArchive(baseDir, archive);
-    }
+    await archiveSlug(baseDir, slug);
     return c.json({ ok: true });
   });
 
-  app.delete("/api/archive/:type/:slug", async (c) => {
-    const type = c.req.param("type") as "sessions" | "replays";
-    if (type !== "sessions" && type !== "replays") {
-      return c.json({ error: "type must be 'sessions' or 'replays'" }, 400);
-    }
+  app.delete("/api/archive/:slug", async (c) => {
     const slug = safeSlug(c.req.param("slug"));
     if (!slug) return c.json({ error: "invalid slug" }, 400);
-    const archive = await loadArchive(baseDir);
-    archive[type] = archive[type].filter((s) => s !== slug);
-    await saveArchive(baseDir, archive);
+    await unarchiveSlug(baseDir, slug);
     return c.json({ ok: true });
   });
 

@@ -485,24 +485,24 @@ function SessionsPanel() {
         if (!r.ok) throw new Error("Failed to load sessions");
         return r.json();
       }),
-      fetch("/api/archived").then((r) => r.ok ? r.json() : { sessions: [] }),
+      fetch("/api/archived").then((r) => r.ok ? r.json() : { slugs: [] }),
     ])
-      .then(([data, archive]: [{ sessions: SourceSession[] }, { sessions: string[] }]) => {
+      .then(([data, archive]: [{ sessions: SourceSession[] }, { slugs: string[] }]) => {
         setSources(data.sessions);
-        setArchivedSlugs(new Set(archive.sessions));
+        setArchivedSlugs(new Set(archive.slugs));
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, []);
 
-  const archiveSession = async (slug: string) => {
-    await fetch(`/api/archive/sessions/${slug}`, { method: "POST" });
-    setArchivedSlugs((prev) => new Set([...prev, slug]));
-  };
-
-  const unarchiveSession = async (slug: string) => {
-    await fetch(`/api/archive/sessions/${slug}`, { method: "DELETE" });
-    setArchivedSlugs((prev) => { const next = new Set(prev); next.delete(slug); return next; });
+  const toggleArchive = async (slug: string) => {
+    const isArchived = archivedSlugs.has(slug);
+    await fetch(`/api/archive/${slug}`, { method: isArchived ? "DELETE" : "POST" });
+    setArchivedSlugs((prev) => {
+      const next = new Set(prev);
+      isArchived ? next.delete(slug) : next.add(slug);
+      return next;
+    });
   };
 
   useEffect(() => { loadSources(); }, [loadSources]);
@@ -771,12 +771,9 @@ function SessionsPanel() {
                     ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/30"
                     : "text-terminal-dim border-terminal-border hover:text-terminal-text"
                 }`}
-                title={showArchived ? "Hide archived" : `Show ${archivedCount} archived`}
+                title={showArchived ? "Hide archived" : `View all (${archivedCount} archived)`}
               >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="inline-block">
-                  <path d="M2 4h12v2H2zM3 6v7h10V6M6.5 8h3" />
-                </svg>
-                {" "}{archivedCount}
+                {showArchived ? "Active" : "View all"}
               </button>
             )}
           </div>
@@ -837,7 +834,7 @@ function SessionsPanel() {
                       onOpen={() => navigateTo({ view: null, session: s.existingReplay! })}
                       onRegenerate={() => handleGenerate(s)}
                       isRegenerating={generatingSlug === s.slug}
-                      onArchive={() => isArchived ? unarchiveSession(s.slug) : archiveSession(s.slug)}
+                      onArchive={() => toggleArchive(s.slug)}
                       isArchived={isArchived}
                     />
                   );
@@ -884,7 +881,7 @@ function SessionsPanel() {
                           ) : "Generate"}
                         </button>
                         <button
-                          onClick={() => isArchived ? unarchiveSession(s.slug) : archiveSession(s.slug)}
+                          onClick={() => toggleArchive(s.slug)}
                           className="p-1 text-terminal-dim hover:text-terminal-text transition-colors"
                           title={isArchived ? "Unarchive" : "Archive"}
                         >
@@ -943,11 +940,11 @@ function ReplaysPanel() {
         if (!r.ok) throw new Error();
         return r.json();
       }),
-      fetch("/api/archived").then((r) => r.ok ? r.json() : { replays: [] }),
+      fetch("/api/archived").then((r) => r.ok ? r.json() : { slugs: [] }),
     ])
-      .then(([data, archive]: [SessionSummary[], { replays?: string[] }]) => {
+      .then(([data, archive]: [SessionSummary[], { slugs: string[] }]) => {
         setSessions(data);
-        setArchivedSlugs(new Set(archive.replays || []));
+        setArchivedSlugs(new Set(archive.slugs));
         setServerAvailable(true);
       })
       .catch(() => {
@@ -961,14 +958,14 @@ function ReplaysPanel() {
       .catch(() => setGhAvailable(false));
   }, []);
 
-  const archiveReplay = async (slug: string) => {
-    await fetch(`/api/archive/replays/${slug}`, { method: "POST" });
-    setArchivedSlugs((prev) => new Set([...prev, slug]));
-  };
-
-  const unarchiveReplay = async (slug: string) => {
-    await fetch(`/api/archive/replays/${slug}`, { method: "DELETE" });
-    setArchivedSlugs((prev) => { const next = new Set(prev); next.delete(slug); return next; });
+  const toggleArchive = async (slug: string) => {
+    const isArchived = archivedSlugs.has(slug);
+    await fetch(`/api/archive/${slug}`, { method: isArchived ? "DELETE" : "POST" });
+    setArchivedSlugs((prev) => {
+      const next = new Set(prev);
+      isArchived ? next.delete(slug) : next.add(slug);
+      return next;
+    });
   };
 
   const handleTitleSave = async (slug: string, title: string) => {
@@ -1085,12 +1082,9 @@ function ReplaysPanel() {
                     ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/30"
                     : "text-terminal-dim border-terminal-border hover:text-terminal-text"
                 }`}
-                title={showArchived ? "Hide archived" : `Show ${archivedCount} archived`}
+                title={showArchived ? "Hide archived" : `View all (${archivedCount} archived)`}
               >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="inline-block">
-                  <path d="M2 4h12v2H2zM3 6v7h10V6M6.5 8h3" />
-                </svg>
-                {" "}{archivedCount}
+                {showArchived ? "Active" : "View all"}
               </button>
             )}
           </div>
@@ -1133,7 +1127,7 @@ function ReplaysPanel() {
                   onTitleSave={handleTitleSave}
                   onDelete={() => confirmDelete(s.slug)}
                   onPublishGist={() => handlePublishGist(s.slug)}
-                  onArchive={() => isArchived ? unarchiveReplay(s.slug) : archiveReplay(s.slug)}
+                  onArchive={() => toggleArchive(s.slug)}
                   ghAvailable={ghAvailable === true}
                   isPublishing={publishingSlug === s.slug}
                   isArchived={isArchived}
