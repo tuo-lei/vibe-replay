@@ -102,7 +102,7 @@ export function useAnnotations(
           body: JSON.stringify(annotations),
         })
           .then(() => {
-            setSavedSnapshot([...annotations]);
+            setSavedSnapshot(annotations);
           })
           .catch(() => {
             /* silent */
@@ -175,7 +175,7 @@ export function useAnnotations(
       URL.revokeObjectURL(url);
     }
 
-    setSavedSnapshot([...annotations]);
+    setSavedSnapshot(annotations);
     try {
       localStorage.removeItem(storageKey(sessionId));
     } catch {
@@ -196,7 +196,7 @@ export function useAnnotations(
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 
-    setSavedSnapshot([...annotations]);
+    setSavedSnapshot(annotations);
     try {
       localStorage.removeItem(storageKey(sessionId));
     } catch {
@@ -221,7 +221,7 @@ export function useAnnotations(
           if (!resp.ok) {
             throw new Error(result.error || `Server error: ${resp.status}`);
           }
-          setSavedSnapshot([...annotations]);
+          setSavedSnapshot(annotations);
           return result as { gistUrl: string; viewerUrl: string };
         } finally {
           setGistPublishing(false);
@@ -280,7 +280,7 @@ export function useAnnotations(
             const data = await resp.json();
             if (!resp.ok) throw new Error(data.error || "AI Coach failed");
             setAnnotations(data.annotations);
-            setSavedSnapshot([...data.annotations]);
+            setSavedSnapshot(data.annotations);
             return { score: data.score as number, itemCount: data.itemCount as number };
           } finally {
             aiCoachAbortRef.current = null;
@@ -318,7 +318,7 @@ export function useAnnotations(
           const data = await resp.json();
           if (!resp.ok) throw new Error(data.error || `Export failed: ${resp.status}`);
           const { path } = data;
-          setSavedSnapshot([...annotations]);
+          setSavedSnapshot(annotations);
           return path as string;
         } finally {
           setHtmlExporting(false);

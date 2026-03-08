@@ -172,4 +172,10 @@ describe("hasUnsavedChanges", () => {
     const list = [makeAnnotation()];
     expect(hasUnsavedChanges(list, [])).toBe(true);
   });
+
+  it("returns true when annotations are in different order (order-sensitive)", () => {
+    const a = makeAnnotation({ id: "a", sceneIndex: 0 });
+    const b = makeAnnotation({ id: "b", sceneIndex: 1 });
+    expect(hasUnsavedChanges([a, b], [b, a])).toBe(true);
+  });
 });
