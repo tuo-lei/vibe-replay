@@ -66,8 +66,9 @@ export async function parseClaudeCodeSession(
     if (!slug && obj.slug) slug = obj.slug;
     if (!cwd && obj.cwd) cwd = obj.cwd;
 
-    if (obj.type === "custom-title" && (obj as any).title) {
-      title = (obj as any).title;
+    if (obj.type === "custom-title") {
+      // Real JSONL uses `customTitle`; support `title` as fallback for compatibility
+      title = (obj as any).customTitle || (obj as any).title || title;
     }
 
     if (obj.type === "file-history-snapshot") {
@@ -267,9 +268,12 @@ function isSystemGeneratedMessage(text: string): boolean {
   return (
     text.startsWith("[Request interrupted by user") ||
     text.startsWith("<command-name>") ||
+    text.startsWith("<command-message>") ||
     text.startsWith("<local-command-caveat>") ||
     text.startsWith("<local-command-stdout>") ||
-    text.startsWith("<task-notification>")
+    text.startsWith("<task-notification>") ||
+    text.startsWith("<bash-input>") ||
+    text.startsWith("<bash-stdout>")
   );
 }
 

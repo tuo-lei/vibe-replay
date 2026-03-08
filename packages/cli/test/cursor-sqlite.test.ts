@@ -289,17 +289,7 @@ describe("parseCursorSession — SQLite priority", () => {
   });
 });
 
-describe("Cursor tool name mapping", () => {
-  it("maps Shell to Bash in transformed output", async () => {
-    // We test through the full transform pipeline
-    // The JSONL fixture doesn't go through SQLite, but the mapping logic
-    // is shared via transform. We verify the mapping constants exist.
-    const parsed = await parseCursorSession(FIXTURE_JSONL);
-    const replay = transformToReplay(parsed, "cursor", "~/test");
-    expect(replay.meta.provider).toBe("cursor");
-    expect(replay.meta.dataSource).toMatch(/^jsonl/);
-  });
-});
+// Shell→Bash mapping is tested in cursor-parser.test.ts / cursor-parser-comprehensive.test.ts
 
 describe("dataSource metadata propagation", () => {
   it("JSONL source propagates to ReplaySession.meta", async () => {
@@ -317,12 +307,7 @@ describe("dataSource metadata propagation", () => {
     expect(replay.meta.dataSource).toBe("jsonl+tools");
   });
 
-  it("thinkingBlocks count is set in meta.stats", async () => {
-    const parsed = await parseCursorSession(FIXTURE_JSONL);
-    const replay = transformToReplay(parsed, "cursor", "~/test");
-    expect(replay.meta.stats.thinkingBlocks).toBeDefined();
-    expect(typeof replay.meta.stats.thinkingBlocks).toBe("number");
-  });
+  // thinkingBlocks count is implicitly tested in transform-comprehensive.test.ts "stats count scenes correctly"
 });
 
 describe("full SQLite round-trip integration", () => {

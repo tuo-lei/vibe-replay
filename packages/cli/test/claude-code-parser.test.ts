@@ -44,14 +44,11 @@ describe("Claude Code parser", () => {
   it("attaches tool results to tool_use blocks", async () => {
     const result = await parseClaudeCodeSession(FIXTURE);
     const assistantTurns = result.turns.filter((t) => t.role === "assistant");
-    // Find the Read tool_use
-    for (const turn of assistantTurns) {
-      for (const block of turn.blocks) {
-        if (block.type === "tool_use" && block.name === "Read") {
-          expect((block as any)._result).toContain("export function login()");
-        }
-      }
-    }
+    const readBlock = assistantTurns
+      .flatMap((t) => t.blocks)
+      .find((b) => b.type === "tool_use" && b.name === "Read");
+    expect(readBlock).toBeDefined();
+    expect((readBlock as any)._result).toContain("export function login()");
   });
 
   it("computes total duration from turn_duration events", async () => {
@@ -120,12 +117,14 @@ describe("Claude Code → transform", () => {
 
     const editScene = replay.scenes.find((s) => s.type === "tool-call" && s.toolName === "Edit");
     expect(editScene).toBeDefined();
-    if (editScene?.type === "tool-call") {
-      expect(editScene.diff).toBeDefined();
-      expect(editScene.diff?.filePath).toBe("/Users/test/project/auth.ts");
-      expect(editScene.diff?.oldContent).toContain("return null");
-      expect(editScene.diff?.newContent).toContain("generateToken");
-    }
+    expect(editScene!.type).toBe("tool-call");
+    expect(editScene!.type === "tool-call" && editScene!.diff?.filePath).toBe(
+      "/Users/test/project/auth.ts",
+    );
+    expect(editScene!.type === "tool-call" && editScene!.diff?.oldContent).toContain("return null");
+    expect(editScene!.type === "tool-call" && editScene!.diff?.newContent).toContain(
+      "generateToken",
+    );
   });
 
   it("enriches Bash tool calls with command + stdout", async () => {
@@ -134,11 +133,11 @@ describe("Claude Code → transform", () => {
 
     const bashScene = replay.scenes.find((s) => s.type === "tool-call" && s.toolName === "Bash");
     expect(bashScene).toBeDefined();
-    if (bashScene?.type === "tool-call") {
-      expect(bashScene.bashOutput).toBeDefined();
-      expect(bashScene.bashOutput?.command).toBe("npm test");
-      expect(bashScene.bashOutput?.stdout).toContain("tests passed");
-    }
+    expect(bashScene!.type).toBe("tool-call");
+    expect(bashScene!.type === "tool-call" && bashScene!.bashOutput?.command).toBe("npm test");
+    expect(bashScene!.type === "tool-call" && bashScene!.bashOutput?.stdout).toContain(
+      "tests passed",
+    );
   });
 
   it("attaches images to user-prompt scenes", async () => {
@@ -152,13 +151,7 @@ describe("Claude Code → transform", () => {
     expect(promptWithImg?.images?.[0]).toMatch(/^data:image\/png;base64,/);
   });
 
-  it("redacts secrets in output", async () => {
-    // Manually test the redaction by checking that a known pattern would be redacted
-    const parsed = await parseClaudeCodeSession(FIXTURE);
-    const replay = transformToReplay(parsed, "claude-code", "~/test/project");
-    // The fixture doesn't contain secrets, but we can verify the pipeline doesn't crash
-    expect(replay.scenes.length).toBeGreaterThan(0);
-  });
+  // Secret redaction is tested in transform-security.test.ts
 
   it("populates metadata correctly", async () => {
     const parsed = await parseClaudeCodeSession(FIXTURE);

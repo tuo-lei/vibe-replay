@@ -1,0 +1,10 @@
+{"role": "user", "message": {"content": [{"type": "text", "text": ""}]}}
+{"role": "user", "message": {"content": [{"type": "text", "text": "<user_query>\n\n</user_query>"}]}}
+not valid json here
+{"role": "user", "message": {"content": [{"type": "text", "text": "<user_query>\nFirst real prompt\n</user_query>"}]}}
+{"role": "assistant", "message": {"content": [{"type": "text", "text": ""}]}}
+{"role": "assistant", "message": {"content": [{"type": "text", "text": "I'll work on that."}]}}
+{"role": "assistant", "message": {"content": [{"type": "text", "text": "Some text before the marker\n\n**Running tests**"}]}}
+{"role": "assistant", "message": {"content": [{"type": "text", "text": "**Single marker only**"}]}}
+{"role": "user", "message": {"content": [{"type": "text", "text": "<user_query>\nSecond prompt with <user_query>nested tags</user_query> inside\n</user_query>"}]}}
+{"role": "assistant", "message": {"content": [{"type": "text", "text": "Handling the nested case."}]}}
