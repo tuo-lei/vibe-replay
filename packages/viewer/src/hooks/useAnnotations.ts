@@ -1,4 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  addAnnotation,
+  computeAnnotatedScenes,
+  computeAnnotationCounts,
+  hasUnsavedChanges,
+  removeAnnotation,
+  updateAnnotation,
+} from "../engine";
 import type { Annotation, ReplaySession } from "../types";
 import type { ViewerMode } from "./useSessionLoader";
 
@@ -80,7 +88,7 @@ export function useAnnotations(
     JSON.stringify(session.annotations ?? []),
   );
 
-  const hasUnsaved = JSON.stringify(annotations) !== savedSnapshot;
+  const hasUnsaved = hasUnsavedChanges(annotations, savedSnapshot);
 
   // Autosave: localStorage for embedded/readonly, API for editor
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -114,41 +122,20 @@ export function useAnnotations(
     }
   }, [annotations, sessionId, isEditor]);
 
-  const annotatedScenes = useMemo(
-    () => new Set(annotations.map((a) => a.sceneIndex)),
-    [annotations],
-  );
+  const annotatedScenes = useMemo(() => computeAnnotatedScenes(annotations), [annotations]);
 
-  const annotationCounts = useMemo(() => {
-    const counts = new Map<number, number>();
-    for (const a of annotations) {
-      counts.set(a.sceneIndex, (counts.get(a.sceneIndex) || 0) + 1);
-    }
-    return counts;
-  }, [annotations]);
+  const annotationCounts = useMemo(() => computeAnnotationCounts(annotations), [annotations]);
 
   const add = useCallback((sceneIndex: number, body: string) => {
-    const now = new Date().toISOString();
-    const annotation: Annotation = {
-      id: crypto.randomUUID(),
-      sceneIndex,
-      body,
-      author: "anonymous",
-      createdAt: now,
-      updatedAt: now,
-      resolved: false,
-    };
-    setAnnotations((prev) => [...prev, annotation]);
+    setAnnotations((prev) => addAnnotation(prev, sceneIndex, body));
   }, []);
 
   const update = useCallback((id: string, body: string) => {
-    setAnnotations((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, body, updatedAt: new Date().toISOString() } : a)),
-    );
+    setAnnotations((prev) => updateAnnotation(prev, id, body));
   }, []);
 
   const remove = useCallback((id: string) => {
-    setAnnotations((prev) => prev.filter((a) => a.id !== id));
+    setAnnotations((prev) => removeAnnotation(prev, id));
   }, []);
 
   const downloadHtml = useCallback(() => {
