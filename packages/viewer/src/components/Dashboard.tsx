@@ -166,7 +166,7 @@ function ReplayCard({
 
   return (
     <div
-      className={`bg-terminal-surface rounded-xl px-5 py-4 hover:bg-terminal-surface-hover transition-all duration-200 ease-material space-y-2.5 shadow-layer-sm hover-lift ${isArchived ? "opacity-50" : ""}`}
+      className={`bg-terminal-surface rounded-xl px-5 py-4 hover:bg-terminal-surface-hover transition-colors duration-200 ease-material space-y-2.5 shadow-layer-sm hover-lift ${isArchived ? "opacity-50" : ""}`}
     >
       {/* Row 1: title + badges + actions */}
       <div className="flex items-center justify-between gap-3">
@@ -986,7 +986,7 @@ function SessionsPanel() {
                 return (
                   <div
                     key={`${s.provider}-${s.slug}`}
-                    className={`bg-terminal-surface rounded-xl px-5 py-4 hover:bg-terminal-surface-hover transition-all duration-200 ease-material space-y-2.5 shadow-layer-sm hover-lift ${isArchived ? "opacity-50" : ""}`}
+                    className={`bg-terminal-surface rounded-xl px-5 py-4 hover:bg-terminal-surface-hover transition-colors duration-200 ease-material space-y-2.5 shadow-layer-sm hover-lift ${isArchived ? "opacity-50" : ""}`}
                   >
                     {/* Row 1: slug + branch + time + action */}
                     <div className="flex items-center gap-2">

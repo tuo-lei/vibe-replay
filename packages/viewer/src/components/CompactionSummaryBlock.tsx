@@ -7,7 +7,7 @@ interface Props {
 
 const PREVIEW_LINES = 3;
 
-export default memo(function CompactionSummaryBlock({ content, isActive }: Props) {
+export default memo(function CompactionSummaryBlock({ content }: Props) {
   const [expanded, setExpanded] = useState(false);
   const lines = content.split("\n");
   const isLong = lines.length > PREVIEW_LINES;

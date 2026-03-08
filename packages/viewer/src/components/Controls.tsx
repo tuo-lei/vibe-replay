@@ -180,18 +180,30 @@ export default function Controls({
         <span className="tabular-nums">
           {Math.max(0, currentIndex + 1)} / {totalScenes}
         </span>
-        {/* Keyboard hints — minimal, no decorative borders */}
+        {/* Keyboard hints */}
         <span className="hidden lg:inline-flex items-center gap-2 text-terminal-dimmer pl-3">
-          <kbd className="text-xs">Space</kbd>
+          <kbd className="text-xs px-1 py-px rounded bg-terminal-surface border border-terminal-border/50">
+            Space
+          </kbd>
           <span className="text-xs">play</span>
-          <kbd className="text-xs">n</kbd>
-          <kbd className="text-xs">p</kbd>
+          <kbd className="text-xs px-1 py-px rounded bg-terminal-surface border border-terminal-border/50">
+            n
+          </kbd>
+          <kbd className="text-xs px-1 py-px rounded bg-terminal-surface border border-terminal-border/50">
+            p
+          </kbd>
           <span className="text-xs">turns</span>
-          <kbd className="text-xs">&larr;&rarr;</kbd>
+          <kbd className="text-xs px-1 py-px rounded bg-terminal-surface border border-terminal-border/50">
+            &larr;&rarr;
+          </kbd>
           <span className="text-xs">step</span>
-          <kbd className="text-xs">e</kbd>
+          <kbd className="text-xs px-1 py-px rounded bg-terminal-surface border border-terminal-border/50">
+            e
+          </kbd>
           <span className="text-xs">all</span>
-          <kbd className="text-xs">⌘K</kbd>
+          <kbd className="text-xs px-1 py-px rounded bg-terminal-surface border border-terminal-border/50">
+            ⌘K
+          </kbd>
           <span className="text-xs">search</span>
         </span>
       </div>

@@ -198,22 +198,6 @@ button,
   animation: fade-in 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Staggered reveal for lists/grids — set --stagger-index on each child */
-@keyframes stagger-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-.stagger-enter {
-  animation: stagger-in 0.35s cubic-bezier(0.4, 0, 0.2, 1) both;
-  animation-delay: calc(var(--stagger-index, 0) * 40ms);
-}
-
 /* Pause overlay */
 @keyframes pulse-border {
   0%,
@@ -288,11 +272,11 @@ button,
   transform: translateY(-1px);
 }
 
-/* Subtle dot-grid background for premium texture (3% opacity) */
+/* Subtle dot-grid background for premium texture */
 .bg-dot-grid {
   background-image: radial-gradient(circle, var(--border) 0.5px, transparent 0.5px);
   background-size: 24px 24px;
-  opacity: 0.3;
+  opacity: 0.03;
 }
 
 /* Minimap */
