@@ -42,6 +42,9 @@ importers:
       '@inquirer/prompts':
         specifier: ^7.2.0
         version: 7.10.1(@types/node@22.19.13)
+      '@vibe-replay/types':
+        specifier: workspace:*
+        version: link:../types
       chalk:
         specifier: ^5.3.0
         version: 5.6.2
@@ -77,8 +80,13 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@types/node@22.19.13)(jiti@1.21.7)(tsx@4.21.0)(yaml@2.8.2)
 
+  packages/types: {}
+
   packages/viewer:
     dependencies:
+      '@vibe-replay/types':
+        specifier: workspace:*
+        version: link:../types
       diff:
         specifier: ^7.0.0
         version: 7.0.0

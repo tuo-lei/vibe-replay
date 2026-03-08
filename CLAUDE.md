@@ -30,7 +30,7 @@ When to use which:
 
 - **`</` escaping**: JSON in `<script>` tags MUST escape `</` as `<\/` — browsers close the tag otherwise (see `generator.ts`)
 - **`lastIndexOf("</head>")`**: Use `lastIndexOf`, not `indexOf` — minified JS in the viewer bundle may contain the string `</head>`
-- **`types.ts` is duplicated**: `packages/cli/src/types.ts` and `packages/viewer/src/types.ts` are separate copies. Sync manually when core types change.
+- **Shared types**: `Scene`, `Annotation`, `DataSourceInfo`, `ReplaySession` live in `packages/types` (`@vibe-replay/types`). CLI and viewer re-export from there. Provider-specific and viewer-specific types remain in their respective packages.
 - **Viewer size limit**: Must stay under 500KB after build (currently ~430KB). This is why we use `marked` instead of `react-markdown`.
 - **Self-contained HTML**: Output must make zero external requests. Everything inlined.
 - **Multi-file sessions**: Claude Code `/resume` creates new JSONL files. Parser accepts `string | string[]` and merges by slug+project.
@@ -49,7 +49,7 @@ When to use which:
 - **After changes**: update CLAUDE.md / README.md / CONTRIBUTING.md if anything becomes outdated
 - **Viewer changes** → `pnpm build` (rebuilds both packages)
 - **CLI-only changes** → `pnpm --filter vibe-replay build`
-- **types.ts changes** → sync both copies
+- **Shared types changes** → edit `packages/types/src/index.ts`, both CLI and viewer pick them up automatically
 - Test with both small (~30 scenes) and large (~500 scenes) sessions
 - **Test modification policy** — see `packages/cli/test/README.md` before changing any test
 
@@ -58,7 +58,8 @@ When to use which:
 | What | Where |
 |------|-------|
 | CLI entry | `packages/cli/src/index.ts` |
-| Core types | `packages/cli/src/types.ts` |
+| Shared types | `packages/types/src/index.ts` |
+| CLI types | `packages/cli/src/types.ts` |
 | Transform (turns → scenes) | `packages/cli/src/transform.ts` |
 | HTML generation | `packages/cli/src/generator.ts` |
 | Editor server | `packages/cli/src/server.ts` |

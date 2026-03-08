@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@vibe-replay/types": "workspace:*",
     "diff": "^7.0.0",
     "marked": "^17.0.4",
     "prism-react-renderer": "^2.4.1",
