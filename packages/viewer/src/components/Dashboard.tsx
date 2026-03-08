@@ -511,6 +511,23 @@ function SessionsPanel() {
     if (titleInput) titleInputRef.current?.focus();
   }, [titleInput]);
 
+  const handleTitleSave = async (slug: string, title: string) => {
+    const resp = await fetch(`/api/sessions/${encodeURIComponent(slug)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+    if (!resp.ok) throw new Error("Failed to update title");
+    // Update the replay summary inside sources so the UI reflects the change
+    setSources((prev) =>
+      prev.map((s) =>
+        s.slug === slug && s.replay
+          ? { ...s, replay: { ...s.replay, title: title || undefined } }
+          : s,
+      ),
+    );
+  };
+
   const handleGenerate = (source: SourceSession) => {
     setTitleInput({ slug: source.slug, defaultTitle: source.title || source.slug });
     setTitleValue(source.title || source.slug);
@@ -832,6 +849,7 @@ function SessionsPanel() {
                       key={`${s.provider}-${s.slug}`}
                       summary={s.replay}
                       onOpen={() => navigateTo({ view: null, session: s.existingReplay! })}
+                      onTitleSave={handleTitleSave}
                       onRegenerate={() => handleGenerate(s)}
                       isRegenerating={generatingSlug === s.slug}
                       onArchive={() => toggleArchive(s.slug)}
