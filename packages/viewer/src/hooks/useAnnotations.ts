@@ -1,4 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  addAnnotation,
+  computeAnnotatedScenes,
+  computeAnnotationCounts,
+  hasUnsavedChanges,
+  removeAnnotation,
+  updateAnnotation,
+} from "../engine";
 import type { Annotation, ReplaySession } from "../types";
 import type { ViewerMode } from "./useSessionLoader";
 
@@ -76,11 +84,9 @@ export function useAnnotations(
   });
 
   // Track whether we've diverged from embedded/server state
-  const [savedSnapshot, setSavedSnapshot] = useState(() =>
-    JSON.stringify(session.annotations ?? []),
-  );
+  const [savedSnapshot, setSavedSnapshot] = useState<Annotation[]>(() => session.annotations ?? []);
 
-  const hasUnsaved = JSON.stringify(annotations) !== savedSnapshot;
+  const hasUnsaved = hasUnsavedChanges(annotations, savedSnapshot);
 
   // Autosave: localStorage for embedded/readonly, API for editor
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -96,7 +102,7 @@ export function useAnnotations(
           body: JSON.stringify(annotations),
         })
           .then(() => {
-            setSavedSnapshot(JSON.stringify(annotations));
+            setSavedSnapshot(annotations);
           })
           .catch(() => {
             /* silent */
@@ -114,41 +120,20 @@ export function useAnnotations(
     }
   }, [annotations, sessionId, isEditor]);
 
-  const annotatedScenes = useMemo(
-    () => new Set(annotations.map((a) => a.sceneIndex)),
-    [annotations],
-  );
+  const annotatedScenes = useMemo(() => computeAnnotatedScenes(annotations), [annotations]);
 
-  const annotationCounts = useMemo(() => {
-    const counts = new Map<number, number>();
-    for (const a of annotations) {
-      counts.set(a.sceneIndex, (counts.get(a.sceneIndex) || 0) + 1);
-    }
-    return counts;
-  }, [annotations]);
+  const annotationCounts = useMemo(() => computeAnnotationCounts(annotations), [annotations]);
 
   const add = useCallback((sceneIndex: number, body: string) => {
-    const now = new Date().toISOString();
-    const annotation: Annotation = {
-      id: crypto.randomUUID(),
-      sceneIndex,
-      body,
-      author: "anonymous",
-      createdAt: now,
-      updatedAt: now,
-      resolved: false,
-    };
-    setAnnotations((prev) => [...prev, annotation]);
+    setAnnotations((prev) => addAnnotation(prev, sceneIndex, body));
   }, []);
 
   const update = useCallback((id: string, body: string) => {
-    setAnnotations((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, body, updatedAt: new Date().toISOString() } : a)),
-    );
+    setAnnotations((prev) => updateAnnotation(prev, id, body));
   }, []);
 
   const remove = useCallback((id: string) => {
-    setAnnotations((prev) => prev.filter((a) => a.id !== id));
+    setAnnotations((prev) => removeAnnotation(prev, id));
   }, []);
 
   const downloadHtml = useCallback(() => {
@@ -190,7 +175,7 @@ export function useAnnotations(
       URL.revokeObjectURL(url);
     }
 
-    setSavedSnapshot(JSON.stringify(annotations));
+    setSavedSnapshot(annotations);
     try {
       localStorage.removeItem(storageKey(sessionId));
     } catch {
@@ -211,7 +196,7 @@ export function useAnnotations(
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 
-    setSavedSnapshot(JSON.stringify(annotations));
+    setSavedSnapshot(annotations);
     try {
       localStorage.removeItem(storageKey(sessionId));
     } catch {
@@ -236,7 +221,7 @@ export function useAnnotations(
           if (!resp.ok) {
             throw new Error(result.error || `Server error: ${resp.status}`);
           }
-          setSavedSnapshot(JSON.stringify(annotations));
+          setSavedSnapshot(annotations);
           return result as { gistUrl: string; viewerUrl: string };
         } finally {
           setGistPublishing(false);
@@ -295,7 +280,7 @@ export function useAnnotations(
             const data = await resp.json();
             if (!resp.ok) throw new Error(data.error || "AI Coach failed");
             setAnnotations(data.annotations);
-            setSavedSnapshot(JSON.stringify(data.annotations));
+            setSavedSnapshot(data.annotations);
             return { score: data.score as number, itemCount: data.itemCount as number };
           } finally {
             aiCoachAbortRef.current = null;
@@ -333,7 +318,7 @@ export function useAnnotations(
           const data = await resp.json();
           if (!resp.ok) throw new Error(data.error || `Export failed: ${resp.status}`);
           const { path } = data;
-          setSavedSnapshot(JSON.stringify(annotations));
+          setSavedSnapshot(annotations);
           return path as string;
         } finally {
           setHtmlExporting(false);

@@ -517,9 +517,16 @@ function bubbleTypeToRole(type: unknown): "user" | "assistant" {
 }
 
 function parseThinking(value: unknown): string {
-  if (typeof value !== "string") return "";
-  const trimmed = value.trim();
-  return trimmed;
+  if (typeof value === "string") return value.trim();
+  if (
+    value &&
+    typeof value === "object" &&
+    "text" in value &&
+    typeof (value as { text: unknown }).text === "string"
+  ) {
+    return (value as { text: string }).text.trim();
+  }
+  return "";
 }
 
 function normalizeTurnText(raw: unknown): string {
