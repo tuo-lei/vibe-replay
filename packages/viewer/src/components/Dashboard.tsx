@@ -142,10 +142,12 @@ function ReplayCard({
   onDelete,
   onPublishGist,
   onRegenerate,
+  onArchive,
   ghAvailable,
   isPublishing,
   isDeleting,
   isRegenerating,
+  isArchived,
 }: {
   summary: SessionSummary;
   onOpen: () => void;
@@ -153,15 +155,17 @@ function ReplayCard({
   onDelete?: () => void;
   onPublishGist?: () => void;
   onRegenerate?: () => void;
+  onArchive?: () => void;
   ghAvailable?: boolean;
   isPublishing?: boolean;
   isDeleting?: boolean;
   isRegenerating?: boolean;
+  isArchived?: boolean;
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   return (
-    <div className="bg-terminal-surface/50 border border-terminal-border/50 rounded-lg px-4 py-3 hover:bg-terminal-surface/80 transition-colors space-y-1.5">
+    <div className={`bg-terminal-surface/50 border border-terminal-border/50 rounded-lg px-4 py-3 hover:bg-terminal-surface/80 transition-colors space-y-1.5 ${isArchived ? "opacity-50" : ""}`}>
       {/* Row 1: title + badges + actions */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 min-w-0">
@@ -251,6 +255,17 @@ function ReplayCard({
                 </svg>
               </button>
             )
+          )}
+          {onArchive && (
+            <button
+              onClick={onArchive}
+              className="p-1.5 text-terminal-dim hover:text-terminal-text transition-colors"
+              title={isArchived ? "Unarchive" : "Archive"}
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M2 4h12v2H2zM3 6v7h10V6M6.5 8h3" />
+              </svg>
+            </button>
           )}
         </div>
       </div>
@@ -459,21 +474,36 @@ function SessionsPanel() {
   const [titleInput, setTitleInput] = useState<{ slug: string; defaultTitle: string } | null>(null);
   const [titleValue, setTitleValue] = useState("");
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());
+  const [showArchived, setShowArchived] = useState(false);
 
   const loadSources = useCallback(() => {
     setLoading(true);
     setError(null);
-    fetch("/api/sources")
-      .then((r) => {
+    Promise.all([
+      fetch("/api/sources").then((r) => {
         if (!r.ok) throw new Error("Failed to load sessions");
         return r.json();
-      })
-      .then((data: { sessions: SourceSession[] }) => {
+      }),
+      fetch("/api/archived").then((r) => r.ok ? r.json() : { sessions: [] }),
+    ])
+      .then(([data, archive]: [{ sessions: SourceSession[] }, { sessions: string[] }]) => {
         setSources(data.sessions);
+        setArchivedSlugs(new Set(archive.sessions));
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, []);
+
+  const archiveSession = async (slug: string) => {
+    await fetch(`/api/archive/sessions/${slug}`, { method: "POST" });
+    setArchivedSlugs((prev) => new Set([...prev, slug]));
+  };
+
+  const unarchiveSession = async (slug: string) => {
+    await fetch(`/api/archive/sessions/${slug}`, { method: "DELETE" });
+    setArchivedSlugs((prev) => { const next = new Set(prev); next.delete(slug); return next; });
+  };
 
   useEffect(() => { loadSources(); }, [loadSources]);
 
@@ -518,9 +548,13 @@ function SessionsPanel() {
     }
   };
 
+  // Visible sessions (excluding archived unless toggled)
+  const archivedCount = sources.filter((s) => archivedSlugs.has(s.slug)).length;
+  const visibleSources = showArchived ? sources : sources.filter((s) => !archivedSlugs.has(s.slug));
+
   // Group by project, sorted by most recent timestamp
   const byProject = new Map<string, SourceSession[]>();
-  for (const s of sources) {
+  for (const s of visibleSources) {
     if (!byProject.has(s.project)) byProject.set(s.project, []);
     byProject.get(s.project)!.push(s);
   }
@@ -535,7 +569,7 @@ function SessionsPanel() {
 
   // Filter sessions within selected project
   const projectSessions = selectedProject === ALL_PROJECTS
-    ? sources
+    ? visibleSources
     : (byProject.get(selectedProject) || []);
 
   const filtered = filter
@@ -712,21 +746,39 @@ function SessionsPanel() {
             </span>
           </div>
 
-          {/* Search */}
-          <div className="relative">
-            <svg
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-terminal-dim"
-              width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"
-            >
-              <circle cx="7" cy="7" r="5" />
-              <path d="M11 11l3.5 3.5" />
-            </svg>
-            <input
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Filter by branch, title, prompt..."
-              className="w-full bg-terminal-surface border border-terminal-border rounded-lg pl-9 pr-3 py-2 text-sm font-mono text-terminal-text placeholder:text-terminal-dim/50 outline-none focus:border-terminal-green/50"
-            />
+          {/* Search + archive toggle */}
+          <div className="flex gap-2 items-center">
+            <div className="relative flex-1">
+              <svg
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-terminal-dim"
+                width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"
+              >
+                <circle cx="7" cy="7" r="5" />
+                <path d="M11 11l3.5 3.5" />
+              </svg>
+              <input
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="Filter by branch, title, prompt..."
+                className="w-full bg-terminal-surface border border-terminal-border rounded-lg pl-9 pr-3 py-2 text-sm font-mono text-terminal-text placeholder:text-terminal-dim/50 outline-none focus:border-terminal-green/50"
+              />
+            </div>
+            {archivedCount > 0 && (
+              <button
+                onClick={() => setShowArchived(!showArchived)}
+                className={`shrink-0 px-2.5 py-2 text-[11px] font-mono rounded-lg border transition-colors ${
+                  showArchived
+                    ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/30"
+                    : "text-terminal-dim border-terminal-border hover:text-terminal-text"
+                }`}
+                title={showArchived ? "Hide archived" : `Show ${archivedCount} archived`}
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="inline-block">
+                  <path d="M2 4h12v2H2zM3 6v7h10V6M6.5 8h3" />
+                </svg>
+                {" "}{archivedCount}
+              </button>
+            )}
           </div>
         </div>
 
@@ -777,6 +829,7 @@ function SessionsPanel() {
               {filtered.map((s) => {
                 // Sessions with replay: use the shared ReplayCard
                 if (s.replay) {
+                  const isArchived = archivedSlugs.has(s.slug);
                   return (
                     <ReplayCard
                       key={`${s.provider}-${s.slug}`}
@@ -784,6 +837,8 @@ function SessionsPanel() {
                       onOpen={() => navigateTo({ view: null, session: s.existingReplay! })}
                       onRegenerate={() => handleGenerate(s)}
                       isRegenerating={generatingSlug === s.slug}
+                      onArchive={() => isArchived ? unarchiveSession(s.slug) : archiveSession(s.slug)}
+                      isArchived={isArchived}
                     />
                   );
                 }
@@ -796,10 +851,11 @@ function SessionsPanel() {
                   const cleaned = cleanPrompt(s.firstPrompt);
                   if (cleaned) prompts.push(cleaned);
                 }
+                const isArchived = archivedSlugs.has(s.slug);
                 return (
                   <div
                     key={`${s.provider}-${s.slug}`}
-                    className="bg-terminal-surface/30 border border-terminal-border/30 rounded-lg px-4 py-3 hover:bg-terminal-surface/50 transition-colors space-y-1.5"
+                    className={`bg-terminal-surface/30 border border-terminal-border/30 rounded-lg px-4 py-3 hover:bg-terminal-surface/50 transition-colors space-y-1.5 ${isArchived ? "opacity-50" : ""}`}
                   >
                     {/* Row 1: slug + branch + time + action */}
                     <div className="flex items-center gap-2">
@@ -814,7 +870,7 @@ function SessionsPanel() {
                           {label.branch}
                         </span>
                       )}
-                      <div className="flex items-center gap-2 shrink-0 ml-auto">
+                      <div className="flex items-center gap-1.5 shrink-0 ml-auto">
                         <span className="text-[11px] font-mono text-terminal-dim/40">
                           {timeAgo(s.timestamp)}
                         </span>
@@ -826,6 +882,15 @@ function SessionsPanel() {
                           {generatingSlug === s.slug ? (
                             <span className="animate-pulse">Generating...</span>
                           ) : "Generate"}
+                        </button>
+                        <button
+                          onClick={() => isArchived ? unarchiveSession(s.slug) : archiveSession(s.slug)}
+                          className="p-1 text-terminal-dim hover:text-terminal-text transition-colors"
+                          title={isArchived ? "Unarchive" : "Archive"}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                            <path d="M2 4h12v2H2zM3 6v7h10V6M6.5 8h3" />
+                          </svg>
                         </button>
                       </div>
                     </div>
@@ -869,15 +934,20 @@ function ReplaysPanel() {
   const [filter, setFilter] = useState("");
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [publishingSlug, setPublishingSlug] = useState<string | null>(null);
+  const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());
+  const [showArchived, setShowArchived] = useState(false);
 
   useEffect(() => {
-    fetch("/api/sessions")
-      .then((r) => {
+    Promise.all([
+      fetch("/api/sessions").then((r) => {
         if (!r.ok) throw new Error();
         return r.json();
-      })
-      .then((data: SessionSummary[]) => {
+      }),
+      fetch("/api/archived").then((r) => r.ok ? r.json() : { replays: [] }),
+    ])
+      .then(([data, archive]: [SessionSummary[], { replays?: string[] }]) => {
         setSessions(data);
+        setArchivedSlugs(new Set(archive.replays || []));
         setServerAvailable(true);
       })
       .catch(() => {
@@ -890,6 +960,16 @@ function ReplaysPanel() {
       .then((data: { available: boolean }) => setGhAvailable(data.available))
       .catch(() => setGhAvailable(false));
   }, []);
+
+  const archiveReplay = async (slug: string) => {
+    await fetch(`/api/archive/replays/${slug}`, { method: "POST" });
+    setArchivedSlugs((prev) => new Set([...prev, slug]));
+  };
+
+  const unarchiveReplay = async (slug: string) => {
+    await fetch(`/api/archive/replays/${slug}`, { method: "DELETE" });
+    setArchivedSlugs((prev) => { const next = new Set(prev); next.delete(slug); return next; });
+  };
 
   const handleTitleSave = async (slug: string, title: string) => {
     const resp = await fetch(`/api/sessions/${encodeURIComponent(slug)}`, {
@@ -949,8 +1029,11 @@ function ReplaysPanel() {
     }
   };
 
+  const archivedCount = sessions.filter((s) => archivedSlugs.has(s.slug)).length;
+  const visibleSessions = showArchived ? sessions : sessions.filter((s) => !archivedSlugs.has(s.slug));
+
   const filtered = filter
-    ? sessions.filter(
+    ? visibleSessions.filter(
         (s) =>
           (s.title || "").toLowerCase().includes(filter.toLowerCase()) ||
           s.slug.toLowerCase().includes(filter.toLowerCase()) ||
@@ -958,7 +1041,7 @@ function ReplaysPanel() {
           s.provider.toLowerCase().includes(filter.toLowerCase()) ||
           (s.firstMessage || "").toLowerCase().includes(filter.toLowerCase()),
       )
-    : sessions;
+    : visibleSessions;
 
   if (loading) {
     return (
@@ -977,21 +1060,39 @@ function ReplaysPanel() {
 
       {serverAvailable && sessions.length > 0 && (
         <>
-          {/* Search */}
-          <div className="relative">
-            <svg
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-terminal-dim"
-              width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"
-            >
-              <circle cx="7" cy="7" r="5" />
-              <path d="M11 11l3.5 3.5" />
-            </svg>
-            <input
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Filter replays..."
-              className="w-full bg-terminal-surface border border-terminal-border rounded-lg pl-9 pr-3 py-2 text-sm font-mono text-terminal-text placeholder:text-terminal-dim/50 outline-none focus:border-terminal-green/50"
-            />
+          {/* Search + archive toggle */}
+          <div className="flex gap-2 items-center">
+            <div className="relative flex-1">
+              <svg
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-terminal-dim"
+                width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"
+              >
+                <circle cx="7" cy="7" r="5" />
+                <path d="M11 11l3.5 3.5" />
+              </svg>
+              <input
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="Filter replays..."
+                className="w-full bg-terminal-surface border border-terminal-border rounded-lg pl-9 pr-3 py-2 text-sm font-mono text-terminal-text placeholder:text-terminal-dim/50 outline-none focus:border-terminal-green/50"
+              />
+            </div>
+            {archivedCount > 0 && (
+              <button
+                onClick={() => setShowArchived(!showArchived)}
+                className={`shrink-0 px-2.5 py-2 text-[11px] font-mono rounded-lg border transition-colors ${
+                  showArchived
+                    ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/30"
+                    : "text-terminal-dim border-terminal-border hover:text-terminal-text"
+                }`}
+                title={showArchived ? "Hide archived" : `Show ${archivedCount} archived`}
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="inline-block">
+                  <path d="M2 4h12v2H2zM3 6v7h10V6M6.5 8h3" />
+                </svg>
+                {" "}{archivedCount}
+              </button>
+            )}
           </div>
 
           {/* Error toast */}
@@ -1022,18 +1123,23 @@ function ReplaysPanel() {
 
           {/* Replay cards */}
           <div className="space-y-2">
-            {filtered.map((s) => (
-              <ReplayCard
-                key={s.slug}
-                summary={s}
-                onOpen={() => handleOpen(s.slug)}
-                onTitleSave={handleTitleSave}
-                onDelete={() => confirmDelete(s.slug)}
-                onPublishGist={() => handlePublishGist(s.slug)}
-                ghAvailable={ghAvailable === true}
-                isPublishing={publishingSlug === s.slug}
-              />
-            ))}
+            {filtered.map((s) => {
+              const isArchived = archivedSlugs.has(s.slug);
+              return (
+                <ReplayCard
+                  key={s.slug}
+                  summary={s}
+                  onOpen={() => handleOpen(s.slug)}
+                  onTitleSave={handleTitleSave}
+                  onDelete={() => confirmDelete(s.slug)}
+                  onPublishGist={() => handlePublishGist(s.slug)}
+                  onArchive={() => isArchived ? unarchiveReplay(s.slug) : archiveReplay(s.slug)}
+                  ghAvailable={ghAvailable === true}
+                  isPublishing={publishingSlug === s.slug}
+                  isArchived={isArchived}
+                />
+              );
+            })}
           </div>
         </>
       )}

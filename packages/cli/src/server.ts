@@ -48,6 +48,30 @@ function requireSlug(raw: string | undefined): { slug: string } | { error: strin
   return { slug };
 }
 
+// ─── Archive helpers (file-based, lightweight) ─────────────────────
+
+interface ArchiveData {
+  sessions: string[];  // archived session slugs (source sessions)
+  replays: string[];   // archived replay slugs
+}
+
+async function loadArchive(baseDir: string): Promise<ArchiveData> {
+  try {
+    const raw = await readFile(join(baseDir, ".archived.json"), "utf-8");
+    const data = JSON.parse(raw);
+    return {
+      sessions: Array.isArray(data.sessions) ? data.sessions : [],
+      replays: Array.isArray(data.replays) ? data.replays : [],
+    };
+  } catch {
+    return { sessions: [], replays: [] };
+  }
+}
+
+async function saveArchive(baseDir: string, archive: ArchiveData): Promise<void> {
+  await writeFile(join(baseDir, ".archived.json"), JSON.stringify(archive, null, 2) + "\n");
+}
+
 async function loadViewerHtml(): Promise<string> {
   const assetsPaths = [
     join(__dirname, "..", "assets", "viewer.html"),
@@ -316,6 +340,40 @@ export async function startServer(
     } catch (err: any) {
       return c.json({ error: err.message || "Delete failed" }, 500);
     }
+  });
+
+  // --- Archive: lightweight file-based hide/show ---
+  app.get("/api/archived", async (c) => {
+    const archive = await loadArchive(baseDir);
+    return c.json(archive);
+  });
+
+  app.post("/api/archive/:type/:slug", async (c) => {
+    const type = c.req.param("type") as "sessions" | "replays";
+    if (type !== "sessions" && type !== "replays") {
+      return c.json({ error: "type must be 'sessions' or 'replays'" }, 400);
+    }
+    const slug = safeSlug(c.req.param("slug"));
+    if (!slug) return c.json({ error: "invalid slug" }, 400);
+    const archive = await loadArchive(baseDir);
+    if (!archive[type].includes(slug)) {
+      archive[type].push(slug);
+      await saveArchive(baseDir, archive);
+    }
+    return c.json({ ok: true });
+  });
+
+  app.delete("/api/archive/:type/:slug", async (c) => {
+    const type = c.req.param("type") as "sessions" | "replays";
+    if (type !== "sessions" && type !== "replays") {
+      return c.json({ error: "type must be 'sessions' or 'replays'" }, 400);
+    }
+    const slug = safeSlug(c.req.param("slug"));
+    if (!slug) return c.json({ error: "invalid slug" }, 400);
+    const archive = await loadArchive(baseDir);
+    archive[type] = archive[type].filter((s) => s !== slug);
+    await saveArchive(baseDir, archive);
+    return c.json({ ok: true });
   });
 
   // --- Sources: discover AI coding sessions from all providers ---
