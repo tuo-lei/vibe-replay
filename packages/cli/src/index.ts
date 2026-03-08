@@ -2,6 +2,7 @@ import { Separator, select } from "@inquirer/prompts";
 import chalk from "chalk";
 import { program } from "commander";
 import ora from "ora";
+import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.js";
 import { generateOutput } from "./generator.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
 import { checkGhStatus, loadSavedGistInfo, publishGist } from "./publishers/gist.js";
@@ -25,6 +26,10 @@ program
     "Custom title for the replay (shown on landing page & shared links)",
   )
   .option("-d, --dashboard", "Open Dashboard directly (skip session picker)")
+  .option("-f, --format <format>", "Output format: html (default), github (markdown + SVG for PRs)")
+  .option("--replay-url <url>", "Full replay URL for GitHub format (e.g. gist viewer link)")
+  .option("--no-svg", "Skip SVG generation in GitHub format")
+  .option("--copy", "Copy GitHub markdown to clipboard")
   .action(async (opts) => {
     console.log(chalk.bold.cyan("\n  vibe-replay") + chalk.dim(` v${CLI_VERSION}\n`));
 
@@ -160,7 +165,7 @@ program
     // Title: CLI flag > interactive prompt > auto-detected > slug
     if (opts.title) {
       replay.meta.title = opts.title;
-    } else {
+    } else if (opts.format !== "github") {
       const { input } = await import("@inquirer/prompts");
       const defaultTitle = replay.meta.title || replay.meta.slug;
       const userTitle = await input({
@@ -170,6 +175,67 @@ program
       if (userTitle.trim()) {
         replay.meta.title = userTitle.trim();
       }
+    }
+
+    // --- GitHub format: generate markdown + SVG and exit ---
+    if (opts.format === "github") {
+      const { join: pathJoin } = await import("node:path");
+      const { mkdir, writeFile } = await import("node:fs/promises");
+      const rawSlug = replay.meta.slug || replay.meta.sessionId.slice(0, 8);
+      const slug = rawSlug.replace(/[^a-zA-Z0-9_-]/g, "-");
+      const outputDir = pathJoin(home, ".vibe-replay", slug);
+      await mkdir(outputDir, { recursive: true });
+
+      let svgPath: string | undefined;
+
+      // Generate animated SVG unless --no-svg
+      if (opts.svg !== false) {
+        const svgSpinner = ora("Generating animated SVG...").start();
+        const svgContent = generateGitHubSvg(replay, { replayUrl: opts.replayUrl });
+        const svgFilePath = pathJoin(outputDir, "session-preview.svg");
+        await writeFile(svgFilePath, svgContent, "utf-8");
+        svgPath = svgFilePath;
+        svgSpinner.succeed(`SVG: ${svgFilePath}`);
+      }
+
+      // Generate markdown
+      const mdSpinner = ora("Generating GitHub markdown...").start();
+      const markdown = generateGitHubMarkdown(replay, {
+        replayUrl: opts.replayUrl,
+        svgPath: svgPath ? "./session-preview.svg" : undefined,
+      });
+      const mdFilePath = pathJoin(outputDir, "github-summary.md");
+      await writeFile(mdFilePath, markdown, "utf-8");
+      mdSpinner.succeed(`Markdown: ${mdFilePath}`);
+
+      // Copy to clipboard if requested
+      if (opts.copy) {
+        const copied = await copyToClipboard(markdown);
+        if (copied) {
+          console.log(chalk.green("  Copied to clipboard!"));
+        } else {
+          console.log(chalk.yellow("  Could not copy to clipboard (pbcopy/xclip not found)"));
+        }
+      }
+
+      // Print the markdown to stdout for easy piping
+      console.log();
+      console.log(chalk.dim("  ─── Preview ───"));
+      console.log();
+      console.log(markdown);
+      console.log();
+      console.log(chalk.bold.green("  Done!"));
+      console.log(chalk.dim("  Files: ") + chalk.white(outputDir));
+      if (svgPath) {
+        console.log(
+          chalk.dim("  Tip: ") +
+            chalk.white(
+              "Copy session-preview.svg to your repo, then paste the markdown into your PR",
+            ),
+        );
+      }
+      console.log();
+      return;
     }
 
     // Output path: ~/.vibe-replay/<slug>/index.html
@@ -423,4 +489,26 @@ function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
   // Re-sort by timestamp descending
   result.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   return result;
+}
+
+async function copyToClipboard(text: string): Promise<boolean> {
+  const { spawn } = await import("node:child_process");
+  const cmds = [
+    ["pbcopy"], // macOS
+    ["xclip", "-selection", "clipboard"], // Linux
+    ["xsel", "--clipboard", "--input"], // Linux alt
+  ];
+  for (const [cmd, ...args] of cmds) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const proc = spawn(cmd, args, { stdio: ["pipe", "ignore", "ignore"] });
+        proc.stdin.write(text);
+        proc.stdin.end();
+        proc.on("close", (code) => (code === 0 ? resolve() : reject()));
+        proc.on("error", reject);
+      });
+      return true;
+    } catch {}
+  }
+  return false;
 }
