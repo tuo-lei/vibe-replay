@@ -2,6 +2,7 @@ import { readdir, stat, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { SessionInfo } from "../../types.js";
+import { cleanPromptText } from "../../clean-prompt.js";
 
 const CLAUDE_DIR = join(homedir(), ".claude", "projects");
 
@@ -63,7 +64,7 @@ function shortenPath(path: string): string {
   return path;
 }
 
-async function extractSessionInfo(
+export async function extractSessionInfo(
   filePath: string,
   fileSize: number,
   project: string,
@@ -79,36 +80,50 @@ async function extractSessionInfo(
     let version = "";
     let gitBranch: string | undefined;
     let timestamp = "";
-    let firstPrompt = "";
+    const prompts: string[] = [];
     let title: string | undefined;
+    let metadataDone = false;
+    const MAX_PROMPTS = 2;
 
-    // Scan first 30 lines for metadata + first prompt
-    for (const line of lines.slice(0, 30)) {
+    // Scan lines for metadata (first 30) + first meaningful user prompts (up to 150)
+    const scanLimit = Math.min(lines.length, 150);
+    for (let i = 0; i < scanLimit; i++) {
       try {
-        const obj = JSON.parse(line);
+        const obj = JSON.parse(lines[i]);
 
-        if (!sessionId && obj.sessionId) sessionId = obj.sessionId;
-        if (!slug && obj.slug) slug = obj.slug;
-        if (!cwd && obj.cwd) cwd = obj.cwd;
-        if (!version && obj.version) version = obj.version;
-        if (!gitBranch && obj.gitBranch) gitBranch = obj.gitBranch;
+        if (!metadataDone) {
+          if (!sessionId && obj.sessionId) sessionId = obj.sessionId;
+          if (!slug && obj.slug) slug = obj.slug;
+          if (!cwd && obj.cwd) cwd = obj.cwd;
+          if (!version && obj.version) version = obj.version;
+          if (!gitBranch && obj.gitBranch) gitBranch = obj.gitBranch;
 
-        if (obj.type === "custom-title" && obj.title) {
-          title = obj.title;
+          if (obj.type === "custom-title" && obj.title) {
+            title = obj.title;
+          }
+
+          if (obj.type === "file-history-snapshot" && obj.snapshot?.timestamp && !timestamp) {
+            timestamp = obj.snapshot.timestamp;
+          }
+
+          if (i >= 29) metadataDone = true;
         }
 
-        if (obj.type === "file-history-snapshot" && obj.snapshot?.timestamp && !timestamp) {
-          timestamp = obj.snapshot.timestamp;
-        }
-
+        // Collect meaningful user prompts (skip boilerplate)
         if (
+          prompts.length < MAX_PROMPTS &&
           obj.type === "user" &&
           obj.message?.role === "user" &&
-          typeof obj.message.content === "string" &&
-          !firstPrompt
+          typeof obj.message.content === "string"
         ) {
-          firstPrompt = obj.message.content.slice(0, 200);
+          const cleaned = cleanPromptText(obj.message.content);
+          if (cleaned.length >= 10) {
+            prompts.push(cleaned.slice(0, 200));
+          }
         }
+
+        // Stop early if we have everything
+        if (prompts.length >= MAX_PROMPTS && metadataDone) break;
       } catch {
         continue;
       }
@@ -150,9 +165,12 @@ async function extractSessionInfo(
       fileSize,
       filePath,
       filePaths: [filePath],
-      firstPrompt: firstPrompt || "(no prompt found)",
+      firstPrompt: prompts[0] || "(no prompt found)",
+      prompts: prompts.length > 0 ? prompts : undefined,
     };
   } catch {
     return null;
   }
 }
+
+

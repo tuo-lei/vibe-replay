@@ -1,16 +1,21 @@
-import { createServer } from "node:net";
 import { createHash } from "node:crypto";
-import { readFile, writeFile, mkdir, readdir, stat } from "node:fs/promises";
+import { readFile, writeFile, mkdir, readdir, stat, unlink } from "node:fs/promises";
 import { join, dirname, resolve, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import open from "open";
 import chalk from "chalk";
-import type { ReplaySession, Annotation } from "./types.js";
+import { homedir } from "node:os";
+import type { ReplaySession, Annotation, SessionInfo } from "./types.js";
 import { generateOutput } from "./generator.js";
 import { checkGhStatus, publishGist, loadSavedGistInfo, type SavedGistInfo } from "./publishers/gist.js";
 import { detectFeedbackTools, generateFeedback } from "./feedback.js";
+import { getAllProviders, getProvider } from "./providers/index.js";
+import { transformToReplay } from "./transform.js";
+import { scanForSecrets } from "./scan.js";
+import { CLI_VERSION } from "./version.js";
+import { cleanPromptText } from "./clean-prompt.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -22,20 +27,36 @@ function safeSlug(raw: string | undefined): string | null {
   return clean;
 }
 
-async function findFreePort(start: number, end: number): Promise<number> {
-  for (let port = start; port <= end; port++) {
-    const available = await new Promise<boolean>((resolve) => {
-      const server = createServer();
-      server.once("error", () => resolve(false));
-      server.once("listening", () => {
-        server.close();
-        resolve(true);
-      });
-      server.listen(port, "127.0.0.1");
-    });
-    if (available) return port;
+/** Require a valid slug from query param, returning 400 if missing */
+function requireSlug(raw: string | undefined): { slug: string } | { error: string } {
+  const slug = safeSlug(raw);
+  if (!slug) return { error: "slug parameter is required" };
+  return { slug };
+}
+
+// ─── Archive helpers (directory-based, one marker file per slug) ────
+
+const ARCHIVE_DIR = ".archive";
+
+async function getArchivedSlugs(baseDir: string): Promise<Set<string>> {
+  try {
+    const entries = await readdir(join(baseDir, ARCHIVE_DIR));
+    return new Set(entries);
+  } catch {
+    return new Set();
   }
-  throw new Error(`No free port found in range ${start}-${end}`);
+}
+
+async function archiveSlug(baseDir: string, slug: string): Promise<void> {
+  const dir = join(baseDir, ARCHIVE_DIR);
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, slug), "");
+}
+
+async function unarchiveSlug(baseDir: string, slug: string): Promise<void> {
+  try {
+    await unlink(join(baseDir, ARCHIVE_DIR, slug));
+  } catch { /* already gone */ }
 }
 
 async function loadViewerHtml(): Promise<string> {
@@ -82,8 +103,12 @@ async function scanSessionsFromDir(baseDir: string): Promise<any[]> {
         gist = await loadSavedGistInfo(join(baseDir, entry));
       } catch { /* no gist info */ }
 
-      const firstPrompt = session.scenes?.find((sc) => sc.type === "user-prompt");
-      const firstMessage = firstPrompt?.content?.slice(0, 200) || undefined;
+      const userPrompts = (session.scenes || [])
+        .filter((sc) => sc.type === "user-prompt")
+        .map((sc) => cleanPromptText(sc.content).slice(0, 200))
+        .filter((m) => m.length >= 10);
+      const firstMessage = userPrompts[0] || undefined;
+      const messages = userPrompts.length > 0 ? userPrompts.slice(0, 2) : undefined;
 
       results.push({
         slug: entry,
@@ -98,6 +123,7 @@ async function scanSessionsFromDir(baseDir: string): Promise<any[]> {
         hasAnnotations: annotationCount > 0,
         annotationCount,
         firstMessage,
+        messages,
         gist: gist ? await (async () => {
           let outdated = false;
           if (gist!.contentHash) {
@@ -170,29 +196,72 @@ async function loadSessionFromDisk(baseDir: string, slug: string): Promise<Repla
   return session;
 }
 
-export async function startEditor(
-  session: ReplaySession,
-  outputDir: string,
-  opts?: { openDashboard?: boolean; externalViewerUrl?: string },
-): Promise<void> {
-  await mkdir(outputDir, { recursive: true });
+/**
+ * Merge multiple JSONL files that share the same slug + project into one entry.
+ * Claude Code creates a new file per /resume, but they're the same logical session.
+ */
+function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
+  const groups = new Map<string, SessionInfo[]>();
+  for (const s of sessions) {
+    const key = `${s.project}::${s.slug}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(s);
+  }
 
-  // Base directory for dashboard (parent of outputDir, e.g. ~/.vibe-replay/)
-  const baseDir = dirname(outputDir);
-  const currentSlug = outputDir.split("/").pop()!;
-
-  // Load existing annotations from disk
-  const annotationsPath = join(outputDir, "annotations.json");
-  try {
-    const raw = await readFile(annotationsPath, "utf-8");
-    const saved = JSON.parse(raw) as Annotation[];
-    if (Array.isArray(saved) && saved.length > 0) {
-      session = { ...session, annotations: saved };
+  const result: SessionInfo[] = [];
+  for (const group of groups.values()) {
+    if (group.length === 1) {
+      result.push(group[0]);
+      continue;
     }
-  } catch { /* no saved annotations */ }
+    group.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    const latest = group[0];
+    const allPaths = group
+      .slice()
+      .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
+      .flatMap((s) => s.filePaths);
 
-  // In-memory annotations state (for the initially-loaded session)
-  let annotations: Annotation[] = session.annotations ?? [];
+    result.push({
+      ...latest,
+      lineCount: group.reduce((sum, s) => sum + s.lineCount, 0),
+      fileSize: group.reduce((sum, s) => sum + s.fileSize, 0),
+      filePaths: allPaths,
+      toolPaths: [...new Set(group.flatMap((s) => s.toolPaths || []))],
+    });
+  }
+
+  result.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  return result;
+}
+
+/** Load annotations from disk for a given slug */
+async function loadAnnotations(baseDir: string, slug: string): Promise<Annotation[]> {
+  const dirs = [join(baseDir, slug), resolve("./vibe-replay", slug)];
+  for (const dir of dirs) {
+    try {
+      const raw = await readFile(join(dir, "annotations.json"), "utf-8");
+      const anns = JSON.parse(raw) as Annotation[];
+      if (Array.isArray(anns)) return anns;
+    } catch { continue; }
+  }
+  return [];
+}
+
+/** Save annotations to disk for a given slug */
+async function saveAnnotations(baseDir: string, slug: string, annotations: Annotation[]): Promise<void> {
+  const annPath = join(baseDir, slug, "annotations.json");
+  await writeFile(annPath, JSON.stringify(annotations, null, 2), "utf-8");
+}
+
+export async function startServer(
+  baseDir: string,
+  opts?: {
+    openDashboard?: boolean;
+    openSlug?: string;
+    externalViewerUrl?: string;
+  },
+): Promise<void> {
+  await mkdir(baseDir, { recursive: true });
 
   const viewerHtml = await loadViewerHtml();
 
@@ -206,20 +275,15 @@ export async function startEditor(
     return c.html(html);
   });
 
-  // --- Session data ---
-  // Without slug: returns the current (initially loaded) session
-  // With slug: loads any session from disk (for dashboard navigation)
+  // --- Session data (requires slug) ---
   app.get("/api/session", async (c) => {
-    const slug = safeSlug(c.req.query("slug"));
-    if (!slug || slug === currentSlug) {
-      return c.json({ ...session, annotations });
-    }
-    // Load a different session from disk
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
     try {
-      const other = await loadSessionFromDisk(baseDir, slug);
-      return c.json(other);
+      const session = await loadSessionFromDisk(baseDir, result.slug);
+      return c.json(session);
     } catch {
-      return c.json({ error: `Session not found: ${slug}` }, 404);
+      return c.json({ error: `Session not found: ${result.slug}` }, 404);
     }
   });
 
@@ -246,11 +310,6 @@ export async function startEditor(
       await writeFile(join(targetDir, "replay.json"), JSON.stringify(target), "utf-8");
       await generateOutput(target, targetDir);
 
-      // Update in-memory session if it's the current one
-      if (slug === currentSlug) {
-        session = { ...session, meta: { ...session.meta, title: target.meta.title } };
-      }
-
       return c.json({ ok: true, title: target.meta.title });
     } catch (err: any) {
       return c.json({ error: err.message || "Update failed" }, 500);
@@ -270,40 +329,202 @@ export async function startEditor(
     }
   });
 
-  // --- Annotations ---
-  // slug query param: operate on a specific session; no slug: current session
-  app.get("/api/annotations", async (c) => {
-    const slug = safeSlug(c.req.query("slug"));
-    if (slug && slug !== currentSlug) {
-      const annPath = join(baseDir, slug, "annotations.json");
-      try {
-        const raw = await readFile(annPath, "utf-8");
-        return c.json(JSON.parse(raw));
-      } catch {
-        return c.json([]);
+  // --- Archive: directory-based, one marker file per slug ---
+  app.get("/api/archived", async (c) => {
+    const slugs = await getArchivedSlugs(baseDir);
+    return c.json({ slugs: [...slugs] });
+  });
+
+  app.post("/api/archive/:slug", async (c) => {
+    const slug = safeSlug(c.req.param("slug"));
+    if (!slug) return c.json({ error: "invalid slug" }, 400);
+    await archiveSlug(baseDir, slug);
+    return c.json({ ok: true });
+  });
+
+  app.delete("/api/archive/:slug", async (c) => {
+    const slug = safeSlug(c.req.param("slug"));
+    if (!slug) return c.json({ error: "invalid slug" }, 400);
+    await unarchiveSlug(baseDir, slug);
+    return c.json({ ok: true });
+  });
+
+  // --- Sources: discover AI coding sessions from all providers ---
+  app.get("/api/sources", async (c) => {
+    try {
+      const providers = getAllProviders();
+      const allSessions: SessionInfo[] = [];
+      for (const provider of providers) {
+        const sessions = await provider.discover();
+        allSessions.push(...sessions);
       }
+
+      // Merge multi-file sessions (Claude Code /resume creates new JSONL files)
+      const merged = mergeSameSessions(allSessions);
+
+      // Normalize project paths: /Users/xxx/... → ~/...
+      const home = homedir();
+      for (const s of merged) {
+        if (s.project.startsWith(home)) {
+          s.project = "~" + s.project.slice(home.length);
+        }
+      }
+
+      // Check which project directories still exist on disk + are git repos
+      const uniqueProjects = [...new Set(merged.map((s) => s.project))];
+      const projectExistsMap = new Map<string, boolean>();
+      const projectIsGitMap = new Map<string, boolean>();
+      for (const p of uniqueProjects) {
+        const resolved = p.startsWith("~/") ? join(home, p.slice(2)) : p === "~" ? home : p;
+        try {
+          const s = await stat(resolved);
+          projectExistsMap.set(p, s.isDirectory());
+          if (s.isDirectory()) {
+            try {
+              await stat(join(resolved, ".git"));
+              projectIsGitMap.set(p, true);
+            } catch {
+              projectIsGitMap.set(p, false);
+            }
+          }
+        } catch {
+          projectExistsMap.set(p, false);
+        }
+      }
+
+      // Check which source sessions already have replays
+      const existingReplays = await scanSessions(baseDir);
+      const replayMap = new Map<string, any>();
+      for (const r of existingReplays) {
+        replayMap.set(r.slug as string, r);
+      }
+
+      const result = merged.map((s) => {
+        const replay = replayMap.get(s.slug);
+        return {
+          provider: s.provider,
+          slug: s.slug,
+          title: s.title,
+          project: s.project,
+          timestamp: s.timestamp,
+          fileSize: s.fileSize,
+          lineCount: s.lineCount,
+          firstPrompt: cleanPromptText(s.firstPrompt).slice(0, 200),
+          prompts: s.prompts?.map((p) => cleanPromptText(p).slice(0, 200)),
+          filePaths: s.filePaths,
+          toolPaths: s.toolPaths,
+          hasSqlite: s.hasSqlite,
+          gitBranch: s.gitBranch,
+          existingReplay: replay ? s.slug : null,
+          projectExists: projectExistsMap.get(s.project) ?? false,
+          isGitRepo: projectIsGitMap.get(s.project) ?? false,
+          replay: replay ? {
+            slug: replay.slug,
+            title: replay.title,
+            provider: replay.provider,
+            model: replay.model,
+            project: replay.project,
+            startTime: replay.startTime,
+            endTime: replay.endTime,
+            stats: replay.stats,
+            hasAnnotations: replay.hasAnnotations,
+            annotationCount: replay.annotationCount,
+            firstMessage: replay.firstMessage,
+            messages: replay.messages,
+            gist: replay.gist,
+          } : undefined,
+        };
+      });
+
+      return c.json({ sessions: result });
+    } catch (err: any) {
+      return c.json({ error: err.message || "Source discovery failed" }, 500);
     }
-    return c.json(annotations);
+  });
+
+  // --- Generate: parse a source session into a replay ---
+  app.post("/api/generate", async (c) => {
+    try {
+      const body = await c.req.json<{
+        provider: string;
+        filePaths: string[];
+        toolPaths?: string[];
+        title?: string;
+        sessionSlug?: string;
+        sessionProject?: string;
+      }>();
+
+      const provider = getProvider(body.provider);
+      if (!provider) {
+        return c.json({ error: `Unknown provider: ${body.provider}` }, 400);
+      }
+
+      const paths = [...body.filePaths, ...(body.toolPaths || [])];
+      if (paths.length === 0) {
+        return c.json({ error: "filePaths is required" }, 400);
+      }
+
+      const parsed = await provider.parse(paths);
+
+      const home = homedir();
+      const rawProject = body.sessionProject || parsed.cwd;
+      const project = rawProject.startsWith(home)
+        ? "~" + rawProject.slice(home.length)
+        : rawProject;
+
+      const replay = transformToReplay(parsed, body.provider, project, {
+        generator: {
+          name: "vibe-replay",
+          version: CLI_VERSION,
+          generatedAt: new Date().toISOString(),
+        },
+      });
+
+      if (body.title) {
+        replay.meta.title = body.title;
+      }
+
+      // Save replay
+      const rawSlug = replay.meta.slug || replay.meta.sessionId.slice(0, 8);
+      const slug = rawSlug.replace(/[^a-zA-Z0-9_-]/g, "-");
+      const outputDir = join(baseDir, slug);
+      await generateOutput(replay, outputDir);
+
+      // Secret scanning
+      const findings = scanForSecrets(JSON.stringify(replay));
+      const warnings = findings.map((f) => `[${f.rule}] ${f.match}`);
+
+      return c.json({
+        slug,
+        title: replay.meta.title || slug,
+        sceneCount: replay.scenes.length,
+        stats: {
+          userPrompts: replay.meta.stats.userPrompts,
+          toolCalls: replay.meta.stats.toolCalls,
+          thinkingBlocks: replay.meta.stats.thinkingBlocks,
+        },
+        warnings: warnings.length > 0 ? warnings : undefined,
+      });
+    } catch (err: any) {
+      return c.json({ error: err.message || "Generation failed" }, 500);
+    }
+  });
+
+  // --- Annotations (requires slug) ---
+  app.get("/api/annotations", async (c) => {
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+    const anns = await loadAnnotations(baseDir, result.slug);
+    return c.json(anns);
   });
 
   app.post("/api/annotations", async (c) => {
-    const slug = safeSlug(c.req.query("slug"));
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
     const body = await c.req.json<Annotation[]>();
-
-    if (slug && slug !== currentSlug) {
-      // Save annotations for a different session
-      const annPath = join(baseDir, slug, "annotations.json");
-      try {
-        await writeFile(annPath, JSON.stringify(body, null, 2), "utf-8");
-      } catch { /* ignore */ }
-      return c.json({ ok: true });
-    }
-
-    // Current session
-    annotations = body;
     try {
-      await writeFile(annotationsPath, JSON.stringify(annotations, null, 2), "utf-8");
-    } catch { /* ignore write errors */ }
+      await saveAnnotations(baseDir, result.slug, body);
+    } catch { /* ignore */ }
     return c.json({ ok: true });
   });
 
@@ -313,41 +534,36 @@ export async function startEditor(
     return c.json(status);
   });
 
-  // Publish to Gist
+  // Publish to Gist (requires slug)
   app.post("/api/publish/gist", async (c) => {
-    const slug = safeSlug(c.req.query("slug"));
-    const targetSlug = slug || currentSlug;
-    const targetDir = join(baseDir, targetSlug);
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetDir = join(baseDir, result.slug);
 
     try {
-      const targetSession = (targetSlug === currentSlug)
-        ? { ...session, annotations }
-        : await loadSessionFromDisk(baseDir, targetSlug);
+      const targetSession = await loadSessionFromDisk(baseDir, result.slug);
 
       await writeFile(join(targetDir, "replay.json"), JSON.stringify(targetSession), "utf-8");
 
       const title = targetSession.meta.title || targetSession.meta.slug;
       const savedGist = await loadSavedGistInfo(targetDir);
-      const result = await publishGist(targetDir, title, {
+      const gistResult = await publishGist(targetDir, title, {
         overwrite: savedGist || undefined,
       });
-      return c.json(result);
+      return c.json(gistResult);
     } catch (err: any) {
       return c.json({ error: err.message || "Gist publish failed" }, 500);
     }
   });
 
-  // Export HTML
+  // Export HTML (requires slug)
   app.post("/api/export/html", async (c) => {
-    const slug = safeSlug(c.req.query("slug"));
-    const targetSlug = slug || currentSlug;
-    const targetDir = join(baseDir, targetSlug);
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetDir = join(baseDir, result.slug);
 
     try {
-      const targetSession = (targetSlug === currentSlug)
-        ? { ...session, annotations }
-        : await loadSessionFromDisk(baseDir, targetSlug);
-
+      const targetSession = await loadSessionFromDisk(baseDir, result.slug);
       const outputPath = await generateOutput(targetSession, targetDir);
       return c.json({ path: outputPath });
     } catch (err: any) {
@@ -373,10 +589,10 @@ export async function startEditor(
     }
   });
 
-  // AI Feedback — generate feedback annotations
+  // AI Feedback — generate feedback annotations (requires slug)
   app.post("/api/feedback/generate", async (c) => {
-    const slug = safeSlug(c.req.query("slug"));
-    const targetSlug = slug || currentSlug;
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
 
     try {
       const body = await c.req.json<{ toolName?: string }>().catch(() => ({}));
@@ -392,9 +608,7 @@ export async function startEditor(
         return c.json({ error: `Requested AI Coach tool is not available: ${requestedToolName}` }, 400);
       }
 
-      const targetSession = (targetSlug === currentSlug)
-        ? { ...session, annotations }
-        : await loadSessionFromDisk(baseDir, targetSlug);
+      const targetSession = await loadSessionFromDisk(baseDir, result.slug);
 
       const fb = await generateFeedback(targetSession, tool);
       if (!fb) {
@@ -407,15 +621,9 @@ export async function startEditor(
         ...fb.annotations,
       ];
 
-      // Update in-memory if current session
-      if (targetSlug === currentSlug) {
-        annotations = newAnnotations;
-      }
-
       // Persist
-      const annPath = join(baseDir, targetSlug, "annotations.json");
       try {
-        await writeFile(annPath, JSON.stringify(newAnnotations, null, 2), "utf-8");
+        await saveAnnotations(baseDir, result.slug, newAnnotations);
       } catch { /* ignore */ }
 
       return c.json({
@@ -428,15 +636,26 @@ export async function startEditor(
     }
   });
 
-  // In dev mode (externalViewerUrl), use fixed port 3456 to match Vite proxy config
-  const port = opts?.externalViewerUrl ? 3456 : await findFreePort(3456, 3466);
-  const url = `http://localhost:${port}`;
-  const browseUrl = opts?.externalViewerUrl
-    ? opts.openDashboard ? `${opts.externalViewerUrl}/?view=dashboard` : opts.externalViewerUrl
-    : opts?.openDashboard ? `${url}/?view=dashboard` : url;
+  // Dev mode: fixed port 3456 to match Vite proxy config
+  // Production: port 0 lets the OS pick a free port (no conflicts)
+  const requestedPort = opts?.externalViewerUrl ? 3456 : 0;
 
-  serve({ fetch: app.fetch, port, hostname: "127.0.0.1" }, () => {
-    const label = opts?.openDashboard ? "Dashboard" : "Editor";
+  const server = serve({ fetch: app.fetch, port: requestedPort, hostname: "127.0.0.1" }, (info) => {
+    const port = info.port;
+    const url = `http://localhost:${port}`;
+
+    // Build the URL to open in the browser
+    let browseUrl: string;
+    const viewerBase = opts?.externalViewerUrl || url;
+    if (opts?.openDashboard) {
+      browseUrl = `${viewerBase}/?view=dashboard`;
+    } else if (opts?.openSlug) {
+      browseUrl = `${viewerBase}/?session=${encodeURIComponent(opts.openSlug)}`;
+    } else {
+      browseUrl = `${viewerBase}/?view=dashboard`;
+    }
+
+    const label = opts?.openDashboard || !opts?.openSlug ? "Dashboard" : "Editor";
     if (opts?.externalViewerUrl) {
       console.log(
         chalk.bold.cyan(`\n  ${label} API running on port ${port}`) +
@@ -457,7 +676,7 @@ export async function startEditor(
   // Keep alive until Ctrl+C
   await new Promise<void>((resolve) => {
     process.on("SIGINT", () => {
-      console.log(chalk.dim("\n  Editor stopped.\n"));
+      console.log(chalk.dim("\n  Server stopped.\n"));
       resolve();
       process.exit(0);
     });
@@ -465,22 +684,8 @@ export async function startEditor(
 }
 
 /**
- * Start dashboard mode — finds first existing replay and opens dashboard view.
+ * Start dashboard mode — no existing replays required.
  */
 export async function startDashboard(baseDir: string, opts?: { externalViewerUrl?: string }): Promise<void> {
-  await mkdir(baseDir, { recursive: true });
-
-  // Find first replay to use as the "current" session
-  const sessions = await scanSessions(baseDir);
-  if (sessions.length === 0) {
-    console.log(chalk.red("  No replays found in " + baseDir));
-    console.log(chalk.dim("  Run vibe-replay first to create a replay.\n"));
-    process.exit(1);
-  }
-
-  const firstSlug = sessions[0].slug;
-  const session = await loadSessionFromDisk(baseDir, firstSlug);
-  const outputDir = join(baseDir, firstSlug);
-
-  await startEditor(session, outputDir, { openDashboard: true, externalViewerUrl: opts?.externalViewerUrl });
+  await startServer(baseDir, { openDashboard: true, externalViewerUrl: opts?.externalViewerUrl });
 }

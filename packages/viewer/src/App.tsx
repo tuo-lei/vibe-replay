@@ -90,6 +90,10 @@ export default function App() {
             >
               vibe-replay
             </button>
+            <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded-full border border-terminal-green/30 bg-terminal-green/10 text-terminal-green">
+              <span className="w-1.5 h-1.5 rounded-full bg-terminal-green animate-pulse" />
+              Local
+            </span>
             <span className="text-terminal-border/60 text-sm select-none">|</span>
             <span className="text-sm font-mono text-terminal-text/80">Dashboard</span>
           </div>
@@ -123,6 +127,12 @@ export default function App() {
           >
             vibe-replay
           </a>
+          {isEditor && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded-full border border-terminal-green/30 bg-terminal-green/10 text-terminal-green">
+              <span className="w-1.5 h-1.5 rounded-full bg-terminal-green animate-pulse" />
+              Local
+            </span>
+          )}
           {showDashboardBack && (
             <>
               <span className="text-terminal-border/60 text-sm select-none">|</span>
