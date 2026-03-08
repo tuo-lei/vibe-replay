@@ -11,10 +11,10 @@ export default memo(function BashBlock({ command, stdout, isActive: _isActive }:
   const hasOutput = stdout.trim().length > 0;
 
   return (
-    <div className="border border-terminal-border rounded-lg overflow-hidden bg-terminal-surface">
+    <div className="bg-terminal-surface rounded-xl overflow-hidden shadow-layer-sm">
       <button
         onClick={() => hasOutput && setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-2 bg-terminal-surface/50 hover:bg-terminal-border/20 transition-colors text-left border-b border-terminal-border"
+        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-terminal-surface-hover transition-colors duration-200 ease-material text-left"
       >
         <span className="text-xs font-mono font-bold text-terminal-orange">$</span>
         <span className="text-xs font-mono text-terminal-text truncate flex-1">{command}</span>

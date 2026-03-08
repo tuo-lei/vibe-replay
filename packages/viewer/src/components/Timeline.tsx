@@ -15,9 +15,9 @@ function sceneColor(type: Scene["type"]): string {
     case "compaction-summary":
       return "#666666";
     case "thinking":
-      return "#bc8cff";
+      return "#b392f0";
     case "text-response":
-      return "#58a6ff";
+      return "#79b8ff";
     case "tool-call":
       return "#d29922";
   }
@@ -101,13 +101,16 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
           {annotationDots.map((pct, i) => (
             <div
               key={i}
-              className="absolute w-1.5 h-1.5 rounded-full bg-terminal-blue shadow-sm shadow-terminal-blue/50"
+              className="absolute w-1.5 h-1.5 rounded-full bg-terminal-blue shadow-layer-sm"
               style={{ left: `${pct}%`, top: "50%", transform: "translate(-50%, -50%)" }}
             />
           ))}
         </div>
       )}
-      <div ref={barRef} className="relative flex h-2 rounded overflow-hidden bg-terminal-border/30">
+      <div
+        ref={barRef}
+        className="relative flex h-2 rounded-full overflow-hidden bg-terminal-surface-2"
+      >
         {segments.map((seg, i) => (
           <div
             key={i}
@@ -120,7 +123,7 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
         ))}
         {/* Playhead */}
         <div
-          className="absolute top-0 bottom-0 w-0.5 bg-white shadow-sm shadow-white/50 transition-[left] duration-150"
+          className="absolute top-0 bottom-0 w-0.5 bg-white shadow-layer-sm transition-[left] duration-150 ease-material"
           style={{ left: `${progressPct}%` }}
         />
       </div>

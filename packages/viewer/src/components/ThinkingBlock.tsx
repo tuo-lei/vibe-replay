@@ -12,7 +12,7 @@ export default memo(function ThinkingBlock({ content, isActive }: Props) {
     <div className="ml-6">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 text-xs text-terminal-dim hover:text-terminal-text transition-colors font-mono"
+        className="flex items-center gap-2 text-xs text-terminal-dim hover:text-terminal-text transition-colors duration-200 ease-material font-mono"
       >
         <span className={`transition-transform ${expanded ? "rotate-90" : ""}`}>{"\u25B6"}</span>
         <span className={isActive ? "animate-pulse" : ""}>Thinking...</span>

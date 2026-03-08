@@ -73,10 +73,10 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
   // Generic tool call
   return (
     <div>
-      <div className="border border-terminal-border rounded-lg overflow-hidden">
+      <div className="bg-terminal-surface rounded-xl overflow-hidden shadow-layer-sm">
         <button
           onClick={() => setExpanded(!expanded)}
-          className="w-full flex items-center gap-2 px-3 py-2 bg-terminal-surface hover:bg-terminal-border/30 transition-colors text-left"
+          className="w-full flex items-center gap-2 px-3 py-2 bg-terminal-surface hover:bg-terminal-surface-hover transition-colors duration-200 ease-material text-left"
         >
           <span className="text-xs font-mono">{toolIcon(scene.toolName)}</span>
           <span className="text-xs font-mono font-bold text-terminal-orange">{scene.toolName}</span>
@@ -90,7 +90,7 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
           </span>
         </button>
         {expanded && (
-          <div className="border-t border-terminal-border">
+          <div className="border-t border-terminal-border-subtle">
             <div className="px-3 py-2">
               <div className="text-xs text-terminal-dim font-mono mb-1">Input:</div>
               <pre className="text-xs text-terminal-text font-mono whitespace-pre-wrap break-words max-h-[200px] overflow-y-auto">
@@ -98,7 +98,7 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
               </pre>
             </div>
             {scene.result && (
-              <div className="px-3 py-2 border-t border-terminal-border">
+              <div className="px-3 py-2 border-t border-terminal-border-subtle">
                 <div className="text-xs text-terminal-dim font-mono mb-1">Result:</div>
                 <pre className="text-xs text-terminal-text font-mono whitespace-pre-wrap break-words max-h-[200px] overflow-y-auto">
                   {scene.result}
@@ -106,14 +106,14 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
               </div>
             )}
             {scene.images && scene.images.length > 0 && (
-              <div className="px-3 py-2 border-t border-terminal-border">
+              <div className="px-3 py-2 border-t border-terminal-border-subtle">
                 <div className="flex gap-2 flex-wrap">
                   {scene.images.map((src, i) => (
                     <img
                       key={i}
                       src={src}
                       alt={`Screenshot ${i + 1}`}
-                      className="max-w-[400px] max-h-[300px] rounded border border-terminal-border object-contain"
+                      className="max-w-[400px] max-h-[300px] rounded-md object-contain"
                     />
                   ))}
                 </div>

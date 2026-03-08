@@ -90,24 +90,27 @@ export default function LandingHero({ session, onStart }: Props) {
 
   return (
     <div className="flex-1 flex flex-col items-center overflow-y-auto relative">
-      {/* Background glow */}
-      <div className="absolute inset-0 bg-gradient-to-b from-terminal-green/[0.03] via-transparent to-transparent pointer-events-none" />
+      {/* Background glow — layered for depth */}
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute inset-0 bg-gradient-to-b from-terminal-green-subtle via-transparent to-transparent" />
+        <div className="absolute inset-0 bg-dot-grid" />
+      </div>
 
-      {/* Top spacer — shrinks to 0 when content exceeds viewport */}
+      {/* Top spacer */}
       <div className="flex-1 min-h-0" />
 
-      <div className="max-w-2xl w-full px-6 text-center space-y-5 md:space-y-8 z-10 shrink-0">
+      <div className="max-w-2xl w-full px-8 text-center space-y-6 md:space-y-10 z-10 shrink-0">
         {/* Title */}
-        <div className="space-y-3 md:space-y-4">
+        <div className="space-y-4 md:space-y-5">
           <a
             href="https://vibe-replay.com"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-block text-lg sm:text-xl font-mono font-bold hover:opacity-80 transition-opacity bg-gradient-to-r from-[#3fb950] to-[#58a6ff] bg-clip-text text-transparent"
+            className="inline-block text-sm font-sans font-semibold uppercase tracking-widest hover:opacity-80 transition-opacity bg-gradient-to-r from-[#3fb950] to-[#79b8ff] bg-clip-text text-transparent"
           >
             vibe-replay
           </a>
-          <h2 className="text-2xl sm:text-3xl font-mono font-bold text-terminal-text leading-tight">
+          <h2 className="text-3xl sm:text-4xl md:text-5xl font-sans font-bold text-terminal-text leading-[1.15] tracking-tight">
             {title}
           </h2>
           {meta.title && meta.project !== meta.title && (
@@ -136,60 +139,62 @@ export default function LandingHero({ session, onStart }: Props) {
         </div>
 
         {/* Model + provider */}
-        <div className="flex items-center justify-center gap-3 text-xs font-mono text-terminal-dim">
+        <div className="flex items-center justify-center gap-3 text-xs font-mono text-terminal-dimmer">
           {meta.model && <span>{meta.model}</span>}
           {meta.model && <span className="text-terminal-border">|</span>}
           <span>{meta.provider}</span>
         </div>
 
-        {/* Play button */}
+        {/* Play button — primary CTA */}
         <button
           onClick={onStart}
-          className="group inline-flex items-center gap-3 px-8 py-3 rounded-xl bg-terminal-green/10 border border-terminal-green/30 hover:bg-terminal-green/20 hover:border-terminal-green/50 transition-all duration-200"
+          className="group inline-flex items-center gap-3 px-10 py-4 rounded-xl bg-terminal-green-subtle hover:bg-terminal-green-emphasis transition-all duration-200 ease-material shadow-layer-md hover:shadow-layer-lg hover:-translate-y-0.5 landing-pulse"
         >
-          <span className="text-xl text-terminal-green group-hover:scale-110 transition-transform">
+          <span className="text-xl text-terminal-green group-hover:scale-110 transition-transform duration-200">
             {"\u25B6"}
           </span>
-          <span className="text-sm font-mono font-semibold text-terminal-green">Start Replay</span>
+          <span className="text-base font-sans font-semibold text-terminal-green tracking-wide">
+            Start Replay
+          </span>
         </button>
       </div>
 
-      {/* First prompt teaser — normal flow, not absolute */}
+      {/* First prompt teaser */}
       {firstPrompt && (
-        <div className="w-full px-6 mt-6 md:mt-8 pb-6 z-10 shrink-0">
+        <div className="w-full px-8 mt-8 md:mt-12 pb-6 z-10 shrink-0">
           <div onClick={onStart} className="max-w-2xl mx-auto cursor-pointer group">
-            <div className="text-[11px] font-mono text-terminal-dim uppercase tracking-wider mb-2 text-center">
+            <div className="text-xs font-sans text-terminal-dimmer uppercase tracking-widest mb-3 text-center font-medium">
               First message
             </div>
-            <div className="rounded-lg bg-terminal-green/5 border border-terminal-green/15 px-4 py-3 group-hover:border-terminal-green/30 transition-colors">
-              <div className="text-[11px] font-mono font-semibold text-terminal-green uppercase tracking-wider mb-1.5">
+            <div className="rounded-xl bg-terminal-green-subtle px-5 py-4 group-hover:bg-terminal-green-emphasis transition-all duration-200 ease-material shadow-layer-sm hover-lift">
+              <div className="text-xs font-sans font-semibold text-terminal-green uppercase tracking-widest mb-2">
                 You
               </div>
-              <div className="text-sm font-mono text-terminal-text/70 line-clamp-3 whitespace-pre-wrap">
+              <div className="text-sm font-mono text-terminal-dim line-clamp-3 whitespace-pre-wrap leading-relaxed">
                 {firstPrompt}
               </div>
             </div>
-            <div className="text-center mt-3 text-terminal-dim/50 text-xs font-mono animate-bounce">
+            <div className="text-center mt-4 text-terminal-dimmer text-xs font-mono animate-bounce">
               {"\u2193"} scroll to explore
             </div>
           </div>
         </div>
       )}
 
-      {/* Explore link */}
-      <div className="px-6 py-4 z-10 shrink-0">
+      {/* Explore link — ghost style */}
+      <div className="px-8 py-5 z-10 shrink-0">
         <a
           href="https://vibe-replay.com/explore"
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-2 text-xs font-mono text-terminal-dim hover:text-terminal-text transition-colors border border-terminal-border/40 rounded-full px-4 py-1.5 hover:border-terminal-border"
+          className="inline-flex items-center gap-2 text-xs font-sans font-medium text-terminal-dim hover:text-terminal-text transition-colors"
         >
           Explore more replays
           <span className="text-terminal-green">{"\u2192"}</span>
         </a>
       </div>
 
-      {/* Bottom spacer — shrinks to 0 when content exceeds viewport */}
+      {/* Bottom spacer */}
       <div className="flex-1 min-h-0" />
     </div>
   );
@@ -205,9 +210,11 @@ function StatPill({
   color: string;
 }) {
   return (
-    <div className="bg-terminal-surface/80 rounded-lg px-3 py-2.5 border border-terminal-border/40">
-      <div className={`text-lg font-bold font-mono tabular-nums ${color}`}>{value}</div>
-      <div className="text-[11px] font-mono text-terminal-dim uppercase tracking-wide">{label}</div>
+    <div className="bg-terminal-surface rounded-xl px-3 py-3 shadow-layer-sm">
+      <div className={`text-xl font-bold font-mono tabular-nums ${color}`}>{value}</div>
+      <div className="text-[10px] font-sans text-terminal-dimmer uppercase tracking-widest font-medium mt-0.5">
+        {label}
+      </div>
     </div>
   );
 }

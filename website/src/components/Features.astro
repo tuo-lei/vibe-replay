@@ -40,7 +40,7 @@ const features = [
   <div class="max-w-5xl mx-auto">
     <!-- Section header -->
     <div class="text-center mb-20">
-      <p class="text-accent font-mono text-sm font-medium tracking-wider uppercase mb-3">Features</p>
+      <p class="text-accent/70 font-mono text-sm font-medium tracking-wider uppercase mb-3">Features</p>
       <h2 class="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight">
         Everything you need,<br />nothing you don't
       </h2>
@@ -49,8 +49,8 @@ const features = [
     <!-- Feature grid -->
     <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
       {features.map((feature) => (
-        <div class="group p-6 rounded-2xl border border-border bg-surface-1/30 hover:bg-surface-1/60 hover:border-accent/20 transition-all duration-300">
-          <div class="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center text-accent mb-4 group-hover:bg-accent/20 transition-colors">
+        <div class="group p-6 rounded-2xl border border-border/40 bg-surface-1/30 hover:bg-surface-1/60 hover:border-accent/20 transition-all duration-300">
+          <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-accent/10 to-cyan-400/5 flex items-center justify-center text-accent mb-4 group-hover:bg-accent/20 transition-colors">
             <Fragment set:html={feature.icon} />
           </div>
           <h3 class="text-lg font-semibold mb-2">{feature.title}</h3>

@@ -32,7 +32,7 @@ export default memo(function TextResponseBlock({ content, isActive }: Props) {
       {isLong && (
         <button
           onClick={() => setExpanded(!expanded)}
-          className="mt-1 text-[11px] font-mono text-terminal-blue hover:text-terminal-text transition-colors"
+          className="mt-1 text-xs font-mono text-terminal-blue hover:text-terminal-text transition-colors"
         >
           {expanded ? "Show less" : `Show more (${content.length} chars)`}
         </button>

@@ -32,7 +32,7 @@ export default memo(function UserPromptBlock({ content, images, isActive }: Prop
       {isLong && (
         <button
           onClick={() => setExpanded((v) => !v)}
-          className="mt-1 text-[11px] font-mono text-terminal-green/80 hover:text-terminal-green transition-colors"
+          className="mt-1 text-xs font-mono text-terminal-dim hover:text-terminal-green transition-colors duration-200 ease-material"
         >
           {expanded ? "Show less" : `Show more (${lines.length} lines)`}
         </button>
@@ -44,7 +44,7 @@ export default memo(function UserPromptBlock({ content, images, isActive }: Prop
               key={i}
               src={src}
               alt={`Attachment ${i + 1}`}
-              className="max-w-[300px] max-h-[200px] rounded border border-terminal-border object-contain"
+              className="max-w-[300px] max-h-[200px] rounded-md object-contain"
             />
           ))}
         </div>

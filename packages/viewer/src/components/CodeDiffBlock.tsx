@@ -81,8 +81,8 @@ export default memo(function CodeDiffBlock({
   const isNewFile = !oldContent;
 
   return (
-    <div className="border border-terminal-border rounded-lg overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-2 bg-terminal-surface border-b border-terminal-border">
+    <div className="bg-terminal-surface rounded-xl overflow-hidden shadow-layer-sm">
+      <div className="flex items-center gap-2 px-3 py-2 bg-terminal-surface">
         <span className="text-xs font-mono font-bold text-terminal-orange">{toolName}</span>
         <span className="text-xs font-mono text-terminal-blue truncate">{filePath}</span>
         {isNewFile && (
