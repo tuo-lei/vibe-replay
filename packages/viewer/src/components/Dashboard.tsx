@@ -37,13 +37,17 @@ function formatSize(bytes: number): string {
 
 function ProviderBadge({ provider }: { provider: string }) {
   const colors: Record<string, string> = {
-    "claude-code": "bg-amber-500/15 text-amber-400 border-amber-500/30",
-    cursor: "bg-blue-500/15 text-blue-400 border-blue-500/30",
+    "claude-code": "bg-terminal-orange-subtle text-terminal-orange",
+    cursor: "bg-terminal-blue-subtle text-terminal-blue",
   };
-  const cls = colors[provider] || "bg-gray-500/15 text-gray-400 border-gray-500/30";
+  const cls = colors[provider] || "bg-terminal-surface text-terminal-dim";
   const label = provider === "claude-code" ? "Claude" : provider === "cursor" ? "Cursor" : provider;
   return (
-    <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${cls}`}>{label}</span>
+    <span
+      className={`text-[10px] font-sans font-medium px-2 py-0.5 rounded-full uppercase tracking-wider ${cls}`}
+    >
+      {label}
+    </span>
   );
 }
 
@@ -100,7 +104,7 @@ function EditableTitle({
               setEditing(false);
             }
           }}
-          className="bg-terminal-surface border border-terminal-border rounded px-2 py-0.5 text-sm font-mono text-terminal-text w-full outline-none focus:border-terminal-green/50"
+          className="bg-terminal-surface-2 rounded px-2 py-0.5 text-sm font-mono text-terminal-text w-full outline-none ring-1 ring-terminal-border-subtle focus:ring-terminal-green/50 transition-shadow duration-200"
           placeholder={slug}
           disabled={saving}
         />
@@ -162,7 +166,7 @@ function ReplayCard({
 
   return (
     <div
-      className={`bg-terminal-surface/50 border border-terminal-border/50 rounded-lg px-4 py-3 hover:bg-terminal-surface/80 transition-colors space-y-1.5 ${isArchived ? "opacity-50" : ""}`}
+      className={`bg-terminal-surface rounded-xl px-5 py-4 hover:bg-terminal-surface-hover transition-colors duration-200 ease-material space-y-2.5 shadow-layer-sm hover-lift ${isArchived ? "opacity-50" : ""}`}
     >
       {/* Row 1: title + badges + actions */}
       <div className="flex items-center justify-between gap-3">
@@ -179,7 +183,7 @@ function ReplayCard({
               href={s.gist.viewerUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded border bg-purple-500/15 text-purple-400 border-purple-500/30 hover:bg-purple-500/25 transition-colors shrink-0"
+              className="inline-flex items-center gap-1 text-xs font-mono px-1.5 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis transition-colors duration-200 shrink-0"
               title={`View on vibe-replay.com`}
             >
               <svg
@@ -199,7 +203,7 @@ function ReplayCard({
             <button
               onClick={onPublishGist}
               disabled={isPublishing}
-              className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded border bg-yellow-500/15 text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/25 transition-colors disabled:opacity-50 shrink-0"
+              className="inline-flex items-center gap-1 text-xs font-mono px-1.5 py-0.5 rounded bg-terminal-orange-subtle text-terminal-orange hover:bg-terminal-orange-emphasis transition-colors duration-200 disabled:opacity-50 shrink-0"
             >
               {isPublishing ? "Syncing..." : "Out of sync"}
             </button>
@@ -208,7 +212,7 @@ function ReplayCard({
         <div className="flex items-center gap-1.5 shrink-0">
           <button
             onClick={onOpen}
-            className="px-3 py-1.5 text-xs font-mono rounded-md bg-terminal-green/10 text-terminal-green border border-terminal-green/20 hover:bg-terminal-green/20 transition-colors"
+            className="px-3.5 py-1.5 text-xs font-sans font-semibold rounded-lg bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 ease-material"
           >
             Open
           </button>
@@ -216,7 +220,7 @@ function ReplayCard({
             <button
               onClick={onRegenerate}
               disabled={isRegenerating}
-              className="px-2 py-1.5 text-[11px] font-mono rounded-md text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/80 transition-colors disabled:opacity-50"
+              className="px-2 py-1.5 text-xs font-mono rounded-md text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/80 transition-colors disabled:opacity-50"
             >
               {isRegenerating ? (
                 <span className="animate-pulse text-terminal-green">...</span>
@@ -229,11 +233,11 @@ function ReplayCard({
             <button
               onClick={onPublishGist}
               disabled={isPublishing}
-              className="px-2 py-1.5 text-xs font-mono rounded-md text-terminal-dim hover:text-purple-400 hover:bg-purple-500/10 transition-colors disabled:opacity-50"
+              className="px-2 py-1.5 text-xs font-mono rounded-md text-terminal-dim hover:text-terminal-purple hover:bg-terminal-purple-subtle transition-colors duration-200 disabled:opacity-50"
               title="Publish to Gist"
             >
               {isPublishing ? (
-                <span className="text-purple-400 animate-pulse">...</span>
+                <span className="text-terminal-purple animate-pulse">...</span>
               ) : (
                 <svg
                   width="14"
@@ -256,7 +260,7 @@ function ReplayCard({
                     onDelete();
                     setConfirmingDelete(false);
                   }}
-                  className="px-2 py-1.5 text-xs font-mono rounded-md bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors"
+                  className="px-2 py-1.5 text-xs font-mono rounded-md bg-terminal-red-subtle text-terminal-red hover:bg-terminal-red-emphasis transition-colors duration-200"
                 >
                   Confirm
                 </button>
@@ -270,7 +274,7 @@ function ReplayCard({
             ) : (
               <button
                 onClick={() => setConfirmingDelete(true)}
-                className="px-2 py-1.5 text-xs font-mono rounded-md text-terminal-dim hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                className="px-2 py-1.5 text-xs font-mono rounded-md text-terminal-dim hover:text-terminal-red hover:bg-terminal-red-subtle transition-colors duration-200"
                 title="Delete"
               >
                 <svg
@@ -308,50 +312,44 @@ function ReplayCard({
       {/* Row 2: user messages */}
       {(s.messages || (s.firstMessage ? [s.firstMessage] : [])).map((msg, i) => (
         <div key={i} className="flex gap-2 items-start">
-          <span className="text-[11px] text-terminal-green/60 shrink-0 mt-px select-none">
-            &gt;
-          </span>
-          <p className="text-[13px] text-terminal-text/60 line-clamp-1 leading-relaxed">{msg}</p>
+          <span className="text-xs text-terminal-green shrink-0 mt-px select-none">&gt;</span>
+          <p className="text-sm text-terminal-dim line-clamp-1 leading-relaxed">{msg}</p>
         </div>
       ))}
-      {/* Row 3: identity */}
-      <div className="flex items-center gap-1.5 text-[11px] font-mono text-terminal-dim/50 flex-wrap">
+      {/* Row 3: stats bar */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim">
+          {s.stats.userPrompts} prompts
+        </span>
+        <span className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-orange-subtle text-terminal-orange">
+          {s.stats.toolCalls} tools
+        </span>
+        {s.stats.durationMs && (
+          <span className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim">
+            {formatDuration(s.stats.durationMs)}
+          </span>
+        )}
+        {s.stats.costEstimate && (
+          <span className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-green-subtle text-terminal-green">
+            {formatCost(s.stats.costEstimate)}
+          </span>
+        )}
+        {s.hasAnnotations && (
+          <span className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-blue-subtle text-terminal-blue">
+            {s.annotationCount} annotation{s.annotationCount !== 1 ? "s" : ""}
+          </span>
+        )}
+      </div>
+      {/* Row 4: identity */}
+      <div className="flex items-center gap-2 text-xs font-mono text-terminal-dimmer flex-wrap">
         <ProviderBadge provider={s.provider} />
-        <span>{s.slug}</span>
-        <span className="text-terminal-dim/30">&middot;</span>
         <span>{s.project}</span>
-        <span className="text-terminal-dim/30">&middot;</span>
+        <span className="text-terminal-border">&middot;</span>
         <span>{formatDate(s.startTime)}</span>
         {s.model && (
           <>
-            <span className="text-terminal-dim/30">&middot;</span>
+            <span className="text-terminal-border">&middot;</span>
             <span>{s.model}</span>
-          </>
-        )}
-      </div>
-      {/* Row 4: stats */}
-      <div className="flex items-center gap-1.5 text-[11px] font-mono text-terminal-dim/40 flex-wrap">
-        <span>{s.stats.sceneCount} scenes</span>
-        <span>{s.stats.userPrompts} prompts</span>
-        <span>{s.stats.toolCalls} tools</span>
-        {s.stats.durationMs && (
-          <>
-            <span className="text-terminal-dim/30">&middot;</span>
-            <span>{formatDuration(s.stats.durationMs)}</span>
-          </>
-        )}
-        {s.stats.costEstimate && (
-          <>
-            <span className="text-terminal-dim/30">&middot;</span>
-            <span>{formatCost(s.stats.costEstimate)}</span>
-          </>
-        )}
-        {s.hasAnnotations && (
-          <>
-            <span className="text-terminal-dim/30">&middot;</span>
-            <span className="text-terminal-orange">
-              {s.annotationCount} annotation{s.annotationCount !== 1 ? "s" : ""}
-            </span>
           </>
         )}
       </div>
@@ -413,13 +411,13 @@ function OpenReplayForm() {
             setError(null);
           }}
           placeholder="Paste a Gist ID, Gist URL, or replay JSON URL..."
-          className="flex-1 bg-terminal-surface border border-terminal-border rounded-lg px-3 py-2 text-sm font-mono text-terminal-text placeholder:text-terminal-dim/50 outline-none focus:border-terminal-green/50"
+          className="flex-1 bg-terminal-surface rounded-lg px-3 py-2.5 text-sm font-mono text-terminal-text placeholder:text-terminal-dimmer outline-none ring-1 ring-transparent focus:ring-terminal-green/40 transition-shadow duration-200 shadow-layer-sm"
           disabled={loading}
         />
         <button
           type="submit"
           disabled={loading || !input.trim()}
-          className="px-4 py-2 text-xs font-mono rounded-lg bg-terminal-green/10 text-terminal-green border border-terminal-green/20 hover:bg-terminal-green/20 transition-colors disabled:opacity-40"
+          className="px-4 py-2 text-xs font-mono rounded-lg bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-colors duration-200 disabled:opacity-40 font-medium"
         >
           {loading ? "Loading..." : "Open"}
         </button>
@@ -673,7 +671,7 @@ function SessionsPanel() {
           <div className="text-terminal-red font-mono text-sm">{error}</div>
           <button
             onClick={loadSources}
-            className="px-3 py-1.5 text-xs font-mono rounded-md bg-terminal-surface text-terminal-dim border border-terminal-border hover:text-terminal-text transition-colors"
+            className="px-3 py-1.5 text-xs font-mono rounded-md bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors duration-200"
           >
             Retry
           </button>
@@ -687,7 +685,7 @@ function SessionsPanel() {
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center space-y-2">
           <div className="text-terminal-dim font-mono text-sm">No AI sessions found</div>
-          <div className="text-terminal-dim/50 font-mono text-xs">
+          <div className="text-terminal-dimmer font-mono text-xs">
             Start a coding session with Claude Code or Cursor, then come back here
           </div>
         </div>
@@ -698,19 +696,19 @@ function SessionsPanel() {
   return (
     <div className="flex flex-1 min-h-0">
       {/* ─── Left sidebar: project navigation (hidden on mobile) ─── */}
-      <div className="hidden md:flex w-56 shrink-0 flex-col border-r border-terminal-border/50 bg-terminal-bg">
-        <div className="flex items-center justify-between px-3 py-2 border-b border-terminal-border/30">
-          <span className="text-[11px] font-mono text-terminal-dim uppercase tracking-wider">
+      <div className="hidden md:flex w-60 shrink-0 flex-col border-r border-terminal-border-subtle bg-terminal-surface/20">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-terminal-border-subtle">
+          <span className="text-[10px] font-sans text-terminal-dimmer uppercase tracking-widest font-semibold">
             Projects
           </span>
           <button
             onClick={loadSources}
-            className="p-1 text-terminal-dim hover:text-terminal-text transition-colors"
+            className="p-1.5 rounded-md text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors duration-200"
             title="Refresh"
           >
             <svg
-              width="12"
-              height="12"
+              width="13"
+              height="13"
               viewBox="0 0 16 16"
               fill="none"
               stroke="currentColor"
@@ -722,21 +720,29 @@ function SessionsPanel() {
             </svg>
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
           {/* All projects */}
           <button
             onClick={() => setSelectedProject(ALL_PROJECTS)}
-            className={`w-full text-left px-3 py-2 text-xs font-mono transition-colors flex items-center justify-between ${
+            className={`w-full text-left px-3 py-2.5 text-xs font-mono rounded-lg transition-all duration-200 ease-material flex items-center justify-between ${
               selectedProject === ALL_PROJECTS
-                ? "bg-terminal-green/10 text-terminal-green"
-                : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50"
+                ? "bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
+                : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface"
             }`}
           >
-            <span>All projects</span>
-            <span className="text-terminal-dim/50">{sources.length}</span>
+            <span className="font-medium">All projects</span>
+            <span
+              className={`tabular-nums px-1.5 py-0.5 rounded-md text-xs ${
+                selectedProject === ALL_PROJECTS
+                  ? "bg-terminal-green-emphasis text-terminal-green"
+                  : "bg-terminal-surface text-terminal-dimmer"
+              }`}
+            >
+              {sources.length}
+            </span>
           </button>
 
-          <div className="border-t border-terminal-border/20 my-1" />
+          <div className="h-px bg-terminal-border-subtle mx-2 my-1.5" />
 
           {/* Per-project items */}
           {projectEntries.map(([project, sessions]) => {
@@ -750,18 +756,20 @@ function SessionsPanel() {
                 key={project}
                 onClick={() => setSelectedProject(project)}
                 title={project}
-                className={`w-full text-left px-3 py-2 transition-colors group ${
-                  isActive ? "bg-terminal-green/10" : "hover:bg-terminal-surface/50"
+                className={`w-full text-left px-3 py-2.5 rounded-lg transition-all duration-200 ease-material group ${
+                  isActive
+                    ? "bg-terminal-green-subtle shadow-layer-sm"
+                    : "hover:bg-terminal-surface"
                 } ${!exists ? "opacity-50" : ""}`}
               >
-                <div className="flex items-center justify-between gap-1">
+                <div className="flex items-center justify-between gap-1.5">
                   <span
-                    className={`text-xs font-mono truncate flex items-center gap-1 ${
+                    className={`text-xs font-mono truncate flex items-center gap-1.5 ${
                       isActive
-                        ? "text-terminal-green"
+                        ? "text-terminal-green font-medium"
                         : !exists
                           ? "text-terminal-dim"
-                          : "text-terminal-text/80 group-hover:text-terminal-text"
+                          : "text-terminal-text group-hover:text-terminal-text"
                     }`}
                   >
                     {isGit && (
@@ -770,7 +778,7 @@ function SessionsPanel() {
                         height="12"
                         viewBox="0 0 16 16"
                         fill="currentColor"
-                        className="shrink-0 opacity-50"
+                        className={`shrink-0 ${isActive ? "opacity-70" : "opacity-40"}`}
                       >
                         <path
                           fillRule="evenodd"
@@ -781,19 +789,25 @@ function SessionsPanel() {
                     {label}
                   </span>
                   <span
-                    className={`text-[10px] font-mono shrink-0 ${
-                      isActive ? "text-terminal-green/60" : "text-terminal-dim/50"
+                    className={`tabular-nums px-1.5 py-0.5 rounded-md text-xs shrink-0 ${
+                      isActive
+                        ? "bg-terminal-green-emphasis text-terminal-green"
+                        : "bg-terminal-surface text-terminal-dimmer"
                     }`}
                   >
                     {sessions.length}
                   </span>
                 </div>
-                <div className="flex items-center gap-1.5 mt-0.5">
-                  <span className="text-[10px] font-mono text-terminal-dim/40 truncate">
+                <div className="flex items-center gap-2 mt-1 ml-0.5">
+                  <span
+                    className={`text-xs font-mono truncate ${isActive ? "text-terminal-dim" : "text-terminal-dimmer"}`}
+                  >
                     {timeAgo(sessions[0]?.timestamp || "")}
                   </span>
                   {replayCount > 0 && (
-                    <span className="text-[9px] font-mono text-green-400/50">
+                    <span
+                      className={`text-xs font-mono ${isActive ? "text-terminal-green" : "text-terminal-dimmer"}`}
+                    >
                       {replayCount} {replayCount === 1 ? "replay" : "replays"}
                     </span>
                   )}
@@ -811,7 +825,7 @@ function SessionsPanel() {
           <select
             value={selectedProject}
             onChange={(e) => setSelectedProject(e.target.value)}
-            className="w-full bg-terminal-surface border border-terminal-border rounded-lg px-3 py-2 text-sm font-mono text-terminal-text outline-none"
+            className="w-full bg-terminal-surface rounded-lg px-3 py-2.5 text-sm font-mono text-terminal-text outline-none shadow-layer-sm"
           >
             <option value={ALL_PROJECTS}>All projects ({sources.length})</option>
             {projectEntries.map(([project, sessions]) => (
@@ -823,22 +837,22 @@ function SessionsPanel() {
         </div>
 
         {/* Search + header */}
-        <div className="px-4 pt-3 pb-2 space-y-2 shrink-0">
+        <div className="px-4 pt-4 pb-2 space-y-3 shrink-0">
           {/* Project title for desktop */}
           <div className="hidden md:flex items-center justify-between">
             <div className="min-w-0">
-              <span className="text-sm font-mono text-terminal-text truncate block">
+              <h2 className="text-base font-mono text-terminal-text truncate font-semibold">
                 {selectedProject === ALL_PROJECTS
                   ? "All projects"
                   : projectLabels.get(selectedProject) || projectName(selectedProject)}
-              </span>
+              </h2>
               {selectedProject !== ALL_PROJECTS && (
-                <span className="text-[11px] font-mono text-terminal-dim/40 truncate block">
+                <span className="text-xs font-mono text-terminal-dimmer truncate block mt-0.5">
                   {selectedProject}
                 </span>
               )}
             </div>
-            <span className="text-xs font-mono text-terminal-dim">
+            <span className="text-xs font-mono text-terminal-dim tabular-nums px-2 py-1 rounded-md bg-terminal-surface">
               {filtered.length} session{filtered.length !== 1 ? "s" : ""}
             </span>
           </div>
@@ -862,16 +876,16 @@ function SessionsPanel() {
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
                 placeholder="Filter by branch, title, prompt..."
-                className="w-full bg-terminal-surface border border-terminal-border rounded-lg pl-9 pr-3 py-2 text-sm font-mono text-terminal-text placeholder:text-terminal-dim/50 outline-none focus:border-terminal-green/50"
+                className="w-full bg-terminal-surface rounded-lg pl-9 pr-3 py-2.5 text-sm font-mono text-terminal-text placeholder:text-terminal-dimmer outline-none ring-1 ring-transparent focus:ring-terminal-green/40 transition-shadow duration-200 shadow-layer-sm"
               />
             </div>
             {archivedCount > 0 && (
               <button
                 onClick={() => setShowArchived(!showArchived)}
-                className={`shrink-0 px-2.5 py-2 text-[11px] font-mono rounded-lg border transition-colors ${
+                className={`shrink-0 px-2.5 py-2 text-xs font-mono rounded-lg transition-colors duration-200 ${
                   showArchived
-                    ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/30"
-                    : "text-terminal-dim border-terminal-border hover:text-terminal-text"
+                    ? "bg-terminal-orange-subtle text-terminal-orange"
+                    : "bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
                 }`}
                 title={showArchived ? "Hide archived" : `View all (${archivedCount} archived)`}
               >
@@ -883,11 +897,11 @@ function SessionsPanel() {
 
         {/* Error toast */}
         {generateError && (
-          <div className="mx-4 mb-2 flex items-center gap-2 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 text-xs font-mono text-red-400 shrink-0">
+          <div className="mx-4 mb-2 flex items-center gap-2 bg-terminal-red-subtle rounded-lg px-3 py-2.5 text-xs font-mono text-terminal-red shrink-0 shadow-layer-sm">
             <span>{generateError}</span>
             <button
               onClick={() => setGenerateError(null)}
-              className="ml-auto text-red-400/60 hover:text-red-400"
+              className="ml-auto text-terminal-red/60 hover:text-terminal-red transition-colors"
             >
               &times;
             </button>
@@ -896,7 +910,7 @@ function SessionsPanel() {
 
         {/* Title input */}
         {titleInput && (
-          <div className="mx-4 mb-2 bg-terminal-surface border border-terminal-green/30 rounded-lg px-4 py-3 space-y-3 shrink-0">
+          <div className="mx-4 mb-2 bg-terminal-surface rounded-lg px-4 py-3.5 space-y-3 shrink-0 shadow-layer-md">
             <div className="text-xs font-mono text-terminal-dim">
               Title for <span className="text-terminal-text">{titleInput.slug}</span>
             </div>
@@ -911,7 +925,7 @@ function SessionsPanel() {
                 ref={titleInputRef}
                 value={titleValue}
                 onChange={(e) => setTitleValue(e.target.value)}
-                className="flex-1 bg-terminal-bg border border-terminal-border rounded-lg px-3 py-2 text-sm font-mono text-terminal-text placeholder:text-terminal-dim/50 outline-none focus:border-terminal-green/50"
+                className="flex-1 bg-terminal-bg rounded-lg px-3 py-2.5 text-sm font-mono text-terminal-text placeholder:text-terminal-dimmer outline-none ring-1 ring-terminal-border-subtle focus:ring-terminal-green/40 transition-shadow duration-200"
                 placeholder={titleInput.defaultTitle}
                 onKeyDown={(e) => {
                   if (e.key === "Escape") setTitleInput(null);
@@ -919,7 +933,7 @@ function SessionsPanel() {
               />
               <button
                 type="submit"
-                className="px-4 py-2 text-xs font-mono rounded-lg bg-terminal-green/10 text-terminal-green border border-terminal-green/20 hover:bg-terminal-green/20 transition-colors"
+                className="px-4 py-2 text-xs font-mono rounded-lg bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-colors duration-200 font-medium"
               >
                 Generate
               </button>
@@ -941,7 +955,7 @@ function SessionsPanel() {
               {filter ? "No sessions match your filter" : "No sessions in this project"}
             </div>
           ) : (
-            <div className="space-y-2 px-3 py-2">
+            <div className="space-y-2.5 px-4 py-3">
               {filtered.map((s) => {
                 // Sessions with replay: use the shared ReplayCard
                 if (s.replay) {
@@ -972,7 +986,7 @@ function SessionsPanel() {
                 return (
                   <div
                     key={`${s.provider}-${s.slug}`}
-                    className={`bg-terminal-surface/30 border border-terminal-border/30 rounded-lg px-4 py-3 hover:bg-terminal-surface/50 transition-colors space-y-1.5 ${isArchived ? "opacity-50" : ""}`}
+                    className={`bg-terminal-surface rounded-xl px-5 py-4 hover:bg-terminal-surface-hover transition-colors duration-200 ease-material space-y-2.5 shadow-layer-sm hover-lift ${isArchived ? "opacity-50" : ""}`}
                   >
                     {/* Row 1: slug + branch + time + action */}
                     <div className="flex items-center gap-2">
@@ -980,7 +994,7 @@ function SessionsPanel() {
                         {label.primary}
                       </span>
                       {label.branch && (
-                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-terminal-border/40 text-terminal-dim/70 shrink-0 flex items-center gap-0.5">
+                        <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-terminal-surface-2 text-terminal-dim shrink-0 flex items-center gap-0.5">
                           <svg
                             width="10"
                             height="10"
@@ -997,13 +1011,13 @@ function SessionsPanel() {
                         </span>
                       )}
                       <div className="flex items-center gap-1.5 shrink-0 ml-auto">
-                        <span className="text-[11px] font-mono text-terminal-dim/40">
+                        <span className="text-xs font-mono text-terminal-dimmer">
                           {timeAgo(s.timestamp)}
                         </span>
                         <button
                           onClick={() => handleGenerate(s)}
                           disabled={generatingSlug === s.slug}
-                          className="px-3 py-1 text-xs font-mono rounded-md bg-terminal-green/10 text-terminal-green border border-terminal-green/20 hover:bg-terminal-green/20 transition-colors disabled:opacity-50"
+                          className="px-3 py-1.5 text-xs font-mono rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-colors duration-200 disabled:opacity-50 font-medium"
                         >
                           {generatingSlug === s.slug ? (
                             <span className="animate-pulse">Generating...</span>
@@ -1032,25 +1046,38 @@ function SessionsPanel() {
                     {/* Row 2: user prompts */}
                     {prompts.map((p, i) => (
                       <div key={i} className="flex gap-2 items-start">
-                        <span className="text-[11px] text-terminal-green/60 shrink-0 mt-px select-none">
+                        <span className="text-xs text-terminal-green shrink-0 mt-px select-none">
                           &gt;
                         </span>
-                        <p className="text-[13px] text-terminal-text/60 line-clamp-1 leading-relaxed">
+                        <p className="text-sm text-terminal-dim line-clamp-1 leading-relaxed">
                           {p}
                         </p>
                       </div>
                     ))}
                     {/* Row 3: meta */}
-                    <div className="flex items-center gap-1.5 text-[11px] font-mono text-terminal-dim/50 flex-wrap">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <ProviderBadge provider={s.provider} />
                       {selectedProject === ALL_PROJECTS && (
-                        <span className="text-terminal-text/40" title={s.project}>
+                        <span
+                          className="text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim"
+                          title={s.project}
+                        >
                           {projectLabels.get(s.project) || projectName(s.project)}
                         </span>
                       )}
-                      <span>{formatSize(s.fileSize)}</span>
-                      {s.filePaths.length > 1 && <span>{s.filePaths.length} parts</span>}
-                      {s.hasSqlite && <span className="text-green-400/60">db</span>}
+                      <span className="text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dimmer">
+                        {formatSize(s.fileSize)}
+                      </span>
+                      {s.filePaths.length > 1 && (
+                        <span className="text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dimmer">
+                          {s.filePaths.length} parts
+                        </span>
+                      )}
+                      {s.hasSqlite && (
+                        <span className="text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-green-subtle text-terminal-green">
+                          db
+                        </span>
+                      )}
                     </div>
                   </div>
                 );
@@ -1075,6 +1102,7 @@ function ReplaysPanel() {
   const [publishingSlug, setPublishingSlug] = useState<string | null>(null);
   const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());
   const [showArchived, setShowArchived] = useState(false);
+  const [selectedProject, setSelectedProject] = useState<string>(ALL_PROJECTS);
 
   useEffect(() => {
     Promise.all([
@@ -1181,8 +1209,26 @@ function ReplaysPanel() {
     ? sessions
     : sessions.filter((s) => !archivedSlugs.has(s.slug));
 
+  // Group by project, sorted by most recent
+  const byProject = new Map<string, SessionSummary[]>();
+  for (const s of visibleSessions) {
+    if (!byProject.has(s.project)) byProject.set(s.project, []);
+    byProject.get(s.project)?.push(s);
+  }
+  const projectEntries = [...byProject.entries()].sort((a, b) => {
+    const aTime = a[1][0]?.startTime || "";
+    const bTime = b[1][0]?.startTime || "";
+    return bTime.localeCompare(aTime);
+  });
+
+  const projectLabels = computeProjectLabels(projectEntries.map(([p]) => p));
+
+  // Filter within selected project
+  const projectSessions =
+    selectedProject === ALL_PROJECTS ? visibleSessions : byProject.get(selectedProject) || [];
+
   const filtered = filter
-    ? visibleSessions.filter(
+    ? projectSessions.filter(
         (s) =>
           (s.title || "").toLowerCase().includes(filter.toLowerCase()) ||
           s.slug.toLowerCase().includes(filter.toLowerCase()) ||
@@ -1190,7 +1236,7 @@ function ReplaysPanel() {
           s.provider.toLowerCase().includes(filter.toLowerCase()) ||
           (s.firstMessage || "").toLowerCase().includes(filter.toLowerCase()),
       )
-    : visibleSessions;
+    : projectSessions;
 
   if (loading) {
     return (
@@ -1200,13 +1246,164 @@ function ReplaysPanel() {
     );
   }
 
-  return (
-    <div className="space-y-4">
-      {/* Open by URL/Gist */}
-      <OpenReplayForm />
+  // Non-server or empty: show simple centered layout
+  if (!serverAvailable || sessions.length === 0) {
+    return (
+      <div className="flex-1 overflow-auto">
+        <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
+          <OpenReplayForm />
+          {serverAvailable && sessions.length === 0 && (
+            <div className="text-center py-12 space-y-2">
+              <div className="text-terminal-dim font-mono text-sm">No replays yet</div>
+              <div className="text-terminal-dimmer font-mono text-xs">
+                Go to the Sessions tab to generate your first replay
+              </div>
+            </div>
+          )}
+          {!serverAvailable && (
+            <div className="text-center py-8 space-y-2">
+              <div className="text-terminal-dimmer font-mono text-xs">
+                Or run <span className="text-terminal-green">npx vibe-replay</span> to create a
+                replay from your AI coding sessions
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
-      {serverAvailable && sessions.length > 0 && (
-        <>
+  return (
+    <div className="flex flex-1 min-h-0">
+      {/* ─── Left sidebar: project navigation (hidden on mobile) ─── */}
+      <div className="hidden md:flex w-60 shrink-0 flex-col border-r border-terminal-border-subtle bg-terminal-surface/20">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-terminal-border-subtle">
+          <span className="text-[10px] font-sans text-terminal-dimmer uppercase tracking-widest font-semibold">
+            Projects
+          </span>
+        </div>
+        <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
+          {/* All projects */}
+          <button
+            onClick={() => setSelectedProject(ALL_PROJECTS)}
+            className={`w-full text-left px-3 py-2.5 text-xs font-mono rounded-lg transition-all duration-200 ease-material flex items-center justify-between ${
+              selectedProject === ALL_PROJECTS
+                ? "bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
+                : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface"
+            }`}
+          >
+            <span className="font-medium">All replays</span>
+            <span
+              className={`tabular-nums px-1.5 py-0.5 rounded-md text-xs ${
+                selectedProject === ALL_PROJECTS
+                  ? "bg-terminal-green-emphasis text-terminal-green"
+                  : "bg-terminal-surface text-terminal-dimmer"
+              }`}
+            >
+              {visibleSessions.length}
+            </span>
+          </button>
+
+          <div className="h-px bg-terminal-border-subtle mx-2 my-1.5" />
+
+          {/* Per-project items */}
+          {projectEntries.map(([project, replays]) => {
+            const isActive = selectedProject === project;
+            const label = projectLabels.get(project) || projectName(project);
+            const publishedCount = replays.filter((s) => s.gist?.gistId).length;
+            return (
+              <button
+                key={project}
+                onClick={() => setSelectedProject(project)}
+                title={project}
+                className={`w-full text-left px-3 py-2.5 rounded-lg transition-all duration-200 ease-material group ${
+                  isActive
+                    ? "bg-terminal-green-subtle shadow-layer-sm"
+                    : "hover:bg-terminal-surface"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-1.5">
+                  <span
+                    className={`text-xs font-mono truncate ${
+                      isActive
+                        ? "text-terminal-green font-medium"
+                        : "text-terminal-text group-hover:text-terminal-text"
+                    }`}
+                  >
+                    {label}
+                  </span>
+                  <span
+                    className={`tabular-nums px-1.5 py-0.5 rounded-md text-xs shrink-0 ${
+                      isActive
+                        ? "bg-terminal-green-emphasis text-terminal-green"
+                        : "bg-terminal-surface text-terminal-dimmer"
+                    }`}
+                  >
+                    {replays.length}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 mt-1 ml-0.5">
+                  <span
+                    className={`text-xs font-mono truncate ${isActive ? "text-terminal-dim" : "text-terminal-dimmer"}`}
+                  >
+                    {timeAgo(replays[0]?.startTime || "")}
+                  </span>
+                  {publishedCount > 0 && (
+                    <span
+                      className={`text-xs font-mono ${isActive ? "text-terminal-purple" : "text-terminal-dimmer"}`}
+                    >
+                      {publishedCount} published
+                    </span>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ─── Right: replay list ─── */}
+      <div className="flex-1 flex flex-col min-h-0 min-w-0">
+        {/* Mobile project selector (shown instead of sidebar) */}
+        <div className="md:hidden px-3 pt-3">
+          <select
+            value={selectedProject}
+            onChange={(e) => setSelectedProject(e.target.value)}
+            className="w-full bg-terminal-surface rounded-lg px-3 py-2.5 text-sm font-mono text-terminal-text outline-none shadow-layer-sm"
+          >
+            <option value={ALL_PROJECTS}>All replays ({visibleSessions.length})</option>
+            {projectEntries.map(([project, replays]) => (
+              <option key={project} value={project}>
+                {projectLabels.get(project) || projectName(project)} ({replays.length})
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Header + search */}
+        <div className="px-4 pt-4 pb-2 space-y-3 shrink-0">
+          {/* Open by URL/Gist */}
+          <OpenReplayForm />
+
+          {/* Project title for desktop */}
+          <div className="hidden md:flex items-center justify-between">
+            <div className="min-w-0">
+              <h2 className="text-base font-mono text-terminal-text truncate font-semibold">
+                {selectedProject === ALL_PROJECTS
+                  ? "All replays"
+                  : projectLabels.get(selectedProject) || projectName(selectedProject)}
+              </h2>
+              {selectedProject !== ALL_PROJECTS && (
+                <span className="text-xs font-mono text-terminal-dimmer truncate block mt-0.5">
+                  {selectedProject}
+                </span>
+              )}
+            </div>
+            <span className="text-xs font-mono text-terminal-dim tabular-nums px-2 py-1 rounded-md bg-terminal-surface">
+              {filtered.length} replay{filtered.length !== 1 ? "s" : ""}
+            </span>
+          </div>
+
           {/* Search + archive toggle */}
           <div className="flex gap-2 items-center">
             <div className="relative flex-1">
@@ -1226,16 +1423,16 @@ function ReplaysPanel() {
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
                 placeholder="Filter replays..."
-                className="w-full bg-terminal-surface border border-terminal-border rounded-lg pl-9 pr-3 py-2 text-sm font-mono text-terminal-text placeholder:text-terminal-dim/50 outline-none focus:border-terminal-green/50"
+                className="w-full bg-terminal-surface rounded-lg pl-9 pr-3 py-2.5 text-sm font-mono text-terminal-text placeholder:text-terminal-dimmer outline-none ring-1 ring-transparent focus:ring-terminal-green/40 transition-shadow duration-200 shadow-layer-sm"
               />
             </div>
             {archivedCount > 0 && (
               <button
                 onClick={() => setShowArchived(!showArchived)}
-                className={`shrink-0 px-2.5 py-2 text-[11px] font-mono rounded-lg border transition-colors ${
+                className={`shrink-0 px-2.5 py-2 text-xs font-mono rounded-lg transition-colors duration-200 ${
                   showArchived
-                    ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/30"
-                    : "text-terminal-dim border-terminal-border hover:text-terminal-text"
+                    ? "bg-terminal-orange-subtle text-terminal-orange"
+                    : "bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
                 }`}
                 title={showArchived ? "Hide archived" : `View all (${archivedCount} archived)`}
               >
@@ -1243,78 +1440,50 @@ function ReplaysPanel() {
               </button>
             )}
           </div>
+        </div>
 
-          {/* Error toast */}
-          {deleteError && (
-            <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 text-xs font-mono text-red-400">
-              <span>{deleteError}</span>
-              <button
-                onClick={() => setDeleteError(null)}
-                className="ml-auto text-red-400/60 hover:text-red-400"
-              >
-                &times;
-              </button>
+        {/* Error toast */}
+        {deleteError && (
+          <div className="mx-4 mb-2 flex items-center gap-2 bg-terminal-red-subtle rounded-lg px-3 py-2.5 text-xs font-mono text-terminal-red shrink-0 shadow-layer-sm">
+            <span>{deleteError}</span>
+            <button
+              onClick={() => setDeleteError(null)}
+              className="ml-auto text-terminal-red/60 hover:text-terminal-red transition-colors"
+            >
+              &times;
+            </button>
+          </div>
+        )}
+
+        {/* Replay list */}
+        <div className="flex-1 overflow-y-auto">
+          {filtered.length === 0 ? (
+            <div className="text-center py-12 text-terminal-dim font-mono text-sm">
+              {filter ? "No replays match your filter" : "No replays in this project"}
+            </div>
+          ) : (
+            <div className="space-y-2.5 px-4 py-3">
+              {filtered.map((s) => {
+                const isArchived = archivedSlugs.has(s.slug);
+                return (
+                  <ReplayCard
+                    key={s.slug}
+                    summary={s}
+                    onOpen={() => handleOpen(s.slug)}
+                    onTitleSave={handleTitleSave}
+                    onDelete={() => confirmDelete(s.slug)}
+                    onPublishGist={() => handlePublishGist(s.slug)}
+                    onArchive={() => toggleArchive(s.slug)}
+                    ghAvailable={ghAvailable === true}
+                    isPublishing={publishingSlug === s.slug}
+                    isArchived={isArchived}
+                  />
+                );
+              })}
             </div>
           )}
-
-          {/* Stats bar */}
-          <div className="flex items-center gap-3 text-xs font-mono text-terminal-dim">
-            <span>
-              {filtered.length} <span className="text-terminal-text/70">local</span> replay
-              {filtered.length !== 1 ? "s" : ""}
-            </span>
-            {filter && filtered.length !== sessions.length && (
-              <span className="text-terminal-dim/50">(of {sessions.length} total)</span>
-            )}
-            {ghAvailable === true && (
-              <span className="text-terminal-green/70">gh authenticated</span>
-            )}
-            {ghAvailable === false && (
-              <span className="text-terminal-dim/50">gh not available</span>
-            )}
-          </div>
-
-          {/* Replay cards */}
-          <div className="space-y-2">
-            {filtered.map((s) => {
-              const isArchived = archivedSlugs.has(s.slug);
-              return (
-                <ReplayCard
-                  key={s.slug}
-                  summary={s}
-                  onOpen={() => handleOpen(s.slug)}
-                  onTitleSave={handleTitleSave}
-                  onDelete={() => confirmDelete(s.slug)}
-                  onPublishGist={() => handlePublishGist(s.slug)}
-                  onArchive={() => toggleArchive(s.slug)}
-                  ghAvailable={ghAvailable === true}
-                  isPublishing={publishingSlug === s.slug}
-                  isArchived={isArchived}
-                />
-              );
-            })}
-          </div>
-        </>
-      )}
-
-      {/* Empty state */}
-      {serverAvailable && sessions.length === 0 && (
-        <div className="text-center py-12 space-y-2">
-          <div className="text-terminal-dim font-mono text-sm">No replays yet</div>
-          <div className="text-terminal-dim/50 font-mono text-xs">
-            Go to the Sessions tab to generate your first replay
-          </div>
         </div>
-      )}
-
-      {!serverAvailable && (
-        <div className="text-center py-8 space-y-2">
-          <div className="text-terminal-dim/50 font-mono text-xs">
-            Or run <span className="text-terminal-green">npx vibe-replay</span> to create a replay
-            from your AI coding sessions
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -1329,40 +1498,34 @@ export default function Dashboard() {
     <div className="flex-1 flex flex-col min-h-0">
       {/* Tab bar — only show when running with local server */}
       {isEditor && (
-        <div className="shrink-0 px-4 flex border-b border-terminal-border/50">
-          <button
-            onClick={() => setTab("sessions")}
-            className={`px-4 py-2 text-sm font-mono transition-colors ${
-              tab === "sessions"
-                ? "text-terminal-green border-b-2 border-terminal-green"
-                : "text-terminal-dim hover:text-terminal-text"
-            }`}
-          >
-            Sessions
-          </button>
-          <button
-            onClick={() => setTab("replays")}
-            className={`px-4 py-2 text-sm font-mono transition-colors ${
-              tab === "replays"
-                ? "text-terminal-green border-b-2 border-terminal-green"
-                : "text-terminal-dim hover:text-terminal-text"
-            }`}
-          >
-            Replays
-          </button>
+        <div className="shrink-0 px-5 py-3 border-b border-terminal-border-subtle bg-terminal-surface/30">
+          <div className="inline-flex items-center rounded-xl bg-terminal-surface p-0.5 shadow-layer-sm">
+            <button
+              onClick={() => setTab("sessions")}
+              className={`px-5 py-2 text-xs font-sans font-semibold rounded-lg transition-all duration-200 ease-material ${
+                tab === "sessions"
+                  ? "bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
+                  : "text-terminal-dim hover:text-terminal-text"
+              }`}
+            >
+              Sessions
+            </button>
+            <button
+              onClick={() => setTab("replays")}
+              className={`px-5 py-2 text-xs font-sans font-semibold rounded-lg transition-all duration-200 ease-material ${
+                tab === "replays"
+                  ? "bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
+                  : "text-terminal-dim hover:text-terminal-text"
+              }`}
+            >
+              Replays
+            </button>
+          </div>
         </div>
       )}
 
       {/* Tab content */}
-      {tab === "sessions" && isEditor ? (
-        <SessionsPanel />
-      ) : (
-        <div className="flex-1 overflow-auto">
-          <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
-            <ReplaysPanel />
-          </div>
-        </div>
-      )}
+      {tab === "sessions" && isEditor ? <SessionsPanel /> : <ReplaysPanel />}
     </div>
   );
 }

@@ -85,7 +85,7 @@ export default function Minimap({ scenes, currentIndex, onSeek }: Props) {
   }, [items, currentIndex]);
 
   return (
-    <div className="flex flex-col gap-px p-2 overflow-y-auto">
+    <div className="flex flex-col gap-1 p-3.5 overflow-y-auto">
       {items.map((item, i) => {
         const isActive = i === activeIdx;
         const isPast = i < activeIdx;
@@ -95,15 +95,15 @@ export default function Minimap({ scenes, currentIndex, onSeek }: Props) {
             <button
               key={`c-${item.promptIndex}`}
               onClick={() => onSeek(item.promptIndex)}
-              className={`text-left px-3 py-2 rounded-md transition-all border border-dashed ${
+              className={`text-left px-3 py-2 rounded-lg transition-all duration-200 ease-material ${
                 isActive
-                  ? "border-terminal-dim/40 bg-terminal-dim/10"
-                  : "border-terminal-border/30 hover:bg-terminal-surface/50 opacity-60 hover:opacity-100"
+                  ? "bg-terminal-surface border-l-2 border-terminal-dim shadow-layer-sm"
+                  : "hover:bg-terminal-surface-hover text-terminal-dimmer hover:text-terminal-dim"
               }`}
             >
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-mono text-terminal-dim/60 shrink-0">{"⟳"}</span>
-                <span className="text-[11px] font-mono text-terminal-dim/70 italic truncate">
+                <span className="text-xs font-mono text-terminal-dimmer shrink-0">{"⟳"}</span>
+                <span className="text-xs font-mono text-terminal-dimmer italic truncate">
                   Context compacted
                 </span>
               </div>
@@ -115,12 +115,12 @@ export default function Minimap({ scenes, currentIndex, onSeek }: Props) {
           <button
             key={`t-${item.promptIndex}`}
             onClick={() => onSeek(item.promptIndex)}
-            className={`group text-left px-3 py-2.5 rounded-md transition-all ${
+            className={`group text-left px-3 py-2.5 rounded-xl transition-all duration-200 ease-material ${
               isActive
-                ? "bg-terminal-green/8 border border-terminal-green/25"
+                ? "bg-terminal-green-subtle border-l-2 border-terminal-green shadow-layer-sm"
                 : isPast
-                  ? "border border-transparent hover:bg-terminal-surface/80 opacity-70 hover:opacity-100"
-                  : "border border-transparent hover:bg-terminal-surface/80"
+                  ? "hover:bg-terminal-surface-hover text-terminal-dim hover:text-terminal-text"
+                  : "hover:bg-terminal-surface-hover"
             }`}
           >
             {/* Turn header */}
@@ -133,8 +133,8 @@ export default function Minimap({ scenes, currentIndex, onSeek }: Props) {
                 {String(item.turnNumber).padStart(2, "0")}
               </span>
               <span
-                className={`text-[13px] font-mono leading-snug line-clamp-2 ${
-                  isActive ? "text-terminal-text" : "text-terminal-text/80"
+                className={`text-sm font-mono leading-snug line-clamp-2 ${
+                  isActive ? "text-terminal-text" : "text-terminal-text"
                 }`}
               >
                 {item.prompt}
@@ -144,17 +144,17 @@ export default function Minimap({ scenes, currentIndex, onSeek }: Props) {
             {/* Summary line */}
             <div className="flex items-center gap-2 mt-1.5 ml-6 flex-wrap">
               {item.toolCalls > 0 && (
-                <span className="text-[11px] font-mono px-1.5 py-px rounded-sm bg-terminal-orange/10 text-terminal-orange/80">
+                <span className="text-[10px] font-mono px-1.5 py-px rounded-full bg-terminal-orange-subtle text-terminal-orange">
                   {item.toolCalls} tool{item.toolCalls > 1 ? "s" : ""}
                 </span>
               )}
               {item.textBlocks > 0 && (
-                <span className="text-[11px] font-mono px-1.5 py-px rounded-sm bg-terminal-blue/10 text-terminal-blue/80">
+                <span className="text-[10px] font-mono px-1.5 py-px rounded-full bg-terminal-blue-subtle text-terminal-blue">
                   {item.textBlocks} resp
                 </span>
               )}
               {item.thinkingBlocks > 0 && (
-                <span className="text-[11px] font-mono px-1.5 py-px rounded-sm bg-terminal-purple/10 text-terminal-purple/80">
+                <span className="text-[10px] font-mono px-1.5 py-px rounded-full bg-terminal-purple-subtle text-terminal-purple">
                   think
                 </span>
               )}
@@ -162,7 +162,7 @@ export default function Minimap({ scenes, currentIndex, onSeek }: Props) {
 
             {/* Tool names (only for active turn) */}
             {isActive && item.toolNames.length > 0 && (
-              <div className="mt-1.5 ml-6 text-[11px] font-mono text-terminal-dim truncate">
+              <div className="mt-1.5 ml-6 text-xs font-mono text-terminal-dim truncate">
                 {item.toolNames.join(", ")}
               </div>
             )}

@@ -74,6 +74,8 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
   const [scrollHintDismissed, setScrollHintDismissed] = useState(false);
   const pendingSeekRef = useRef<number | null>(null);
   const navFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Flag to suppress auto-scroll when scene advance comes from scroll-to-reveal
+  const scrollRevealRef = useRef(false);
 
   // Cmd+K / Ctrl+K to open search
   useEffect(() => {
@@ -142,19 +144,46 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
     if (state === "playing") setScrollHintDismissed(false);
   }, [state]);
 
-  // Auto-scroll to current scene — only during playback
+  // Auto-scroll to keep the current scene visible.
+  // During playback → center the scene. When paused (arrow-key stepping) → ensure
+  // the scene is at least visible, scrolling only when it falls outside the viewport.
   useEffect(() => {
-    if (!scrollRef.current || currentIndex < 0 || state !== "playing") return;
+    if (!scrollRef.current || currentIndex < 0) return;
+    // Skip when a manual navigation (outline/timeline/search) is pending — it
+    // has its own scroll handler with flash animation.
+    if (pendingSeekRef.current !== null) return;
+    // Skip when the advance came from scroll-to-reveal (user is actively scrolling)
+    if (scrollRevealRef.current) {
+      scrollRevealRef.current = false;
+      return;
+    }
     const el = scrollRef.current;
     programScrollRef.current = true;
     requestAnimationFrame(() => {
       const sceneEl = el.querySelector(`[data-scene-index="${currentIndex}"]`);
       if (sceneEl) {
-        sceneEl.scrollIntoView({ behavior: "smooth", block: "center" });
-      } else {
+        if (state === "playing") {
+          sceneEl.scrollIntoView({ behavior: "smooth", block: "center" });
+        } else {
+          // When paused (arrow keys), keep the scene comfortably in view.
+          // "nearest" only scrolls if the element is outside the visible area,
+          // but it pins to the very edge. Instead, manually check and place the
+          // scene at ~30% from the top when it would go below the viewport.
+          const containerRect = el.getBoundingClientRect();
+          const sceneRect = sceneEl.getBoundingClientRect();
+          const relativeTop = sceneRect.top - containerRect.top;
+          const relativeBottom = sceneRect.bottom - containerRect.top;
+
+          if (relativeBottom > containerRect.height || relativeTop < 0) {
+            // Scene is out of view — scroll so its top sits at ~30% from viewport top
+            const offset = sceneRect.top - containerRect.top + el.scrollTop;
+            const target = offset - containerRect.height * 0.3;
+            el.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
+          }
+        }
+      } else if (state === "playing") {
         el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
       }
-      // Clear flag after smooth scroll settles
       setTimeout(() => {
         programScrollRef.current = false;
       }, 400);
@@ -195,10 +224,15 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
     const advance = () => {
       if (state !== "paused" || throttle) return;
       if (currentIndex >= session.scenes.length - 1) return;
+      // Don't advance during programmatic scrolls or pending navigation jumps.
+      // pendingSeekRef is critical: when seekFromNavigation shrinks visibleCount,
+      // the DOM shrinks and fires scroll events BEFORE effects set programScrollRef.
+      if (programScrollRef.current || pendingSeekRef.current !== null) return;
 
       const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
       if (nearBottom) {
         throttle = true;
+        scrollRevealRef.current = true;
         seekTo(currentIndex + 1);
         setTimeout(() => {
           throttle = false;
@@ -289,24 +323,24 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
   return (
     <div className="flex flex-1 min-h-0 relative">
       {/* Sidebar */}
-      <div className="hidden md:flex w-64 shrink-0 flex-col border-r border-terminal-border/50 bg-terminal-bg">
-        <div className="flex border-b border-terminal-border/50">
+      <div className="hidden md:flex w-64 shrink-0 flex-col border-r border-terminal-border-subtle bg-terminal-bg shadow-layer-sm">
+        <div className="flex border-b border-terminal-border-subtle">
           <button
             onClick={() => setSidebarTab("outline")}
-            className={`flex-1 px-3 py-2 text-xs font-mono uppercase tracking-wider transition-colors ${
+            className={`flex-1 px-3 py-2.5 text-[10px] font-sans font-semibold uppercase tracking-widest transition-colors ${
               sidebarTab === "outline"
                 ? "text-terminal-green border-b-2 border-terminal-green"
-                : "text-terminal-dim hover:text-terminal-text"
+                : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
             }`}
           >
             Outline
           </button>
           <button
             onClick={() => setSidebarTab("stats")}
-            className={`flex-1 px-3 py-2 text-xs font-mono uppercase tracking-wider transition-colors ${
+            className={`flex-1 px-3 py-2.5 text-[10px] font-sans font-semibold uppercase tracking-widest transition-colors ${
               sidebarTab === "stats"
                 ? "text-terminal-green border-b-2 border-terminal-green"
-                : "text-terminal-dim hover:text-terminal-text"
+                : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
             }`}
           >
             Stats
@@ -331,7 +365,7 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
           <div className="flex flex-col flex-1 min-h-0 min-w-0 relative">
             <div
               ref={scrollRef}
-              className="flex-1 overflow-y-auto px-4 py-4 pb-8 overscroll-contain"
+              className="flex-1 overflow-y-auto px-5 py-5 pb-10 overscroll-contain"
             >
               <ConversationView
                 scenes={session.scenes}
@@ -357,7 +391,7 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
               currentIndex < session.scenes.length - 1 &&
               !scrollHintDismissed && (
                 <div className="absolute bottom-[72px] left-1/2 -translate-x-1/2 z-10 pointer-events-none animate-bounce">
-                  <div className="px-4 py-1.5 rounded-full bg-terminal-surface/90 border border-terminal-border/60 backdrop-blur-sm text-xs font-mono text-terminal-dim flex items-center gap-2 shadow-lg">
+                  <div className="px-5 py-2 rounded-full bg-terminal-surface/90 backdrop-blur-md text-xs font-mono text-terminal-dim flex items-center gap-2 shadow-layer-lg border border-terminal-border-subtle">
                     <span className="text-terminal-green">{"\u2193"}</span>
                     scroll for more
                   </div>
@@ -377,7 +411,7 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
 
             {/* Pause overlay — hidden on mobile (shown in controls bar instead) */}
             {state === "paused" && visibleCount > 0 && (
-              <div className="hidden md:block absolute top-3 right-3 px-3 py-1.5 rounded-md bg-terminal-orange/10 border border-terminal-orange/20 text-terminal-orange text-xs font-mono pause-overlay pointer-events-none backdrop-blur-sm">
+              <div className="hidden md:block absolute top-3 right-3 px-3.5 py-1.5 rounded-lg bg-terminal-orange-subtle text-terminal-orange text-[10px] font-sans font-semibold uppercase tracking-widest pause-overlay pointer-events-none backdrop-blur-sm">
                 PAUSED
               </div>
             )}
@@ -385,7 +419,7 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
 
           {/* Annotation panel — right sidebar */}
           {annotationPanelOpen && (
-            <div className="hidden md:flex w-72 shrink-0 flex-col border-l border-terminal-border/50 bg-terminal-bg">
+            <div className="hidden md:flex w-72 shrink-0 flex-col border-l border-terminal-border-subtle bg-terminal-bg">
               <AnnotationPanel
                 actions={annotationActions}
                 scenes={session.scenes}
@@ -401,7 +435,7 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
         </div>
 
         {/* Playback bar */}
-        <div className="shrink-0 border-t border-terminal-border/50 bg-terminal-surface/80 backdrop-blur-sm sticky bottom-0 safe-bottom">
+        <div className="shrink-0 border-t border-terminal-border-subtle bg-terminal-surface/80 backdrop-blur-md sticky bottom-0 safe-bottom shadow-layer-lg">
           <Timeline
             scenes={session.scenes}
             currentIndex={currentIndex}
@@ -438,7 +472,7 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
       >
         <div className="absolute inset-0 bg-black/40" />
         <div
-          className={`absolute bottom-0 left-0 right-0 h-[65vh] bg-terminal-bg border-t border-terminal-border rounded-t-2xl flex flex-col transition-transform duration-300 safe-bottom ${
+          className={`absolute bottom-0 left-0 right-0 h-[65vh] bg-terminal-bg border-t border-terminal-border-subtle rounded-t-2xl flex flex-col transition-transform duration-300 ease-material-decel safe-bottom shadow-layer-xl ${
             mobileDrawerOpen ? "translate-y-0" : "translate-y-full"
           }`}
           onClick={(e) => e.stopPropagation()}
@@ -448,33 +482,33 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
             <div className="w-10 h-1 rounded-full bg-terminal-border" />
           </div>
           {/* Tabs */}
-          <div className="flex border-b border-terminal-border/50 shrink-0">
+          <div className="flex border-b border-terminal-border-subtle shrink-0">
             <button
               onClick={() => setSidebarTab("outline")}
-              className={`flex-1 px-3 py-2.5 text-xs font-mono uppercase tracking-wider transition-colors ${
+              className={`flex-1 px-3 py-2.5 text-[10px] font-sans font-semibold uppercase tracking-widest transition-colors ${
                 sidebarTab === "outline"
                   ? "text-terminal-green border-b-2 border-terminal-green"
-                  : "text-terminal-dim"
+                  : "text-terminal-dim hover:text-terminal-text"
               }`}
             >
               Outline
             </button>
             <button
               onClick={() => setSidebarTab("stats")}
-              className={`flex-1 px-3 py-2.5 text-xs font-mono uppercase tracking-wider transition-colors ${
+              className={`flex-1 px-3 py-2.5 text-[10px] font-sans font-semibold uppercase tracking-widest transition-colors ${
                 sidebarTab === "stats"
                   ? "text-terminal-green border-b-2 border-terminal-green"
-                  : "text-terminal-dim"
+                  : "text-terminal-dim hover:text-terminal-text"
               }`}
             >
               Stats
             </button>
             <button
               onClick={() => setSidebarTab("comments")}
-              className={`flex-1 px-3 py-2.5 text-xs font-mono uppercase tracking-wider transition-colors ${
+              className={`flex-1 px-3 py-2.5 text-[10px] font-sans font-semibold uppercase tracking-widest transition-colors ${
                 sidebarTab === "comments"
                   ? "text-terminal-blue border-b-2 border-terminal-blue"
-                  : "text-terminal-dim"
+                  : "text-terminal-dim hover:text-terminal-text"
               }`}
             >
               Comments

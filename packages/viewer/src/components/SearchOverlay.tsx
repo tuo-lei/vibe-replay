@@ -147,12 +147,12 @@ export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) 
     >
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
       <div
-        className="relative w-full max-w-xl mx-3 sm:mx-0 bg-terminal-bg border border-terminal-border rounded-xl shadow-2xl overflow-hidden"
+        className="relative w-full max-w-xl mx-3 sm:mx-0 bg-terminal-bg border border-terminal-border-subtle rounded-2xl shadow-layer-xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
         {/* Search input */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-terminal-border">
+        <div className="flex items-center gap-3 px-5 py-3.5 border-b border-terminal-border-subtle">
           <span className="text-terminal-dim text-sm">{"\uD83D\uDD0D"}</span>
           <input
             ref={inputRef}
@@ -162,7 +162,7 @@ export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) 
             placeholder="Search scenes..."
             className="flex-1 bg-transparent text-sm font-mono text-terminal-text placeholder-terminal-dim outline-none"
           />
-          <kbd className="text-[10px] font-mono text-terminal-dim bg-terminal-surface px-1.5 py-0.5 rounded border border-terminal-border">
+          <kbd className="text-[10px] font-mono text-terminal-dimmer bg-terminal-surface px-2 py-0.5 rounded-md">
             ESC
           </kbd>
         </div>
@@ -187,16 +187,16 @@ export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) 
                 }`}
               >
                 <span
-                  className={`text-[10px] font-mono font-semibold uppercase shrink-0 mt-0.5 ${
+                  className={`text-xs font-mono font-semibold uppercase shrink-0 mt-0.5 ${
                     TYPE_COLORS[r.type] || "text-terminal-dim"
                   }`}
                 >
                   {r.toolName || TYPE_LABELS[r.type] || r.type}
                 </span>
-                <span className="text-xs font-mono text-terminal-text/80 line-clamp-2 break-words">
+                <span className="text-xs font-mono text-terminal-text line-clamp-2 break-words">
                   {renderHighlighted(r.snippet, query)}
                 </span>
-                <span className="text-[10px] font-mono text-terminal-dim shrink-0 mt-0.5">
+                <span className="text-xs font-mono text-terminal-dimmer shrink-0 mt-0.5">
                   #{r.sceneIndex}
                 </span>
               </button>
@@ -206,7 +206,7 @@ export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) 
 
         {/* Footer */}
         {results.length > 0 && (
-          <div className="px-4 py-2 border-t border-terminal-border text-[10px] font-mono text-terminal-dim flex gap-4">
+          <div className="px-4 py-2 border-t border-terminal-border-subtle text-xs font-mono text-terminal-dimmer flex gap-4">
             <span>
               {results.length} result{results.length !== 1 ? "s" : ""}
             </span>

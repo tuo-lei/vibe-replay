@@ -202,17 +202,17 @@ export default function AnnotationPanel({
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-terminal-border/50">
-        <span className="text-xs font-mono font-semibold text-terminal-text uppercase tracking-wider">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-terminal-border-subtle">
+        <span className="text-[10px] font-sans font-semibold text-terminal-text uppercase tracking-widest">
           Comments
         </span>
         <div className="flex items-center gap-2">
           {readOnly && (
-            <span className="text-[9px] font-mono text-terminal-dim/60 uppercase px-1.5 py-0.5 rounded border border-terminal-border/40">
+            <span className="text-xs font-mono text-terminal-dimmer uppercase px-1.5 py-0.5 rounded bg-terminal-surface">
               Read-only
             </span>
           )}
-          <span className="text-[10px] font-mono text-terminal-dim">{annotations.length}</span>
+          <span className="text-xs font-mono text-terminal-dim">{annotations.length}</span>
         </div>
       </div>
 
@@ -222,7 +222,7 @@ export default function AnnotationPanel({
           <div className="px-3 py-8 text-center">
             <div className="text-terminal-dim text-xs font-mono mb-2">No comments yet</div>
             {!readOnly && (
-              <div className="text-terminal-dim/60 text-[10px] font-mono">
+              <div className="text-terminal-dimmer text-xs font-mono">
                 Hover over any message and click the comment icon to add one
               </div>
             )}
@@ -258,17 +258,15 @@ export default function AnnotationPanel({
         {!readOnly && activeAdding !== null && (
           <div
             ref={addFormRef}
-            className="px-3 py-2.5 border-b border-terminal-border/30 bg-terminal-blue/[0.03]"
+            className="px-3 py-2.5 border-b border-terminal-border-subtle bg-terminal-blue-subtle"
           >
             {/* Scene preview */}
             {addingPreview && (
               <div className="flex items-center gap-1.5 mb-2">
-                <span
-                  className={`text-[10px] font-mono font-semibold uppercase ${addingLabelColor}`}
-                >
+                <span className={`text-xs font-mono font-semibold uppercase ${addingLabelColor}`}>
                   {addingPreview.label}
                 </span>
-                <span className="text-[10px] font-mono text-terminal-dim truncate">
+                <span className="text-xs font-mono text-terminal-dim truncate">
                   {addingPreview.text}
                 </span>
               </div>
@@ -285,24 +283,24 @@ export default function AnnotationPanel({
                 if (e.key === "Escape") cancelAdding();
               }}
               placeholder="Add a comment... (Markdown supported)"
-              className="w-full bg-terminal-surface border border-terminal-border/50 rounded px-2 py-1.5 text-xs font-mono text-terminal-text placeholder-terminal-dim/50 resize-none focus:outline-none focus:border-terminal-blue/50"
+              className="w-full bg-terminal-surface rounded px-2 py-1.5 text-xs font-mono text-terminal-text placeholder-terminal-dimmer resize-none focus:outline-none ring-1 ring-terminal-border-subtle focus:ring-terminal-blue/40 transition-shadow duration-200"
               rows={3}
             />
             <div className="flex items-center justify-between mt-1.5">
-              <span className="text-[9px] font-mono text-terminal-dim/50">
+              <span className="text-xs font-mono text-terminal-dimmer">
                 {"\u2318"}+Enter to save
               </span>
               <div className="flex gap-1.5">
                 <button
                   onClick={cancelAdding}
-                  className="px-2 py-1 text-[10px] font-mono text-terminal-dim hover:text-terminal-text transition-colors"
+                  className="px-2 py-1 text-xs font-mono text-terminal-dim hover:text-terminal-text transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleAdd}
                   disabled={!newBody.trim()}
-                  className="px-2 py-1 text-[10px] font-mono bg-terminal-blue/15 text-terminal-blue rounded hover:bg-terminal-blue/25 transition-colors disabled:opacity-40"
+                  className="px-2 py-1 text-xs font-mono bg-terminal-blue-subtle text-terminal-blue rounded hover:bg-terminal-blue-emphasis transition-colors disabled:opacity-40"
                 >
                   Comment
                 </button>
@@ -314,15 +312,15 @@ export default function AnnotationPanel({
 
       {/* Footer: Save/export/publish buttons + AI Coach */}
       {!readOnly && (annotations.length > 0 || runAiCoach) && (
-        <div className="shrink-0 border-t border-terminal-border/50 px-3 py-2 space-y-1.5">
+        <div className="shrink-0 border-t border-terminal-border-subtle px-3 py-2 space-y-1.5">
           {hasUnsaved && !publishGist && (
-            <div className="text-[9px] font-mono text-terminal-orange text-center mb-1">
+            <div className="text-xs font-mono text-terminal-orange text-center mb-1">
               Unsaved changes
             </div>
           )}
           {statusMsg && (
             <div
-              className={`text-[9px] font-mono text-center mb-1 ${statusMsg.type === "success" ? "text-terminal-green" : "text-terminal-red"}`}
+              className={`text-xs font-mono text-center mb-1 ${statusMsg.type === "success" ? "text-terminal-green" : "text-terminal-red"}`}
             >
               {statusMsg.type === "success" && statusMsg.text.startsWith("http") ? (
                 <a
@@ -348,7 +346,7 @@ export default function AnnotationPanel({
               return (
                 <button
                   onClick={() => setShowAiCoachConfirm(true)}
-                  className="w-full px-2 py-1.5 text-[10px] font-mono bg-terminal-purple/15 text-terminal-purple rounded hover:bg-terminal-purple/25 transition-colors text-center border border-terminal-purple/30"
+                  className="w-full px-2 py-1.5 text-xs font-mono bg-terminal-purple-subtle text-terminal-purple rounded hover:bg-terminal-purple-emphasis transition-colors text-center"
                 >
                   {hasExisting ? "Re-run AI Coach (beta)" : "AI Coach (beta)"}
                 </button>
@@ -359,11 +357,11 @@ export default function AnnotationPanel({
             (() => {
               const hasExisting = annotations.some((a) => a.author === "vibe-feedback");
               return (
-                <div className="space-y-1.5 p-2 rounded border border-terminal-purple/30 bg-terminal-purple/5">
-                  <div className="text-[10px] font-mono text-terminal-purple font-semibold">
+                <div className="space-y-1.5 p-2 rounded bg-terminal-purple-subtle">
+                  <div className="text-xs font-mono text-terminal-purple font-semibold">
                     AI Coach (beta)
                   </div>
-                  <div className="text-[9px] font-mono text-terminal-dim leading-relaxed">
+                  <div className="text-xs font-mono text-terminal-dim leading-relaxed">
                     Uses <span className="text-terminal-text">{aiCoachTool?.name}</span> CLI to
                     analyze your prompting technique. This will make API calls using your configured
                     credentials and may use tokens/cost money. Typically takes 1-3 minutes.
@@ -374,12 +372,12 @@ export default function AnnotationPanel({
                     )}
                   </div>
                   {aiCoachTools.length > 1 && setAiCoachToolName && (
-                    <label className="block text-[9px] font-mono text-terminal-dim">
+                    <label className="block text-xs font-mono text-terminal-dim">
                       Tool:
                       <select
                         value={aiCoachToolName || ""}
                         onChange={(e) => setAiCoachToolName(e.target.value)}
-                        className="ml-1 bg-terminal-surface border border-terminal-border/50 rounded px-1.5 py-0.5 text-[9px] font-mono text-terminal-text"
+                        className="ml-1 bg-terminal-surface rounded px-1.5 py-0.5 text-xs font-mono text-terminal-text"
                       >
                         {aiCoachTools.map((tool) => (
                           <option key={tool.name} value={tool.name}>
@@ -392,7 +390,7 @@ export default function AnnotationPanel({
                   <div className="flex gap-1.5 justify-end">
                     <button
                       onClick={() => setShowAiCoachConfirm(false)}
-                      className="px-2 py-1 text-[10px] font-mono text-terminal-dim hover:text-terminal-text transition-colors"
+                      className="px-2 py-1 text-xs font-mono text-terminal-dim hover:text-terminal-text transition-colors"
                     >
                       Cancel
                     </button>
@@ -410,7 +408,7 @@ export default function AnnotationPanel({
                           setStatusMsg({ type: "error", text: e.message });
                         }
                       }}
-                      className="px-2 py-1 text-[10px] font-mono bg-terminal-purple/20 text-terminal-purple rounded hover:bg-terminal-purple/30 transition-colors"
+                      className="px-2 py-1 text-xs font-mono bg-terminal-purple-subtle text-terminal-purple rounded hover:bg-terminal-purple-emphasis transition-colors"
                     >
                       Run
                     </button>
@@ -420,13 +418,13 @@ export default function AnnotationPanel({
             })()}
           {aiCoachRunning && (
             <div className="flex items-center justify-center gap-2 py-2">
-              <span className="text-[10px] font-mono text-terminal-purple animate-pulse">
+              <span className="text-xs font-mono text-terminal-purple animate-pulse">
                 Analyzing your prompting patterns...
               </span>
               {cancelAiCoach && (
                 <button
                   onClick={cancelAiCoach}
-                  className="px-1.5 py-0.5 text-[9px] font-mono text-terminal-dim hover:text-terminal-red border border-terminal-border/40 rounded transition-colors"
+                  className="px-1.5 py-0.5 text-xs font-mono text-terminal-dim hover:text-terminal-red rounded transition-colors"
                 >
                   Cancel
                 </button>
@@ -447,7 +445,7 @@ export default function AnnotationPanel({
                 }
               }}
               disabled={htmlExporting}
-              className="w-full px-2 py-1.5 text-[10px] font-mono bg-terminal-green/15 text-terminal-green rounded hover:bg-terminal-green/25 transition-colors text-center border border-terminal-green/30 disabled:opacity-50"
+              className="w-full px-2 py-1.5 text-xs font-mono bg-terminal-green-subtle text-terminal-green rounded hover:bg-terminal-green-emphasis transition-colors text-center disabled:opacity-50"
             >
               {htmlExporting ? "Exporting..." : "Export HTML"}
             </button>
@@ -464,13 +462,13 @@ export default function AnnotationPanel({
                 }
               }}
               disabled={gistPublishing}
-              className="w-full px-2 py-1.5 text-[10px] font-mono bg-terminal-purple/15 text-terminal-purple rounded hover:bg-terminal-purple/25 transition-colors text-center border border-terminal-purple/30 disabled:opacity-50"
+              className="w-full px-2 py-1.5 text-xs font-mono bg-terminal-purple-subtle text-terminal-purple rounded hover:bg-terminal-purple-emphasis transition-colors text-center disabled:opacity-50"
             >
               {gistPublishing ? "Publishing..." : "Publish to Gist"}
             </button>
           )}
           {publishGist && ghAvailable === false && (
-            <div className="text-[9px] font-mono text-terminal-orange/70 text-center px-2 py-1.5 border border-terminal-orange/20 rounded bg-terminal-orange/5">
+            <div className="text-xs font-mono text-terminal-orange text-center px-2 py-1.5 rounded bg-terminal-orange-subtle">
               Gist publishing requires{" "}
               <a
                 href="https://cli.github.com/"
@@ -480,7 +478,7 @@ export default function AnnotationPanel({
               >
                 gh CLI
               </a>{" "}
-              — install then run <span className="text-terminal-text/70">gh auth login</span>
+              — install then run <span className="text-terminal-text">gh auth login</span>
             </div>
           )}
 
@@ -488,21 +486,21 @@ export default function AnnotationPanel({
           {!exportHtml && canSaveHtml && (
             <button
               onClick={downloadHtml}
-              className="w-full px-2 py-1.5 text-[10px] font-mono bg-terminal-green/15 text-terminal-green rounded hover:bg-terminal-green/25 transition-colors text-center border border-terminal-green/30"
+              className="w-full px-2 py-1.5 text-xs font-mono bg-terminal-green-subtle text-terminal-green rounded hover:bg-terminal-green-emphasis transition-colors text-center"
               title="Download HTML with comments embedded"
             >
               Save HTML with Comments
             </button>
           )}
           {!exportHtml && !canSaveHtml && (
-            <div className="text-[9px] font-mono text-terminal-dim/60 text-center px-2 py-1">
+            <div className="text-xs font-mono text-terminal-dimmer text-center px-2 py-1">
               Save HTML requires a production build (use CLI output)
             </div>
           )}
           {!publishGist && (
             <button
               onClick={downloadJson}
-              className="w-full px-2 py-1.5 text-[10px] font-mono bg-terminal-blue/10 text-terminal-blue rounded hover:bg-terminal-blue/20 transition-colors text-center border border-terminal-blue/20"
+              className="w-full px-2 py-1.5 text-xs font-mono bg-terminal-blue-subtle text-terminal-blue rounded hover:bg-terminal-blue-emphasis transition-colors text-center"
               title="Download replay.json for re-publishing to gist"
             >
               Export JSON (for gist re-publish)
@@ -566,7 +564,7 @@ const AnnotationCard = memo(function AnnotationCard({
   return (
     <div
       data-annotation-scene={annotation.sceneIndex}
-      className={`px-3 py-2 border-b border-terminal-border/30 transition-colors ${
+      className={`px-3 py-2 border-b border-terminal-border-subtle transition-colors ${
         isAiFeedback
           ? isCurrent
             ? "bg-terminal-purple/10 border-l-2 border-l-terminal-purple"
@@ -581,7 +579,7 @@ const AnnotationCard = memo(function AnnotationCard({
       {/* AI Feedback badge */}
       {isAiFeedback && (
         <div className="flex items-center gap-1.5 mb-1">
-          <span className="text-[9px] font-mono font-semibold uppercase tracking-wider text-terminal-purple px-1.5 py-0.5 rounded border border-terminal-purple/30 bg-terminal-purple/10">
+          <span className="text-[10px] font-sans font-semibold uppercase tracking-widest text-terminal-purple px-2 py-0.5 rounded-full bg-terminal-purple-subtle">
             AI Coach
           </span>
         </div>
@@ -594,18 +592,16 @@ const AnnotationCard = memo(function AnnotationCard({
       >
         {preview && (
           <>
-            <span
-              className={`text-[10px] font-mono font-semibold uppercase shrink-0 ${labelColor}`}
-            >
+            <span className={`text-xs font-mono font-semibold uppercase shrink-0 ${labelColor}`}>
               {preview.label}
             </span>
-            <span className="text-[10px] font-mono text-terminal-dim truncate group-hover/ref:text-terminal-text transition-colors">
+            <span className="text-xs font-mono text-terminal-dim truncate group-hover/ref:text-terminal-text transition-colors">
               {preview.text}
             </span>
           </>
         )}
         {!preview && (
-          <span className="text-[10px] font-mono text-terminal-dim">
+          <span className="text-xs font-mono text-terminal-dim">
             Step {annotation.sceneIndex + 1}
           </span>
         )}
@@ -627,19 +623,19 @@ const AnnotationCard = memo(function AnnotationCard({
                   }
                   if (e.key === "Escape") onCancelEdit();
                 }}
-                className="w-full bg-terminal-surface border border-terminal-border/50 rounded px-2 py-1.5 text-xs font-mono text-terminal-text resize-none focus:outline-none focus:border-terminal-blue/50"
+                className="w-full bg-terminal-surface rounded px-2 py-1.5 text-xs font-mono text-terminal-text resize-none focus:outline-none ring-1 ring-terminal-border-subtle focus:ring-terminal-blue/40 transition-shadow duration-200"
                 rows={3}
               />
               <div className="flex justify-end gap-1.5 mt-1">
                 <button
                   onClick={onCancelEdit}
-                  className="px-2 py-0.5 text-[10px] font-mono text-terminal-dim hover:text-terminal-text transition-colors"
+                  className="px-2 py-0.5 text-xs font-mono text-terminal-dim hover:text-terminal-text transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={onSaveEdit}
-                  className="px-2 py-0.5 text-[10px] font-mono bg-terminal-blue/15 text-terminal-blue rounded hover:bg-terminal-blue/25 transition-colors"
+                  className="px-2 py-0.5 text-xs font-mono bg-terminal-blue-subtle text-terminal-blue rounded hover:bg-terminal-blue-emphasis transition-colors"
                 >
                   Save
                 </button>
@@ -647,7 +643,7 @@ const AnnotationCard = memo(function AnnotationCard({
             </div>
           ) : (
             <div
-              className="prose-terminal text-xs text-terminal-text/90 leading-relaxed"
+              className="prose-terminal text-xs text-terminal-text leading-relaxed"
               dangerouslySetInnerHTML={{ __html: marked.parse(annotation.body) as string }}
             />
           )}
@@ -658,14 +654,14 @@ const AnnotationCard = memo(function AnnotationCard({
           <div className="flex gap-0.5 shrink-0 pt-0.5">
             <button
               onClick={onStartEdit}
-              className="p-0.5 text-[10px] text-terminal-dim hover:text-terminal-blue transition-colors"
+              className="p-0.5 text-xs text-terminal-dim hover:text-terminal-blue transition-colors"
               title="Edit"
             >
               {"\u270E"}
             </button>
             <button
               onClick={onDelete}
-              className="p-0.5 text-[10px] text-terminal-dim hover:text-terminal-red transition-colors"
+              className="p-0.5 text-xs text-terminal-dim hover:text-terminal-red transition-colors"
               title="Delete"
             >
               {"\u2715"}
@@ -675,7 +671,7 @@ const AnnotationCard = memo(function AnnotationCard({
       </div>
 
       {/* Timestamp */}
-      <div className="text-[9px] font-mono text-terminal-dim/40 mt-1">{timeStr}</div>
+      <div className="text-xs font-mono text-terminal-dimmer mt-1">{timeStr}</div>
     </div>
   );
 });

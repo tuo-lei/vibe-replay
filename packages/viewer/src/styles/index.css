@@ -2,32 +2,100 @@
 @tailwind components;
 @tailwind utilities;
 
+/* System sans-serif for headings & UI labels (keeps mono for code/content) */
+:root {
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
 /* Theme CSS variables */
 :root,
 .dark {
   --bg: #0d1117;
   --surface: #161b22;
+  --surface-hover: #21262d;
+  --surface-2: #1c2129;
+  --surface-inset: #010409;
   --border: #30363d;
-  --text: #e6edf3;
+  --border-subtle: rgba(48, 54, 61, 0.5);
+  --text: #c9d1d9;
   --dim: #8b949e;
+  --dimmer: #7d8590;
+
   --green: #3fb950;
-  --blue: #58a6ff;
+  --green-subtle: rgba(63, 185, 80, 0.15);
+  --green-emphasis: rgba(63, 185, 80, 0.25);
+
+  --blue: #79b8ff;
+  --blue-subtle: rgba(121, 184, 255, 0.15);
+  --blue-emphasis: rgba(121, 184, 255, 0.25);
+
   --orange: #d29922;
+  --orange-subtle: rgba(210, 153, 34, 0.15);
+  --orange-emphasis: rgba(210, 153, 34, 0.25);
+
   --red: #f85149;
-  --purple: #bc8cff;
+  --red-subtle: rgba(248, 81, 73, 0.15);
+  --red-emphasis: rgba(248, 81, 73, 0.25);
+
+  --purple: #b392f0;
+  --purple-subtle: rgba(179, 146, 240, 0.15);
+  --purple-emphasis: rgba(179, 146, 240, 0.25);
+
+  /* Layered shadow color (hue-matched to dark bg) */
+  --shadow-color: 215 28% 4%;
+  --shadow-sm: 0 1px 2px hsl(var(--shadow-color) / 0.5);
+  --shadow-md: 0 1px 2px hsl(var(--shadow-color) / 0.4), 0 4px 8px hsl(var(--shadow-color) / 0.3);
+  --shadow-lg:
+    0 1px 3px hsl(var(--shadow-color) / 0.4), 0 4px 8px hsl(var(--shadow-color) / 0.3),
+    0 12px 24px hsl(var(--shadow-color) / 0.25);
+  --shadow-xl:
+    0 2px 4px hsl(var(--shadow-color) / 0.4), 0 8px 16px hsl(var(--shadow-color) / 0.3),
+    0 24px 48px hsl(var(--shadow-color) / 0.25);
 }
 
 .light {
   --bg: #ffffff;
   --surface: #f6f8fa;
+  --surface-hover: #e6edf3;
+  --surface-2: #ebeef1;
+  --surface-inset: #f0f2f5;
   --border: #d0d7de;
-  --text: #1f2328;
-  --dim: #656d76;
+  --border-subtle: rgba(208, 215, 222, 0.5);
+  --text: #24292f;
+  --dim: #57606a;
+  --dimmer: #697078;
+
   --green: #1a7f37;
+  --green-subtle: rgba(26, 127, 55, 0.1);
+  --green-emphasis: rgba(26, 127, 55, 0.2);
+
   --blue: #0969da;
+  --blue-subtle: rgba(9, 105, 218, 0.1);
+  --blue-emphasis: rgba(9, 105, 218, 0.2);
+
   --orange: #9a6700;
+  --orange-subtle: rgba(154, 103, 0, 0.1);
+  --orange-emphasis: rgba(154, 103, 0, 0.2);
+
   --red: #cf222e;
+  --red-subtle: rgba(207, 34, 46, 0.1);
+  --red-emphasis: rgba(207, 34, 46, 0.2);
+
   --purple: #8250df;
+  --purple-subtle: rgba(130, 80, 223, 0.1);
+  --purple-emphasis: rgba(130, 80, 223, 0.2);
+
+  /* Layered shadow color (warm gray for light mode) */
+  --shadow-color: 220 10% 50%;
+  --shadow-sm: 0 1px 2px hsl(var(--shadow-color) / 0.1);
+  --shadow-md: 0 1px 2px hsl(var(--shadow-color) / 0.08), 0 4px 8px hsl(var(--shadow-color) / 0.06);
+  --shadow-lg:
+    0 1px 3px hsl(var(--shadow-color) / 0.08), 0 4px 8px hsl(var(--shadow-color) / 0.06),
+    0 12px 24px hsl(var(--shadow-color) / 0.05);
+  --shadow-xl:
+    0 2px 4px hsl(var(--shadow-color) / 0.08), 0 8px 16px hsl(var(--shadow-color) / 0.06),
+    0 24px 48px hsl(var(--shadow-color) / 0.05);
 }
 
 /* Smooth theme transition — scoped to avoid interfering with animations */
@@ -56,12 +124,37 @@ html.theme-transition *::after {
     background: var(--border);
     border-radius: 3px;
   }
+  /* Tabular numbers globally for monospace-feel numeric displays */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Respect reduced-motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* Mobile interaction improvements */
 button,
 [role="button"] {
   -webkit-tap-highlight-color: transparent;
+}
+
+/* Focus-visible for keyboard accessibility */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 /* Safe area insets for notched phones */
@@ -93,7 +186,7 @@ button,
 @keyframes fade-in {
   from {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
@@ -102,7 +195,7 @@ button,
 }
 
 .scene-enter {
-  animation: fade-in 0.3s ease-out;
+  animation: fade-in 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Pause overlay */
@@ -169,11 +262,28 @@ button,
   animation: landing-glow 2.5s ease-in-out infinite;
 }
 
+/* Hover lift for interactive cards */
+.hover-lift {
+  transition:
+    transform 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.hover-lift:hover {
+  transform: translateY(-1px);
+}
+
+/* Subtle dot-grid background for premium texture */
+.bg-dot-grid {
+  background-image: radial-gradient(circle, var(--border) 0.5px, transparent 0.5px);
+  background-size: 24px 24px;
+  opacity: 0.03;
+}
+
 /* Minimap */
 .minimap-item {
   transition:
-    background-color 0.15s,
-    border-color 0.15s;
+    background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Markdown prose styles */

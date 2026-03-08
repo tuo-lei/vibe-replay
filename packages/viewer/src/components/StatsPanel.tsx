@@ -60,10 +60,10 @@ export default function StatsPanel({ session }: Props) {
   const { meta } = session;
 
   return (
-    <div className="p-3 space-y-4 text-xs font-mono">
+    <div className="p-4 space-y-6 text-xs font-mono">
       {/* Session info */}
       <div>
-        <div className="text-terminal-dim uppercase tracking-wider text-[11px] font-semibold mb-1.5">
+        <div className="text-terminal-dimmer uppercase tracking-widest text-[10px] font-sans font-semibold mb-2">
           Session
         </div>
         {meta.title && (
@@ -75,21 +75,21 @@ export default function StatsPanel({ session }: Props) {
           {meta.project}
         </div>
         <div className="text-terminal-dim mt-0.5 flex items-center gap-1.5 flex-wrap">
-          {meta.model && <span className="text-terminal-text/60">{meta.model}</span>}
+          {meta.model && <span className="text-terminal-dim">{meta.model}</span>}
           {meta.provider && <span>{meta.provider}</span>}
         </div>
         {meta.generator?.version && (
-          <div className="text-terminal-dim/80 mt-0.5 truncate">
+          <div className="text-terminal-dim mt-0.5 truncate">
             replay:{" "}
-            <span className="text-terminal-text/80">
+            <span className="text-terminal-text">
               {meta.generator.name} v{meta.generator.version}
             </span>
           </div>
         )}
         {meta.generator?.generatedAt && (
-          <div className="text-terminal-dim/80 mt-0.5 truncate" title={meta.generator.generatedAt}>
+          <div className="text-terminal-dim mt-0.5 truncate" title={meta.generator.generatedAt}>
             generated:{" "}
-            <span className="text-terminal-text/80">
+            <span className="text-terminal-text">
               {formatGeneratedAt(meta.generator.generatedAt)}
             </span>
           </div>
@@ -120,7 +120,7 @@ export default function StatsPanel({ session }: Props) {
                   ? stats.costEstimate.toFixed(4)
                   : stats.costEstimate.toFixed(2)}
               </span>
-              <span className="text-terminal-dim/60"> (estimate)</span>
+              <span className="text-terminal-dimmer"> (estimate)</span>
             </div>
           )}
         </div>
@@ -128,7 +128,7 @@ export default function StatsPanel({ session }: Props) {
 
       {stats.tokenUsage && (
         <div>
-          <div className="text-terminal-dim mb-1.5 text-[11px] font-semibold uppercase tracking-wider">
+          <div className="text-terminal-dimmer mb-2 text-[10px] font-sans font-semibold uppercase tracking-widest">
             Tokens
           </div>
           <div className="text-terminal-dim leading-relaxed space-y-0.5">
@@ -164,12 +164,12 @@ export default function StatsPanel({ session }: Props) {
 
       {stats.compactions && stats.compactions.length > 0 && (
         <div>
-          <div className="text-terminal-dim mb-1.5 text-[11px] font-semibold uppercase tracking-wider">
+          <div className="text-terminal-dimmer mb-2 text-[10px] font-sans font-semibold uppercase tracking-widest">
             Context Compactions ({stats.compactions.length})
           </div>
           <div className="space-y-1">
             {stats.compactions.map((c, i) => (
-              <div key={i} className="text-terminal-dim text-[11px] flex items-baseline gap-1.5">
+              <div key={i} className="text-terminal-dim text-xs flex items-baseline gap-1.5">
                 <span className="text-terminal-orange">●</span>
                 <span>{c.trigger}</span>
                 {c.preTokens && (
@@ -183,16 +183,16 @@ export default function StatsPanel({ session }: Props) {
 
       {stats.topTools.length > 0 && (
         <div>
-          <div className="text-terminal-dim mb-2 text-[11px] font-semibold uppercase tracking-wider">
+          <div className="text-terminal-dimmer mb-2 text-[10px] font-sans font-semibold uppercase tracking-widest">
             Top Tools
           </div>
           <div className="space-y-1.5">
             {stats.topTools.map(([name, count]) => (
               <div key={name} className="flex items-center gap-2">
                 <span className="text-terminal-text shrink-0 w-20 text-right">{name}</span>
-                <div className="flex-1 h-1.5 rounded-full bg-terminal-border/30 overflow-hidden">
+                <div className="flex-1 h-2 rounded-full bg-terminal-surface overflow-hidden">
                   <div
-                    className="h-full rounded-full bg-terminal-orange/60"
+                    className="h-full rounded-full bg-terminal-orange"
                     style={{ width: `${(count / stats.topTools[0][1]) * 100}%` }}
                   />
                 </div>
@@ -206,8 +206,8 @@ export default function StatsPanel({ session }: Props) {
       )}
 
       {(meta.dataSource || meta.dataSourceInfo) && (
-        <div className="pt-1 border-t border-terminal-border/30">
-          <div className="text-terminal-dim mb-1.5 text-[11px] font-semibold uppercase tracking-wider">
+        <div>
+          <div className="text-terminal-dimmer mb-2 text-[10px] font-sans font-semibold uppercase tracking-widest">
             Data Source
           </div>
           <div className="text-terminal-dim">
@@ -218,7 +218,7 @@ export default function StatsPanel({ session }: Props) {
           {meta.dataSourceInfo?.sources && meta.dataSourceInfo.sources.length > 0 && (
             <div className="mt-0.5 space-y-0.5">
               {meta.dataSourceInfo.sources.map((source) => (
-                <div key={source} className="text-terminal-dim/80 truncate" title={source}>
+                <div key={source} className="text-terminal-dim truncate" title={source}>
                   <span className="text-terminal-green">source:</span> {source}
                 </div>
               ))}
@@ -227,7 +227,7 @@ export default function StatsPanel({ session }: Props) {
           {meta.dataSourceInfo?.supplements && meta.dataSourceInfo.supplements.length > 0 && (
             <div className="mt-0.5 space-y-0.5">
               {meta.dataSourceInfo.supplements.map((source) => (
-                <div key={source} className="text-terminal-dim/80 truncate" title={source}>
+                <div key={source} className="text-terminal-dim truncate" title={source}>
                   <span className="text-terminal-purple">supplement:</span> {source}
                 </div>
               ))}
@@ -236,7 +236,7 @@ export default function StatsPanel({ session }: Props) {
           {meta.dataSourceInfo?.notes && meta.dataSourceInfo.notes.length > 0 && (
             <div className="mt-0.5 space-y-0.5">
               {meta.dataSourceInfo.notes.map((note) => (
-                <div key={note} className="text-terminal-dim/80 truncate" title={note}>
+                <div key={note} className="text-terminal-dim truncate" title={note}>
                   <span className="text-terminal-orange">note:</span> {note}
                 </div>
               ))}
@@ -250,9 +250,11 @@ export default function StatsPanel({ session }: Props) {
 
 function StatCard({ label, value, color }: { label: string; value: number; color: string }) {
   return (
-    <div className="bg-terminal-surface/80 rounded-md px-2.5 py-2 border border-terminal-border/40">
-      <div className={`text-lg font-bold tabular-nums ${color}`}>{value}</div>
-      <div className="text-terminal-dim text-[11px] uppercase tracking-wide">{label}</div>
+    <div className="bg-terminal-surface rounded-xl px-3 py-3 shadow-layer-sm">
+      <div className={`text-xl font-bold tabular-nums ${color}`}>{value}</div>
+      <div className="text-terminal-dimmer text-[10px] font-sans font-medium uppercase tracking-widest mt-0.5">
+        {label}
+      </div>
     </div>
   );
 }

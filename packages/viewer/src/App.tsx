@@ -78,24 +78,24 @@ export default function App() {
   if (loadState.status === "dashboard") {
     return (
       <div className="h-screen bg-terminal-bg flex flex-col overflow-hidden">
-        <header className="border-b border-terminal-border/50 px-3 md:px-4 py-2 md:py-2.5 flex items-center justify-between shrink-0 bg-terminal-surface/30 safe-top">
+        <header className="border-b border-terminal-border-subtle px-4 md:px-5 py-2.5 md:py-3 flex items-center justify-between shrink-0 bg-terminal-surface/30 backdrop-blur-sm safe-top">
           <div className="flex items-center gap-3">
             <button
               onClick={() => navigateTo({ view: null, session: null })}
-              className="text-sm font-mono font-bold bg-gradient-to-r from-[#3fb950] to-[#58a6ff] bg-clip-text text-transparent hover:opacity-80 transition-opacity"
+              className="text-sm font-sans font-bold bg-gradient-to-r from-[#3fb950] to-[#79b8ff] bg-clip-text text-transparent hover:opacity-80 transition-opacity"
             >
               vibe-replay
             </button>
-            <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded-full border border-terminal-green/30 bg-terminal-green/10 text-terminal-green">
+            <span className="inline-flex items-center gap-1 text-[10px] font-sans font-medium px-2 py-0.5 rounded-full bg-terminal-green-subtle text-terminal-green uppercase tracking-wider">
               <span className="w-1.5 h-1.5 rounded-full bg-terminal-green animate-pulse" />
               Local
             </span>
-            <span className="text-terminal-border/60 text-sm select-none">|</span>
-            <span className="text-sm font-mono text-terminal-text/80">Dashboard</span>
+            <span className="text-terminal-border/40 text-sm select-none">|</span>
+            <span className="text-sm font-sans font-medium text-terminal-text">Dashboard</span>
           </div>
           <button
             onClick={toggleTheme}
-            className="h-7 w-7 flex items-center justify-center rounded-md border border-terminal-border/60 bg-terminal-surface text-terminal-dim hover:text-terminal-text text-xs transition-colors"
+            className="h-7 w-7 flex items-center justify-center rounded-md bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover text-xs transition-colors"
           >
             {theme === "dark" ? "\u263E" : "\u2600"}
           </button>
@@ -112,29 +112,29 @@ export default function App() {
 
   return (
     <div className="h-screen bg-terminal-bg flex flex-col overflow-hidden">
-      <header className="border-b border-terminal-border/50 px-3 md:px-4 py-2 md:py-2.5 flex items-center justify-between shrink-0 bg-terminal-surface/30 safe-top">
+      <header className="relative z-30 border-b border-terminal-border-subtle px-4 md:px-5 py-2.5 md:py-3 flex items-center justify-between shrink-0 bg-terminal-surface/30 backdrop-blur-sm safe-top">
         {/* Left: branding + session info */}
         <div className="flex items-center gap-2 md:gap-3 min-w-0">
           <a
             href="https://vibe-replay.com"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-sm font-mono font-bold shrink-0 hover:opacity-80 transition-opacity bg-gradient-to-r from-[#3fb950] to-[#58a6ff] bg-clip-text text-transparent"
+            className="text-sm font-sans font-bold shrink-0 hover:opacity-80 transition-opacity bg-gradient-to-r from-[#3fb950] to-[#79b8ff] bg-clip-text text-transparent"
           >
             vibe-replay
           </a>
           {isEditor && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded-full border border-terminal-green/30 bg-terminal-green/10 text-terminal-green">
+            <span className="inline-flex items-center gap-1 text-[10px] font-sans font-medium px-2 py-0.5 rounded-full bg-terminal-green-subtle text-terminal-green uppercase tracking-wider">
               <span className="w-1.5 h-1.5 rounded-full bg-terminal-green animate-pulse" />
               Local
             </span>
           )}
           {showDashboardBack && (
             <>
-              <span className="text-terminal-border/60 text-sm select-none">|</span>
+              <span className="text-terminal-border/40 text-sm select-none">|</span>
               <button
                 onClick={() => navigateTo({ view: "dashboard", session: null })}
-                className="flex items-center gap-0.5 text-sm font-mono text-terminal-text/80 hover:text-terminal-text transition-colors"
+                className="flex items-center gap-0.5 text-sm font-sans font-medium text-terminal-dim hover:text-terminal-text transition-colors"
               >
                 <svg
                   width="12"
@@ -154,11 +154,11 @@ export default function App() {
           )}
           {meta.title && (
             <>
-              <span className="hidden md:inline text-terminal-border/60 text-sm select-none">
+              <span className="hidden md:inline text-terminal-border/40 text-sm select-none">
                 |
               </span>
               <span
-                className="hidden md:inline text-terminal-text/80 text-xs font-mono truncate max-w-[300px]"
+                className="hidden md:inline text-terminal-text text-xs font-sans font-medium truncate max-w-[300px]"
                 title={meta.project}
               >
                 {meta.title}
@@ -173,7 +173,7 @@ export default function App() {
                   href={`https://github.com/${gistOwner}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-terminal-text/60 hover:text-terminal-text transition-colors"
+                  className="text-terminal-dim hover:text-terminal-text transition-colors"
                 >
                   @{gistOwner}
                 </a>
@@ -182,7 +182,7 @@ export default function App() {
             {meta.model && (
               <>
                 <span className="text-terminal-border">&middot;</span>
-                <span className="text-terminal-text/60">{meta.model}</span>
+                <span className="text-terminal-dim">{meta.model}</span>
               </>
             )}
             {duration && (
@@ -199,7 +199,7 @@ export default function App() {
           {isEditor && !showDashboardBack && (
             <button
               onClick={() => navigateTo({ view: "dashboard" })}
-              className="h-7 px-2.5 flex items-center gap-1.5 rounded-md border border-terminal-border/60 bg-terminal-surface text-terminal-dim hover:text-terminal-text text-xs font-mono transition-colors"
+              className="h-7 px-2.5 flex items-center gap-1.5 rounded-md bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover text-xs font-mono transition-colors"
               title="All replays"
             >
               <svg
@@ -221,15 +221,15 @@ export default function App() {
           )}
 
           {/* View mode: segmented control */}
-          <div className="flex items-center h-7 rounded-md overflow-hidden border border-terminal-border/60">
+          <div className="flex items-center h-7 rounded-md overflow-hidden bg-terminal-surface">
             <button
               onClick={() => {
                 if (prefs.promptsOnly) togglePref("promptsOnly");
               }}
               className={`h-full px-2.5 text-xs font-mono transition-colors ${
                 !prefs.promptsOnly
-                  ? "bg-terminal-green/15 text-terminal-green"
-                  : "bg-terminal-surface text-terminal-dim hover:text-terminal-text"
+                  ? "bg-terminal-green-subtle text-terminal-green"
+                  : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
               }`}
             >
               All
@@ -240,8 +240,8 @@ export default function App() {
               }}
               className={`h-full px-2.5 text-xs font-mono transition-colors ${
                 prefs.promptsOnly
-                  ? "bg-terminal-green/15 text-terminal-green"
-                  : "bg-terminal-surface text-terminal-dim hover:text-terminal-text"
+                  ? "bg-terminal-green-subtle text-terminal-green"
+                  : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
               }`}
             >
               Prompts
@@ -252,12 +252,12 @@ export default function App() {
           <div ref={filterRef} className="relative">
             <button
               onClick={() => setFilterOpen((v) => !v)}
-              className={`h-7 w-7 flex items-center justify-center rounded-md border transition-colors text-xs ${
+              className={`h-7 w-7 flex items-center justify-center rounded-md transition-colors text-xs ${
                 filterOpen
-                  ? "bg-terminal-green/15 text-terminal-green border-terminal-green/30"
+                  ? "bg-terminal-green-subtle text-terminal-green"
                   : prefs.collapseAllTools || prefs.hideThinking
-                    ? "bg-terminal-orange/10 text-terminal-orange border-terminal-orange/30"
-                    : "bg-terminal-surface text-terminal-dim border-terminal-border/60 hover:text-terminal-text"
+                    ? "bg-terminal-orange-subtle text-terminal-orange"
+                    : "bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
               }`}
               title="Settings"
             >
@@ -279,7 +279,7 @@ export default function App() {
               </svg>
             </button>
             {filterOpen && (
-              <div className="absolute right-0 top-full mt-1.5 w-48 bg-terminal-bg border border-terminal-border rounded-lg shadow-xl z-50 py-1.5 overflow-hidden">
+              <div className="absolute right-0 top-full mt-2 w-48 bg-terminal-surface border border-terminal-border-subtle rounded-xl shadow-layer-xl z-50 py-2 overflow-hidden backdrop-blur-md">
                 {!prefs.promptsOnly && (
                   <>
                     <button
@@ -287,10 +287,10 @@ export default function App() {
                       className="w-full text-left px-3 py-2 text-xs font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50 transition-colors flex items-center gap-2"
                     >
                       <span
-                        className={`w-3.5 h-3.5 rounded border flex items-center justify-center text-[10px] ${
+                        className={`w-3.5 h-3.5 rounded flex items-center justify-center text-xs ${
                           prefs.collapseAllTools
-                            ? "bg-terminal-orange/20 border-terminal-orange/50 text-terminal-orange"
-                            : "border-terminal-border"
+                            ? "bg-terminal-orange-subtle text-terminal-orange"
+                            : "bg-terminal-surface"
                         }`}
                       >
                         {prefs.collapseAllTools ? "\u2713" : ""}
@@ -303,10 +303,10 @@ export default function App() {
                         className="w-full text-left px-3 py-2 text-xs font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50 transition-colors flex items-center gap-2"
                       >
                         <span
-                          className={`w-3.5 h-3.5 rounded border flex items-center justify-center text-[10px] ${
+                          className={`w-3.5 h-3.5 rounded flex items-center justify-center text-xs ${
                             prefs.hideThinking
-                              ? "bg-terminal-purple/20 border-terminal-purple/50 text-terminal-purple"
-                              : "border-terminal-border"
+                              ? "bg-terminal-purple-subtle text-terminal-purple"
+                              : "bg-terminal-surface"
                           }`}
                         >
                           {prefs.hideThinking ? "\u2713" : ""}
@@ -314,7 +314,7 @@ export default function App() {
                         Hide Thinking
                       </button>
                     )}
-                    <div className="border-t border-terminal-border/40 my-1.5" />
+                    <div className="border-t border-terminal-border-subtle my-1.5" />
                   </>
                 )}
                 <button

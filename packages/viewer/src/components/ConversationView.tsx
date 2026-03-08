@@ -101,7 +101,7 @@ export default function ConversationView({
   }, [displayGroups, currentIndex]);
 
   return (
-    <div className="max-w-4xl mx-auto space-y-3 pb-4">
+    <div className="max-w-4xl mx-auto space-y-5 pb-6">
       {displayGroups.map((group, gi) => (
         <LazyGroup key={gi} forceRender={Math.abs(gi - currentGroupIdx) <= 5}>
           <GroupCard
@@ -216,10 +216,10 @@ const GroupCard = memo(function GroupCard({
           e.stopPropagation();
           onComment(firstIndex);
         }}
-        className={`absolute -right-3 top-3 z-10 flex items-center gap-1 px-1.5 py-1 rounded-md border text-[10px] font-mono transition-all duration-150 ${
+        className={`absolute -right-2 top-3 z-10 flex items-center gap-1 px-1.5 py-1 rounded-md text-xs font-mono transition-all duration-150 ${
           userCommentCount > 0
-            ? "bg-terminal-blue border-terminal-blue text-white shadow-sm"
-            : "bg-terminal-bg border-terminal-border text-terminal-dim hover:text-terminal-blue hover:border-terminal-blue/40 opacity-0 group-hover:opacity-100"
+            ? "bg-terminal-blue text-terminal-bg shadow-layer-sm"
+            : "text-terminal-dim hover:text-terminal-blue hover:bg-terminal-blue-subtle opacity-0 group-hover:opacity-100"
         }`}
         title={
           userCommentCount > 0
@@ -237,34 +237,34 @@ const GroupCard = memo(function GroupCard({
       <div
         id={`scene-${firstIndex}`}
         data-scene-index={firstIndex}
-        className={`group relative rounded-lg px-4 py-3 transition-colors duration-200 ${
+        className={`group relative rounded-xl px-5 py-4 transition-all duration-200 ease-material ${
           groupHasFocusedTarget
-            ? "scene-nav-focused bg-terminal-green/30 border-2 border-terminal-green ring-2 ring-terminal-green/60 shadow-lg shadow-terminal-green/30"
+            ? "scene-nav-focused bg-terminal-green-emphasis border-l-2 border-terminal-green shadow-layer-lg"
             : groupHasCurrent
-              ? "bg-terminal-green/20 border-2 border-terminal-green/60 ring-1 ring-terminal-green/40 shadow-md shadow-terminal-green/20"
-              : "bg-terminal-green/5 border border-terminal-green/15"
+              ? "bg-terminal-green-subtle border-l-2 border-terminal-green shadow-layer-sm"
+              : "bg-terminal-green-subtle"
         }`}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       >
         {userCommentButton}
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-[11px] font-mono font-semibold text-terminal-green uppercase tracking-wider">
+        <div className="flex items-center gap-2 mb-2.5">
+          <span className="text-[10px] font-sans font-semibold text-terminal-green uppercase tracking-widest">
             You
           </span>
           {groupHasFocusedTarget ? (
-            <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-terminal-green text-terminal-green bg-terminal-green/20">
+            <span className="text-[10px] font-sans font-medium uppercase tracking-widest px-2 py-0.5 rounded-full bg-terminal-green-emphasis text-terminal-green">
               Jump Target
             </span>
           ) : (
             groupHasCurrent && (
-              <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-terminal-green/50 text-terminal-green bg-terminal-green/10">
+              <span className="text-[10px] font-sans font-medium uppercase tracking-widest px-2 py-0.5 rounded-full bg-terminal-green-subtle text-terminal-green">
                 Focused
               </span>
             )
           )}
           {group.timestamp && (
-            <span className="text-[11px] font-mono text-terminal-dim">
+            <span className="text-xs font-mono text-terminal-dimmer">
               {formatTime(group.timestamp)}
             </span>
           )}
@@ -289,20 +289,20 @@ const GroupCard = memo(function GroupCard({
       <div
         id={`scene-${firstIndex}`}
         data-scene-index={firstIndex}
-        className={`group relative rounded-lg px-4 py-3 transition-colors duration-200 ${
+        className={`group relative rounded-xl px-5 py-3.5 transition-all duration-200 ease-material ${
           groupHasFocusedTarget
-            ? "scene-nav-focused bg-terminal-dim/20 border-2 border-terminal-dim ring-2 ring-terminal-dim/60"
+            ? "scene-nav-focused bg-terminal-surface border-l-2 border-terminal-dim shadow-layer-sm"
             : groupHasCurrent
-              ? "bg-terminal-dim/10 border-2 border-terminal-dim/40"
-              : "bg-terminal-dim/[0.03] border border-terminal-border/30 border-dashed"
+              ? "bg-terminal-surface border-l-2 border-terminal-dim shadow-layer-sm"
+              : "bg-terminal-surface/50"
         }`}
       >
         <div className="flex items-center gap-2 mb-2">
-          <span className="text-[11px] font-mono font-semibold text-terminal-dim uppercase tracking-wider">
+          <span className="text-[10px] font-sans font-semibold text-terminal-dim uppercase tracking-widest">
             Context Compaction
           </span>
           {group.timestamp && (
-            <span className="text-[11px] font-mono text-terminal-dim/60">
+            <span className="text-xs font-mono text-terminal-dimmer">
               {formatTime(group.timestamp)}
             </span>
           )}
@@ -323,31 +323,31 @@ const GroupCard = memo(function GroupCard({
     <div
       id={`scene-${firstIndex}`}
       data-scene-index={firstIndex}
-      className={`relative rounded-lg px-4 py-3 transition-colors duration-200 ${
+      className={`relative rounded-xl px-5 py-4 transition-all duration-200 ease-material ${
         groupHasFocusedTarget
-          ? "scene-nav-focused bg-terminal-blue/20 border-2 border-terminal-blue ring-2 ring-terminal-blue/60 shadow-lg shadow-terminal-blue/30"
+          ? "scene-nav-focused bg-terminal-blue-subtle border-l-2 border-terminal-blue shadow-layer-lg"
           : groupHasCurrent
-            ? "bg-terminal-blue/15 border-2 border-terminal-blue/45 ring-1 ring-terminal-blue/35 shadow-md shadow-terminal-blue/20"
-            : "bg-terminal-blue/[0.03] border border-terminal-blue/10"
+            ? "bg-terminal-blue-subtle border-l-2 border-terminal-blue shadow-layer-sm"
+            : "bg-terminal-surface shadow-layer-sm"
       }`}
     >
       <div className="flex items-center gap-2 mb-2">
-        <span className="text-[11px] font-mono font-semibold text-terminal-blue/70 uppercase tracking-wider">
+        <span className="text-[10px] font-sans font-semibold text-terminal-blue uppercase tracking-widest">
           Assistant
         </span>
         {groupHasFocusedTarget ? (
-          <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-terminal-blue text-terminal-blue bg-terminal-blue/20">
+          <span className="text-[10px] font-sans font-medium uppercase tracking-widest px-2 py-0.5 rounded-full bg-terminal-blue-emphasis text-terminal-blue">
             Jump Target
           </span>
         ) : (
           groupHasCurrent && (
-            <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-terminal-blue/50 text-terminal-blue bg-terminal-blue/10">
+            <span className="text-[10px] font-sans font-medium uppercase tracking-widest px-2 py-0.5 rounded-full bg-terminal-blue-subtle text-terminal-blue">
               Focused
             </span>
           )
         )}
         {group.timestamp && (
-          <span className="text-[11px] font-mono text-terminal-dim">
+          <span className="text-xs font-mono text-terminal-dimmer">
             {formatTime(group.timestamp)}
           </span>
         )}
@@ -414,11 +414,7 @@ function BatchedScenes({
           const { scene, index } = batch[0];
           const count = annotationCounts?.get(index) || 0;
           return (
-            <div
-              key={index}
-              data-scene-index={index}
-              className={`group/scene relative scene-enter ${index === currentIndex ? "" : "opacity-90"}`}
-            >
+            <div key={index} data-scene-index={index} className="group/scene relative scene-enter">
               <SceneBlock
                 scene={scene}
                 isActive={index === currentIndex}
@@ -430,10 +426,10 @@ function BatchedScenes({
                     e.stopPropagation();
                     onComment(index);
                   }}
-                  className={`absolute -right-2 top-1 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border text-[10px] font-mono transition-all duration-150 ${
+                  className={`absolute -right-2 top-1 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-xs font-mono transition-all duration-150 ${
                     count > 0
-                      ? "bg-terminal-blue border-terminal-blue text-white shadow-sm"
-                      : "bg-terminal-bg border-terminal-border text-terminal-dim hover:text-terminal-blue hover:border-terminal-blue/40 opacity-0 group-hover/scene:opacity-100"
+                      ? "bg-terminal-blue text-terminal-bg shadow-layer-sm"
+                      : "text-terminal-dim hover:text-terminal-blue hover:bg-terminal-blue-subtle opacity-0 group-hover/scene:opacity-100"
                   }`}
                   title={count > 0 ? `${count} comment${count > 1 ? "s" : ""}` : "Add comment"}
                 >
@@ -496,20 +492,20 @@ function ToolBatch({
 
   return (
     <div data-scene-index={batch[0].index} className="group/batch relative">
-      {/* Collapsed summary — always visible */}
+      {/* Collapsed summary */}
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-xs font-mono text-terminal-dim border border-terminal-border/50 rounded-lg bg-terminal-surface/50 hover:bg-terminal-surface hover:border-terminal-border transition-colors cursor-pointer text-left"
+        className="w-full flex items-center gap-2 px-3.5 py-2.5 text-xs font-mono text-terminal-dim rounded-xl bg-terminal-surface hover:bg-terminal-surface-hover transition-all duration-200 ease-material cursor-pointer text-left shadow-layer-sm"
       >
-        <span className={`transition-transform text-[10px] ${expanded ? "rotate-90" : ""}`}>
+        <span className={`transition-transform text-xs ${expanded ? "rotate-90" : ""}`}>
           {"\u25B6"}
         </span>
         <span className="text-terminal-orange font-semibold">{toolName}</span>
-        <span className="text-terminal-dim/70">
+        <span className="text-terminal-dimmer">
           {batch.length} call{batch.length > 1 ? "s" : ""}
         </span>
         {!expanded && (
-          <span className="truncate text-terminal-dim/50 ml-1">
+          <span className="truncate text-terminal-dimmer ml-1">
             {summaries.filter(Boolean).slice(0, 3).join(", ")}
             {summaries.filter(Boolean).length > 3 && "..."}
           </span>
@@ -522,10 +518,10 @@ function ToolBatch({
             e.stopPropagation();
             onComment(batch[0].index);
           }}
-          className={`absolute -right-2 top-1 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border text-[10px] font-mono transition-all duration-150 ${
+          className={`absolute -right-2 top-1 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-xs font-mono transition-all duration-150 ${
             batchCommentCount > 0
-              ? "bg-terminal-blue border-terminal-blue text-white shadow-sm"
-              : "bg-terminal-bg border-terminal-border text-terminal-dim hover:text-terminal-blue hover:border-terminal-blue/40 opacity-0 group-hover/batch:opacity-100"
+              ? "bg-terminal-blue text-terminal-bg shadow-layer-sm"
+              : "text-terminal-dim hover:text-terminal-blue hover:bg-terminal-blue-subtle opacity-0 group-hover/batch:opacity-100"
           }`}
           title={
             batchCommentCount > 0
@@ -540,14 +536,14 @@ function ToolBatch({
 
       {/* Expanded: show all individual tool calls with per-scene comment buttons */}
       {expanded && (
-        <div className="mt-1 ml-4 space-y-2 border-l border-terminal-border/30 pl-3">
+        <div className="mt-1 ml-4 space-y-2 pl-4">
           {batch.map(({ scene, index }) => {
             const count = annotationCounts?.get(index) || 0;
             return (
               <div
                 key={index}
                 data-scene-index={index}
-                className={`group/scene relative scene-enter ${index === currentIndex ? "" : "opacity-90"}`}
+                className="group/scene relative scene-enter"
               >
                 <SceneBlock
                   scene={scene}
@@ -560,10 +556,10 @@ function ToolBatch({
                       e.stopPropagation();
                       onComment(index);
                     }}
-                    className={`absolute -right-2 top-1 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md border text-[10px] font-mono transition-all duration-150 ${
+                    className={`absolute -right-2 top-1 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-xs font-mono transition-all duration-150 ${
                       count > 0
-                        ? "bg-terminal-blue border-terminal-blue text-white shadow-sm"
-                        : "bg-terminal-bg border-terminal-border text-terminal-dim hover:text-terminal-blue hover:border-terminal-blue/40 opacity-0 group-hover/scene:opacity-100"
+                        ? "bg-terminal-blue text-terminal-bg shadow-layer-sm"
+                        : "text-terminal-dim hover:text-terminal-blue hover:bg-terminal-blue-subtle opacity-0 group-hover/scene:opacity-100"
                     }`}
                     title={count > 0 ? `${count} comment${count > 1 ? "s" : ""}` : "Add comment"}
                   >
