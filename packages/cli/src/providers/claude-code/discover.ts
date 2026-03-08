@@ -64,7 +64,7 @@ function shortenPath(path: string): string {
   return path;
 }
 
-async function extractSessionInfo(
+export async function extractSessionInfo(
   filePath: string,
   fileSize: number,
   project: string,
