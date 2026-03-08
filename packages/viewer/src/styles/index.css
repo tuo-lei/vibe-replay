@@ -35,7 +35,10 @@ html.theme-transition,
 html.theme-transition *,
 html.theme-transition *::before,
 html.theme-transition *::after {
-  transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease !important;
+  transition:
+    background-color 0.25s ease,
+    border-color 0.25s ease,
+    color 0.25s ease;
 }
 
 @layer base {
@@ -56,19 +59,29 @@ html.theme-transition *::after {
 }
 
 /* Mobile interaction improvements */
-button, [role="button"] {
+button,
+[role="button"] {
   -webkit-tap-highlight-color: transparent;
 }
 
 /* Safe area insets for notched phones */
 @supports (padding: env(safe-area-inset-top)) {
-  .safe-top { padding-top: env(safe-area-inset-top); }
-  .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
 }
 
 @keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
 }
 
 .typing-cursor::after {
@@ -78,8 +91,14 @@ button, [role="button"] {
 }
 
 @keyframes fade-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .scene-enter {
@@ -88,8 +107,13 @@ button, [role="button"] {
 
 /* Pause overlay */
 @keyframes pulse-border {
-  0%, 100% { border-color: rgba(210, 153, 34, 0.3); }
-  50% { border-color: rgba(210, 153, 34, 0.6); }
+  0%,
+  100% {
+    border-color: rgba(210, 153, 34, 0.3);
+  }
+  50% {
+    border-color: rgba(210, 153, 34, 0.6);
+  }
 }
 
 .pause-overlay {
@@ -118,8 +142,13 @@ button, [role="button"] {
 }
 
 @keyframes nav-focus-pulse {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-1px); }
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-1px);
+  }
 }
 
 .scene-nav-focused {
@@ -128,8 +157,13 @@ button, [role="button"] {
 
 /* Landing page start button pulse */
 @keyframes landing-glow {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0); }
-  50% { box-shadow: 0 0 20px 2px rgba(63, 185, 80, 0.15); }
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(63, 185, 80, 0);
+  }
+  50% {
+    box-shadow: 0 0 20px 2px rgba(63, 185, 80, 0.15);
+  }
 }
 .landing-pulse {
   animation: landing-glow 2.5s ease-in-out infinite;
@@ -137,7 +171,9 @@ button, [role="button"] {
 
 /* Minimap */
 .minimap-item {
-  transition: background-color 0.15s, border-color 0.15s;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s;
 }
 
 /* Markdown prose styles */
@@ -164,14 +200,17 @@ button, [role="button"] {
   background: none;
   padding: 0;
 }
-.prose-terminal ul, .prose-terminal ol {
+.prose-terminal ul,
+.prose-terminal ol {
   padding-left: 1.5em;
   margin: 0.5em 0;
 }
 .prose-terminal li {
   margin: 0.25em 0;
 }
-.prose-terminal h1, .prose-terminal h2, .prose-terminal h3 {
+.prose-terminal h1,
+.prose-terminal h2,
+.prose-terminal h3 {
   margin: 0.75em 0 0.5em;
   font-weight: 600;
 }
@@ -189,7 +228,8 @@ button, [role="button"] {
   border-collapse: collapse;
   margin: 0.5em 0;
 }
-.prose-terminal th, .prose-terminal td {
+.prose-terminal th,
+.prose-terminal td {
   border: 1px solid var(--border);
   padding: 0.4em 0.8em;
 }

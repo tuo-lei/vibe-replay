@@ -1,8 +1,10 @@
 import { readFile } from "node:fs/promises";
-import type { RawMessage, ContentBlock, ParsedTurn } from "../../types.js";
-import type { ProviderParseResult, TokenUsage, Compaction } from "../types.js";
+import type { ContentBlock, ParsedTurn, RawMessage } from "../../types.js";
+import type { Compaction, ProviderParseResult, TokenUsage } from "../types.js";
 
-export async function parseClaudeCodeSession(filePaths: string | string[]): Promise<ProviderParseResult> {
+export async function parseClaudeCodeSession(
+  filePaths: string | string[],
+): Promise<ProviderParseResult> {
   const paths = Array.isArray(filePaths) ? filePaths : [filePaths];
 
   // Read all files and concatenate lines in order (files should be sorted chronologically)
@@ -25,7 +27,15 @@ export async function parseClaudeCodeSession(filePaths: string | string[]): Prom
 
   // Token usage: track last usage per message ID to avoid double-counting
   // (each message.id appears in multiple JSONL lines with the same cumulative usage)
-  const usageByMsgId = new Map<string, { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number }>();
+  const usageByMsgId = new Map<
+    string,
+    {
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_creation_input_tokens?: number;
+      cache_read_input_tokens?: number;
+    }
+  >();
 
   // Compaction events
   const compactions: Compaction[] = [];
@@ -93,7 +103,9 @@ export async function parseClaudeCodeSession(filePaths: string | string[]): Prom
     // User message with string content = human prompt (or compaction summary)
     if (role === "user" && typeof msgContent === "string") {
       if (isSystemGeneratedMessage(msgContent)) continue;
-      const isCompaction = msgContent.startsWith("This session is being continued from a previous conversation");
+      const isCompaction = msgContent.startsWith(
+        "This session is being continued from a previous conversation",
+      );
       userTurns.push({
         role: "user",
         ...(isCompaction ? { subtype: "compaction-summary" } : {}),
@@ -134,8 +146,14 @@ export async function parseClaudeCodeSession(filePaths: string | string[]): Prom
 
       // Skip emitting user turn for automated ToolSearch responses and system-generated messages
       const combinedText = textParts.join("").trim();
-      if (!isToolSearchResponse && !isSystemGeneratedMessage(combinedText) && (textParts.length > 0 || userImages.length > 0)) {
-        const blocks: ContentBlock[] = textParts.map((t) => ({ type: "text", text: t } as ContentBlock));
+      if (
+        !isToolSearchResponse &&
+        !isSystemGeneratedMessage(combinedText) &&
+        (textParts.length > 0 || userImages.length > 0)
+      ) {
+        const blocks: ContentBlock[] = textParts.map(
+          (t) => ({ type: "text", text: t }) as ContentBlock,
+        );
         if (userImages.length > 0) {
           blocks.push({ type: "_user_images", images: userImages } as any);
         }
@@ -214,7 +232,12 @@ export async function parseClaudeCodeSession(filePaths: string | string[]): Prom
   // Aggregate token usage from deduplicated per-message data
   let tokenUsage: TokenUsage | undefined;
   if (usageByMsgId.size > 0) {
-    const totals: TokenUsage = { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 };
+    const totals: TokenUsage = {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+    };
     for (const u of usageByMsgId.values()) {
       totals.inputTokens += u.input_tokens || 0;
       totals.outputTokens += u.output_tokens || 0;

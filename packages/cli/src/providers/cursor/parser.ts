@@ -1,6 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
-import { basename, extname, join } from "node:path";
 import { homedir } from "node:os";
+import { basename, extname, join } from "node:path";
 import type { ParsedTurn, SessionInfo } from "../../types.js";
 import type { DataSourceInfo, ProviderParseResult } from "../types.js";
 import { parseCursorSqlite } from "./sqlite-reader.js";
@@ -25,7 +25,9 @@ export async function parseCursorSession(
       if (transcriptPaths.length > 0) {
         const thinkingBefore = countThinkingBlocks(sqliteResult.turns);
         const userImagesBefore = countUserImages(sqliteResult.turns);
-        const jsonlThinking = await parseCursorJsonl(transcriptPaths, [], { inferToolPaths: false });
+        const jsonlThinking = await parseCursorJsonl(transcriptPaths, [], {
+          inferToolPaths: false,
+        });
         sqliteResult.turns = mergeJsonlSupplementsIntoCursorTurns(
           sqliteResult.turns,
           jsonlThinking.turns,
@@ -54,7 +56,9 @@ interface ParseJsonlOptions {
   inferToolPaths: boolean;
 }
 
-function defaultDataSourceInfo(dataSource?: ProviderParseResult["dataSource"]): DataSourceInfo | undefined {
+function defaultDataSourceInfo(
+  dataSource?: ProviderParseResult["dataSource"],
+): DataSourceInfo | undefined {
   if (!dataSource) return undefined;
   return {
     primary: dataSource,
@@ -162,11 +166,12 @@ async function parseCursorJsonl(
     }
   }
 
-  const toolPaths = explicitToolPaths.length > 0
-    ? await sortByMtime(explicitToolPaths)
-    : options.inferToolPaths
-    ? await inferToolPaths(sortedTranscriptPaths)
-    : [];
+  const toolPaths =
+    explicitToolPaths.length > 0
+      ? await sortByMtime(explicitToolPaths)
+      : options.inferToolPaths
+        ? await inferToolPaths(sortedTranscriptPaths)
+        : [];
   const toolEvents = await loadToolEvents(toolPaths);
   attachToolEvents(allTurns, toolEvents);
 
@@ -175,9 +180,10 @@ async function parseCursorJsonl(
 
   // Try to extract a meaningful title from first user prompt
   const firstUser = allTurns.find((t) => t.role === "user");
-  const firstText = firstUser?.blocks[0]?.type === "text"
-    ? (firstUser.blocks[0] as any).text?.slice(0, 80)
-    : undefined;
+  const firstText =
+    firstUser?.blocks[0]?.type === "text"
+      ? (firstUser.blocks[0] as any).text?.slice(0, 80)
+      : undefined;
 
   const hasToolData = toolPaths.length > 0;
   return {
@@ -366,7 +372,9 @@ function mergeJsonlUserImagesIntoCursorTurns(
     const mergedImages = [...new Set([...existingImages, ...candidateImages])];
     if (mergedImages.length === existingImages.length) continue;
 
-    const nonImageBlocks = (targetTurn.blocks as any[]).filter((block) => block?.type !== "_user_images");
+    const nonImageBlocks = (targetTurn.blocks as any[]).filter(
+      (block) => block?.type !== "_user_images",
+    );
     targetTurn.blocks = [...nonImageBlocks, { type: "_user_images", images: mergedImages }] as any;
   }
 
@@ -414,7 +422,7 @@ async function inferToolPaths(transcriptPaths: string[]): Promise<string[]> {
     const projectRoot = getCursorProjectRoot(transcriptPath);
     if (!projectRoot) continue;
     if (!projects.has(projectRoot)) projects.set(projectRoot, new Set());
-    projects.get(projectRoot)!.add(transcriptPath);
+    projects.get(projectRoot)?.add(transcriptPath);
   }
 
   for (const [projectRoot, selectedPaths] of projects.entries()) {

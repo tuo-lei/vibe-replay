@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Scene } from "../types";
 
 interface Props {
@@ -43,7 +43,8 @@ function highlightMatch(text: string, query: string): string {
   if (idx === -1) return text.slice(0, 120);
   const start = Math.max(0, idx - 40);
   const end = Math.min(text.length, idx + query.length + 60);
-  let snippet = (start > 0 ? "..." : "") + text.slice(start, end) + (end < text.length ? "..." : "");
+  const snippet =
+    (start > 0 ? "..." : "") + text.slice(start, end) + (end < text.length ? "..." : "");
   return snippet;
 }
 
@@ -99,7 +100,7 @@ export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) 
   }, [scenes, query]);
 
   // Reset selection when results change
-  useEffect(() => setSelectedIdx(0), [results]);
+  useEffect(() => setSelectedIdx(0), []);
 
   // Scroll selected into view
   useEffect(() => {
@@ -152,9 +153,7 @@ export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) 
       >
         {/* Search input */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-terminal-border">
-          <span className="text-terminal-dim text-sm">
-            {"\uD83D\uDD0D"}
-          </span>
+          <span className="text-terminal-dim text-sm">{"\uD83D\uDD0D"}</span>
           <input
             ref={inputRef}
             type="text"
@@ -184,9 +183,7 @@ export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) 
                 key={r.sceneIndex}
                 onClick={() => selectResult(i)}
                 className={`w-full text-left px-4 py-2.5 flex items-start gap-3 transition-colors ${
-                  i === selectedIdx
-                    ? "bg-terminal-green/10"
-                    : "hover:bg-terminal-surface/50"
+                  i === selectedIdx ? "bg-terminal-green/10" : "hover:bg-terminal-surface/50"
                 }`}
               >
                 <span
@@ -210,7 +207,9 @@ export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) 
         {/* Footer */}
         {results.length > 0 && (
           <div className="px-4 py-2 border-t border-terminal-border text-[10px] font-mono text-terminal-dim flex gap-4">
-            <span>{results.length} result{results.length !== 1 ? "s" : ""}</span>
+            <span>
+              {results.length} result{results.length !== 1 ? "s" : ""}
+            </span>
             <span>↑↓ navigate</span>
             <span>↵ select</span>
           </div>

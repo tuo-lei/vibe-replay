@@ -1,11 +1,11 @@
-import { readdir, stat, readFile } from "node:fs/promises";
-import { join, basename } from "node:path";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
+import { basename, join } from "node:path";
 import type { SessionInfo } from "../../types.js";
 import {
-  storeDbExists,
-  discoverSqliteOnlySessions,
   discoverGlobalStateOnlySessions,
+  discoverSqliteOnlySessions,
+  storeDbExists,
 } from "./sqlite-reader.js";
 
 const CURSOR_DIR = join(homedir(), ".cursor", "projects");
@@ -91,21 +91,21 @@ async function decodeProjectDir(encoded: string): Promise<string> {
       return s?.isDirectory() ? current : null;
     }
     // Try `/` (path separator) first — more common
-    const withSlash = current + "/" + parts[idx];
+    const withSlash = `${current}/${parts[idx]}`;
     const slashResult = await resolve(idx + 1, withSlash);
     if (slashResult) return slashResult;
     // Try `-` (literal hyphen in directory name)
-    const withHyphen = current + "-" + parts[idx];
+    const withHyphen = `${current}-${parts[idx]}`;
     return resolve(idx + 1, withHyphen);
   }
 
-  const result = await resolve(1, "/" + parts[0]);
-  return result || "/" + encoded.replace(/-/g, "/");
+  const result = await resolve(1, `/${parts[0]}`);
+  return result || `/${encoded.replace(/-/g, "/")}`;
 }
 
 function shortenPath(path: string): string {
   const home = homedir();
-  if (path.startsWith(home)) return "~" + path.slice(home.length);
+  if (path.startsWith(home)) return `~${path.slice(home.length)}`;
   return path;
 }
 
@@ -129,9 +129,7 @@ async function extractSessionInfo(
       try {
         const obj = JSON.parse(line);
         if (obj.role === "user") {
-          const textBlock = obj.message?.content?.find?.(
-            (b: any) => b.type === "text",
-          );
+          const textBlock = obj.message?.content?.find?.((b: any) => b.type === "text");
           if (textBlock?.text) {
             // Strip <user_query> wrapper if present
             firstPrompt = textBlock.text
@@ -141,9 +139,7 @@ async function extractSessionInfo(
             break;
           }
         }
-      } catch {
-        continue;
-      }
+      } catch {}
     }
 
     // Use file mtime as timestamp (Cursor doesn't store timestamps in JSONL)

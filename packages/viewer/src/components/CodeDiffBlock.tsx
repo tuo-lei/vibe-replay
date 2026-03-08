@@ -1,6 +1,6 @@
-import { useMemo, memo, useSyncExternalStore } from "react";
-import { Highlight, themes } from "prism-react-renderer";
 import { diffLines as computeLineDiff } from "diff";
+import { Highlight, themes } from "prism-react-renderer";
+import { memo, useMemo, useSyncExternalStore } from "react";
 
 // Subscribe to dark/light class changes on <html> for prism theme switching
 const subscribe = (cb: () => void) => {
@@ -33,11 +33,7 @@ function computeDiff(oldStr: string, newStr: string): DiffLine[] {
 
   for (const change of changes) {
     const changeLines = change.value.replace(/\n$/, "").split("\n");
-    const type: DiffLine["type"] = change.added
-      ? "add"
-      : change.removed
-        ? "remove"
-        : "context";
+    const type: DiffLine["type"] = change.added ? "add" : change.removed ? "remove" : "context";
     for (const line of changeLines) {
       lines.push({ type, content: line });
     }
@@ -77,12 +73,9 @@ export default memo(function CodeDiffBlock({
   filePath,
   oldContent,
   newContent,
-  isActive,
+  isActive: _isActive,
 }: Props) {
-  const diffLines = useMemo(
-    () => computeDiff(oldContent, newContent),
-    [oldContent, newContent],
-  );
+  const diffLines = useMemo(() => computeDiff(oldContent, newContent), [oldContent, newContent]);
   const language = guessLanguage(filePath);
   const isDark = useSyncExternalStore(subscribe, getIsDark);
   const isNewFile = !oldContent;
@@ -90,12 +83,8 @@ export default memo(function CodeDiffBlock({
   return (
     <div className="border border-terminal-border rounded-lg overflow-hidden">
       <div className="flex items-center gap-2 px-3 py-2 bg-terminal-surface border-b border-terminal-border">
-        <span className="text-xs font-mono font-bold text-terminal-orange">
-          {toolName}
-        </span>
-        <span className="text-xs font-mono text-terminal-blue truncate">
-          {filePath}
-        </span>
+        <span className="text-xs font-mono font-bold text-terminal-orange">{toolName}</span>
+        <span className="text-xs font-mono text-terminal-blue truncate">{filePath}</span>
         {isNewFile && (
           <span className="text-xs px-1.5 py-0.5 rounded bg-terminal-green/20 text-terminal-green">
             new
@@ -120,11 +109,7 @@ export default memo(function CodeDiffBlock({
                       ? "bg-red-100 dark:bg-red-900/30"
                       : "";
                 const prefix =
-                  diffLine.type === "add"
-                    ? "+"
-                    : diffLine.type === "remove"
-                      ? "-"
-                      : " ";
+                  diffLine.type === "add" ? "+" : diffLine.type === "remove" ? "-" : " ";
                 const prefixColor =
                   diffLine.type === "add"
                     ? "text-terminal-green"
@@ -138,11 +123,7 @@ export default memo(function CodeDiffBlock({
                     {...getLineProps({ line })}
                     className={`flex ${bgClass} px-3 leading-5`}
                   >
-                    <span
-                      className={`select-none w-4 shrink-0 ${prefixColor}`}
-                    >
-                      {prefix}
-                    </span>
+                    <span className={`select-none w-4 shrink-0 ${prefixColor}`}>{prefix}</span>
                     <span>
                       {line.map((token, j) => (
                         <span key={j} {...getTokenProps({ token })} />

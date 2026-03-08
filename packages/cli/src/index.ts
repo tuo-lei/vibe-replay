@@ -1,15 +1,15 @@
-import { program } from "commander";
-import { select, Separator } from "@inquirer/prompts";
+import { Separator, select } from "@inquirer/prompts";
 import chalk from "chalk";
+import { program } from "commander";
 import ora from "ora";
-import { getAllProviders, getProvider } from "./providers/index.js";
-import { transformToReplay } from "./transform.js";
 import { generateOutput } from "./generator.js";
+import { getAllProviders, getProvider } from "./providers/index.js";
+import { checkGhStatus, loadSavedGistInfo, publishGist } from "./publishers/gist.js";
 import { publishLocal } from "./publishers/local.js";
-import { publishGist, checkGhStatus, loadSavedGistInfo } from "./publishers/gist.js";
-import { startServer, startDashboard } from "./server.js";
 import { scanForSecrets } from "./scan.js";
-import type { SessionInfo, ReplaySession } from "./types.js";
+import { startDashboard, startServer } from "./server.js";
+import { transformToReplay } from "./transform.js";
+import type { SessionInfo } from "./types.js";
 import { CLI_VERSION } from "./version.js";
 
 const DEV_MENU_ENABLED = process.env.VIBE_REPLAY_DEV_MENU === "1";
@@ -20,7 +20,10 @@ program
   .version(CLI_VERSION)
   .option("-s, --session <path>", "Path to a specific JSONL session file")
   .option("-p, --provider <name>", "Provider name (default: claude-code)", "claude-code")
-  .option("-t, --title <name>", "Custom title for the replay (shown on landing page & shared links)")
+  .option(
+    "-t, --title <name>",
+    "Custom title for the replay (shown on landing page & shared links)",
+  )
   .option("-d, --dashboard", "Open Dashboard directly (skip session picker)")
   .action(async (opts) => {
     console.log(chalk.bold.cyan("\n  vibe-replay") + chalk.dim(` v${CLI_VERSION}\n`));
@@ -30,7 +33,10 @@ program
       const { join: pathJoin } = await import("node:path");
       const { homedir } = await import("node:os");
       const replayBaseDir = pathJoin(homedir(), ".vibe-replay");
-      await startDashboard(replayBaseDir, DEV_MENU_ENABLED ? { externalViewerUrl: "http://localhost:5173" } : undefined);
+      await startDashboard(
+        replayBaseDir,
+        DEV_MENU_ENABLED ? { externalViewerUrl: "http://localhost:5173" } : undefined,
+      );
       return;
     }
 
@@ -88,22 +94,28 @@ program
 
       let chosen: string;
       try {
-        chosen = await select<string>({
-          message: "Pick a session to replay:",
-          choices,
-          pageSize: 20,
-          theme: {
-            style: {
-              keysHelpTip: (keys: [string, string][]) =>
-                [...keys, ["d", "dashboard"]]
-                  .map(([k, v]) => `${chalk.bold(k)} ${chalk.dim(v)}`)
-                  .join(chalk.dim(" \u00b7 ")),
+        chosen = await select<string>(
+          {
+            message: "Pick a session to replay:",
+            choices,
+            pageSize: 20,
+            theme: {
+              style: {
+                keysHelpTip: (keys: [string, string][]) =>
+                  [...keys, ["d", "dashboard"]]
+                    .map(([k, v]) => `${chalk.bold(k)} ${chalk.dim(v)}`)
+                    .join(chalk.dim(" \u00b7 ")),
+              },
             },
           },
-        }, { signal: ac.signal });
+          { signal: ac.signal },
+        );
       } catch {
         if (dashboardRequested) {
-          await startDashboard(replayBaseDir, DEV_MENU_ENABLED ? { externalViewerUrl: "http://localhost:5173" } : undefined);
+          await startDashboard(
+            replayBaseDir,
+            DEV_MENU_ENABLED ? { externalViewerUrl: "http://localhost:5173" } : undefined,
+          );
           return;
         }
         process.exit(0);
@@ -111,9 +123,7 @@ program
 
       const info = allSessions.find((s) => s.filePath === chosen);
       sessionInfo = info;
-      sessionPaths = info
-        ? [...info.filePaths, ...(info.toolPaths || [])]
-        : [chosen];
+      sessionPaths = info ? [...info.filePaths, ...(info.toolPaths || [])] : [chosen];
       providerName = info?.provider || opts.provider;
     }
 
@@ -130,9 +140,7 @@ program
 
     const rawProject = sessionInfo?.project || parsed.cwd;
     const home = (await import("node:os")).homedir();
-    const project = rawProject.startsWith(home)
-      ? "~" + rawProject.slice(home.length)
-      : rawProject;
+    const project = rawProject.startsWith(home) ? `~${rawProject.slice(home.length)}` : rawProject;
     const replay = transformToReplay(parsed, providerName, project, {
       generator: {
         name: "vibe-replay",
@@ -144,9 +152,7 @@ program
     const thinkingStr = replay.meta.stats.thinkingBlocks
       ? `, ${replay.meta.stats.thinkingBlocks} thinking`
       : "";
-    const sourceStr = replay.meta.dataSource
-      ? chalk.dim(` [${replay.meta.dataSource}]`)
-      : "";
+    const sourceStr = replay.meta.dataSource ? chalk.dim(` [${replay.meta.dataSource}]`) : "";
     spinner.succeed(
       `${replay.scenes.length} scenes (${replay.meta.stats.userPrompts} prompts, ${replay.meta.stats.toolCalls} tool calls${thinkingStr})${sourceStr}`,
     );
@@ -216,8 +222,14 @@ program
     // Publish target
     console.log();
     const choices: { name: string; value: "local" | "editor" | "gist" | "exit" }[] = [
-      { name: `${chalk.magenta("✎")} Open in Editor ${chalk.dim("(annotate, publish, export)")}`, value: "editor" as const },
-      { name: `${chalk.green("●")} Quick preview ${chalk.dim("(open HTML in browser, no editing)")}`, value: "local" as const },
+      {
+        name: `${chalk.magenta("✎")} Open in Editor ${chalk.dim("(annotate, publish, export)")}`,
+        value: "editor" as const,
+      },
+      {
+        name: `${chalk.green("●")} Quick preview ${chalk.dim("(open HTML in browser, no editing)")}`,
+        value: "local" as const,
+      },
       { name: gistLabel, value: "gist" as const },
       { name: `${chalk.dim("✕")} Exit`, value: "exit" as const },
     ];
@@ -259,7 +271,7 @@ program
           const title = replay.meta.title || slug;
           const savedGist = await loadSavedGistInfo(outputDir);
           let shouldPublish = true;
-          let overwriteGist = undefined;
+          let overwriteGist: string | undefined;
           if (savedGist) {
             const publishMode = await select<"overwrite" | "create" | "cancel">({
               message: `Previous gist found (${savedGist.gistId}). How to publish this replay?`,
@@ -311,7 +323,7 @@ function formatSessionChoices(sessions: SessionInfo[]) {
   for (const s of merged) {
     const key = s.project;
     if (!byProject.has(key)) byProject.set(key, []);
-    byProject.get(key)!.push(s);
+    byProject.get(key)?.push(s);
   }
 
   const choices: any[] = [];
@@ -337,15 +349,14 @@ function formatSessionChoices(sessions: SessionInfo[]) {
       const prompt = s.firstPrompt.replace(/\n/g, " ").slice(0, 50);
 
       // Claude: orange-brown (#D97706), Cursor: blue (#0096FF)
-      const providerBadge = s.provider === "claude-code"
-        ? chalk.hex("#D97706")("claude")
-        : s.provider === "cursor"
-        ? chalk.hex("#0096FF")("cursor")
-        : chalk.yellow(s.provider);
+      const providerBadge =
+        s.provider === "claude-code"
+          ? chalk.hex("#D97706")("claude")
+          : s.provider === "cursor"
+            ? chalk.hex("#0096FF")("cursor")
+            : chalk.yellow(s.provider);
 
-      const titleStr = s.title
-        ? chalk.white(` "${s.title}"`)
-        : "";
+      const titleStr = s.title ? chalk.white(` "${s.title}"`) : "";
 
       const fileCount = s.filePaths.length > 1 ? chalk.dim(` [${s.filePaths.length} parts]`) : "";
       const sqliteBadge = s.hasSqlite ? chalk.green(" db") : "";
@@ -357,7 +368,9 @@ function formatSessionChoices(sessions: SessionInfo[]) {
         fileCount,
         chalk.dim("—"),
         chalk.dim(`"${prompt}..."`),
-        chalk.dim(`(${s.lineCount}L, ${sizeKB >= 1024 ? (sizeKB / 1024).toFixed(1) + "MB" : sizeKB + "KB"})`),
+        chalk.dim(
+          `(${s.lineCount}L, ${sizeKB >= 1024 ? `${(sizeKB / 1024).toFixed(1)}MB` : `${sizeKB}KB`})`,
+        ),
       ].join(" ");
 
       choices.push({ name: line, value: s.filePath });
@@ -378,7 +391,7 @@ function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
   for (const s of sessions) {
     const key = `${s.project}::${s.slug}`;
     if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(s);
+    groups.get(key)?.push(s);
   }
 
   const result: SessionInfo[] = [];

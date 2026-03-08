@@ -1,17 +1,21 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { scanForSecrets } from "../src/scan.js";
 
 describe("scanForSecrets", () => {
   it("returns empty for clean text", () => {
-    const findings = scanForSecrets(JSON.stringify({
-      content: "Hello world, no secrets here",
-      path: "/Users/test/project/src/index.ts",
-    }));
+    const findings = scanForSecrets(
+      JSON.stringify({
+        content: "Hello world, no secrets here",
+        path: "/Users/test/project/src/index.ts",
+      }),
+    );
     expect(findings).toEqual([]);
   });
 
   it("detects OpenAI API key", () => {
-    const findings = scanForSecrets(`{"key": "sk-proj-abc123def456ghi789jkl012mno345pqr678stu901vwx234"}`);
+    const findings = scanForSecrets(
+      `{"key": "sk-proj-abc123def456ghi789jkl012mno345pqr678stu901vwx234"}`,
+    );
     expect(findings.length).toBeGreaterThan(0);
     expect(findings[0].rule).toMatch(/OpenAI|API Key/i);
   });
@@ -29,7 +33,9 @@ describe("scanForSecrets", () => {
   });
 
   it("detects Slack token", () => {
-    const slackToken = ["xoxb", "123456789012", "1234567890123", "AbCdEfGhIjKlMnOpQrStUvWx"].join("-");
+    const slackToken = ["xoxb", "123456789012", "1234567890123", "AbCdEfGhIjKlMnOpQrStUvWx"].join(
+      "-",
+    );
     const findings = scanForSecrets(`{"token": "${slackToken}"}`);
     expect(findings.length).toBeGreaterThan(0);
     expect(findings[0].rule).toMatch(/Slack/i);
@@ -43,19 +49,25 @@ describe("scanForSecrets", () => {
   });
 
   it("detects JWT", () => {
-    const findings = scanForSecrets(`{"token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"}`);
+    const findings = scanForSecrets(
+      `{"token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"}`,
+    );
     expect(findings.length).toBeGreaterThan(0);
     expect(findings[0].rule).toMatch(/JSON Web Token/i);
   });
 
   it("detects SendGrid key", () => {
-    const findings = scanForSecrets(`{"key": "SG.1234567890abcdefghijklmn.1234567890abcdefghijklmnopqrstuvwxyz1234"}`);
+    const findings = scanForSecrets(
+      `{"key": "SG.1234567890abcdefghijklmn.1234567890abcdefghijklmnopqrstuvwxyz1234"}`,
+    );
     expect(findings.length).toBeGreaterThan(0);
     expect(findings[0].rule).toMatch(/SendGrid/i);
   });
 
   it("detects database URI with credentials", () => {
-    const findings = scanForSecrets(`{"uri": "postgres://admin:supersecret@db.example.com:5432/mydb"}`);
+    const findings = scanForSecrets(
+      `{"uri": "postgres://admin:supersecret@db.example.com:5432/mydb"}`,
+    );
     expect(findings.length).toBeGreaterThan(0);
     expect(findings[0].rule).toMatch(/Database/i);
   });

@@ -1,17 +1,17 @@
-import { useRef, useEffect, useState, useCallback } from "react";
-import type { ReplaySession } from "../types";
-import type { ViewPrefs } from "../hooks/useViewPrefs";
-import { usePlayback } from "../hooks/usePlayback";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAnnotations } from "../hooks/useAnnotations";
+import { usePlayback } from "../hooks/usePlayback";
 import type { ViewerMode } from "../hooks/useSessionLoader";
-import Timeline from "./Timeline";
+import type { ViewPrefs } from "../hooks/useViewPrefs";
+import type { ReplaySession } from "../types";
+import AnnotationPanel from "./AnnotationPanel";
 import Controls from "./Controls";
 import ConversationView from "./ConversationView";
-import Minimap from "./Minimap";
-import StatsPanel from "./StatsPanel";
-import SearchOverlay from "./SearchOverlay";
 import LandingHero from "./LandingHero";
-import AnnotationPanel from "./AnnotationPanel";
+import Minimap from "./Minimap";
+import SearchOverlay from "./SearchOverlay";
+import StatsPanel from "./StatsPanel";
+import Timeline from "./Timeline";
 
 interface Props {
   session: ReplaySession;
@@ -33,19 +33,21 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
   const isReadOnly = viewerMode === "readonly";
   const [landed, setLanded] = useState(false);
   const [navFocusIndex, setNavFocusIndex] = useState<number | undefined>(undefined);
-  const [navJumpSeq, setNavJumpSeq] = useState(0);
+  const [_navJumpSeq, setNavJumpSeq] = useState(0);
   const [annotationPanelOpen, setAnnotationPanelOpen] = useState(() => {
     // Check embedded annotations
     if ((session.annotations?.length ?? 0) > 0) return true;
     // Check localStorage draft (useAnnotations loads from here too)
     try {
-      const key = "vibe-replay-annotations-" + session.meta.sessionId;
+      const key = `vibe-replay-annotations-${session.meta.sessionId}`;
       const draft = localStorage.getItem(key);
       if (draft) {
         const parsed = JSON.parse(draft);
         return Array.isArray(parsed) && parsed.length > 0;
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     return false;
   });
   const [commentTargetScene, setCommentTargetScene] = useState<number | null>(null);
@@ -85,21 +87,23 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
     return () => window.removeEventListener("keydown", handleKey);
   }, []);
 
-  const currentTurn =
-    userPromptIndices.filter((i) => i <= currentIndex).length || 0;
+  const currentTurn = userPromptIndices.filter((i) => i <= currentIndex).length || 0;
   const userPromptCount = userPromptIndices.length;
 
   // Start playback when user dismisses landing page
   // autoPlay=true (button click) → play immediately
   // autoPlay=false (scroll/swipe) → show first scene paused, let user control
-  const handleStart = useCallback((autoPlay = true) => {
-    setLanded(true);
-    if (autoPlay) {
-      setTimeout(play, 300);
-    } else {
-      setTimeout(() => seekTo(0), 100);
-    }
-  }, [play, seekTo]);
+  const handleStart = useCallback(
+    (autoPlay = true) => {
+      setLanded(true);
+      if (autoPlay) {
+        setTimeout(play, 300);
+      } else {
+        setTimeout(() => seekTo(0), 100);
+      }
+    },
+    [play, seekTo],
+  );
 
   const seekFromNavigation = useCallback(
     (index: number) => {
@@ -151,7 +155,9 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
         el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
       }
       // Clear flag after smooth scroll settles
-      setTimeout(() => { programScrollRef.current = false; }, 400);
+      setTimeout(() => {
+        programScrollRef.current = false;
+      }, 400);
     });
   }, [currentIndex, state]);
 
@@ -194,7 +200,9 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
       if (nearBottom) {
         throttle = true;
         seekTo(currentIndex + 1);
-        setTimeout(() => { throttle = false; }, 150);
+        setTimeout(() => {
+          throttle = false;
+        }, 150);
       }
     };
 
@@ -235,9 +243,7 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
     let attempts = 0;
     const tryLocateAndFocus = () => {
       if (cancelled) return;
-      const sceneEl = el.querySelector(
-        `[data-scene-index="${targetIndex}"]`,
-      ) as HTMLElement | null;
+      const sceneEl = el.querySelector(`[data-scene-index="${targetIndex}"]`) as HTMLElement | null;
       if (sceneEl) {
         programScrollRef.current = true;
         // Manual center: place top of target at ~35% from viewport top
@@ -248,7 +254,9 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
         const target = offset - containerRect.height * 0.35;
         el.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
         flashJumpTarget(sceneEl);
-        setTimeout(() => { programScrollRef.current = false; }, 450);
+        setTimeout(() => {
+          programScrollRef.current = false;
+        }, 450);
         pendingSeekRef.current = null;
         return;
       }
@@ -265,7 +273,7 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
     return () => {
       cancelled = true;
     };
-  }, [navJumpSeq, currentIndex, visibleCount]);
+  }, [currentIndex]);
 
   useEffect(() => {
     return () => {
@@ -321,7 +329,10 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
       <div className="flex flex-col flex-1 min-h-0 min-w-0">
         <div className="flex flex-1 min-h-0">
           <div className="flex flex-col flex-1 min-h-0 min-w-0 relative">
-            <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 pb-8 overscroll-contain">
+            <div
+              ref={scrollRef}
+              className="flex-1 overflow-y-auto px-4 py-4 pb-8 overscroll-contain"
+            >
               <ConversationView
                 scenes={session.scenes}
                 visibleCount={visibleCount}
@@ -330,22 +341,28 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
                 focusIndex={navFocusIndex}
                 annotatedScenes={annotationActions.annotatedScenes}
                 annotationCounts={annotationActions.annotationCounts}
-                onComment={isReadOnly ? undefined : (sceneIndex) => {
-                  setAnnotationPanelOpen(true);
-                  setCommentTargetScene(sceneIndex);
-                }}
+                onComment={
+                  isReadOnly
+                    ? undefined
+                    : (sceneIndex) => {
+                        setAnnotationPanelOpen(true);
+                        setCommentTargetScene(sceneIndex);
+                      }
+                }
               />
             </div>
 
             {/* Scroll-to-reveal hint */}
-            {state === "paused" && currentIndex < session.scenes.length - 1 && !scrollHintDismissed && (
-              <div className="absolute bottom-[72px] left-1/2 -translate-x-1/2 z-10 pointer-events-none animate-bounce">
-                <div className="px-4 py-1.5 rounded-full bg-terminal-surface/90 border border-terminal-border/60 backdrop-blur-sm text-xs font-mono text-terminal-dim flex items-center gap-2 shadow-lg">
-                  <span className="text-terminal-green">{"\u2193"}</span>
-                  scroll for more
+            {state === "paused" &&
+              currentIndex < session.scenes.length - 1 &&
+              !scrollHintDismissed && (
+                <div className="absolute bottom-[72px] left-1/2 -translate-x-1/2 z-10 pointer-events-none animate-bounce">
+                  <div className="px-4 py-1.5 rounded-full bg-terminal-surface/90 border border-terminal-border/60 backdrop-blur-sm text-xs font-mono text-terminal-dim flex items-center gap-2 shadow-lg">
+                    <span className="text-terminal-green">{"\u2193"}</span>
+                    scroll for more
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
             {/* Search overlay */}
             <SearchOverlay
@@ -460,7 +477,10 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
                   : "text-terminal-dim"
               }`}
             >
-              Comments{annotationActions.annotations.length > 0 ? ` (${annotationActions.annotations.length})` : ""}
+              Comments
+              {annotationActions.annotations.length > 0
+                ? ` (${annotationActions.annotations.length})`
+                : ""}
             </button>
           </div>
           {/* Content */}

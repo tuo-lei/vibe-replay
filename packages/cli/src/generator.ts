@@ -1,14 +1,11 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ReplaySession } from "./types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-export async function generateOutput(
-  session: ReplaySession,
-  outputDir: string,
-): Promise<string> {
+export async function generateOutput(session: ReplaySession, outputDir: string): Promise<string> {
   await mkdir(outputDir, { recursive: true });
 
   // Load the pre-built viewer HTML
@@ -23,15 +20,11 @@ export async function generateOutput(
     try {
       viewerHtml = await readFile(p, "utf-8");
       break;
-    } catch {
-      continue;
-    }
+    } catch {}
   }
 
   if (!viewerHtml) {
-    throw new Error(
-      "Could not find viewer.html. Run `pnpm build` first.",
-    );
+    throw new Error("Could not find viewer.html. Run `pnpm build` first.");
   }
 
   // Inject session data — escape </ to prevent browser from closing the script tag
@@ -40,7 +33,7 @@ export async function generateOutput(
   // Use lastIndexOf to find the ACTUAL </head> HTML tag, not a "</head>" string
   // that may appear inside minified JS code within the viewer bundle.
   const headIdx = viewerHtml.lastIndexOf("</head>");
-  const outputHtml = viewerHtml.slice(0, headIdx) + dataScript + "\n" + viewerHtml.slice(headIdx);
+  const outputHtml = `${viewerHtml.slice(0, headIdx) + dataScript}\n${viewerHtml.slice(headIdx)}`;
 
   // Update title
   const title = session.meta.title || session.meta.slug;

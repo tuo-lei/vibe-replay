@@ -1,9 +1,10 @@
-import { useState, useRef, useEffect, useMemo, memo, useCallback } from "react";
 import { marked } from "marked";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Annotation, Scene } from "../types";
 
 // Configure marked for short-form annotation text
 marked.setOptions({ breaks: true, gfm: true });
+
 import type { AnnotationActions } from "../hooks/useAnnotations";
 
 interface Props {
@@ -35,18 +36,30 @@ function scenePreview(scene: Scene): { label: string; text: string } {
     case "tool-call":
       return {
         label: scene.toolName,
-        text: scene.diff?.filePath || scene.bashOutput?.command || Object.values(scene.input).filter(v => typeof v === "string").join(", ").slice(0, 80) || "",
+        text:
+          scene.diff?.filePath ||
+          scene.bashOutput?.command ||
+          Object.values(scene.input)
+            .filter((v) => typeof v === "string")
+            .join(", ")
+            .slice(0, 80) ||
+          "",
       };
   }
 }
 
 function sceneLabelColor(scene: Scene): string {
   switch (scene.type) {
-    case "user-prompt": return "text-terminal-green";
-    case "compaction-summary": return "text-terminal-dim";
-    case "thinking": return "text-terminal-purple";
-    case "text-response": return "text-terminal-blue";
-    case "tool-call": return "text-terminal-orange";
+    case "user-prompt":
+      return "text-terminal-green";
+    case "compaction-summary":
+      return "text-terminal-dim";
+    case "thinking":
+      return "text-terminal-purple";
+    case "text-response":
+      return "text-terminal-blue";
+    case "tool-call":
+      return "text-terminal-orange";
   }
 }
 
@@ -54,7 +67,7 @@ export default function AnnotationPanel({
   actions,
   scenes,
   currentIndex,
-  totalScenes,
+  totalScenes: _totalScenes,
   onSeek,
   addingForScene,
   onClearAddingTarget,
@@ -83,7 +96,9 @@ export default function AnnotationPanel({
   } = actions;
   const [internalAdding, setInternalAdding] = useState<number | null>(null);
   const [newBody, setNewBody] = useState("");
-  const [statusMsg, setStatusMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [statusMsg, setStatusMsg] = useState<{ type: "success" | "error"; text: string } | null>(
+    null,
+  );
   const [ghAvailable, setGhAvailable] = useState<boolean | null>(null);
   const [showAiCoachConfirm, setShowAiCoachConfirm] = useState(false);
 
@@ -179,12 +194,10 @@ export default function AnnotationPanel({
   }, [editingId, editBody, update]);
 
   // Preview for the scene being commented on
-  const addingPreview = activeAdding !== null && scenes[activeAdding]
-    ? scenePreview(scenes[activeAdding])
-    : null;
-  const addingLabelColor = activeAdding !== null && scenes[activeAdding]
-    ? sceneLabelColor(scenes[activeAdding])
-    : "";
+  const addingPreview =
+    activeAdding !== null && scenes[activeAdding] ? scenePreview(scenes[activeAdding]) : null;
+  const addingLabelColor =
+    activeAdding !== null && scenes[activeAdding] ? sceneLabelColor(scenes[activeAdding]) : "";
 
   return (
     <div className="flex flex-col h-full">
@@ -199,9 +212,7 @@ export default function AnnotationPanel({
               Read-only
             </span>
           )}
-          <span className="text-[10px] font-mono text-terminal-dim">
-            {annotations.length}
-          </span>
+          <span className="text-[10px] font-mono text-terminal-dim">{annotations.length}</span>
         </div>
       </div>
 
@@ -209,9 +220,7 @@ export default function AnnotationPanel({
       <div ref={panelRef} className="flex-1 overflow-y-auto">
         {sorted.length === 0 && activeAdding === null && (
           <div className="px-3 py-8 text-center">
-            <div className="text-terminal-dim text-xs font-mono mb-2">
-              No comments yet
-            </div>
+            <div className="text-terminal-dim text-xs font-mono mb-2">No comments yet</div>
             {!readOnly && (
               <div className="text-terminal-dim/60 text-[10px] font-mono">
                 Hover over any message and click the comment icon to add one
@@ -247,11 +256,16 @@ export default function AnnotationPanel({
 
         {/* New annotation form */}
         {!readOnly && activeAdding !== null && (
-          <div ref={addFormRef} className="px-3 py-2.5 border-b border-terminal-border/30 bg-terminal-blue/[0.03]">
+          <div
+            ref={addFormRef}
+            className="px-3 py-2.5 border-b border-terminal-border/30 bg-terminal-blue/[0.03]"
+          >
             {/* Scene preview */}
             {addingPreview && (
               <div className="flex items-center gap-1.5 mb-2">
-                <span className={`text-[10px] font-mono font-semibold uppercase ${addingLabelColor}`}>
+                <span
+                  className={`text-[10px] font-mono font-semibold uppercase ${addingLabelColor}`}
+                >
                   {addingPreview.label}
                 </span>
                 <span className="text-[10px] font-mono text-terminal-dim truncate">
@@ -307,86 +321,103 @@ export default function AnnotationPanel({
             </div>
           )}
           {statusMsg && (
-            <div className={`text-[9px] font-mono text-center mb-1 ${statusMsg.type === "success" ? "text-terminal-green" : "text-terminal-red"}`}>
+            <div
+              className={`text-[9px] font-mono text-center mb-1 ${statusMsg.type === "success" ? "text-terminal-green" : "text-terminal-red"}`}
+            >
               {statusMsg.type === "success" && statusMsg.text.startsWith("http") ? (
-                <a href={statusMsg.text} target="_blank" rel="noopener noreferrer" className="underline hover:text-terminal-text transition-colors">
+                <a
+                  href={statusMsg.text}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline hover:text-terminal-text transition-colors"
+                >
                   {statusMsg.text}
                 </a>
-              ) : statusMsg.text}
+              ) : (
+                statusMsg.text
+              )}
             </div>
           )}
 
           {/* AI Coach (editor mode only) */}
-          {runAiCoach && !showAiCoachConfirm && !aiCoachRunning && (() => {
-            const hasExisting = annotations.some((a) => a.author === "vibe-feedback");
-            return (
-              <button
-                onClick={() => setShowAiCoachConfirm(true)}
-                className="w-full px-2 py-1.5 text-[10px] font-mono bg-terminal-purple/15 text-terminal-purple rounded hover:bg-terminal-purple/25 transition-colors text-center border border-terminal-purple/30"
-              >
-                {hasExisting ? "Re-run AI Coach (beta)" : "AI Coach (beta)"}
-              </button>
-            );
-          })()}
-          {showAiCoachConfirm && !aiCoachRunning && (() => {
-            const hasExisting = annotations.some((a) => a.author === "vibe-feedback");
-            return (
-              <div className="space-y-1.5 p-2 rounded border border-terminal-purple/30 bg-terminal-purple/5">
-                <div className="text-[10px] font-mono text-terminal-purple font-semibold">
-                  AI Coach (beta)
-                </div>
-                <div className="text-[9px] font-mono text-terminal-dim leading-relaxed">
-                  Uses <span className="text-terminal-text">{aiCoachTool?.name}</span> CLI to analyze your prompting technique.
-                  This will make API calls using your configured credentials and may use tokens/cost money.
-                  Typically takes 1-3 minutes.
-                  {hasExisting && (
-                    <span className="block mt-1 text-terminal-orange">
-                      This will replace existing AI Coach comments.
-                    </span>
+          {runAiCoach &&
+            !showAiCoachConfirm &&
+            !aiCoachRunning &&
+            (() => {
+              const hasExisting = annotations.some((a) => a.author === "vibe-feedback");
+              return (
+                <button
+                  onClick={() => setShowAiCoachConfirm(true)}
+                  className="w-full px-2 py-1.5 text-[10px] font-mono bg-terminal-purple/15 text-terminal-purple rounded hover:bg-terminal-purple/25 transition-colors text-center border border-terminal-purple/30"
+                >
+                  {hasExisting ? "Re-run AI Coach (beta)" : "AI Coach (beta)"}
+                </button>
+              );
+            })()}
+          {showAiCoachConfirm &&
+            !aiCoachRunning &&
+            (() => {
+              const hasExisting = annotations.some((a) => a.author === "vibe-feedback");
+              return (
+                <div className="space-y-1.5 p-2 rounded border border-terminal-purple/30 bg-terminal-purple/5">
+                  <div className="text-[10px] font-mono text-terminal-purple font-semibold">
+                    AI Coach (beta)
+                  </div>
+                  <div className="text-[9px] font-mono text-terminal-dim leading-relaxed">
+                    Uses <span className="text-terminal-text">{aiCoachTool?.name}</span> CLI to
+                    analyze your prompting technique. This will make API calls using your configured
+                    credentials and may use tokens/cost money. Typically takes 1-3 minutes.
+                    {hasExisting && (
+                      <span className="block mt-1 text-terminal-orange">
+                        This will replace existing AI Coach comments.
+                      </span>
+                    )}
+                  </div>
+                  {aiCoachTools.length > 1 && setAiCoachToolName && (
+                    <label className="block text-[9px] font-mono text-terminal-dim">
+                      Tool:
+                      <select
+                        value={aiCoachToolName || ""}
+                        onChange={(e) => setAiCoachToolName(e.target.value)}
+                        className="ml-1 bg-terminal-surface border border-terminal-border/50 rounded px-1.5 py-0.5 text-[9px] font-mono text-terminal-text"
+                      >
+                        {aiCoachTools.map((tool) => (
+                          <option key={tool.name} value={tool.name}>
+                            {tool.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   )}
-                </div>
-                {aiCoachTools.length > 1 && setAiCoachToolName && (
-                  <label className="block text-[9px] font-mono text-terminal-dim">
-                    Tool:
-                    <select
-                      value={aiCoachToolName || ""}
-                      onChange={(e) => setAiCoachToolName(e.target.value)}
-                      className="ml-1 bg-terminal-surface border border-terminal-border/50 rounded px-1.5 py-0.5 text-[9px] font-mono text-terminal-text"
+                  <div className="flex gap-1.5 justify-end">
+                    <button
+                      onClick={() => setShowAiCoachConfirm(false)}
+                      className="px-2 py-1 text-[10px] font-mono text-terminal-dim hover:text-terminal-text transition-colors"
                     >
-                      {aiCoachTools.map((tool) => (
-                        <option key={tool.name} value={tool.name}>
-                          {tool.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-                <div className="flex gap-1.5 justify-end">
-                  <button
-                    onClick={() => setShowAiCoachConfirm(false)}
-                    className="px-2 py-1 text-[10px] font-mono text-terminal-dim hover:text-terminal-text transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={async () => {
-                      setShowAiCoachConfirm(false);
-                      try {
-                        const result = await runAiCoach!();
-                        setStatusMsg({ type: "success", text: `Score: ${result.score}/10 — ${result.itemCount} comment(s) added` });
-                      } catch (e: any) {
-                        if (e.name === "AbortError") return;
-                        setStatusMsg({ type: "error", text: e.message });
-                      }
-                    }}
-                    className="px-2 py-1 text-[10px] font-mono bg-terminal-purple/20 text-terminal-purple rounded hover:bg-terminal-purple/30 transition-colors"
-                  >
-                    Run
-                  </button>
+                      Cancel
+                    </button>
+                    <button
+                      onClick={async () => {
+                        setShowAiCoachConfirm(false);
+                        try {
+                          const result = await runAiCoach?.();
+                          setStatusMsg({
+                            type: "success",
+                            text: `Score: ${result.score}/10 — ${result.itemCount} comment(s) added`,
+                          });
+                        } catch (e: any) {
+                          if (e.name === "AbortError") return;
+                          setStatusMsg({ type: "error", text: e.message });
+                        }
+                      }}
+                      className="px-2 py-1 text-[10px] font-mono bg-terminal-purple/20 text-terminal-purple rounded hover:bg-terminal-purple/30 transition-colors"
+                    >
+                      Run
+                    </button>
+                  </div>
                 </div>
-              </div>
-            );
-          })()}
+              );
+            })()}
           {aiCoachRunning && (
             <div className="flex items-center justify-center gap-2 py-2">
               <span className="text-[10px] font-mono text-terminal-purple animate-pulse">
@@ -441,8 +472,15 @@ export default function AnnotationPanel({
           {publishGist && ghAvailable === false && (
             <div className="text-[9px] font-mono text-terminal-orange/70 text-center px-2 py-1.5 border border-terminal-orange/20 rounded bg-terminal-orange/5">
               Gist publishing requires{" "}
-              <a href="https://cli.github.com/" target="_blank" rel="noopener noreferrer" className="underline">gh CLI</a>
-              {" "}— install then run <span className="text-terminal-text/70">gh auth login</span>
+              <a
+                href="https://cli.github.com/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline"
+              >
+                gh CLI
+              </a>{" "}
+              — install then run <span className="text-terminal-text/70">gh auth login</span>
             </div>
           )}
 
@@ -556,7 +594,9 @@ const AnnotationCard = memo(function AnnotationCard({
       >
         {preview && (
           <>
-            <span className={`text-[10px] font-mono font-semibold uppercase shrink-0 ${labelColor}`}>
+            <span
+              className={`text-[10px] font-mono font-semibold uppercase shrink-0 ${labelColor}`}
+            >
               {preview.label}
             </span>
             <span className="text-[10px] font-mono text-terminal-dim truncate group-hover/ref:text-terminal-text transition-colors">

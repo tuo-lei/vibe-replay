@@ -1,6 +1,6 @@
-import { useMemo, useState, useRef, useEffect } from "react";
-import Player from "./components/Player";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Dashboard from "./components/Dashboard";
+import Player from "./components/Player";
 import { useSessionLoader } from "./hooks/useSessionLoader";
 import { useTheme } from "./hooks/useTheme";
 import { useViewPrefs } from "./hooks/useViewPrefs";
@@ -57,9 +57,7 @@ export default function App() {
   if (loadState.status === "loading") {
     return (
       <div className="h-screen bg-terminal-bg flex items-center justify-center">
-        <div className="text-terminal-dim font-mono text-sm animate-pulse">
-          Loading session...
-        </div>
+        <div className="text-terminal-dim font-mono text-sm animate-pulse">Loading session...</div>
       </div>
     );
   }
@@ -68,9 +66,7 @@ export default function App() {
     return (
       <div className="h-screen bg-terminal-bg flex items-center justify-center">
         <div className="text-center space-y-2">
-          <div className="text-terminal-red font-mono text-sm">
-            {loadState.message}
-          </div>
+          <div className="text-terminal-red font-mono text-sm">{loadState.message}</div>
           <div className="text-terminal-dim font-mono text-xs">
             Use ?gist=&lt;id&gt; or ?url=&lt;replay-json-url&gt; or embed via CLI
           </div>
@@ -140,7 +136,16 @@ export default function App() {
                 onClick={() => navigateTo({ view: "dashboard", session: null })}
                 className="flex items-center gap-0.5 text-sm font-mono text-terminal-text/80 hover:text-terminal-text transition-colors"
               >
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
                   <path d="M10 3L5 8l5 5" />
                 </svg>
                 Dashboard
@@ -149,27 +154,42 @@ export default function App() {
           )}
           {meta.title && (
             <>
-              <span className="hidden md:inline text-terminal-border/60 text-sm select-none">|</span>
-              <span className="hidden md:inline text-terminal-text/80 text-xs font-mono truncate max-w-[300px]" title={meta.project}>
+              <span className="hidden md:inline text-terminal-border/60 text-sm select-none">
+                |
+              </span>
+              <span
+                className="hidden md:inline text-terminal-text/80 text-xs font-mono truncate max-w-[300px]"
+                title={meta.project}
+              >
                 {meta.title}
               </span>
             </>
           )}
           <div className="hidden sm:flex items-center gap-1.5 text-xs font-mono text-terminal-dim">
             {gistOwner && (
-              <><span className="text-terminal-border">&middot;</span>
-              <a
-                href={`https://github.com/${gistOwner}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-terminal-text/60 hover:text-terminal-text transition-colors"
-              >@{gistOwner}</a></>
+              <>
+                <span className="text-terminal-border">&middot;</span>
+                <a
+                  href={`https://github.com/${gistOwner}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-terminal-text/60 hover:text-terminal-text transition-colors"
+                >
+                  @{gistOwner}
+                </a>
+              </>
             )}
             {meta.model && (
-              <><span className="text-terminal-border">&middot;</span><span className="text-terminal-text/60">{meta.model}</span></>
+              <>
+                <span className="text-terminal-border">&middot;</span>
+                <span className="text-terminal-text/60">{meta.model}</span>
+              </>
             )}
             {duration && (
-              <><span className="text-terminal-border">&middot;</span><span>{duration}</span></>
+              <>
+                <span className="text-terminal-border">&middot;</span>
+                <span>{duration}</span>
+              </>
             )}
           </div>
         </div>
@@ -182,9 +202,19 @@ export default function App() {
               className="h-7 px-2.5 flex items-center gap-1.5 rounded-md border border-terminal-border/60 bg-terminal-surface text-terminal-dim hover:text-terminal-text text-xs font-mono transition-colors"
               title="All replays"
             >
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                <rect x="1" y="1" width="6" height="6" rx="1" /><rect x="9" y="1" width="6" height="6" rx="1" />
-                <rect x="1" y="9" width="6" height="6" rx="1" /><rect x="9" y="9" width="6" height="6" rx="1" />
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              >
+                <rect x="1" y="1" width="6" height="6" rx="1" />
+                <rect x="9" y="1" width="6" height="6" rx="1" />
+                <rect x="1" y="9" width="6" height="6" rx="1" />
+                <rect x="9" y="9" width="6" height="6" rx="1" />
               </svg>
               <span className="hidden sm:inline">Dashboard</span>
             </button>
@@ -193,7 +223,9 @@ export default function App() {
           {/* View mode: segmented control */}
           <div className="flex items-center h-7 rounded-md overflow-hidden border border-terminal-border/60">
             <button
-              onClick={() => { if (prefs.promptsOnly) togglePref("promptsOnly"); }}
+              onClick={() => {
+                if (prefs.promptsOnly) togglePref("promptsOnly");
+              }}
               className={`h-full px-2.5 text-xs font-mono transition-colors ${
                 !prefs.promptsOnly
                   ? "bg-terminal-green/15 text-terminal-green"
@@ -203,7 +235,9 @@ export default function App() {
               All
             </button>
             <button
-              onClick={() => { if (!prefs.promptsOnly) togglePref("promptsOnly"); }}
+              onClick={() => {
+                if (!prefs.promptsOnly) togglePref("promptsOnly");
+              }}
               className={`h-full px-2.5 text-xs font-mono transition-colors ${
                 prefs.promptsOnly
                   ? "bg-terminal-green/15 text-terminal-green"
@@ -227,9 +261,21 @@ export default function App() {
               }`}
               title="Settings"
             >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                <line x1="2" y1="4" x2="14" y2="4" /><line x1="2" y1="8" x2="14" y2="8" /><line x1="2" y1="12" x2="14" y2="12" />
-                <circle cx="5" cy="4" r="1.5" fill="currentColor" /><circle cx="10" cy="8" r="1.5" fill="currentColor" /><circle cx="6" cy="12" r="1.5" fill="currentColor" />
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              >
+                <line x1="2" y1="4" x2="14" y2="4" />
+                <line x1="2" y1="8" x2="14" y2="8" />
+                <line x1="2" y1="12" x2="14" y2="12" />
+                <circle cx="5" cy="4" r="1.5" fill="currentColor" />
+                <circle cx="10" cy="8" r="1.5" fill="currentColor" />
+                <circle cx="6" cy="12" r="1.5" fill="currentColor" />
               </svg>
             </button>
             {filterOpen && (
@@ -240,11 +286,15 @@ export default function App() {
                       onClick={() => togglePref("collapseAllTools")}
                       className="w-full text-left px-3 py-2 text-xs font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50 transition-colors flex items-center gap-2"
                     >
-                      <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center text-[10px] ${
-                        prefs.collapseAllTools
-                          ? "bg-terminal-orange/20 border-terminal-orange/50 text-terminal-orange"
-                          : "border-terminal-border"
-                      }`}>{prefs.collapseAllTools ? "\u2713" : ""}</span>
+                      <span
+                        className={`w-3.5 h-3.5 rounded border flex items-center justify-center text-[10px] ${
+                          prefs.collapseAllTools
+                            ? "bg-terminal-orange/20 border-terminal-orange/50 text-terminal-orange"
+                            : "border-terminal-border"
+                        }`}
+                      >
+                        {prefs.collapseAllTools ? "\u2713" : ""}
+                      </span>
                       Collapse Tools
                     </button>
                     {hasThinking && (
@@ -252,11 +302,15 @@ export default function App() {
                         onClick={() => togglePref("hideThinking")}
                         className="w-full text-left px-3 py-2 text-xs font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50 transition-colors flex items-center gap-2"
                       >
-                        <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center text-[10px] ${
-                          prefs.hideThinking
-                            ? "bg-terminal-purple/20 border-terminal-purple/50 text-terminal-purple"
-                            : "border-terminal-border"
-                        }`}>{prefs.hideThinking ? "\u2713" : ""}</span>
+                        <span
+                          className={`w-3.5 h-3.5 rounded border flex items-center justify-center text-[10px] ${
+                            prefs.hideThinking
+                              ? "bg-terminal-purple/20 border-terminal-purple/50 text-terminal-purple"
+                              : "border-terminal-border"
+                          }`}
+                        >
+                          {prefs.hideThinking ? "\u2713" : ""}
+                        </span>
                         Hide Thinking
                       </button>
                     )}
@@ -264,16 +318,20 @@ export default function App() {
                   </>
                 )}
                 <button
-                  onClick={() => { toggleTheme(); setFilterOpen(false); }}
+                  onClick={() => {
+                    toggleTheme();
+                    setFilterOpen(false);
+                  }}
                   className="w-full text-left px-3 py-2 text-xs font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50 transition-colors flex items-center gap-2"
                 >
-                  <span className="w-3.5 text-center">{theme === "dark" ? "\u263E" : "\u2600"}</span>
+                  <span className="w-3.5 text-center">
+                    {theme === "dark" ? "\u263E" : "\u2600"}
+                  </span>
                   {theme === "dark" ? "Light Mode" : "Dark Mode"}
                 </button>
               </div>
             )}
           </div>
-
         </div>
       </header>
       <Player session={session!} viewPrefs={prefs} viewerMode={viewerMode} />

@@ -16,7 +16,10 @@
     "dev:dashboard": "sh -c 'pnpm viewer:dev >/tmp/vibe-replay-viewer.log 2>&1 & VITE_PID=$!; cleanup(){ kill $VITE_PID 2>/dev/null; }; trap \"cleanup; exit 130\" INT TERM; echo \"[vibe-replay] viewer: http://localhost:5173  logs: /tmp/vibe-replay-viewer.log\"; pnpm cli:dev -- -d; cleanup'",
     "viewer:dev": "pnpm --filter @vibe-replay/viewer dev",
     "cli:dev": "VIBE_REPLAY_DEV_MENU=1 npx tsx packages/cli/src/index.ts",
-    "test": "pnpm --filter vibe-replay test"
+    "test": "pnpm --filter vibe-replay test",
+    "lint": "biome check --write packages/ website/src cloudflare/src",
+    "lint:check": "biome check packages/ website/src cloudflare/src",
+    "prepare": "lefthook install"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -24,6 +27,8 @@
     ]
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.6",
+    "lefthook": "^2.1.3",
     "vitest": "^4.0.18"
   },
   "packageManager": "pnpm@10.24.0+sha512.01ff8ae71b4419903b65c60fb2dc9d34cf8bb6e06d03bde112ef38f7a34d6904c424ba66bea5cdcf12890230bf39f9580473140ed9c946fef328b6e5238a345a"

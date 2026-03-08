@@ -1,5 +1,5 @@
-import { useState, memo, useMemo } from "react";
 import { marked } from "marked";
+import { memo, useMemo, useState } from "react";
 
 interface Props {
   content: string;
@@ -13,7 +13,7 @@ export default memo(function TextResponseBlock({ content, isActive }: Props) {
   const [expanded, setExpanded] = useState(false);
 
   const displayContent =
-    isLong && !expanded ? content.slice(0, COLLAPSE_THRESHOLD) + "..." : content;
+    isLong && !expanded ? `${content.slice(0, COLLAPSE_THRESHOLD)}...` : content;
 
   const html = useMemo(() => marked.parse(displayContent) as string, [displayContent]);
 

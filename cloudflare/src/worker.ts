@@ -1,5 +1,5 @@
-import { drizzle } from "drizzle-orm/d1";
 import { desc, eq, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { replays } from "./db/schema";
 
 interface Env {
@@ -73,8 +73,7 @@ async function importPrivateKey(pem: string): Promise<CryptoKey> {
 function wrapPkcs1InPkcs8(pkcs1: Uint8Array): Uint8Array {
   // PKCS#8 header for RSA: SEQUENCE { version, AlgorithmIdentifier { rsaEncryption, NULL }, OCTET STRING { pkcs1 } }
   const rsaOid = new Uint8Array([
-    0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01,
-    0x01, 0x05, 0x00,
+    0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00,
   ]);
   const version = new Uint8Array([0x02, 0x01, 0x00]);
 
@@ -87,10 +86,14 @@ function wrapPkcs1InPkcs8(pkcs1: Uint8Array): Uint8Array {
 
   const result = new Uint8Array(seqHeader.length + innerLen);
   let offset = 0;
-  result.set(seqHeader, offset); offset += seqHeader.length;
-  result.set(version, offset); offset += version.length;
-  result.set(rsaOid, offset); offset += rsaOid.length;
-  result.set(octetHeader, offset); offset += octetHeader.length;
+  result.set(seqHeader, offset);
+  offset += seqHeader.length;
+  result.set(version, offset);
+  offset += version.length;
+  result.set(rsaOid, offset);
+  offset += rsaOid.length;
+  result.set(octetHeader, offset);
+  offset += octetHeader.length;
   result.set(pkcs1, offset);
   return result;
 }
@@ -111,13 +114,15 @@ async function createAppJwt(appId: string, privateKeyPem: string): Promise<strin
   const now = Math.floor(Date.now() / 1000);
   const header = base64url(new TextEncoder().encode(JSON.stringify({ alg: "RS256", typ: "JWT" })));
   const payload = base64url(
-    new TextEncoder().encode(
-      JSON.stringify({ iat: now - 60, exp: now + 600, iss: appId }),
-    ),
+    new TextEncoder().encode(JSON.stringify({ iat: now - 60, exp: now + 600, iss: appId })),
   );
   const signingInput = `${header}.${payload}`;
   const key = await importPrivateKey(privateKeyPem);
-  const sig = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, new TextEncoder().encode(signingInput));
+  const sig = await crypto.subtle.sign(
+    "RSASSA-PKCS1-v1_5",
+    key,
+    new TextEncoder().encode(signingInput),
+  );
   return `${signingInput}.${base64url(sig)}`;
 }
 
@@ -197,8 +202,7 @@ async function handleGetReplays(url: URL, env: Env): Promise<Response> {
   const sort = url.searchParams.get("sort") || "recent";
   const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 100);
 
-  const orderCol =
-    sort === "popular" ? desc(replays.viewCount) : desc(replays.createdAt);
+  const orderCol = sort === "popular" ? desc(replays.viewCount) : desc(replays.createdAt);
 
   const results = await db
     .select({
@@ -233,10 +237,7 @@ async function handleGetReplays(url: URL, env: Env): Promise<Response> {
 // - Existing + lastViewedAt within 1h → just bump viewCount (cached)
 // - Existing + stale → re-fetch from GitHub, UPDATE metadata + bump viewCount
 // ---------------------------------------------------------------------------
-async function handlePostReplay(
-  request: Request,
-  env: Env,
-): Promise<Response> {
+async function handlePostReplay(request: Request, env: Env): Promise<Response> {
   try {
     const body = (await request.json()) as { gist_id: string };
 
@@ -262,8 +263,7 @@ async function handlePostReplay(
     if (existing.length > 0) {
       const lastViewed = existing[0].lastViewedAt;
       const isFresh =
-        lastViewed &&
-        Date.now() - new Date(lastViewed + "Z").getTime() < CACHE_TTL_MS;
+        lastViewed && Date.now() - new Date(`${lastViewed}Z`).getTime() < CACHE_TTL_MS;
 
       if (isFresh) {
         // Cache hit — just bump view count, skip GitHub fetch
@@ -341,7 +341,10 @@ interface GistMeta {
   gistOwner: string | null;
 }
 
-async function fetchGistMeta(gistId: string, installToken?: string | null): Promise<GistMeta | null> {
+async function fetchGistMeta(
+  gistId: string,
+  installToken?: string | null,
+): Promise<GistMeta | null> {
   // 1. Fetch gist metadata from GitHub API
   const headers: Record<string, string> = {
     "User-Agent": "vibe-replay-worker",
@@ -373,9 +376,7 @@ async function fetchGistMeta(gistId: string, installToken?: string | null): Prom
   };
 
   // 2. Find the JSON file
-  const jsonFile = Object.values(gistData.files || {}).find((f) =>
-    f.filename?.endsWith(".json"),
-  );
+  const jsonFile = Object.values(gistData.files || {}).find((f) => f.filename?.endsWith(".json"));
   if (!jsonFile) return null;
 
   // 3. Get content — prefer inline content (even if truncated, since we only
@@ -481,7 +482,7 @@ function extractFirstMessage(json: string): string | null {
   if (idx === -1) return null;
 
   // Look backwards for the opening brace of this scene object
-  let objStart = json.lastIndexOf("{", idx);
+  const objStart = json.lastIndexOf("{", idx);
   if (objStart === -1) return null;
 
   // Find the matching closing brace
@@ -490,9 +491,18 @@ function extractFirstMessage(json: string): string | null {
   let escape = false;
   for (let i = objStart; i < json.length && i < objStart + 5000; i++) {
     const ch = json[i];
-    if (escape) { escape = false; continue; }
-    if (ch === "\\") { escape = true; continue; }
-    if (ch === '"') { inString = !inString; continue; }
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escape = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
     if (inString) continue;
     if (ch === "{") depth++;
     if (ch === "}") {
@@ -503,7 +513,9 @@ function extractFirstMessage(json: string): string | null {
           if (scene.type === "user-prompt" && typeof scene.content === "string") {
             return scene.content.slice(0, 300);
           }
-        } catch { /* fall through */ }
+        } catch {
+          /* fall through */
+        }
         return null;
       }
     }

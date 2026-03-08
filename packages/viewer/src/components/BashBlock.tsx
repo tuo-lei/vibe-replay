@@ -1,4 +1,4 @@
-import { useState, memo } from "react";
+import { memo, useState } from "react";
 
 interface Props {
   command: string;
@@ -6,7 +6,7 @@ interface Props {
   isActive: boolean;
 }
 
-export default memo(function BashBlock({ command, stdout, isActive }: Props) {
+export default memo(function BashBlock({ command, stdout, isActive: _isActive }: Props) {
   const [expanded, setExpanded] = useState(true);
   const hasOutput = stdout.trim().length > 0;
 
@@ -16,12 +16,8 @@ export default memo(function BashBlock({ command, stdout, isActive }: Props) {
         onClick={() => hasOutput && setExpanded(!expanded)}
         className="w-full flex items-center gap-2 px-3 py-2 bg-terminal-surface/50 hover:bg-terminal-border/20 transition-colors text-left border-b border-terminal-border"
       >
-        <span className="text-xs font-mono font-bold text-terminal-orange">
-          $
-        </span>
-        <span className="text-xs font-mono text-terminal-text truncate flex-1">
-          {command}
-        </span>
+        <span className="text-xs font-mono font-bold text-terminal-orange">$</span>
+        <span className="text-xs font-mono text-terminal-text truncate flex-1">{command}</span>
         {hasOutput && (
           <span
             className={`text-xs text-terminal-dim transition-transform ${expanded ? "rotate-90" : ""}`}

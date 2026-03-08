@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
-import type { Scene, ReplaySession } from "./types.js";
 import type { ProviderParseResult } from "./providers/types.js";
+import type { ReplaySession, Scene } from "./types.js";
 
 const HOME = homedir();
 
@@ -53,17 +53,30 @@ export function transformToReplay(
       if (block.type === "thinking") {
         const thinking = (block as any).thinking || "";
         if (thinking.trim()) {
-          scenes.push({ type: "thinking", content: truncate(redactPath(thinking), 2000), timestamp: turn.timestamp });
+          scenes.push({
+            type: "thinking",
+            content: truncate(redactPath(thinking), 2000),
+            timestamp: turn.timestamp,
+          });
           thinkingBlocks++;
         }
       } else if (block.type === "text") {
         const text = (block as any).text || "";
         if (text.trim()) {
-          scenes.push({ type: "text-response", content: redactSecrets(redactPath(text)), timestamp: turn.timestamp });
+          scenes.push({
+            type: "text-response",
+            content: redactSecrets(redactPath(text)),
+            timestamp: turn.timestamp,
+          });
         }
       } else if (block.type === "tool_use") {
         const toolBlock = block as any;
-        const scene = buildToolScene(toolBlock.name, toolBlock.input || {}, toolBlock._result || "", toolBlock._images);
+        const scene = buildToolScene(
+          toolBlock.name,
+          toolBlock.input || {},
+          toolBlock._result || "",
+          toolBlock._images,
+        );
         (scene as any).timestamp = turn.timestamp;
         scenes.push(scene);
         toolCalls++;
@@ -82,7 +95,7 @@ export function transformToReplay(
     let cacheCreateRate = 18.75;
     let cacheReadRate = 1.875;
     if (model.includes("haiku")) {
-      inputRate = 0.80;
+      inputRate = 0.8;
       outputRate = 4;
       cacheCreateRate = 1;
       cacheReadRate = 0.08;
@@ -90,14 +103,14 @@ export function transformToReplay(
       inputRate = 3;
       outputRate = 15;
       cacheCreateRate = 3.75;
-      cacheReadRate = 0.30;
+      cacheReadRate = 0.3;
     }
-    costEstimate = (
-      u.inputTokens * inputRate +
-      u.outputTokens * outputRate +
-      u.cacheCreationTokens * cacheCreateRate +
-      u.cacheReadTokens * cacheReadRate
-    ) / 1_000_000;
+    costEstimate =
+      (u.inputTokens * inputRate +
+        u.outputTokens * outputRate +
+        u.cacheCreationTokens * cacheCreateRate +
+        u.cacheReadTokens * cacheReadRate) /
+      1_000_000;
   }
 
   return {
@@ -169,13 +182,18 @@ function sanitizeInput(input: Record<string, any>): Record<string, any> {
   const sanitized: Record<string, any> = {};
   for (const [key, value] of Object.entries(input)) {
     if (typeof value === "string" && value.length > 3000) {
-      sanitized[key] = redactSecrets(redactPath(value.slice(0, 3000) + `\n... (${value.length} chars total)`));
+      sanitized[key] = redactSecrets(
+        redactPath(`${value.slice(0, 3000)}\n... (${value.length} chars total)`),
+      );
     } else if (typeof value === "string") {
       sanitized[key] = redactSecrets(redactPath(value));
     } else if (Array.isArray(value)) {
       sanitized[key] = value.map((v) =>
-        typeof v === "string" ? redactSecrets(redactPath(v)) :
-        v && typeof v === "object" ? sanitizeInput(v) : v
+        typeof v === "string"
+          ? redactSecrets(redactPath(v))
+          : v && typeof v === "object"
+            ? sanitizeInput(v)
+            : v,
       );
     } else if (value && typeof value === "object") {
       sanitized[key] = sanitizeInput(value);
@@ -188,7 +206,7 @@ function sanitizeInput(input: Record<string, any>): Record<string, any> {
 
 function truncate(s: string, max: number): string {
   if (s.length <= max) return redactSecrets(s);
-  return redactSecrets(s.slice(0, max) + `\n... (truncated, ${s.length} chars total)`);
+  return redactSecrets(`${s.slice(0, max)}\n... (truncated, ${s.length} chars total)`);
 }
 
 // Redact common secret patterns from output
@@ -238,7 +256,7 @@ const SECRET_PATTERNS = [
   // Database connection strings with credentials
   /(?:mongodb(?:\+srv)?|postgres(?:ql)?|mysql|redis):\/\/[^:]+:[^@]+@[^\s"']+/gi,
   // Email addresses
-  /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g,
+  /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
 ];
 
 function redactSecrets(s: string): string {
@@ -248,14 +266,14 @@ function redactSecrets(s: string): string {
       // Email: keep domain for context
       if (match.includes("@") && /^[a-zA-Z0-9._%+-]+@/.test(match)) {
         const atIdx = match.indexOf("@");
-        return "[REDACTED]" + match.slice(atIdx);
+        return `[REDACTED]${match.slice(atIdx)}`;
       }
       // Env var pattern: preserve the key name
       const eqIdx = match.search(/[=:]/);
       if (eqIdx > 0) {
-        return match.slice(0, eqIdx + 1) + " [REDACTED]";
+        return `${match.slice(0, eqIdx + 1)} [REDACTED]`;
       }
-      return match.slice(0, 6) + "..." + "[REDACTED]";
+      return `${match.slice(0, 6)}...[REDACTED]`;
     });
   }
   return result;

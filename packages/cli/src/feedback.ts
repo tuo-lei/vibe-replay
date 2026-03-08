@@ -11,7 +11,7 @@
 
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import type { ReplaySession, Scene, Annotation } from "./types.js";
+import type { Annotation, ReplaySession } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -26,13 +26,7 @@ export interface FeedbackItem {
   sceneIndex: number;
   title: string;
   feedback: string;
-  category:
-    | "clarity"
-    | "specificity"
-    | "context"
-    | "efficiency"
-    | "iteration"
-    | "tool-usage";
+  category: "clarity" | "specificity" | "context" | "efficiency" | "iteration" | "tool-usage";
   improvedPrompt?: string;
 }
 
@@ -74,9 +68,10 @@ export async function detectFeedbackTools(): Promise<{
     }
   }
 
-  const defaultTool = TOOL_PRIORITY
-    .map((name) => tools.find((t) => t.name === name))
-    .find((tool): tool is FeedbackTool => !!tool) || null;
+  const defaultTool =
+    TOOL_PRIORITY.map((name) => tools.find((t) => t.name === name)).find(
+      (tool): tool is FeedbackTool => !!tool,
+    ) || null;
 
   return { tools, defaultTool };
 }
@@ -115,7 +110,7 @@ function buildSessionDigest(session: ReplaySession): string {
       turnLines.push("[USER PROMPT]:");
       const content =
         scene.content.length > maxPromptChars
-          ? scene.content.slice(0, maxPromptChars) + "\n...(truncated)"
+          ? `${scene.content.slice(0, maxPromptChars)}\n...(truncated)`
           : scene.content;
       turnLines.push(content);
       turnLines.push("");
@@ -123,9 +118,7 @@ function buildSessionDigest(session: ReplaySession): string {
     } else if (scene.type === "thinking") {
       if (responseChars < maxResponseChars) {
         const summary =
-          scene.content.length > 200
-            ? scene.content.slice(0, 200) + "..."
-            : scene.content;
+          scene.content.length > 200 ? `${scene.content.slice(0, 200)}...` : scene.content;
         turnLines.push(`  - Thinking: ${summary}`);
         responseChars += summary.length;
       }
@@ -133,21 +126,17 @@ function buildSessionDigest(session: ReplaySession): string {
       if (responseChars < maxResponseChars) {
         const budget = maxResponseChars - responseChars;
         const summary =
-          scene.content.length > budget
-            ? scene.content.slice(0, budget) + "..."
-            : scene.content;
+          scene.content.length > budget ? `${scene.content.slice(0, budget)}...` : scene.content;
         turnLines.push(`  - Text: ${summary}`);
         responseChars += summary.length;
       }
     } else if (scene.type === "tool-call") {
       if (scene.diff) {
-        turnLines.push(
-          `  - ${scene.toolName}: ${scene.diff.filePath}`,
-        );
+        turnLines.push(`  - ${scene.toolName}: ${scene.diff.filePath}`);
       } else if (scene.bashOutput) {
         const cmd =
           scene.bashOutput.command.length > 120
-            ? scene.bashOutput.command.slice(0, 120) + "..."
+            ? `${scene.bashOutput.command.slice(0, 120)}...`
             : scene.bashOutput.command;
         turnLines.push(`  - Bash: ${cmd}`);
       } else {
@@ -163,10 +152,7 @@ function buildSessionDigest(session: ReplaySession): string {
   // Hard cap for safety (roughly 30KB ≈ ~7500 tokens)
   const digest = lines.join("\n");
   if (digest.length > 35000) {
-    return (
-      digest.slice(0, 35000) +
-      "\n\n... (remaining turns omitted due to length)"
-    );
+    return `${digest.slice(0, 35000)}\n\n... (remaining turns omitted due to length)`;
   }
   return digest;
 }
@@ -214,10 +200,7 @@ const FEEDBACK_EXAMPLE = `{
   ]
 }`;
 
-function buildFeedbackPrompt(
-  digest: string,
-  session: ReplaySession,
-): string {
+function buildFeedbackPrompt(digest: string, session: ReplaySession): string {
   const userPromptIndices = session.scenes
     .map((s, i) => (s.type === "user-prompt" ? i : -1))
     .filter((i) => i !== -1);
@@ -280,10 +263,7 @@ CRITICAL RULES:
 // Execution
 // ---------------------------------------------------------------------------
 
-async function executeFeedback(
-  prompt: string,
-  tool: FeedbackTool,
-): Promise<string> {
+async function executeFeedback(prompt: string, tool: FeedbackTool): Promise<string> {
   if (tool.name === "claude") {
     return runClaude(prompt, tool.command);
   }
@@ -319,9 +299,7 @@ function runClaude(prompt: string, cmd: string): Promise<string> {
       }
     });
 
-    proc.on("error", (err) =>
-      reject(new Error(`Failed to start claude: ${err.message}`)),
-    );
+    proc.on("error", (err) => reject(new Error(`Failed to start claude: ${err.message}`)));
 
     proc.stdin.write(prompt);
     proc.stdin.end();
@@ -346,15 +324,11 @@ function runOpencode(prompt: string, cmd: string): Promise<string> {
       if (code === 0) {
         resolve(stripAnsi(stdout));
       } else {
-        reject(
-          new Error(`opencode exited ${code}: ${stripAnsi(stderr).slice(0, 500)}`),
-        );
+        reject(new Error(`opencode exited ${code}: ${stripAnsi(stderr).slice(0, 500)}`));
       }
     });
 
-    proc.on("error", (err) =>
-      reject(new Error(`Failed to start opencode: ${err.message}`)),
-    );
+    proc.on("error", (err) => reject(new Error(`Failed to start opencode: ${err.message}`)));
 
     proc.stdin.write(prompt);
     proc.stdin.end();
@@ -363,15 +337,11 @@ function runOpencode(prompt: string, cmd: string): Promise<string> {
 
 function runAgent(prompt: string, cmd: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const proc = spawn(
-      cmd,
-      ["-p", "--output-format", "json", "--mode", "ask", "--trust"],
-      {
-        env: { ...process.env, NO_COLOR: "1" },
-        timeout: 600_000,
-        stdio: ["pipe", "pipe", "pipe"],
-      },
-    );
+    const proc = spawn(cmd, ["-p", "--output-format", "json", "--mode", "ask", "--trust"], {
+      env: { ...process.env, NO_COLOR: "1" },
+      timeout: 600_000,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
 
     let stdout = "";
     let stderr = "";
@@ -391,9 +361,7 @@ function runAgent(prompt: string, cmd: string): Promise<string> {
       }
     });
 
-    proc.on("error", (err) =>
-      reject(new Error(`Failed to start agent: ${err.message}`)),
-    );
+    proc.on("error", (err) => reject(new Error(`Failed to start agent: ${err.message}`)));
 
     proc.stdin.write(prompt);
     proc.stdin.end();
@@ -404,10 +372,7 @@ function runAgent(prompt: string, cmd: string): Promise<string> {
 // Parsing & validation
 // ---------------------------------------------------------------------------
 
-function parseFeedbackResponse(
-  output: string,
-  session: ReplaySession,
-): FeedbackResult | null {
+function parseFeedbackResponse(output: string, session: ReplaySession): FeedbackResult | null {
   const json = extractJson(output);
   if (!json) return null;
 
@@ -429,9 +394,7 @@ function parseFeedbackResponse(
 
   // Valid user-prompt scene indices
   const validIndices = new Set(
-    session.scenes
-      .map((s, i) => (s.type === "user-prompt" ? i : -1))
-      .filter((i) => i !== -1),
+    session.scenes.map((s, i) => (s.type === "user-prompt" ? i : -1)).filter((i) => i !== -1),
   );
   const validCategories = new Set([
     "clarity",
@@ -477,10 +440,7 @@ function extractJson(raw: string): string | null {
 
   // 0. Pre-process: fix common model errors
   //    - Missing { before "sceneIndex" in feedbackItems array
-  const preFixed = str.replace(
-    /},\s*"sceneIndex"\s*:/g,
-    '},{"sceneIndex":',
-  );
+  const preFixed = str.replace(/},\s*"sceneIndex"\s*:/g, '},{"sceneIndex":');
 
   // 1. Try raw parse (with pre-fix applied)
   for (const candidate of [preFixed, str]) {
@@ -739,9 +699,7 @@ export async function generateFeedback(
 
 function stripAnsi(str: string): string {
   // eslint-disable-next-line no-control-regex
-  return str
-    .replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "")
-    .replace(/\x1B\][^\x07]*\x07/g, "");
+  return str.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "").replace(/\x1B\][^\x07]*\x07/g, "");
 }
 
 function shell(cmd: string): Promise<string> {

@@ -16,20 +16,8 @@ module.exports = {
         "text-muted": "#555568",
       },
       fontFamily: {
-        sans: [
-          "Inter",
-          "system-ui",
-          "-apple-system",
-          "BlinkMacSystemFont",
-          "sans-serif",
-        ],
-        mono: [
-          "JetBrains Mono",
-          "Fira Code",
-          "SF Mono",
-          "Consolas",
-          "monospace",
-        ],
+        sans: ["Inter", "system-ui", "-apple-system", "BlinkMacSystemFont", "sans-serif"],
+        mono: ["JetBrains Mono", "Fira Code", "SF Mono", "Consolas", "monospace"],
       },
       animation: {
         "fade-in": "fadeIn 0.6s ease-out",

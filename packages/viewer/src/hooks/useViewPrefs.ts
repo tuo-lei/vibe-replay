@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useCallback, useState } from "react";
 
 export interface ViewPrefs {
   hideThinking: boolean;
@@ -25,16 +25,13 @@ const defaultPrefs: ViewPrefs = {
 export function useViewPrefs() {
   const [prefs, setPrefs] = useState<ViewPrefs>(loadPrefs);
 
-  const updatePref = useCallback(
-    <K extends keyof ViewPrefs>(key: K, value: ViewPrefs[K]) => {
-      setPrefs((prev) => {
-        const next = { ...prev, [key]: value };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-        return next;
-      });
-    },
-    [],
-  );
+  const updatePref = useCallback(<K extends keyof ViewPrefs>(key: K, value: ViewPrefs[K]) => {
+    setPrefs((prev) => {
+      const next = { ...prev, [key]: value };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
 
   const togglePref = useCallback((key: keyof ViewPrefs) => {
     setPrefs((prev) => {
