@@ -111,16 +111,15 @@ describe("transform — per-model cost estimation", () => {
     const parsed = await parseClaudeCodeSession(resolve(FIXTURES, "claude-code-multi-model.jsonl"));
     const replay = transformToReplay(parsed, "claude-code", "~/test");
 
-    // Calculate expected cost manually:
-    // Opus (msg_a1):  (5000*15 + 800*75 + 2000*18.75 + 1000*1.5) / 1M
-    //              =  (75000 + 60000 + 37500 + 1500) / 1M = 174000 / 1M = 0.174
-    // Haiku (msg_sub1 + msg_sub2 from subagent file):
-    //   (1100*0.8 + 130*4 + 8000*1 + 27000*0.08) / 1M
-    //   = (880 + 520 + 8000 + 2160) / 1M = 11560 / 1M = 0.01156
-    // Sonnet (msg_a3): (8000*3 + 1500*15 + 0*3.75 + 3000*0.3) / 1M
-    //               =  (24000 + 22500 + 0 + 900) / 1M = 47400 / 1M = 0.0474
-    // Total: 0.174 + 0.01156 + 0.0474 = 0.23296
-    expect(replay.meta.stats.costEstimate).toBeCloseTo(0.23296, 3);
+    // Calculate expected cost manually (fixture model IDs → pricing):
+    // Opus (msg_a1, claude-opus-4-20250514 → legacy Opus $15/$75/$18.75/$1.50):
+    //   (5000*15 + 800*75 + 2000*18.75 + 1000*1.5) / 1M = 174000 / 1M = 0.174
+    // Haiku (msg_sub1+msg_sub2, claude-haiku-4-5-20251001 → Haiku 4.5 $1/$5/$1.25/$0.10):
+    //   (1100*1 + 130*5 + 8000*1.25 + 27000*0.10) / 1M = 14450 / 1M = 0.01445
+    // Sonnet (msg_a3, claude-sonnet-4-20250514 → legacy Sonnet $3/$15/$3.75/$0.30):
+    //   (8000*3 + 1500*15 + 0 + 3000*0.3) / 1M = 47400 / 1M = 0.0474
+    // Total: 0.174 + 0.01445 + 0.0474 = 0.23585
+    expect(replay.meta.stats.costEstimate).toBeCloseTo(0.23585, 3);
   });
 
   it("multi-model cost differs from naive single-model assumption", async () => {

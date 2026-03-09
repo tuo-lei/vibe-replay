@@ -3,41 +3,59 @@ import { estimateCost, estimateCostSimple, getModelPricing } from "../src/pricin
 import type { TokenUsage } from "../src/providers/types.js";
 
 // ---------------------------------------------------------------------------
-// getModelPricing — model family detection
+// getModelPricing — model family + version detection
 // ---------------------------------------------------------------------------
 describe("getModelPricing — model family detection", () => {
-  it("returns Opus pricing for opus model IDs", () => {
+  it("returns Opus 4.6 pricing for opus-4-6 model ID", () => {
+    const p = getModelPricing("claude-opus-4-6");
+    expect(p.inputRate).toBe(5);
+    expect(p.outputRate).toBe(25);
+    expect(p.cacheCreateRate).toBe(6.25);
+    expect(p.cacheReadRate).toBe(0.5);
+  });
+
+  it("returns Opus 4.5 pricing for opus-4-5 model ID", () => {
+    const p = getModelPricing("claude-opus-4-5-20250514");
+    expect(p.inputRate).toBe(5);
+    expect(p.outputRate).toBe(25);
+  });
+
+  it("returns legacy Opus pricing for opus-4-20250514 (4.1)", () => {
     const p = getModelPricing("claude-opus-4-20250514");
     expect(p.inputRate).toBe(15);
     expect(p.outputRate).toBe(75);
+    expect(p.cacheCreateRate).toBe(18.75);
+    expect(p.cacheReadRate).toBe(1.5);
   });
 
-  it("returns Opus pricing for short opus model ID", () => {
-    const p = getModelPricing("claude-opus-4-6");
-    expect(p.inputRate).toBe(15);
-    expect(p.outputRate).toBe(75);
-  });
-
-  it("returns Sonnet pricing for sonnet model IDs", () => {
-    const p = getModelPricing("claude-sonnet-4-20250514");
-    expect(p.inputRate).toBe(3);
-    expect(p.outputRate).toBe(15);
-  });
-
-  it("returns Sonnet pricing for short sonnet model ID", () => {
+  it("returns Sonnet 4.6 pricing for sonnet-4-6 model ID", () => {
     const p = getModelPricing("claude-sonnet-4-6");
     expect(p.inputRate).toBe(3);
     expect(p.outputRate).toBe(15);
   });
 
-  it("returns Haiku pricing for haiku model IDs", () => {
-    const p = getModelPricing("claude-haiku-4-20250514");
-    expect(p.inputRate).toBe(0.8);
-    expect(p.outputRate).toBe(4);
+  it("returns Sonnet 4.5 pricing for sonnet-4-5 model ID", () => {
+    const p = getModelPricing("claude-sonnet-4-5-20250514");
+    expect(p.inputRate).toBe(3);
+    expect(p.outputRate).toBe(15);
   });
 
-  it("returns Haiku pricing for older haiku model", () => {
+  it("returns legacy Sonnet pricing for sonnet-3-7", () => {
+    const p = getModelPricing("claude-3-7-sonnet-20250219");
+    expect(p.inputRate).toBe(3);
+    expect(p.outputRate).toBe(15);
+  });
+
+  it("returns Haiku 4.5 pricing for haiku-4-5 model ID", () => {
     const p = getModelPricing("claude-haiku-4-5-20251001");
+    expect(p.inputRate).toBe(1);
+    expect(p.outputRate).toBe(5);
+    expect(p.cacheCreateRate).toBe(1.25);
+    expect(p.cacheReadRate).toBe(0.1);
+  });
+
+  it("returns legacy Haiku pricing for haiku-3-5", () => {
+    const p = getModelPricing("claude-3-5-haiku-20241022");
     expect(p.inputRate).toBe(0.8);
     expect(p.outputRate).toBe(4);
   });
@@ -55,9 +73,9 @@ describe("getModelPricing — model family detection", () => {
   });
 
   it("is case-insensitive", () => {
-    expect(getModelPricing("Claude-OPUS-4").inputRate).toBe(15);
-    expect(getModelPricing("CLAUDE-SONNET-4").inputRate).toBe(3);
-    expect(getModelPricing("claude-HAIKU-3").inputRate).toBe(0.8);
+    expect(getModelPricing("Claude-OPUS-4-6").inputRate).toBe(5);
+    expect(getModelPricing("CLAUDE-SONNET-4-6").inputRate).toBe(3);
+    expect(getModelPricing("claude-HAIKU-4-5").inputRate).toBe(1);
   });
 });
 
@@ -72,19 +90,24 @@ describe("estimateCostSimple — single model", () => {
     cacheReadTokens: 0,
   };
 
-  it("calculates Opus cost", () => {
+  it("calculates Opus 4.6 cost", () => {
+    // 5 * 1M / 1M + 25 * 100K / 1M = 5 + 2.5 = 7.5
+    expect(estimateCostSimple(usage, "claude-opus-4-6")).toBeCloseTo(7.5, 2);
+  });
+
+  it("calculates legacy Opus cost", () => {
     // 15 * 1M / 1M + 75 * 100K / 1M = 15 + 7.5 = 22.5
     expect(estimateCostSimple(usage, "claude-opus-4-20250514")).toBeCloseTo(22.5, 2);
   });
 
   it("calculates Sonnet cost", () => {
     // 3 * 1M / 1M + 15 * 100K / 1M = 3 + 1.5 = 4.5
-    expect(estimateCostSimple(usage, "claude-sonnet-4-20250514")).toBeCloseTo(4.5, 2);
+    expect(estimateCostSimple(usage, "claude-sonnet-4-6")).toBeCloseTo(4.5, 2);
   });
 
-  it("calculates Haiku cost", () => {
-    // 0.8 * 1M / 1M + 4 * 100K / 1M = 0.8 + 0.4 = 1.2
-    expect(estimateCostSimple(usage, "claude-haiku-4-20250514")).toBeCloseTo(1.2, 2);
+  it("calculates Haiku 4.5 cost", () => {
+    // 1 * 1M / 1M + 5 * 100K / 1M = 1 + 0.5 = 1.5
+    expect(estimateCostSimple(usage, "claude-haiku-4-5-20251001")).toBeCloseTo(1.5, 2);
   });
 
   it("includes cache creation and read tokens", () => {
@@ -95,7 +118,7 @@ describe("estimateCostSimple — single model", () => {
       cacheReadTokens: 1_000_000,
     };
     // Sonnet: create=3.75 + read=0.3 = 4.05
-    expect(estimateCostSimple(withCache, "claude-sonnet-4-20250514")).toBeCloseTo(4.05, 2);
+    expect(estimateCostSimple(withCache, "claude-sonnet-4-6")).toBeCloseTo(4.05, 2);
   });
 
   it("returns 0 for zero token usage", () => {
@@ -105,40 +128,38 @@ describe("estimateCostSimple — single model", () => {
       cacheCreationTokens: 0,
       cacheReadTokens: 0,
     };
-    expect(estimateCostSimple(zero, "claude-opus-4-20250514")).toBe(0);
+    expect(estimateCostSimple(zero, "claude-opus-4-6")).toBe(0);
   });
 });
 
 // ---------------------------------------------------------------------------
-// estimateCost — per-model breakdown (the key improvement)
+// estimateCost — per-model breakdown
 // ---------------------------------------------------------------------------
 describe("estimateCost — per-model breakdown", () => {
   it("sums cost across multiple models", () => {
     const usageByModel: Record<string, TokenUsage> = {
-      "claude-opus-4-20250514": {
+      "claude-opus-4-6": {
         inputTokens: 1_000_000,
         outputTokens: 100_000,
         cacheCreationTokens: 0,
         cacheReadTokens: 0,
       },
-      "claude-sonnet-4-20250514": {
+      "claude-sonnet-4-6": {
         inputTokens: 500_000,
         outputTokens: 200_000,
         cacheCreationTokens: 0,
         cacheReadTokens: 0,
       },
     };
-    // Opus: 15*1 + 75*0.1 = 22.5
+    // Opus 4.6: 5*1 + 25*0.1 = 5 + 2.5 = 7.5
     // Sonnet: 3*0.5 + 15*0.2 = 1.5 + 3 = 4.5
-    // Total: 27.0
-    expect(estimateCost(usageByModel)).toBeCloseTo(27.0, 2);
+    // Total: 12.0
+    expect(estimateCost(usageByModel)).toBeCloseTo(12.0, 2);
   });
 
   it("gives different result than single-model assumption", () => {
-    // This is the core bug fix: if we assumed all tokens were Opus,
-    // we'd get a different (wrong) cost than per-model calculation.
     const usageByModel: Record<string, TokenUsage> = {
-      "claude-opus-4-20250514": {
+      "claude-opus-4-6": {
         inputTokens: 100_000,
         outputTokens: 50_000,
         cacheCreationTokens: 0,
@@ -153,38 +174,34 @@ describe("estimateCost — per-model breakdown", () => {
     };
     const perModel = estimateCost(usageByModel);
 
-    // If we wrongly assumed all-Opus:
-    const totalInput = 1_000_000;
-    const totalOutput = 500_000;
+    // Opus 4.6: 5*0.1 + 25*0.05 = 0.5 + 1.25 = 1.75
+    // Haiku 4.5: 1*0.9 + 5*0.45 = 0.9 + 2.25 = 3.15
+    // Total: 4.90
+    expect(perModel).toBeCloseTo(4.9, 1);
+
+    // All-Opus would be much more expensive
     const allOpus = estimateCostSimple(
       {
-        inputTokens: totalInput,
-        outputTokens: totalOutput,
+        inputTokens: 1_000_000,
+        outputTokens: 500_000,
         cacheCreationTokens: 0,
         cacheReadTokens: 0,
       },
-      "claude-opus-4-20250514",
+      "claude-opus-4-6",
     );
-
-    // Per-model should be significantly cheaper because Haiku is much cheaper
-    // Opus: 15*0.1 + 75*0.05 = 1.5 + 3.75 = 5.25
-    // Haiku: 0.8*0.9 + 4*0.45 = 0.72 + 1.8 = 2.52
-    // Total: 7.77
-    expect(perModel).toBeCloseTo(7.77, 1);
-    // All-Opus would be: 15*1 + 75*0.5 = 52.5
-    expect(allOpus).toBeCloseTo(52.5, 1);
     expect(perModel).toBeLessThan(allOpus);
   });
 
   it("handles single model in breakdown", () => {
     const usageByModel: Record<string, TokenUsage> = {
-      "claude-sonnet-4-20250514": {
+      "claude-sonnet-4-6": {
         inputTokens: 1_000_000,
         outputTokens: 100_000,
         cacheCreationTokens: 0,
         cacheReadTokens: 0,
       },
     };
+    // 3*1 + 15*0.1 = 4.5
     expect(estimateCost(usageByModel)).toBeCloseTo(4.5, 2);
   });
 
@@ -213,10 +230,10 @@ describe("estimateCost — per-model breakdown", () => {
         cacheReadTokens: 0,
       },
     };
-    // Opus: 15*0.1 + 75*0.01 = 1.5 + 0.75 = 2.25
+    // Opus 4.6: 5*0.1 + 25*0.01 = 0.5 + 0.25 = 0.75
     // Sonnet: 3*0.1 + 15*0.01 = 0.3 + 0.15 = 0.45
-    // Haiku: 0.8*0.1 + 4*0.01 = 0.08 + 0.04 = 0.12
-    // Total: 2.82
-    expect(estimateCost(usageByModel)).toBeCloseTo(2.82, 2);
+    // Haiku 4.5: 1*0.1 + 5*0.01 = 0.1 + 0.05 = 0.15
+    // Total: 1.35
+    expect(estimateCost(usageByModel)).toBeCloseTo(1.35, 2);
   });
 });
