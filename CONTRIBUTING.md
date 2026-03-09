@@ -27,10 +27,11 @@ pnpm start        # Full build + run (simulates real user flow)
 
 ## Architecture
 
-pnpm monorepo with two main packages:
+pnpm monorepo with three packages:
 
 - **`packages/cli`** — CLI tool published as `vibe-replay` on npm. Discovers sessions, parses them, transforms into scenes, and generates output.
 - **`packages/viewer`** — React app built into a single HTML file (~430KB) via `vite-plugin-singlefile`. Handles playback, annotations, theming, and search.
+- **`packages/types`** — Shared TypeScript types (`@vibe-replay/types`). Both CLI and viewer re-export from here.
 
 ### Data flow
 
@@ -48,12 +49,14 @@ Session files (JSONL / SQLite)
 ```
 packages/cli/src/
 ├── index.ts              # Entry point, interactive picker, publish menu
-├── types.ts              # Core types (Scene, ReplaySession, SessionInfo)
+├── types.ts              # CLI-specific types + re-exports from @vibe-replay/types
 ├── transform.ts          # Turns → Scenes, secret redaction, cost estimation
 ├── generator.ts          # Inject JSON into viewer HTML
 ├── server.ts             # Editor mode: Hono localhost server
 ├── feedback.ts           # AI Coach integration
 ├── scan.ts               # Secret detection in output
+├── clean-prompt.ts       # Strip system boilerplate from prompts
+├── version.ts            # CLI_VERSION from package.json
 ├── providers/
 │   ├── types.ts          # Provider interface (discover + parse)
 │   ├── index.ts          # Provider registry
@@ -69,11 +72,19 @@ packages/cli/src/
 ```
 packages/viewer/src/
 ├── App.tsx               # Root component, mode detection
+├── types.ts              # Viewer-specific types + re-exports from @vibe-replay/types
+├── engine/               # Framework-agnostic playback engine (pure functions)
+│   ├── index.ts          # Public exports
+│   ├── scene-navigation.ts   # User prompt jumping, next/prev logic
+│   ├── scene-timing.ts       # Timing, batching, duration calculation
+│   ├── annotation-store.ts   # Pure annotation management
+│   └── __tests__/            # Engine unit tests
 ├── hooks/
 │   ├── useSessionLoader.ts   # Load data (embedded / editor API / URL)
-│   ├── usePlayback.ts        # Playback state machine, timing, keyboard shortcuts
+│   ├── usePlayback.ts        # Playback state machine (consumes engine/)
 │   ├── useAnnotations.ts     # Annotation CRUD + auto-save
-│   └── useTheme.ts           # Light/dark theme via CSS variables
+│   ├── useTheme.ts           # Light/dark theme via CSS variables
+│   └── useViewPrefs.ts       # View preferences (hide thinking, collapse tools)
 └── components/
     ├── Player.tsx         # Main playback orchestrator
     ├── Dashboard.tsx      # Session management (editor mode)
@@ -83,7 +94,11 @@ packages/viewer/src/
     ├── Minimap.tsx
     ├── SearchOverlay.tsx
     ├── AnnotationPanel.tsx
-    └── [Scene renderers]  # UserPromptBlock, ToolCallBlock, etc.
+    ├── LandingHero.tsx    # Landing page intro
+    ├── StatsPanel.tsx     # Statistics display
+    └── [Scene renderers]  # UserPromptBlock, ToolCallBlock, BashBlock,
+                           # CodeDiffBlock, TextResponseBlock, ThinkingBlock,
+                           # CompactionSummaryBlock
 ```
 
 ### Viewer modes
@@ -120,7 +135,7 @@ The viewer is built once, then the CLI embeds it. The final HTML output is the v
 - **TypeScript strict mode**, ESM throughout
 - **Viewer must stay under 500KB** after build (currently ~430KB)
 - **Output HTML must be fully self-contained** — no external requests
-- **`types.ts` is duplicated** between CLI and viewer — sync manually when core types change
+- **Shared types** live in `packages/types` (`@vibe-replay/types`) — CLI and viewer re-export from there
 - **Secret redaction**: `transform.ts` strips API keys, tokens, PEM keys, paths. `scan.ts` does a second pass on the final output.
 - **`</` escaping**: JSON in `<script>` tags must escape `</` as `<\/` (see `generator.ts`)
 

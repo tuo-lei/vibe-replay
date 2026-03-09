@@ -4,7 +4,7 @@
 
 vibe-replay turns AI coding sessions into animated, interactive web replays as self-contained HTML files. Supports Claude Code and Cursor.
 
-pnpm monorepo: `packages/cli` (npm: `vibe-replay`), `packages/viewer` (React → single HTML), `website/` (Astro), `cloudflare/` (Workers API).
+pnpm monorepo: `packages/cli` (npm: `vibe-replay`), `packages/viewer` (React → single HTML), `packages/types` (shared types), `website/` (Astro), `cloudflare/` (Workers API).
 
 ## Commands
 
@@ -18,6 +18,7 @@ pnpm cli:dev               # CLI only (tsx)
 pnpm test                  # Run tests
 pnpm lint                  # Lint + format (auto-fix)
 pnpm lint:check            # Lint check (no fix, for CI)
+pnpm dev:dashboard         # Dev mode with dashboard flag (-d)
 ```
 
 When to use which:
@@ -65,7 +66,9 @@ When to use which:
 | Editor server | `packages/cli/src/server.ts` |
 | Provider interface | `packages/cli/src/providers/types.ts` |
 | Viewer entry | `packages/viewer/src/App.tsx` |
-| Playback engine | `packages/viewer/src/hooks/usePlayback.ts` |
+| Playback engine (pure) | `packages/viewer/src/engine/` |
+| Playback hook | `packages/viewer/src/hooks/usePlayback.ts` |
 | Session loading | `packages/viewer/src/hooks/useSessionLoader.ts` |
+| View preferences | `packages/viewer/src/hooks/useViewPrefs.ts` |
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for full architecture details.
