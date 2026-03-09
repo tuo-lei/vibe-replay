@@ -79,8 +79,15 @@ export async function parseClaudeCodeSession(
       continue;
     }
 
-    // Skip non-message types
-    if (obj.type === "progress") continue;
+    // Progress lines contain subagent (e.g. Haiku) streaming data.
+    // We skip them for content but extract token usage for cost estimation.
+    if (obj.type === "progress") {
+      const inner = (obj as any).data?.message?.message;
+      if (inner?.usage && inner?.id) {
+        usageByMsgId.set(inner.id, { ...inner.usage, model: inner.model });
+      }
+      continue;
+    }
 
     if (obj.type === "system") {
       if (obj.subtype === "turn_duration" && obj.durationMs) {

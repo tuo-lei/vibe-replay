@@ -17,12 +17,26 @@ describe("parser — per-model token usage breakdown", () => {
     expect(result.tokenUsageByModel).toBeDefined();
     const byModel = result.tokenUsageByModel!;
 
-    // Should have 3 distinct models
+    // Should have 3 distinct models (opus from assistant, haiku from progress, sonnet from assistant)
     const models = Object.keys(byModel);
     expect(models).toHaveLength(3);
     expect(models).toContain("claude-opus-4-20250514");
     expect(models).toContain("claude-haiku-4-5-20251001");
     expect(models).toContain("claude-sonnet-4-20250514");
+  });
+
+  it("extracts haiku subagent usage from progress lines", async () => {
+    const result = await parseClaudeCodeSession(resolve(FIXTURES, "claude-code-multi-model.jsonl"));
+    const byModel = result.tokenUsageByModel!;
+
+    // msg_sub1 + msg_sub2 (haiku from progress lines):
+    // msg_sub1: input:500, output:50, cache_create:8000, cache_read:12000
+    // msg_sub2: input:600, output:80, cache_create:0, cache_read:15000
+    const haiku = byModel["claude-haiku-4-5-20251001"];
+    expect(haiku.inputTokens).toBe(500 + 600);
+    expect(haiku.outputTokens).toBe(50 + 80);
+    expect(haiku.cacheCreationTokens).toBe(8000 + 0);
+    expect(haiku.cacheReadTokens).toBe(12000 + 15000);
   });
 
   it("correctly aggregates per-model tokens (deduped by message ID)", async () => {
@@ -35,13 +49,6 @@ describe("parser — per-model token usage breakdown", () => {
     expect(opus.outputTokens).toBe(800);
     expect(opus.cacheCreationTokens).toBe(2000);
     expect(opus.cacheReadTokens).toBe(1000);
-
-    // msg_a2 (haiku): input:3000, output:200, cache_create:0, cache_read:500
-    const haiku = byModel["claude-haiku-4-5-20251001"];
-    expect(haiku.inputTokens).toBe(3000);
-    expect(haiku.outputTokens).toBe(200);
-    expect(haiku.cacheCreationTokens).toBe(0);
-    expect(haiku.cacheReadTokens).toBe(500);
 
     // msg_a3 (sonnet): input:8000, output:1500, cache_create:0, cache_read:3000
     const sonnet = byModel["claude-sonnet-4-20250514"];
@@ -95,12 +102,13 @@ describe("transform — per-model cost estimation", () => {
     // Calculate expected cost manually:
     // Opus (msg_a1):  (5000*15 + 800*75 + 2000*18.75 + 1000*1.5) / 1M
     //              =  (75000 + 60000 + 37500 + 1500) / 1M = 174000 / 1M = 0.174
-    // Haiku (msg_a2): (3000*0.8 + 200*4 + 0*1 + 500*0.08) / 1M
-    //              =  (2400 + 800 + 0 + 40) / 1M = 3240 / 1M = 0.00324
+    // Haiku (msg_sub1 + msg_sub2 from progress):
+    //   (1100*0.8 + 130*4 + 8000*1 + 27000*0.08) / 1M
+    //   = (880 + 520 + 8000 + 2160) / 1M = 11560 / 1M = 0.01156
     // Sonnet (msg_a3): (8000*3 + 1500*15 + 0*3.75 + 3000*0.3) / 1M
     //               =  (24000 + 22500 + 0 + 900) / 1M = 47400 / 1M = 0.0474
-    // Total: 0.174 + 0.00324 + 0.0474 = 0.22464
-    expect(replay.meta.stats.costEstimate).toBeCloseTo(0.22464, 3);
+    // Total: 0.174 + 0.01156 + 0.0474 = 0.23296
+    expect(replay.meta.stats.costEstimate).toBeCloseTo(0.23296, 3);
   });
 
   it("multi-model cost differs from naive single-model assumption", async () => {
