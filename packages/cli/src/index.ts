@@ -29,6 +29,17 @@ program
   .action(async (opts) => {
     console.log(chalk.bold.cyan("\n  vibe-replay") + chalk.dim(` v${CLI_VERSION}\n`));
 
+    // Windows is not supported yet (see https://github.com/tuo-lei/vibe-replay/issues/26)
+    if (process.platform === "win32") {
+      console.log(chalk.yellow("  ⚠ Windows is not supported yet.\n"));
+      console.log(chalk.dim("  We're working on it! Follow progress and updates:"));
+      console.log(
+        chalk.dim("  → ") + chalk.white("https://github.com/tuo-lei/vibe-replay/issues/26"),
+      );
+      console.log(chalk.dim("  → ") + chalk.white("https://vibe-replay.com\n"));
+      process.exit(1);
+    }
+
     // --dashboard: open Dashboard directly
     if (opts.dashboard) {
       const { join: pathJoin } = await import("node:path");
