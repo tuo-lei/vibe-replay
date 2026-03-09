@@ -15,7 +15,7 @@ interface Props {
   onOpenSearch: () => void;
   onOpenOutline?: () => void;
   annotationCount?: number;
-  annotationPanelOpen?: boolean;
+  commentDrawerOpen?: boolean;
   onToggleAnnotations?: () => void;
   hasUnsavedAnnotations?: boolean;
 }
@@ -36,7 +36,7 @@ export default function Controls({
   onOpenSearch,
   onOpenOutline,
   annotationCount = 0,
-  annotationPanelOpen = false,
+  commentDrawerOpen = false,
   onToggleAnnotations,
   hasUnsavedAnnotations = false,
 }: Props) {
@@ -140,7 +140,7 @@ export default function Controls({
               onToggleAnnotations();
             }}
             className={`${ghostBtn} hidden md:inline-flex items-center ${
-              annotationPanelOpen
+              commentDrawerOpen
                 ? "bg-terminal-blue-subtle text-terminal-blue"
                 : "text-terminal-dim hover:text-terminal-blue hover:bg-terminal-blue-subtle"
             } ${flashClass("annotate")} relative`}
