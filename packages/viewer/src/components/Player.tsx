@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAnnotations } from "../hooks/useAnnotations";
 import { usePlayback } from "../hooks/usePlayback";
 import type { ViewerMode } from "../hooks/useSessionLoader";
