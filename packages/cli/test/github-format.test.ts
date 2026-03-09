@@ -100,7 +100,11 @@ describe("generateGitHubMarkdown", () => {
     const md = generateGitHubMarkdown(session);
 
     expect(md).toContain("12 min");
-    expect(md).toContain("12 steps");
+    expect(md).toContain("8 tools");
+    expect(md).toContain("1 response");
+    expect(md).toContain("Read 2");
+    expect(md).toContain("Edit 3");
+    expect(md).toContain("Bash (pnpm) 2");
     expect(md).toContain("Claude Opus");
   });
 
@@ -301,7 +305,8 @@ describe("generateGitHubSvg", () => {
     const svg = generateGitHubSvg(session);
 
     expect(svg).toContain("COMPLETE");
-    expect(svg).toContain("12 steps");
+    expect(svg).toContain("8 tools");
+    expect(svg).toContain("1 response");
   });
 
   it("has reasonable file size", () => {

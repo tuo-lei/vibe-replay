@@ -27,6 +27,7 @@ export function generateGitHubMarkdown(
   const { meta } = session;
   const phases = extractPhases(session.scenes);
   const filesChanged = collectFilesChanged(session.scenes);
+  const toolStats = computeToolStats(session.scenes);
   const duration = formatDuration(meta.stats.durationMs);
   const title = meta.title || meta.slug;
 
@@ -49,11 +50,22 @@ export function generateGitHubMarkdown(
   // Stats line
   const statParts = [
     duration,
-    `${meta.stats.sceneCount} steps`,
     filesChanged.size > 0 ? `${filesChanged.size} files changed` : null,
     meta.model || null,
   ].filter(Boolean);
   lines.push(statParts.join(" · "));
+
+  // Tool breakdown line
+  const toolParts: string[] = [];
+  if (toolStats.responses > 0) toolParts.push(`${toolStats.responses} responses`);
+  if (toolStats.totalTools > 0) toolParts.push(`${toolStats.totalTools} tools`);
+  if (toolStats.thinking > 0) toolParts.push(`${toolStats.thinking} thinking`);
+  const breakdownStr = formatToolBreakdown(toolStats);
+  if (breakdownStr) {
+    lines.push(`${toolParts.join(" · ")} — ${breakdownStr}`);
+  } else {
+    lines.push(toolParts.join(" · "));
+  }
   lines.push("");
 
   // ── Collapsible body ──
@@ -106,6 +118,82 @@ export function generateGitHubSvg(session: ReplaySession, opts: GitHubFormatOpti
   const phases = extractPhases(session.scenes);
   const frames = buildSvgFrames(session, phases, opts);
   return renderSvg(frames, session, opts);
+}
+
+// ─── Tool stats breakdown ───────────────────────────────────
+
+interface ToolStats {
+  responses: number;
+  thinking: number;
+  totalTools: number;
+  /** Sorted breakdown: [["Read", 26], ["Edit", 52], ...] */
+  toolBreakdown: [string, number][];
+  /** Unique Bash command names (first word of each command) */
+  bashCommands: string[];
+}
+
+function computeToolStats(scenes: Scene[]): ToolStats {
+  const breakdown: Record<string, number> = {};
+  const bashCmds = new Set<string>();
+  let responses = 0;
+  let thinking = 0;
+  let totalTools = 0;
+
+  for (const scene of scenes) {
+    if (scene.type === "text-response") {
+      responses++;
+    } else if (scene.type === "thinking") {
+      thinking++;
+    } else if (scene.type === "tool-call") {
+      totalTools++;
+      const name = shortToolName(scene.toolName);
+      breakdown[name] = (breakdown[name] || 0) + 1;
+      if (scene.toolName === "Bash" && scene.input?.command) {
+        const cmd = scene.input.command.trim().split(/[\s|;&]/)[0];
+        if (cmd) bashCmds.add(cmd);
+      }
+    }
+  }
+
+  // Sort: common tools first, then by count
+  const order = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Agent"];
+  const entries = Object.entries(breakdown) as [string, number][];
+  entries.sort((a, b) => {
+    const ai = order.indexOf(a[0]);
+    const bi = order.indexOf(b[0]);
+    return (ai >= 0 ? ai : 100) - (bi >= 0 ? bi : 100);
+  });
+
+  return {
+    responses,
+    thinking,
+    totalTools,
+    toolBreakdown: entries,
+    bashCommands: [...bashCmds],
+  };
+}
+
+/** Shorten MCP-style tool names: mcp__service__method → method */
+function shortToolName(name: string): string {
+  if (name.startsWith("mcp__")) {
+    const parts = name.split("__");
+    return parts[parts.length - 1];
+  }
+  return name;
+}
+
+/** Format tool breakdown as a single string: "Read 26 · Edit 52 · Bash (git, pnpm) 10" */
+function formatToolBreakdown(stats: ToolStats): string {
+  return stats.toolBreakdown
+    .map(([name, count]) => {
+      if (name === "Bash" && stats.bashCommands.length > 0) {
+        const cmds = stats.bashCommands.slice(0, 4).join(", ");
+        const more = stats.bashCommands.length > 4 ? ", ..." : "";
+        return `${name} (${cmds}${more}) ${count}`;
+      }
+      return `${name} ${count}`;
+    })
+    .join(" · ");
 }
 
 // ─── Phase extraction ──────────────────────────────────────
@@ -424,6 +512,7 @@ function buildSvgFrames(
   const frames: SvgFrame[] = [];
   const task = phases[0]?.prompt || meta.title || meta.slug;
   const duration = formatDuration(meta.stats.durationMs);
+  const toolStats = computeToolStats(session.scenes);
 
   // ── Frame 0: Title ──
   const taskWrap = wrapText(task, 56);
@@ -436,11 +525,21 @@ function buildSvgFrames(
   if (meta.model) {
     titleFrame.lines.push({ text: meta.model, color: C.purple });
   }
-  const statLine = [duration, `${meta.stats.sceneCount} steps`].filter(Boolean).join("  ·  ");
-  if (statLine) {
-    titleFrame.lines.push({ text: statLine, color: C.dim });
+  // Tool stats summary line
+  const statParts: string[] = [];
+  if (toolStats.responses > 0) statParts.push(`${toolStats.responses} responses`);
+  if (toolStats.totalTools > 0) statParts.push(`${toolStats.totalTools} tools`);
+  if (toolStats.thinking > 0) statParts.push(`${toolStats.thinking} thinking`);
+  if (statParts.length > 0) {
+    titleFrame.lines.push({ text: statParts.join("  ·  "), color: C.dim });
   }
-  titleFrame.lines.push({ text: meta.project || meta.cwd, color: C.dim });
+  // Tool breakdown line
+  const breakdown = formatToolBreakdown(toolStats);
+  if (breakdown) {
+    titleFrame.lines.push({ text: condenseLine(breakdown, 60), color: C.orange });
+  }
+  const metaLine = [duration, meta.project || meta.cwd].filter(Boolean).join("  ·  ");
+  titleFrame.lines.push({ text: metaLine, color: C.dim });
   frames.push(titleFrame);
 
   // ── Phase frames (pick most interesting, max 3) ──
@@ -477,16 +576,22 @@ function buildSvgFrames(
   const filesChanged = collectFilesChanged(session.scenes);
   const summaryStats = [
     filesChanged.size > 0 ? `${filesChanged.size} files changed` : null,
-    `${meta.stats.sceneCount} steps`,
     `${meta.stats.userPrompts} prompts`,
     duration,
   ]
     .filter(Boolean)
     .join("  ·  ");
 
+  // Summary tool stats
+  const summaryToolParts: string[] = [];
+  if (toolStats.responses > 0) summaryToolParts.push(`${toolStats.responses} responses`);
+  if (toolStats.totalTools > 0) summaryToolParts.push(`${toolStats.totalTools} tools`);
+  if (toolStats.thinking > 0) summaryToolParts.push(`${toolStats.thinking} thinking`);
+
   const summaryLines: SvgTextLine[] = [
     { text: summaryStats, color: C.green },
-    { text: `${meta.stats.toolCalls} tool calls`, color: C.dim },
+    { text: summaryToolParts.join("  ·  "), color: C.dim },
+    { text: condenseLine(breakdown, 60), color: C.orange },
     { text: "", color: C.dim }, // spacer
   ];
   if (opts.replayUrl) {
@@ -583,9 +688,11 @@ function renderSvg(
 
   // Footer
   const duration = formatDuration(session.meta.stats.durationMs);
-  const footerLeft = [duration, `${session.meta.stats.sceneCount} steps`]
-    .filter(Boolean)
-    .join(" · ");
+  const tStats = computeToolStats(session.scenes);
+  const footerParts = [duration];
+  if (tStats.responses > 0) footerParts.push(`${tStats.responses} responses`);
+  if (tStats.totalTools > 0) footerParts.push(`${tStats.totalTools} tools`);
+  const footerLeft = footerParts.filter(Boolean).join(" · ");
   const footerRight = opts.replayUrl ? "View full replay →" : "vibe-replay.com";
 
   // Build frame SVG content

@@ -713,9 +713,9 @@ export async function startServer(
     }
   });
 
-  // Dev mode: fixed port 3456 to match Vite proxy config
+  // Dev mode: fixed port 13456 to match Vite proxy config
   // Production: port 0 lets the OS pick a free port (no conflicts)
-  const requestedPort = opts?.externalViewerUrl ? 3456 : 0;
+  const requestedPort = opts?.externalViewerUrl ? 13456 : 0;
 
   const _server = serve(
     { fetch: app.fetch, port: requestedPort, hostname: "127.0.0.1" },

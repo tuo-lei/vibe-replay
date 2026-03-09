@@ -379,6 +379,15 @@ const GroupCard = memo(function GroupCard({
   );
 });
 
+/** Shorten long MCP-style tool names: mcp__service__method → method */
+function shortToolName(name: string): string {
+  if (name.startsWith("mcp__")) {
+    const parts = name.split("__");
+    return parts[parts.length - 1];
+  }
+  return name;
+}
+
 /**
  * Compact assistant group: shows a summary line (tool/response/thinking counts)
  * plus the last text-response, with an expand button to reveal all scenes.
@@ -400,17 +409,27 @@ function CompactAssistantGroup({
 }) {
   const [expanded, setExpanded] = useState(false);
 
-  // Compute summary stats
+  // Compute detailed summary stats
   const stats = useMemo(() => {
-    let tools = 0;
+    const toolBreakdown: Record<string, number> = {};
+    const bashCommands = new Set<string>();
     let responses = 0;
     let thinking = 0;
+    let totalTools = 0;
     for (const { scene } of filteredScenes) {
-      if (scene.type === "tool-call") tools++;
-      else if (scene.type === "text-response") responses++;
+      if (scene.type === "tool-call") {
+        totalTools++;
+        const displayName = shortToolName(scene.toolName);
+        toolBreakdown[displayName] = (toolBreakdown[displayName] || 0) + 1;
+        // Extract Bash command names
+        if (scene.toolName === "Bash" && scene.input?.command) {
+          const cmd = scene.input.command.trim().split(/[\s|;&]/)[0];
+          if (cmd) bashCommands.add(cmd);
+        }
+      } else if (scene.type === "text-response") responses++;
       else if (scene.type === "thinking") thinking++;
     }
-    return { tools, responses, thinking };
+    return { totalTools, toolBreakdown, responses, thinking, bashCommands: [...bashCommands] };
   }, [filteredScenes]);
 
   // Find the last text-response to show as preview
@@ -423,11 +442,19 @@ function CompactAssistantGroup({
     return null;
   }, [filteredScenes]);
 
-  const summaryParts: string[] = [];
-  if (stats.tools > 0) summaryParts.push(`${stats.tools} tool${stats.tools > 1 ? "s" : ""}`);
-  if (stats.responses > 0)
-    summaryParts.push(`${stats.responses} response${stats.responses > 1 ? "s" : ""}`);
-  if (stats.thinking > 0) summaryParts.push(`${stats.thinking} thinking`);
+  // Ordered tool names for display (common ones first)
+  const sortedToolEntries = useMemo(() => {
+    const order = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Agent"];
+    const entries = Object.entries(stats.toolBreakdown);
+    entries.sort((a, b) => {
+      const ai = order.indexOf(a[0]);
+      const bi = order.indexOf(b[0]);
+      const ao = ai >= 0 ? ai : 100;
+      const bo = bi >= 0 ? bi : 100;
+      return ao - bo;
+    });
+    return entries;
+  }, [stats.toolBreakdown]);
 
   return (
     <div
@@ -450,7 +477,45 @@ function CompactAssistantGroup({
             {formatTime(group.timestamp)}
           </span>
         )}
-        <span className="text-xs font-mono text-terminal-dimmer">{summaryParts.join(" · ")}</span>
+      </div>
+
+      {/* Compact stats bar */}
+      <div className="flex flex-wrap items-center gap-1.5 mb-3 text-[11px] font-mono">
+        {stats.responses > 0 && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-terminal-blue-subtle text-terminal-blue">
+            {stats.responses} response{stats.responses > 1 ? "s" : ""}
+          </span>
+        )}
+        {stats.totalTools > 0 && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-terminal-orange-subtle text-terminal-orange">
+            {stats.totalTools} tool{stats.totalTools > 1 ? "s" : ""}
+          </span>
+        )}
+        {stats.thinking > 0 && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-terminal-purple-subtle text-terminal-purple">
+            {stats.thinking} thinking
+          </span>
+        )}
+        {sortedToolEntries.length > 0 && (
+          <>
+            <span className="text-terminal-border mx-0.5">|</span>
+            {sortedToolEntries.map(([name, count]) => (
+              <span
+                key={name}
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-terminal-surface-hover text-terminal-dim"
+              >
+                <span className="text-terminal-orange">{name}</span>
+                {name === "Bash" && stats.bashCommands.length > 0 && (
+                  <span className="text-terminal-dimmer">
+                    ({stats.bashCommands.slice(0, 4).join(", ")}
+                    {stats.bashCommands.length > 4 ? ", ..." : ""})
+                  </span>
+                )}
+                <span>{count}</span>
+              </span>
+            ))}
+          </>
+        )}
       </div>
 
       {/* Last text-response preview (always shown) */}
@@ -479,7 +544,7 @@ function CompactAssistantGroup({
         onClick={() => setExpanded(!expanded)}
         className="text-xs font-mono text-terminal-dim hover:text-terminal-blue transition-colors"
       >
-        {expanded ? "Collapse" : `Expand ${summaryParts.join(" · ")}`}
+        {expanded ? "Collapse" : "Show all details"}
       </button>
     </div>
   );
