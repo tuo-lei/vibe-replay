@@ -117,29 +117,30 @@ describe("generateGitHubMarkdown", () => {
     expect(md).toContain("> **Add rate limiting to the login endpoint**");
   });
 
-  it("groups consecutive reads", () => {
+  it("shows per-phase compact tool stats", () => {
     const session = makeSession();
     const md = generateGitHubMarkdown(session);
 
-    // Should group the two consecutive reads into one line
-    expect(md).toContain("Read `auth.ts`, `routes.ts`");
+    // Phase 1: 2 reads + 1 edit + 1 write + 1 thinking + 1 response
+    expect(md).toContain("Read 2");
+    expect(md).toContain("Write 1");
+    expect(md).toContain("Edit 1");
   });
 
-  it("shows file operations", () => {
+  it("shows per-phase bash breakdown", () => {
     const session = makeSession();
     const md = generateGitHubMarkdown(session);
 
-    expect(md).toContain("Edit `auth.ts`");
-    expect(md).toContain("Create `Login.tsx`");
+    // Phase 2 has 2 Bash calls (pnpm test)
+    expect(md).toContain("Bash (pnpm) 2");
   });
 
-  it("shows test pass/fail", () => {
+  it("shows last text response as preview", () => {
     const session = makeSession();
     const md = generateGitHubMarkdown(session);
 
-    expect(md).toContain("Run `pnpm test`");
-    expect(md).toMatch(/failed/i);
-    expect(md).toMatch(/passed/i);
+    // Phase 1's last text response
+    expect(md).toContain("I've implemented the auth middleware");
   });
 
   it("includes replay URL when provided", () => {

@@ -319,16 +319,22 @@ const GroupCard = memo(function GroupCard({
 
   if (filteredScenes.length === 0) return null;
 
+  // All scenes in the group (unfiltered by visibleCount) — for stable stats
+  const allGroupScenes = effectivePrefs.hideThinking
+    ? group.scenes.filter((s) => s.scene.type !== "thinking")
+    : group.scenes;
+
   // Compact mode: show summary + last text-response, expandable
   if (effectivePrefs.compactAssistant) {
     return (
       <CompactAssistantGroup
-        group={group}
+        allScenes={allGroupScenes}
         filteredScenes={filteredScenes}
         firstIndex={firstIndex}
         currentIndex={currentIndex}
         groupHasCurrent={groupHasCurrent}
         groupHasFocusedTarget={groupHasFocusedTarget}
+        timestamp={group.timestamp}
       />
     );
   }
@@ -389,39 +395,42 @@ function shortToolName(name: string): string {
 }
 
 /**
- * Compact assistant group: shows a summary line (tool/response/thinking counts)
- * plus the last text-response, with an expand button to reveal all scenes.
+ * Compact assistant group: shows a STABLE summary (computed from ALL scenes
+ * in the group, not just visible ones) plus the last text-response preview.
  */
 function CompactAssistantGroup({
-  group,
+  allScenes,
   filteredScenes,
   firstIndex,
   currentIndex,
   groupHasCurrent,
   groupHasFocusedTarget,
+  timestamp,
 }: {
-  group: TurnGroup;
+  /** All scenes in the group — used for stable stats (not affected by playback progress) */
+  allScenes: { scene: Scene; index: number }[];
+  /** Scenes visible so far (filtered by visibleCount + prefs) — used for expand view */
   filteredScenes: { scene: Scene; index: number }[];
   firstIndex: number;
   currentIndex: number;
   groupHasCurrent: boolean;
   groupHasFocusedTarget: boolean;
+  timestamp?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
 
-  // Compute detailed summary stats
+  // Compute stats from ALL scenes (stable — doesn't change during playback)
   const stats = useMemo(() => {
     const toolBreakdown: Record<string, number> = {};
     const bashCommands = new Set<string>();
     let responses = 0;
     let thinking = 0;
     let totalTools = 0;
-    for (const { scene } of filteredScenes) {
+    for (const { scene } of allScenes) {
       if (scene.type === "tool-call") {
         totalTools++;
         const displayName = shortToolName(scene.toolName);
         toolBreakdown[displayName] = (toolBreakdown[displayName] || 0) + 1;
-        // Extract Bash command names
         if (scene.toolName === "Bash" && scene.input?.command) {
           const cmd = scene.input.command.trim().split(/[\s|;&]/)[0];
           if (cmd) bashCommands.add(cmd);
@@ -430,17 +439,17 @@ function CompactAssistantGroup({
       else if (scene.type === "thinking") thinking++;
     }
     return { totalTools, toolBreakdown, responses, thinking, bashCommands: [...bashCommands] };
-  }, [filteredScenes]);
+  }, [allScenes]);
 
-  // Find the last text-response to show as preview
+  // Find the last text-response from ALL scenes (stable preview)
   const lastTextResponse = useMemo(() => {
-    for (let i = filteredScenes.length - 1; i >= 0; i--) {
-      if (filteredScenes[i].scene.type === "text-response") {
-        return filteredScenes[i];
+    for (let i = allScenes.length - 1; i >= 0; i--) {
+      if (allScenes[i].scene.type === "text-response") {
+        return allScenes[i];
       }
     }
     return null;
-  }, [filteredScenes]);
+  }, [allScenes]);
 
   // Ordered tool names for display (common ones first)
   const sortedToolEntries = useMemo(() => {
@@ -472,14 +481,12 @@ function CompactAssistantGroup({
         <span className="text-[10px] font-sans font-semibold text-terminal-blue uppercase tracking-widest">
           Assistant
         </span>
-        {group.timestamp && (
-          <span className="text-xs font-mono text-terminal-dimmer">
-            {formatTime(group.timestamp)}
-          </span>
+        {timestamp && (
+          <span className="text-xs font-mono text-terminal-dimmer">{formatTime(timestamp)}</span>
         )}
       </div>
 
-      {/* Compact stats bar */}
+      {/* Compact stats bar — stable, computed from ALL scenes */}
       <div className="flex flex-wrap items-center gap-1.5 mb-3 text-[11px] font-mono">
         {stats.responses > 0 && (
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-terminal-blue-subtle text-terminal-blue">
@@ -518,7 +525,7 @@ function CompactAssistantGroup({
         )}
       </div>
 
-      {/* Last text-response preview (always shown) */}
+      {/* Last text-response preview (stable — from all scenes) */}
       {lastTextResponse && !expanded && (
         <div className="mb-2">
           <TextResponseBlock
@@ -528,7 +535,7 @@ function CompactAssistantGroup({
         </div>
       )}
 
-      {/* Expanded: show all scenes */}
+      {/* Expanded: show visible scenes so far */}
       {expanded && (
         <div className="space-y-2 mb-2">
           {filteredScenes.map(({ scene, index }) => (

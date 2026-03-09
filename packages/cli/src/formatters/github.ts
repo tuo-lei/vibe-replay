@@ -68,7 +68,7 @@ export function generateGitHubMarkdown(
   }
   lines.push("");
 
-  // ── Collapsible body ──
+  // ── Collapsible body (compact format) ──
   lines.push("<details>");
   lines.push(
     `<summary>View session details (${meta.stats.userPrompts} prompts, ${meta.stats.toolCalls} tool calls)</summary>`,
@@ -77,11 +77,25 @@ export function generateGitHubMarkdown(
 
   for (const phase of phases) {
     lines.push(`> **${escMd(condenseLine(phase.prompt, 120))}**`);
-    lines.push("");
 
-    const formatted = formatActionsMarkdown(phase.actions, 8);
-    for (const a of formatted) {
-      lines.push(`- ${a}`);
+    // Per-phase compact stats
+    const phaseStats = computeToolStats(phase.scenes);
+    const phaseParts: string[] = [];
+    if (phaseStats.responses > 0) phaseParts.push(`${phaseStats.responses} responses`);
+    if (phaseStats.totalTools > 0) phaseParts.push(`${phaseStats.totalTools} tools`);
+    if (phaseStats.thinking > 0) phaseParts.push(`${phaseStats.thinking} thinking`);
+    const phaseBreakdown = formatToolBreakdown(phaseStats);
+    if (phaseBreakdown) {
+      lines.push(`> ${phaseParts.join(" · ")} — ${phaseBreakdown}`);
+    } else if (phaseParts.length > 0) {
+      lines.push(`> ${phaseParts.join(" · ")}`);
+    }
+
+    // Last meaningful text response as preview
+    const lastText = findLastTextResponse(phase.scenes);
+    if (lastText) {
+      lines.push(">");
+      lines.push(`> *${escMd(condenseLine(lastText, 120))}*`);
     }
     lines.push("");
   }
@@ -182,6 +196,17 @@ function shortToolName(name: string): string {
   return name;
 }
 
+/** Find the last meaningful text-response in a list of scenes */
+function findLastTextResponse(scenes: Scene[]): string | null {
+  for (let i = scenes.length - 1; i >= 0; i--) {
+    if (scenes[i].type === "text-response") {
+      const text = scenes[i].content.trim();
+      if (text.length > 10) return text;
+    }
+  }
+  return null;
+}
+
 /** Format tool breakdown as a single string: "Read 26 · Edit 52 · Bash (git, pnpm) 10" */
 function formatToolBreakdown(stats: ToolStats): string {
   return stats.toolBreakdown
@@ -201,6 +226,8 @@ function formatToolBreakdown(stats: ToolStats): string {
 interface Phase {
   prompt: string;
   actions: GroupedAction[];
+  /** Raw scenes in this phase (for computing per-phase tool stats) */
+  scenes: Scene[];
 }
 
 type GroupedAction =
@@ -213,7 +240,7 @@ type GroupedAction =
 
 function extractPhases(scenes: Scene[]): Phase[] {
   const phases: Phase[] = [];
-  let current: { prompt: string; rawActions: RawAction[] } | null = null;
+  let current: { prompt: string; rawActions: RawAction[]; scenes: Scene[] } | null = null;
 
   for (const scene of scenes) {
     if (scene.type === "user-prompt") {
@@ -221,13 +248,15 @@ function extractPhases(scenes: Scene[]): Phase[] {
         phases.push({
           prompt: current.prompt,
           actions: groupActions(current.rawActions),
+          scenes: current.scenes,
         });
       }
-      current = { prompt: scene.content, rawActions: [] };
+      current = { prompt: scene.content, rawActions: [], scenes: [] };
       continue;
     }
 
     if (!current) continue;
+    current.scenes.push(scene);
 
     if (scene.type === "tool-call") {
       const action = parseToolCall(scene);
@@ -259,6 +288,7 @@ function extractPhases(scenes: Scene[]): Phase[] {
     phases.push({
       prompt: current.prompt,
       actions: groupActions(current.rawActions),
+      scenes: current.scenes,
     });
   }
 
