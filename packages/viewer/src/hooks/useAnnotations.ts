@@ -25,8 +25,11 @@ export interface AnnotationActions {
   publishGist: (() => Promise<{ gistUrl: string; viewerUrl: string }>) | null;
   /** Editor mode: export HTML via server API */
   exportHtml: (() => Promise<string>) | null;
+  /** Editor mode: export GitHub markdown+SVG via server API */
+  exportGithub: (() => Promise<{ markdown: string; svgPath: string; mdPath: string }>) | null;
   gistPublishing: boolean;
   htmlExporting: boolean;
+  githubExporting: boolean;
   /** Editor mode: detected AI Coach tool info (null if unavailable) */
   aiCoachTool: { name: string } | null;
   /** Editor mode: available AI Coach tool options */
@@ -326,6 +329,28 @@ export function useAnnotations(
       }
     : null;
 
+  // Editor mode: server-side GitHub export
+  const [githubExporting, setGithubExporting] = useState(false);
+  const exportGithub = isEditor
+    ? async () => {
+        setGithubExporting(true);
+        try {
+          await fetch(apiUrl("/api/annotations"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(annotations),
+          });
+          const resp = await fetch(apiUrl("/api/export/github"), { method: "POST" });
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data.error || `Export failed: ${resp.status}`);
+          setSavedSnapshot(annotations);
+          return data as { markdown: string; svgPath: string; mdPath: string };
+        } finally {
+          setGithubExporting(false);
+        }
+      }
+    : null;
+
   return {
     annotations,
     annotatedScenes,
@@ -339,8 +364,10 @@ export function useAnnotations(
     downloadJson,
     publishGist,
     exportHtml,
+    exportGithub,
     gistPublishing,
     htmlExporting,
+    githubExporting,
     aiCoachTool,
     aiCoachTools,
     aiCoachToolName,

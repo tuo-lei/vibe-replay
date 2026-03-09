@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAnnotations } from "../hooks/useAnnotations";
 import { usePlayback } from "../hooks/usePlayback";
 import type { ViewerMode } from "../hooks/useSessionLoader";
-import type { ViewPrefs } from "../hooks/useViewPrefs";
+import { getEffectivePrefs, type ViewPrefs } from "../hooks/useViewPrefs";
 import type { ReplaySession } from "../types";
 import AnnotationPanel from "./AnnotationPanel";
 import Controls from "./Controls";
@@ -53,6 +53,8 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
   const [commentTargetScene, setCommentTargetScene] = useState<number | null>(null);
   const annotationActions = useAnnotations(session, viewerMode);
 
+  const effectivePrefs = getEffectivePrefs(viewPrefs);
+
   const {
     state,
     currentIndex,
@@ -65,7 +67,7 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
     changeSpeed,
     totalScenes,
     userPromptIndices,
-  } = usePlayback(session.scenes, viewPrefs.promptsOnly, landed);
+  } = usePlayback(session.scenes, effectivePrefs.promptsOnly, landed);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [sidebarTab, setSidebarTab] = useState<"outline" | "stats" | "comments">("outline");
@@ -92,6 +94,16 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
   const currentTurn = userPromptIndices.filter((i) => i <= currentIndex).length || 0;
   const userPromptCount = userPromptIndices.length;
 
+  // Find a good initial scene index that fills the viewport
+  // (end of first assistant group, or second user prompt, whichever comes first)
+  const initialSeekIndex = useMemo(() => {
+    if (userPromptIndices.length >= 2) {
+      return userPromptIndices[1];
+    }
+    // Fallback: show all scenes up to index 15 or total
+    return Math.min(15, session.scenes.length - 1);
+  }, [userPromptIndices, session.scenes.length]);
+
   // Start playback when user dismisses landing page
   // autoPlay=true (button click) → play immediately
   // autoPlay=false (scroll/swipe) → show first scene paused, let user control
@@ -101,11 +113,23 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
       if (autoPlay) {
         setTimeout(play, 300);
       } else {
-        setTimeout(() => seekTo(0), 100);
+        setTimeout(() => seekTo(initialSeekIndex), 100);
       }
     },
-    [play, seekTo],
+    [play, seekTo, initialSeekIndex],
   );
+
+  // Auto-land when user changes display mode from the header while on landing page
+  const prevModeRef = useRef(viewPrefs.displayMode);
+  useEffect(() => {
+    if (prevModeRef.current !== viewPrefs.displayMode) {
+      prevModeRef.current = viewPrefs.displayMode;
+      if (!landed) {
+        setLanded(true);
+        setTimeout(() => seekTo(initialSeekIndex), 100);
+      }
+    }
+  }, [viewPrefs.displayMode, landed, seekTo, initialSeekIndex]);
 
   const seekFromNavigation = useCallback(
     (index: number) => {
@@ -371,7 +395,7 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
                 scenes={session.scenes}
                 visibleCount={visibleCount}
                 currentIndex={currentIndex}
-                viewPrefs={viewPrefs}
+                effectivePrefs={effectivePrefs}
                 focusIndex={navFocusIndex}
                 annotatedScenes={annotationActions.annotatedScenes}
                 annotationCounts={annotationActions.annotationCounts}

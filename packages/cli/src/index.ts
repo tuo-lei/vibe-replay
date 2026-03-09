@@ -2,6 +2,7 @@ import { Separator, select } from "@inquirer/prompts";
 import chalk from "chalk";
 import { program } from "commander";
 import ora from "ora";
+import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.js";
 import { generateOutput } from "./generator.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
 import { checkGhStatus, loadSavedGistInfo, publishGist } from "./publishers/gist.js";
@@ -172,10 +173,10 @@ program
       }
     }
 
-    // Output path: ~/.vibe-replay/<slug>/index.html
+    // Common output path
+    const { join } = await import("node:path");
     const rawSlug = replay.meta.slug || replay.meta.sessionId.slice(0, 8);
     const slug = rawSlug.replace(/[^a-zA-Z0-9_-]/g, "-");
-    const { join } = await import("node:path");
     const outputDir = join(home, ".vibe-replay", slug);
 
     const genSpinner = ora("Generating replay...").start();
@@ -221,7 +222,10 @@ program
 
     // Publish target
     console.log();
-    const choices: { name: string; value: "local" | "editor" | "gist" | "exit" }[] = [
+    const choices: {
+      name: string;
+      value: "local" | "editor" | "gist" | "github" | "exit";
+    }[] = [
       {
         name: `${chalk.magenta("✎")} Open in Editor ${chalk.dim("(annotate, publish, export)")}`,
         value: "editor" as const,
@@ -231,6 +235,10 @@ program
         value: "local" as const,
       },
       { name: gistLabel, value: "gist" as const },
+      {
+        name: `${chalk.yellow("★")} Export for GitHub ${chalk.dim("(markdown + animated SVG for PRs)")}`,
+        value: "github" as const,
+      },
       { name: `${chalk.dim("✕")} Exit`, value: "exit" as const },
     ];
 
@@ -303,6 +311,47 @@ program
           }
         }
       }
+    } else if (target === "github") {
+      const { mkdir, writeFile } = await import("node:fs/promises");
+      await mkdir(outputDir, { recursive: true });
+
+      // Auto-detect replay URL from previously published gist
+      const savedGist = await loadSavedGistInfo(outputDir);
+      const replayUrl = savedGist?.viewerUrl;
+
+      // Generate animated SVG
+      const svgSpinner2 = ora("Generating animated SVG...").start();
+      const svgContent = generateGitHubSvg(replay, { replayUrl });
+      const svgFilePath = join(outputDir, "session-preview.svg");
+      await writeFile(svgFilePath, svgContent, "utf-8");
+      svgSpinner2.succeed(`SVG: ${svgFilePath}`);
+
+      // Generate markdown
+      const mdSpinner = ora("Generating GitHub markdown...").start();
+      const markdown = generateGitHubMarkdown(replay, {
+        replayUrl,
+        svgPath: "./session-preview.svg",
+      });
+      const mdFilePath = join(outputDir, "github-summary.md");
+      await writeFile(mdFilePath, markdown, "utf-8");
+      mdSpinner.succeed(`Markdown: ${mdFilePath}`);
+
+      // Print preview
+      console.log();
+      console.log(chalk.dim("  ─── Preview ───"));
+      console.log();
+      console.log(markdown);
+      console.log();
+      console.log(chalk.bold.green("  Done!"));
+      console.log(chalk.dim("  Files: ") + chalk.white(outputDir));
+      console.log(
+        chalk.dim("  Tip: ") +
+          chalk.white(
+            "Copy session-preview.svg to your repo, then paste the markdown into your PR",
+          ),
+      );
+      console.log();
+      return;
     }
 
     // Final summary

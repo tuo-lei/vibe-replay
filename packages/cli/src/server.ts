@@ -9,6 +9,7 @@ import { Hono } from "hono";
 import open from "open";
 import { cleanPromptText } from "./clean-prompt.js";
 import { detectFeedbackTools, generateFeedback } from "./feedback.js";
+import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.js";
 import { generateOutput } from "./generator.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
 import {
@@ -600,6 +601,48 @@ export async function startServer(
     }
   });
 
+  // Export GitHub markdown + SVG (requires slug)
+  app.post("/api/export/github", async (c) => {
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetDir = join(baseDir, result.slug);
+
+    try {
+      const targetSession = await loadSessionFromDisk(baseDir, result.slug);
+
+      // Check for a previously published gist to use as replay URL
+      const gist = await loadSavedGistInfo(targetDir);
+      const replayUrl = gist?.viewerUrl || undefined;
+
+      // Generate SVG
+      const svgContent = generateGitHubSvg(targetSession, { replayUrl });
+      const svgFilePath = join(targetDir, "session-preview.svg");
+      await writeFile(svgFilePath, svgContent, "utf-8");
+
+      // Generate markdown
+      const markdown = generateGitHubMarkdown(targetSession, {
+        replayUrl,
+        svgPath: "./session-preview.svg",
+      });
+      const mdFilePath = join(targetDir, "github-summary.md");
+      await writeFile(mdFilePath, markdown, "utf-8");
+
+      // Secret scan warnings
+      const findings = scanForSecrets(JSON.stringify(targetSession));
+      const warnings = findings.map((f) => `[${f.rule}] ${f.match}`);
+
+      return c.json({
+        markdown,
+        svgPath: svgFilePath,
+        mdPath: mdFilePath,
+        replayUrl,
+        warnings: warnings.length > 0 ? warnings : undefined,
+      });
+    } catch (err: any) {
+      return c.json({ error: err.message || "GitHub export failed" }, 500);
+    }
+  });
+
   // AI Feedback — detect available CLI tools
   app.get("/api/feedback/detect", async (c) => {
     try {
@@ -670,9 +713,9 @@ export async function startServer(
     }
   });
 
-  // Dev mode: fixed port 3456 to match Vite proxy config
+  // Dev mode: fixed port 13456 to match Vite proxy config
   // Production: port 0 lets the OS pick a free port (no conflicts)
-  const requestedPort = opts?.externalViewerUrl ? 3456 : 0;
+  const requestedPort = opts?.externalViewerUrl ? 13456 : 0;
 
   const _server = serve(
     { fetch: app.fetch, port: requestedPort, hostname: "127.0.0.1" },

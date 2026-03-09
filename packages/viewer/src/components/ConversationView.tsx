@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import type { ViewPrefs } from "../hooks/useViewPrefs";
+import type { EffectivePrefs } from "../hooks/useViewPrefs";
 import type { Scene } from "../types";
 import CompactionSummaryBlock from "./CompactionSummaryBlock";
 import TextResponseBlock from "./TextResponseBlock";
@@ -11,7 +11,7 @@ interface Props {
   scenes: Scene[];
   visibleCount: number;
   currentIndex: number;
-  viewPrefs: ViewPrefs;
+  effectivePrefs: EffectivePrefs;
   focusIndex?: number;
   annotatedScenes?: Set<number>;
   annotationCounts?: Map<number, number>;
@@ -43,7 +43,7 @@ export default function ConversationView({
   scenes,
   visibleCount,
   currentIndex,
-  viewPrefs,
+  effectivePrefs,
   focusIndex,
   annotatedScenes,
   annotationCounts,
@@ -80,15 +80,15 @@ export default function ConversationView({
     return result;
   }, [scenes]);
 
-  // Only show groups that have visible scenes, filtered by viewPrefs
+  // Only show groups that have visible scenes, filtered by effectivePrefs
   const displayGroups = useMemo(() => {
-    if (viewPrefs.promptsOnly) {
+    if (effectivePrefs.promptsOnly) {
       return allGroups.filter(
         (g) => (g.type === "user" || g.type === "compaction") && g.scenes[0].index < visibleCount,
       );
     }
     return allGroups.filter((g) => g.scenes[0].index < visibleCount);
-  }, [allGroups, visibleCount, viewPrefs.promptsOnly]);
+  }, [allGroups, visibleCount, effectivePrefs.promptsOnly]);
 
   // Find which group contains the currentIndex
   const currentGroupIdx = useMemo(() => {
@@ -108,7 +108,7 @@ export default function ConversationView({
             group={group}
             currentIndex={currentIndex}
             visibleCount={visibleCount}
-            viewPrefs={viewPrefs}
+            effectivePrefs={effectivePrefs}
             focusIndex={focusIndex}
             annotatedScenes={annotatedScenes}
             annotationCounts={annotationCounts}
@@ -177,7 +177,7 @@ const GroupCard = memo(function GroupCard({
   group,
   currentIndex,
   visibleCount,
-  viewPrefs,
+  effectivePrefs,
   focusIndex,
   annotatedScenes: _annotatedScenes,
   annotationCounts,
@@ -186,7 +186,7 @@ const GroupCard = memo(function GroupCard({
   group: TurnGroup;
   currentIndex: number;
   visibleCount: number;
-  viewPrefs: ViewPrefs;
+  effectivePrefs: EffectivePrefs;
   focusIndex?: number;
   annotatedScenes?: Set<number>;
   annotationCounts?: Map<number, number>;
@@ -216,7 +216,7 @@ const GroupCard = memo(function GroupCard({
           e.stopPropagation();
           onComment(firstIndex);
         }}
-        className={`absolute -right-2 top-3 z-10 flex items-center gap-1 px-1.5 py-1 rounded-md text-xs font-mono transition-all duration-150 ${
+        className={`absolute right-0 top-3 z-10 flex items-center gap-1 px-1.5 py-1 rounded-md text-xs font-mono transition-all duration-150 ${
           userCommentCount > 0
             ? "bg-terminal-blue text-terminal-bg shadow-layer-sm"
             : "text-terminal-dim hover:text-terminal-blue hover:bg-terminal-blue-subtle opacity-0 group-hover:opacity-100"
@@ -274,7 +274,7 @@ const GroupCard = memo(function GroupCard({
             <SceneBlock
               scene={scene}
               isActive={index === currentIndex}
-              collapseTools={viewPrefs.collapseAllTools}
+              collapseTools={effectivePrefs.collapseAllTools}
             />
           </div>
         ))}
@@ -312,12 +312,32 @@ const GroupCard = memo(function GroupCard({
     );
   }
 
-  // Assistant group — filter by viewPrefs
-  const filteredScenes = viewPrefs.hideThinking
+  // Assistant group — filter by effectivePrefs
+  const filteredScenes = effectivePrefs.hideThinking
     ? visibleScenes.filter((s) => s.scene.type !== "thinking")
     : visibleScenes;
 
   if (filteredScenes.length === 0) return null;
+
+  // All scenes in the group (unfiltered by visibleCount) — for stable stats
+  const allGroupScenes = effectivePrefs.hideThinking
+    ? group.scenes.filter((s) => s.scene.type !== "thinking")
+    : group.scenes;
+
+  // Compact mode: show summary + last text-response, expandable
+  if (effectivePrefs.compactAssistant) {
+    return (
+      <CompactAssistantGroup
+        allScenes={allGroupScenes}
+        filteredScenes={filteredScenes}
+        firstIndex={firstIndex}
+        currentIndex={currentIndex}
+        groupHasCurrent={groupHasCurrent}
+        groupHasFocusedTarget={groupHasFocusedTarget}
+        timestamp={group.timestamp}
+      />
+    );
+  }
 
   return (
     <div
@@ -356,7 +376,7 @@ const GroupCard = memo(function GroupCard({
         <BatchedScenes
           scenes={filteredScenes}
           currentIndex={currentIndex}
-          collapseTools={viewPrefs.collapseAllTools}
+          collapseTools={effectivePrefs.collapseAllTools}
           annotationCounts={annotationCounts}
           onComment={onComment}
         />
@@ -364,6 +384,178 @@ const GroupCard = memo(function GroupCard({
     </div>
   );
 });
+
+/** Shorten long MCP-style tool names: mcp__service__method → method */
+function shortToolName(name: string): string {
+  if (name.startsWith("mcp__")) {
+    const parts = name.split("__");
+    return parts[parts.length - 1];
+  }
+  return name;
+}
+
+/**
+ * Compact assistant group: shows a STABLE summary (computed from ALL scenes
+ * in the group, not just visible ones) plus the last text-response preview.
+ */
+function CompactAssistantGroup({
+  allScenes,
+  filteredScenes,
+  firstIndex,
+  currentIndex,
+  groupHasCurrent,
+  groupHasFocusedTarget,
+  timestamp,
+}: {
+  /** All scenes in the group — used for stable stats (not affected by playback progress) */
+  allScenes: { scene: Scene; index: number }[];
+  /** Scenes visible so far (filtered by visibleCount + prefs) — used for expand view */
+  filteredScenes: { scene: Scene; index: number }[];
+  firstIndex: number;
+  currentIndex: number;
+  groupHasCurrent: boolean;
+  groupHasFocusedTarget: boolean;
+  timestamp?: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  // Compute stats from ALL scenes (stable — doesn't change during playback)
+  const stats = useMemo(() => {
+    const toolBreakdown: Record<string, number> = {};
+    const bashCommands = new Set<string>();
+    let responses = 0;
+    let thinking = 0;
+    let totalTools = 0;
+    for (const { scene } of allScenes) {
+      if (scene.type === "tool-call") {
+        totalTools++;
+        const displayName = shortToolName(scene.toolName);
+        toolBreakdown[displayName] = (toolBreakdown[displayName] || 0) + 1;
+        if (scene.toolName === "Bash" && scene.input?.command) {
+          const cmd = scene.input.command.trim().split(/[\s|;&]/)[0];
+          if (cmd) bashCommands.add(cmd);
+        }
+      } else if (scene.type === "text-response") responses++;
+      else if (scene.type === "thinking") thinking++;
+    }
+    return { totalTools, toolBreakdown, responses, thinking, bashCommands: [...bashCommands] };
+  }, [allScenes]);
+
+  // Find the last text-response from ALL scenes (stable preview)
+  const lastTextResponse = useMemo(() => {
+    for (let i = allScenes.length - 1; i >= 0; i--) {
+      if (allScenes[i].scene.type === "text-response") {
+        return allScenes[i];
+      }
+    }
+    return null;
+  }, [allScenes]);
+
+  // Ordered tool names for display (common ones first)
+  const sortedToolEntries = useMemo(() => {
+    const order = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Agent"];
+    const entries = Object.entries(stats.toolBreakdown);
+    entries.sort((a, b) => {
+      const ai = order.indexOf(a[0]);
+      const bi = order.indexOf(b[0]);
+      const ao = ai >= 0 ? ai : 100;
+      const bo = bi >= 0 ? bi : 100;
+      return ao - bo;
+    });
+    return entries;
+  }, [stats.toolBreakdown]);
+
+  return (
+    <div
+      id={`scene-${firstIndex}`}
+      data-scene-index={firstIndex}
+      className={`relative rounded-xl px-5 py-4 transition-all duration-200 ease-material ${
+        groupHasFocusedTarget
+          ? "scene-nav-focused bg-terminal-blue-subtle border-l-2 border-terminal-blue shadow-layer-lg"
+          : groupHasCurrent
+            ? "bg-terminal-blue-subtle border-l-2 border-terminal-blue shadow-layer-sm"
+            : "bg-terminal-surface shadow-layer-sm"
+      }`}
+    >
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-[10px] font-sans font-semibold text-terminal-blue uppercase tracking-widest">
+          Assistant
+        </span>
+        {timestamp && (
+          <span className="text-xs font-mono text-terminal-dimmer">{formatTime(timestamp)}</span>
+        )}
+      </div>
+
+      {/* Compact stats bar — stable, computed from ALL scenes */}
+      <div className="flex flex-wrap items-center gap-1.5 mb-3 text-[11px] font-mono">
+        {stats.responses > 0 && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-terminal-blue-subtle text-terminal-blue">
+            {stats.responses} response{stats.responses > 1 ? "s" : ""}
+          </span>
+        )}
+        {stats.totalTools > 0 && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-terminal-orange-subtle text-terminal-orange">
+            {stats.totalTools} tool{stats.totalTools > 1 ? "s" : ""}
+          </span>
+        )}
+        {stats.thinking > 0 && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-terminal-purple-subtle text-terminal-purple">
+            {stats.thinking} thinking
+          </span>
+        )}
+        {sortedToolEntries.length > 0 && (
+          <>
+            <span className="text-terminal-border mx-0.5">|</span>
+            {sortedToolEntries.map(([name, count]) => (
+              <span
+                key={name}
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-terminal-surface-hover text-terminal-dim"
+              >
+                <span className="text-terminal-orange">{name}</span>
+                {name === "Bash" && stats.bashCommands.length > 0 && (
+                  <span className="text-terminal-dimmer">
+                    ({stats.bashCommands.slice(0, 4).join(", ")}
+                    {stats.bashCommands.length > 4 ? ", ..." : ""})
+                  </span>
+                )}
+                <span>{count}</span>
+              </span>
+            ))}
+          </>
+        )}
+      </div>
+
+      {/* Last text-response preview (stable — from all scenes) */}
+      {lastTextResponse && !expanded && (
+        <div className="mb-2">
+          <TextResponseBlock
+            content={lastTextResponse.scene.content}
+            isActive={lastTextResponse.index === currentIndex}
+          />
+        </div>
+      )}
+
+      {/* Expanded: show visible scenes so far */}
+      {expanded && (
+        <div className="space-y-2 mb-2">
+          {filteredScenes.map(({ scene, index }) => (
+            <div key={index} data-scene-index={index} className="scene-enter">
+              <SceneBlock scene={scene} isActive={index === currentIndex} collapseTools={false} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Expand/collapse toggle */}
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="text-xs font-mono text-terminal-dim hover:text-terminal-blue transition-colors"
+      >
+        {expanded ? "Collapse" : "Show all details"}
+      </button>
+    </div>
+  );
+}
 
 /**
  * Batch consecutive tool calls of the same type into a collapsible group.
@@ -414,7 +606,11 @@ function BatchedScenes({
           const { scene, index } = batch[0];
           const count = annotationCounts?.get(index) || 0;
           return (
-            <div key={index} data-scene-index={index} className="group/scene relative scene-enter">
+            <div
+              key={index}
+              data-scene-index={index}
+              className={`group/scene relative scene-enter ${onComment ? "pr-7" : ""}`}
+            >
               <SceneBlock
                 scene={scene}
                 isActive={index === currentIndex}
@@ -426,7 +622,7 @@ function BatchedScenes({
                     e.stopPropagation();
                     onComment(index);
                   }}
-                  className={`absolute -right-2 top-1 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-xs font-mono transition-all duration-150 ${
+                  className={`absolute right-0 top-1 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-xs font-mono transition-all duration-150 ${
                     count > 0
                       ? "bg-terminal-blue text-terminal-bg shadow-layer-sm"
                       : "text-terminal-dim hover:text-terminal-blue hover:bg-terminal-blue-subtle opacity-0 group-hover/scene:opacity-100"
@@ -491,7 +687,10 @@ function ToolBatch({
   });
 
   return (
-    <div data-scene-index={batch[0].index} className="group/batch relative">
+    <div
+      data-scene-index={batch[0].index}
+      className={`group/batch relative ${onComment ? "pr-7" : ""}`}
+    >
       {/* Collapsed summary */}
       <button
         onClick={() => setExpanded(!expanded)}
@@ -518,7 +717,7 @@ function ToolBatch({
             e.stopPropagation();
             onComment(batch[0].index);
           }}
-          className={`absolute -right-2 top-1 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-xs font-mono transition-all duration-150 ${
+          className={`absolute right-0 top-1 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-xs font-mono transition-all duration-150 ${
             batchCommentCount > 0
               ? "bg-terminal-blue text-terminal-bg shadow-layer-sm"
               : "text-terminal-dim hover:text-terminal-blue hover:bg-terminal-blue-subtle opacity-0 group-hover/batch:opacity-100"
@@ -543,7 +742,7 @@ function ToolBatch({
               <div
                 key={index}
                 data-scene-index={index}
-                className="group/scene relative scene-enter"
+                className={`group/scene relative scene-enter ${onComment ? "pr-7" : ""}`}
               >
                 <SceneBlock
                   scene={scene}
@@ -556,7 +755,7 @@ function ToolBatch({
                       e.stopPropagation();
                       onComment(index);
                     }}
-                    className={`absolute -right-2 top-1 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-xs font-mono transition-all duration-150 ${
+                    className={`absolute right-0 top-1 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-xs font-mono transition-all duration-150 ${
                       count > 0
                         ? "bg-terminal-blue text-terminal-bg shadow-layer-sm"
                         : "text-terminal-dim hover:text-terminal-blue hover:bg-terminal-blue-subtle opacity-0 group-hover/scene:opacity-100"

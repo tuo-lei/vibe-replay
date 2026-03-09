@@ -84,8 +84,10 @@ export default function AnnotationPanel({
     downloadJson,
     publishGist,
     exportHtml,
+    exportGithub,
     gistPublishing,
     htmlExporting,
+    githubExporting,
     aiCoachTool,
     aiCoachTools,
     aiCoachToolName,
@@ -448,6 +450,27 @@ export default function AnnotationPanel({
               className="w-full px-2 py-1.5 text-xs font-mono bg-terminal-green-subtle text-terminal-green rounded hover:bg-terminal-green-emphasis transition-colors text-center disabled:opacity-50"
             >
               {htmlExporting ? "Exporting..." : "Export HTML"}
+            </button>
+          )}
+          {exportGithub && (
+            <button
+              onClick={async () => {
+                setStatusMsg(null);
+                try {
+                  const result = await exportGithub();
+                  await navigator.clipboard.writeText(result.markdown);
+                  setStatusMsg({
+                    type: "success",
+                    text: "Markdown copied to clipboard!",
+                  });
+                } catch (e: any) {
+                  setStatusMsg({ type: "error", text: e.message });
+                }
+              }}
+              disabled={githubExporting}
+              className="w-full px-2 py-1.5 text-xs font-mono bg-terminal-orange-subtle text-terminal-orange rounded hover:bg-terminal-orange-emphasis transition-colors text-center disabled:opacity-50"
+            >
+              {githubExporting ? "Exporting..." : "Export for GitHub"}
             </button>
           )}
           {publishGist && ghAvailable && (
