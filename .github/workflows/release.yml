@@ -33,6 +33,4 @@ jobs:
       - run: pnpm build
 
       - name: Publish to npm
-        run: |
-          cd packages/cli
-          npm publish --access public
+        run: pnpm --filter vibe-replay publish --access public --no-git-checks
