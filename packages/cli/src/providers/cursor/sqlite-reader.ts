@@ -267,6 +267,12 @@ export interface GlobalStateDiscoveryResult {
   sessionIds: Set<string>;
 }
 
+export function countComposerConversationHeaders(composer: Record<string, any>): number {
+  return Array.isArray(composer.fullConversationHeadersOnly)
+    ? composer.fullConversationHeadersOnly.length
+    : 0;
+}
+
 /**
  * Discover sessions from Cursor's globalStorage state.vscdb.
  * This is where devcontainer/remote sessions can keep rich `composerData:*`
@@ -305,12 +311,16 @@ export async function discoverGlobalStateOnlySessions(
       const sessionId = key.startsWith("composerData:") ? key.slice("composerData:".length) : "";
       if (!SESSION_ID_RE.test(sessionId)) continue;
 
-      sessionIds.add(sessionId);
-      if (knownSessionIds.has(sessionId)) continue;
-
       const rawComposer = valueToString(value);
       const composer = parseJson<Record<string, any>>(rawComposer);
       if (!composer) continue;
+      const headerCount = countComposerConversationHeaders(composer);
+      // Skip sessions without conversation headers: they cannot be replayed.
+      if (headerCount === 0) continue;
+
+      // Track only replayable global-state sessions for downstream hasSqlite marking.
+      sessionIds.add(sessionId);
+      if (knownSessionIds.has(sessionId)) continue;
 
       const timestamp =
         toIsoTimestamp(composer.lastUpdatedAt) ||
@@ -321,9 +331,6 @@ export async function discoverGlobalStateOnlySessions(
           ? composer.name.trim()
           : undefined;
       const firstPrompt = title || "(cursor global state session)";
-      const headers = Array.isArray(composer.fullConversationHeadersOnly)
-        ? composer.fullConversationHeadersOnly
-        : [];
       const projectPath = await inferProjectFromComposerData(rawComposer, decodedWorkspacePaths);
 
       const sessionInfo: SessionInfo = {
@@ -335,7 +342,7 @@ export async function discoverGlobalStateOnlySessions(
         cwd: projectPath,
         version: "",
         timestamp,
-        lineCount: headers.length,
+        lineCount: headerCount,
         fileSize: Buffer.byteLength(rawComposer, "utf-8"),
         filePath: `${dbPath}#composerData:${sessionId}`,
         filePaths: [],
@@ -656,10 +663,8 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
     const composer = parseJson<Record<string, any>>(rawComposer);
     if (!composer) return null;
 
-    const headers = Array.isArray(composer.fullConversationHeadersOnly)
-      ? composer.fullConversationHeadersOnly
-      : [];
-    if (headers.length === 0) return null;
+    if (countComposerConversationHeaders(composer) === 0) return null;
+    const headers = composer.fullConversationHeadersOnly as any[];
 
     const turns: ParsedTurn[] = [];
     const bubbleStmt = db.prepare("SELECT value FROM cursorDiskKV WHERE key = ?");

@@ -5,6 +5,17 @@ import type { ParsedTurn, SessionInfo } from "../../types.js";
 import type { DataSourceInfo, ProviderParseResult } from "../types.js";
 import { parseCursorSqlite } from "./sqlite-reader.js";
 
+function toErrorMessage(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  return String(err);
+}
+
+function compactErrorMessage(err: unknown, max = 180): string {
+  const cleaned = toErrorMessage(err).replace(/\s+/g, " ").trim();
+  if (cleaned.length <= max) return cleaned;
+  return `${cleaned.slice(0, max)}...`;
+}
+
 export async function parseCursorSession(
   filePaths: string | string[],
   sessionInfo?: SessionInfo,
@@ -12,13 +23,25 @@ export async function parseCursorSession(
   const paths = Array.isArray(filePaths) ? filePaths : [filePaths];
   const transcriptPaths = paths.filter((p) => p.endsWith(".jsonl"));
   const explicitToolPaths = paths.filter((p) => p.endsWith(".txt"));
+  let sqliteError: string | undefined;
+  let sqliteFallbackNote: string | undefined;
+  let sqliteAttempted = false;
 
   // Try SQLite first if session info is available
   if (sessionInfo?.sessionId) {
-    const sqliteResult = await parseCursorSqlite(
-      sessionInfo.workspacePath || "",
-      sessionInfo.sessionId,
-    );
+    sqliteAttempted = true;
+    let sqliteResult: ProviderParseResult | null = null;
+    try {
+      sqliteResult = await parseCursorSqlite(
+        sessionInfo.workspacePath || "",
+        sessionInfo.sessionId,
+      );
+    } catch (err) {
+      // Cursor DB schemas can vary across versions/hosts; fall back to JSONL when available.
+      sqliteError = compactErrorMessage(err);
+      sqliteFallbackNote = `cursor SQLite parse failed (${sqliteError}); fell back to JSONL transcript`;
+      sqliteResult = null;
+    }
     if (sqliteResult) {
       // Keep SQLite/global-state as source of truth, but supplement missing
       // thinking markers and user images from JSONL when transcript files are available.
@@ -47,9 +70,28 @@ export async function parseCursorSession(
 
   // Fallback to JSONL parsing
   if (transcriptPaths.length === 0) {
+    if (sqliteError) {
+      throw new Error(
+        `Cursor parse failed: ${sqliteError}. No transcript .jsonl fallback is available.`,
+      );
+    }
+    if (sqliteAttempted) {
+      throw new Error(
+        "Cursor parse failed: SQLite data unavailable for this session and no transcript .jsonl fallback is available.",
+      );
+    }
     throw new Error("Cursor parse requires at least one transcript .jsonl path");
   }
-  return parseCursorJsonl(transcriptPaths, explicitToolPaths, { inferToolPaths: true });
+  const jsonlResult = await parseCursorJsonl(transcriptPaths, explicitToolPaths, {
+    inferToolPaths: true,
+  });
+  if (sqliteFallbackNote) {
+    jsonlResult.dataSourceInfo = withNote(
+      jsonlResult.dataSourceInfo || defaultDataSourceInfo(jsonlResult.dataSource),
+      sqliteFallbackNote,
+    );
+  }
+  return jsonlResult;
 }
 
 interface ParseJsonlOptions {
@@ -74,6 +116,13 @@ function withSupplement(
   const supplements = [...(info.supplements || [])];
   if (!supplements.includes(supplement)) supplements.push(supplement);
   return { ...info, supplements };
+}
+
+function withNote(info: DataSourceInfo | undefined, note: string): DataSourceInfo | undefined {
+  if (!info) return undefined;
+  const notes = [...(info.notes || [])];
+  if (!notes.includes(note)) notes.push(note);
+  return { ...info, notes };
 }
 
 async function parseCursorJsonl(
