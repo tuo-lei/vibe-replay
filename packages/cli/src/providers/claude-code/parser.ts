@@ -260,6 +260,7 @@ export async function parseClaudeCodeSession(
       totals.cacheCreationTokens += cacheCreate;
       totals.cacheReadTokens += cacheRead;
 
+      // Falls back to session-level model, then "unknown" (priced at Sonnet rates via DEFAULT_PRICING)
       const msgModel = u.model || model || "unknown";
       if (!byModel[msgModel]) {
         byModel[msgModel] = {
@@ -382,9 +383,9 @@ async function readSubagentUsage(
         const obj = JSON.parse(line);
         const msg = obj?.message;
         if (msg?.usage && msg?.id) {
-          // Only update if this message hasn't been seen in the main file.
-          // Subagent files have the complete final usage; progress lines in
-          // the main file are streaming fragments with the same message IDs.
+          // Subagent files contain the complete final usage for subagent messages.
+          // Progress lines in the main file are already skipped (line ~85), so
+          // subagent message IDs won't be in usageByMsgId — unconditional set is safe.
           usageByMsgId.set(msg.id, { ...msg.usage, model: msg.model });
         }
       } catch {}

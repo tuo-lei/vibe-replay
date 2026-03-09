@@ -27,7 +27,7 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
     cacheCreateRate: 18.75,
     cacheReadRate: 1.5,
   },
-  // Sonnet 4.6/4.5
+  // Sonnet 4.6/4.5 — same rates as earlier Sonnet today; separate entry for future divergence
   "sonnet-4-new": {
     inputRate: 3,
     outputRate: 15,

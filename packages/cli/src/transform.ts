@@ -90,6 +90,7 @@ export function transformToReplay(
   if (parsed.tokenUsageByModel) {
     costEstimate = estimateCost(parsed.tokenUsageByModel);
   } else if (parsed.tokenUsage) {
+    // Empty string falls back to Sonnet rates via getModelPricing default
     costEstimate = estimateCostSimple(parsed.tokenUsage, parsed.model || "");
   }
 
