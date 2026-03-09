@@ -405,49 +405,6 @@ function groupActions(raw: RawAction[]): GroupedAction[] {
   return grouped;
 }
 
-// ─── Markdown action formatting ────────────────────────────
-
-function formatActionsMarkdown(actions: GroupedAction[], maxLines: number): string[] {
-  const lines: string[] = [];
-
-  for (const action of actions) {
-    if (lines.length >= maxLines) {
-      lines.push(`*... and ${actions.length - maxLines} more actions*`);
-      break;
-    }
-
-    switch (action.kind) {
-      case "read": {
-        const show = action.files.slice(0, 5);
-        const fileList = show.map((f) => `\`${f}\``).join(", ");
-        const more = action.files.length > 5 ? ` +${action.files.length - 5} more` : "";
-        lines.push(`Read ${fileList}${more}`);
-        break;
-      }
-      case "edit":
-        lines.push(`Edit \`${action.file}\``);
-        break;
-      case "create":
-        lines.push(`Create \`${action.file}\``);
-        break;
-      case "run": {
-        const status =
-          action.passed === true ? " — passed" : action.passed === false ? " — **failed**" : "";
-        lines.push(`Run \`${action.command}\`${status}`);
-        break;
-      }
-      case "search":
-        lines.push(action.description);
-        break;
-      case "text":
-        lines.push(`*${action.summary}*`);
-        break;
-    }
-  }
-
-  return lines;
-}
-
 // ─── Risk signals ──────────────────────────────────────────
 
 function detectRiskSignals(scenes: Scene[], filesChanged: Map<string, number>): string[] {
