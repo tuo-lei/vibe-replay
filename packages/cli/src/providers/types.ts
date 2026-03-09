@@ -35,5 +35,7 @@ export interface ProviderParseResult {
   dataSource?: DataSource;
   dataSourceInfo?: DataSourceInfo;
   tokenUsage?: TokenUsage;
+  /** Per-model token usage breakdown for accurate cost estimation */
+  tokenUsageByModel?: Record<string, TokenUsage>;
   compactions?: Compaction[];
 }

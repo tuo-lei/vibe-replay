@@ -25,7 +25,7 @@ export async function parseClaudeCodeSession(
   let endTime: string | undefined;
   let totalDurationMs = 0;
 
-  // Token usage: track last usage per message ID to avoid double-counting
+  // Token usage: track last usage + model per message ID to avoid double-counting
   // (each message.id appears in multiple JSONL lines with the same cumulative usage)
   const usageByMsgId = new Map<
     string,
@@ -34,6 +34,7 @@ export async function parseClaudeCodeSession(
       output_tokens?: number;
       cache_creation_input_tokens?: number;
       cache_read_input_tokens?: number;
+      model?: string;
     }
   >();
 
@@ -171,7 +172,7 @@ export async function parseClaudeCodeSession(
       // Track usage per message ID — overwrite so we keep the last (final) value
       const usage = (obj.message as any).usage;
       if (usage && msgId) {
-        usageByMsgId.set(msgId, usage);
+        usageByMsgId.set(msgId, { ...usage, model: obj.message.model });
       }
 
       if (!assistantBlocks.has(msgId)) {
@@ -232,6 +233,7 @@ export async function parseClaudeCodeSession(
 
   // Aggregate token usage from deduplicated per-message data
   let tokenUsage: TokenUsage | undefined;
+  let tokenUsageByModel: Record<string, TokenUsage> | undefined;
   if (usageByMsgId.size > 0) {
     const totals: TokenUsage = {
       inputTokens: 0,
@@ -239,13 +241,34 @@ export async function parseClaudeCodeSession(
       cacheCreationTokens: 0,
       cacheReadTokens: 0,
     };
+    const byModel: Record<string, TokenUsage> = {};
     for (const u of usageByMsgId.values()) {
-      totals.inputTokens += u.input_tokens || 0;
-      totals.outputTokens += u.output_tokens || 0;
-      totals.cacheCreationTokens += u.cache_creation_input_tokens || 0;
-      totals.cacheReadTokens += u.cache_read_input_tokens || 0;
+      const input = u.input_tokens || 0;
+      const output = u.output_tokens || 0;
+      const cacheCreate = u.cache_creation_input_tokens || 0;
+      const cacheRead = u.cache_read_input_tokens || 0;
+
+      totals.inputTokens += input;
+      totals.outputTokens += output;
+      totals.cacheCreationTokens += cacheCreate;
+      totals.cacheReadTokens += cacheRead;
+
+      const msgModel = u.model || model || "unknown";
+      if (!byModel[msgModel]) {
+        byModel[msgModel] = {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 0,
+        };
+      }
+      byModel[msgModel].inputTokens += input;
+      byModel[msgModel].outputTokens += output;
+      byModel[msgModel].cacheCreationTokens += cacheCreate;
+      byModel[msgModel].cacheReadTokens += cacheRead;
     }
     tokenUsage = totals;
+    tokenUsageByModel = byModel;
   }
 
   return {
@@ -259,6 +282,7 @@ export async function parseClaudeCodeSession(
     totalDurationMs: totalDurationMs || undefined,
     turns: finalTurns,
     tokenUsage,
+    tokenUsageByModel,
     compactions: compactions.length > 0 ? compactions : undefined,
   };
 }
