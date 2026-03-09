@@ -987,7 +987,7 @@ function SessionsPanel() {
           </div>
         </div>
 
-        {(showInitialLoading || refreshing || staleCachedAt || refreshError) && (
+        {(showInitialLoading || refreshing || staleCachedAt) && (
           <div className="mx-4 mb-2 flex items-center gap-2 rounded-lg px-3 py-2.5 text-xs font-mono bg-terminal-blue-subtle text-terminal-blue shrink-0 shadow-layer-sm">
             {showInitialLoading ? (
               <>

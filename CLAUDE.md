@@ -55,6 +55,20 @@ When to use which:
 - Test with both small (~30 scenes) and large (~500 scenes) sessions
 - **Test modification policy** — see `packages/cli/test/README.md` before changing any test
 
+## Release checklist (important)
+
+When creating a release for npm/GitHub, do this in order:
+
+1. Confirm with user first (no autonomous publish/version bump).
+2. Bump `packages/cli/package.json` `version` to the target release version.
+3. Build CLI: `pnpm --filter vibe-replay build`.
+4. Verify displayed CLI version matches package version:
+   - `node packages/cli/dist/index.js --version`
+   - Note: startup banner `vX.Y.Z` comes from `packages/cli/src/version.ts` reading `packages/cli/package.json`.
+5. Only then create tag/release/publish for that same version.
+
+If tag/release is updated but `packages/cli/package.json` is not, CLI will still show the old version.
+
 ## Key files
 
 | What | Where |

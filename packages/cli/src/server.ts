@@ -322,7 +322,6 @@ export async function startServer(
     const cached = await readFileCache<any[]>(replaysCacheKey);
     return c.json({
       sessions: cached?.data || [],
-      stale: !!cached,
       cachedAt: cached?.updatedAt,
     });
   });
@@ -394,7 +393,6 @@ export async function startServer(
     const cached = await readFileCache<any[]>(sourcesCacheKey);
     return c.json({
       sessions: cached?.data || [],
-      stale: !!cached,
       cachedAt: cached?.updatedAt,
     });
   });
