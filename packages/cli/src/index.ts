@@ -37,7 +37,7 @@ program
         chalk.dim("  → ") + chalk.white("https://github.com/tuo-lei/vibe-replay/issues/26"),
       );
       console.log(chalk.dim("  → ") + chalk.white("https://vibe-replay.com\n"));
-      process.exit(0);
+      process.exit(1);
     }
 
     // --dashboard: open Dashboard directly
