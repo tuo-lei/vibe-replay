@@ -1,4 +1,5 @@
 import { homedir } from "node:os";
+import { estimateCost, estimateCostSimple } from "./pricing.js";
 import type { ProviderParseResult } from "./providers/types.js";
 import type { ReplaySession, Scene } from "./types.js";
 
@@ -84,33 +85,13 @@ export function transformToReplay(
     }
   }
 
-  // Estimate cost based on model pricing (USD)
+  // Estimate cost based on per-model pricing (USD)
   let costEstimate: number | undefined;
-  if (parsed.tokenUsage) {
-    const u = parsed.tokenUsage;
-    const model = parsed.model || "";
-    // Default to Opus pricing; adjust for other models
-    let inputRate = 15; // $/M tokens
-    let outputRate = 75;
-    let cacheCreateRate = 18.75;
-    let cacheReadRate = 1.875;
-    if (model.includes("haiku")) {
-      inputRate = 0.8;
-      outputRate = 4;
-      cacheCreateRate = 1;
-      cacheReadRate = 0.08;
-    } else if (model.includes("sonnet")) {
-      inputRate = 3;
-      outputRate = 15;
-      cacheCreateRate = 3.75;
-      cacheReadRate = 0.3;
-    }
-    costEstimate =
-      (u.inputTokens * inputRate +
-        u.outputTokens * outputRate +
-        u.cacheCreationTokens * cacheCreateRate +
-        u.cacheReadTokens * cacheReadRate) /
-      1_000_000;
+  if (parsed.tokenUsageByModel) {
+    costEstimate = estimateCost(parsed.tokenUsageByModel);
+  } else if (parsed.tokenUsage) {
+    // Empty string falls back to Sonnet rates via getModelPricing default
+    costEstimate = estimateCostSimple(parsed.tokenUsage, parsed.model || "");
   }
 
   return {

@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { ContentBlock, ParsedTurn, RawMessage } from "../../types.js";
 import type { Compaction, ProviderParseResult, TokenUsage } from "../types.js";
 
@@ -25,7 +26,7 @@ export async function parseClaudeCodeSession(
   let endTime: string | undefined;
   let totalDurationMs = 0;
 
-  // Token usage: track last usage per message ID to avoid double-counting
+  // Token usage: track last usage + model per message ID to avoid double-counting
   // (each message.id appears in multiple JSONL lines with the same cumulative usage)
   const usageByMsgId = new Map<
     string,
@@ -34,6 +35,7 @@ export async function parseClaudeCodeSession(
       output_tokens?: number;
       cache_creation_input_tokens?: number;
       cache_read_input_tokens?: number;
+      model?: string;
     }
   >();
 
@@ -78,7 +80,8 @@ export async function parseClaudeCodeSession(
       continue;
     }
 
-    // Skip non-message types
+    // Progress lines are subagent streaming fragments.
+    // Full subagent usage is read from subagent JSONL files instead.
     if (obj.type === "progress") continue;
 
     if (obj.type === "system") {
@@ -171,7 +174,7 @@ export async function parseClaudeCodeSession(
       // Track usage per message ID — overwrite so we keep the last (final) value
       const usage = (obj.message as any).usage;
       if (usage && msgId) {
-        usageByMsgId.set(msgId, usage);
+        usageByMsgId.set(msgId, { ...usage, model: obj.message.model });
       }
 
       if (!assistantBlocks.has(msgId)) {
@@ -230,8 +233,14 @@ export async function parseClaudeCodeSession(
 
   const finalTurns: ParsedTurn[] = entries.map((e) => e.turn);
 
+  // Read subagent JSONL files for token usage (e.g. Haiku subtasks).
+  // Subagent files live at <session-dir>/subagents/agent-*.jsonl
+  // where <session-dir> matches the main file name without .jsonl extension.
+  await readSubagentUsage(paths[0], usageByMsgId);
+
   // Aggregate token usage from deduplicated per-message data
   let tokenUsage: TokenUsage | undefined;
+  let tokenUsageByModel: Record<string, TokenUsage> | undefined;
   if (usageByMsgId.size > 0) {
     const totals: TokenUsage = {
       inputTokens: 0,
@@ -239,13 +248,35 @@ export async function parseClaudeCodeSession(
       cacheCreationTokens: 0,
       cacheReadTokens: 0,
     };
+    const byModel: Record<string, TokenUsage> = {};
     for (const u of usageByMsgId.values()) {
-      totals.inputTokens += u.input_tokens || 0;
-      totals.outputTokens += u.output_tokens || 0;
-      totals.cacheCreationTokens += u.cache_creation_input_tokens || 0;
-      totals.cacheReadTokens += u.cache_read_input_tokens || 0;
+      const input = u.input_tokens || 0;
+      const output = u.output_tokens || 0;
+      const cacheCreate = u.cache_creation_input_tokens || 0;
+      const cacheRead = u.cache_read_input_tokens || 0;
+
+      totals.inputTokens += input;
+      totals.outputTokens += output;
+      totals.cacheCreationTokens += cacheCreate;
+      totals.cacheReadTokens += cacheRead;
+
+      // Falls back to session-level model, then "unknown" (priced at Sonnet rates via DEFAULT_PRICING)
+      const msgModel = u.model || model || "unknown";
+      if (!byModel[msgModel]) {
+        byModel[msgModel] = {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 0,
+        };
+      }
+      byModel[msgModel].inputTokens += input;
+      byModel[msgModel].outputTokens += output;
+      byModel[msgModel].cacheCreationTokens += cacheCreate;
+      byModel[msgModel].cacheReadTokens += cacheRead;
     }
     tokenUsage = totals;
+    tokenUsageByModel = byModel;
   }
 
   return {
@@ -259,6 +290,7 @@ export async function parseClaudeCodeSession(
     totalDurationMs: totalDurationMs || undefined,
     turns: finalTurns,
     tokenUsage,
+    tokenUsageByModel,
     compactions: compactions.length > 0 ? compactions : undefined,
   };
 }
@@ -307,4 +339,56 @@ function extractToolResultText(block: ContentBlock): string {
       .join("\n");
   }
   return JSON.stringify(content);
+}
+
+/**
+ * Read subagent JSONL files and merge their token usage into the main usage map.
+ * Subagent files are stored at <sessionDir>/subagents/agent-*.jsonl
+ * where sessionDir = mainFilePath without the .jsonl extension.
+ */
+async function readSubagentUsage(
+  mainFilePath: string,
+  usageByMsgId: Map<
+    string,
+    {
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_creation_input_tokens?: number;
+      cache_read_input_tokens?: number;
+      model?: string;
+    }
+  >,
+): Promise<void> {
+  const sessionDir = mainFilePath.replace(/\.jsonl$/, "");
+  const subagentsDir = join(sessionDir, "subagents");
+
+  let files: string[];
+  try {
+    files = await readdir(subagentsDir);
+  } catch {
+    return; // No subagents directory
+  }
+
+  for (const file of files) {
+    if (!file.endsWith(".jsonl")) continue;
+    let content: string;
+    try {
+      content = await readFile(join(subagentsDir, file), "utf-8");
+    } catch {
+      continue;
+    }
+    for (const line of content.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const obj = JSON.parse(line);
+        const msg = obj?.message;
+        if (msg?.usage && msg?.id) {
+          // Subagent files contain the complete final usage for subagent messages.
+          // Progress lines in the main file are already skipped (line ~85), so
+          // subagent message IDs won't be in usageByMsgId — unconditional set is safe.
+          usageByMsgId.set(msg.id, { ...msg.usage, model: msg.model });
+        }
+      } catch {}
+    }
+  }
 }

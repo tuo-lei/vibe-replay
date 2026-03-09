@@ -437,8 +437,8 @@ describe("transform — cost estimation", () => {
       "claude-code",
       "~/test",
     );
-    // Haiku: 0.8 * 1M + 4 * 0.1M = 0.8 + 0.4 = 1.2
-    expect(replay.meta.stats.costEstimate).toBeCloseTo(1.2, 1);
+    // Haiku 4.5: 1 * 1M + 5 * 0.1M = 1.0 + 0.5 = 1.5
+    expect(replay.meta.stats.costEstimate).toBeCloseTo(1.5, 1);
   });
 
   it("returns undefined cost when no token usage", () => {
