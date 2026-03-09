@@ -56,3 +56,35 @@ jobs:
           mkdir -p website/public/view
           cp packages/viewer/dist/index.html website/public/view/index.html
           pnpm --filter @vibe-replay/website build
+
+      - name: Simulate npm install (catch broken releases before merge)
+        run: |
+          cd packages/cli
+          pnpm pack --pack-destination /tmp/vibe-replay-pack
+
+          # Check for workspace: protocol leaks
+          tar xzf /tmp/vibe-replay-pack/*.tgz -C /tmp/vibe-replay-pack
+          if grep -q 'workspace:' /tmp/vibe-replay-pack/package/package.json; then
+            echo "::error::workspace: protocol reference found in packed package.json"
+            cat /tmp/vibe-replay-pack/package/package.json
+            exit 1
+          fi
+
+          # Verify required files are in the tarball
+          for f in package.json dist/index.js assets/viewer.html; do
+            if [ ! -f "/tmp/vibe-replay-pack/package/$f" ]; then
+              echo "::error::Required file missing from package: $f"
+              ls -R /tmp/vibe-replay-pack/package/
+              exit 1
+            fi
+          done
+
+          # Install from tarball in a clean directory (like a real user)
+          mkdir -p /tmp/vibe-replay-smoke
+          cd /tmp/vibe-replay-smoke
+          npm init -y > /dev/null 2>&1
+          npm install /tmp/vibe-replay-pack/*.tgz
+
+          # Verify the CLI actually runs
+          npx vibe-replay --version
+          echo "Publish simulation passed — package installs and runs correctly"

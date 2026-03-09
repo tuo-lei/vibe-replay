@@ -32,5 +32,32 @@ jobs:
 
       - run: pnpm build
 
+      - name: Validate package (no workspace protocol leaks)
+        run: |
+          cd packages/cli
+          pnpm pack --pack-destination /tmp/vibe-replay-pack
+          tar xzf /tmp/vibe-replay-pack/*.tgz -C /tmp/vibe-replay-pack
+          if grep -q 'workspace:' /tmp/vibe-replay-pack/package/package.json; then
+            echo "::error::workspace: protocol reference found in packed package.json — aborting publish"
+            cat /tmp/vibe-replay-pack/package/package.json
+            exit 1
+          fi
+          echo "Package validation passed"
+
       - name: Publish to npm
         run: pnpm --filter vibe-replay publish --access public --no-git-checks
+
+      - name: Smoke test published package
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          for i in 1 2 3; do
+            echo "Attempt $i: waiting for npm registry propagation..."
+            sleep 30
+            if npx --yes vibe-replay@${VERSION} --version 2>&1 | grep -q "${VERSION}"; then
+              echo "Smoke test passed: vibe-replay@${VERSION} is installable and reports correct version"
+              exit 0
+            fi
+            echo "Version not yet available, retrying..."
+          done
+          echo "::error::Smoke test failed after 3 attempts — vibe-replay@${VERSION} not installable or reports wrong version"
+          exit 1
