@@ -2,6 +2,52 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { SessionSummary, SourceSession } from "../types";
 
 type Tab = "sessions" | "replays";
+type CachedListResponse<T> = {
+  sessions: T[];
+  cachedAt?: string;
+};
+const CACHE_REFRESH_TTL_MS = 5 * 60 * 1000;
+
+function parseCachedList<T>(payload: unknown): CachedListResponse<T> | null {
+  if (!payload || typeof payload !== "object") return null;
+  const obj = payload as { sessions?: unknown; cachedAt?: unknown };
+  if (!Array.isArray(obj.sessions)) return null;
+  return {
+    sessions: obj.sessions as T[],
+    cachedAt: typeof obj.cachedAt === "string" ? obj.cachedAt : undefined,
+  };
+}
+
+function formatCacheAge(iso?: string): string {
+  if (!iso) return "just now";
+  const ageMs = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ageMs) || ageMs < 0) return "just now";
+  const mins = Math.floor(ageMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function formatCompactAge(iso?: string, nowMs = Date.now()): string {
+  if (!iso) return "";
+  const ageMs = nowMs - new Date(iso).getTime();
+  if (!Number.isFinite(ageMs) || ageMs < 0) return "0m";
+  const mins = Math.floor(ageMs / 60000);
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  return `${days}d`;
+}
+
+function isCacheFresh(iso?: string, ttlMs = CACHE_REFRESH_TTL_MS): boolean {
+  if (!iso) return false;
+  const ageMs = Date.now() - new Date(iso).getTime();
+  return Number.isFinite(ageMs) && ageMs >= 0 && ageMs < ttlMs;
+}
 
 function formatDuration(ms?: number): string {
   if (!ms) return "";
@@ -521,6 +567,11 @@ function SessionsPanel() {
   const [sources, setSources] = useState<SourceSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [staleCachedAt, setStaleCachedAt] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
+  const [refreshClockMs, setRefreshClockMs] = useState(() => Date.now());
   const [selectedProject, setSelectedProject] = useState<string>(ALL_PROJECTS);
   const [filter, setFilter] = useState("");
   const [generatingSlug, setGeneratingSlug] = useState<string | null>(null);
@@ -531,22 +582,56 @@ function SessionsPanel() {
   const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());
   const [showArchived, setShowArchived] = useState(false);
 
-  const loadSources = useCallback(() => {
+  const loadSources = useCallback(async (opts?: { forceRefresh?: boolean }) => {
     setLoading(true);
     setError(null);
-    Promise.all([
-      fetch("/api/sources").then((r) => {
-        if (!r.ok) throw new Error("Failed to load sessions");
-        return r.json();
-      }),
-      fetch("/api/archived").then((r) => (r.ok ? r.json() : { slugs: [] })),
-    ])
-      .then(([data, archive]: [{ sessions: SourceSession[] }, { slugs: string[] }]) => {
-        setSources(data.sessions);
-        setArchivedSlugs(new Set(archive.slugs));
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+    setRefreshError(null);
+    setRefreshing(false);
+    setStaleCachedAt(null);
+
+    const archive = await fetch("/api/archived")
+      .then((r) => (r.ok ? r.json() : { slugs: [] }))
+      .catch(() => ({ slugs: [] as string[] }));
+    setArchivedSlugs(new Set(archive.slugs));
+
+    let servedFromCache = false;
+    const cached = await fetch("/api/sources/cached")
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null);
+    const cachedData = parseCachedList<SourceSession>(cached);
+    const shouldSkipRefresh = !opts?.forceRefresh && isCacheFresh(cachedData?.cachedAt);
+    if (cachedData && cachedData.sessions.length > 0) {
+      servedFromCache = true;
+      setSources(cachedData.sessions);
+      setLastRefreshedAt(cachedData.cachedAt ?? null);
+      setStaleCachedAt(shouldSkipRefresh ? null : (cachedData.cachedAt ?? null));
+      setLoading(false);
+      setRefreshing(!shouldSkipRefresh);
+    }
+
+    if (shouldSkipRefresh) {
+      setRefreshing(false);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const freshResp = await fetch("/api/sources");
+      if (!freshResp.ok) throw new Error("Failed to load sessions");
+      const fresh = (await freshResp.json()) as { sessions: SourceSession[] };
+      setSources(fresh.sessions);
+      setLastRefreshedAt(new Date().toISOString());
+      setStaleCachedAt(null);
+    } catch (err: any) {
+      if (!servedFromCache) {
+        setError(err.message || "Failed to load sessions");
+      } else {
+        setRefreshError("Failed to refresh latest sessions. Showing cached data.");
+      }
+    } finally {
+      setRefreshing(false);
+      setLoading(false);
+    }
   }, []);
 
   const toggleArchive = async (slug: string) => {
@@ -560,8 +645,13 @@ function SessionsPanel() {
   };
 
   useEffect(() => {
-    loadSources();
+    void loadSources();
   }, [loadSources]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setRefreshClockMs(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (titleInput) titleInputRef.current?.focus();
@@ -653,18 +743,11 @@ function SessionsPanel() {
           (s.gitBranch || "").toLowerCase().includes(filter.toLowerCase()),
       )
     : projectSessions;
+  const refreshAge = lastRefreshedAt ? formatCompactAge(lastRefreshedAt, refreshClockMs) : null;
 
-  if (loading) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="text-terminal-dim font-mono text-sm animate-pulse">
-          Scanning for AI sessions...
-        </div>
-      </div>
-    );
-  }
+  const showInitialLoading = loading && sources.length === 0;
 
-  if (error) {
+  if (error && sources.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center space-y-3">
@@ -680,7 +763,7 @@ function SessionsPanel() {
     );
   }
 
-  if (sources.length === 0) {
+  if (sources.length === 0 && !showInitialLoading) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center space-y-2">
@@ -698,11 +781,20 @@ function SessionsPanel() {
       {/* ─── Left sidebar: project navigation (hidden on mobile) ─── */}
       <div className="hidden md:flex w-60 shrink-0 flex-col border-r border-terminal-border-subtle bg-terminal-surface/20">
         <div className="flex items-center justify-between px-4 py-3 border-b border-terminal-border-subtle">
-          <span className="text-[10px] font-sans text-terminal-dimmer uppercase tracking-widest font-semibold">
-            Projects
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-sans text-terminal-dimmer uppercase tracking-widest font-semibold">
+              Projects
+            </span>
+            {refreshAge && (
+              <span className="text-[10px] font-mono text-terminal-dimmer tabular-nums">
+                {refreshAge}
+              </span>
+            )}
+          </div>
           <button
-            onClick={loadSources}
+            onClick={() => {
+              void loadSources({ forceRefresh: true });
+            }}
             className="p-1.5 rounded-md text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors duration-200"
             title="Refresh"
           >
@@ -895,6 +987,42 @@ function SessionsPanel() {
           </div>
         </div>
 
+        {(showInitialLoading || refreshing || staleCachedAt) && (
+          <div className="mx-4 mb-2 flex items-center gap-2 rounded-lg px-3 py-2.5 text-xs font-mono bg-terminal-blue-subtle text-terminal-blue shrink-0 shadow-layer-sm">
+            {showInitialLoading ? (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-terminal-blue animate-pulse" />
+                <span>FETCHING SESSIONS...</span>
+              </>
+            ) : refreshing ? (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-terminal-blue animate-pulse" />
+                <span>SCANNING LATEST SESSIONS...</span>
+                {staleCachedAt && (
+                  <span className="text-terminal-dim">
+                    Showing stale cache ({formatCacheAge(staleCachedAt)})
+                  </span>
+                )}
+              </>
+            ) : staleCachedAt ? (
+              <span>Showing stale cache ({formatCacheAge(staleCachedAt)})</span>
+            ) : null}
+          </div>
+        )}
+
+        {/* Error toast */}
+        {refreshError && (
+          <div className="mx-4 mb-2 flex items-center gap-2 bg-terminal-orange-subtle rounded-lg px-3 py-2.5 text-xs font-mono text-terminal-orange shrink-0 shadow-layer-sm">
+            <span>{refreshError}</span>
+            <button
+              onClick={() => setRefreshError(null)}
+              className="ml-auto text-terminal-orange/60 hover:text-terminal-orange transition-colors"
+            >
+              &times;
+            </button>
+          </div>
+        )}
+
         {/* Error toast */}
         {generateError && (
           <div className="mx-4 mb-2 flex items-center gap-2 bg-terminal-red-subtle rounded-lg px-3 py-2.5 text-xs font-mono text-terminal-red shrink-0 shadow-layer-sm">
@@ -950,7 +1078,11 @@ function SessionsPanel() {
 
         {/* Session list */}
         <div className="flex-1 overflow-y-auto">
-          {filtered.length === 0 ? (
+          {showInitialLoading ? (
+            <div className="text-center py-12 text-terminal-dim font-mono text-sm">
+              Fetching sessions...
+            </div>
+          ) : filtered.length === 0 ? (
             <div className="text-center py-12 text-terminal-dim font-mono text-sm">
               {filter ? "No sessions match your filter" : "No sessions in this project"}
             </div>
@@ -1096,6 +1228,10 @@ function ReplaysPanel() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [serverAvailable, setServerAvailable] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [staleCachedAt, setStaleCachedAt] = useState<string | null>(null);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
+  const [refreshClockMs, setRefreshClockMs] = useState(() => Date.now());
   const [ghAvailable, setGhAvailable] = useState<boolean | null>(null);
   const [filter, setFilter] = useState("");
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -1105,27 +1241,82 @@ function ReplaysPanel() {
   const [selectedProject, setSelectedProject] = useState<string>(ALL_PROJECTS);
 
   useEffect(() => {
-    Promise.all([
-      fetch("/api/sessions").then((r) => {
-        if (!r.ok) throw new Error();
-        return r.json();
-      }),
-      fetch("/api/archived").then((r) => (r.ok ? r.json() : { slugs: [] })),
-    ])
-      .then(([data, archive]: [SessionSummary[], { slugs: string[] }]) => {
-        setSessions(data);
+    let mounted = true;
+    const loadReplays = async () => {
+      setLoading(true);
+      setRefreshing(false);
+      setStaleCachedAt(null);
+
+      const archive = await fetch("/api/archived")
+        .then((r) => (r.ok ? r.json() : { slugs: [] }))
+        .catch(() => ({ slugs: [] as string[] }));
+      if (mounted) {
         setArchivedSlugs(new Set(archive.slugs));
+      }
+
+      let servedFromCache = false;
+      const cached = await fetch("/api/sessions/cached")
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
+      const cachedData = parseCachedList<SessionSummary>(cached);
+      const shouldSkipRefresh = isCacheFresh(cachedData?.cachedAt);
+      if (mounted && cachedData) {
+        servedFromCache = true;
+        setSessions(cachedData.sessions);
         setServerAvailable(true);
-      })
-      .catch(() => {
-        setServerAvailable(false);
-      })
-      .finally(() => setLoading(false));
+        setLastRefreshedAt(cachedData.cachedAt ?? null);
+        if (cachedData.sessions.length > 0 || shouldSkipRefresh) {
+          setStaleCachedAt(shouldSkipRefresh ? null : (cachedData.cachedAt ?? null));
+          setLoading(false);
+          setRefreshing(!shouldSkipRefresh);
+        }
+      }
+
+      if (shouldSkipRefresh) {
+        if (mounted) {
+          setRefreshing(false);
+          setLoading(false);
+        }
+        return;
+      }
+
+      try {
+        const resp = await fetch("/api/sessions");
+        if (!resp.ok) throw new Error();
+        const data = (await resp.json()) as SessionSummary[];
+        if (!mounted) return;
+        setSessions(data);
+        setServerAvailable(true);
+        setLastRefreshedAt(new Date().toISOString());
+        setStaleCachedAt(null);
+      } catch {
+        if (!mounted) return;
+        if (!servedFromCache) {
+          setServerAvailable(false);
+        }
+      } finally {
+        if (mounted) {
+          setRefreshing(false);
+          setLoading(false);
+        }
+      }
+    };
+
+    void loadReplays();
 
     fetch("/api/gh-status")
       .then((r) => r.json())
       .then((data: { available: boolean }) => setGhAvailable(data.available))
       .catch(() => setGhAvailable(false));
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setRefreshClockMs(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
   }, []);
 
   const toggleArchive = async (slug: string) => {
@@ -1237,17 +1428,11 @@ function ReplaysPanel() {
           (s.firstMessage || "").toLowerCase().includes(filter.toLowerCase()),
       )
     : projectSessions;
-
-  if (loading) {
-    return (
-      <div className="flex-1 flex items-center justify-center py-12">
-        <div className="text-terminal-dim font-mono text-sm animate-pulse">Loading...</div>
-      </div>
-    );
-  }
+  const refreshAge = lastRefreshedAt ? formatCompactAge(lastRefreshedAt, refreshClockMs) : null;
+  const showInitialLoading = loading && sessions.length === 0;
 
   // Non-server or empty: show simple centered layout
-  if (!serverAvailable || sessions.length === 0) {
+  if (!showInitialLoading && (!serverAvailable || sessions.length === 0)) {
     return (
       <div className="flex-1 overflow-auto">
         <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
@@ -1278,9 +1463,16 @@ function ReplaysPanel() {
       {/* ─── Left sidebar: project navigation (hidden on mobile) ─── */}
       <div className="hidden md:flex w-60 shrink-0 flex-col border-r border-terminal-border-subtle bg-terminal-surface/20">
         <div className="flex items-center justify-between px-4 py-3 border-b border-terminal-border-subtle">
-          <span className="text-[10px] font-sans text-terminal-dimmer uppercase tracking-widest font-semibold">
-            Projects
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-sans text-terminal-dimmer uppercase tracking-widest font-semibold">
+              Projects
+            </span>
+            {refreshAge && (
+              <span className="text-[10px] font-mono text-terminal-dimmer tabular-nums">
+                {refreshAge}
+              </span>
+            )}
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
           {/* All projects */}
@@ -1442,6 +1634,29 @@ function ReplaysPanel() {
           </div>
         </div>
 
+        {(showInitialLoading || refreshing || staleCachedAt) && (
+          <div className="mx-4 mb-2 flex items-center gap-2 rounded-lg px-3 py-2.5 text-xs font-mono bg-terminal-blue-subtle text-terminal-blue shrink-0 shadow-layer-sm">
+            {showInitialLoading ? (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-terminal-blue animate-pulse" />
+                <span>FETCHING REPLAYS...</span>
+              </>
+            ) : refreshing ? (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-terminal-blue animate-pulse" />
+                <span>SCANNING LATEST REPLAYS...</span>
+                {staleCachedAt && (
+                  <span className="text-terminal-dim">
+                    Showing stale cache ({formatCacheAge(staleCachedAt)})
+                  </span>
+                )}
+              </>
+            ) : staleCachedAt ? (
+              <span>Showing stale cache ({formatCacheAge(staleCachedAt)})</span>
+            ) : null}
+          </div>
+        )}
+
         {/* Error toast */}
         {deleteError && (
           <div className="mx-4 mb-2 flex items-center gap-2 bg-terminal-red-subtle rounded-lg px-3 py-2.5 text-xs font-mono text-terminal-red shrink-0 shadow-layer-sm">
@@ -1457,7 +1672,11 @@ function ReplaysPanel() {
 
         {/* Replay list */}
         <div className="flex-1 overflow-y-auto">
-          {filtered.length === 0 ? (
+          {showInitialLoading ? (
+            <div className="text-center py-12 text-terminal-dim font-mono text-sm">
+              Fetching replays...
+            </div>
+          ) : filtered.length === 0 ? (
             <div className="text-center py-12 text-terminal-dim font-mono text-sm">
               {filter ? "No replays match your filter" : "No replays in this project"}
             </div>

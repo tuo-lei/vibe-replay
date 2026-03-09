@@ -60,7 +60,12 @@ export default function App() {
   if (loadState.status === "loading") {
     return (
       <div className="h-screen bg-terminal-bg flex items-center justify-center">
-        <div className="text-terminal-dim font-mono text-sm animate-pulse">Loading session...</div>
+        <div className="text-center space-y-2">
+          <div className="text-terminal-green font-mono text-sm animate-pulse">
+            LOADING SESSION...
+          </div>
+          <div className="text-terminal-dimmer font-mono text-xs">Preparing replay data</div>
+        </div>
       </div>
     );
   }

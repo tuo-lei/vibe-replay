@@ -38,6 +38,7 @@ When to use which:
 - **Cursor tri-source**: Sessions come from SQLite `store.db` (primary), `globalStorage/state.vscdb`, or JSONL (fallback). Discovery merges all sources. DB data is source of truth; JSONL supplements missing thinking/images.
 - **Skip `progress` lines**: These are subagent streaming artifacts in JSONL.
 - **sql.js (WASM)**: Used instead of native SQLite bindings for portability — no C++ compiler needed.
+- **Session discovery cache**: CLI picker + local dashboard use file cache at `~/.vibe-replay/cache/*.json` (stale-while-refresh UX). Cache validity is tied to CLI release version (`CLI_VERSION`) plus envelope version, so caches auto-invalidate across releases. Keep cache writes best-effort and never block generation/parsing on cache failures.
 
 ## Rules
 
@@ -53,6 +54,20 @@ When to use which:
 - **Shared types changes** → edit `packages/types/src/index.ts`, both CLI and viewer pick them up automatically
 - Test with both small (~30 scenes) and large (~500 scenes) sessions
 - **Test modification policy** — see `packages/cli/test/README.md` before changing any test
+
+## Release checklist (important)
+
+When creating a release for npm/GitHub, do this in order:
+
+1. Confirm with user first (no autonomous publish/version bump).
+2. Bump `packages/cli/package.json` `version` to the target release version.
+3. Build CLI: `pnpm --filter vibe-replay build`.
+4. Verify displayed CLI version matches package version:
+   - `node packages/cli/dist/index.js --version`
+   - Note: startup banner `vX.Y.Z` comes from `packages/cli/src/version.ts` reading `packages/cli/package.json`.
+5. Only then create tag/release/publish for that same version.
+
+If tag/release is updated but `packages/cli/package.json` is not, CLI will still show the old version.
 
 ## Key files
 

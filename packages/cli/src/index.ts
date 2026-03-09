@@ -2,6 +2,7 @@ import { Separator, select } from "@inquirer/prompts";
 import chalk from "chalk";
 import { program } from "commander";
 import ora from "ora";
+import { readFileCache, writeFileCache } from "./cache.js";
 import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.js";
 import { generateOutput } from "./generator.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
@@ -14,6 +15,30 @@ import type { SessionInfo } from "./types.js";
 import { CLI_VERSION } from "./version.js";
 
 const DEV_MENU_ENABLED = process.env.VIBE_REPLAY_DEV_MENU === "1";
+const SESSION_DISCOVERY_CACHE_KEY = "session-discovery-v1";
+
+function formatRelativeAge(iso: string): string {
+  const ageMs = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ageMs) || ageMs < 0) return "just now";
+  const mins = Math.floor(ageMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+async function discoverAllSessions(): Promise<SessionInfo[]> {
+  const providers = getAllProviders();
+  const allSessions: SessionInfo[] = [];
+  for (const provider of providers) {
+    const sessions = await provider.discover();
+    allSessions.push(...sessions);
+  }
+  allSessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  return allSessions;
+}
 
 program
   .name("vibe-replay")
@@ -60,80 +85,175 @@ program
       sessionPaths = opts.session;
       providerName = opts.provider;
     } else {
-      // Discover sessions from all providers
-      const spinner = ora("Scanning sessions...").start();
-      const providers = getAllProviders();
-      const allSessions: SessionInfo[] = [];
+      let displayedSessions: SessionInfo[] = [];
+      const cached = await readFileCache<SessionInfo[]>(SESSION_DISCOVERY_CACHE_KEY);
+      const hasStaleCache = !!(cached && cached.data.length > 0);
+      let showStaleLabel = hasStaleCache;
+      let refreshPromise: Promise<SessionInfo[] | null> | null = null;
 
-      for (const provider of providers) {
-        const sessions = await provider.discover();
-        allSessions.push(...sessions);
+      if (hasStaleCache && cached) {
+        displayedSessions = cached.data
+          .slice()
+          .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+        console.log(
+          chalk.cyan(
+            `  Quick start: loaded ${displayedSessions.length} sessions from local cache (${formatRelativeAge(cached.updatedAt)}).`,
+          ),
+        );
+        console.log(
+          chalk.dim("  Fetching latest sessions in background; this list will auto-refresh.\n"),
+        );
+
+        refreshPromise = discoverAllSessions()
+          .then(async (freshSessions) => {
+            await writeFileCache(SESSION_DISCOVERY_CACHE_KEY, freshSessions);
+            return freshSessions;
+          })
+          .catch(() => null);
+      } else {
+        const spinner = ora("Scanning latest sessions...").start();
+        try {
+          displayedSessions = await discoverAllSessions();
+          await writeFileCache(SESSION_DISCOVERY_CACHE_KEY, displayedSessions);
+        } finally {
+          spinner.stop();
+        }
       }
 
-      // Sort by timestamp descending
-      allSessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-      spinner.stop();
-
-      if (allSessions.length === 0) {
+      if (displayedSessions.length === 0) {
         console.log(chalk.red("  No AI coding sessions found."));
         process.exit(1);
       }
-
-      // Group by project for display
-      const choices = formatSessionChoices(allSessions);
 
       const { join: pathJoin } = await import("node:path");
       const { homedir } = await import("node:os");
       const replayBaseDir = pathJoin(homedir(), ".vibe-replay");
 
-      // Listen for 'd' keypress to open dashboard
-      const ac = new AbortController();
-      let dashboardRequested = false;
-      const { emitKeypressEvents } = await import("node:readline");
-      if (!process.stdin.listenerCount("keypress")) {
-        emitKeypressEvents(process.stdin);
-      }
-      const onKeypress = (_str: string, key: { name?: string }) => {
-        if (key?.name === "d") {
-          dashboardRequested = true;
-          ac.abort();
-        }
-      };
-      process.stdin.on("keypress", onKeypress);
-      ac.signal.addEventListener("abort", () => {
-        process.stdin.off("keypress", onKeypress);
-      });
-
       let chosen: string;
-      try {
-        chosen = await select<string>(
-          {
-            message: "Pick a session to replay:",
-            choices,
-            pageSize: 20,
-            theme: {
-              style: {
-                keysHelpTip: (keys: [string, string][]) =>
-                  [...keys, ["d", "dashboard"]]
-                    .map(([k, v]) => `${chalk.bold(k)} ${chalk.dim(v)}`)
-                    .join(chalk.dim(" \u00b7 ")),
+      let highlightedValue: string | undefined;
+      while (true) {
+        const choices = formatSessionChoices(displayedSessions);
+        const selectableValues = choices
+          .filter(
+            (choice): choice is { value: string } =>
+              !!choice &&
+              typeof choice === "object" &&
+              "value" in choice &&
+              typeof (choice as any).value === "string",
+          )
+          .map((choice) => choice.value);
+
+        let cursorIndex = 0;
+        if (highlightedValue) {
+          const idx = selectableValues.indexOf(highlightedValue);
+          if (idx >= 0) cursorIndex = idx;
+        }
+        highlightedValue = selectableValues[cursorIndex];
+
+        const ac = new AbortController();
+        let dashboardRequested = false;
+        let shouldSwitchToFresh = false;
+        let freshSessions: SessionInfo[] | null = null;
+        let promptSettled = false;
+
+        const { emitKeypressEvents } = await import("node:readline");
+        if (!process.stdin.listenerCount("keypress")) {
+          emitKeypressEvents(process.stdin);
+        }
+        const onKeypress = (_str: string, key: { name?: string }) => {
+          if (key?.name === "d") {
+            dashboardRequested = true;
+            ac.abort();
+            return;
+          }
+
+          if (selectableValues.length === 0) return;
+
+          if (key?.name === "down" || key?.name === "j") {
+            cursorIndex = Math.min(selectableValues.length - 1, cursorIndex + 1);
+            highlightedValue = selectableValues[cursorIndex];
+          } else if (key?.name === "up" || key?.name === "k") {
+            cursorIndex = Math.max(0, cursorIndex - 1);
+            highlightedValue = selectableValues[cursorIndex];
+          } else if (key?.name === "pageup") {
+            cursorIndex = Math.max(0, cursorIndex - 20);
+            highlightedValue = selectableValues[cursorIndex];
+          } else if (key?.name === "pagedown") {
+            cursorIndex = Math.min(selectableValues.length - 1, cursorIndex + 20);
+            highlightedValue = selectableValues[cursorIndex];
+          } else if (key?.name === "home") {
+            cursorIndex = 0;
+            highlightedValue = selectableValues[cursorIndex];
+          } else if (key?.name === "end") {
+            cursorIndex = selectableValues.length - 1;
+            highlightedValue = selectableValues[cursorIndex];
+          }
+        };
+        const cleanup = () => {
+          process.stdin.off("keypress", onKeypress);
+        };
+        process.stdin.on("keypress", onKeypress);
+        ac.signal.addEventListener("abort", () => {
+          cleanup();
+        });
+
+        if (showStaleLabel && refreshPromise) {
+          void refreshPromise.then((sessions) => {
+            if (promptSettled) return;
+            if (!sessions || sessions.length === 0) return;
+            freshSessions = sessions;
+            shouldSwitchToFresh = true;
+            ac.abort();
+          });
+        }
+
+        try {
+          chosen = await select<string>(
+            {
+              message: showStaleLabel
+                ? "Pick a session to replay (cached, auto-refreshing):"
+                : "Pick a session to replay:",
+              choices,
+              default: highlightedValue,
+              pageSize: 20,
+              theme: {
+                style: {
+                  keysHelpTip: (keys: [string, string][]) =>
+                    [...keys, ["d", "dashboard"]]
+                      .map(([k, v]) => `${chalk.bold(k)} ${chalk.dim(v)}`)
+                      .join(chalk.dim(" \u00b7 ")),
+                },
               },
             },
-          },
-          { signal: ac.signal },
-        );
-      } catch {
-        if (dashboardRequested) {
-          await startDashboard(
-            replayBaseDir,
-            DEV_MENU_ENABLED ? { externalViewerUrl: "http://localhost:5173" } : undefined,
+            { signal: ac.signal },
           );
-          return;
+          promptSettled = true;
+          highlightedValue = chosen;
+          cleanup();
+          break;
+        } catch {
+          promptSettled = true;
+          cleanup();
+          if (dashboardRequested) {
+            await startDashboard(
+              replayBaseDir,
+              DEV_MENU_ENABLED ? { externalViewerUrl: "http://localhost:5173" } : undefined,
+            );
+            return;
+          }
+          if (shouldSwitchToFresh && freshSessions) {
+            displayedSessions = freshSessions
+              .slice()
+              .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+            showStaleLabel = false;
+            console.log(chalk.green("\n  Latest sessions fetched. List refreshed.\n"));
+            continue;
+          }
+          process.exit(0);
         }
-        process.exit(0);
       }
 
-      const info = allSessions.find((s) => s.filePath === chosen);
+      const info = displayedSessions.find((s) => s.filePath === chosen);
       sessionInfo = info;
       sessionPaths = info ? [...info.filePaths, ...(info.toolPaths || [])] : [chosen];
       providerName = info?.provider || opts.provider;

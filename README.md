@@ -27,6 +27,7 @@ Pick a session, get a self-contained HTML file. Done.
 - **Share anywhere** — publish to [vibe-replay.com](https://vibe-replay.com) via GitHub Gist, or just send the HTML file
 - **Privacy first** — API keys, tokens, credentials, and paths are automatically redacted
 - **Light & dark themes** — with customizable view preferences
+- **Faster startup** — file-based stale cache shows sessions immediately while latest sessions refresh in background
 
 ## Supported Providers
 
