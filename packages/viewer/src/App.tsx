@@ -40,16 +40,16 @@ export default function App() {
     [session],
   );
 
-  // Custom mode popover — close when leaving custom mode
+  // Custom mode dropdown
   const [customOpen, setCustomOpen] = useState(false);
-  const customPopoverRef = useRef<HTMLDivElement>(null);
+  const customRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (prefs.displayMode !== "custom") setCustomOpen(false);
   }, [prefs.displayMode]);
   useEffect(() => {
     if (!customOpen) return;
     const handler = (e: MouseEvent) => {
-      if (customPopoverRef.current && !customPopoverRef.current.contains(e.target as Node)) {
+      if (customRef.current && !customRef.current.contains(e.target as Node)) {
         setCustomOpen(false);
       }
     };
@@ -223,55 +223,54 @@ export default function App() {
             </button>
           )}
 
-          {/* Display mode: segmented control */}
-          <div className="flex items-center h-7 rounded-md overflow-hidden bg-terminal-surface">
-            <button
-              onClick={() => updatePref("displayMode", "all")}
-              className={`h-full px-2.5 text-xs font-mono transition-colors ${
-                prefs.displayMode === "all"
-                  ? "bg-terminal-green-subtle text-terminal-green"
-                  : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
-              }`}
-            >
-              All
-            </button>
-            <button
-              onClick={() => updatePref("displayMode", "compact")}
-              className={`h-full px-2.5 text-xs font-mono transition-colors ${
-                prefs.displayMode === "compact"
-                  ? "bg-terminal-green-subtle text-terminal-green"
-                  : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
-              }`}
-            >
-              Compact
-            </button>
-            <button
-              onClick={() => {
-                updatePref("displayMode", "custom");
-                setCustomOpen((v) => (prefs.displayMode === "custom" ? !v : true));
-              }}
-              className={`h-full px-2.5 text-xs font-mono transition-colors ${
-                prefs.displayMode === "custom"
-                  ? "bg-terminal-green-subtle text-terminal-green"
-                  : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
-              }`}
-            >
-              Custom
-            </button>
-          </div>
-          {/* Custom mode popover — outside overflow-hidden container */}
-          {customOpen && prefs.displayMode === "custom" && (
-            <div ref={customPopoverRef} className="relative">
-              <div className="absolute right-0 top-full mt-1 w-44 bg-terminal-surface border border-terminal-border-subtle rounded-xl shadow-layer-xl z-50 py-2 backdrop-blur-md">
+          {/* Display mode: segmented control + Custom dropdown */}
+          <div ref={customRef} className="relative flex items-center">
+            <div className="flex items-center h-7 rounded-md overflow-hidden bg-terminal-surface">
+              <button
+                onClick={() => updatePref("displayMode", "all")}
+                className={`h-full px-2.5 text-xs font-mono transition-colors ${
+                  prefs.displayMode === "all"
+                    ? "bg-terminal-green-subtle text-terminal-green"
+                    : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
+                }`}
+              >
+                All
+              </button>
+              <button
+                onClick={() => updatePref("displayMode", "compact")}
+                className={`h-full px-2.5 text-xs font-mono transition-colors ${
+                  prefs.displayMode === "compact"
+                    ? "bg-terminal-green-subtle text-terminal-green"
+                    : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
+                }`}
+              >
+                Compact
+              </button>
+              <button
+                onClick={() => {
+                  updatePref("displayMode", "custom");
+                  setCustomOpen((v) => (prefs.displayMode === "custom" ? !v : true));
+                }}
+                className={`h-full px-2.5 text-xs font-mono transition-colors ${
+                  prefs.displayMode === "custom"
+                    ? "bg-terminal-green-subtle text-terminal-green"
+                    : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
+                }`}
+              >
+                Custom
+              </button>
+            </div>
+            {customOpen && prefs.displayMode === "custom" && (
+              <div className="absolute right-0 top-full mt-2 w-40 bg-terminal-surface border border-terminal-border-subtle rounded-xl shadow-layer-xl z-50 py-1.5 backdrop-blur-md">
                 <button
                   onClick={() => togglePref("promptsOnly")}
-                  className="w-full text-left px-3 py-2 text-xs font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50 transition-colors flex items-center gap-2"
+                  className="w-full text-left px-3 py-1.5 text-xs font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50 transition-colors flex items-center gap-2"
                 >
                   <span
-                    className={`w-3.5 h-3.5 rounded flex items-center justify-center text-xs ${
+                    className={`w-3.5 h-3.5 rounded flex items-center justify-center text-[10px] ${
                       prefs.promptsOnly
                         ? "bg-terminal-green-subtle text-terminal-green"
-                        : "bg-terminal-surface"
+                        : "bg-terminal-bg"
                     }`}
                   >
                     {prefs.promptsOnly ? "\u2713" : ""}
@@ -280,39 +279,39 @@ export default function App() {
                 </button>
                 <button
                   onClick={() => togglePref("collapseAllTools")}
-                  className="w-full text-left px-3 py-2 text-xs font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50 transition-colors flex items-center gap-2"
+                  className="w-full text-left px-3 py-1.5 text-xs font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50 transition-colors flex items-center gap-2"
                 >
                   <span
-                    className={`w-3.5 h-3.5 rounded flex items-center justify-center text-xs ${
+                    className={`w-3.5 h-3.5 rounded flex items-center justify-center text-[10px] ${
                       prefs.collapseAllTools
                         ? "bg-terminal-orange-subtle text-terminal-orange"
-                        : "bg-terminal-surface"
+                        : "bg-terminal-bg"
                     }`}
                   >
                     {prefs.collapseAllTools ? "\u2713" : ""}
                   </span>
-                  Collapse Tools
+                  Tools Collapsed
                 </button>
                 {hasThinking && (
                   <button
                     onClick={() => togglePref("hideThinking")}
-                    className="w-full text-left px-3 py-2 text-xs font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50 transition-colors flex items-center gap-2"
+                    className="w-full text-left px-3 py-1.5 text-xs font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50 transition-colors flex items-center gap-2"
                   >
                     <span
-                      className={`w-3.5 h-3.5 rounded flex items-center justify-center text-xs ${
+                      className={`w-3.5 h-3.5 rounded flex items-center justify-center text-[10px] ${
                         prefs.hideThinking
                           ? "bg-terminal-purple-subtle text-terminal-purple"
-                          : "bg-terminal-surface"
+                          : "bg-terminal-bg"
                       }`}
                     >
                       {prefs.hideThinking ? "\u2713" : ""}
                     </span>
-                    Hide Thinking
+                    Thinking Hidden
                   </button>
                 )}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Theme toggle */}
           <button
