@@ -7,6 +7,7 @@ import { serve } from "@hono/node-server";
 import chalk from "chalk";
 import { Hono } from "hono";
 import open from "open";
+import { readFileCache, writeFileCache } from "./cache.js";
 import { cleanPromptText } from "./clean-prompt.js";
 import { detectFeedbackTools, generateFeedback } from "./feedback.js";
 import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.js";
@@ -290,6 +291,9 @@ export async function startServer(
   await mkdir(baseDir, { recursive: true });
 
   const viewerHtml = await loadViewerHtml();
+  const cacheKeySuffix = createHash("sha1").update(baseDir).digest("hex").slice(0, 12);
+  const sourcesCacheKey = `dashboard-sources-v1-${cacheKeySuffix}`;
+  const replaysCacheKey = `dashboard-replays-v1-${cacheKeySuffix}`;
 
   const app = new Hono();
 
@@ -314,8 +318,18 @@ export async function startServer(
   });
 
   // --- Dashboard: list all sessions ---
+  app.get("/api/sessions/cached", async (c) => {
+    const cached = await readFileCache<any[]>(replaysCacheKey);
+    return c.json({
+      sessions: cached?.data || [],
+      stale: !!cached,
+      cachedAt: cached?.updatedAt,
+    });
+  });
+
   app.get("/api/sessions", async (c) => {
     const sessions = await scanSessions(baseDir);
+    await writeFileCache(replaysCacheKey, sessions);
     return c.json(sessions);
   });
 
@@ -376,6 +390,15 @@ export async function startServer(
   });
 
   // --- Sources: discover AI coding sessions from all providers ---
+  app.get("/api/sources/cached", async (c) => {
+    const cached = await readFileCache<any[]>(sourcesCacheKey);
+    return c.json({
+      sessions: cached?.data || [],
+      stale: !!cached,
+      cachedAt: cached?.updatedAt,
+    });
+  });
+
   app.get("/api/sources", async (c) => {
     try {
       const providers = getAllProviders();
@@ -464,6 +487,7 @@ export async function startServer(
         };
       });
 
+      await writeFileCache(sourcesCacheKey, result);
       return c.json({ sessions: result });
     } catch (err: any) {
       return c.json({ error: err.message || "Source discovery failed" }, 500);

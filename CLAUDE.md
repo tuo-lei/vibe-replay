@@ -38,6 +38,7 @@ When to use which:
 - **Cursor tri-source**: Sessions come from SQLite `store.db` (primary), `globalStorage/state.vscdb`, or JSONL (fallback). Discovery merges all sources. DB data is source of truth; JSONL supplements missing thinking/images.
 - **Skip `progress` lines**: These are subagent streaming artifacts in JSONL.
 - **sql.js (WASM)**: Used instead of native SQLite bindings for portability — no C++ compiler needed.
+- **Session discovery cache**: CLI picker + local dashboard use file cache at `~/.vibe-replay/cache/*.json` (stale-while-refresh UX). Cache validity is tied to CLI release version (`CLI_VERSION`) plus envelope version, so caches auto-invalidate across releases. Keep cache writes best-effort and never block generation/parsing on cache failures.
 
 ## Rules
 
