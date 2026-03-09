@@ -216,7 +216,7 @@ const GroupCard = memo(function GroupCard({
           e.stopPropagation();
           onComment(firstIndex);
         }}
-        className={`absolute -right-2 top-3 z-10 flex items-center gap-1 px-1.5 py-1 rounded-md text-xs font-mono transition-all duration-150 ${
+        className={`absolute right-0 top-3 z-10 flex items-center gap-1 px-1.5 py-1 rounded-md text-xs font-mono transition-all duration-150 ${
           userCommentCount > 0
             ? "bg-terminal-blue text-terminal-bg shadow-layer-sm"
             : "text-terminal-dim hover:text-terminal-blue hover:bg-terminal-blue-subtle opacity-0 group-hover:opacity-100"
@@ -414,7 +414,11 @@ function BatchedScenes({
           const { scene, index } = batch[0];
           const count = annotationCounts?.get(index) || 0;
           return (
-            <div key={index} data-scene-index={index} className="group/scene relative scene-enter">
+            <div
+              key={index}
+              data-scene-index={index}
+              className={`group/scene relative scene-enter ${onComment ? "pr-7" : ""}`}
+            >
               <SceneBlock
                 scene={scene}
                 isActive={index === currentIndex}
@@ -426,7 +430,7 @@ function BatchedScenes({
                     e.stopPropagation();
                     onComment(index);
                   }}
-                  className={`absolute -right-2 top-1 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-xs font-mono transition-all duration-150 ${
+                  className={`absolute right-0 top-1 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-xs font-mono transition-all duration-150 ${
                     count > 0
                       ? "bg-terminal-blue text-terminal-bg shadow-layer-sm"
                       : "text-terminal-dim hover:text-terminal-blue hover:bg-terminal-blue-subtle opacity-0 group-hover/scene:opacity-100"
@@ -491,7 +495,10 @@ function ToolBatch({
   });
 
   return (
-    <div data-scene-index={batch[0].index} className="group/batch relative">
+    <div
+      data-scene-index={batch[0].index}
+      className={`group/batch relative ${onComment ? "pr-7" : ""}`}
+    >
       {/* Collapsed summary */}
       <button
         onClick={() => setExpanded(!expanded)}
@@ -518,7 +525,7 @@ function ToolBatch({
             e.stopPropagation();
             onComment(batch[0].index);
           }}
-          className={`absolute -right-2 top-1 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-xs font-mono transition-all duration-150 ${
+          className={`absolute right-0 top-1 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-xs font-mono transition-all duration-150 ${
             batchCommentCount > 0
               ? "bg-terminal-blue text-terminal-bg shadow-layer-sm"
               : "text-terminal-dim hover:text-terminal-blue hover:bg-terminal-blue-subtle opacity-0 group-hover/batch:opacity-100"
@@ -543,7 +550,7 @@ function ToolBatch({
               <div
                 key={index}
                 data-scene-index={index}
-                className="group/scene relative scene-enter"
+                className={`group/scene relative scene-enter ${onComment ? "pr-7" : ""}`}
               >
                 <SceneBlock
                   scene={scene}
@@ -556,7 +563,7 @@ function ToolBatch({
                       e.stopPropagation();
                       onComment(index);
                     }}
-                    className={`absolute -right-2 top-1 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-xs font-mono transition-all duration-150 ${
+                    className={`absolute right-0 top-1 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-xs font-mono transition-all duration-150 ${
                       count > 0
                         ? "bg-terminal-blue text-terminal-bg shadow-layer-sm"
                         : "text-terminal-dim hover:text-terminal-blue hover:bg-terminal-blue-subtle opacity-0 group-hover/scene:opacity-100"
