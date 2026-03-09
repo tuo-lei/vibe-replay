@@ -7,6 +7,11 @@ type CachedListResponse<T> = {
   cachedAt?: string;
 };
 const CACHE_REFRESH_TTL_MS = 5 * 60 * 1000;
+const TITLE_MAX_CHARS = 120;
+
+function normalizeTitleText(value?: string): string {
+  return (value || "").replace(/\s+/g, " ").trim().slice(0, TITLE_MAX_CHARS);
+}
 
 function parseCachedList<T>(payload: unknown): CachedListResponse<T> | null {
   if (!payload || typeof payload !== "object") return null;
@@ -100,20 +105,23 @@ function ProviderBadge({ provider }: { provider: string }) {
 function EditableTitle({
   slug,
   title,
+  fallbackTitle,
   onSave,
 }: {
   slug: string;
   title?: string;
+  fallbackTitle?: string;
   onSave: (slug: string, title: string) => Promise<void>;
 }) {
+  const suggestedTitle = normalizeTitleText(title || fallbackTitle || slug);
   const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(title || "");
+  const [value, setValue] = useState(suggestedTitle);
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setValue(title || "");
-  }, [title]);
+    setValue(suggestedTitle);
+  }, [suggestedTitle]);
 
   useEffect(() => {
     if (editing) inputRef.current?.focus();
@@ -123,7 +131,7 @@ function EditableTitle({
     if (saving) return;
     setSaving(true);
     try {
-      await onSave(slug, value.trim());
+      await onSave(slug, normalizeTitleText(value));
     } finally {
       setSaving(false);
       setEditing(false);
@@ -132,51 +140,64 @@ function EditableTitle({
 
   if (editing) {
     return (
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          save();
-        }}
-        className="flex items-center gap-1.5 min-w-0"
-      >
-        <input
-          ref={inputRef}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onBlur={save}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              setValue(title || "");
-              setEditing(false);
-            }
+      <div className="min-w-0">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            save();
           }}
-          className="bg-terminal-surface-2 rounded px-2 py-0.5 text-sm font-mono text-terminal-text w-full outline-none ring-1 ring-terminal-border-subtle focus:ring-terminal-green/50 transition-shadow duration-200"
-          placeholder={slug}
-          disabled={saving}
-        />
-      </form>
+          className="flex items-center gap-1.5 min-w-0"
+        >
+          <input
+            ref={inputRef}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onBlur={save}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setValue(suggestedTitle);
+                setEditing(false);
+              }
+            }}
+            className="bg-terminal-surface-2 rounded px-2 py-0.5 text-sm font-mono text-terminal-text w-full outline-none ring-1 ring-terminal-border-subtle focus:ring-terminal-green/50 transition-shadow duration-200"
+            placeholder={suggestedTitle}
+            maxLength={TITLE_MAX_CHARS}
+            disabled={saving}
+          />
+        </form>
+        <div className="text-[11px] font-mono text-terminal-dimmer truncate mt-0.5">
+          slug: <span className="text-terminal-dim">{slug}</span>
+        </div>
+      </div>
     );
   }
 
   return (
-    <button
-      onClick={() => setEditing(true)}
-      className="group flex items-center gap-1 min-w-0 text-left"
-      title="Click to edit title"
-    >
-      <span className="text-sm font-mono text-terminal-text truncate">{title || slug}</span>
-      <svg
-        width="12"
-        height="12"
-        viewBox="0 0 16 16"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        className="shrink-0 text-terminal-dim opacity-0 group-hover:opacity-100 transition-opacity"
+    <div className="min-w-0">
+      <button
+        onClick={() => setEditing(true)}
+        className="group flex items-center gap-1 min-w-0 text-left"
+        title="Click to edit title"
       >
-        <path d="M11.5 1.5l3 3-9 9H2.5v-3l9-9z" />
-      </svg>
-    </button>
+        <span className="text-sm font-mono text-terminal-text truncate">
+          {suggestedTitle || slug}
+        </span>
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          className="shrink-0 text-terminal-dim opacity-0 group-hover:opacity-100 transition-opacity"
+        >
+          <path d="M11.5 1.5l3 3-9 9H2.5v-3l9-9z" />
+        </svg>
+      </button>
+      <div className="text-[11px] font-mono text-terminal-dimmer truncate mt-0.5">
+        slug: <span className="text-terminal-dim">{slug}</span>
+      </div>
+    </div>
   );
 }
 
@@ -216,13 +237,23 @@ function ReplayCard({
     >
       {/* Row 1: title + badges + actions */}
       <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex items-start gap-2 min-w-0">
           {onTitleSave ? (
-            <EditableTitle slug={s.slug} title={s.title} onSave={onTitleSave} />
+            <EditableTitle
+              slug={s.slug}
+              title={s.title}
+              fallbackTitle={replaySuggestedTitle(s)}
+              onSave={onTitleSave}
+            />
           ) : (
-            <span className="text-sm font-mono text-terminal-text truncate">
-              {s.title || s.slug}
-            </span>
+            <div className="min-w-0">
+              <span className="text-sm font-mono text-terminal-text truncate block">
+                {replaySuggestedTitle(s)}
+              </span>
+              <div className="text-[11px] font-mono text-terminal-dimmer truncate mt-0.5">
+                slug: <span className="text-terminal-dim">{s.slug}</span>
+              </div>
+            </div>
           )}
           {s.gist && !s.gist.outdated && (
             <a
@@ -532,16 +563,6 @@ function shortenPath(path: string): string {
   return `${first}/\u2026/${last}`;
 }
 
-/** Build a human-readable session label — slug is always the primary identifier */
-function sessionLabel(s: SourceSession): { primary: string; branch?: string } {
-  const branch =
-    s.gitBranch && s.gitBranch !== "main" && s.gitBranch !== "master" ? s.gitBranch : undefined;
-  if (s.title && s.title !== s.slug) {
-    return { primary: s.title, branch };
-  }
-  return { primary: s.slug, branch };
-}
-
 /** Strip system-injected noise from first prompt for display */
 function cleanPrompt(text: string): string {
   let cleaned = text;
@@ -558,6 +579,27 @@ function cleanPrompt(text: string): string {
   // Collapse whitespace
   cleaned = cleaned.replace(/\s+/g, " ").trim();
   return cleaned;
+}
+
+function sourceSuggestedTitle(s: SourceSession): string {
+  const explicitTitle = normalizeTitleText(s.title);
+  if (explicitTitle) return explicitTitle;
+  const promptCandidates = [...(s.prompts || []), s.firstPrompt];
+  for (const candidate of promptCandidates) {
+    const cleaned = normalizeTitleText(cleanPrompt(candidate || ""));
+    if (cleaned) return cleaned;
+  }
+  return s.slug;
+}
+
+function replaySuggestedTitle(s: SessionSummary): string {
+  const explicitTitle = normalizeTitleText(s.title);
+  if (explicitTitle) return explicitTitle;
+  const firstMessage = normalizeTitleText(s.firstMessage);
+  if (firstMessage) return firstMessage;
+  const firstFromMessages = normalizeTitleText(s.messages?.[0]);
+  if (firstFromMessages) return firstFromMessages;
+  return s.slug;
 }
 
 /** "All projects" sentinel */
@@ -675,8 +717,9 @@ function SessionsPanel() {
   };
 
   const handleGenerate = (source: SourceSession) => {
-    setTitleInput({ slug: source.slug, defaultTitle: source.title || source.slug });
-    setTitleValue(source.title || source.slug);
+    const suggested = sourceSuggestedTitle(source);
+    setTitleInput({ slug: source.slug, defaultTitle: suggested });
+    setTitleValue(suggested);
   };
 
   const submitGenerate = async () => {
@@ -696,7 +739,7 @@ function SessionsPanel() {
           provider: source.provider,
           filePaths: source.filePaths,
           toolPaths: source.toolPaths,
-          title: titleValue.trim() || undefined,
+          title: normalizeTitleText(titleValue) || undefined,
           sessionSlug: source.slug,
           sessionProject: source.project,
         }),
@@ -1055,6 +1098,7 @@ function SessionsPanel() {
                 onChange={(e) => setTitleValue(e.target.value)}
                 className="flex-1 bg-terminal-bg rounded-lg px-3 py-2.5 text-sm font-mono text-terminal-text placeholder:text-terminal-dimmer outline-none ring-1 ring-terminal-border-subtle focus:ring-terminal-green/40 transition-shadow duration-200"
                 placeholder={titleInput.defaultTitle}
+                maxLength={TITLE_MAX_CHARS}
                 onKeyDown={(e) => {
                   if (e.key === "Escape") setTitleInput(null);
                 }}
@@ -1106,7 +1150,6 @@ function SessionsPanel() {
                   );
                 }
                 // Sessions without replay: simpler card with Generate
-                const label = sessionLabel(s);
                 const prompts = (s.prompts || [])
                   .map((p) => cleanPrompt(p))
                   .filter((p) => p.length > 0);
@@ -1114,6 +1157,11 @@ function SessionsPanel() {
                   const cleaned = cleanPrompt(s.firstPrompt);
                   if (cleaned) prompts.push(cleaned);
                 }
+                const branch =
+                  s.gitBranch && s.gitBranch !== "main" && s.gitBranch !== "master"
+                    ? s.gitBranch
+                    : undefined;
+                const sessionTitle = sourceSuggestedTitle(s);
                 const isArchived = archivedSlugs.has(s.slug);
                 return (
                   <div
@@ -1122,10 +1170,15 @@ function SessionsPanel() {
                   >
                     {/* Row 1: slug + branch + time + action */}
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-mono text-terminal-text truncate">
-                        {label.primary}
-                      </span>
-                      {label.branch && (
+                      <div className="min-w-0">
+                        <span className="text-sm font-mono text-terminal-text truncate block">
+                          {sessionTitle}
+                        </span>
+                        <div className="text-[11px] font-mono text-terminal-dimmer truncate mt-0.5">
+                          slug: <span className="text-terminal-dim">{s.slug}</span>
+                        </div>
+                      </div>
+                      {branch && (
                         <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-terminal-surface-2 text-terminal-dim shrink-0 flex items-center gap-0.5">
                           <svg
                             width="10"
@@ -1139,7 +1192,7 @@ function SessionsPanel() {
                             <circle cx="11" cy="12" r="2" />
                             <path d="M5 6v4c0 1.1.9 2 2 2h2" />
                           </svg>
-                          {label.branch}
+                          {branch}
                         </span>
                       )}
                       <div className="flex items-center gap-1.5 shrink-0 ml-auto">

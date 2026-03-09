@@ -41,6 +41,13 @@ function requireSlug(raw: string | undefined): { slug: string } | { error: strin
   return { slug };
 }
 
+const MAX_TITLE_CHARS = 120;
+
+function normalizeTitle(title: string): string | undefined {
+  const cleaned = title.replace(/\s+/g, " ").trim().slice(0, MAX_TITLE_CHARS);
+  return cleaned || undefined;
+}
+
 // ─── Archive helpers (directory-based, one marker file per slug) ────
 
 const ARCHIVE_DIR = ".archive";
@@ -344,14 +351,14 @@ export async function startServer(
   app.patch("/api/sessions/:slug", async (c) => {
     const slug = safeSlug(c.req.param("slug"));
     if (!slug) return c.json({ error: "invalid slug" }, 400);
-    const body = await c.req.json<{ title: string }>();
-    if (!body.title && body.title !== "") {
+    const body = await c.req.json<{ title?: unknown }>();
+    if (typeof body.title !== "string") {
       return c.json({ error: "title field required" }, 400);
     }
 
     try {
       const target = await loadSessionFromDisk(baseDir, slug);
-      target.meta.title = body.title || undefined;
+      target.meta.title = normalizeTitle(body.title);
 
       const targetDir = join(baseDir, slug);
       await writeFile(join(targetDir, "replay.json"), JSON.stringify(target), "utf-8");
@@ -509,7 +516,7 @@ export async function startServer(
         provider: string;
         filePaths: string[];
         toolPaths?: string[];
-        title?: string;
+        title?: unknown;
         sessionSlug?: string;
         sessionProject?: string;
       }>();
@@ -522,6 +529,9 @@ export async function startServer(
       const paths = [...body.filePaths, ...(body.toolPaths || [])];
       if (paths.length === 0) {
         return c.json({ error: "filePaths is required" }, 400);
+      }
+      if (body.title !== undefined && typeof body.title !== "string") {
+        return c.json({ error: "title must be a string" }, 400);
       }
 
       const parsed = await provider.parse(paths);
@@ -540,8 +550,11 @@ export async function startServer(
         },
       });
 
-      if (body.title) {
-        replay.meta.title = body.title;
+      if (typeof body.title === "string") {
+        const normalizedCustomTitle = normalizeTitle(body.title);
+        if (normalizedCustomTitle) {
+          replay.meta.title = normalizedCustomTitle;
+        }
       }
 
       // Save replay

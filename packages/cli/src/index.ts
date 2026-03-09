@@ -3,6 +3,7 @@ import chalk from "chalk";
 import { program } from "commander";
 import ora from "ora";
 import { readFileCache, writeFileCache } from "./cache.js";
+import { cleanPromptText } from "./clean-prompt.js";
 import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.js";
 import { generateOutput } from "./generator.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
@@ -16,6 +17,37 @@ import { CLI_VERSION } from "./version.js";
 
 const DEV_MENU_ENABLED = process.env.VIBE_REPLAY_DEV_MENU === "1";
 const SESSION_DISCOVERY_CACHE_KEY = "session-discovery-v1";
+const TITLE_MAX_CHARS = 120;
+
+function normalizeTitle(value?: string): string {
+  return (value || "").replace(/\s+/g, " ").trim().slice(0, TITLE_MAX_CHARS);
+}
+
+function normalizePromptTitle(value?: string): string {
+  return normalizeTitle(cleanPromptText(value || ""));
+}
+
+function suggestedReplayTitle(
+  replayTitle: string | undefined,
+  replaySlug: string,
+  sessionInfo?: SessionInfo,
+): string {
+  const slug = normalizeTitle(replaySlug);
+  const replayCandidate = normalizeTitle(replayTitle);
+  if (replayCandidate && replayCandidate !== slug) return replayCandidate;
+
+  const sessionTitle = normalizeTitle(sessionInfo?.title);
+  if (sessionTitle && sessionTitle !== slug) return sessionTitle;
+
+  for (const prompt of sessionInfo?.prompts || []) {
+    const promptTitle = normalizePromptTitle(prompt);
+    if (promptTitle) return promptTitle;
+  }
+  const firstPromptTitle = normalizePromptTitle(sessionInfo?.firstPrompt);
+  if (firstPromptTitle) return firstPromptTitle;
+
+  return replayCandidate || slug;
+}
 
 function formatRelativeAge(iso: string): string {
   const ageMs = Date.now() - new Date(iso).getTime();
@@ -291,16 +323,18 @@ program
 
     // Title: CLI flag > interactive prompt > auto-detected > slug
     if (opts.title) {
-      replay.meta.title = opts.title;
+      const normalizedCliTitle = normalizeTitle(opts.title);
+      if (normalizedCliTitle) replay.meta.title = normalizedCliTitle;
     } else {
       const { input } = await import("@inquirer/prompts");
-      const defaultTitle = replay.meta.title || replay.meta.slug;
+      const defaultTitle = suggestedReplayTitle(replay.meta.title, replay.meta.slug, sessionInfo);
       const userTitle = await input({
         message: "Replay title (shown on landing page & shared links):",
         default: defaultTitle,
       });
-      if (userTitle.trim()) {
-        replay.meta.title = userTitle.trim();
+      const normalizedUserTitle = normalizeTitle(userTitle);
+      if (normalizedUserTitle) {
+        replay.meta.title = normalizedUserTitle;
       }
     }
 
