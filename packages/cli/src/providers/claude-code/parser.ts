@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { ContentBlock, ParsedTurn, RawMessage } from "../../types.js";
 import type { Compaction, ProviderParseResult, TokenUsage } from "../types.js";
 
@@ -79,15 +80,9 @@ export async function parseClaudeCodeSession(
       continue;
     }
 
-    // Progress lines contain subagent (e.g. Haiku) streaming data.
-    // We skip them for content but extract token usage for cost estimation.
-    if (obj.type === "progress") {
-      const inner = (obj as any).data?.message?.message;
-      if (inner?.usage && inner?.id) {
-        usageByMsgId.set(inner.id, { ...inner.usage, model: inner.model });
-      }
-      continue;
-    }
+    // Progress lines are subagent streaming fragments.
+    // Full subagent usage is read from subagent JSONL files instead.
+    if (obj.type === "progress") continue;
 
     if (obj.type === "system") {
       if (obj.subtype === "turn_duration" && obj.durationMs) {
@@ -238,6 +233,11 @@ export async function parseClaudeCodeSession(
 
   const finalTurns: ParsedTurn[] = entries.map((e) => e.turn);
 
+  // Read subagent JSONL files for token usage (e.g. Haiku subtasks).
+  // Subagent files live at <session-dir>/subagents/agent-*.jsonl
+  // where <session-dir> matches the main file name without .jsonl extension.
+  await readSubagentUsage(paths[0], usageByMsgId);
+
   // Aggregate token usage from deduplicated per-message data
   let tokenUsage: TokenUsage | undefined;
   let tokenUsageByModel: Record<string, TokenUsage> | undefined;
@@ -338,4 +338,56 @@ function extractToolResultText(block: ContentBlock): string {
       .join("\n");
   }
   return JSON.stringify(content);
+}
+
+/**
+ * Read subagent JSONL files and merge their token usage into the main usage map.
+ * Subagent files are stored at <sessionDir>/subagents/agent-*.jsonl
+ * where sessionDir = mainFilePath without the .jsonl extension.
+ */
+async function readSubagentUsage(
+  mainFilePath: string,
+  usageByMsgId: Map<
+    string,
+    {
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_creation_input_tokens?: number;
+      cache_read_input_tokens?: number;
+      model?: string;
+    }
+  >,
+): Promise<void> {
+  const sessionDir = mainFilePath.replace(/\.jsonl$/, "");
+  const subagentsDir = join(sessionDir, "subagents");
+
+  let files: string[];
+  try {
+    files = await readdir(subagentsDir);
+  } catch {
+    return; // No subagents directory
+  }
+
+  for (const file of files) {
+    if (!file.endsWith(".jsonl")) continue;
+    let content: string;
+    try {
+      content = await readFile(join(subagentsDir, file), "utf-8");
+    } catch {
+      continue;
+    }
+    for (const line of content.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const obj = JSON.parse(line);
+        const msg = obj?.message;
+        if (msg?.usage && msg?.id) {
+          // Only update if this message hasn't been seen in the main file.
+          // Subagent files have the complete final usage; progress lines in
+          // the main file are streaming fragments with the same message IDs.
+          usageByMsgId.set(msg.id, { ...msg.usage, model: msg.model });
+        }
+      } catch {}
+    }
+  }
 }

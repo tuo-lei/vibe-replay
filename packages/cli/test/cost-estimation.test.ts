@@ -17,7 +17,7 @@ describe("parser — per-model token usage breakdown", () => {
     expect(result.tokenUsageByModel).toBeDefined();
     const byModel = result.tokenUsageByModel!;
 
-    // Should have 3 distinct models (opus from assistant, haiku from progress, sonnet from assistant)
+    // Should have 3 distinct models (opus + sonnet from main file, haiku from subagent file)
     const models = Object.keys(byModel);
     expect(models).toHaveLength(3);
     expect(models).toContain("claude-opus-4-20250514");
@@ -25,11 +25,11 @@ describe("parser — per-model token usage breakdown", () => {
     expect(models).toContain("claude-sonnet-4-20250514");
   });
 
-  it("extracts haiku subagent usage from progress lines", async () => {
+  it("reads haiku subagent usage from subagent JSONL files", async () => {
     const result = await parseClaudeCodeSession(resolve(FIXTURES, "claude-code-multi-model.jsonl"));
     const byModel = result.tokenUsageByModel!;
 
-    // msg_sub1 + msg_sub2 (haiku from progress lines):
+    // Subagent file has msg_sub1 and msg_sub2 (haiku):
     // msg_sub1: input:500, output:50, cache_create:8000, cache_read:12000
     // msg_sub2: input:600, output:80, cache_create:0, cache_read:15000
     const haiku = byModel["claude-haiku-4-5-20251001"];
@@ -37,6 +37,18 @@ describe("parser — per-model token usage breakdown", () => {
     expect(haiku.outputTokens).toBe(50 + 80);
     expect(haiku.cacheCreationTokens).toBe(8000 + 0);
     expect(haiku.cacheReadTokens).toBe(12000 + 15000);
+  });
+
+  it("subagent file overrides progress line streaming fragments", async () => {
+    // The progress line in the main file has partial usage (200/20/4000/6000)
+    // for msg_sub1, but the subagent file has the final usage (500/50/8000/12000).
+    // The parser should use the subagent file values since it's processed after.
+    const result = await parseClaudeCodeSession(resolve(FIXTURES, "claude-code-multi-model.jsonl"));
+    const byModel = result.tokenUsageByModel!;
+
+    const haiku = byModel["claude-haiku-4-5-20251001"];
+    // If progress line was used instead: input would be 200+600=800, not 500+600=1100
+    expect(haiku.inputTokens).toBe(1100);
   });
 
   it("correctly aggregates per-model tokens (deduped by message ID)", async () => {
@@ -102,7 +114,7 @@ describe("transform — per-model cost estimation", () => {
     // Calculate expected cost manually:
     // Opus (msg_a1):  (5000*15 + 800*75 + 2000*18.75 + 1000*1.5) / 1M
     //              =  (75000 + 60000 + 37500 + 1500) / 1M = 174000 / 1M = 0.174
-    // Haiku (msg_sub1 + msg_sub2 from progress):
+    // Haiku (msg_sub1 + msg_sub2 from subagent file):
     //   (1100*0.8 + 130*4 + 8000*1 + 27000*0.08) / 1M
     //   = (880 + 520 + 8000 + 2160) / 1M = 11560 / 1M = 0.01156
     // Sonnet (msg_a3): (8000*3 + 1500*15 + 0*3.75 + 3000*0.3) / 1M
