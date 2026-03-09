@@ -40,19 +40,19 @@ export default function App() {
     [session],
   );
 
-  // Mobile filter dropdown
-  const [filterOpen, setFilterOpen] = useState(false);
-  const filterRef = useRef<HTMLDivElement>(null);
+  // Custom mode popover
+  const [customOpen, setCustomOpen] = useState(false);
+  const customRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!filterOpen) return;
+    if (!customOpen) return;
     const handler = (e: MouseEvent) => {
-      if (filterRef.current && !filterRef.current.contains(e.target as Node)) {
-        setFilterOpen(false);
+      if (customRef.current && !customRef.current.contains(e.target as Node)) {
+        setCustomOpen(false);
       }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [filterOpen]);
+  }, [customOpen]);
 
   if (loadState.status === "loading") {
     return (
@@ -220,120 +220,104 @@ export default function App() {
             </button>
           )}
 
-          {/* Display mode: segmented control */}
+          {/* Display mode: segmented control — Custom has a popover */}
           <div className="flex items-center h-7 rounded-md overflow-hidden bg-terminal-surface">
-            {(["all", "compact", "custom"] as const).map((mode) => (
+            <button
+              onClick={() => updatePref("displayMode", "all")}
+              className={`h-full px-2.5 text-xs font-mono transition-colors ${
+                prefs.displayMode === "all"
+                  ? "bg-terminal-green-subtle text-terminal-green"
+                  : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
+              }`}
+            >
+              All
+            </button>
+            <button
+              onClick={() => updatePref("displayMode", "compact")}
+              className={`h-full px-2.5 text-xs font-mono transition-colors ${
+                prefs.displayMode === "compact"
+                  ? "bg-terminal-green-subtle text-terminal-green"
+                  : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
+              }`}
+            >
+              Compact
+            </button>
+            <div ref={customRef} className="relative h-full">
               <button
-                key={mode}
-                onClick={() => updatePref("displayMode", mode)}
+                onClick={() => {
+                  updatePref("displayMode", "custom");
+                  setCustomOpen((v) => (prefs.displayMode === "custom" ? !v : true));
+                }}
                 className={`h-full px-2.5 text-xs font-mono transition-colors ${
-                  prefs.displayMode === mode
+                  prefs.displayMode === "custom"
                     ? "bg-terminal-green-subtle text-terminal-green"
                     : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
                 }`}
               >
-                {mode === "all" ? "All" : mode === "compact" ? "Compact" : "Custom"}
+                Custom
               </button>
-            ))}
+              {customOpen && prefs.displayMode === "custom" && (
+                <div className="absolute right-0 top-full mt-2 w-44 bg-terminal-surface border border-terminal-border-subtle rounded-xl shadow-layer-xl z-50 py-2 overflow-hidden backdrop-blur-md">
+                  <button
+                    onClick={() => togglePref("promptsOnly")}
+                    className="w-full text-left px-3 py-2 text-xs font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50 transition-colors flex items-center gap-2"
+                  >
+                    <span
+                      className={`w-3.5 h-3.5 rounded flex items-center justify-center text-xs ${
+                        prefs.promptsOnly
+                          ? "bg-terminal-green-subtle text-terminal-green"
+                          : "bg-terminal-surface"
+                      }`}
+                    >
+                      {prefs.promptsOnly ? "\u2713" : ""}
+                    </span>
+                    Prompts Only
+                  </button>
+                  <button
+                    onClick={() => togglePref("collapseAllTools")}
+                    className="w-full text-left px-3 py-2 text-xs font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50 transition-colors flex items-center gap-2"
+                  >
+                    <span
+                      className={`w-3.5 h-3.5 rounded flex items-center justify-center text-xs ${
+                        prefs.collapseAllTools
+                          ? "bg-terminal-orange-subtle text-terminal-orange"
+                          : "bg-terminal-surface"
+                      }`}
+                    >
+                      {prefs.collapseAllTools ? "\u2713" : ""}
+                    </span>
+                    Collapse Tools
+                  </button>
+                  {hasThinking && (
+                    <button
+                      onClick={() => togglePref("hideThinking")}
+                      className="w-full text-left px-3 py-2 text-xs font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50 transition-colors flex items-center gap-2"
+                    >
+                      <span
+                        className={`w-3.5 h-3.5 rounded flex items-center justify-center text-xs ${
+                          prefs.hideThinking
+                            ? "bg-terminal-purple-subtle text-terminal-purple"
+                            : "bg-terminal-surface"
+                        }`}
+                      >
+                        {prefs.hideThinking ? "\u2713" : ""}
+                      </span>
+                      Hide Thinking
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Settings dropdown */}
-          <div ref={filterRef} className="relative">
-            <button
-              onClick={() => setFilterOpen((v) => !v)}
-              className={`h-7 w-7 flex items-center justify-center rounded-md transition-colors text-xs ${
-                filterOpen
-                  ? "bg-terminal-green-subtle text-terminal-green"
-                  : "bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
-              }`}
-              title="Settings"
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              >
-                <line x1="2" y1="4" x2="14" y2="4" />
-                <line x1="2" y1="8" x2="14" y2="8" />
-                <line x1="2" y1="12" x2="14" y2="12" />
-                <circle cx="5" cy="4" r="1.5" fill="currentColor" />
-                <circle cx="10" cy="8" r="1.5" fill="currentColor" />
-                <circle cx="6" cy="12" r="1.5" fill="currentColor" />
-              </svg>
-            </button>
-            {filterOpen && (
-              <div className="absolute right-0 top-full mt-2 w-48 bg-terminal-surface border border-terminal-border-subtle rounded-xl shadow-layer-xl z-50 py-2 overflow-hidden backdrop-blur-md">
-                {prefs.displayMode === "custom" && (
-                  <>
-                    <button
-                      onClick={() => togglePref("promptsOnly")}
-                      className="w-full text-left px-3 py-2 text-xs font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50 transition-colors flex items-center gap-2"
-                    >
-                      <span
-                        className={`w-3.5 h-3.5 rounded flex items-center justify-center text-xs ${
-                          prefs.promptsOnly
-                            ? "bg-terminal-green-subtle text-terminal-green"
-                            : "bg-terminal-surface"
-                        }`}
-                      >
-                        {prefs.promptsOnly ? "\u2713" : ""}
-                      </span>
-                      Prompts Only
-                    </button>
-                    <button
-                      onClick={() => togglePref("collapseAllTools")}
-                      className="w-full text-left px-3 py-2 text-xs font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50 transition-colors flex items-center gap-2"
-                    >
-                      <span
-                        className={`w-3.5 h-3.5 rounded flex items-center justify-center text-xs ${
-                          prefs.collapseAllTools
-                            ? "bg-terminal-orange-subtle text-terminal-orange"
-                            : "bg-terminal-surface"
-                        }`}
-                      >
-                        {prefs.collapseAllTools ? "\u2713" : ""}
-                      </span>
-                      Collapse Tools
-                    </button>
-                    {hasThinking && (
-                      <button
-                        onClick={() => togglePref("hideThinking")}
-                        className="w-full text-left px-3 py-2 text-xs font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50 transition-colors flex items-center gap-2"
-                      >
-                        <span
-                          className={`w-3.5 h-3.5 rounded flex items-center justify-center text-xs ${
-                            prefs.hideThinking
-                              ? "bg-terminal-purple-subtle text-terminal-purple"
-                              : "bg-terminal-surface"
-                          }`}
-                        >
-                          {prefs.hideThinking ? "\u2713" : ""}
-                        </span>
-                        Hide Thinking
-                      </button>
-                    )}
-                    <div className="border-t border-terminal-border-subtle my-1.5" />
-                  </>
-                )}
-                <button
-                  onClick={() => {
-                    toggleTheme();
-                    setFilterOpen(false);
-                  }}
-                  className="w-full text-left px-3 py-2 text-xs font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50 transition-colors flex items-center gap-2"
-                >
-                  <span className="w-3.5 text-center">
-                    {theme === "dark" ? "\u263E" : "\u2600"}
-                  </span>
-                  {theme === "dark" ? "Light Mode" : "Dark Mode"}
-                </button>
-              </div>
-            )}
-          </div>
+          {/* Theme toggle */}
+          <button
+            onClick={toggleTheme}
+            className="h-7 w-7 flex items-center justify-center rounded-md bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover text-xs transition-colors"
+            title={theme === "dark" ? "Light mode" : "Dark mode"}
+          >
+            {theme === "dark" ? "\u263E" : "\u2600"}
+          </button>
         </div>
       </header>
       <Player session={session!} viewPrefs={prefs} viewerMode={viewerMode} />
