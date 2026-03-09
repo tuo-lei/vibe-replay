@@ -267,6 +267,12 @@ export interface GlobalStateDiscoveryResult {
   sessionIds: Set<string>;
 }
 
+export function countComposerConversationHeaders(composer: Record<string, any>): number {
+  return Array.isArray(composer.fullConversationHeadersOnly)
+    ? composer.fullConversationHeadersOnly.length
+    : 0;
+}
+
 /**
  * Discover sessions from Cursor's globalStorage state.vscdb.
  * This is where devcontainer/remote sessions can keep rich `composerData:*`
@@ -321,9 +327,9 @@ export async function discoverGlobalStateOnlySessions(
           ? composer.name.trim()
           : undefined;
       const firstPrompt = title || "(cursor global state session)";
-      const headers = Array.isArray(composer.fullConversationHeadersOnly)
-        ? composer.fullConversationHeadersOnly
-        : [];
+      const headerCount = countComposerConversationHeaders(composer);
+      // Skip sessions without conversation headers: they cannot be replayed.
+      if (headerCount === 0) continue;
       const projectPath = await inferProjectFromComposerData(rawComposer, decodedWorkspacePaths);
 
       const sessionInfo: SessionInfo = {
@@ -335,7 +341,7 @@ export async function discoverGlobalStateOnlySessions(
         cwd: projectPath,
         version: "",
         timestamp,
-        lineCount: headers.length,
+        lineCount: headerCount,
         fileSize: Buffer.byteLength(rawComposer, "utf-8"),
         filePath: `${dbPath}#composerData:${sessionId}`,
         filePaths: [],

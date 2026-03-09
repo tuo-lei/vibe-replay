@@ -15,10 +15,16 @@ export async function parseCursorSession(
 
   // Try SQLite first if session info is available
   if (sessionInfo?.sessionId) {
-    const sqliteResult = await parseCursorSqlite(
-      sessionInfo.workspacePath || "",
-      sessionInfo.sessionId,
-    );
+    let sqliteResult: ProviderParseResult | null = null;
+    try {
+      sqliteResult = await parseCursorSqlite(
+        sessionInfo.workspacePath || "",
+        sessionInfo.sessionId,
+      );
+    } catch {
+      // Cursor DB schemas can vary across versions/hosts; fall back to JSONL when available.
+      sqliteResult = null;
+    }
     if (sqliteResult) {
       // Keep SQLite/global-state as source of truth, but supplement missing
       // thinking markers and user images from JSONL when transcript files are available.
