@@ -35,6 +35,7 @@ describe("parseCursorSession", () => {
       },
     });
 
+    // Use a non-.jsonl path so this test exercises the sqlite return path only.
     const parsed = await parseCursorSession(["/tmp/fake.txt"], {
       provider: "cursor",
       sessionId: "sqlite-session",

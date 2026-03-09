@@ -663,10 +663,8 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
     const composer = parseJson<Record<string, any>>(rawComposer);
     if (!composer) return null;
 
-    const headers = Array.isArray(composer.fullConversationHeadersOnly)
-      ? composer.fullConversationHeadersOnly
-      : [];
-    if (headers.length === 0) return null;
+    if (countComposerConversationHeaders(composer) === 0) return null;
+    const headers = composer.fullConversationHeadersOnly as any[];
 
     const turns: ParsedTurn[] = [];
     const bubbleStmt = db.prepare("SELECT value FROM cursorDiskKV WHERE key = ?");

@@ -23,6 +23,7 @@ export async function parseCursorSession(
   const paths = Array.isArray(filePaths) ? filePaths : [filePaths];
   const transcriptPaths = paths.filter((p) => p.endsWith(".jsonl"));
   const explicitToolPaths = paths.filter((p) => p.endsWith(".txt"));
+  let sqliteError: string | undefined;
   let sqliteFallbackNote: string | undefined;
   let sqliteAttempted = false;
 
@@ -37,7 +38,8 @@ export async function parseCursorSession(
       );
     } catch (err) {
       // Cursor DB schemas can vary across versions/hosts; fall back to JSONL when available.
-      sqliteFallbackNote = `cursor SQLite parse failed (${compactErrorMessage(err)}); fell back to JSONL transcript`;
+      sqliteError = compactErrorMessage(err);
+      sqliteFallbackNote = `cursor SQLite parse failed (${sqliteError}); fell back to JSONL transcript`;
       sqliteResult = null;
     }
     if (sqliteResult) {
@@ -68,9 +70,9 @@ export async function parseCursorSession(
 
   // Fallback to JSONL parsing
   if (transcriptPaths.length === 0) {
-    if (sqliteFallbackNote) {
+    if (sqliteError) {
       throw new Error(
-        `Cursor parse failed: ${sqliteFallbackNote.replace("; fell back to JSONL transcript", "")}. No transcript .jsonl fallback is available.`,
+        `Cursor parse failed: ${sqliteError}. No transcript .jsonl fallback is available.`,
       );
     }
     if (sqliteAttempted) {
