@@ -294,6 +294,14 @@ export async function startServer(
   const cacheKeySuffix = createHash("sha1").update(baseDir).digest("hex").slice(0, 12);
   const sourcesCacheKey = `dashboard-sources-v1-${cacheKeySuffix}`;
   const replaysCacheKey = `dashboard-replays-v1-${cacheKeySuffix}`;
+  const refreshReplaysCache = async (): Promise<void> => {
+    try {
+      const sessions = await scanSessions(baseDir);
+      await writeFileCache(replaysCacheKey, sessions);
+    } catch {
+      // Best-effort cache refresh for dashboard listing.
+    }
+  };
 
   const app = new Hono();
 
@@ -348,6 +356,7 @@ export async function startServer(
       const targetDir = join(baseDir, slug);
       await writeFile(join(targetDir, "replay.json"), JSON.stringify(target), "utf-8");
       await generateOutput(target, targetDir);
+      await refreshReplaysCache();
 
       return c.json({ ok: true, title: target.meta.title });
     } catch (err: any) {
@@ -362,6 +371,7 @@ export async function startServer(
     try {
       const { rm } = await import("node:fs/promises");
       await rm(join(baseDir, slug), { recursive: true });
+      await refreshReplaysCache();
       return c.json({ ok: true });
     } catch (err: any) {
       return c.json({ error: err.message || "Delete failed" }, 500);
@@ -539,6 +549,7 @@ export async function startServer(
       const slug = rawSlug.replace(/[^a-zA-Z0-9_-]/g, "-");
       const outputDir = join(baseDir, slug);
       await generateOutput(replay, outputDir);
+      await refreshReplaysCache();
 
       // Secret scanning
       const findings = scanForSecrets(JSON.stringify(replay));

@@ -1260,14 +1260,16 @@ function ReplaysPanel() {
         .catch(() => null);
       const cachedData = parseCachedList<SessionSummary>(cached);
       const shouldSkipRefresh = isCacheFresh(cachedData?.cachedAt);
-      if (mounted && cachedData && cachedData.sessions.length > 0) {
+      if (mounted && cachedData) {
         servedFromCache = true;
         setSessions(cachedData.sessions);
         setServerAvailable(true);
         setLastRefreshedAt(cachedData.cachedAt ?? null);
-        setStaleCachedAt(shouldSkipRefresh ? null : (cachedData.cachedAt ?? null));
-        setLoading(false);
-        setRefreshing(!shouldSkipRefresh);
+        if (cachedData.sessions.length > 0 || shouldSkipRefresh) {
+          setStaleCachedAt(shouldSkipRefresh ? null : (cachedData.cachedAt ?? null));
+          setLoading(false);
+          setRefreshing(!shouldSkipRefresh);
+        }
       }
 
       if (shouldSkipRefresh) {
