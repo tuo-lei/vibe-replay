@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAnnotations } from "../hooks/useAnnotations";
 import { usePlayback } from "../hooks/usePlayback";
 import type { ViewerMode } from "../hooks/useSessionLoader";
-import type { ViewPrefs } from "../hooks/useViewPrefs";
+import { getEffectivePrefs, type ViewPrefs } from "../hooks/useViewPrefs";
 import type { ReplaySession } from "../types";
 import AnnotationPanel from "./AnnotationPanel";
 import Controls from "./Controls";
@@ -53,6 +53,8 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
   const [commentTargetScene, setCommentTargetScene] = useState<number | null>(null);
   const annotationActions = useAnnotations(session, viewerMode);
 
+  const effectivePrefs = getEffectivePrefs(viewPrefs);
+
   const {
     state,
     currentIndex,
@@ -65,7 +67,7 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
     changeSpeed,
     totalScenes,
     userPromptIndices,
-  } = usePlayback(session.scenes, viewPrefs.promptsOnly, landed);
+  } = usePlayback(session.scenes, effectivePrefs.promptsOnly, landed);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [sidebarTab, setSidebarTab] = useState<"outline" | "stats" | "comments">("outline");
@@ -371,7 +373,7 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
                 scenes={session.scenes}
                 visibleCount={visibleCount}
                 currentIndex={currentIndex}
-                viewPrefs={viewPrefs}
+                effectivePrefs={effectivePrefs}
                 focusIndex={navFocusIndex}
                 annotatedScenes={annotationActions.annotatedScenes}
                 annotationCounts={annotationActions.annotationCounts}

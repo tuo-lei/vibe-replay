@@ -8,6 +8,12 @@ dist/
 vibe-replay/*/
 packages/cli/vibe-replay/
 
+# Temp files (Biome, etc.)
+_tmp_*
+
+# Playwright CLI cache
+.playwright-cli/
+
 # Dev artifacts
 packages/viewer/public/demo.json
 packages/viewer/dist/

@@ -28,7 +28,7 @@ function navigateTo(params: Record<string, string | null>) {
 export default function App() {
   const loadState = useSessionLoader();
   const { theme, toggleTheme } = useTheme();
-  const { prefs, togglePref } = useViewPrefs();
+  const { prefs, updatePref, togglePref } = useViewPrefs();
 
   const session = loadState.status === "ready" ? loadState.session : null;
   const viewerMode = loadState.status === "ready" ? loadState.mode : "embedded";
@@ -220,44 +220,31 @@ export default function App() {
             </button>
           )}
 
-          {/* View mode: segmented control */}
+          {/* Display mode: segmented control */}
           <div className="flex items-center h-7 rounded-md overflow-hidden bg-terminal-surface">
-            <button
-              onClick={() => {
-                if (prefs.promptsOnly) togglePref("promptsOnly");
-              }}
-              className={`h-full px-2.5 text-xs font-mono transition-colors ${
-                !prefs.promptsOnly
-                  ? "bg-terminal-green-subtle text-terminal-green"
-                  : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
-              }`}
-            >
-              All
-            </button>
-            <button
-              onClick={() => {
-                if (!prefs.promptsOnly) togglePref("promptsOnly");
-              }}
-              className={`h-full px-2.5 text-xs font-mono transition-colors ${
-                prefs.promptsOnly
-                  ? "bg-terminal-green-subtle text-terminal-green"
-                  : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
-              }`}
-            >
-              Prompts
-            </button>
+            {(["all", "compact", "custom"] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => updatePref("displayMode", mode)}
+                className={`h-full px-2.5 text-xs font-mono transition-colors ${
+                  prefs.displayMode === mode
+                    ? "bg-terminal-green-subtle text-terminal-green"
+                    : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
+                }`}
+              >
+                {mode === "all" ? "All" : mode === "compact" ? "Compact" : "Custom"}
+              </button>
+            ))}
           </div>
 
-          {/* Settings dropdown — filters + theme */}
+          {/* Settings dropdown */}
           <div ref={filterRef} className="relative">
             <button
               onClick={() => setFilterOpen((v) => !v)}
               className={`h-7 w-7 flex items-center justify-center rounded-md transition-colors text-xs ${
                 filterOpen
                   ? "bg-terminal-green-subtle text-terminal-green"
-                  : prefs.collapseAllTools || prefs.hideThinking
-                    ? "bg-terminal-orange-subtle text-terminal-orange"
-                    : "bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
+                  : "bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
               }`}
               title="Settings"
             >
@@ -280,8 +267,23 @@ export default function App() {
             </button>
             {filterOpen && (
               <div className="absolute right-0 top-full mt-2 w-48 bg-terminal-surface border border-terminal-border-subtle rounded-xl shadow-layer-xl z-50 py-2 overflow-hidden backdrop-blur-md">
-                {!prefs.promptsOnly && (
+                {prefs.displayMode === "custom" && (
                   <>
+                    <button
+                      onClick={() => togglePref("promptsOnly")}
+                      className="w-full text-left px-3 py-2 text-xs font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50 transition-colors flex items-center gap-2"
+                    >
+                      <span
+                        className={`w-3.5 h-3.5 rounded flex items-center justify-center text-xs ${
+                          prefs.promptsOnly
+                            ? "bg-terminal-green-subtle text-terminal-green"
+                            : "bg-terminal-surface"
+                        }`}
+                      >
+                        {prefs.promptsOnly ? "\u2713" : ""}
+                      </span>
+                      Prompts Only
+                    </button>
                     <button
                       onClick={() => togglePref("collapseAllTools")}
                       className="w-full text-left px-3 py-2 text-xs font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50 transition-colors flex items-center gap-2"

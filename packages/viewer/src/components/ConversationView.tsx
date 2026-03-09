@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import type { ViewPrefs } from "../hooks/useViewPrefs";
+import type { EffectivePrefs } from "../hooks/useViewPrefs";
 import type { Scene } from "../types";
 import CompactionSummaryBlock from "./CompactionSummaryBlock";
 import TextResponseBlock from "./TextResponseBlock";
@@ -11,7 +11,7 @@ interface Props {
   scenes: Scene[];
   visibleCount: number;
   currentIndex: number;
-  viewPrefs: ViewPrefs;
+  effectivePrefs: EffectivePrefs;
   focusIndex?: number;
   annotatedScenes?: Set<number>;
   annotationCounts?: Map<number, number>;
@@ -43,7 +43,7 @@ export default function ConversationView({
   scenes,
   visibleCount,
   currentIndex,
-  viewPrefs,
+  effectivePrefs,
   focusIndex,
   annotatedScenes,
   annotationCounts,
@@ -80,15 +80,15 @@ export default function ConversationView({
     return result;
   }, [scenes]);
 
-  // Only show groups that have visible scenes, filtered by viewPrefs
+  // Only show groups that have visible scenes, filtered by effectivePrefs
   const displayGroups = useMemo(() => {
-    if (viewPrefs.promptsOnly) {
+    if (effectivePrefs.promptsOnly) {
       return allGroups.filter(
         (g) => (g.type === "user" || g.type === "compaction") && g.scenes[0].index < visibleCount,
       );
     }
     return allGroups.filter((g) => g.scenes[0].index < visibleCount);
-  }, [allGroups, visibleCount, viewPrefs.promptsOnly]);
+  }, [allGroups, visibleCount, effectivePrefs.promptsOnly]);
 
   // Find which group contains the currentIndex
   const currentGroupIdx = useMemo(() => {
@@ -108,7 +108,7 @@ export default function ConversationView({
             group={group}
             currentIndex={currentIndex}
             visibleCount={visibleCount}
-            viewPrefs={viewPrefs}
+            effectivePrefs={effectivePrefs}
             focusIndex={focusIndex}
             annotatedScenes={annotatedScenes}
             annotationCounts={annotationCounts}
@@ -177,7 +177,7 @@ const GroupCard = memo(function GroupCard({
   group,
   currentIndex,
   visibleCount,
-  viewPrefs,
+  effectivePrefs,
   focusIndex,
   annotatedScenes: _annotatedScenes,
   annotationCounts,
@@ -186,7 +186,7 @@ const GroupCard = memo(function GroupCard({
   group: TurnGroup;
   currentIndex: number;
   visibleCount: number;
-  viewPrefs: ViewPrefs;
+  effectivePrefs: EffectivePrefs;
   focusIndex?: number;
   annotatedScenes?: Set<number>;
   annotationCounts?: Map<number, number>;
@@ -274,7 +274,7 @@ const GroupCard = memo(function GroupCard({
             <SceneBlock
               scene={scene}
               isActive={index === currentIndex}
-              collapseTools={viewPrefs.collapseAllTools}
+              collapseTools={effectivePrefs.collapseAllTools}
             />
           </div>
         ))}
@@ -312,12 +312,26 @@ const GroupCard = memo(function GroupCard({
     );
   }
 
-  // Assistant group — filter by viewPrefs
-  const filteredScenes = viewPrefs.hideThinking
+  // Assistant group — filter by effectivePrefs
+  const filteredScenes = effectivePrefs.hideThinking
     ? visibleScenes.filter((s) => s.scene.type !== "thinking")
     : visibleScenes;
 
   if (filteredScenes.length === 0) return null;
+
+  // Compact mode: show summary + last text-response, expandable
+  if (effectivePrefs.compactAssistant) {
+    return (
+      <CompactAssistantGroup
+        group={group}
+        filteredScenes={filteredScenes}
+        firstIndex={firstIndex}
+        currentIndex={currentIndex}
+        groupHasCurrent={groupHasCurrent}
+        groupHasFocusedTarget={groupHasFocusedTarget}
+      />
+    );
+  }
 
   return (
     <div
@@ -356,7 +370,7 @@ const GroupCard = memo(function GroupCard({
         <BatchedScenes
           scenes={filteredScenes}
           currentIndex={currentIndex}
-          collapseTools={viewPrefs.collapseAllTools}
+          collapseTools={effectivePrefs.collapseAllTools}
           annotationCounts={annotationCounts}
           onComment={onComment}
         />
@@ -364,6 +378,112 @@ const GroupCard = memo(function GroupCard({
     </div>
   );
 });
+
+/**
+ * Compact assistant group: shows a summary line (tool/response/thinking counts)
+ * plus the last text-response, with an expand button to reveal all scenes.
+ */
+function CompactAssistantGroup({
+  group,
+  filteredScenes,
+  firstIndex,
+  currentIndex,
+  groupHasCurrent,
+  groupHasFocusedTarget,
+}: {
+  group: TurnGroup;
+  filteredScenes: { scene: Scene; index: number }[];
+  firstIndex: number;
+  currentIndex: number;
+  groupHasCurrent: boolean;
+  groupHasFocusedTarget: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  // Compute summary stats
+  const stats = useMemo(() => {
+    let tools = 0;
+    let responses = 0;
+    let thinking = 0;
+    for (const { scene } of filteredScenes) {
+      if (scene.type === "tool-call") tools++;
+      else if (scene.type === "text-response") responses++;
+      else if (scene.type === "thinking") thinking++;
+    }
+    return { tools, responses, thinking };
+  }, [filteredScenes]);
+
+  // Find the last text-response to show as preview
+  const lastTextResponse = useMemo(() => {
+    for (let i = filteredScenes.length - 1; i >= 0; i--) {
+      if (filteredScenes[i].scene.type === "text-response") {
+        return filteredScenes[i];
+      }
+    }
+    return null;
+  }, [filteredScenes]);
+
+  const summaryParts: string[] = [];
+  if (stats.tools > 0) summaryParts.push(`${stats.tools} tool${stats.tools > 1 ? "s" : ""}`);
+  if (stats.responses > 0)
+    summaryParts.push(`${stats.responses} response${stats.responses > 1 ? "s" : ""}`);
+  if (stats.thinking > 0) summaryParts.push(`${stats.thinking} thinking`);
+
+  return (
+    <div
+      id={`scene-${firstIndex}`}
+      data-scene-index={firstIndex}
+      className={`relative rounded-xl px-5 py-4 transition-all duration-200 ease-material ${
+        groupHasFocusedTarget
+          ? "scene-nav-focused bg-terminal-blue-subtle border-l-2 border-terminal-blue shadow-layer-lg"
+          : groupHasCurrent
+            ? "bg-terminal-blue-subtle border-l-2 border-terminal-blue shadow-layer-sm"
+            : "bg-terminal-surface shadow-layer-sm"
+      }`}
+    >
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-[10px] font-sans font-semibold text-terminal-blue uppercase tracking-widest">
+          Assistant
+        </span>
+        {group.timestamp && (
+          <span className="text-xs font-mono text-terminal-dimmer">
+            {formatTime(group.timestamp)}
+          </span>
+        )}
+        <span className="text-xs font-mono text-terminal-dimmer">{summaryParts.join(" · ")}</span>
+      </div>
+
+      {/* Last text-response preview (always shown) */}
+      {lastTextResponse && !expanded && (
+        <div className="mb-2">
+          <TextResponseBlock
+            content={lastTextResponse.scene.content}
+            isActive={lastTextResponse.index === currentIndex}
+          />
+        </div>
+      )}
+
+      {/* Expanded: show all scenes */}
+      {expanded && (
+        <div className="space-y-2 mb-2">
+          {filteredScenes.map(({ scene, index }) => (
+            <div key={index} data-scene-index={index} className="scene-enter">
+              <SceneBlock scene={scene} isActive={index === currentIndex} collapseTools={false} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Expand/collapse toggle */}
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="text-xs font-mono text-terminal-dim hover:text-terminal-blue transition-colors"
+      >
+        {expanded ? "Collapse" : `Expand ${summaryParts.join(" · ")}`}
+      </button>
+    </div>
+  );
+}
 
 /**
  * Batch consecutive tool calls of the same type into a collapsible group.
