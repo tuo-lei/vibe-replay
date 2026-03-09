@@ -311,12 +311,16 @@ export async function discoverGlobalStateOnlySessions(
       const sessionId = key.startsWith("composerData:") ? key.slice("composerData:".length) : "";
       if (!SESSION_ID_RE.test(sessionId)) continue;
 
-      sessionIds.add(sessionId);
-      if (knownSessionIds.has(sessionId)) continue;
-
       const rawComposer = valueToString(value);
       const composer = parseJson<Record<string, any>>(rawComposer);
       if (!composer) continue;
+      const headerCount = countComposerConversationHeaders(composer);
+      // Skip sessions without conversation headers: they cannot be replayed.
+      if (headerCount === 0) continue;
+
+      // Track only replayable global-state sessions for downstream hasSqlite marking.
+      sessionIds.add(sessionId);
+      if (knownSessionIds.has(sessionId)) continue;
 
       const timestamp =
         toIsoTimestamp(composer.lastUpdatedAt) ||
@@ -327,9 +331,6 @@ export async function discoverGlobalStateOnlySessions(
           ? composer.name.trim()
           : undefined;
       const firstPrompt = title || "(cursor global state session)";
-      const headerCount = countComposerConversationHeaders(composer);
-      // Skip sessions without conversation headers: they cannot be replayed.
-      if (headerCount === 0) continue;
       const projectPath = await inferProjectFromComposerData(rawComposer, decodedWorkspacePaths);
 
       const sessionInfo: SessionInfo = {

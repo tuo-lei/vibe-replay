@@ -91,5 +91,28 @@ describe("parseCursorSession", () => {
     expect(parsed.dataSource).toBe("jsonl");
     expect(parsed.turns.length).toBeGreaterThan(0);
     expect(parsed.turns[0]?.role).toBe("user");
+    expect(parsed.dataSourceInfo?.notes?.[0]).toContain("SQLite parse failed");
+    expect(parsed.dataSourceInfo?.notes?.[0]).toContain("fell back to JSONL transcript");
+  });
+
+  it("surfaces sqlite error details when no transcript fallback exists", async () => {
+    mockedParseCursorSqlite.mockRejectedValueOnce(new Error("sql.js init failed"));
+
+    await expect(
+      parseCursorSession(["/tmp/fake.txt"], {
+        provider: "cursor",
+        sessionId: "session",
+        slug: "session",
+        project: "/tmp",
+        cwd: "/tmp",
+        version: "",
+        timestamp: new Date().toISOString(),
+        lineCount: 0,
+        fileSize: 0,
+        filePath: "/tmp/fake.txt",
+        filePaths: ["/tmp/fake.txt"],
+        firstPrompt: "x",
+      }),
+    ).rejects.toThrow(/sql\.js init failed/);
   });
 });
