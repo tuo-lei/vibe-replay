@@ -139,7 +139,7 @@ program
       if (topChoice === "replays") {
         // List existing generated replays from ~/.vibe-replay/
         const { readdir, readFile } = await import("node:fs/promises");
-        const replayChoices: { name: string; value: string }[] = [];
+        const replayEntries: { name: string; value: string; startTime: string }[] = [];
         try {
           const entries = await readdir(replayBaseDir);
           for (const slug of entries) {
@@ -150,8 +150,9 @@ program
               const title = replay.meta?.title || slug;
               const provider = replay.meta?.provider || "";
               const scenes = replay.meta?.stats?.sceneCount || 0;
-              const time = replay.meta?.startTime
-                ? new Date(replay.meta.startTime).toLocaleString("en-US", {
+              const startTime = replay.meta?.startTime || "";
+              const time = startTime
+                ? new Date(startTime).toLocaleString("en-US", {
                     month: "short",
                     day: "numeric",
                     hour: "2-digit",
@@ -165,9 +166,10 @@ program
                   : provider === "cursor"
                     ? chalk.hex("#0096FF")("cursor")
                     : chalk.yellow(provider);
-              replayChoices.push({
+              replayEntries.push({
                 name: `${providerBadge} ${chalk.dim(`[${time}]`)} ${chalk.white(title)} ${chalk.dim(`(${scenes} scenes)`)}`,
                 value: slug,
+                startTime,
               });
             } catch {
               // skip invalid entries
@@ -177,15 +179,16 @@ program
           // directory doesn't exist yet
         }
 
-        if (replayChoices.length === 0) {
+        if (replayEntries.length === 0) {
           console.log(chalk.yellow("\n  No replays found. Generate one first!\n"));
           process.exit(0);
         }
 
-        // Sort by time (newest first) — entries are already in directory order
+        // Sort by startTime descending (newest first)
+        replayEntries.sort((a, b) => b.startTime.localeCompare(a.startTime));
         const replaySlug = await select<string>({
           message: "Pick a replay to open:",
-          choices: replayChoices,
+          choices: replayEntries,
           pageSize: 20,
         });
 

@@ -862,10 +862,6 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
               onNextPrompt={seekToNextPromptWithFeedback}
               onOpenSearch={() => setSearchOpen(true)}
               onOpenOutline={() => setMobileDrawerOpen(true)}
-              annotationCount={annotationActions.annotations.length}
-              commentDrawerOpen={commentDrawerOpen}
-              onToggleAnnotations={() => setCommentDrawerOpen((v) => !v)}
-              hasUnsavedAnnotations={annotationActions.hasUnsaved}
               onShowHelp={() => setShowHelp(true)}
             />
           </div>
@@ -879,7 +875,6 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
         actions={annotationActions}
         scenes={session.scenes}
         currentIndex={currentIndex}
-        totalScenes={totalScenes}
         onSeek={seekFromNavigation}
         addingForScene={commentTargetScene}
         onClearAddingTarget={() => setCommentTargetScene(null)}

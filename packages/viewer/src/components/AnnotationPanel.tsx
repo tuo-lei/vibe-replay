@@ -11,7 +11,6 @@ interface Props {
   actions: AnnotationActions;
   scenes: Scene[];
   currentIndex: number;
-  totalScenes: number;
   onSeek: (index: number) => void;
   addingForScene: number | null;
   onClearAddingTarget: () => void;
@@ -67,7 +66,6 @@ export default function AnnotationPanel({
   actions,
   scenes,
   currentIndex,
-  totalScenes: _totalScenes,
   onSeek,
   addingForScene,
   onClearAddingTarget,

@@ -14,10 +14,6 @@ interface Props {
   onNextPrompt: () => void;
   onOpenSearch: () => void;
   onOpenOutline?: () => void;
-  annotationCount?: number;
-  commentDrawerOpen?: boolean;
-  onToggleAnnotations?: () => void;
-  hasUnsavedAnnotations?: boolean;
   onShowHelp?: () => void;
 }
 
@@ -36,10 +32,6 @@ export default function Controls({
   onNextPrompt,
   onOpenSearch,
   onOpenOutline,
-  annotationCount: _annotationCount = 0,
-  commentDrawerOpen: _commentDrawerOpen = false,
-  onToggleAnnotations: _onToggleAnnotations,
-  hasUnsavedAnnotations: _hasUnsavedAnnotations = false,
   onShowHelp,
 }: Props) {
   const isPlaying = state === "playing";

@@ -9,7 +9,6 @@ interface Props {
   actions: AnnotationActions;
   scenes: Scene[];
   currentIndex: number;
-  totalScenes: number;
   onSeek: (index: number) => void;
   addingForScene: number | null;
   onClearAddingTarget: () => void;
@@ -22,7 +21,6 @@ export default function CommentDrawer({
   actions,
   scenes,
   currentIndex,
-  totalScenes,
   onSeek,
   addingForScene,
   onClearAddingTarget,
@@ -70,7 +68,6 @@ export default function CommentDrawer({
           actions={actions}
           scenes={scenes}
           currentIndex={currentIndex}
-          totalScenes={totalScenes}
           onSeek={onSeek}
           addingForScene={addingForScene}
           onClearAddingTarget={onClearAddingTarget}
