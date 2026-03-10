@@ -248,10 +248,24 @@ export default function StatsPanel({ session }: Props) {
   );
 }
 
-export function StatCard({ label, value, color }: { label: string; value: number; color: string }) {
+export function StatCard({
+  label,
+  value,
+  color,
+}: {
+  label: string;
+  value: number | React.ReactNode;
+  color: string;
+}) {
+  const isNumber = typeof value === "number";
   return (
     <div className="bg-terminal-surface rounded-xl px-3 py-3 shadow-layer-sm">
-      <div className={`text-xl font-bold tabular-nums ${color}`}>{value}</div>
+      <div
+        className={`text-xl font-bold ${isNumber ? "tabular-nums" : "truncate w-full"} ${color}`}
+        title={typeof value === "string" ? value : undefined}
+      >
+        {value}
+      </div>
       <div className="text-terminal-dimmer text-[10px] font-sans font-medium uppercase tracking-widest mt-0.5">
         {label}
       </div>

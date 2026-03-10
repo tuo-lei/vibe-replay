@@ -56,7 +56,6 @@ function ExportCard({
 
 export default function ExportView({ actions, viewerMode, readOnly }: Props) {
   const {
-    annotations,
     hasUnsaved,
     canSaveHtml,
     downloadHtml,
@@ -67,13 +66,6 @@ export default function ExportView({ actions, viewerMode, readOnly }: Props) {
     gistPublishing,
     htmlExporting,
     githubExporting,
-    aiCoachTool,
-    aiCoachTools,
-    aiCoachToolName,
-    setAiCoachToolName,
-    runAiCoach,
-    cancelAiCoach,
-    aiCoachRunning,
   } = actions;
 
   const [htmlStatus, setHtmlStatus] = useState<{ type: "success" | "error"; text: string } | null>(
@@ -85,12 +77,7 @@ export default function ExportView({ actions, viewerMode, readOnly }: Props) {
   const [gistStatus, setGistStatus] = useState<{ type: "success" | "error"; text: string } | null>(
     null,
   );
-  const [coachStatus, setCoachStatus] = useState<{
-    type: "success" | "error";
-    text: string;
-  } | null>(null);
   const [ghAvailable, setGhAvailable] = useState<boolean | null>(null);
-  const [showAiCoachConfirm, setShowAiCoachConfirm] = useState(false);
 
   // Check gh CLI availability in editor mode
   useEffect(() => {
@@ -220,98 +207,6 @@ export default function ExportView({ actions, viewerMode, readOnly }: Props) {
               </div>
             ) : (
               <div className="text-xs font-mono text-terminal-dimmer">Checking gh CLI...</div>
-            )}
-          </ExportCard>
-        )}
-
-        {/* AI Coach */}
-        {isEditor && runAiCoach && (
-          <ExportCard
-            title="AI Coach"
-            description="AI analysis of your prompting technique"
-            color="text-terminal-purple"
-          >
-            {aiCoachRunning ? (
-              <div className="flex items-center justify-center gap-2 py-2">
-                <span className="text-xs font-mono text-terminal-purple animate-pulse">
-                  Analyzing your prompting patterns...
-                </span>
-                {cancelAiCoach && (
-                  <button
-                    onClick={cancelAiCoach}
-                    className="px-1.5 py-0.5 text-xs font-mono text-terminal-dim hover:text-terminal-red rounded transition-colors"
-                  >
-                    Cancel
-                  </button>
-                )}
-              </div>
-            ) : showAiCoachConfirm ? (
-              <div className="space-y-2">
-                <div className="text-xs font-mono text-terminal-dim leading-relaxed">
-                  Uses <span className="text-terminal-text">{aiCoachTool?.name}</span> CLI to
-                  analyze your prompting technique. This will make API calls using your configured
-                  credentials and may use tokens/cost money.
-                  {annotations.some((a) => a.author === "vibe-feedback") && (
-                    <span className="block mt-1 text-terminal-orange">
-                      This will replace existing AI Coach comments.
-                    </span>
-                  )}
-                </div>
-                {aiCoachTools.length > 1 && setAiCoachToolName && (
-                  <label className="block text-xs font-mono text-terminal-dim">
-                    Tool:
-                    <select
-                      value={aiCoachToolName || ""}
-                      onChange={(e) => setAiCoachToolName(e.target.value)}
-                      className="ml-1 bg-terminal-surface rounded px-1.5 py-0.5 text-xs font-mono text-terminal-text"
-                    >
-                      {aiCoachTools.map((tool) => (
-                        <option key={tool.name} value={tool.name}>
-                          {tool.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-                <div className="flex gap-1.5 justify-end">
-                  <button
-                    onClick={() => setShowAiCoachConfirm(false)}
-                    className="px-2 py-1 text-xs font-mono text-terminal-dim hover:text-terminal-text transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={async () => {
-                      setShowAiCoachConfirm(false);
-                      try {
-                        const result = await runAiCoach?.();
-                        setCoachStatus({
-                          type: "success",
-                          text: `Score: ${result.score}/10 — ${result.itemCount} comment(s) added`,
-                        });
-                      } catch (e: any) {
-                        if (e.name === "AbortError") return;
-                        setCoachStatus({ type: "error", text: e.message });
-                      }
-                    }}
-                    className="px-2 py-1 text-xs font-mono bg-terminal-purple-subtle text-terminal-purple rounded hover:bg-terminal-purple-emphasis transition-colors"
-                  >
-                    Run
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <>
-                <button
-                  onClick={() => setShowAiCoachConfirm(true)}
-                  className={`${btnBase} bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis`}
-                >
-                  {annotations.some((a) => a.author === "vibe-feedback")
-                    ? "Re-run AI Coach (beta)"
-                    : "AI Coach (beta)"}
-                </button>
-                <StatusMessage msg={coachStatus} />
-              </>
             )}
           </ExportCard>
         )}

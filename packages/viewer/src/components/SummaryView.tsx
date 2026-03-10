@@ -91,6 +91,7 @@ export default function SummaryView({ session }: Props) {
           <StatCard label="Tool Calls" value={stats.toolCalls} color="text-terminal-orange" />
           <StatCard label="Files Modified" value={stats.filesModified} color="text-terminal-blue" />
           <StatCard label="Scenes" value={stats.totalScenes} color="text-terminal-text" />
+          {meta.model && <StatCard label="Model" value={meta.model} color="text-terminal-text" />}
         </div>
       </div>
 

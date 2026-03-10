@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   computeNextIndex,
+  computePrevIndex,
   computeUserPromptIndices,
   findBatchEnd,
   findNextUserPrompt,
@@ -8,6 +9,7 @@ import {
   sceneDuration,
 } from "../engine";
 import type { Scene } from "../types";
+import type { EffectivePrefs } from "./useViewPrefs";
 
 export type PlayState = "idle" | "playing" | "paused" | "ended";
 
@@ -21,7 +23,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return role === "textbox" || role === "combobox";
 }
 
-export function usePlayback(scenes: Scene[], promptsOnly = false, enabled = true) {
+export function usePlayback(scenes: Scene[], prefs: EffectivePrefs, enabled = true) {
   const [state, setState] = useState<PlayState>("idle");
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [speed, setSpeed] = useState(1);
@@ -31,12 +33,12 @@ export function usePlayback(scenes: Scene[], promptsOnly = false, enabled = true
   const stateRef = useRef(state);
   const indexRef = useRef(currentIndex);
   const speedRef = useRef(speed);
-  const promptsOnlyRef = useRef(promptsOnly);
+  const prefsRef = useRef(prefs);
 
   stateRef.current = state;
   indexRef.current = currentIndex;
   speedRef.current = speed;
-  promptsOnlyRef.current = promptsOnly;
+  prefsRef.current = prefs;
 
   // Compute user prompt indices for jump navigation
   const userPromptIndices = useMemo(() => computeUserPromptIndices(scenes), [scenes]);
@@ -51,7 +53,7 @@ export function usePlayback(scenes: Scene[], promptsOnly = false, enabled = true
   const advanceScene = useCallback(() => {
     if (stateRef.current !== "playing") return;
 
-    const nextIdx = computeNextIndex(scenes, indexRef.current, promptsOnlyRef.current);
+    const nextIdx = computeNextIndex(scenes, indexRef.current, prefsRef.current);
     if (nextIdx === -1) {
       setState("ended");
       setCurrentIndex(scenes.length - 1);
@@ -162,15 +164,40 @@ export function usePlayback(scenes: Scene[], promptsOnly = false, enabled = true
         e.preventDefault();
         togglePlayPause();
       }
-      // Arrow right / l — next scene
+      // Arrow Down / j — next scene
+      else if (e.key === "ArrowDown" || e.key === "j") {
+        if (stateRef.current === "playing") pause();
+        e.preventDefault();
+        const nextIdx = computeNextIndex(scenes, indexRef.current, prefsRef.current);
+        if (nextIdx !== -1) seekTo(nextIdx);
+      }
+      // Arrow Up / k — prev scene
+      else if (e.key === "ArrowUp" || e.key === "k") {
+        if (stateRef.current === "playing") pause();
+        e.preventDefault();
+        const prevIdx = computePrevIndex(scenes, indexRef.current, prefsRef.current);
+        seekTo(prevIdx);
+      }
+      // Arrow Left / h — collapse
+      else if (e.key === "ArrowLeft" || e.key === "h") {
+        e.preventDefault();
+        window.dispatchEvent(
+          new CustomEvent("vibe:toggle-expand", { detail: { action: "collapse" } }),
+        );
+      }
+      // Escape — pause (consistent with Claude Code)
+      else if (e.key === "Escape") {
+        if (stateRef.current === "playing") {
+          e.preventDefault();
+          pause();
+        }
+      }
+      // Arrow Right / l — expand
       else if (e.key === "ArrowRight" || e.key === "l") {
         e.preventDefault();
-        seekTo(indexRef.current + 1);
-      }
-      // Arrow left / j — prev scene
-      else if (e.key === "ArrowLeft" || e.key === "j") {
-        e.preventDefault();
-        seekTo(indexRef.current - 1);
+        window.dispatchEvent(
+          new CustomEvent("vibe:toggle-expand", { detail: { action: "expand" } }),
+        );
       }
       // n — next user prompt
       else if (e.key === "n") {
@@ -195,7 +222,7 @@ export function usePlayback(scenes: Scene[], promptsOnly = false, enabled = true
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [enabled, togglePlayPause, seekTo, jumpToNextUserPrompt, jumpToPrevUserPrompt, scenes.length]);
+  }, [enabled, togglePlayPause, seekTo, jumpToNextUserPrompt, jumpToPrevUserPrompt, scenes, pause]);
 
   return {
     state,
@@ -211,5 +238,13 @@ export function usePlayback(scenes: Scene[], promptsOnly = false, enabled = true
     jumpToPrevUserPrompt,
     userPromptIndices,
     totalScenes: scenes.length,
+    computeNextIndex: useCallback(
+      (idx: number) => computeNextIndex(scenes, idx, prefs),
+      [scenes, prefs],
+    ),
+    computePrevIndex: useCallback(
+      (idx: number) => computePrevIndex(scenes, idx, prefs),
+      [scenes, prefs],
+    ),
   };
 }

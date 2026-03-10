@@ -30,15 +30,16 @@ export function generateGitHubMarkdown(
   const toolStats = computeToolStats(session.scenes);
   const duration = formatDuration(meta.stats.durationMs);
   const title = meta.title || meta.slug;
+  const condensedTitle = condenseLine(title, 80);
 
   const lines: string[] = [];
 
   // ── SVG preview image (clickable link to full replay) ──
   if (opts.svgPath) {
     if (opts.replayUrl) {
-      lines.push(`[![AI Session: ${escMd(title)}](${opts.svgPath})](${opts.replayUrl})`);
+      lines.push(`[![AI Session: ${escMd(condensedTitle)}](${opts.svgPath})](${opts.replayUrl})`);
     } else {
-      lines.push(`![AI Session: ${escMd(title)}](${opts.svgPath})`);
+      lines.push(`![AI Session: ${escMd(condensedTitle)}](${opts.svgPath})`);
     }
     lines.push("");
   }

@@ -9,6 +9,7 @@ export {
 
 export {
   computeNextIndex,
+  computePrevIndex,
   computeUserPromptIndices,
   findNextUserPrompt,
   findPrevUserPrompt,

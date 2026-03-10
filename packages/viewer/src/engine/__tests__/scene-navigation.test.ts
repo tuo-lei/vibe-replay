@@ -80,12 +80,12 @@ describe("findPrevUserPrompt", () => {
 describe("computeNextIndex", () => {
   it("returns -1 when past end of scenes", () => {
     const scenes = [userPrompt(), textResponse()];
-    expect(computeNextIndex(scenes, 1, false)).toBe(-1);
+    expect(computeNextIndex(scenes, 1, { promptsOnly: false, compactAssistant: false })).toBe(-1);
   });
 
   it("advances to next scene normally", () => {
     const scenes = [userPrompt(), thinking(), textResponse()];
-    expect(computeNextIndex(scenes, 0, false)).toBe(1);
+    expect(computeNextIndex(scenes, 0, { promptsOnly: false, compactAssistant: false })).toBe(1);
   });
 
   it("batches consecutive same-name tool calls", () => {
@@ -96,7 +96,7 @@ describe("computeNextIndex", () => {
       toolCall("Read"),
       textResponse(),
     ];
-    expect(computeNextIndex(scenes, 0, false)).toBe(3);
+    expect(computeNextIndex(scenes, 0, { promptsOnly: false, compactAssistant: false })).toBe(3);
   });
 
   it("in prompts-only mode, skips to next user-prompt", () => {
@@ -107,16 +107,16 @@ describe("computeNextIndex", () => {
       toolCall(),
       userPrompt("second"),
     ];
-    expect(computeNextIndex(scenes, 0, true)).toBe(4);
+    expect(computeNextIndex(scenes, 0, { promptsOnly: true, compactAssistant: false })).toBe(4);
   });
 
   it("in prompts-only mode, returns -1 when no more prompts", () => {
     const scenes = [userPrompt(), thinking(), textResponse()];
-    expect(computeNextIndex(scenes, 0, true)).toBe(-1);
+    expect(computeNextIndex(scenes, 0, { promptsOnly: true, compactAssistant: false })).toBe(-1);
   });
 
   it("in prompts-only mode from before first scene", () => {
     const scenes = [thinking(), userPrompt()];
-    expect(computeNextIndex(scenes, -1, true)).toBe(1);
+    expect(computeNextIndex(scenes, -1, { promptsOnly: true, compactAssistant: false })).toBe(1);
   });
 });

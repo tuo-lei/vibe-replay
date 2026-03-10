@@ -16,12 +16,14 @@ interface Props {
   annotatedScenes?: Set<number>;
   annotationCounts?: Map<number, number>;
   onComment?: (sceneIndex: number) => void;
+  state?: string;
 }
 
 interface TurnGroup {
   type: "user" | "assistant" | "compaction";
   timestamp?: string;
   scenes: { scene: Scene; index: number }[];
+  turnNumber?: number;
 }
 
 function formatTime(iso?: string): string {
@@ -48,21 +50,27 @@ export default function ConversationView({
   annotatedScenes,
   annotationCounts,
   onComment,
-}: Props) {
+  onSeek,
+  state,
+}: Props & { onSeek?: (index: number) => void }) {
   // Pre-compute ALL groups once — stable across playback ticks
   const allGroups = useMemo(() => {
     const result: TurnGroup[] = [];
     let current: TurnGroup | null = null;
+    let turnCount = 0;
 
     for (let i = 0; i < scenes.length; i++) {
       const scene = scenes[i];
       if (scene.type === "user-prompt" || scene.type === "compaction-summary") {
         if (current && current.scenes.length > 0) result.push(current);
+        const type = scene.type === "compaction-summary" ? "compaction" : "user";
+        if (type === "user") turnCount++;
         result.push({
-          type: scene.type === "compaction-summary" ? "compaction" : "user",
+          type,
           timestamp: scene.timestamp,
           scenes: [{ scene, index: i }],
-        });
+          turnNumber: type === "user" ? turnCount : undefined,
+        } as TurnGroup);
         current = null;
       } else {
         if (!current || current.type !== "assistant") {
@@ -116,6 +124,95 @@ export default function ConversationView({
           />
         </LazyGroup>
       ))}
+      {state === "paused" && visibleCount < scenes.length && (
+        <div className="pt-4 pb-12 flex items-center justify-center animate-in fade-in slide-in-from-bottom-2 duration-700 ease-out select-none">
+          <div className="group/pause relative flex items-center gap-8 px-4 py-2 bg-transparent backdrop-blur-sm">
+            {/* Ambient Glow */}
+            <div className="absolute inset-0 bg-terminal-orange/5 opacity-0 group-hover/pause:opacity-100 transition-opacity duration-700 blur-2xl -z-10" />
+
+            {/* Left: Status Label */}
+            <div className="flex items-center gap-2.5 pr-8 border-r border-terminal-border/20">
+              <div className="relative flex h-2 w-2">
+                <div className="animate-ping absolute inline-flex h-full w-full rounded-full bg-terminal-orange opacity-40"></div>
+                <div className="relative inline-flex rounded-full h-2 w-2 bg-terminal-orange/80 shadow-[0_0_8px_rgba(251,146,60,0.5)]"></div>
+              </div>
+              <span className="text-[10px] font-sans font-black text-terminal-orange uppercase tracking-[.25em] drop-shadow-sm">
+                Paused
+              </span>
+            </div>
+
+            {/* Right: Interaction Hints */}
+            <div className="flex items-center gap-8">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-terminal-surface-hover/80 border border-terminal-border-subtle/50 text-terminal-text shadow-sm">
+                  <span className="text-[11px] font-mono font-bold">&darr;</span>
+                </div>
+                <span className="text-[10px] font-sans font-bold text-terminal-dim uppercase tracking-widest opacity-80">
+                  Explore
+                </span>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-terminal-surface-hover/80 border border-terminal-border-subtle/50 text-terminal-text shadow-sm">
+                  <span className="text-[9px] font-mono font-black tracking-tight">SPACE</span>
+                </div>
+                <span className="text-[10px] font-sans font-bold text-terminal-dim uppercase tracking-widest opacity-80">
+                  Resume
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {visibleCount >= scenes.length && (
+        <div className="pt-12 pb-24 flex flex-col items-center justify-center animate-in fade-in zoom-in-95 duration-1000 ease-out select-none">
+          <div className="h-px w-8 bg-terminal-border-subtle mb-6" />
+          <div className="flex flex-col items-center gap-1">
+            <div className="text-[10px] font-mono font-bold text-terminal-dimmer uppercase tracking-[0.3em]">
+              the end
+            </div>
+            <div className="text-[9px] font-mono text-terminal-border uppercase tracking-widest mt-1">
+              session replay complete
+            </div>
+          </div>
+
+          <div className="mt-8 flex flex-col items-center gap-6">
+            <button
+              onClick={() => onSeek?.(0)}
+              className="group flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-terminal-surface/30 border border-terminal-border-subtle text-terminal-dimmer hover:text-terminal-green hover:border-terminal-green/30 hover:bg-terminal-green/5 transition-all duration-300"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="transition-transform duration-300 group-hover:-translate-y-0.5"
+              >
+                <path d="m18 15-6-6-6 6" />
+              </svg>
+              <span className="text-[10px] font-mono font-bold uppercase tracking-widest transition-colors">
+                Back to Top
+              </span>
+              <span className="text-[9px] font-mono font-bold opacity-0 group-hover:opacity-60 transition-opacity">
+                {" "}
+                [Home]
+              </span>
+            </button>
+
+            <div className="flex items-center gap-3 opacity-20">
+              <div className="w-1 h-1 rounded-full bg-terminal-green" />
+              <div className="w-1 h-1 rounded-full bg-terminal-blue" />
+              <div className="w-1 h-1 rounded-full bg-terminal-orange" />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -191,6 +288,7 @@ const GroupCard = memo(function GroupCard({
   annotatedScenes?: Set<number>;
   annotationCounts?: Map<number, number>;
   onComment?: (sceneIndex: number) => void;
+  state?: string;
 }) {
   const [hovered, setHovered] = useState(false);
 
@@ -237,12 +335,12 @@ const GroupCard = memo(function GroupCard({
       <div
         id={`scene-${firstIndex}`}
         data-scene-index={firstIndex}
-        className={`group relative rounded-xl px-5 py-4 transition-all duration-200 ease-material ${
+        className={`group relative rounded-2xl px-5 py-4 transition-all duration-200 ease-material ml-4 md:ml-12 border ${
           groupHasFocusedTarget
-            ? "scene-nav-focused bg-terminal-green-emphasis border-l-2 border-terminal-green shadow-layer-lg"
+            ? "scene-nav-focused bg-terminal-green-emphasis border-terminal-green shadow-layer-lg"
             : groupHasCurrent
-              ? "bg-terminal-green-subtle border-l-2 border-terminal-green shadow-layer-sm"
-              : "bg-terminal-green-subtle"
+              ? "bg-terminal-green-subtle border-terminal-green/30 shadow-layer-sm"
+              : "bg-terminal-surface border-terminal-border-subtle shadow-sm"
         }`}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
@@ -252,32 +350,40 @@ const GroupCard = memo(function GroupCard({
           <span className="text-[10px] font-sans font-semibold text-terminal-green uppercase tracking-widest">
             You
           </span>
+          {group.timestamp && (
+            <span className="text-[10px] font-mono text-terminal-dimmer">
+              {formatTime(group.timestamp)}
+            </span>
+          )}
+          <div className="flex-1" />
           {groupHasFocusedTarget ? (
-            <span className="text-[10px] font-sans font-medium uppercase tracking-widest px-2 py-0.5 rounded-full bg-terminal-green-emphasis text-terminal-green">
+            <span className="text-[10px] font-sans font-medium uppercase tracking-widest px-2 py-0.5 rounded-full bg-terminal-green text-terminal-bg">
               Jump Target
             </span>
           ) : (
             groupHasCurrent && (
-              <span className="text-[10px] font-sans font-medium uppercase tracking-widest px-2 py-0.5 rounded-full bg-terminal-green-subtle text-terminal-green">
+              <span className="text-[10px] font-sans font-medium uppercase tracking-widest px-2 py-0.5 rounded-full bg-terminal-green-subtle text-terminal-green border border-terminal-green/20">
                 Focused
               </span>
             )
           )}
-          {group.timestamp && (
-            <span className="text-xs font-mono text-terminal-dimmer">
-              {formatTime(group.timestamp)}
+          {group.turnNumber !== undefined && (
+            <span className="text-[10px] font-mono text-terminal-dimmer font-bold">
+              #{String(group.turnNumber).padStart(2, "0")}
             </span>
           )}
         </div>
-        {visibleScenes.map(({ scene, index }) => (
-          <div key={index} className="scene-enter">
-            <SceneBlock
-              scene={scene}
-              isActive={index === currentIndex}
-              collapseTools={effectivePrefs.collapseAllTools}
-            />
-          </div>
-        ))}
+        <div className="text-left">
+          {visibleScenes.map(({ scene, index }) => (
+            <div key={index} className="scene-enter">
+              <SceneBlock
+                scene={scene}
+                isActive={index === currentIndex}
+                collapseTools={effectivePrefs.collapseAllTools}
+              />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -355,6 +461,12 @@ const GroupCard = memo(function GroupCard({
         <span className="text-[10px] font-sans font-semibold text-terminal-blue uppercase tracking-widest">
           Assistant
         </span>
+        {group.timestamp && (
+          <span className="text-[10px] font-mono text-terminal-dimmer">
+            {formatTime(group.timestamp)}
+          </span>
+        )}
+        <div className="flex-1" />
         {groupHasFocusedTarget ? (
           <span className="text-[10px] font-sans font-medium uppercase tracking-widest px-2 py-0.5 rounded-full bg-terminal-blue-emphasis text-terminal-blue">
             Jump Target
@@ -366,9 +478,9 @@ const GroupCard = memo(function GroupCard({
             </span>
           )
         )}
-        {group.timestamp && (
-          <span className="text-xs font-mono text-terminal-dimmer">
-            {formatTime(group.timestamp)}
+        {group.turnNumber !== undefined && (
+          <span className="text-[10px] font-mono text-terminal-dimmer font-bold">
+            #{String(group.turnNumber).padStart(2, "0")}
           </span>
         )}
       </div>
@@ -418,6 +530,17 @@ function CompactAssistantGroup({
   timestamp?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      if (!groupHasCurrent) return;
+      const detail = (e as CustomEvent).detail;
+      if (detail.action === "expand") setExpanded(true);
+      else if (detail.action === "collapse") setExpanded(false);
+    };
+    window.addEventListener("vibe:toggle-expand", handler);
+    return () => window.removeEventListener("vibe:toggle-expand", handler);
+  }, [groupHasCurrent]);
 
   // Compute stats from ALL scenes (stable — doesn't change during playback)
   const stats = useMemo(() => {
@@ -482,8 +605,25 @@ function CompactAssistantGroup({
           Assistant
         </span>
         {timestamp && (
-          <span className="text-xs font-mono text-terminal-dimmer">{formatTime(timestamp)}</span>
+          <span className="text-[10px] font-mono text-terminal-dimmer">
+            {formatTime(timestamp)}
+          </span>
         )}
+        <div className="flex-1" />
+        {groupHasFocusedTarget ? (
+          <span className="text-[10px] font-sans font-medium uppercase tracking-widest px-2 py-0.5 rounded-full bg-terminal-blue-emphasis text-terminal-blue">
+            Jump Target
+          </span>
+        ) : (
+          groupHasCurrent && (
+            <span className="text-[10px] font-sans font-medium uppercase tracking-widest px-2 py-0.5 rounded-full bg-terminal-blue-subtle text-terminal-blue">
+              Focused
+            </span>
+          )
+        )}
+        {/* We don't have turnNumber here directly, but the component caller should probably pass it if needed. 
+            For now, let's keep it consistent with the timestamp on the right if that's what was intended.
+            Actually, let's just leave the space for consistency. */}
       </div>
 
       {/* Compact stats bar — stable, computed from ALL scenes */}
@@ -529,7 +669,7 @@ function CompactAssistantGroup({
       {lastTextResponse && !expanded && (
         <div className="mb-2">
           <TextResponseBlock
-            content={lastTextResponse.scene.content}
+            content={(lastTextResponse.scene as Extract<Scene, { type: "text-response" }>).content}
             isActive={lastTextResponse.index === currentIndex}
           />
         </div>
@@ -549,9 +689,14 @@ function CompactAssistantGroup({
       {/* Expand/collapse toggle */}
       <button
         onClick={() => setExpanded(!expanded)}
-        className="text-xs font-mono text-terminal-dim hover:text-terminal-blue transition-colors"
+        className="text-xs font-mono text-terminal-dim hover:text-terminal-blue transition-colors flex items-center gap-1.5"
       >
-        {expanded ? "Collapse" : "Show all details"}
+        {groupHasCurrent && (
+          <span className="text-secondary-text font-bold opacity-70">
+            {expanded ? "[←]" : "[→]"}
+          </span>
+        )}
+        <span>{expanded ? "Collapse" : "Show all details"}</span>
       </button>
     </div>
   );
@@ -573,6 +718,7 @@ function BatchedScenes({
   collapseTools: boolean;
   annotationCounts?: Map<number, number>;
   onComment?: (sceneIndex: number) => void;
+  state?: string;
 }) {
   // Group consecutive tool calls with the same toolName (only batchable ones)
   const batches: { scene: Scene; index: number }[][] = [];
@@ -670,6 +816,7 @@ function ToolBatch({
   collapseTools: boolean;
   annotationCounts?: Map<number, number>;
   onComment?: (sceneIndex: number) => void;
+  state?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
 
