@@ -49,18 +49,6 @@ function suggestedReplayTitle(
   return replayCandidate || slug;
 }
 
-function formatRelativeAge(iso: string): string {
-  const ageMs = Date.now() - new Date(iso).getTime();
-  if (!Number.isFinite(ageMs) || ageMs < 0) return "just now";
-  const mins = Math.floor(ageMs / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
 async function discoverAllSessions(): Promise<SessionInfo[]> {
   const providers = getAllProviders();
   const allSessions: SessionInfo[] = [];
@@ -109,6 +97,10 @@ program
       return;
     }
 
+    const { join: pathJoin } = await import("node:path");
+    const { homedir } = await import("node:os");
+    const replayBaseDir = pathJoin(homedir(), ".vibe-replay");
+
     let sessionInfo: SessionInfo | undefined;
     let sessionPaths: string | string[];
     let providerName: string;
@@ -117,6 +109,96 @@ program
       sessionPaths = opts.session;
       providerName = opts.provider;
     } else {
+      // ─── Top-level menu ─────────────────────────────────
+      const topChoice = await select<"dashboard" | "sessions" | "replays">({
+        message: "What would you like to do?",
+        choices: [
+          {
+            name: `${chalk.bold.cyan("◆")} ${chalk.bold("Dashboard")} ${chalk.dim("— browse, annotate, share & export all replays")} ${chalk.cyan("(recommended)")}`,
+            value: "dashboard" as const,
+          },
+          {
+            name: `${chalk.bold.green("▶")} ${chalk.bold("New Replay")} ${chalk.dim("— pick a session and generate a replay")}`,
+            value: "sessions" as const,
+          },
+          {
+            name: `${chalk.bold.magenta("◎")} ${chalk.bold("Open Replay")} ${chalk.dim("— quick-open an existing replay in browser")}`,
+            value: "replays" as const,
+          },
+        ],
+      });
+
+      if (topChoice === "dashboard") {
+        await startDashboard(
+          replayBaseDir,
+          DEV_MENU_ENABLED ? { externalViewerUrl: "http://localhost:5173" } : undefined,
+        );
+        return;
+      }
+
+      if (topChoice === "replays") {
+        // List existing generated replays from ~/.vibe-replay/
+        const { readdir, readFile } = await import("node:fs/promises");
+        const replayChoices: { name: string; value: string }[] = [];
+        try {
+          const entries = await readdir(replayBaseDir);
+          for (const slug of entries) {
+            if (slug.startsWith(".") || slug === "cache") continue;
+            try {
+              const raw = await readFile(pathJoin(replayBaseDir, slug, "replay.json"), "utf-8");
+              const replay = JSON.parse(raw);
+              const title = replay.meta?.title || slug;
+              const provider = replay.meta?.provider || "";
+              const scenes = replay.meta?.stats?.sceneCount || 0;
+              const time = replay.meta?.startTime
+                ? new Date(replay.meta.startTime).toLocaleString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    hour12: false,
+                  })
+                : "";
+              const providerBadge =
+                provider === "claude-code"
+                  ? chalk.hex("#D97706")("claude")
+                  : provider === "cursor"
+                    ? chalk.hex("#0096FF")("cursor")
+                    : chalk.yellow(provider);
+              replayChoices.push({
+                name: `${providerBadge} ${chalk.dim(`[${time}]`)} ${chalk.white(title)} ${chalk.dim(`(${scenes} scenes)`)}`,
+                value: slug,
+              });
+            } catch {
+              // skip invalid entries
+            }
+          }
+        } catch {
+          // directory doesn't exist yet
+        }
+
+        if (replayChoices.length === 0) {
+          console.log(chalk.yellow("\n  No replays found. Generate one first!\n"));
+          process.exit(0);
+        }
+
+        // Sort by time (newest first) — entries are already in directory order
+        const replaySlug = await select<string>({
+          message: "Pick a replay to open:",
+          choices: replayChoices,
+          pageSize: 20,
+        });
+
+        const htmlPath = pathJoin(replayBaseDir, replaySlug, "index.html");
+        await publishLocal(htmlPath);
+        console.log();
+        console.log(chalk.bold.green("  ✓ Opened!"));
+        console.log(chalk.dim("  File: ") + chalk.white(htmlPath));
+        console.log();
+        return;
+      }
+
+      // ─── Sessions: discover & pick ──────────────────────
       let displayedSessions: SessionInfo[] = [];
       const cached = await readFileCache<SessionInfo[]>(SESSION_DISCOVERY_CACHE_KEY);
       const hasStaleCache = !!(cached && cached.data.length > 0);
@@ -125,20 +207,15 @@ program
         displayedSessions = cached.data
           .slice()
           .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-        console.log(
-          chalk.dim(
-            `  Loaded ${displayedSessions.length} sessions from cache (${formatRelativeAge(cached.updatedAt)}). Refreshing in background...\n`,
-          ),
-        );
 
-        // Silently refresh cache for next run — don't interrupt current prompt
+        // Silently refresh cache for next run
         discoverAllSessions()
           .then(async (freshSessions) => {
             await writeFileCache(SESSION_DISCOVERY_CACHE_KEY, freshSessions);
           })
           .catch(() => {});
       } else {
-        const spinner = ora("Scanning latest sessions...").start();
+        const spinner = ora("Scanning sessions...").start();
         try {
           displayedSessions = await discoverAllSessions();
           await writeFileCache(SESSION_DISCOVERY_CACHE_KEY, displayedSessions);
@@ -152,67 +229,64 @@ program
         process.exit(1);
       }
 
-      const { join: pathJoin } = await import("node:path");
-      const { homedir } = await import("node:os");
-      const replayBaseDir = pathJoin(homedir(), ".vibe-replay");
-
       let chosen: string;
-      const choices = formatSessionChoices(displayedSessions);
-
-      const ac = new AbortController();
-      let dashboardRequested = false;
 
       const { emitKeypressEvents } = await import("node:readline");
       if (!process.stdin.listenerCount("keypress")) {
         emitKeypressEvents(process.stdin);
       }
-      const onKeypress = (_str: string, key: { name?: string }) => {
-        if (key?.name === "d") {
-          dashboardRequested = true;
-          ac.abort();
-        }
-      };
-      process.stdin.on("keypress", onKeypress);
-      ac.signal.addEventListener("abort", () => {
-        process.stdin.off("keypress", onKeypress);
-      });
 
-      try {
-        chosen = await select<string>(
-          {
-            message: "What would you like to do?",
-            choices,
-            pageSize: 20,
-            theme: {
-              style: {
-                keysHelpTip: (keys: [string, string][]) =>
-                  [...keys, ["d", "dashboard"]]
-                    .map(([k, v]) => `${chalk.bold(k)} ${chalk.dim(v)}`)
-                    .join(chalk.dim(" \u00b7 ")),
+      // Loop to support r=refresh shortcut
+      while (true) {
+        const choices = formatSessionChoices(displayedSessions);
+        const ac = new AbortController();
+        let shouldRefresh = false;
+
+        const onKeypress = (_str: string, key: { name?: string }) => {
+          if (key?.name === "r") {
+            shouldRefresh = true;
+            ac.abort();
+          }
+        };
+        process.stdin.on("keypress", onKeypress);
+        ac.signal.addEventListener("abort", () => {
+          process.stdin.off("keypress", onKeypress);
+        });
+
+        try {
+          chosen = await select<string>(
+            {
+              message: "Pick a session to replay:",
+              choices,
+              pageSize: 20,
+              theme: {
+                style: {
+                  keysHelpTip: (keys: [string, string][]) =>
+                    [...keys, ["r", "refresh"]]
+                      .map(([k, v]) => `${chalk.bold(k)} ${chalk.dim(v)}`)
+                      .join(chalk.dim(" \u00b7 ")),
+                },
               },
             },
-          },
-          { signal: ac.signal },
-        );
-        process.stdin.off("keypress", onKeypress);
-      } catch {
-        process.stdin.off("keypress", onKeypress);
-        if (dashboardRequested) {
-          await startDashboard(
-            replayBaseDir,
-            DEV_MENU_ENABLED ? { externalViewerUrl: "http://localhost:5173" } : undefined,
+            { signal: ac.signal },
           );
-          return;
+          process.stdin.off("keypress", onKeypress);
+          break;
+        } catch {
+          process.stdin.off("keypress", onKeypress);
+          if (shouldRefresh) {
+            const spinner = ora("Refreshing sessions...").start();
+            try {
+              displayedSessions = await discoverAllSessions();
+              await writeFileCache(SESSION_DISCOVERY_CACHE_KEY, displayedSessions);
+              spinner.succeed(`Found ${displayedSessions.length} sessions`);
+            } catch {
+              spinner.fail("Refresh failed, using previous list");
+            }
+            continue;
+          }
+          process.exit(0);
         }
-        process.exit(0);
-      }
-
-      if (chosen === "__dashboard__") {
-        await startDashboard(
-          replayBaseDir,
-          DEV_MENU_ENABLED ? { externalViewerUrl: "http://localhost:5173" } : undefined,
-        );
-        return;
       }
 
       const info = displayedSessions.find((s) => s.filePath === chosen);
@@ -479,13 +553,7 @@ function formatSessionChoices(sessions: SessionInfo[]) {
     byProject.get(key)?.push(s);
   }
 
-  const choices: any[] = [
-    {
-      name: `${chalk.bold.cyan("◆")} ${chalk.bold("Open Dashboard")} ${chalk.dim("— browse all replays, annotate, share & export")}`,
-      value: "__dashboard__",
-    },
-    new Separator(chalk.dim("  Or pick a session to replay:")),
-  ];
+  const choices: any[] = [];
   const projectEntries = [...byProject.entries()];
 
   for (let pi = 0; pi < projectEntries.length; pi++) {
