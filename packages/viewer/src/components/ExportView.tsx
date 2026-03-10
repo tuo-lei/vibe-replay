@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AnnotationActions } from "../hooks/useAnnotations";
 import type { ViewerMode } from "../hooks/useSessionLoader";
 import type { ReplaySession } from "../types";
+import { sanitizeHtml, sanitizeSvg } from "../utils/sanitize";
 
 interface Props {
   actions: AnnotationActions;
@@ -194,8 +195,13 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
     if (!ghExportResult?.markdown) return "";
     // Strip the image line — SVG is shown separately
     const md = ghExportResult.markdown.replace(/!\[[^\]]*\]\([^)]*\.svg\)\n*/g, "");
-    return marked.parse(md) as string;
+    return sanitizeHtml(marked.parse(md) as string);
   }, [ghExportResult?.markdown]);
+
+  const sanitizedSvg = useMemo(() => {
+    if (!ghExportResult?.svgContent) return "";
+    return sanitizeSvg(ghExportResult.svgContent);
+  }, [ghExportResult?.svgContent]);
 
   if (readOnly) {
     return (
@@ -385,7 +391,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                     {/* Inline SVG render (scaled to fit) */}
                     <div
                       className="bg-white p-1 [&>svg]:w-full [&>svg]:h-auto [&>svg]:max-h-52 [&>svg]:block"
-                      dangerouslySetInnerHTML={{ __html: ghExportResult.svgContent }}
+                      dangerouslySetInnerHTML={{ __html: sanitizedSvg }}
                     />
 
                     <div className="px-5 py-3 space-y-1.5 border-t border-terminal-border-subtle">

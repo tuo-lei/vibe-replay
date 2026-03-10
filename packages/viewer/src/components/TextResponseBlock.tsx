@@ -1,5 +1,6 @@
 import { marked } from "marked";
 import { memo, useMemo, useState } from "react";
+import { sanitizeHtml } from "../utils/sanitize";
 
 interface Props {
   content: string;
@@ -15,7 +16,10 @@ export default memo(function TextResponseBlock({ content, isActive }: Props) {
   const displayContent =
     isLong && !expanded ? `${content.slice(0, COLLAPSE_THRESHOLD)}...` : content;
 
-  const html = useMemo(() => marked.parse(displayContent) as string, [displayContent]);
+  const html = useMemo(
+    () => sanitizeHtml(marked.parse(displayContent) as string),
+    [displayContent],
+  );
 
   return (
     <div>

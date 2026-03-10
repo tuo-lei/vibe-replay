@@ -1,6 +1,7 @@
 import { marked } from "marked";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Annotation, Scene } from "../types";
+import { sanitizeHtml } from "../utils/sanitize";
 
 // Configure marked for short-form annotation text
 marked.setOptions({ breaks: true, gfm: true });
@@ -544,7 +545,9 @@ const AnnotationCard = memo(function AnnotationCard({
           ) : (
             <div
               className="prose-terminal text-xs text-terminal-text leading-relaxed"
-              dangerouslySetInnerHTML={{ __html: marked.parse(annotation.body) as string }}
+              dangerouslySetInnerHTML={{
+                __html: sanitizeHtml(marked.parse(annotation.body) as string),
+              }}
             />
           )}
         </div>
