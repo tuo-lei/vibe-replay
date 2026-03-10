@@ -22,11 +22,20 @@ export interface AnnotationActions {
   downloadHtml: () => void;
   downloadJson: () => void;
   /** Editor mode: publish to gist via server API */
-  publishGist: (() => Promise<{ gistUrl: string; viewerUrl: string }>) | null;
+  publishGist: (() => Promise<{ gistId: string; gistUrl: string; viewerUrl: string }>) | null;
   /** Editor mode: export HTML via server API */
   exportHtml: (() => Promise<string>) | null;
   /** Editor mode: export GitHub markdown+SVG via server API */
-  exportGithub: (() => Promise<{ markdown: string; svgPath: string; mdPath: string }>) | null;
+  exportGithub:
+    | (() => Promise<{
+        markdown: string;
+        svgContent: string;
+        svgPath: string;
+        mdPath: string;
+        replayUrl?: string;
+        warnings?: string[];
+      }>)
+    | null;
   gistPublishing: boolean;
   htmlExporting: boolean;
   githubExporting: boolean;
@@ -225,7 +234,7 @@ export function useAnnotations(
             throw new Error(result.error || `Server error: ${resp.status}`);
           }
           setSavedSnapshot(annotations);
-          return result as { gistUrl: string; viewerUrl: string };
+          return result as { gistId: string; gistUrl: string; viewerUrl: string };
         } finally {
           setGistPublishing(false);
         }
@@ -344,7 +353,14 @@ export function useAnnotations(
           const data = await resp.json();
           if (!resp.ok) throw new Error(data.error || `Export failed: ${resp.status}`);
           setSavedSnapshot(annotations);
-          return data as { markdown: string; svgPath: string; mdPath: string };
+          return data as {
+            markdown: string;
+            svgContent: string;
+            svgPath: string;
+            mdPath: string;
+            replayUrl?: string;
+            warnings?: string[];
+          };
         } finally {
           setGithubExporting(false);
         }

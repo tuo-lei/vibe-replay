@@ -11,11 +11,8 @@ export function findBatchEnd(scenes: Scene[], idx: number): number {
   if (!isBatchable(scene)) return idx;
   const toolName = scene.toolName;
   let end = idx;
-  while (
-    end + 1 < scenes.length &&
-    isBatchable(scenes[end + 1]) &&
-    scenes[end + 1].toolName === toolName
-  ) {
+  while (end + 1 < scenes.length && isBatchable(scenes[end + 1])) {
+    if ((scenes[end + 1] as Extract<Scene, { type: "tool-call" }>).toolName !== toolName) break;
     end++;
   }
   return end;
@@ -38,6 +35,12 @@ export function sceneDuration(scene: Scene, speed: number): number {
         if (scene.diff) return 1200;
         if (scene.bashOutput) return 900;
         return 400;
+      }
+      case "compaction-summary":
+        return 800;
+      default: {
+        const _exhaustive: never = scene;
+        return 800;
       }
     }
   })();

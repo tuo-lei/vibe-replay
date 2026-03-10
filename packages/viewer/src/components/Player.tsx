@@ -4,14 +4,18 @@ import { usePlayback } from "../hooks/usePlayback";
 import type { ViewerMode } from "../hooks/useSessionLoader";
 import { getEffectivePrefs, type ViewPrefs } from "../hooks/useViewPrefs";
 import type { ReplaySession } from "../types";
-import AnnotationPanel from "./AnnotationPanel";
+import CommentDrawer from "./CommentDrawer";
 import Controls from "./Controls";
 import ConversationView from "./ConversationView";
+import ExportView from "./ExportView";
+import HelpOverlay from "./HelpOverlay";
 import LandingHero from "./LandingHero";
 import Minimap from "./Minimap";
 import SearchOverlay from "./SearchOverlay";
-import StatsPanel from "./StatsPanel";
+import { fmtNum, formatDuration, StatCard } from "./StatsPanel";
+import SummaryView from "./SummaryView";
 import Timeline from "./Timeline";
+import ViewTabBar, { type ActiveView } from "./ViewTabBar";
 
 interface Props {
   session: ReplaySession;
@@ -34,24 +38,20 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
   const [landed, setLanded] = useState(false);
   const [navFocusIndex, setNavFocusIndex] = useState<number | undefined>(undefined);
   const [_navJumpSeq, setNavJumpSeq] = useState(0);
-  const [annotationPanelOpen, setAnnotationPanelOpen] = useState(() => {
-    // Check embedded annotations
-    if ((session.annotations?.length ?? 0) > 0) return true;
-    // Check localStorage draft (useAnnotations loads from here too)
-    try {
-      const key = `vibe-replay-annotations-${session.meta.sessionId}`;
-      const draft = localStorage.getItem(key);
-      if (draft) {
-        const parsed = JSON.parse(draft);
-        return Array.isArray(parsed) && parsed.length > 0;
-      }
-    } catch {
-      /* ignore */
-    }
-    return false;
-  });
+  const [activeView, setActiveView] = useState<ActiveView>("replay");
+  const [commentDrawerOpen, setCommentDrawerOpen] = useState(false);
   const [commentTargetScene, setCommentTargetScene] = useState<number | null>(null);
+  const [isOutlineOpen, setIsOutlineOpen] = useState(true);
   const annotationActions = useAnnotations(session, viewerMode);
+  const {
+    annotations,
+    runAiCoach,
+    aiCoachRunning,
+    cancelAiCoach,
+    aiCoachTools,
+    aiCoachToolName,
+    setAiCoachToolName,
+  } = annotationActions;
 
   const effectivePrefs = getEffectivePrefs(viewPrefs);
 
@@ -67,17 +67,24 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
     changeSpeed,
     totalScenes,
     userPromptIndices,
-  } = usePlayback(session.scenes, effectivePrefs.promptsOnly, landed);
+    computeNextIndex,
+  } = usePlayback(session.scenes, effectivePrefs, landed);
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [sidebarTab, setSidebarTab] = useState<"outline" | "stats" | "comments">("outline");
+  const [mobileDrawerTab, setMobileDrawerTab] = useState<"outline" | "stats">("outline");
   const [searchOpen, setSearchOpen] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
-  const [scrollHintDismissed, setScrollHintDismissed] = useState(false);
+  const [_scrollHintDismissed, setScrollHintDismissed] = useState(false);
   const pendingSeekRef = useRef<number | null>(null);
   const navFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Flag to suppress auto-scroll when scene advance comes from scroll-to-reveal
   const scrollRevealRef = useRef(false);
+  const [coachStatus, setCoachStatus] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+  const [showCoachConfirm, setShowCoachConfirm] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
 
   // Cmd+K / Ctrl+K to open search
   useEffect(() => {
@@ -85,11 +92,25 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
         setSearchOpen((v) => !v);
+      } else if (e.key === "/") {
+        // Only trigger search if not in an input/textarea
+        if (!(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
+          e.preventDefault();
+          setSearchOpen(true);
+        }
+      } else if (e.key === "?") {
+        setShowHelp((v) => !v);
+      } else if (e.key === "Escape") {
+        if (showHelp) {
+          setShowHelp(false);
+        } else if (searchOpen) {
+          setSearchOpen(false);
+        }
       }
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, []);
+  }, [searchOpen, showHelp]);
 
   const currentTurn = userPromptIndices.filter((i) => i <= currentIndex).length || 0;
   const userPromptCount = userPromptIndices.length;
@@ -183,27 +204,42 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
     }
     const el = scrollRef.current;
     programScrollRef.current = true;
+    const getGroupFirstIndex = (idx: number): number => {
+      const scenes = session.scenes;
+      if (idx < 0 || idx >= scenes.length) return idx;
+      if (scenes[idx].type === "user-prompt" || scenes[idx].type === "compaction-summary")
+        return idx;
+      let first = idx;
+      while (
+        first > 0 &&
+        scenes[first - 1].type !== "user-prompt" &&
+        scenes[first - 1].type !== "compaction-summary"
+      ) {
+        first--;
+      }
+      return first;
+    };
+
+    const findBlockForIndex = (index: number): HTMLElement | null => {
+      const exactMatch = el.querySelector(`[data-scene-index="${index}"]`) as HTMLElement | null;
+      if (exactMatch) return exactMatch;
+      const firstIndex = getGroupFirstIndex(index);
+      return el.querySelector(`[data-scene-index="${firstIndex}"]`) as HTMLElement | null;
+    };
+
     requestAnimationFrame(() => {
-      const sceneEl = el.querySelector(`[data-scene-index="${currentIndex}"]`);
+      const sceneEl = findBlockForIndex(currentIndex);
       if (sceneEl) {
         if (state === "playing") {
           sceneEl.scrollIntoView({ behavior: "smooth", block: "center" });
         } else {
-          // When paused (arrow keys), keep the scene comfortably in view.
-          // "nearest" only scrolls if the element is outside the visible area,
-          // but it pins to the very edge. Instead, manually check and place the
-          // scene at ~30% from the top when it would go below the viewport.
+          // When paused (arrow keys), always bring the new scene into a comfortable
+          // reading position (~30% from the top) rather than leaving it at the bottom jump
           const containerRect = el.getBoundingClientRect();
           const sceneRect = sceneEl.getBoundingClientRect();
-          const relativeTop = sceneRect.top - containerRect.top;
-          const relativeBottom = sceneRect.bottom - containerRect.top;
-
-          if (relativeBottom > containerRect.height || relativeTop < 0) {
-            // Scene is out of view — scroll so its top sits at ~30% from viewport top
-            const offset = sceneRect.top - containerRect.top + el.scrollTop;
-            const target = offset - containerRect.height * 0.3;
-            el.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
-          }
+          const offset = sceneRect.top - containerRect.top + el.scrollTop;
+          const target = offset - containerRect.height * 0.3;
+          el.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
         }
       } else if (state === "playing") {
         el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
@@ -212,7 +248,7 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
         programScrollRef.current = false;
       }, 400);
     });
-  }, [currentIndex, state]);
+  }, [currentIndex, state, session.scenes]);
 
   // User scroll/touch → auto-pause + enter infinite scroll mode
   useEffect(() => {
@@ -249,15 +285,15 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
       if (state !== "paused" || throttle) return;
       if (currentIndex >= session.scenes.length - 1) return;
       // Don't advance during programmatic scrolls or pending navigation jumps.
-      // pendingSeekRef is critical: when seekFromNavigation shrinks visibleCount,
-      // the DOM shrinks and fires scroll events BEFORE effects set programScrollRef.
       if (programScrollRef.current || pendingSeekRef.current !== null) return;
 
       const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
       if (nearBottom) {
         throttle = true;
         scrollRevealRef.current = true;
-        seekTo(currentIndex + 1);
+        // Instead of blind + 1, jump to the next visual breakpoint for current mode
+        const nextIdx = computeNextIndex(currentIndex);
+        if (nextIdx !== -1) seekTo(nextIdx);
         setTimeout(() => {
           throttle = false;
         }, 150);
@@ -289,7 +325,7 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
       el.removeEventListener("touchstart", handleTouchStart);
       el.removeEventListener("touchend", handleTouchEnd);
     };
-  }, [state, currentIndex, session.scenes.length, seekTo]);
+  }, [state, currentIndex, session.scenes.length, seekTo, computeNextIndex]);
 
   // Manual navigation (outline/timeline/search): always center + flash the target scene.
   useEffect(() => {
@@ -299,17 +335,44 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
 
     let cancelled = false;
     let attempts = 0;
+
+    const findBlockForIndex = (index: number): HTMLElement | null => {
+      // First try an exact match (if it's rendered, e.g. in 'all' mode or batched expanded)
+      const elMatch = el.querySelector(`[data-scene-index="${index}"]`) as HTMLElement | null;
+      if (elMatch) return elMatch;
+
+      // In compact mode, the precise scene might not be rendered individually.
+      // E.g. a compaction block has first index 44, but contains 44-50.
+      // We find the nearest [data-scene-index] that is <= our targetIndex.
+      const blocks = Array.from(el.querySelectorAll("[data-scene-index]")) as HTMLElement[];
+      let bestMatch: HTMLElement | null = null;
+      let bestDiff = Infinity;
+
+      for (const block of blocks) {
+        const idxStr = block.getAttribute("data-scene-index");
+        if (!idxStr) continue;
+        const blockIdx = parseInt(idxStr, 10);
+        if (blockIdx <= index) {
+          const diff = index - blockIdx;
+          if (diff < bestDiff) {
+            bestDiff = diff;
+            bestMatch = block;
+          }
+        }
+      }
+      return bestMatch;
+    };
+
     const tryLocateAndFocus = () => {
       if (cancelled) return;
-      const sceneEl = el.querySelector(`[data-scene-index="${targetIndex}"]`) as HTMLElement | null;
+      const sceneEl = findBlockForIndex(targetIndex);
       if (sceneEl) {
         programScrollRef.current = true;
-        // Manual center: place top of target at ~35% from viewport top
-        // (slightly above center feels more natural for reading)
+        // Manual center: place top of target at ~30% from viewport top
         const containerRect = el.getBoundingClientRect();
         const sceneRect = sceneEl.getBoundingClientRect();
         const offset = sceneRect.top - containerRect.top + el.scrollTop;
-        const target = offset - containerRect.height * 0.35;
+        const target = offset - containerRect.height * 0.3;
         el.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
         flashJumpTarget(sceneEl);
         setTimeout(() => {
@@ -339,153 +402,483 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
     };
   }, []);
 
+  const hasAiCoach = !!runAiCoach && !isReadOnly;
+  const hasAiFeedback = useMemo(
+    () => annotations.some((a) => a.author === "vibe-feedback"),
+    [annotations],
+  );
+
+  const handleRunCoach = useCallback(async () => {
+    if (!runAiCoach) return;
+    setCoachStatus(null);
+    try {
+      const result = await runAiCoach();
+      setCoachStatus({
+        type: "success",
+        text: `Score ${result.score}/10 — ${result.itemCount} comment(s) added`,
+      });
+      setShowCoachConfirm(false);
+      setCommentDrawerOpen(true);
+    } catch (e: any) {
+      if (e?.name === "AbortError") return;
+      setCoachStatus({ type: "error", text: e?.message || "AI Coach failed" });
+    }
+  }, [runAiCoach]);
+
   // Show landing page before playback starts
   if (!landed) {
     return <LandingHero session={session} onStart={handleStart} />;
   }
 
+  const { meta } = session;
+
   return (
     <div className="flex flex-1 min-h-0 relative">
-      {/* Sidebar */}
-      <div className="hidden md:flex w-64 shrink-0 flex-col border-r border-terminal-border-subtle bg-terminal-bg shadow-layer-sm">
-        <div className="flex border-b border-terminal-border-subtle">
-          <button
-            onClick={() => setSidebarTab("outline")}
-            className={`flex-1 px-3 py-2.5 text-[10px] font-sans font-semibold uppercase tracking-widest transition-colors ${
-              sidebarTab === "outline"
-                ? "text-terminal-green border-b-2 border-terminal-green"
-                : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
-            }`}
-          >
-            Outline
-          </button>
-          <button
-            onClick={() => setSidebarTab("stats")}
-            className={`flex-1 px-3 py-2.5 text-[10px] font-sans font-semibold uppercase tracking-widest transition-colors ${
-              sidebarTab === "stats"
-                ? "text-terminal-green border-b-2 border-terminal-green"
-                : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
-            }`}
-          >
-            Stats
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto">
-          {sidebarTab === "stats" ? (
-            <StatsPanel session={session} />
-          ) : (
-            <Minimap
-              scenes={session.scenes}
-              currentIndex={currentIndex}
-              onSeek={seekFromNavigation}
-            />
-          )}
-        </div>
-      </div>
-
-      {/* Main content */}
+      {/* Main content area */}
       <div className="flex flex-col flex-1 min-h-0 min-w-0">
-        <div className="flex flex-1 min-h-0">
-          <div className="flex flex-col flex-1 min-h-0 min-w-0 relative">
-            <div
-              ref={scrollRef}
-              className="flex-1 overflow-y-auto px-5 py-5 pb-10 overscroll-contain"
-            >
-              <ConversationView
-                scenes={session.scenes}
-                visibleCount={visibleCount}
-                currentIndex={currentIndex}
-                effectivePrefs={effectivePrefs}
-                focusIndex={navFocusIndex}
-                annotatedScenes={annotationActions.annotatedScenes}
-                annotationCounts={annotationActions.annotationCounts}
-                onComment={
-                  isReadOnly
-                    ? undefined
-                    : (sceneIndex) => {
-                        setAnnotationPanelOpen(true);
-                        setCommentTargetScene(sceneIndex);
-                      }
-                }
-              />
-            </div>
+        {/* View Tab Bar with embedded global CTAs */}
+        <ViewTabBar
+          activeView={activeView}
+          onChangeView={setActiveView}
+          hiddenTabs={isReadOnly ? ["export"] : undefined}
+          rightContent={
+            activeView === "replay" ? (
+              <div className="flex items-center gap-3">
+                {/* Comments Status */}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setCommentDrawerOpen(true)}
+                    className="flex items-center gap-1.5 text-xs font-mono font-semibold text-terminal-text hover:text-terminal-green transition-colors"
+                    title="Open comments"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="text-terminal-dim"
+                    >
+                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                    <span className="hidden sm:inline">Comments</span>
+                    {annotationActions.annotations.length > 0 && (
+                      <span className="ml-0.5 px-1 py-0.5 rounded bg-terminal-black text-[10px] text-terminal-text border border-terminal-border tabular-nums leading-none">
+                        {annotationActions.annotations.length}
+                      </span>
+                    )}
+                  </button>
 
-            {/* Scroll-to-reveal hint */}
-            {state === "paused" &&
-              currentIndex < session.scenes.length - 1 &&
-              !scrollHintDismissed && (
-                <div className="absolute bottom-[72px] left-1/2 -translate-x-1/2 z-10 pointer-events-none animate-bounce">
-                  <div className="px-5 py-2 rounded-full bg-terminal-surface/90 backdrop-blur-md text-xs font-mono text-terminal-dim flex items-center gap-2 shadow-layer-lg border border-terminal-border-subtle">
-                    <span className="text-terminal-green">{"\u2193"}</span>
-                    scroll for more
+                  <div className="h-3 w-px bg-terminal-border hidden sm:block" />
+
+                  <div className="text-[11px] font-mono flex items-center gap-1.5 hidden sm:flex">
+                    {coachStatus ? (
+                      <span
+                        className={
+                          coachStatus.type === "success"
+                            ? "text-terminal-green"
+                            : "text-terminal-red"
+                        }
+                      >
+                        {coachStatus.text}
+                      </span>
+                    ) : hasAiFeedback ? (
+                      <span className="text-terminal-purple flex items-center gap-1.5">
+                        <span className="relative flex h-1.5 w-1.5">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-terminal-purple opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-terminal-purple"></span>
+                        </span>
+                        AI Coach added
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+
+                {/* AI Coach Actions */}
+                {hasAiCoach && (
+                  <div className="relative flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => {
+                        if (!aiCoachRunning) setShowCoachConfirm((v) => !v);
+                      }}
+                      disabled={aiCoachRunning}
+                      className="pl-2 pr-3 py-1 text-[10px] sm:text-[11px] font-mono rounded bg-[rgba(168,85,247,0.1)] hover:bg-[rgba(168,85,247,0.2)] border border-[rgba(168,85,247,0.3)] hover:border-[rgba(168,85,247,0.5)] text-terminal-purple transition-all disabled:opacity-50 flex items-center gap-1.5 relative overflow-hidden group shadow-sm"
+                    >
+                      <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
+                      {aiCoachRunning ? (
+                        <svg
+                          className="animate-spin h-3.5 w-3.5 text-terminal-purple"
+                          xmlns="http://www.w3.org/2000/svg"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                        >
+                          <circle
+                            className="opacity-25"
+                            cx="12"
+                            cy="12"
+                            r="10"
+                            stroke="currentColor"
+                            strokeWidth="4"
+                          ></circle>
+                          <path
+                            className="opacity-75"
+                            fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                          ></path>
+                        </svg>
+                      ) : (
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className="text-[#c084fc]"
+                        >
+                          <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+                        </svg>
+                      )}
+                      <span className="font-semibold tracking-wide">
+                        {aiCoachRunning
+                          ? "Analyzing..."
+                          : hasAiFeedback
+                            ? "Re-run Coach"
+                            : "AI Coach"}
+                      </span>
+                    </button>
+                    {aiCoachRunning && cancelAiCoach && (
+                      <button
+                        onClick={cancelAiCoach}
+                        className="p-1 rounded-full bg-terminal-black border border-terminal-border text-terminal-dim hover:text-terminal-red hover:border-terminal-red/30 transition-colors"
+                        title="Cancel AI Coach"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="10"
+                          height="10"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <line x1="18" y1="6" x2="6" y2="18"></line>
+                          <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                      </button>
+                    )}
+
+                    {/* Dropdown confirm popover */}
+                    {showCoachConfirm && !aiCoachRunning && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-40"
+                          onClick={() => setShowCoachConfirm(false)}
+                        />
+                        <div className="absolute right-0 top-full mt-2 z-50 w-72 bg-terminal-bg border border-terminal-border-subtle rounded-2xl shadow-layer-xl overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150">
+                          {/* Header */}
+                          <div className="px-4 pt-4 pb-3">
+                            <div className="flex items-center gap-2 mb-1.5">
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                className="text-terminal-purple"
+                              >
+                                <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+                              </svg>
+                              <span className="text-xs font-sans font-semibold text-terminal-text">
+                                Run AI Coach
+                              </span>
+                            </div>
+                            <p className="text-[11px] font-mono text-terminal-dim leading-relaxed">
+                              Analyzes your prompts using a local CLI tool. Uses tokens from your
+                              own account.
+                            </p>
+                          </div>
+
+                          {hasAiFeedback && (
+                            <div className="mx-4 mb-3 text-[11px] font-mono text-terminal-orange px-2.5 py-1.5 rounded-lg bg-terminal-orange-subtle/40 border border-terminal-orange/10">
+                              Existing AI feedback will be replaced.
+                            </div>
+                          )}
+
+                          {/* Tool selector */}
+                          <div className="mx-4 mb-4 flex items-center justify-between">
+                            <span className="text-[11px] font-mono text-terminal-dim">Tool</span>
+                            {aiCoachTools.length > 1 && setAiCoachToolName ? (
+                              <select
+                                value={aiCoachToolName || ""}
+                                onChange={(e) => setAiCoachToolName(e.target.value)}
+                                className="bg-terminal-surface border border-terminal-border rounded-lg px-2.5 py-1 text-[11px] font-mono text-terminal-text outline-none cursor-pointer hover:border-terminal-purple/30 transition-colors"
+                              >
+                                {aiCoachTools.map((t) => (
+                                  <option key={t.name} value={t.name}>
+                                    {t.name}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <span className="text-[11px] font-mono font-medium text-terminal-text px-2.5 py-1 rounded-lg bg-terminal-surface border border-terminal-border">
+                                {aiCoachToolName}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Actions */}
+                          <div className="flex border-t border-terminal-border-subtle">
+                            <button
+                              onClick={() => setShowCoachConfirm(false)}
+                              className="flex-1 px-4 py-2.5 text-[11px] font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface transition-colors"
+                            >
+                              Cancel
+                            </button>
+                            <div className="w-px bg-terminal-border-subtle" />
+                            <button
+                              onClick={() => void handleRunCoach()}
+                              className="flex-1 px-4 py-2.5 text-[11px] font-mono font-semibold text-terminal-purple hover:bg-terminal-purple-subtle/30 transition-colors"
+                            >
+                              Run
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : undefined
+          }
+        />
+
+        {/* Active view content */}
+        <div className="flex flex-1 min-h-0 min-w-0 w-full">
+          {activeView === "replay" && (
+            <div className="flex flex-1 min-h-0 min-w-0 w-full relative">
+              {/* Left Sidebar — stacked Outline + compact Stats */}
+              {isOutlineOpen && (
+                <div className="hidden md:flex w-64 shrink-0 flex-col border-r border-terminal-border-subtle bg-terminal-bg shadow-layer-sm">
+                  {/* Outline (top, scrollable) */}
+                  <div className="flex-1 overflow-y-auto min-h-0">
+                    {/* Sidebar Header */}
+                    <div className="px-3 py-2 border-b border-terminal-border-subtle flex items-center justify-between group/side">
+                      <span className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest">
+                        Outline
+                      </span>
+                      <button
+                        onClick={() => setIsOutlineOpen(false)}
+                        className="p-1 rounded hover:bg-terminal-surface text-terminal-dimmer hover:text-terminal-text transition-colors"
+                        title="Hide Sidebar"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+                          <line x1="9" x2="9" y1="3" y2="21" />
+                        </svg>
+                      </button>
+                    </div>
+                    <Minimap
+                      scenes={session.scenes}
+                      currentIndex={currentIndex}
+                      onSeek={seekFromNavigation}
+                    />
+                  </div>
+                  {/* Compact Stats (bottom) */}
+                  <div className="shrink-0 border-t border-terminal-border-subtle overflow-y-auto max-h-[35%]">
+                    <div className="px-3 py-2 border-b border-terminal-border-subtle">
+                      <button
+                        onClick={() => setActiveView("summary")}
+                        className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest hover:text-terminal-green transition-colors"
+                        title="Open Summary view"
+                      >
+                        Stats
+                      </button>
+                    </div>
+                    <div className="p-3">
+                      <div className="grid grid-cols-2 gap-2">
+                        <StatCard
+                          label="Turns"
+                          value={meta.stats.userPrompts}
+                          color="text-terminal-green"
+                        />
+                        <StatCard
+                          label="Tools"
+                          value={meta.stats.toolCalls}
+                          color="text-terminal-orange"
+                        />
+                      </div>
+                      <div className="mt-2 text-xs font-mono text-terminal-dim space-y-0.5">
+                        {meta.model && (
+                          <div>
+                            <span className="text-terminal-text">{meta.model}</span>
+                          </div>
+                        )}
+                        {meta.stats.durationMs && (
+                          <div>
+                            {formatDuration(meta.stats.durationMs)}
+                            {meta.stats.costEstimate !== undefined && (
+                              <span>
+                                {" / "}
+                                <span className="text-terminal-green">
+                                  $
+                                  {meta.stats.costEstimate < 0.01
+                                    ? meta.stats.costEstimate.toFixed(4)
+                                    : meta.stats.costEstimate.toFixed(2)}
+                                </span>
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {meta.stats.tokenUsage && (
+                          <div>
+                            {fmtNum(meta.stats.tokenUsage.inputTokens)} in /{" "}
+                            {fmtNum(meta.stats.tokenUsage.outputTokens)} out
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
 
-            {/* Search overlay */}
-            <SearchOverlay
-              scenes={session.scenes}
-              open={searchOpen}
-              onClose={() => setSearchOpen(false)}
-              onSeek={(i) => {
-                seekFromNavigation(i);
-                setSearchOpen(false);
-              }}
-            />
+              {/* Main Replay list area */}
+              <div className="flex flex-col flex-1 min-h-0 min-w-0 relative">
+                {/* Floating Expand Button (shown when sidebar is closed) */}
+                {!isOutlineOpen && (
+                  <button
+                    onClick={() => setIsOutlineOpen(true)}
+                    className="absolute left-0 top-1/2 -translate-y-1/2 z-20 group/expand px-1.5 py-4 bg-terminal-surface/80 backdrop-blur-md border border-l-0 border-terminal-border-subtle rounded-r-xl text-terminal-dim hover:text-terminal-green transition-all shadow-layer-md animate-in slide-in-from-left-2 duration-300"
+                    title="Show Sidebar"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <polyline points="9 18 15 12 9 6" />
+                    </svg>
+                  </button>
+                )}
+                <div
+                  ref={scrollRef}
+                  className="flex-1 overflow-y-auto px-5 py-5 pb-10 overscroll-contain"
+                >
+                  <ConversationView
+                    scenes={session.scenes}
+                    visibleCount={visibleCount}
+                    currentIndex={currentIndex}
+                    effectivePrefs={effectivePrefs}
+                    focusIndex={navFocusIndex}
+                    annotatedScenes={annotationActions.annotatedScenes}
+                    annotationCounts={annotationActions.annotationCounts}
+                    onSeek={seekFromNavigation}
+                    state={state}
+                    onComment={
+                      isReadOnly
+                        ? undefined
+                        : (sceneIndex) => {
+                            setCommentDrawerOpen(true);
+                            setCommentTargetScene(sceneIndex);
+                          }
+                    }
+                  />
+                </div>
 
-            {/* Pause overlay — hidden on mobile (shown in controls bar instead) */}
-            {state === "paused" && visibleCount > 0 && (
-              <div className="hidden md:block absolute top-3 right-3 px-3.5 py-1.5 rounded-lg bg-terminal-orange-subtle text-terminal-orange text-[10px] font-sans font-semibold uppercase tracking-widest pause-overlay pointer-events-none backdrop-blur-sm">
-                PAUSED
+                {/* Search overlay */}
+                <SearchOverlay
+                  scenes={session.scenes}
+                  open={searchOpen}
+                  onClose={() => setSearchOpen(false)}
+                  onSeek={(i) => {
+                    seekFromNavigation(i);
+                    setSearchOpen(false);
+                  }}
+                />
               </div>
-            )}
-          </div>
-
-          {/* Annotation panel — right sidebar */}
-          {annotationPanelOpen && (
-            <div className="hidden md:flex w-72 shrink-0 flex-col border-l border-terminal-border-subtle bg-terminal-bg">
-              <AnnotationPanel
-                actions={annotationActions}
-                scenes={session.scenes}
-                currentIndex={currentIndex}
-                totalScenes={totalScenes}
-                onSeek={seekFromNavigation}
-                addingForScene={commentTargetScene}
-                onClearAddingTarget={() => setCommentTargetScene(null)}
-                readOnly={isReadOnly}
-              />
             </div>
+          )}
+
+          {activeView === "summary" && <SummaryView session={session} />}
+          {activeView === "export" && (
+            <ExportView
+              actions={annotationActions}
+              viewerMode={viewerMode}
+              readOnly={isReadOnly}
+              session={session}
+            />
           )}
         </div>
 
-        {/* Playback bar */}
-        <div className="shrink-0 border-t border-terminal-border-subtle bg-terminal-surface/80 backdrop-blur-md sticky bottom-0 safe-bottom shadow-layer-lg">
-          <Timeline
-            scenes={session.scenes}
-            currentIndex={currentIndex}
-            onSeek={seekFromNavigation}
-            annotatedScenes={annotationActions.annotatedScenes}
-          />
-          <Controls
-            state={state}
-            speed={speed}
-            currentIndex={currentIndex}
-            totalScenes={totalScenes}
-            userPromptCount={userPromptCount}
-            currentTurn={currentTurn}
-            onTogglePlayPause={togglePlayPause}
-            onChangeSpeed={changeSpeed}
-            onPrevPrompt={seekToPrevPromptWithFeedback}
-            onNextPrompt={seekToNextPromptWithFeedback}
-            onOpenSearch={() => setSearchOpen(true)}
-            onOpenOutline={() => setMobileDrawerOpen(true)}
-            annotationCount={annotationActions.annotations.length}
-            annotationPanelOpen={annotationPanelOpen}
-            onToggleAnnotations={() => setAnnotationPanelOpen((v) => !v)}
-            hasUnsavedAnnotations={annotationActions.hasUnsaved}
-          />
-        </div>
+        {/* Playback bar — only in replay view */}
+        {activeView === "replay" && (
+          <div className="shrink-0 border-t border-terminal-border-subtle bg-terminal-surface/80 backdrop-blur-md sticky bottom-0 safe-bottom shadow-layer-lg">
+            <Timeline
+              scenes={session.scenes}
+              currentIndex={currentIndex}
+              onSeek={seekFromNavigation}
+              annotatedScenes={annotationActions.annotatedScenes}
+            />
+            <Controls
+              state={state}
+              speed={speed}
+              currentIndex={currentIndex}
+              totalScenes={totalScenes}
+              userPromptCount={userPromptCount}
+              currentTurn={currentTurn}
+              onTogglePlayPause={togglePlayPause}
+              onChangeSpeed={changeSpeed}
+              onPrevPrompt={seekToPrevPromptWithFeedback}
+              onNextPrompt={seekToNextPromptWithFeedback}
+              onOpenSearch={() => setSearchOpen(true)}
+              onOpenOutline={() => setMobileDrawerOpen(true)}
+              onShowHelp={() => setShowHelp(true)}
+            />
+          </div>
+        )}
       </div>
+
+      {/* Comment drawer (slides from right) */}
+      <CommentDrawer
+        open={commentDrawerOpen}
+        onClose={() => setCommentDrawerOpen(false)}
+        actions={annotationActions}
+        scenes={session.scenes}
+        currentIndex={currentIndex}
+        onSeek={seekFromNavigation}
+        addingForScene={commentTargetScene}
+        onClearAddingTarget={() => setCommentTargetScene(null)}
+        readOnly={isReadOnly}
+      />
 
       {/* Mobile sidebar drawer */}
       <div
@@ -508,9 +901,9 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
           {/* Tabs */}
           <div className="flex border-b border-terminal-border-subtle shrink-0">
             <button
-              onClick={() => setSidebarTab("outline")}
+              onClick={() => setMobileDrawerTab("outline")}
               className={`flex-1 px-3 py-2.5 text-[10px] font-sans font-semibold uppercase tracking-widest transition-colors ${
-                sidebarTab === "outline"
+                mobileDrawerTab === "outline"
                   ? "text-terminal-green border-b-2 border-terminal-green"
                   : "text-terminal-dim hover:text-terminal-text"
               }`}
@@ -518,32 +911,19 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
               Outline
             </button>
             <button
-              onClick={() => setSidebarTab("stats")}
+              onClick={() => setMobileDrawerTab("stats")}
               className={`flex-1 px-3 py-2.5 text-[10px] font-sans font-semibold uppercase tracking-widest transition-colors ${
-                sidebarTab === "stats"
+                mobileDrawerTab === "stats"
                   ? "text-terminal-green border-b-2 border-terminal-green"
                   : "text-terminal-dim hover:text-terminal-text"
               }`}
             >
               Stats
             </button>
-            <button
-              onClick={() => setSidebarTab("comments")}
-              className={`flex-1 px-3 py-2.5 text-[10px] font-sans font-semibold uppercase tracking-widest transition-colors ${
-                sidebarTab === "comments"
-                  ? "text-terminal-blue border-b-2 border-terminal-blue"
-                  : "text-terminal-dim hover:text-terminal-text"
-              }`}
-            >
-              Comments
-              {annotationActions.annotations.length > 0
-                ? ` (${annotationActions.annotations.length})`
-                : ""}
-            </button>
           </div>
           {/* Content */}
           <div className="flex-1 overflow-y-auto overscroll-contain">
-            {sidebarTab === "outline" ? (
+            {mobileDrawerTab === "outline" ? (
               <Minimap
                 scenes={session.scenes}
                 currentIndex={currentIndex}
@@ -552,26 +932,14 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
                   setMobileDrawerOpen(false);
                 }}
               />
-            ) : sidebarTab === "stats" ? (
-              <StatsPanel session={session} />
             ) : (
-              <AnnotationPanel
-                actions={annotationActions}
-                scenes={session.scenes}
-                currentIndex={currentIndex}
-                totalScenes={totalScenes}
-                onSeek={(i) => {
-                  seekFromNavigation(i);
-                  setMobileDrawerOpen(false);
-                }}
-                addingForScene={commentTargetScene}
-                onClearAddingTarget={() => setCommentTargetScene(null)}
-                readOnly={isReadOnly}
-              />
+              <SummaryView session={session} />
             )}
           </div>
         </div>
       </div>
+
+      <HelpOverlay open={showHelp} onClose={() => setShowHelp(false)} />
     </div>
   );
 }

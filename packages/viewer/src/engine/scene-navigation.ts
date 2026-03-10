@@ -32,6 +32,7 @@ export function findPrevUserPrompt(
 /**
  * Compute the next scene index to display, accounting for:
  * - prompts-only mode (skip non-user-prompt scenes)
+ * - compact mode (skip directly to the end of the assistant grouping)
  * - batch grouping (consecutive same-name batchable tool calls)
  *
  * Returns the target index, or -1 if playback should end.
@@ -39,19 +40,106 @@ export function findPrevUserPrompt(
 export function computeNextIndex(
   scenes: Scene[],
   currentIndex: number,
-  promptsOnly: boolean,
+  prefs: { promptsOnly: boolean; compactAssistant: boolean },
 ): number {
   let nextIdx = currentIndex + 1;
 
   if (nextIdx >= scenes.length) return -1;
 
-  if (promptsOnly) {
-    while (nextIdx < scenes.length && scenes[nextIdx].type !== "user-prompt") {
+  if (prefs.promptsOnly) {
+    while (
+      nextIdx < scenes.length &&
+      scenes[nextIdx].type !== "user-prompt" &&
+      scenes[nextIdx].type !== "compaction-summary"
+    ) {
       nextIdx++;
     }
     return nextIdx >= scenes.length ? -1 : nextIdx;
   }
 
-  // For batchable tool calls, skip to the end of the batch
+  if (prefs.compactAssistant) {
+    const isBoundary =
+      scenes[nextIdx].type === "user-prompt" || scenes[nextIdx].type === "compaction-summary";
+    if (!isBoundary) {
+      // It's entering an assistant group. Skip to the LAST scene of this group.
+      let end = nextIdx;
+      while (
+        end + 1 < scenes.length &&
+        scenes[end + 1].type !== "user-prompt" &&
+        scenes[end + 1].type !== "compaction-summary"
+      ) {
+        end++;
+      }
+      return end; // Lands on the last scene of the assistant block
+    }
+  }
+
+  // Fallback: Default ALL mode. For batchable tool calls, skip to the end of the batch
   return findBatchEnd(scenes, nextIdx);
+}
+
+/**
+ * Compute the previous scene index to display, accounting for:
+ * - compact mode (skip backwards past the entire assistant grouping if we are leaving it)
+ * - batch grouping (skip backwards past the current batch)
+ */
+export function computePrevIndex(
+  scenes: Scene[],
+  currentIndex: number,
+  prefs: { promptsOnly: boolean; compactAssistant: boolean },
+): number {
+  let prevIdx = Math.max(0, currentIndex - 1);
+  if (currentIndex <= 0) return 0;
+
+  if (prefs.promptsOnly) {
+    while (
+      prevIdx > 0 &&
+      scenes[prevIdx].type !== "user-prompt" &&
+      scenes[prevIdx].type !== "compaction-summary"
+    ) {
+      prevIdx--;
+    }
+    return prevIdx;
+  }
+
+  if (prefs.compactAssistant) {
+    const isCurrentBoundary =
+      scenes[currentIndex].type === "user-prompt" ||
+      scenes[currentIndex].type === "compaction-summary";
+
+    if (!isCurrentBoundary) {
+      // We are inside/at the end of an assistant block. Skip backwards to the previous user prompt.
+      let start = currentIndex;
+      while (
+        start > 0 &&
+        scenes[start - 1].type !== "user-prompt" &&
+        scenes[start - 1].type !== "compaction-summary"
+      ) {
+        start--;
+      }
+      return Math.max(0, start - 1);
+    }
+
+    // We are at a user prompt. Move back one step.
+    // If that step is an assistant scene, it's already the "end" of that block relative to us.
+    return Math.max(0, currentIndex - 1);
+  }
+
+  // Fallback: Default ALL mode.
+  // If the scene we are moving BACK into is part of a batch, skip to the START of that batch
+  const targetScene = scenes[prevIdx];
+  if (targetScene.type === "tool-call" && !targetScene.diff && !targetScene.bashOutput) {
+    const toolName = targetScene.toolName;
+    while (
+      prevIdx > 0 &&
+      scenes[prevIdx - 1].type === "tool-call" &&
+      !(scenes[prevIdx - 1] as Extract<Scene, { type: "tool-call" }>).diff &&
+      !(scenes[prevIdx - 1] as Extract<Scene, { type: "tool-call" }>).bashOutput &&
+      (scenes[prevIdx - 1] as Extract<Scene, { type: "tool-call" }>).toolName === toolName
+    ) {
+      prevIdx--;
+    }
+  }
+
+  return prevIdx;
 }

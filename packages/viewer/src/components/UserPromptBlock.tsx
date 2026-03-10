@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 
 interface Props {
   content: string;
@@ -11,6 +11,18 @@ const COLLAPSE_CHARS = 900;
 
 export default memo(function UserPromptBlock({ content, images, isActive }: Props) {
   const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      if (!isActive) return;
+      const detail = (e as CustomEvent).detail;
+      if (detail.action === "expand") setExpanded(true);
+      else if (detail.action === "collapse") setExpanded(false);
+    };
+    window.addEventListener("vibe:toggle-expand", handler);
+    return () => window.removeEventListener("vibe:toggle-expand", handler);
+  }, [isActive]);
+
   const lines = useMemo(() => content.split("\n"), [content]);
   const isLong = lines.length > COLLAPSE_LINES || content.length > COLLAPSE_CHARS;
 
@@ -32,9 +44,14 @@ export default memo(function UserPromptBlock({ content, images, isActive }: Prop
       {isLong && (
         <button
           onClick={() => setExpanded((v) => !v)}
-          className="mt-1 text-xs font-mono text-terminal-dim hover:text-terminal-green transition-colors duration-200 ease-material"
+          className="mt-1 text-xs font-mono text-terminal-dim hover:text-terminal-green transition-colors duration-200 ease-material flex items-center gap-1.5"
         >
-          {expanded ? "Show less" : `Show more (${lines.length} lines)`}
+          {isActive && (
+            <span className="text-secondary-text font-bold opacity-70">
+              {expanded ? "[←]" : "[→]"}
+            </span>
+          )}
+          <span>{expanded ? "Show less" : `Show more (${lines.length} lines)`}</span>
         </button>
       )}
       {images && images.length > 0 && (

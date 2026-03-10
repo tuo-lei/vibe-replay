@@ -14,10 +14,7 @@ interface Props {
   onNextPrompt: () => void;
   onOpenSearch: () => void;
   onOpenOutline?: () => void;
-  annotationCount?: number;
-  annotationPanelOpen?: boolean;
-  onToggleAnnotations?: () => void;
-  hasUnsavedAnnotations?: boolean;
+  onShowHelp?: () => void;
 }
 
 const SPEEDS = [1, 5, 10];
@@ -35,10 +32,7 @@ export default function Controls({
   onNextPrompt,
   onOpenSearch,
   onOpenOutline,
-  annotationCount = 0,
-  annotationPanelOpen = false,
-  onToggleAnnotations,
-  hasUnsavedAnnotations = false,
+  onShowHelp,
 }: Props) {
   const isPlaying = state === "playing";
   const playIcon = isPlaying ? "\u23F8" : "\u25B6";
@@ -53,7 +47,7 @@ export default function Controls({
   const flashClass = (id: string) => (flashId === id ? "scale-105" : "");
 
   const ghostBtn =
-    "px-2.5 py-1.5 text-xs font-mono rounded-lg transition-all duration-200 ease-material";
+    "px-2.5 py-1.5 text-xs font-sans rounded-lg transition-all duration-200 ease-material";
 
   return (
     <div className="flex items-center justify-between px-4 md:px-5 py-2.5">
@@ -103,9 +97,11 @@ export default function Controls({
           >
             {"\u2039"}
           </button>
-          <span className="px-1.5 py-1.5 text-xs font-mono text-terminal-dim tabular-nums">
+          <span className="px-1.5 py-1.5 text-xs font-sans text-terminal-dim tabular-nums flex items-center gap-1">
             <span className="hidden sm:inline">Turn </span>
-            {currentTurn}/{userPromptCount}
+            <span className="font-mono">{currentTurn}</span>
+            <span>/</span>
+            <span className="font-mono">{userPromptCount}</span>
           </span>
           <button
             onClick={() => {
@@ -118,44 +114,32 @@ export default function Controls({
             {"\u203A"}
           </button>
         </div>
+      </div>
 
-        {/* Search */}
-        <button
-          onClick={() => {
-            flash("search");
-            onOpenSearch();
-          }}
-          className={`${ghostBtn} text-terminal-dim hover:text-terminal-blue hover:bg-terminal-blue-subtle ${flashClass("search")}`}
-          title="Search (Cmd/Ctrl+K)"
-        >
-          <span>{"\uD83D\uDD0D"}</span>
-          <span className="hidden sm:inline ml-1.5">Search</span>
-        </button>
+      {/* Search - Flexible Grow */}
+      <button
+        onClick={() => {
+          flash("search");
+          onOpenSearch();
+        }}
+        className={`h-8 flex-grow flex items-center gap-3 px-3 rounded-lg bg-terminal-surface/20 border border-terminal-border-subtle hover:border-terminal-blue/40 hover:bg-terminal-blue-subtle/20 group/search transition-all duration-200 max-w-sm ${flashClass("search")}`}
+        title="Search (/ or Cmd+K)"
+      >
+        <span className="text-sm opacity-70 group-hover/search:opacity-100 transition-opacity">
+          {"\uD83D\uDD0D"}
+        </span>
+        <span className="text-[11px] font-sans font-medium text-terminal-dim group-hover/search:text-terminal-blue transition-colors">
+          Search...
+        </span>
+        <div className="flex items-center gap-1 ml-1 opacity-40 group-hover/search:opacity-80 transition-opacity">
+          <span className="px-1 py-0.5 rounded bg-terminal-surface border border-terminal-border/50 text-[9px] font-mono font-bold text-terminal-text">
+            /
+          </span>
+        </div>
+      </button>
 
-        {/* Annotations toggle */}
-        {onToggleAnnotations && (
-          <button
-            onClick={() => {
-              flash("annotate");
-              onToggleAnnotations();
-            }}
-            className={`${ghostBtn} hidden md:inline-flex items-center ${
-              annotationPanelOpen
-                ? "bg-terminal-blue-subtle text-terminal-blue"
-                : "text-terminal-dim hover:text-terminal-blue hover:bg-terminal-blue-subtle"
-            } ${flashClass("annotate")} relative`}
-            title="Toggle comments panel"
-          >
-            <span>{"\uD83D\uDCAC"}</span>
-            {annotationCount > 0 && (
-              <span className="hidden sm:inline ml-1.5">{annotationCount}</span>
-            )}
-            {hasUnsavedAnnotations && (
-              <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-terminal-orange" />
-            )}
-          </button>
-        )}
-
+      {/* Right side items */}
+      <div className="flex items-center gap-2 md:gap-4">
         {/* Outline (mobile only) */}
         {onOpenOutline && (
           <button
@@ -169,6 +153,25 @@ export default function Controls({
             {"\u2630"}
           </button>
         )}
+
+        {/* Shortcuts Help */}
+        {onShowHelp && (
+          <button
+            onClick={() => {
+              flash("help");
+              onShowHelp();
+            }}
+            className={`flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-terminal-dimmer hover:text-terminal-text hover:bg-terminal-surface-hover group/help transition-all duration-200 ${flashClass("help")}`}
+            title="Keyboard Shortcuts (?)"
+          >
+            <div className="flex items-center justify-center w-5 h-5 rounded border border-terminal-border-subtle/50 bg-terminal-surface group-hover/help:border-terminal-text group-hover/help:text-terminal-bg group-hover/help:bg-terminal-text transition-all duration-200">
+              <span className="text-[11px] font-mono font-black">?</span>
+            </div>
+            <span className="hidden lg:inline text-[10px] font-sans font-bold uppercase tracking-widest opacity-60 group-hover/help:opacity-100">
+              Press ? for help
+            </span>
+          </button>
+        )}
       </div>
 
       <div className="hidden sm:flex items-center gap-2 md:gap-3 text-xs text-terminal-dim font-mono shrink-0">
@@ -179,32 +182,6 @@ export default function Controls({
         )}
         <span className="tabular-nums">
           {Math.max(0, currentIndex + 1)} / {totalScenes}
-        </span>
-        {/* Keyboard hints */}
-        <span className="hidden lg:inline-flex items-center gap-2 text-terminal-dimmer pl-3">
-          <kbd className="text-xs px-1 py-px rounded bg-terminal-surface border border-terminal-border/50">
-            Space
-          </kbd>
-          <span className="text-xs">play</span>
-          <kbd className="text-xs px-1 py-px rounded bg-terminal-surface border border-terminal-border/50">
-            n
-          </kbd>
-          <kbd className="text-xs px-1 py-px rounded bg-terminal-surface border border-terminal-border/50">
-            p
-          </kbd>
-          <span className="text-xs">turns</span>
-          <kbd className="text-xs px-1 py-px rounded bg-terminal-surface border border-terminal-border/50">
-            &larr;&rarr;
-          </kbd>
-          <span className="text-xs">step</span>
-          <kbd className="text-xs px-1 py-px rounded bg-terminal-surface border border-terminal-border/50">
-            e
-          </kbd>
-          <span className="text-xs">all</span>
-          <kbd className="text-xs px-1 py-px rounded bg-terminal-surface border border-terminal-border/50">
-            ⌘K
-          </kbd>
-          <span className="text-xs">search</span>
         </span>
       </div>
     </div>

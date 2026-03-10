@@ -5,16 +5,6 @@ import { useSessionLoader } from "./hooks/useSessionLoader";
 import { useTheme } from "./hooks/useTheme";
 import { useViewPrefs } from "./hooks/useViewPrefs";
 
-function formatDuration(ms?: number): string {
-  if (!ms) return "";
-  const secs = Math.floor(ms / 1000);
-  if (secs < 60) return `${secs}s`;
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m ${secs % 60}s`;
-  const hrs = Math.floor(mins / 60);
-  return `${hrs}h ${mins % 60}m`;
-}
-
 function navigateTo(params: Record<string, string | null>) {
   const url = new URL(window.location.href);
   for (const [key, value] of Object.entries(params)) {
@@ -61,7 +51,7 @@ export default function App() {
     return (
       <div className="h-screen bg-terminal-bg flex items-center justify-center">
         <div className="text-center space-y-2">
-          <div className="text-terminal-green font-mono text-sm animate-pulse">
+          <div className="text-terminal-green font-sans font-bold text-sm animate-pulse">
             LOADING SESSION...
           </div>
           <div className="text-terminal-dimmer font-mono text-xs">Preparing replay data</div>
@@ -114,7 +104,6 @@ export default function App() {
   }
 
   const { meta } = session!;
-  const duration = formatDuration(meta.stats.durationMs);
   // Show back-to-dashboard button when viewing a session via ?session= param
   const showDashboardBack = isEditor && new URLSearchParams(window.location.search).has("session");
 
@@ -187,18 +176,6 @@ export default function App() {
                 </a>
               </>
             )}
-            {meta.model && (
-              <>
-                <span className="text-terminal-border">&middot;</span>
-                <span className="text-terminal-dim">{meta.model}</span>
-              </>
-            )}
-            {duration && (
-              <>
-                <span className="text-terminal-border">&middot;</span>
-                <span>{duration}</span>
-              </>
-            )}
           </div>
         </div>
 
@@ -207,7 +184,7 @@ export default function App() {
           {isEditor && !showDashboardBack && (
             <button
               onClick={() => navigateTo({ view: "dashboard" })}
-              className="h-7 px-2.5 flex items-center gap-1.5 rounded-md bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover text-xs font-mono transition-colors"
+              className="h-7 px-2.5 flex items-center gap-1.5 rounded-md bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover text-xs font-sans font-medium transition-colors"
               title="All replays"
             >
               <svg

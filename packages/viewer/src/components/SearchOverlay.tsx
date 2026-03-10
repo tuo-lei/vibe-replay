@@ -85,13 +85,17 @@ export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) 
     const q = query.toLowerCase();
     const matches: SearchResult[] = [];
     for (let i = 0; i < scenes.length; i++) {
-      const text = getSceneText(scenes[i]);
+      const scene = scenes[i];
+      const text = getSceneText(scene);
       if (text.toLowerCase().includes(q)) {
         matches.push({
           sceneIndex: i,
-          type: scenes[i].type,
+          type: scene.type,
           snippet: highlightMatch(text, query),
-          toolName: scenes[i].type === "tool-call" ? scenes[i].toolName : undefined,
+          toolName:
+            scene.type === "tool-call"
+              ? (scene as Extract<Scene, { type: "tool-call" }>).toolName
+              : undefined,
         });
       }
       if (matches.length >= 50) break;
@@ -160,7 +164,7 @@ export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) 
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search scenes..."
-            className="flex-1 bg-transparent text-sm font-mono text-terminal-text placeholder-terminal-dim outline-none"
+            className="flex-1 bg-transparent text-sm font-sans font-medium text-terminal-text placeholder-terminal-dim outline-none"
           />
           <kbd className="text-[10px] font-mono text-terminal-dimmer bg-terminal-surface px-2 py-0.5 rounded-md">
             ESC
@@ -170,11 +174,11 @@ export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) 
         {/* Results */}
         <div ref={listRef} className="max-h-[50vh] overflow-y-auto">
           {query.length < 2 ? (
-            <div className="px-4 py-8 text-center text-xs font-mono text-terminal-dim">
+            <div className="px-4 py-8 text-center text-xs font-sans font-medium text-terminal-dim">
               Type at least 2 characters to search
             </div>
           ) : results.length === 0 ? (
-            <div className="px-4 py-8 text-center text-xs font-mono text-terminal-dim">
+            <div className="px-4 py-8 text-center text-xs font-sans font-medium text-terminal-dim">
               No results for "{query}"
             </div>
           ) : (
@@ -187,7 +191,7 @@ export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) 
                 }`}
               >
                 <span
-                  className={`text-xs font-mono font-semibold uppercase shrink-0 mt-0.5 ${
+                  className={`text-[10px] font-sans font-bold uppercase shrink-0 mt-0.5 tracking-wider ${
                     TYPE_COLORS[r.type] || "text-terminal-dim"
                   }`}
                 >
@@ -206,12 +210,12 @@ export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) 
 
         {/* Footer */}
         {results.length > 0 && (
-          <div className="px-4 py-2 border-t border-terminal-border-subtle text-xs font-mono text-terminal-dimmer flex gap-4">
+          <div className="px-4 py-2 border-t border-terminal-border-subtle text-[10px] font-sans font-bold uppercase tracking-wider text-terminal-dimmer flex gap-4">
             <span>
               {results.length} result{results.length !== 1 ? "s" : ""}
             </span>
-            <span>↑↓ navigate</span>
-            <span>↵ select</span>
+            <span>&uarr;&darr; navigate</span>
+            <span>&crarr; select</span>
           </div>
         )}
       </div>

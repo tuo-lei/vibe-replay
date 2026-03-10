@@ -79,7 +79,7 @@ export default function LandingHero({ session, onStart }: Props) {
   // Space/Enter also triggers start
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === " " || e.key === "Enter") {
+      if (e.key === " " || e.key === "Enter" || e.key === "ArrowDown" || e.key === "ArrowRight") {
         e.preventDefault();
         onStart();
       }
@@ -147,7 +147,7 @@ export default function LandingHero({ session, onStart }: Props) {
 
         {/* Play button — primary CTA */}
         <button
-          onClick={onStart}
+          onClick={() => onStart()}
           className="group inline-flex items-center gap-3 px-10 py-4 rounded-xl bg-terminal-green-subtle hover:bg-terminal-green-emphasis transition-all duration-200 ease-material shadow-layer-md hover:shadow-layer-lg hover:-translate-y-0.5 landing-pulse"
         >
           <span className="text-xl text-terminal-green group-hover:scale-110 transition-transform duration-200">
@@ -162,7 +162,7 @@ export default function LandingHero({ session, onStart }: Props) {
       {/* First prompt teaser */}
       {firstPrompt && (
         <div className="w-full px-8 mt-8 md:mt-12 pb-6 z-10 shrink-0">
-          <div onClick={onStart} className="max-w-2xl mx-auto cursor-pointer group">
+          <div onClick={() => onStart()} className="max-w-2xl mx-auto cursor-pointer group">
             <div className="text-xs font-sans text-terminal-dimmer uppercase tracking-widest mb-3 text-center font-medium">
               First message
             </div>
@@ -174,8 +174,8 @@ export default function LandingHero({ session, onStart }: Props) {
                 {firstPrompt}
               </div>
             </div>
-            <div className="text-center mt-4 text-terminal-dimmer text-xs font-mono animate-bounce">
-              {"\u2193"} scroll to explore
+            <div className="text-center mt-4 text-terminal-dimmer text-xs font-mono animate-bounce uppercase tracking-wider">
+              {"\u2193"} press down or scroll to explore
             </div>
           </div>
         </div>

@@ -159,7 +159,7 @@ function EditableTitle({
                 setEditing(false);
               }
             }}
-            className="bg-terminal-surface-2 rounded px-2 py-0.5 text-sm font-mono text-terminal-text w-full outline-none ring-1 ring-terminal-border-subtle focus:ring-terminal-green/50 transition-shadow duration-200"
+            className="bg-terminal-surface-2 rounded px-2 py-0.5 text-sm font-sans text-terminal-text w-full outline-none ring-1 ring-terminal-border-subtle focus:ring-terminal-green/50 transition-shadow duration-200"
             placeholder={suggestedTitle}
             maxLength={TITLE_MAX_CHARS}
             disabled={saving}
@@ -173,13 +173,13 @@ function EditableTitle({
   }
 
   return (
-    <div className="min-w-0">
+    <div className="flex-1 min-w-0">
       <button
         onClick={() => setEditing(true)}
-        className="group flex items-center gap-1 min-w-0 text-left"
+        className="group flex items-center gap-1 min-w-0 max-w-full text-left"
         title="Click to edit title"
       >
-        <span className="text-sm font-mono text-terminal-text truncate">
+        <span className="text-sm font-sans font-medium text-terminal-text truncate">
           {suggestedTitle || slug}
         </span>
         <svg
@@ -237,7 +237,7 @@ function ReplayCard({
     >
       {/* Row 1: title + badges + actions */}
       <div className="flex items-center justify-between gap-3">
-        <div className="flex items-start gap-2 min-w-0">
+        <div className="flex-1 flex items-center gap-2 min-w-0">
           {onTitleSave ? (
             <EditableTitle
               slug={s.slug}
@@ -246,8 +246,8 @@ function ReplayCard({
               onSave={onTitleSave}
             />
           ) : (
-            <div className="min-w-0">
-              <span className="text-sm font-mono text-terminal-text truncate block">
+            <div className="flex-1 min-w-0">
+              <span className="text-sm font-sans font-medium text-terminal-text truncate block">
                 {replaySuggestedTitle(s)}
               </span>
               <div className="text-[11px] font-mono text-terminal-dimmer truncate mt-0.5">
@@ -286,10 +286,10 @@ function ReplayCard({
             </button>
           )}
         </div>
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex items-center gap-1 shrink-0 h-8">
           <button
             onClick={onOpen}
-            className="px-3.5 py-1.5 text-xs font-sans font-semibold rounded-lg bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 ease-material"
+            className="h-7 px-3 text-xs font-sans font-semibold rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 ease-material flex items-center justify-center shrink-0"
           >
             Open
           </button>
@@ -297,12 +297,27 @@ function ReplayCard({
             <button
               onClick={onRegenerate}
               disabled={isRegenerating}
-              className="px-2 py-1.5 text-xs font-mono rounded-md text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/80 transition-colors disabled:opacity-50"
+              className="w-8 h-8 flex items-center justify-center rounded-md text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/80 transition-colors disabled:opacity-50"
+              title="Redo"
             >
               {isRegenerating ? (
                 <span className="animate-pulse text-terminal-green">...</span>
               ) : (
-                "Redo"
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+                  <path d="M21 3v5h-5" />
+                  <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+                  <path d="M8 16H3v5" />
+                </svg>
               )}
             </button>
           )}
@@ -310,7 +325,7 @@ function ReplayCard({
             <button
               onClick={onPublishGist}
               disabled={isPublishing}
-              className="px-2 py-1.5 text-xs font-mono rounded-md text-terminal-dim hover:text-terminal-purple hover:bg-terminal-purple-subtle transition-colors duration-200 disabled:opacity-50"
+              className="w-8 h-8 flex items-center justify-center rounded-md text-terminal-dim hover:text-terminal-purple hover:bg-terminal-purple-subtle transition-colors duration-200 disabled:opacity-50"
               title="Publish to Gist"
             >
               {isPublishing ? (
@@ -331,19 +346,19 @@ function ReplayCard({
           )}
           {onDelete &&
             (confirmingDelete ? (
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 pl-1">
                 <button
                   onClick={() => {
                     onDelete();
                     setConfirmingDelete(false);
                   }}
-                  className="px-2 py-1.5 text-xs font-mono rounded-md bg-terminal-red-subtle text-terminal-red hover:bg-terminal-red-emphasis transition-colors duration-200"
+                  className="h-7 px-2 text-xs font-mono rounded-md bg-terminal-red-subtle text-terminal-red hover:bg-terminal-red-emphasis transition-colors duration-200"
                 >
                   Confirm
                 </button>
                 <button
                   onClick={() => setConfirmingDelete(false)}
-                  className="px-2 py-1.5 text-xs font-mono rounded-md text-terminal-dim hover:text-terminal-text transition-colors"
+                  className="h-7 px-2 text-xs font-mono rounded-md text-terminal-dim hover:text-terminal-text transition-colors"
                 >
                   Cancel
                 </button>
@@ -351,7 +366,7 @@ function ReplayCard({
             ) : (
               <button
                 onClick={() => setConfirmingDelete(true)}
-                className="px-2 py-1.5 text-xs font-mono rounded-md text-terminal-dim hover:text-terminal-red hover:bg-terminal-red-subtle transition-colors duration-200"
+                className="w-8 h-8 flex items-center justify-center rounded-md text-terminal-dim hover:text-terminal-red hover:bg-terminal-red-subtle transition-colors duration-200"
                 title="Delete"
               >
                 <svg
@@ -369,7 +384,7 @@ function ReplayCard({
           {onArchive && (
             <button
               onClick={onArchive}
-              className="p-1.5 text-terminal-dim hover:text-terminal-text transition-colors"
+              className="w-8 h-8 flex items-center justify-center text-terminal-dim hover:text-terminal-text transition-colors"
               title={isArchived ? "Unarchive" : "Archive"}
             >
               <svg
@@ -387,12 +402,15 @@ function ReplayCard({
         </div>
       </div>
       {/* Row 2: user messages */}
-      {(s.messages || (s.firstMessage ? [s.firstMessage] : [])).map((msg, i) => (
-        <div key={i} className="flex gap-2 items-start">
-          <span className="text-xs text-terminal-green shrink-0 mt-px select-none">&gt;</span>
-          <p className="text-sm text-terminal-dim line-clamp-1 leading-relaxed">{msg}</p>
-        </div>
-      ))}
+      {(s.messages || (s.firstMessage ? [s.firstMessage] : []))
+        .map((msg) => cleanPrompt(msg || ""))
+        .filter((msg) => msg.length > 0)
+        .map((msg, i) => (
+          <div key={i} className="flex gap-2 items-start">
+            <span className="text-xs text-terminal-green shrink-0 mt-px select-none">&gt;</span>
+            <p className="text-sm text-terminal-dim line-clamp-1 leading-relaxed">{msg}</p>
+          </div>
+        ))}
       {/* Row 3: stats bar */}
       <div className="flex items-center gap-1.5 flex-wrap">
         <span className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim">
@@ -574,6 +592,10 @@ function cleanPrompt(text: string): string {
     "",
   );
   cleaned = cleaned.replace(/DO NOT respond to these messages[^.]*/g, "");
+  // Strip GitHub export markdown from vibe-replay (image + header + stats line)
+  cleaned = cleaned.replace(/!\[AI Session:[^\]]*]\([^)]+\)/gi, "");
+  cleaned = cleaned.replace(/###\s*AI Coding Session[^\n]*/gi, "");
+  cleaned = cleaned.replace(/\d+\s+prompts?,\s+\d+\s+tools?,[^\n]*/gi, "");
   // Remove slash commands
   cleaned = cleaned.replace(/^\/\w+\s*/g, "");
   // Collapse whitespace
@@ -582,7 +604,8 @@ function cleanPrompt(text: string): string {
 }
 
 function sourceSuggestedTitle(s: SourceSession): string {
-  const explicitTitle = normalizeTitleText(s.title);
+  // Prefer a cleaned version of the provider title (strip markdown / noise)
+  const explicitTitle = s.title ? normalizeTitleText(cleanPrompt(s.title)) : "";
   if (explicitTitle) return explicitTitle;
   const promptCandidates = [...(s.prompts || []), s.firstPrompt];
   for (const candidate of promptCandidates) {
@@ -796,7 +819,7 @@ function SessionsPanel() {
         <div className="text-center space-y-3">
           <div className="text-terminal-red font-mono text-sm">{error}</div>
           <button
-            onClick={loadSources}
+            onClick={() => void loadSources({ forceRefresh: true })}
             className="px-3 py-1.5 text-xs font-mono rounded-md bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors duration-200"
           >
             Retry
@@ -859,7 +882,7 @@ function SessionsPanel() {
           {/* All projects */}
           <button
             onClick={() => setSelectedProject(ALL_PROJECTS)}
-            className={`w-full text-left px-3 py-2.5 text-xs font-mono rounded-lg transition-all duration-200 ease-material flex items-center justify-between ${
+            className={`w-full text-left px-3 py-2.5 text-xs font-sans rounded-lg transition-all duration-200 ease-material flex items-center justify-between ${
               selectedProject === ALL_PROJECTS
                 ? "bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
                 : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface"
@@ -899,7 +922,7 @@ function SessionsPanel() {
               >
                 <div className="flex items-center justify-between gap-1.5">
                   <span
-                    className={`text-xs font-mono truncate flex items-center gap-1.5 ${
+                    className={`text-xs font-sans truncate flex items-center gap-1.5 ${
                       isActive
                         ? "text-terminal-green font-medium"
                         : !exists
@@ -960,7 +983,7 @@ function SessionsPanel() {
           <select
             value={selectedProject}
             onChange={(e) => setSelectedProject(e.target.value)}
-            className="w-full bg-terminal-surface rounded-lg px-3 py-2.5 text-sm font-mono text-terminal-text outline-none shadow-layer-sm"
+            className="w-full bg-terminal-surface rounded-lg px-3 py-2.5 text-sm font-sans text-terminal-text outline-none shadow-layer-sm"
           >
             <option value={ALL_PROJECTS}>All projects ({sources.length})</option>
             {projectEntries.map(([project, sessions]) => (
@@ -976,7 +999,7 @@ function SessionsPanel() {
           {/* Project title for desktop */}
           <div className="hidden md:flex items-center justify-between">
             <div className="min-w-0">
-              <h2 className="text-base font-mono text-terminal-text truncate font-semibold">
+              <h2 className="text-base font-sans text-terminal-text truncate font-semibold">
                 {selectedProject === ALL_PROJECTS
                   ? "All projects"
                   : projectLabels.get(selectedProject) || projectName(selectedProject)}
@@ -987,7 +1010,7 @@ function SessionsPanel() {
                 </span>
               )}
             </div>
-            <span className="text-xs font-mono text-terminal-dim tabular-nums px-2 py-1 rounded-md bg-terminal-surface">
+            <span className="text-xs font-sans text-terminal-dim tabular-nums px-2 py-1 rounded-md bg-terminal-surface">
               {filtered.length} session{filtered.length !== 1 ? "s" : ""}
             </span>
           </div>
@@ -1168,64 +1191,68 @@ function SessionsPanel() {
                     key={`${s.provider}-${s.slug}`}
                     className={`bg-terminal-surface rounded-xl px-5 py-4 hover:bg-terminal-surface-hover transition-colors duration-200 ease-material space-y-2.5 shadow-layer-sm hover-lift ${isArchived ? "opacity-50" : ""}`}
                   >
-                    {/* Row 1: slug + branch + time + action */}
-                    <div className="flex items-center gap-2">
-                      <div className="min-w-0">
+                    {/* Row 1: title + meta (left) / time + actions (right) */}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 space-y-0.5">
                         <span className="text-sm font-mono text-terminal-text truncate block">
                           {sessionTitle}
                         </span>
-                        <div className="text-[11px] font-mono text-terminal-dimmer truncate mt-0.5">
-                          slug: <span className="text-terminal-dim">{s.slug}</span>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="text-[11px] font-mono text-terminal-dimmer truncate">
+                            slug: <span className="text-terminal-dim">{s.slug}</span>
+                          </div>
+                          {branch && (
+                            <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-terminal-surface-2 text-terminal-dim shrink-0 inline-flex items-center gap-0.5">
+                              <svg
+                                width="10"
+                                height="10"
+                                viewBox="0 0 16 16"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.5"
+                              >
+                                <circle cx="5" cy="4" r="2" />
+                                <circle cx="11" cy="12" r="2" />
+                                <path d="M5 6v4c0 1.1.9 2 2 2h2" />
+                              </svg>
+                              {branch}
+                            </span>
+                          )}
                         </div>
                       </div>
-                      {branch && (
-                        <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-terminal-surface-2 text-terminal-dim shrink-0 flex items-center gap-0.5">
-                          <svg
-                            width="10"
-                            height="10"
-                            viewBox="0 0 16 16"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="1.5"
-                          >
-                            <circle cx="5" cy="4" r="2" />
-                            <circle cx="11" cy="12" r="2" />
-                            <path d="M5 6v4c0 1.1.9 2 2 2h2" />
-                          </svg>
-                          {branch}
-                        </span>
-                      )}
-                      <div className="flex items-center gap-1.5 shrink-0 ml-auto">
+                      <div className="flex flex-col items-end gap-1 shrink-0">
                         <span className="text-xs font-mono text-terminal-dimmer">
                           {timeAgo(s.timestamp)}
                         </span>
-                        <button
-                          onClick={() => handleGenerate(s)}
-                          disabled={generatingSlug === s.slug}
-                          className="px-3 py-1.5 text-xs font-mono rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-colors duration-200 disabled:opacity-50 font-medium"
-                        >
-                          {generatingSlug === s.slug ? (
-                            <span className="animate-pulse">Generating...</span>
-                          ) : (
-                            "Generate"
-                          )}
-                        </button>
-                        <button
-                          onClick={() => toggleArchive(s.slug)}
-                          className="p-1 text-terminal-dim hover:text-terminal-text transition-colors"
-                          title={isArchived ? "Unarchive" : "Archive"}
-                        >
-                          <svg
-                            width="14"
-                            height="14"
-                            viewBox="0 0 16 16"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="1.5"
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => handleGenerate(s)}
+                            disabled={generatingSlug === s.slug}
+                            className="px-3 py-1.5 text-xs font-mono rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-colors duration-200 disabled:opacity-50 font-medium"
                           >
-                            <path d="M2 4h12v2H2zM3 6v7h10V6M6.5 8h3" />
-                          </svg>
-                        </button>
+                            {generatingSlug === s.slug ? (
+                              <span className="animate-pulse">Generating...</span>
+                            ) : (
+                              "Generate"
+                            )}
+                          </button>
+                          <button
+                            onClick={() => toggleArchive(s.slug)}
+                            className="p-1 text-terminal-dim hover:text-terminal-text transition-colors"
+                            title={isArchived ? "Unarchive" : "Archive"}
+                          >
+                            <svg
+                              width="14"
+                              height="14"
+                              viewBox="0 0 16 16"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                            >
+                              <path d="M2 4h12v2H2zM3 6v7h10V6M6.5 8h3" />
+                            </svg>
+                          </button>
+                        </div>
                       </div>
                     </div>
                     {/* Row 2: user prompts */}
@@ -1630,9 +1657,9 @@ function ReplaysPanel() {
           {/* Open by URL/Gist */}
           <OpenReplayForm />
 
-          {/* Project title for desktop */}
-          <div className="hidden md:flex items-center justify-between">
-            <div className="min-w-0">
+          {/* Project title + inline search (desktop) */}
+          <div className="hidden md:flex items-center gap-3">
+            <div className="min-w-0 shrink-0">
               <h2 className="text-base font-mono text-terminal-text truncate font-semibold">
                 {selectedProject === ALL_PROJECTS
                   ? "All replays"
@@ -1644,13 +1671,48 @@ function ReplaysPanel() {
                 </span>
               )}
             </div>
-            <span className="text-xs font-mono text-terminal-dim tabular-nums px-2 py-1 rounded-md bg-terminal-surface">
+            <div className="flex-1 flex items-center gap-2">
+              <div className="relative flex-1">
+                <svg
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-terminal-dim"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                >
+                  <circle cx="7" cy="7" r="5" />
+                  <path d="M11 11l3.5 3.5" />
+                </svg>
+                <input
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  placeholder="Filter replays..."
+                  className="w-full bg-terminal-surface rounded-lg pl-9 pr-3 py-2.5 text-sm font-mono text-terminal-text placeholder:text-terminal-dimmer outline-none ring-1 ring-transparent focus:ring-terminal-green/40 transition-shadow duration-200 shadow-layer-sm"
+                />
+              </div>
+              {archivedCount > 0 && (
+                <button
+                  onClick={() => setShowArchived(!showArchived)}
+                  className={`shrink-0 px-2.5 py-2 text-xs font-mono rounded-lg transition-colors duration-200 ${
+                    showArchived
+                      ? "bg-terminal-orange-subtle text-terminal-orange"
+                      : "bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
+                  }`}
+                  title={showArchived ? "Hide archived" : `View all (${archivedCount} archived)`}
+                >
+                  {showArchived ? "Active" : "View all"}
+                </button>
+              )}
+            </div>
+            <span className="text-xs font-mono text-terminal-dim tabular-nums px-2 py-1 rounded-md bg-terminal-surface shrink-0">
               {filtered.length} replay{filtered.length !== 1 ? "s" : ""}
             </span>
           </div>
 
-          {/* Search + archive toggle */}
-          <div className="flex gap-2 items-center">
+          {/* Mobile search + archive toggle (kept stacked) */}
+          <div className="md:hidden flex gap-2 items-center">
             <div className="relative flex-1">
               <svg
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-terminal-dim"
