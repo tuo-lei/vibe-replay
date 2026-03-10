@@ -621,6 +621,16 @@ export async function startServer(
     return c.json(status);
   });
 
+  // Gist info for a session (requires slug)
+  app.get("/api/gist-info", async (c) => {
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetDir = join(baseDir, result.slug);
+    const gist = await loadSavedGistInfo(targetDir);
+    if (!gist) return c.json({ gist: null });
+    return c.json({ gist });
+  });
+
   // Publish to Gist (requires slug)
   app.post("/api/publish/gist", async (c) => {
     const result = requireSlug(c.req.query("slug"));
@@ -658,6 +668,33 @@ export async function startServer(
     }
   });
 
+  // Check existing GitHub export files (requires slug)
+  app.get("/api/export/github/status", async (c) => {
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetDir = join(baseDir, result.slug);
+    try {
+      const svgPath = join(targetDir, "session-preview.svg");
+      const mdPath = join(targetDir, "github-summary.md");
+      const [svgContent, markdown] = await Promise.all([
+        readFile(svgPath, "utf-8").catch(() => null),
+        readFile(mdPath, "utf-8").catch(() => null),
+      ]);
+      if (!svgContent && !markdown) return c.json({ exists: false });
+      const gist = await loadSavedGistInfo(targetDir);
+      return c.json({
+        exists: true,
+        svgContent,
+        markdown,
+        svgPath,
+        mdPath,
+        replayUrl: gist?.viewerUrl || undefined,
+      });
+    } catch {
+      return c.json({ exists: false });
+    }
+  });
+
   // Export GitHub markdown + SVG (requires slug)
   app.post("/api/export/github", async (c) => {
     const result = requireSlug(c.req.query("slug"));
@@ -690,6 +727,7 @@ export async function startServer(
 
       return c.json({
         markdown,
+        svgContent,
         svgPath: svgFilePath,
         mdPath: mdFilePath,
         replayUrl,

@@ -35,7 +35,7 @@ export default function Controls({
   onPrevPrompt,
   onNextPrompt,
   onOpenSearch,
-  onOpenOutline: _onOpenOutline,
+  onOpenOutline,
   annotationCount: _annotationCount = 0,
   commentDrawerOpen: _commentDrawerOpen = false,
   onToggleAnnotations: _onToggleAnnotations,

@@ -7,6 +7,7 @@ interface Props {
   onChangeView: (view: ActiveView) => void;
   className?: string;
   rightContent?: ReactNode;
+  hiddenTabs?: ActiveView[];
 }
 
 const TABS: { key: ActiveView; label: string }[] = [
@@ -20,13 +21,14 @@ export default function ViewTabBar({
   onChangeView,
   className = "",
   rightContent,
+  hiddenTabs,
 }: Props) {
   return (
     <div
       className={`flex items-center justify-between border-b border-terminal-border-subtle bg-terminal-bg shrink-0 ${className}`}
     >
       <div className="flex bg-terminal-surface/30">
-        {TABS.map(({ key, label }) => (
+        {TABS.filter((t) => !hiddenTabs?.includes(t.key)).map(({ key, label }) => (
           <button
             key={key}
             onClick={() => onChangeView(key)}

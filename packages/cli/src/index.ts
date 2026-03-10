@@ -120,28 +120,23 @@ program
       let displayedSessions: SessionInfo[] = [];
       const cached = await readFileCache<SessionInfo[]>(SESSION_DISCOVERY_CACHE_KEY);
       const hasStaleCache = !!(cached && cached.data.length > 0);
-      let showStaleLabel = hasStaleCache;
-      let refreshPromise: Promise<SessionInfo[] | null> | null = null;
 
       if (hasStaleCache && cached) {
         displayedSessions = cached.data
           .slice()
           .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
         console.log(
-          chalk.cyan(
-            `  Quick start: loaded ${displayedSessions.length} sessions from local cache (${formatRelativeAge(cached.updatedAt)}).`,
+          chalk.dim(
+            `  Loaded ${displayedSessions.length} sessions from cache (${formatRelativeAge(cached.updatedAt)}). Refreshing in background...\n`,
           ),
         );
-        console.log(
-          chalk.dim("  Fetching latest sessions in background; this list will auto-refresh.\n"),
-        );
 
-        refreshPromise = discoverAllSessions()
+        // Silently refresh cache for next run — don't interrupt current prompt
+        discoverAllSessions()
           .then(async (freshSessions) => {
             await writeFileCache(SESSION_DISCOVERY_CACHE_KEY, freshSessions);
-            return freshSessions;
           })
-          .catch(() => null);
+          .catch(() => {});
       } else {
         const spinner = ora("Scanning latest sessions...").start();
         try {
@@ -162,127 +157,62 @@ program
       const replayBaseDir = pathJoin(homedir(), ".vibe-replay");
 
       let chosen: string;
-      let highlightedValue: string | undefined;
-      while (true) {
-        const choices = formatSessionChoices(displayedSessions);
-        const selectableValues = choices
-          .filter(
-            (choice): choice is { value: string } =>
-              !!choice &&
-              typeof choice === "object" &&
-              "value" in choice &&
-              typeof (choice as any).value === "string",
-          )
-          .map((choice) => choice.value);
+      const choices = formatSessionChoices(displayedSessions);
 
-        let cursorIndex = 0;
-        if (highlightedValue) {
-          const idx = selectableValues.indexOf(highlightedValue);
-          if (idx >= 0) cursorIndex = idx;
+      const ac = new AbortController();
+      let dashboardRequested = false;
+
+      const { emitKeypressEvents } = await import("node:readline");
+      if (!process.stdin.listenerCount("keypress")) {
+        emitKeypressEvents(process.stdin);
+      }
+      const onKeypress = (_str: string, key: { name?: string }) => {
+        if (key?.name === "d") {
+          dashboardRequested = true;
+          ac.abort();
         }
-        highlightedValue = selectableValues[cursorIndex];
+      };
+      process.stdin.on("keypress", onKeypress);
+      ac.signal.addEventListener("abort", () => {
+        process.stdin.off("keypress", onKeypress);
+      });
 
-        const ac = new AbortController();
-        let dashboardRequested = false;
-        let shouldSwitchToFresh = false;
-        let freshSessions: SessionInfo[] | null = null;
-        let promptSettled = false;
-
-        const { emitKeypressEvents } = await import("node:readline");
-        if (!process.stdin.listenerCount("keypress")) {
-          emitKeypressEvents(process.stdin);
-        }
-        const onKeypress = (_str: string, key: { name?: string }) => {
-          if (key?.name === "d") {
-            dashboardRequested = true;
-            ac.abort();
-            return;
-          }
-
-          if (selectableValues.length === 0) return;
-
-          if (key?.name === "down" || key?.name === "j") {
-            cursorIndex = Math.min(selectableValues.length - 1, cursorIndex + 1);
-            highlightedValue = selectableValues[cursorIndex];
-          } else if (key?.name === "up" || key?.name === "k") {
-            cursorIndex = Math.max(0, cursorIndex - 1);
-            highlightedValue = selectableValues[cursorIndex];
-          } else if (key?.name === "pageup") {
-            cursorIndex = Math.max(0, cursorIndex - 20);
-            highlightedValue = selectableValues[cursorIndex];
-          } else if (key?.name === "pagedown") {
-            cursorIndex = Math.min(selectableValues.length - 1, cursorIndex + 20);
-            highlightedValue = selectableValues[cursorIndex];
-          } else if (key?.name === "home") {
-            cursorIndex = 0;
-            highlightedValue = selectableValues[cursorIndex];
-          } else if (key?.name === "end") {
-            cursorIndex = selectableValues.length - 1;
-            highlightedValue = selectableValues[cursorIndex];
-          }
-        };
-        const cleanup = () => {
-          process.stdin.off("keypress", onKeypress);
-        };
-        process.stdin.on("keypress", onKeypress);
-        ac.signal.addEventListener("abort", () => {
-          cleanup();
-        });
-
-        if (showStaleLabel && refreshPromise) {
-          void refreshPromise.then((sessions) => {
-            if (promptSettled) return;
-            if (!sessions || sessions.length === 0) return;
-            freshSessions = sessions;
-            shouldSwitchToFresh = true;
-            ac.abort();
-          });
-        }
-
-        try {
-          chosen = await select<string>(
-            {
-              message: showStaleLabel
-                ? "Pick a session to replay (cached, auto-refreshing):"
-                : "Pick a session to replay:",
-              choices,
-              default: highlightedValue,
-              pageSize: 20,
-              theme: {
-                style: {
-                  keysHelpTip: (keys: [string, string][]) =>
-                    [...keys, ["d", "dashboard"]]
-                      .map(([k, v]) => `${chalk.bold(k)} ${chalk.dim(v)}`)
-                      .join(chalk.dim(" \u00b7 ")),
-                },
+      try {
+        chosen = await select<string>(
+          {
+            message: "What would you like to do?",
+            choices,
+            pageSize: 20,
+            theme: {
+              style: {
+                keysHelpTip: (keys: [string, string][]) =>
+                  [...keys, ["d", "dashboard"]]
+                    .map(([k, v]) => `${chalk.bold(k)} ${chalk.dim(v)}`)
+                    .join(chalk.dim(" \u00b7 ")),
               },
             },
-            { signal: ac.signal },
+          },
+          { signal: ac.signal },
+        );
+        process.stdin.off("keypress", onKeypress);
+      } catch {
+        process.stdin.off("keypress", onKeypress);
+        if (dashboardRequested) {
+          await startDashboard(
+            replayBaseDir,
+            DEV_MENU_ENABLED ? { externalViewerUrl: "http://localhost:5173" } : undefined,
           );
-          promptSettled = true;
-          highlightedValue = chosen;
-          cleanup();
-          break;
-        } catch {
-          promptSettled = true;
-          cleanup();
-          if (dashboardRequested) {
-            await startDashboard(
-              replayBaseDir,
-              DEV_MENU_ENABLED ? { externalViewerUrl: "http://localhost:5173" } : undefined,
-            );
-            return;
-          }
-          if (shouldSwitchToFresh && freshSessions) {
-            displayedSessions = freshSessions
-              .slice()
-              .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-            showStaleLabel = false;
-            console.log(chalk.green("\n  Latest sessions fetched. List refreshed.\n"));
-            continue;
-          }
-          process.exit(0);
+          return;
         }
+        process.exit(0);
+      }
+
+      if (chosen === "__dashboard__") {
+        await startDashboard(
+          replayBaseDir,
+          DEV_MENU_ENABLED ? { externalViewerUrl: "http://localhost:5173" } : undefined,
+        );
+        return;
       }
 
       const info = displayedSessions.find((s) => s.filePath === chosen);
@@ -549,7 +479,13 @@ function formatSessionChoices(sessions: SessionInfo[]) {
     byProject.get(key)?.push(s);
   }
 
-  const choices: any[] = [];
+  const choices: any[] = [
+    {
+      name: `${chalk.bold.cyan("◆")} ${chalk.bold("Open Dashboard")} ${chalk.dim("— browse all replays, annotate, share & export")}`,
+      value: "__dashboard__",
+    },
+    new Separator(chalk.dim("  Or pick a session to replay:")),
+  ];
   const projectEntries = [...byProject.entries()];
 
   for (let pi = 0; pi < projectEntries.length; pi++) {

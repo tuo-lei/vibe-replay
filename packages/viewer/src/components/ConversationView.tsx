@@ -441,6 +441,8 @@ const GroupCard = memo(function GroupCard({
         groupHasCurrent={groupHasCurrent}
         groupHasFocusedTarget={groupHasFocusedTarget}
         timestamp={group.timestamp}
+        annotationCounts={annotationCounts}
+        onComment={onComment}
       />
     );
   }
@@ -518,6 +520,8 @@ function CompactAssistantGroup({
   groupHasCurrent,
   groupHasFocusedTarget,
   timestamp,
+  annotationCounts,
+  onComment,
 }: {
   /** All scenes in the group — used for stable stats (not affected by playback progress) */
   allScenes: { scene: Scene; index: number }[];
@@ -528,6 +532,8 @@ function CompactAssistantGroup({
   groupHasCurrent: boolean;
   groupHasFocusedTarget: boolean;
   timestamp?: string;
+  annotationCounts?: Map<number, number>;
+  onComment?: (sceneIndex: number) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -588,18 +594,54 @@ function CompactAssistantGroup({
     return entries;
   }, [stats.toolBreakdown]);
 
+  // Total comment count across all scenes in this group
+  const groupCommentCount = useMemo(
+    () =>
+      annotationCounts
+        ? allScenes.reduce((sum, { index }) => sum + (annotationCounts.get(index) || 0), 0)
+        : 0,
+    [allScenes, annotationCounts],
+  );
+
+  const [hovered, setHovered] = useState(false);
+
   return (
     <div
       id={`scene-${firstIndex}`}
       data-scene-index={firstIndex}
-      className={`relative rounded-xl px-5 py-4 transition-all duration-200 ease-material ${
+      className={`group relative rounded-xl px-5 py-4 transition-all duration-200 ease-material ${
         groupHasFocusedTarget
           ? "scene-nav-focused bg-terminal-blue-subtle border-l-2 border-terminal-blue shadow-layer-lg"
           : groupHasCurrent
             ? "bg-terminal-blue-subtle border-l-2 border-terminal-blue shadow-layer-sm"
             : "bg-terminal-surface shadow-layer-sm"
       }`}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
+      {/* Group-level comment button */}
+      {onComment && (groupCommentCount > 0 || hovered) && !expanded && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onComment(firstIndex);
+          }}
+          className={`absolute right-3 top-3 z-10 flex items-center gap-1 px-1.5 py-1 rounded-md text-xs font-mono transition-all duration-150 ${
+            groupCommentCount > 0
+              ? "bg-terminal-blue text-terminal-bg shadow-layer-sm"
+              : "text-terminal-dim hover:text-terminal-blue hover:bg-terminal-blue-subtle opacity-0 group-hover:opacity-100"
+          }`}
+          title={
+            groupCommentCount > 0
+              ? `${groupCommentCount} comment${groupCommentCount > 1 ? "s" : ""}`
+              : "Add comment"
+          }
+        >
+          {"\uD83D\uDCAC"}
+          {groupCommentCount > 0 && <span>{groupCommentCount}</span>}
+        </button>
+      )}
+
       <div className="flex items-center gap-2 mb-2">
         <span className="text-[10px] font-sans font-semibold text-terminal-blue uppercase tracking-widest">
           Assistant
@@ -621,9 +663,6 @@ function CompactAssistantGroup({
             </span>
           )
         )}
-        {/* We don't have turnNumber here directly, but the component caller should probably pass it if needed. 
-            For now, let's keep it consistent with the timestamp on the right if that's what was intended.
-            Actually, let's just leave the space for consistency. */}
       </div>
 
       {/* Compact stats bar — stable, computed from ALL scenes */}
@@ -675,14 +714,38 @@ function CompactAssistantGroup({
         </div>
       )}
 
-      {/* Expanded: show visible scenes so far */}
+      {/* Expanded: show visible scenes so far with per-scene comment buttons */}
       {expanded && (
         <div className="space-y-2 mb-2">
-          {filteredScenes.map(({ scene, index }) => (
-            <div key={index} data-scene-index={index} className="scene-enter">
-              <SceneBlock scene={scene} isActive={index === currentIndex} collapseTools={false} />
-            </div>
-          ))}
+          {filteredScenes.map(({ scene, index }) => {
+            const count = annotationCounts?.get(index) || 0;
+            return (
+              <div
+                key={index}
+                data-scene-index={index}
+                className={`group/scene relative scene-enter ${onComment ? "pr-7" : ""}`}
+              >
+                <SceneBlock scene={scene} isActive={index === currentIndex} collapseTools={false} />
+                {onComment && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onComment(index);
+                    }}
+                    className={`absolute right-0 top-1 z-10 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-xs font-mono transition-all duration-150 ${
+                      count > 0
+                        ? "bg-terminal-blue text-terminal-bg shadow-layer-sm"
+                        : "text-terminal-dim hover:text-terminal-blue hover:bg-terminal-blue-subtle opacity-0 group-hover/scene:opacity-100"
+                    }`}
+                    title={count > 0 ? `${count} comment${count > 1 ? "s" : ""}` : "Add comment"}
+                  >
+                    {"\uD83D\uDCAC"}
+                    {count > 0 && <span>{count}</span>}
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
