@@ -468,6 +468,7 @@ async function parseCursorStoreDb(sessionId: string): Promise<ProviderParseResul
     const metaHex = metaRows[0].values[0][0] as string;
     const metaJson: ChatMeta = JSON.parse(Buffer.from(metaHex, "hex").toString("utf-8"));
     const rootId = metaJson.latestRootBlobId;
+    if (!rootId) return null;
 
     const rootRows = db.exec("SELECT data FROM blobs WHERE id = ?", [rootId]);
     if (!rootRows.length || !rootRows[0].values.length) return null;
@@ -675,16 +676,19 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
           : "";
       if (!bubbleId) continue;
 
-      bubbleStmt.bind([`bubbleId:${sessionId}:${bubbleId}`]);
-      if (bubbleStmt.step()) {
-        const rawBubble = valueToString(bubbleStmt.get()[0]);
-        const bubble = parseJson<Record<string, any>>(rawBubble);
-        if (bubble) {
-          const turn = bubbleToTurn(bubble);
-          if (turn) turns.push(turn);
+      try {
+        bubbleStmt.bind([`bubbleId:${sessionId}:${bubbleId}`]);
+        if (bubbleStmt.step()) {
+          const rawBubble = valueToString(bubbleStmt.get()[0]);
+          const bubble = parseJson<Record<string, any>>(rawBubble);
+          if (bubble) {
+            const turn = bubbleToTurn(bubble);
+            if (turn) turns.push(turn);
+          }
         }
+      } finally {
+        bubbleStmt.reset();
       }
-      bubbleStmt.reset();
     }
     bubbleStmt.free();
 

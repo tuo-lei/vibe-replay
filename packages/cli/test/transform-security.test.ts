@@ -632,6 +632,34 @@ describe("tool result truncation", () => {
     const scene = replay.scenes.find((s) => s.type === "tool-call")!;
     expect(scene.result).not.toContain(secretTail);
   });
+
+  it("redacts secrets that span the truncation boundary", () => {
+    // Place the secret so it straddles the 5000-char truncation limit.
+    // With redact-after-truncate, slice(0, 5000) would cut the token in half,
+    // leaving a partial prefix that no longer matches the regex → leak.
+    const prefix = "A".repeat(4990);
+    const secretTail = EXAMPLE_GH_PAT; // ~41 chars → total ~5031, exceeds 5000
+    const parsed = makeParsed([
+      {
+        role: "assistant",
+        blocks: [
+          {
+            type: "tool_use",
+            id: "t1",
+            name: "Read",
+            input: { file_path: "/f" },
+            _result: prefix + secretTail,
+          } as any,
+        ],
+      },
+    ]);
+    const replay = transform(parsed);
+    const scene = replay.scenes.find((s) => s.type === "tool-call")!;
+    // The full token must not appear, and neither should a recognizable partial prefix.
+    // The [REDACTED] marker itself may be truncated, so we only assert no secret leaks.
+    expect(scene.result).not.toContain(secretTail);
+    expect(scene.result).not.toContain("ghp_ABCDEFGHIJ");
+  });
 });
 
 // ---------------------------------------------------------------------------
