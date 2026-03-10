@@ -288,7 +288,6 @@ const GroupCard = memo(function GroupCard({
   annotatedScenes?: Set<number>;
   annotationCounts?: Map<number, number>;
   onComment?: (sceneIndex: number) => void;
-  state?: string;
 }) {
   const [hovered, setHovered] = useState(false);
 
@@ -781,7 +780,6 @@ function BatchedScenes({
   collapseTools: boolean;
   annotationCounts?: Map<number, number>;
   onComment?: (sceneIndex: number) => void;
-  state?: string;
 }) {
   // Group consecutive tool calls with the same toolName (only batchable ones)
   const batches: { scene: Scene; index: number }[][] = [];
@@ -879,7 +877,6 @@ function ToolBatch({
   collapseTools: boolean;
   annotationCounts?: Map<number, number>;
   onComment?: (sceneIndex: number) => void;
-  state?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
 

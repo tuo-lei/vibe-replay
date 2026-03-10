@@ -92,7 +92,10 @@ export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) 
           sceneIndex: i,
           type: scene.type,
           snippet: highlightMatch(text, query),
-          toolName: scene.type === "tool-call" ? (scene as any).toolName : undefined,
+          toolName:
+            scene.type === "tool-call"
+              ? (scene as Extract<Scene, { type: "tool-call" }>).toolName
+              : undefined,
         });
       }
       if (matches.length >= 50) break;

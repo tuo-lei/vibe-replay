@@ -38,7 +38,11 @@ export function sceneDuration(scene: Scene, speed: number): number {
       }
       case "compaction-summary":
         return 800;
+      default: {
+        const _exhaustive: never = scene;
+        return 800;
+      }
     }
   })();
-  return base! / speed;
+  return base / speed;
 }

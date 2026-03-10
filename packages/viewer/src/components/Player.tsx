@@ -48,7 +48,6 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
     runAiCoach,
     aiCoachRunning,
     cancelAiCoach,
-    aiCoachTool: _aiCoachTool,
     aiCoachTools,
     aiCoachToolName,
     setAiCoachToolName,
