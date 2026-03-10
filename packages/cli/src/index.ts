@@ -299,27 +299,36 @@ program
     }
 
     const spinner = ora("Parsing session...").start();
-    const parsed = await provider.parse(sessionPaths, sessionInfo);
-    spinner.text = "Transforming to replay...";
-
-    const rawProject = sessionInfo?.project || parsed.cwd;
     const home = (await import("node:os")).homedir();
-    const project = rawProject.startsWith(home) ? `~${rawProject.slice(home.length)}` : rawProject;
-    const replay = transformToReplay(parsed, providerName, project, {
-      generator: {
-        name: "vibe-replay",
-        version: CLI_VERSION,
-        generatedAt: new Date().toISOString(),
-      },
-    });
+    let parsed: Awaited<ReturnType<typeof provider.parse>>;
+    let replay: ReturnType<typeof transformToReplay>;
+    try {
+      parsed = await provider.parse(sessionPaths, sessionInfo);
+      spinner.text = "Transforming to replay...";
 
-    const thinkingStr = replay.meta.stats.thinkingBlocks
-      ? `, ${replay.meta.stats.thinkingBlocks} thinking`
-      : "";
-    const sourceStr = replay.meta.dataSource ? chalk.dim(` [${replay.meta.dataSource}]`) : "";
-    spinner.succeed(
-      `${replay.scenes.length} scenes (${replay.meta.stats.userPrompts} prompts, ${replay.meta.stats.toolCalls} tool calls${thinkingStr})${sourceStr}`,
-    );
+      const rawProject = sessionInfo?.project || parsed.cwd;
+      const project = rawProject.startsWith(home)
+        ? `~${rawProject.slice(home.length)}`
+        : rawProject;
+      replay = transformToReplay(parsed, providerName, project, {
+        generator: {
+          name: "vibe-replay",
+          version: CLI_VERSION,
+          generatedAt: new Date().toISOString(),
+        },
+      });
+
+      const thinkingStr = replay.meta.stats.thinkingBlocks
+        ? `, ${replay.meta.stats.thinkingBlocks} thinking`
+        : "";
+      const sourceStr = replay.meta.dataSource ? chalk.dim(` [${replay.meta.dataSource}]`) : "";
+      spinner.succeed(
+        `${replay.scenes.length} scenes (${replay.meta.stats.userPrompts} prompts, ${replay.meta.stats.toolCalls} tool calls${thinkingStr})${sourceStr}`,
+      );
+    } catch (err) {
+      spinner.fail("Failed to parse session");
+      throw err;
+    }
 
     // Title: CLI flag > interactive prompt > auto-detected > slug
     if (opts.title) {
@@ -470,8 +479,8 @@ program
               gistSpinner.succeed(result.mode === "updated" ? "Gist updated!" : "Published!");
               console.log(chalk.dim("  Gist:   ") + chalk.white(result.gistUrl));
               console.log(chalk.dim("  Viewer: ") + chalk.cyan(result.viewerUrl));
-            } catch (err: any) {
-              gistSpinner.fail(err.message);
+            } catch (err: unknown) {
+              gistSpinner.fail(err instanceof Error ? err.message : String(err));
             }
           }
         }

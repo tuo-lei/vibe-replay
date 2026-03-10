@@ -186,8 +186,9 @@ function sanitizeInput(input: Record<string, any>): Record<string, any> {
 }
 
 function truncate(s: string, max: number): string {
-  if (s.length <= max) return redactSecrets(s);
-  return redactSecrets(`${s.slice(0, max)}\n... (truncated, ${s.length} chars total)`);
+  const redacted = redactSecrets(s);
+  if (redacted.length <= max) return redacted;
+  return `${redacted.slice(0, max)}\n... (truncated, ${redacted.length} chars total)`;
 }
 
 // Redact common secret patterns from output

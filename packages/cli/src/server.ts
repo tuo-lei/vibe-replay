@@ -351,7 +351,13 @@ export async function startServer(
   app.patch("/api/sessions/:slug", async (c) => {
     const slug = safeSlug(c.req.param("slug"));
     if (!slug) return c.json({ error: "invalid slug" }, 400);
-    const body = await c.req.json<{ title?: unknown }>();
+
+    let body: { title?: unknown };
+    try {
+      body = await c.req.json<{ title?: unknown }>();
+    } catch {
+      return c.json({ error: "invalid JSON body" }, 400);
+    }
     if (typeof body.title !== "string") {
       return c.json({ error: "title field required" }, 400);
     }
@@ -595,7 +601,12 @@ export async function startServer(
   app.post("/api/annotations", async (c) => {
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
-    const body = await c.req.json<Annotation[]>();
+    let body: Annotation[];
+    try {
+      body = await c.req.json<Annotation[]>();
+    } catch {
+      return c.json({ error: "invalid JSON body" }, 400);
+    }
     try {
       await saveAnnotations(baseDir, result.slug, body);
     } catch {

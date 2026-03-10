@@ -33,6 +33,9 @@ export async function generateOutput(session: ReplaySession, outputDir: string):
   // Use lastIndexOf to find the ACTUAL </head> HTML tag, not a "</head>" string
   // that may appear inside minified JS code within the viewer bundle.
   const headIdx = viewerHtml.lastIndexOf("</head>");
+  if (headIdx === -1) {
+    throw new Error("Could not find </head> tag in viewer.html — is the build corrupted?");
+  }
   const outputHtml = `${viewerHtml.slice(0, headIdx) + dataScript}\n${viewerHtml.slice(headIdx)}`;
 
   // Update title
