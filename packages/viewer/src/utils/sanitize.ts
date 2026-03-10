@@ -1,15 +1,24 @@
 /**
  * Lightweight HTML sanitizer using the browser's DOMParser.
- * Strips <script>, <iframe>, <object>, <embed>, <style> tags
- * and all on* event handler attributes.
+ * Strips dangerous tags and all on* event handler attributes.
  * Zero dependencies — relies only on browser APIs.
  */
 
-const DANGEROUS_TAGS = new Set(["script", "iframe", "object", "embed", "style", "link", "meta"]);
+const DANGEROUS_TAGS_HTML = new Set([
+  "script",
+  "iframe",
+  "object",
+  "embed",
+  "style",
+  "link",
+  "meta",
+]);
+// SVG needs <style> for fonts/layout, so we keep it
+const DANGEROUS_TAGS_SVG = new Set(["script", "iframe", "object", "embed", "link", "meta"]);
 
 export function sanitizeHtml(html: string): string {
   const doc = new DOMParser().parseFromString(html, "text/html");
-  sanitizeNode(doc.body);
+  sanitizeNode(doc.body, DANGEROUS_TAGS_HTML);
   return doc.body.innerHTML;
 }
 
@@ -20,11 +29,11 @@ export function sanitizeSvg(svg: string): string {
   if (root.tagName === "parsererror" || root.querySelector("parsererror")) {
     return "";
   }
-  sanitizeNode(root);
+  sanitizeNode(root, DANGEROUS_TAGS_SVG);
   return new XMLSerializer().serializeToString(root);
 }
 
-function sanitizeNode(node: Node): void {
+function sanitizeNode(node: Node, dangerousTags: Set<string>): void {
   const toRemove: Node[] = [];
 
   for (const child of node.childNodes) {
@@ -32,7 +41,7 @@ function sanitizeNode(node: Node): void {
       const el = child as Element;
       const tag = el.tagName.toLowerCase();
 
-      if (DANGEROUS_TAGS.has(tag)) {
+      if (dangerousTags.has(tag)) {
         toRemove.push(child);
         continue;
       }
@@ -49,7 +58,7 @@ function sanitizeNode(node: Node): void {
         }
       }
 
-      sanitizeNode(child);
+      sanitizeNode(child, dangerousTags);
     }
   }
 
