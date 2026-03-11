@@ -20,13 +20,7 @@ npx vibe-replay
 
 Pick a session from the interactive list → get a self-contained HTML replay → share it anywhere.
 
-<p align="center">
-  <a href="https://vibe-replay.com/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba">
-    <img src="docs/screenshots/viewer-hero.png" alt="vibe-replay viewer showing syntax-highlighted diffs, timeline, and session outline" width="800" />
-  </a>
-  <br />
-  <a href="https://vibe-replay.com/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba"><strong>Watch a live demo →</strong></a>
-</p>
+> **[Watch a live demo →](https://vibe-replay.com/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba)**
 
 ## Why
 
@@ -36,18 +30,32 @@ vibe-replay makes that process visible and shareable.
 
 ## Features
 
-- **Animated playback** — relive the full conversation, not just the diff. Play/pause/seek at 1x/5x/10x speed
-- **Rich tool rendering** — syntax-highlighted diffs, terminal output, screenshots, all inline
-- **Color-coded timeline** — user prompts, thinking, responses, and tool calls at a glance
-- **Annotations & AI coach** — add comments to any scene, get AI-powered prompting feedback
-- **Local dashboard** — browse, search, and manage all your sessions in the browser (`-d` flag)
-- **Share via Gist** — one flag to publish, get a shareable link on [vibe-replay.com](https://vibe-replay.com)
-- **GitHub export** — markdown summary + animated SVG preview for PRs and READMEs
-- **Session summary** — stats, cost tracking, file impact, token usage at a glance
-- **Search & navigate** — Cmd+K search, outline sidebar, keyboard shortcuts
-- **Auto-redaction** — API keys, tokens, credentials, and paths stripped automatically
-- **Single HTML file** — works offline, no server, under 600KB. Zero external requests
-- **Light & dark themes** — with customizable view preferences
+- ⚡ **Zero config** — one command, no setup, no account. Works instantly with existing sessions
+- 📦 **Single HTML file** — self-contained, works offline, zero external requests. Drop it in Slack, email it, open it anywhere
+- 🔀 **Claude Code + Cursor** — both providers supported out of the box, including multi-file and resumed sessions
+- 🎬 **Animated playback** — step through prompts, thinking, tool calls, and diffs at 1x/5x/10x speed
+- 🎨 **Rich rendering** — syntax-highlighted diffs, terminal output, screenshots, color-coded timeline
+
+<p align="center">
+  <a href="https://vibe-replay.com/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba">
+    <img src="docs/screenshots/viewer-hero.png" alt="vibe-replay viewer — animated playback with timeline, outline, and inline diffs" width="800" />
+  </a>
+  <br />
+  <a href="https://vibe-replay.com/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba"><strong>Try this replay live →</strong></a>
+</p>
+
+- 💬 **Add comments** — leave notes on any scene. Comments are saved into the HTML file and travel with the replay
+- 🤖 **Built-in AI helper** — ask AI to review the session and get feedback on your prompting patterns
+- 📋 **Local dashboard** — browse, search, and manage all your sessions in the browser (`-d` flag)
+- 🔗 **Share via Gist** — publish to GitHub Gist, get a shareable link on [vibe-replay.com](https://vibe-replay.com)
+- 📤 **GitHub export** — markdown summary + animated SVG preview for PRs and READMEs
+
+<p align="center">
+  <img src="docs/screenshots/session-preview-demo.svg" alt="Animated SVG export — embeddable session preview for PRs and READMEs" width="800" />
+</p>
+
+- 📊 **Session summary** — stats, cost tracking, file impact, token usage at a glance
+- 🔒 **Basic secret redaction** — common patterns like API keys and tokens are detected and masked before sharing. Simple pattern matching, not a security guarantee
 
 ## Supported Providers
 
@@ -66,7 +74,7 @@ AI session files  →  vibe-replay  →  self-contained HTML
                       transform)       shareable)
 ```
 
-The CLI discovers sessions on your machine, parses the conversation data, and packages it into a pre-built React viewer — one HTML file (~530KB + session data) that works anywhere.
+The CLI discovers sessions on your machine, parses the conversation data, and packages it into a pre-built React viewer — one HTML file that works anywhere.
 
 After generation:
 - **Open in Editor** — annotate, get AI feedback, export to multiple formats, publish to Gist
