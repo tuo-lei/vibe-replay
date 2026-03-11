@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="380" viewBox="0 0 840 380">
+  <style>
+    text { font-family: 'SF Mono','Cascadia Code','Fira Code',Menlo,Consolas,'Liberation Mono',monospace; }
+    @keyframes fadeInOut {
+      0% { opacity: 0 }
+      2% { opacity: 1 }
+      18% { opacity: 1 }
+      20% { opacity: 0 }
+      100% { opacity: 0 }
+    }
+    .frame { opacity: 0; }
+    .frame-0 { animation: fadeInOut 25s 0s infinite; animation-fill-mode: backwards; }
+    .frame-1 { animation: fadeInOut 25s 5s infinite; }
+    .frame-2 { animation: fadeInOut 25s 10s infinite; }
+    .frame-3 { animation: fadeInOut 25s 15s infinite; }
+    .frame-4 { animation: fadeInOut 25s 20s infinite; }
+  </style>
+
+  <defs>
+    <clipPath id="vr-clip-8f624d28">
+      <rect x="0" y="36" width="840" height="304"/>
+    </clipPath>
+  </defs>
+
+  <!-- Background -->
+  <rect width="840" height="380" rx="12" fill="#0d1117"/>
+
+  <!-- Header bar -->
+  <path d="M0,12 Q0,0 12,0 H828 Q840,0 840,12 V36 H0 Z" fill="#161b22"/>
+  <circle cx="24" cy="18" r="5" fill="#ff7b72" opacity="0.9"/>
+  <circle cx="42" cy="18" r="5" fill="#d29922" opacity="0.9"/>
+  <circle cx="60" cy="18" r="5" fill="#3fb950" opacity="0.9"/>
+  <text x="420" y="23" text-anchor="middle" fill="#7d8590" font-size="12" letter-spacing="0.5">vibe-replay</text>
+
+  <!-- Footer bar -->
+  <path d="M0,340 H840 V368 Q840,380 828,380 H12 Q0,380 0,368 Z" fill="#161b22"/>
+  <line x1="0" y1="340" x2="840" y2="340" stroke="#30363d" stroke-width="1"/>
+  <text x="40" y="364" fill="#7d8590" font-size="11">58 min · 244 responses · 408 tools</text>
+  <text x="800" y="364" text-anchor="end" fill="#7d8590" font-size="11">View full replay →</text>
+
+  <!-- Animated content frames (clipped to content area) -->
+  <g clip-path="url(#vr-clip-8f624d28)">
+  <g class="frame frame-0">
+    <text x="40" y="60" fill="#7d8590" font-size="11" letter-spacing="1.5">TASK</text>
+    <line x1="40" y1="70" x2="800" y2="70" stroke="#30363d" stroke-width="1"/>
+    <text x="40" y="98" fill="#58a6ff" font-size="15" font-weight="600"># Prompt: Add Annotation/Comment Feature to vibe-replay</text>
+    <text x="40" y="122" fill="#58a6ff" font-size="15" font-weight="600">## Context vibe-replay is a CLI tool that turns AI codi…</text>
+    <text x="40" y="158" fill="#bc8cff" font-size="13">claude-opus-4-6</text>
+    <text x="40" y="182" fill="#7d8590" font-size="13">244 responses  ·  408 tools</text>
+    <text x="40" y="206" fill="#d29922" font-size="13">Read 75 · Write 10 · Edit 129 · Bash (pnpm, cd, npx, git, .…</text>
+    <text x="40" y="230" fill="#7d8590" font-size="13">58 min  ·  ~/Code/vibe-replay</text>
+  </g>
+
+  <g class="frame frame-1">
+    <text x="40" y="60" fill="#7d8590" font-size="11" letter-spacing="1.5">STEP 1 OF 14</text>
+    <line x1="40" y1="70" x2="800" y2="70" stroke="#30363d" stroke-width="1"/>
+    <text x="40" y="98" fill="#58a6ff" font-size="15" font-weight="600"># Prompt: Add Annotation/Comment Feature to</text>
+    <text x="40" y="122" fill="#58a6ff" font-size="15" font-weight="600">vibe-replay ## Context vibe-replay is a CLI tool th…</text>
+    <text x="40" y="158" fill="#7d8590" font-size="13">    types.ts, types.ts, generator.ts +6</text>
+    <text x="40" y="182" fill="#7d8590" font-size="13">    index.css, package.json, TextResponseBlock.tsx</text>
+    <text x="40" y="206" fill="#e6edf3" font-size="13">    Edit types.ts</text>
+    <text x="40" y="230" fill="#e6edf3" font-size="13">    Edit types.ts</text>
+    <text x="40" y="254" fill="#3fb950" font-size="13">    + useAnnotations.ts</text>
+    <text x="40" y="278" fill="#7d8590" font-size="13">    ... +44 more</text>
+  </g>
+
+  <g class="frame frame-2">
+    <text x="40" y="60" fill="#7d8590" font-size="11" letter-spacing="1.5">STEP 9 OF 14</text>
+    <line x1="40" y1="70" x2="800" y2="70" stroke="#30363d" stroke-width="1"/>
+    <text x="40" y="98" fill="#58a6ff" font-size="15" font-weight="600">--- Task: Add an &quot;Open Editor&quot; mode to vibe-replay</text>
+    <text x="40" y="122" fill="#58a6ff" font-size="15" font-weight="600">CLI Context vibe-replay is a CLI tool that turns AI…</text>
+    <text x="40" y="158" fill="#7d8590" font-size="13">    index.ts, package.json, tsup.config.ts +6</text>
+    <text x="40" y="182" fill="#7d8590" font-size="13">    Good, I have full context. Let me implement thi…</text>
+    <text x="40" y="206" fill="#e6edf3" font-size="13">    $ pnpm --filter vibe-replay add hono @hono/node-ser…</text>
+    <text x="40" y="230" fill="#3fb950" font-size="13">    + server.ts</text>
+    <text x="40" y="254" fill="#e6edf3" font-size="13">    Edit index.ts</text>
+    <text x="40" y="278" fill="#7d8590" font-size="13">    ... +61 more</text>
+  </g>
+
+  <g class="frame frame-3">
+    <text x="40" y="60" fill="#7d8590" font-size="11" letter-spacing="1.5">STEP 11 OF 14</text>
+    <line x1="40" y1="70" x2="800" y2="70" stroke="#30363d" stroke-width="1"/>
+    <text x="40" y="98" fill="#58a6ff" font-size="15" font-weight="600">Task: Fix Claude Code parser — filter ToolSearch</text>
+    <text x="40" y="122" fill="#58a6ff" font-size="15" font-weight="600">noise and handle compaction summaries Context vibe-…</text>
+    <text x="40" y="158" fill="#7d8590" font-size="13">    parser.ts, types.ts, transform.ts +2</text>
+    <text x="40" y="182" fill="#7d8590" font-size="13">    SearchOverlay.tsx, Minimap.tsx, StatsPanel.tsx</text>
+    <text x="40" y="206" fill="#7d8590" font-size="13">    Good. Now I have a complete picture. Let me als…</text>
+    <text x="40" y="230" fill="#e6edf3" font-size="13">    $ python3 -c &quot;</text>
+    <text x="40" y="254" fill="#7d8590" font-size="13">    70 ToolSearch responses! Let me check if there …</text>
+    <text x="40" y="278" fill="#7d8590" font-size="13">    ... +61 more</text>
+  </g>
+
+  <g class="frame frame-4">
+    <text x="40" y="60" fill="#7d8590" font-size="11" letter-spacing="1.5">COMPLETE</text>
+    <line x1="40" y1="70" x2="800" y2="70" stroke="#30363d" stroke-width="1"/>
+    <text x="40" y="98" fill="#58a6ff" font-size="15" font-weight="600">Comment feature in Vibe Replay</text>
+    <text x="40" y="134" fill="#3fb950" font-size="13">22 files changed  ·  14 prompts  ·  58 min</text>
+    <text x="40" y="158" fill="#7d8590" font-size="13">244 responses  ·  408 tools</text>
+    <text x="40" y="182" fill="#d29922" font-size="13">Read 75 · Write 10 · Edit 129 · Bash (pnpm, cd, npx, git, .…</text>
+    <text x="40" y="218" fill="#58a6ff" font-size="13" font-weight="600">View full replay  →</text>
+    <text x="40" y="242" fill="#7d8590" font-size="13">vibe-replay.com</text>
+  </g>
+  </g>
+</svg>

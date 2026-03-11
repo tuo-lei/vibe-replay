@@ -1,13 +1,16 @@
 # vibe-replay
 
 [![npm version](https://img.shields.io/npm/v/vibe-replay)](https://www.npmjs.com/package/vibe-replay)
+[![npm downloads](https://img.shields.io/npm/dm/vibe-replay)](https://www.npmjs.com/package/vibe-replay)
 [![license](https://img.shields.io/npm/l/vibe-replay)](./LICENSE)
 
-Turn AI coding sessions into animated, interactive web replays.
+Turn Claude Code and Cursor sessions into shareable, interactive replays.
 
-One command. One HTML file. Share anywhere.
+**PR diffs show _what_ changed. vibe-replay shows _why_** — every prompt, every thought, every edit, in one shareable file. One command. Zero config. Works offline.
 
-<!-- TODO: add demo GIF here -->
+<p align="center">
+  <img src="docs/screenshots/demo.gif" alt="vibe-replay demo — from session picker to interactive replay" width="800" />
+</p>
 
 ## Quick Start
 
@@ -15,19 +18,38 @@ One command. One HTML file. Share anywhere.
 npx vibe-replay
 ```
 
-Pick a session, get a self-contained HTML file. Done.
+Pick a session from the interactive list → get a self-contained HTML replay → share it anywhere.
+
+> **[Watch a live demo →](https://vibe-replay.com/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba)**
 
 ## Features
 
-- **Animated playback** — play/pause/seek through the full conversation with 1x/5x/10x speed
-- **Rich tool rendering** — syntax-highlighted diffs, terminal output, screenshots
-- **Color-coded timeline** — see user prompts, thinking, responses, and tool calls at a glance
-- **Search & navigate** — Cmd+K search, minimap, outline sidebar, keyboard shortcuts
-- **Annotations** — add comments to any scene, get AI-powered prompting feedback
-- **Share anywhere** — publish to [vibe-replay.com](https://vibe-replay.com) via GitHub Gist, or just send the HTML file
-- **Privacy first** — API keys, tokens, credentials, and paths are automatically redacted
-- **Light & dark themes** — with customizable view preferences
-- **Faster startup** — file-based stale cache shows sessions immediately while latest sessions refresh in background
+- ⚡ **Zero config** — one command, no setup, no account. Works instantly with existing sessions
+- 📦 **Single HTML file** — self-contained, works offline, zero external requests. Drop it in Slack, email it, open it anywhere
+- 🔀 **Claude Code + Cursor** — both providers supported out of the box, including multi-file and resumed sessions
+- 🎬 **Animated playback** — step through prompts, thinking, tool calls, and diffs at 1x/5x/10x speed
+- 🎨 **Rich rendering** — syntax-highlighted diffs, terminal output, screenshots, color-coded timeline
+
+<p align="center">
+  <a href="https://vibe-replay.com/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba">
+    <img src="docs/screenshots/viewer-hero.png" alt="vibe-replay viewer — animated playback with timeline, outline, and inline diffs" width="800" />
+  </a>
+  <br />
+  <a href="https://vibe-replay.com/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba"><strong>Try this replay live →</strong></a>
+</p>
+
+- 💬 **Add comments** — leave notes on any scene. Comments are saved into the HTML file and travel with the replay
+- 🤖 **Built-in AI helper** — ask AI to review the session and get feedback on your prompting patterns
+- 📋 **Local dashboard** — browse, search, and manage all your sessions in the browser (`-d` flag)
+- 🔗 **Share via Gist** — publish to GitHub Gist, get a shareable link on [vibe-replay.com](https://vibe-replay.com)
+- 📤 **GitHub export** — markdown summary + animated SVG preview for PRs and READMEs
+
+<p align="center">
+  <img src="docs/screenshots/session-preview-demo.svg" alt="Animated SVG export — embeddable session preview for PRs and READMEs" width="800" />
+</p>
+
+- 📊 **Session summary** — stats, cost tracking, file impact, token usage at a glance
+- 🔒 **Basic secret redaction** — common patterns like API keys and tokens are detected and masked before sharing. Simple pattern matching, not a security guarantee
 
 ## Supported Providers
 
@@ -35,21 +57,24 @@ Pick a session, get a self-contained HTML file. Done.
 |----------|--------|
 | Claude Code | Supported |
 | Cursor | Supported |
-| Codex | Planned |
-| Gemini CLI | Planned |
+| More coming soon | — |
 
 ## How It Works
 
 ```
-AI session files → vibe-replay → self-contained HTML
+AI session files  →  vibe-replay  →  self-contained HTML
+(Claude Code,        (parse,          (animated viewer,
+ Cursor)              redact,          offline-ready,
+                      transform)       shareable)
 ```
 
-The CLI discovers sessions on your machine, parses the conversation data, and injects it into a pre-built React viewer — producing a single HTML file (~430KB + session data) that works offline, no server needed.
+The CLI discovers sessions on your machine, parses the conversation data, and packages it into a pre-built React viewer — one HTML file that works anywhere.
 
-After generation you can:
-- **Open in Editor** — annotate, get AI feedback, export, publish to Gist
-- **Open in browser** — instant preview
+After generation:
+- **Open in Editor** — annotate, get AI feedback, export to multiple formats, publish to Gist
+- **Quick preview** — open in browser instantly
 - **Publish to Gist** — shareable link on [vibe-replay.com](https://vibe-replay.com)
+- **Export for GitHub** — markdown + animated SVG for PRs
 
 ## Development
 
