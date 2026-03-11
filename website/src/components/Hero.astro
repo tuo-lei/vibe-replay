@@ -27,324 +27,567 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
   <div class="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-accent/8 rounded-full blur-[120px] pointer-events-none"></div>
 
   <div class="relative z-10 max-w-6xl mx-auto px-6 text-center">
-    <!-- Badge -->
-    <div class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-border bg-surface-1/80 backdrop-blur-sm text-sm text-text-secondary mb-8 animate-fade-in">
-      <span class="w-2 h-2 rounded-full bg-accent animate-pulse"></span>
-      Open Source &middot; MIT License
-    </div>
-
     <!-- Headline -->
-    <h1 class="text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-extrabold tracking-tight sm:tracking-tighter leading-[1.05] mb-6 animate-slide-up">
-      <span class="text-text-primary text-4xl sm:text-5xl md:text-6xl lg:text-7xl">
-        See how the
+    <h1 class="font-extrabold tracking-tight sm:tracking-tighter leading-[1.05] mb-6 animate-slide-up">
+      <span class="block text-5xl sm:text-6xl md:text-7xl lg:text-8xl bg-gradient-to-r from-accent via-emerald-400 to-cyan-400 bg-clip-text text-transparent">
+        vibe-replay
       </span>
-      <br />
-      <span class="bg-gradient-to-r from-accent via-emerald-400 to-cyan-400 bg-clip-text text-transparent">
-        code was made
+      <span class="block text-2xl sm:text-3xl md:text-4xl lg:text-5xl mt-2">
+        <span id="rotating-word" class="inline-block min-w-[4.5em] text-right text-accent transition-all duration-400 ease-in-out"></span><span class="text-text-primary"> your vibe coding sessions</span>
       </span>
     </h1>
 
     <!-- Subheadline -->
-    <p class="text-lg sm:text-xl text-text-secondary max-w-2xl mx-auto mb-10 animate-slide-up" style="animation-delay: 0.1s">
-      PR diffs show <em>what</em> changed. <span class="text-text-primary font-medium">vibe-replay</span> shows <em>why</em>. Turn AI coding sessions into interactive, shareable replays &mdash; one command, one HTML file.
+    <p class="text-lg sm:text-xl text-text-secondary max-w-2xl mx-auto mb-10 animate-slide-up">
+      Turn Claude Code and Cursor sessions into shareable, interactive replays.
     </p>
 
-    <!-- Install command -->
-    <div class="flex items-center justify-center mb-14 animate-slide-up" style="animation-delay: 0.2s">
-      <div class="group relative">
-        <div class="absolute -inset-0.5 bg-gradient-to-r from-accent/50 to-cyan-400/50 rounded-lg blur opacity-40 group-hover:opacity-60 transition"></div>
-        <button
-          id="copy-btn"
-          class="relative flex items-center gap-3 px-6 py-3.5 bg-surface-1 border border-border rounded-lg font-mono text-base hover:border-accent/50 transition-all cursor-pointer"
-        >
-          <span class="text-text-muted select-none">$</span>
-          <span class="text-text-primary">npx vibe-replay</span>
-          <svg id="copy-icon" class="w-4 h-4 text-text-muted hover:text-accent transition-colors ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" stroke-width="2"/>
-            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" stroke-width="2"/>
-          </svg>
-          <svg id="check-icon" class="w-4 h-4 text-accent ml-2 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <polyline points="20 6 9 17 4 12" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </button>
-      </div>
-    </div>
+    <!-- Animated demo: Terminal → Viewer mockup -->
+    <div id="demo-container" class="max-w-5xl mx-auto animate-slide-up relative">
 
-    <!-- Product mockup with hover overlay -->
-    <a href={DEMO_URL} class="block max-w-5xl mx-auto animate-slide-up group relative" style="animation-delay: 0.3s">
-      <!-- Hover overlay: "See it live" -->
-      <div class="absolute inset-0 z-10 rounded-xl bg-black/60 backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-all duration-300 flex items-center justify-center">
-        <div class="flex flex-col items-center gap-3">
-          <div class="w-16 h-16 rounded-full bg-accent/20 border-2 border-accent flex items-center justify-center">
-            <svg class="w-7 h-7 text-accent ml-1" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+      <!-- Phase 1: Terminal (normal flow, tall from the start) -->
+      <div id="demo-terminal" class="rounded-xl border border-border bg-[#0d1117] shadow-2xl shadow-black/60 overflow-hidden transition-all duration-500">
+        <!-- Terminal title bar -->
+        <div class="flex items-center gap-2 px-4 py-2.5 border-b border-[#30363d] bg-[#161b22]">
+          <div class="flex gap-1.5">
+            <div class="w-3 h-3 rounded-full bg-[#ff5f57]"></div>
+            <div class="w-3 h-3 rounded-full bg-[#febc2e]"></div>
+            <div class="w-3 h-3 rounded-full bg-[#28c840]"></div>
           </div>
-          <span class="text-white font-mono text-lg font-semibold">See it live</span>
-          <span class="text-white/60 text-sm">A real vibe-replay session</span>
+          <span class="text-[11px] font-mono text-[#8b949e] ml-2">Terminal</span>
+        </div>
+        <!-- Terminal body -->
+        <div class="p-5 font-mono text-sm min-h-[460px] text-left">
+          <div class="flex">
+            <span class="text-[#8b949e] select-none mr-2">$</span>
+            <span id="term-cmd" class="text-[#e6edf3]"></span><span id="term-cursor" class="text-[#e6edf3] animate-pulse">▊</span>
+          </div>
+          <div id="term-output" class="mt-4 space-y-0.5 hidden text-left text-xs sm:text-sm">
+            <div class="text-[#8b949e] text-xs mb-2">Found 12 sessions across 2 providers</div>
+            <div class="text-[#e6edf3] font-bold text-xs mb-1">&nbsp; ─── ~/Code/vibe-replay ───</div>
+            <div class="flex items-baseline gap-1.5 bg-[#1a2332] rounded px-1 py-0.5">
+              <span class="text-[#3fb950] shrink-0">❯</span>
+              <span class="text-[#D97706] shrink-0">claude</span>
+              <span class="text-[#8b949e] shrink-0 hidden sm:inline">[Mar 8 22:15]</span>
+              <span class="text-[#67e8f9] shrink-0">annotations</span>
+              <span class="text-[#8b949e] truncate">"Implement annotations system..."</span>
+              <span class="text-[#8b949e] shrink-0 hidden sm:inline">(1500L, 512KB)</span>
+            </div>
+            <div class="flex items-baseline gap-1.5 px-1 py-0.5">
+              <span class="text-transparent shrink-0">&nbsp;</span>
+              <span class="text-[#D97706] shrink-0">claude</span>
+              <span class="text-[#8b949e] shrink-0 hidden sm:inline">[Mar 8 18:42]</span>
+              <span class="text-[#67e8f9] shrink-0">fix-editor</span>
+              <span class="text-[#8b949e] truncate">"Fix the editor mode bug..."</span>
+              <span class="text-[#8b949e] shrink-0 hidden sm:inline">(420L, 156KB)</span>
+            </div>
+            <div class="flex items-baseline gap-1.5 px-1 py-0.5">
+              <span class="text-transparent shrink-0">&nbsp;</span>
+              <span class="text-[#0096FF] shrink-0">cursor</span>
+              <span class="text-[#8b949e] shrink-0 hidden sm:inline">[Mar 7 14:20]</span>
+              <span class="text-[#67e8f9] shrink-0">token-tracking</span>
+              <span class="text-[#8b949e] truncate">"Add token tracking to viewer..."</span>
+              <span class="text-[#8b949e] shrink-0 hidden sm:inline">(890L, 287KB)</span>
+            </div>
+            <div class="text-[#e6edf3] font-bold text-xs mt-2 mb-1">&nbsp; ─── ~/Code/my-saas-app ───</div>
+            <div class="flex items-baseline gap-1.5 px-1 py-0.5">
+              <span class="text-transparent shrink-0">&nbsp;</span>
+              <span class="text-[#0096FF] shrink-0">cursor</span>
+              <span class="text-[#8b949e] shrink-0 hidden sm:inline">[Mar 6 10:15]</span>
+              <span class="text-[#67e8f9] shrink-0">refactor-api</span>
+              <span class="text-[#8b949e] truncate">"Refactor the REST API endpoints..."</span>
+              <span class="text-[#8b949e] shrink-0 hidden sm:inline">(2100L, 1.2MB)</span>
+            </div>
+            <div class="flex items-baseline gap-1.5 px-1 py-0.5">
+              <span class="text-transparent shrink-0">&nbsp;</span>
+              <span class="text-[#D97706] shrink-0">claude</span>
+              <span class="text-[#8b949e] shrink-0 hidden sm:inline">[Mar 5 09:30]</span>
+              <span class="text-[#67e8f9] shrink-0">setup-ci</span>
+              <span class="text-[#8b949e] truncate">"Set up GitHub Actions CI..."</span>
+              <span class="text-[#8b949e] shrink-0 hidden sm:inline">(650L, 198KB)</span>
+            </div>
+            <div class="text-[#8b949e] text-[10px] mt-2"><span class="text-[#e6edf3] font-bold">r</span> refresh <span class="text-[#8b949e]">·</span> <span class="text-[#e6edf3] font-bold">↑↓</span> navigate <span class="text-[#8b949e]">·</span> <span class="text-[#e6edf3] font-bold">enter</span> select</div>
+          </div>
+          <div id="term-generating" class="mt-3 hidden">
+            <span id="term-spinner" class="text-[#d29922]">⠋</span>
+            <span id="term-gen-text" class="text-[#8b949e] ml-2">Generating replay...</span>
+          </div>
         </div>
       </div>
 
-      <div class="rounded-xl border border-border group-hover:border-accent/40 bg-[#0d1117] shadow-2xl shadow-black/60 overflow-hidden transition-all duration-300">
-        <!-- Viewer header bar -->
-        <div class="flex items-center justify-between px-4 py-2.5 border-b border-[#30363d] bg-[#161b22] text-xs font-mono">
-          <div class="flex items-center gap-3">
-            <span class="text-[#3fb950] font-semibold">vibe-replay</span>
-            <span class="text-[#e6edf3] hidden sm:inline">Annotations, editor mode, token tracking</span>
-            <span class="text-[#8b949e] hidden sm:inline">&middot;</span>
-            <span class="text-[#e6edf3]/60 hidden sm:inline">claude-opus-4-20250514 &middot; 1h 24m</span>
-          </div>
-          <div class="hidden sm:flex items-center gap-3 text-[#8b949e]">
-            <span class="px-1.5 py-0.5 rounded bg-[#3fb950]/15 text-[#3fb950]">All</span>
-            <span class="px-1.5 py-0.5 rounded bg-[#1a1a24] text-[#8b949e]">Prompts</span>
-            <!-- Settings gear -->
-            <svg class="w-3.5 h-3.5 text-[#8b949e]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
-          </div>
-        </div>
-
-        <!-- Main area: sidebar + content + comments -->
-        <div class="flex" style="height: 460px;">
-          <!-- Sidebar minimap -->
-          <div class="hidden md:block w-44 border-r border-[#30363d] bg-[#0d1117] p-3 overflow-hidden">
-            <div class="flex items-center gap-2 mb-2">
-              <div class="text-[10px] font-mono text-[#3fb950] uppercase tracking-wider border-b border-[#3fb950] pb-1">Outline</div>
-              <div class="text-[10px] font-mono text-[#8b949e] uppercase tracking-wider pb-1">Stats</div>
-            </div>
-            <!-- Turn entries -->
-            <div class="space-y-2">
-              <!-- Turn 1 -->
-              <div class="rounded px-2 py-1.5 bg-[#3fb950]/5 border-l-2 border-[#3fb950]">
-                <div class="flex items-center gap-1.5">
-                  <span class="text-[10px] font-mono text-[#3fb950] font-bold">01</span>
-                  <span class="text-[10px] text-[#e6edf3] truncate">Implement annotations...</span>
-                </div>
-                <div class="flex gap-1 mt-1">
-                  <span class="text-[8px] px-1 py-0.5 rounded bg-[#d29922]/15 text-[#d29922]">42 tools</span>
-                  <span class="text-[8px] px-1 py-0.5 rounded bg-[#58a6ff]/15 text-[#58a6ff]">8 resp</span>
-                  <span class="text-[8px] px-1 py-0.5 rounded bg-[#bc8cff]/15 text-[#bc8cff]">think</span>
-                </div>
-              </div>
-              <!-- Turn 2 -->
-              <div class="rounded px-2 py-1.5 opacity-70">
-                <div class="flex items-center gap-1.5">
-                  <span class="text-[10px] font-mono text-[#8b949e]">02</span>
-                  <span class="text-[10px] text-[#8b949e] truncate">Fix the editor mode...</span>
-                </div>
-                <div class="flex gap-1 mt-1">
-                  <span class="text-[8px] px-1 py-0.5 rounded bg-[#d29922]/15 text-[#d29922]">18 tools</span>
-                  <span class="text-[8px] px-1 py-0.5 rounded bg-[#58a6ff]/15 text-[#58a6ff]">5 resp</span>
-                </div>
-              </div>
-              <!-- Compaction marker -->
-              <div class="rounded px-2 py-1.5 border border-dashed border-[#30363d] opacity-60">
-                <div class="flex items-center gap-1.5">
-                  <span class="text-[10px] text-[#8b949e]">&#8635;</span>
-                  <span class="text-[9px] text-[#8b949e] italic">Context compacted</span>
-                </div>
-              </div>
-              <!-- Turn 3 -->
-              <div class="rounded px-2 py-1.5 opacity-70">
-                <div class="flex items-center gap-1.5">
-                  <span class="text-[10px] font-mono text-[#8b949e]">03</span>
-                  <span class="text-[10px] text-[#8b949e] truncate">Add token tracking...</span>
-                </div>
-                <div class="flex gap-1 mt-1">
-                  <span class="text-[8px] px-1 py-0.5 rounded bg-[#d29922]/15 text-[#d29922]">35 tools</span>
-                  <span class="text-[8px] px-1 py-0.5 rounded bg-[#58a6ff]/15 text-[#58a6ff]">6 resp</span>
-                  <span class="text-[8px] px-1 py-0.5 rounded bg-[#bc8cff]/15 text-[#bc8cff]">think</span>
-                </div>
-              </div>
-              <!-- Turn 4 -->
-              <div class="rounded px-2 py-1.5 opacity-70">
-                <div class="flex items-center gap-1.5">
-                  <span class="text-[10px] font-mono text-[#8b949e]">04</span>
-                  <span class="text-[10px] text-[#8b949e] truncate">Compaction summaries...</span>
-                </div>
-                <div class="flex gap-1 mt-1">
-                  <span class="text-[8px] px-1 py-0.5 rounded bg-[#d29922]/15 text-[#d29922]">28 tools</span>
-                  <span class="text-[8px] px-1 py-0.5 rounded bg-[#58a6ff]/15 text-[#58a6ff]">4 resp</span>
-                </div>
-              </div>
-              <!-- Turn 5 -->
-              <div class="rounded px-2 py-1.5 opacity-70">
-                <div class="flex items-center gap-1.5">
-                  <span class="text-[10px] font-mono text-[#8b949e]">05</span>
-                  <span class="text-[10px] text-[#8b949e] truncate">Fix viewer mode enum...</span>
-                </div>
-                <div class="flex gap-1 mt-1">
-                  <span class="text-[8px] px-1 py-0.5 rounded bg-[#d29922]/15 text-[#d29922]">12 tools</span>
-                  <span class="text-[8px] px-1 py-0.5 rounded bg-[#58a6ff]/15 text-[#58a6ff]">3 resp</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Content area -->
-          <div class="flex-1 overflow-hidden p-4 sm:p-6 space-y-4 font-mono text-sm text-left">
-            <!-- User prompt with comment badge -->
-            <div class="rounded-lg bg-[#3fb950]/5 border border-[#3fb950]/15 p-4 relative">
-              <!-- Comment badge -->
-              <div class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[#58a6ff] text-white text-[9px] font-bold flex items-center justify-center shadow-sm">2</div>
-              <div class="flex items-center gap-2 mb-2">
-                <span class="text-[10px] font-bold uppercase tracking-wider text-[#3fb950]">You</span>
-                <span class="text-[10px] text-[#8b949e]">10:21 PM</span>
-              </div>
-              <p class="text-[#3fb950]/90 text-sm leading-relaxed">Implement annotations system — users should be able to add comments to any scene, with a comments panel, persistence, and export support.</p>
-            </div>
-
-            <!-- Thinking block -->
-            <div class="rounded-lg bg-[#bc8cff]/[0.03] border border-[#bc8cff]/10 p-4">
-              <div class="flex items-center gap-2 mb-2">
-                <span class="text-[10px] font-bold uppercase tracking-wider text-[#bc8cff]/60">Thinking</span>
-              </div>
-              <p class="text-[#8b949e] text-xs leading-relaxed">I need to design an annotation system that works across all three viewer modes: embedded HTML, editor mode with local server, and readonly gist/URL viewing. Let me plan the data model first...</p>
-            </div>
-
-            <!-- Tool call: Write file -->
-            <div class="rounded-lg bg-[#d29922]/[0.03] border border-[#d29922]/10 p-4">
-              <div class="flex items-center gap-2">
-                <svg class="w-3.5 h-3.5 text-[#d29922]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-                <span class="text-[10px] font-bold uppercase tracking-wider text-[#d29922]">Write</span>
-                <span class="text-[#8b949e] text-xs">packages/viewer/src/AnnotationPanel.tsx</span>
-              </div>
-            </div>
-
-            <!-- Tool call: Edit file with diff -->
-            <div class="rounded-lg bg-[#d29922]/[0.03] border border-[#d29922]/10 p-4 relative">
-              <!-- Comment badge on tool call -->
-              <div class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[#58a6ff] text-white text-[9px] font-bold flex items-center justify-center shadow-sm">1</div>
-              <div class="flex items-center gap-2 mb-3">
-                <svg class="w-3.5 h-3.5 text-[#d29922]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
-                <span class="text-[10px] font-bold uppercase tracking-wider text-[#d29922]">Edit</span>
-                <span class="text-[#8b949e] text-xs">packages/cli/src/types.ts</span>
-              </div>
-              <!-- Mini diff -->
-              <div class="rounded bg-[#0d1117] border border-[#30363d] text-xs overflow-hidden">
-                <div class="px-3 py-1 bg-[#3fb950]/10 text-[#3fb950]">
-                  <span class="select-none text-[#3fb950]/40">+ </span>annotations?: Annotation[];
-                </div>
-                <div class="px-3 py-1 bg-[#3fb950]/10 text-[#3fb950]">
-                  <span class="select-none text-[#3fb950]/40">+ </span>interface Annotation &#123;
-                </div>
-                <div class="px-3 py-1 bg-[#3fb950]/10 text-[#3fb950]">
-                  <span class="select-none text-[#3fb950]/40">+ </span>&nbsp; id: string; sceneIndex: number;
-                </div>
-              </div>
-            </div>
-
-            <!-- Bash command -->
-            <div class="rounded-lg bg-[#d29922]/[0.03] border border-[#d29922]/10 p-4">
-              <div class="flex items-center gap-2 mb-2">
-                <svg class="w-3.5 h-3.5 text-[#d29922]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" /></svg>
-                <span class="text-[10px] font-bold uppercase tracking-wider text-[#d29922]">Bash</span>
-                <span class="text-[#8b949e] text-xs">pnpm build</span>
-              </div>
-              <div class="rounded bg-[#0d1117] border border-[#30363d] text-xs p-2 text-[#8b949e]">
-                <div>✓ viewer: 435.85 kB &middot; built in 665ms</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Comments sidebar (desktop only) -->
-          <div class="hidden lg:block w-52 border-l border-[#30363d] bg-[#0d1117] p-3 overflow-hidden">
-            <div class="flex items-center justify-between mb-3">
-              <span class="text-[10px] font-mono text-[#e6edf3] uppercase tracking-wider font-semibold">Comments <span class="text-[#8b949e]">(3)</span></span>
-            </div>
-            <!-- Comment 1 -->
-            <div class="rounded-lg bg-[#161b22] border border-[#30363d] p-2.5 mb-2">
-              <div class="text-[9px] text-[#58a6ff] mb-1 truncate">You &mdash; Implement annotations...</div>
-              <p class="text-[10px] text-[#e6edf3]/80 leading-relaxed mb-1.5">Great starting prompt. The three-mode architecture was the key insight here.</p>
-              <div class="text-[8px] text-[#8b949e]">Mar 5, 2026</div>
-            </div>
-            <!-- Comment 2 -->
-            <div class="rounded-lg bg-[#161b22] border border-[#30363d] p-2.5 mb-2">
-              <div class="text-[9px] text-[#58a6ff] mb-1 truncate">You &mdash; Implement annotations...</div>
-              <p class="text-[10px] text-[#e6edf3]/80 leading-relaxed mb-1.5">Notice how it planned the Hono server routes before touching the viewer.</p>
-              <div class="text-[8px] text-[#8b949e]">Mar 5, 2026</div>
-            </div>
-            <!-- Comment 3 -->
-            <div class="rounded-lg bg-[#161b22] border border-[#30363d] p-2.5">
-              <div class="text-[9px] text-[#d29922] mb-1 truncate">Edit &mdash; types.ts</div>
-              <p class="text-[10px] text-[#e6edf3]/80 leading-relaxed mb-1.5">The annotation type design is clean &mdash; `sceneIndex` makes lookup O(1).</p>
-              <div class="text-[8px] text-[#8b949e]">Mar 5, 2026</div>
-            </div>
+      <!-- Phase 2: Viewer mockup (starts hidden, overlays terminal) -->
+      <div id="demo-viewer" class="absolute inset-0 hidden group/viewer">
+        <!-- Hover overlay with dual CTAs -->
+        <div class="absolute inset-0 z-10 rounded-xl bg-black/60 backdrop-blur-sm opacity-0 group-hover/viewer:opacity-100 transition-all duration-300 flex items-center justify-center">
+          <div class="flex flex-col items-center gap-3">
+            <a href={DEMO_URL} class="w-16 h-16 rounded-full bg-accent/20 border-2 border-accent flex items-center justify-center hover:bg-accent/30 transition-all">
+              <svg class="w-7 h-7 text-accent ml-1" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            </a>
+            <a href={DEMO_URL} class="text-white font-mono text-lg font-semibold hover:text-accent transition-colors">See it live</a>
+            <span class="text-white/60 text-sm">A real vibe-replay session</span>
+            <button id="demo-replay-btn" class="mt-2 flex items-center gap-2 px-4 py-2 rounded-lg border border-white/20 hover:border-white/40 text-white/70 hover:text-white text-sm transition-all">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" /></svg>
+              Replay animation
+            </button>
           </div>
         </div>
 
-        <!-- Playback controls bar -->
-        <div class="border-t border-[#30363d] bg-[#161b22]/90">
-          <!-- Timeline with annotation dots -->
-          <div class="relative h-2 px-3 pt-2">
-            <!-- Annotation dots -->
-            <div class="absolute top-0 left-[8%] w-1.5 h-1.5 rounded-full bg-[#58a6ff]"></div>
-            <div class="absolute top-0 left-[35%] w-1.5 h-1.5 rounded-full bg-[#58a6ff]"></div>
-            <!-- Timeline segments -->
-            <div class="flex gap-[1px] h-full">
-              <div class="flex-[3] rounded-sm bg-[#3fb950]/60"></div>
-              <div class="flex-[2] rounded-sm bg-[#bc8cff]/40"></div>
-              <div class="flex-[5] rounded-sm bg-[#58a6ff]/50"></div>
-              <div class="flex-[2] rounded-sm bg-[#d29922]/50"></div>
-              <div class="flex-[3] rounded-sm bg-[#d29922]/50"></div>
-              <div class="flex-[4] rounded-sm bg-[#58a6ff]/50"></div>
-              <div class="flex-[2] rounded-sm bg-[#d29922]/50"></div>
-              <div class="flex-[3] rounded-sm bg-[#3fb950]/60 ring-1 ring-white/60"></div>
-              <div class="flex-[2] rounded-sm bg-[#bc8cff]/30"></div>
-              <div class="flex-[4] rounded-sm bg-[#58a6ff]/30"></div>
-              <div class="flex-[2] rounded-sm bg-[#d29922]/30"></div>
-              <div class="flex-[3] rounded-sm bg-[#58a6ff]/30"></div>
-            </div>
-          </div>
-          <!-- Controls -->
-          <div class="flex items-center justify-between px-4 py-2 text-xs font-mono text-[#8b949e]">
+        <!-- The actual mockup (based on committed version, updated header) -->
+        <div class="h-full rounded-xl border border-border bg-[#0d1117] shadow-2xl shadow-black/60 overflow-hidden flex flex-col">
+          <!-- Viewer header bar -->
+          <div class="flex items-center justify-between px-4 py-2.5 border-b border-[#30363d] bg-[#161b22] text-xs font-mono shrink-0">
             <div class="flex items-center gap-3">
-              <!-- Play button -->
-              <div class="w-7 h-7 flex items-center justify-center rounded border border-[#30363d] text-[#e6edf3]">
-                <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-              </div>
-              <!-- Speed buttons -->
-              <div class="hidden sm:flex items-center gap-1">
-                <span class="px-1.5 py-0.5 rounded bg-[#3fb950]/15 text-[#3fb950] text-[10px]">1x</span>
-                <span class="px-1.5 py-0.5 rounded text-[#8b949e] text-[10px]">5x</span>
-                <span class="px-1.5 py-0.5 rounded text-[#8b949e] text-[10px]">10x</span>
-              </div>
-              <span class="text-[#8b949e] hidden sm:inline">|</span>
-              <!-- Turn nav -->
-              <span>&lt; Turn <span class="text-[#e6edf3]">3</span>/9 &gt;</span>
-              <span class="text-[#8b949e] hidden sm:inline">|</span>
-              <!-- Search -->
-              <span class="hidden sm:flex items-center gap-1 text-[#8b949e]">
-                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-              </span>
-              <!-- Comments toggle -->
-              <span class="hidden sm:flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#58a6ff]/15 text-[#58a6ff] text-[10px]">
-                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"/></svg>
-                3
-              </span>
+              <span class="text-[#3fb950] font-semibold">vibe-replay</span>
+              <span class="text-[#8b949e]">|</span>
+              <span class="text-[#e6edf3]">Comment feature in Vibe Replay</span>
+              <span class="text-[#8b949e] hidden sm:inline">&middot; @tuo-lei</span>
             </div>
-            <div class="flex items-center gap-3">
-              <span>Scene <span class="text-[#e6edf3]">124</span>/512</span>
-              <span class="text-[10px] text-[#8b949e]/50 hidden sm:inline">Space &middot; ←→ &middot; ⌘K</span>
+            <div class="hidden sm:flex items-center gap-3 text-[#8b949e]">
+              <span class="px-1.5 py-0.5 rounded bg-[#3fb950]/15 text-[#3fb950]">All</span>
+              <span class="px-1.5 py-0.5 rounded bg-[#1a1a24] text-[#8b949e]">Compact</span>
+              <span class="px-1.5 py-0.5 rounded bg-[#1a1a24] text-[#8b949e]">Custom</span>
+              <!-- Dark mode toggle -->
+              <svg class="w-3.5 h-3.5 text-[#8b949e]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M21.752 15.002A9.72 9.72 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" /></svg>
+            </div>
+          </div>
+
+          <!-- Main area: sidebar + content + comments -->
+          <div class="flex flex-1 min-h-0 overflow-hidden">
+            <!-- Sidebar minimap -->
+            <div class="hidden md:block w-44 border-r border-[#30363d] bg-[#0d1117] p-3 overflow-hidden shrink-0">
+              <div class="flex items-center gap-2 mb-2">
+                <div class="text-[10px] font-mono text-[#3fb950] uppercase tracking-wider border-b border-[#3fb950] pb-1">Outline</div>
+                <div class="text-[10px] font-mono text-[#8b949e] uppercase tracking-wider pb-1">Stats</div>
+              </div>
+              <!-- Turn entries -->
+              <div class="space-y-2">
+                <div class="rounded px-2 py-1.5 bg-[#3fb950]/5 border-l-2 border-[#3fb950]">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-[10px] font-mono text-[#3fb950] font-bold">01</span>
+                    <span class="text-[10px] text-[#e6edf3] truncate">Implement annotations...</span>
+                  </div>
+                  <div class="flex gap-1 mt-1">
+                    <span class="text-[8px] px-1 py-0.5 rounded bg-[#d29922]/15 text-[#d29922]">42 tools</span>
+                    <span class="text-[8px] px-1 py-0.5 rounded bg-[#58a6ff]/15 text-[#58a6ff]">8 resp</span>
+                    <span class="text-[8px] px-1 py-0.5 rounded bg-[#bc8cff]/15 text-[#bc8cff]">think</span>
+                  </div>
+                </div>
+                <div class="rounded px-2 py-1.5 opacity-70">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-[10px] font-mono text-[#8b949e]">02</span>
+                    <span class="text-[10px] text-[#8b949e] truncate">Fix the editor mode...</span>
+                  </div>
+                  <div class="flex gap-1 mt-1">
+                    <span class="text-[8px] px-1 py-0.5 rounded bg-[#d29922]/15 text-[#d29922]">18 tools</span>
+                    <span class="text-[8px] px-1 py-0.5 rounded bg-[#58a6ff]/15 text-[#58a6ff]">5 resp</span>
+                  </div>
+                </div>
+                <!-- Compaction marker -->
+                <div class="rounded px-2 py-1.5 border border-dashed border-[#30363d] opacity-60">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-[10px] text-[#8b949e]">&#8635;</span>
+                    <span class="text-[9px] text-[#8b949e] italic">Context compacted</span>
+                  </div>
+                </div>
+                <div class="rounded px-2 py-1.5 opacity-70">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-[10px] font-mono text-[#8b949e]">03</span>
+                    <span class="text-[10px] text-[#8b949e] truncate">Add token tracking...</span>
+                  </div>
+                  <div class="flex gap-1 mt-1">
+                    <span class="text-[8px] px-1 py-0.5 rounded bg-[#d29922]/15 text-[#d29922]">35 tools</span>
+                    <span class="text-[8px] px-1 py-0.5 rounded bg-[#58a6ff]/15 text-[#58a6ff]">6 resp</span>
+                    <span class="text-[8px] px-1 py-0.5 rounded bg-[#bc8cff]/15 text-[#bc8cff]">think</span>
+                  </div>
+                </div>
+                <div class="rounded px-2 py-1.5 opacity-70">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-[10px] font-mono text-[#8b949e]">04</span>
+                    <span class="text-[10px] text-[#8b949e] truncate">Compaction summaries...</span>
+                  </div>
+                  <div class="flex gap-1 mt-1">
+                    <span class="text-[8px] px-1 py-0.5 rounded bg-[#d29922]/15 text-[#d29922]">28 tools</span>
+                    <span class="text-[8px] px-1 py-0.5 rounded bg-[#58a6ff]/15 text-[#58a6ff]">4 resp</span>
+                  </div>
+                </div>
+                <div class="rounded px-2 py-1.5 opacity-70">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-[10px] font-mono text-[#8b949e]">05</span>
+                    <span class="text-[10px] text-[#8b949e] truncate">Fix viewer mode enum...</span>
+                  </div>
+                  <div class="flex gap-1 mt-1">
+                    <span class="text-[8px] px-1 py-0.5 rounded bg-[#d29922]/15 text-[#d29922]">12 tools</span>
+                    <span class="text-[8px] px-1 py-0.5 rounded bg-[#58a6ff]/15 text-[#58a6ff]">3 resp</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Content area -->
+            <div class="flex-1 overflow-hidden p-4 sm:p-6 space-y-4 font-mono text-sm text-left">
+              <!-- User prompt with comment badge -->
+              <div class="hero-scene rounded-lg bg-[#3fb950]/5 border border-[#3fb950]/15 p-4 relative">
+                <div class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[#58a6ff] text-white text-[9px] font-bold flex items-center justify-center shadow-sm">2</div>
+                <div class="flex items-center gap-2 mb-2">
+                  <span class="text-[10px] font-bold uppercase tracking-wider text-[#3fb950]">You</span>
+                  <span class="text-[10px] text-[#8b949e]">10:21 PM</span>
+                </div>
+                <p class="text-[#3fb950]/90 text-sm leading-relaxed">Implement annotations system — users should be able to add comments to any scene, with a comments panel, persistence, and export support.</p>
+              </div>
+
+              <!-- Thinking block -->
+              <div class="hero-scene rounded-lg bg-[#bc8cff]/[0.03] border border-[#bc8cff]/10 p-4">
+                <div class="flex items-center gap-2 mb-2">
+                  <span class="text-[10px] font-bold uppercase tracking-wider text-[#bc8cff]/60">Thinking</span>
+                </div>
+                <p class="text-[#8b949e] text-xs leading-relaxed">I need to design an annotation system that works across all three viewer modes: embedded HTML, editor mode with local server, and readonly gist/URL viewing. Let me plan the data model first...</p>
+              </div>
+
+              <!-- Tool call: Write file -->
+              <div class="hero-scene rounded-lg bg-[#d29922]/[0.03] border border-[#d29922]/10 p-4">
+                <div class="flex items-center gap-2">
+                  <svg class="w-3.5 h-3.5 text-[#d29922]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+                  <span class="text-[10px] font-bold uppercase tracking-wider text-[#d29922]">Write</span>
+                  <span class="text-[#8b949e] text-xs">packages/viewer/src/AnnotationPanel.tsx</span>
+                </div>
+              </div>
+
+              <!-- Tool call: Edit file with diff -->
+              <div class="hero-scene rounded-lg bg-[#d29922]/[0.03] border border-[#d29922]/10 p-4 relative">
+                <div class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[#58a6ff] text-white text-[9px] font-bold flex items-center justify-center shadow-sm">1</div>
+                <div class="flex items-center gap-2 mb-3">
+                  <svg class="w-3.5 h-3.5 text-[#d29922]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
+                  <span class="text-[10px] font-bold uppercase tracking-wider text-[#d29922]">Edit</span>
+                  <span class="text-[#8b949e] text-xs">packages/cli/src/types.ts</span>
+                </div>
+                <div class="rounded bg-[#0d1117] border border-[#30363d] text-xs overflow-hidden">
+                  <div class="px-3 py-1 bg-[#3fb950]/10 text-[#3fb950]">
+                    <span class="select-none text-[#3fb950]/40">+ </span>annotations?: Annotation[];
+                  </div>
+                  <div class="px-3 py-1 bg-[#3fb950]/10 text-[#3fb950]">
+                    <span class="select-none text-[#3fb950]/40">+ </span>interface Annotation &#123;
+                  </div>
+                  <div class="px-3 py-1 bg-[#3fb950]/10 text-[#3fb950]">
+                    <span class="select-none text-[#3fb950]/40">+ </span>&nbsp; id: string; sceneIndex: number;
+                  </div>
+                </div>
+              </div>
+
+              <!-- Bash command -->
+              <div class="hero-scene rounded-lg bg-[#d29922]/[0.03] border border-[#d29922]/10 p-4">
+                <div class="flex items-center gap-2 mb-2">
+                  <svg class="w-3.5 h-3.5 text-[#d29922]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" /></svg>
+                  <span class="text-[10px] font-bold uppercase tracking-wider text-[#d29922]">Bash</span>
+                  <span class="text-[#8b949e] text-xs">pnpm build</span>
+                </div>
+                <div class="rounded bg-[#0d1117] border border-[#30363d] text-xs p-2 text-[#8b949e]">
+                  <div>&check; viewer: 435.85 kB &middot; built in 665ms</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Comments sidebar (desktop only) -->
+            <div class="hidden lg:block w-52 border-l border-[#30363d] bg-[#0d1117] p-3 overflow-hidden shrink-0">
+              <div class="flex items-center justify-between mb-3">
+                <span class="text-[10px] font-mono text-[#e6edf3] uppercase tracking-wider font-semibold">Comments <span class="text-[#8b949e]">(3)</span></span>
+              </div>
+              <div class="rounded-lg bg-[#161b22] border border-[#30363d] p-2.5 mb-2">
+                <div class="text-[9px] text-[#58a6ff] mb-1 truncate">You &mdash; Implement annotations...</div>
+                <p class="text-[10px] text-[#e6edf3]/80 leading-relaxed mb-1.5">Great starting prompt. The three-mode architecture was the key insight here.</p>
+                <div class="text-[8px] text-[#8b949e]">Mar 5, 2026</div>
+              </div>
+              <div class="rounded-lg bg-[#161b22] border border-[#30363d] p-2.5 mb-2">
+                <div class="text-[9px] text-[#58a6ff] mb-1 truncate">You &mdash; Implement annotations...</div>
+                <p class="text-[10px] text-[#e6edf3]/80 leading-relaxed mb-1.5">Notice how it planned the Hono server routes before touching the viewer.</p>
+                <div class="text-[8px] text-[#8b949e]">Mar 5, 2026</div>
+              </div>
+              <div class="rounded-lg bg-[#161b22] border border-[#30363d] p-2.5">
+                <div class="text-[9px] text-[#d29922] mb-1 truncate">Edit &mdash; types.ts</div>
+                <p class="text-[10px] text-[#e6edf3]/80 leading-relaxed mb-1.5">The annotation type design is clean &mdash; `sceneIndex` makes lookup O(1).</p>
+                <div class="text-[8px] text-[#8b949e]">Mar 5, 2026</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Playback controls bar -->
+          <div class="border-t border-[#30363d] bg-[#161b22]/90 shrink-0">
+            <!-- Timeline with annotation dots -->
+            <div class="relative h-2 px-3 pt-2">
+              <div class="absolute top-0 left-[8%] w-1.5 h-1.5 rounded-full bg-[#58a6ff]"></div>
+              <div class="absolute top-0 left-[35%] w-1.5 h-1.5 rounded-full bg-[#58a6ff]"></div>
+              <div class="flex gap-[1px] h-full">
+                <div class="hero-timeline-seg flex-[3] rounded-sm bg-[#3fb950]/60"></div>
+                <div class="hero-timeline-seg flex-[2] rounded-sm bg-[#bc8cff]/40"></div>
+                <div class="hero-timeline-seg flex-[5] rounded-sm bg-[#58a6ff]/50"></div>
+                <div class="hero-timeline-seg flex-[2] rounded-sm bg-[#d29922]/50"></div>
+                <div class="hero-timeline-seg flex-[3] rounded-sm bg-[#d29922]/50"></div>
+                <div class="hero-timeline-seg flex-[4] rounded-sm bg-[#58a6ff]/50"></div>
+                <div class="hero-timeline-seg flex-[2] rounded-sm bg-[#d29922]/50"></div>
+                <div class="hero-timeline-seg flex-[3] rounded-sm bg-[#3fb950]/60 ring-1 ring-white/60"></div>
+                <div class="flex-[2] rounded-sm bg-[#bc8cff]/30"></div>
+                <div class="flex-[4] rounded-sm bg-[#58a6ff]/30"></div>
+                <div class="flex-[2] rounded-sm bg-[#d29922]/30"></div>
+                <div class="flex-[3] rounded-sm bg-[#58a6ff]/30"></div>
+              </div>
+            </div>
+            <!-- Controls -->
+            <div class="flex items-center justify-between px-4 py-2 text-xs font-mono text-[#8b949e]">
+              <div class="flex items-center gap-3">
+                <div class="w-7 h-7 flex items-center justify-center rounded border border-[#30363d] text-[#e6edf3]">
+                  <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                </div>
+                <div class="hidden sm:flex items-center gap-1">
+                  <span class="px-1.5 py-0.5 rounded bg-[#3fb950]/15 text-[#3fb950] text-[10px]">1x</span>
+                  <span class="px-1.5 py-0.5 rounded text-[#8b949e] text-[10px]">5x</span>
+                  <span class="px-1.5 py-0.5 rounded text-[#8b949e] text-[10px]">10x</span>
+                </div>
+                <span class="text-[#8b949e] hidden sm:inline">|</span>
+                <span>&lt; Turn <span class="text-[#e6edf3]">3</span>/9 &gt;</span>
+                <span class="text-[#8b949e] hidden sm:inline">|</span>
+                <span class="hidden sm:flex items-center gap-1 text-[#8b949e]">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                </span>
+                <span class="hidden sm:flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#58a6ff]/15 text-[#58a6ff] text-[10px]">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z"/></svg>
+                  3
+                </span>
+              </div>
+              <div class="flex items-center gap-3">
+                <span>Scene <span class="text-[#e6edf3]">124</span>/512</span>
+                <span class="text-[10px] text-[#8b949e]/50 hidden sm:inline">Space &middot; &larr;&rarr; &middot; &Command;K</span>
+              </div>
             </div>
           </div>
         </div>
       </div>
-    </a>
 
-    <!-- CTAs below mockup -->
-    <div class="mt-10 animate-slide-up flex flex-col sm:flex-row items-center justify-center gap-4" style="animation-delay: 0.5s">
-      <a href={DEMO_URL} class="group inline-flex items-center gap-3 px-8 py-4 rounded-xl bg-accent hover:bg-accent-dim text-surface font-semibold text-lg transition-all shadow-lg shadow-accent/20 hover:shadow-accent/30">
-        <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-        Watch a real session
-        <svg class="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"/></svg>
-      </a>
-      <a href="/explore" class="group inline-flex items-center gap-2 px-6 py-4 rounded-xl border border-border hover:border-accent/40 text-text-secondary hover:text-text-primary font-semibold text-lg transition-all">
-        Explore replays
-        <svg class="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"/></svg>
-      </a>
+    </div><!-- end demo container -->
+
+    <!-- Install command + CTAs -->
+    <div class="mt-10 animate-slide-up space-y-6">
+      <!-- Install command (always visible) -->
+      <div class="flex items-center justify-center">
+        <div class="group relative">
+          <div class="absolute -inset-0.5 bg-gradient-to-r from-accent/50 to-cyan-400/50 rounded-lg blur opacity-40 group-hover:opacity-60 transition"></div>
+          <button
+            id="copy-btn"
+            class="relative flex items-center gap-3 px-6 py-3.5 bg-surface-1 border border-border rounded-lg font-mono text-base hover:border-accent/50 transition-all cursor-pointer"
+          >
+            <span class="text-text-muted select-none">$</span>
+            <span class="text-text-primary">npx vibe-replay</span>
+            <svg id="copy-icon" class="w-4 h-4 text-text-muted hover:text-accent transition-colors ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" stroke-width="2"/>
+              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" stroke-width="2"/>
+            </svg>
+            <svg id="check-icon" class="w-4 h-4 text-accent ml-2 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <polyline points="20 6 9 17 4 12" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <!-- CTA buttons -->
+      <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+        <a href={DEMO_URL} class="group inline-flex items-center gap-3 px-8 py-4 rounded-xl bg-accent hover:bg-accent-dim text-surface font-semibold text-lg transition-all shadow-lg shadow-accent/20 hover:shadow-accent/30">
+          <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+          Watch a real session
+          <svg class="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"/></svg>
+        </a>
+        <a href="/explore" class="group inline-flex items-center gap-2 px-6 py-4 rounded-xl border border-border hover:border-accent/40 text-text-secondary hover:text-text-primary font-semibold text-lg transition-all">
+          Explore replays
+          <svg class="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"/></svg>
+        </a>
+      </div>
     </div>
   </div>
 </section>
 
+<style>
+  /* Scene cards auto-play: slide in one by one */
+  .hero-scene {
+    opacity: 0;
+    animation: hero-scene-in 0.5s ease-out forwards;
+  }
+  .hero-scene:nth-child(1) { animation-delay: 0s; }
+  .hero-scene:nth-child(2) { animation-delay: 0.8s; }
+  .hero-scene:nth-child(3) { animation-delay: 1.4s; }
+  .hero-scene:nth-child(4) { animation-delay: 2.0s; }
+  .hero-scene:nth-child(5) { animation-delay: 2.6s; }
+
+  @keyframes hero-scene-in {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Timeline segments sweep: light up left to right */
+  .hero-timeline-seg {
+    opacity: 0.3;
+    animation: hero-seg-light 4s ease-in-out infinite;
+  }
+  .hero-timeline-seg:nth-child(1) { animation-delay: 0s; }
+  .hero-timeline-seg:nth-child(2) { animation-delay: 0.3s; }
+  .hero-timeline-seg:nth-child(3) { animation-delay: 0.6s; }
+  .hero-timeline-seg:nth-child(4) { animation-delay: 0.9s; }
+  .hero-timeline-seg:nth-child(5) { animation-delay: 1.2s; }
+  .hero-timeline-seg:nth-child(6) { animation-delay: 1.5s; }
+  .hero-timeline-seg:nth-child(7) { animation-delay: 1.8s; }
+  .hero-timeline-seg:nth-child(8) { animation-delay: 2.1s; }
+
+  @keyframes hero-seg-light {
+    0%, 100% { opacity: 0.3; }
+    30%, 60% { opacity: 1; }
+  }
+</style>
+
 <script>
-  // Copy button — stop propagation so it doesn't follow the <a> if nested
+  // --- Rotating word animation ---
+  const words = ["Review", "Share", "Export", "Replay"];
+  const rotEl = document.getElementById("rotating-word");
+  if (rotEl) {
+    let idx = 0;
+    rotEl.textContent = words[0];
+    setInterval(() => {
+      rotEl.style.opacity = "0";
+      rotEl.style.transform = "translateY(-50%)";
+      setTimeout(() => {
+        idx = (idx + 1) % words.length;
+        rotEl.textContent = words[idx];
+        rotEl.style.transition = "none";
+        rotEl.style.transform = "translateY(50%)";
+        rotEl.style.opacity = "0";
+        rotEl.offsetHeight;
+        rotEl.style.transition = "all 0.4s ease-in-out";
+        rotEl.style.opacity = "1";
+        rotEl.style.transform = "translateY(0)";
+      }, 400);
+    }, 3000);
+  }
+
+  // --- Terminal → Viewer demo orchestration ---
+  const delay = (ms: number) => new Promise(r => setTimeout(r, ms));
+  let abortController: AbortController | null = null;
+
+  async function typeText(el: HTMLElement, text: string, speed = 60, signal?: AbortSignal) {
+    for (const ch of text) {
+      if (signal?.aborted) return;
+      el.textContent += ch;
+      await delay(speed);
+    }
+  }
+
+  function resetTerminal() {
+    const cmd = document.getElementById("term-cmd");
+    const cursor = document.getElementById("term-cursor");
+    const output = document.getElementById("term-output");
+    const generating = document.getElementById("term-generating");
+    const spinner = document.getElementById("term-spinner");
+    const genText = document.getElementById("term-gen-text");
+    const terminal = document.getElementById("demo-terminal");
+
+    if (cmd) cmd.textContent = "";
+    if (cursor) { cursor.classList.remove("hidden"); cursor.className = "text-[#e6edf3] animate-pulse"; }
+    if (output) output.classList.add("hidden");
+    if (generating) generating.classList.add("hidden");
+    if (spinner) { spinner.textContent = "⠋"; spinner.className = "text-[#d29922]"; }
+    if (genText) { genText.textContent = "Generating replay..."; genText.className = "text-[#8b949e] ml-2"; }
+    if (terminal) {
+      terminal.classList.remove("hidden");
+      terminal.style.opacity = "1";
+      terminal.style.transform = "";
+      terminal.style.transition = "";
+    }
+  }
+
+  function resetSceneAnimations() {
+    const viewer = document.getElementById("demo-viewer");
+    if (!viewer) return;
+    viewer.querySelectorAll(".hero-scene").forEach(el => {
+      const htmlEl = el as HTMLElement;
+      htmlEl.style.animation = "none";
+      htmlEl.offsetHeight;
+      htmlEl.style.animation = "";
+    });
+  }
+
+  async function runDemo() {
+    if (abortController) abortController.abort();
+    abortController = new AbortController();
+    const signal = abortController.signal;
+
+    const cmd = document.getElementById("term-cmd");
+    const cursor = document.getElementById("term-cursor");
+    const output = document.getElementById("term-output");
+    const generating = document.getElementById("term-generating");
+    const spinner = document.getElementById("term-spinner");
+    const genText = document.getElementById("term-gen-text");
+    const terminal = document.getElementById("demo-terminal");
+    const viewer = document.getElementById("demo-viewer");
+    const container = document.getElementById("demo-container");
+
+    if (!cmd || !terminal || !viewer || !container) return;
+
+    // Reset
+    resetTerminal();
+    viewer.classList.add("hidden");
+    viewer.style.opacity = "";
+    viewer.style.transform = "";
+    container.style.height = "";
+    container.style.transition = "";
+
+    // Phase 1: Type command
+    await delay(800);
+    if (signal.aborted) return;
+    await typeText(cmd, "npx vibe-replay", 70, signal);
+    if (signal.aborted) return;
+    await delay(600);
+    if (signal.aborted) return;
+
+    // Phase 2: Show session picker
+    if (cursor) cursor.classList.add("hidden");
+    if (output) output.classList.remove("hidden");
+    await delay(1500);
+    if (signal.aborted) return;
+
+    // Phase 3: Generating spinner
+    if (generating) generating.classList.remove("hidden");
+    const spinFrames = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
+    let spinIdx = 0;
+    const spinInterval = setInterval(() => {
+      if (spinner) spinner.textContent = spinFrames[spinIdx++ % spinFrames.length];
+    }, 80);
+    await delay(1800);
+    if (signal.aborted) { clearInterval(spinInterval); return; }
+    clearInterval(spinInterval);
+
+    // Success
+    if (spinner) { spinner.textContent = "✓"; spinner.className = "text-[#3fb950]"; }
+    if (genText) { genText.textContent = "Generated replay — 512 scenes, 537KB"; genText.className = "text-[#e6edf3] ml-2"; }
+    await delay(800);
+    if (signal.aborted) return;
+
+    // Phase 4: Crossfade to viewer mockup
+    const currentH = container.offsetHeight;
+    container.style.height = currentH + "px";
+
+    terminal.style.transition = "all 0.5s ease-in-out";
+    terminal.style.opacity = "0";
+    terminal.style.transform = "translateY(-20px)";
+    await delay(500);
+    if (signal.aborted) return;
+    terminal.classList.add("hidden");
+
+    // Reset scene animations so they replay
+    resetSceneAnimations();
+
+    viewer.classList.remove("hidden");
+    viewer.style.opacity = "0";
+    viewer.style.transform = "translateY(20px)";
+    viewer.offsetHeight;
+    viewer.style.transition = "all 0.5s ease-in-out";
+    viewer.style.opacity = "1";
+    viewer.style.transform = "translateY(0)";
+  }
+
+  // Copy button
   document.getElementById("copy-btn")?.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -360,4 +603,9 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
       }, 2000);
     }
   });
+
+  // Replay button
+  document.getElementById("demo-replay-btn")?.addEventListener("click", () => runDemo());
+
+  runDemo();
 </script>
