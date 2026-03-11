@@ -594,8 +594,13 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
     viewer.style.opacity = "1";
     viewer.style.transform = "translateY(0)";
 
-    // Release fixed height after crossfade so container can reflow on resize
-    setTimeout(() => { if (!signal.aborted) container.style.height = ""; }, 500);
+    // After crossfade: switch viewer to relative so it provides flow height,
+    // then release the fixed container height for proper resize behavior
+    setTimeout(() => {
+      if (signal.aborted) return;
+      viewer.style.position = "relative";
+      container.style.height = "";
+    }, 500);
   }
 
   // Copy button
