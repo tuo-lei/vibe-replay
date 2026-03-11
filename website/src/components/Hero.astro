@@ -8,7 +8,7 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
     <div class="flex items-center gap-4">
       <a href="/" class="font-mono font-bold text-sm hover:opacity-80 transition-opacity bg-gradient-to-r from-accent via-emerald-400 to-cyan-400 bg-clip-text text-transparent">vibe-replay</a>
       <span class="text-border hidden sm:inline">|</span>
-      <a href="/explore" class="text-text-muted hover:text-text-primary text-sm transition-colors hidden sm:inline">Explore</a>
+      <a href="/explore" class="text-text-secondary hover:text-accent text-sm transition-colors hidden sm:inline underline underline-offset-4 decoration-text-muted hover:decoration-accent">Explore</a>
     </div>
     <div class="flex items-center gap-4">
       <a class="github-button" href="https://github.com/tuo-lei/vibe-replay" data-color-scheme="dark" data-icon="octicon-star" data-size="large" data-show-count="true" aria-label="Star tuo-lei/vibe-replay on GitHub">Star</a>
@@ -363,10 +363,14 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
 
     </div><!-- end demo container -->
 
-    <!-- Install command + CTAs -->
-    <div class="mt-10 animate-slide-up space-y-6">
-      <!-- Install command (always visible) -->
-      <div class="flex items-center justify-center">
+    <!-- Install command + CTA -->
+    <div class="mt-10 animate-slide-up">
+      <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+        <a href={DEMO_URL} class="group inline-flex items-center gap-3 px-8 py-4 rounded-xl bg-accent hover:bg-accent-dim text-surface font-semibold text-lg transition-all shadow-lg shadow-accent/20 hover:shadow-accent/30">
+          <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+          Watch a real session
+          <svg class="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"/></svg>
+        </a>
         <div class="group relative">
           <div class="absolute -inset-0.5 bg-gradient-to-r from-accent/50 to-cyan-400/50 rounded-lg blur opacity-40 group-hover:opacity-60 transition"></div>
           <button
@@ -384,18 +388,6 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
             </svg>
           </button>
         </div>
-      </div>
-      <!-- CTA buttons -->
-      <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
-        <a href={DEMO_URL} class="group inline-flex items-center gap-3 px-8 py-4 rounded-xl bg-accent hover:bg-accent-dim text-surface font-semibold text-lg transition-all shadow-lg shadow-accent/20 hover:shadow-accent/30">
-          <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-          Watch a real session
-          <svg class="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"/></svg>
-        </a>
-        <a href="/explore" class="group inline-flex items-center gap-2 px-6 py-4 rounded-xl border border-border hover:border-accent/40 text-text-secondary hover:text-text-primary font-semibold text-lg transition-all">
-          Explore replays
-          <svg class="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"/></svg>
-        </a>
       </div>
     </div>
   </div>
