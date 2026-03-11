@@ -48,6 +48,90 @@ function normalizeTitle(title: string): string | undefined {
   return cleaned || undefined;
 }
 
+function normalizeProjectPath(project: string): string {
+  const home = homedir();
+  return project.startsWith(home) ? `~${project.slice(home.length)}` : project;
+}
+
+interface GenerateRequestBody {
+  provider: string;
+  filePaths?: unknown;
+  toolPaths?: unknown;
+  title?: unknown;
+  sessionSlug?: string;
+  sessionProject?: string;
+}
+
+interface ResolvedGenerateInputs {
+  paths: string[];
+  sessionInfo?: SessionInfo;
+}
+
+type GenerateInputResolution =
+  | { ok: true; value: ResolvedGenerateInputs }
+  | { ok: false; error: string };
+
+function toStringArray(value: unknown): string[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) return null;
+  if (value.some((item) => typeof item !== "string")) return null;
+  return value;
+}
+
+export function resolveGenerateInputs(
+  body: GenerateRequestBody,
+  discoveredSessions: SessionInfo[],
+): GenerateInputResolution {
+  const filePaths = toStringArray(body.filePaths);
+  if (!filePaths) {
+    return { ok: false, error: "filePaths must be an array of strings" };
+  }
+  const toolPaths = toStringArray(body.toolPaths);
+  if (!toolPaths) {
+    return { ok: false, error: "toolPaths must be an array of strings" };
+  }
+
+  const requestedSessionSlug =
+    typeof body.sessionSlug === "string" ? safeSlug(body.sessionSlug) : null;
+  const requestedSessionProject =
+    typeof body.sessionProject === "string" ? normalizeProjectPath(body.sessionProject) : undefined;
+
+  let sessionInfo: SessionInfo | undefined;
+  if (requestedSessionSlug) {
+    const slugMatches = discoveredSessions.filter((s) => s.slug === requestedSessionSlug);
+    if (requestedSessionProject) {
+      sessionInfo = slugMatches.find(
+        (s) => normalizeProjectPath(s.project) === requestedSessionProject,
+      );
+    }
+    sessionInfo = sessionInfo || slugMatches[0];
+  }
+
+  const fallbackFilePaths = sessionInfo?.filePaths || [];
+  const fallbackToolPaths = sessionInfo?.toolPaths || [];
+  const paths = [
+    ...(filePaths.length > 0 ? filePaths : fallbackFilePaths),
+    ...(toolPaths.length > 0 ? toolPaths : fallbackToolPaths),
+  ];
+
+  const hasCursorSessionFallback = body.provider === "cursor" && Boolean(sessionInfo?.sessionId);
+  if (paths.length === 0 && !hasCursorSessionFallback) {
+    return {
+      ok: false,
+      error:
+        "filePaths is required (or provide a resolvable Cursor sessionSlug for SQLite/global-state sessions)",
+    };
+  }
+
+  return {
+    ok: true,
+    value: {
+      paths,
+      sessionInfo,
+    },
+  };
+}
+
 // ─── Archive helpers (directory-based, one marker file per slug) ────
 
 const ARCHIVE_DIR = ".archive";
@@ -518,29 +602,27 @@ export async function startServer(
   // --- Generate: parse a source session into a replay ---
   app.post("/api/generate", async (c) => {
     try {
-      const body = await c.req.json<{
-        provider: string;
-        filePaths: string[];
-        toolPaths?: string[];
-        title?: unknown;
-        sessionSlug?: string;
-        sessionProject?: string;
-      }>();
+      const body = await c.req.json<GenerateRequestBody>();
 
       const provider = getProvider(body.provider);
       if (!provider) {
         return c.json({ error: `Unknown provider: ${body.provider}` }, 400);
       }
 
-      const paths = [...body.filePaths, ...(body.toolPaths || [])];
-      if (paths.length === 0) {
-        return c.json({ error: "filePaths is required" }, 400);
+      let discoveredSessions: SessionInfo[] = [];
+      if (typeof body.sessionSlug === "string" && safeSlug(body.sessionSlug)) {
+        discoveredSessions = mergeSameSessions(await provider.discover());
+      }
+
+      const resolved = resolveGenerateInputs(body, discoveredSessions);
+      if (!resolved.ok) {
+        return c.json({ error: resolved.error }, 400);
       }
       if (body.title !== undefined && typeof body.title !== "string") {
         return c.json({ error: "title must be a string" }, 400);
       }
 
-      const parsed = await provider.parse(paths);
+      const parsed = await provider.parse(resolved.value.paths, resolved.value.sessionInfo);
 
       const home = homedir();
       const rawProject = body.sessionProject || parsed.cwd;
