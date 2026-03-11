@@ -525,11 +525,11 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
     // Skip animation for users who prefer reduced motion
     const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (prefersReducedMotion) {
-      terminal.style.display = "none";
+      terminal.style.visibility = "hidden";
       viewer.classList.remove("hidden");
       viewer.style.opacity = "1";
       viewer.style.transform = "";
-      viewer.style.position = "relative";
+      container.style.height = container.offsetHeight + "px";
       return;
     }
 
@@ -594,13 +594,6 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
     viewer.style.opacity = "1";
     viewer.style.transform = "translateY(0)";
 
-    // After crossfade: switch viewer to relative so it provides flow height,
-    // then release the fixed container height for proper resize behavior
-    setTimeout(() => {
-      if (signal.aborted) return;
-      viewer.style.position = "relative";
-      container.style.height = "";
-    }, 500);
   }
 
   // Copy button
