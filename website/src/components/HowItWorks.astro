@@ -362,17 +362,18 @@
 
 <script>
   document.getElementById("hiw-copy-btn")?.addEventListener("click", () => {
-    navigator.clipboard.writeText("npx vibe-replay");
-    const copyIcon = document.getElementById("hiw-copy-icon");
-    const checkIcon = document.getElementById("hiw-check-icon");
-    if (copyIcon && checkIcon) {
-      copyIcon.classList.add("hidden");
-      checkIcon.classList.remove("hidden");
-      setTimeout(() => {
-        copyIcon.classList.remove("hidden");
-        checkIcon.classList.add("hidden");
-      }, 2000);
-    }
+    navigator.clipboard.writeText("npx vibe-replay").then(() => {
+      const copyIcon = document.getElementById("hiw-copy-icon");
+      const checkIcon = document.getElementById("hiw-check-icon");
+      if (copyIcon && checkIcon) {
+        copyIcon.classList.add("hidden");
+        checkIcon.classList.remove("hidden");
+        setTimeout(() => {
+          copyIcon.classList.remove("hidden");
+          checkIcon.classList.add("hidden");
+        }, 2000);
+      }
+    }).catch(() => {});
   });
 </script>
   </div>

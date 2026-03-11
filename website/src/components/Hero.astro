@@ -120,10 +120,10 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
         <!-- Hover overlay with dual CTAs -->
         <div class="absolute inset-0 z-10 rounded-xl bg-black/60 backdrop-blur-sm opacity-0 group-hover/viewer:opacity-100 transition-all duration-300 flex items-center justify-center">
           <div class="flex flex-col items-center gap-3">
-            <a href={DEMO_URL} target="_blank" rel="noopener" class="w-16 h-16 rounded-full bg-accent/20 border-2 border-accent flex items-center justify-center hover:bg-accent/30 transition-all">
+            <a href={DEMO_URL} target="_blank" rel="noopener noreferrer" aria-label="Watch a real vibe-replay session" class="w-16 h-16 rounded-full bg-accent/20 border-2 border-accent flex items-center justify-center hover:bg-accent/30 transition-all">
               <svg class="w-7 h-7 text-accent ml-1" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
             </a>
-            <a href={DEMO_URL} target="_blank" rel="noopener" class="text-white font-mono text-lg font-semibold hover:text-accent transition-colors">See it live</a>
+            <a href={DEMO_URL} target="_blank" rel="noopener noreferrer" class="text-white font-mono text-lg font-semibold hover:text-accent transition-colors">See it live</a>
             <span class="text-white/60 text-sm">A real vibe-replay session</span>
             <button id="demo-replay-btn" class="mt-2 flex items-center gap-2 px-4 py-2 rounded-lg border border-white/20 hover:border-white/40 text-white/70 hover:text-white text-sm transition-all">
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" /></svg>
@@ -366,7 +366,7 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
     <!-- Install command + CTA -->
     <div class="mt-10 animate-slide-up">
       <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
-        <a href={DEMO_URL} target="_blank" rel="noopener" class="group inline-flex items-center gap-3 px-8 py-4 rounded-xl bg-accent hover:bg-accent-dim text-surface font-semibold text-lg transition-all shadow-lg shadow-accent/20 hover:shadow-accent/30">
+        <a href={DEMO_URL} target="_blank" rel="noopener noreferrer" class="group inline-flex items-center gap-3 px-8 py-4 rounded-xl bg-accent hover:bg-accent-dim text-surface font-semibold text-lg transition-all shadow-lg shadow-accent/20 hover:shadow-accent/30">
           <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
           Watch a real session
           <svg class="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"/></svg>
@@ -427,6 +427,11 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
   @keyframes hero-seg-light {
     0%, 100% { opacity: 0.3; }
     30%, 60% { opacity: 1; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hero-scene { animation: none; opacity: 1; }
+    .hero-timeline-seg { animation: none; opacity: 1; }
   }
 </style>
 
@@ -517,6 +522,16 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
 
     if (!cmd || !terminal || !viewer || !container) return;
 
+    // Skip animation for users who prefer reduced motion
+    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (prefersReducedMotion) {
+      terminal.classList.add("hidden");
+      viewer.classList.remove("hidden");
+      viewer.style.opacity = "1";
+      viewer.style.transform = "";
+      return;
+    }
+
     // Reset
     resetTerminal();
     viewer.classList.add("hidden");
@@ -577,23 +592,27 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
     viewer.style.transition = "all 0.5s ease-in-out";
     viewer.style.opacity = "1";
     viewer.style.transform = "translateY(0)";
+
+    // Release fixed height after crossfade so container can reflow on resize
+    setTimeout(() => { if (!signal.aborted) container.style.height = ""; }, 500);
   }
 
   // Copy button
   document.getElementById("copy-btn")?.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    navigator.clipboard.writeText("npx vibe-replay");
-    const copyIcon = document.getElementById("copy-icon");
-    const checkIcon = document.getElementById("check-icon");
-    if (copyIcon && checkIcon) {
-      copyIcon.classList.add("hidden");
-      checkIcon.classList.remove("hidden");
-      setTimeout(() => {
-        copyIcon.classList.remove("hidden");
-        checkIcon.classList.add("hidden");
-      }, 2000);
-    }
+    navigator.clipboard.writeText("npx vibe-replay").then(() => {
+      const copyIcon = document.getElementById("copy-icon");
+      const checkIcon = document.getElementById("check-icon");
+      if (copyIcon && checkIcon) {
+        copyIcon.classList.add("hidden");
+        checkIcon.classList.remove("hidden");
+        setTimeout(() => {
+          copyIcon.classList.remove("hidden");
+          checkIcon.classList.add("hidden");
+        }, 2000);
+      }
+    }).catch(() => {});
   });
 
   // Replay button
