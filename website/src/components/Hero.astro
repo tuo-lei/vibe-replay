@@ -35,18 +35,18 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
 
     <!-- Headline -->
     <h1 class="text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-extrabold tracking-tight sm:tracking-tighter leading-[1.05] mb-6 animate-slide-up">
-      <span class="bg-gradient-to-r from-accent via-emerald-400 to-cyan-400 bg-clip-text text-transparent">
-        vibe-replay
+      <span class="text-text-primary text-4xl sm:text-5xl md:text-6xl lg:text-7xl">
+        See how the
       </span>
       <br />
-      <span class="text-text-primary text-4xl sm:text-5xl md:text-6xl lg:text-7xl">
-        Replay your AI coding sessions
+      <span class="bg-gradient-to-r from-accent via-emerald-400 to-cyan-400 bg-clip-text text-transparent">
+        code was made
       </span>
     </h1>
 
     <!-- Subheadline -->
     <p class="text-lg sm:text-xl text-text-secondary max-w-2xl mx-auto mb-10 animate-slide-up" style="animation-delay: 0.1s">
-      Turn your Claude Code and Cursor sessions into interactive, shareable web replays &mdash; as single, self-contained HTML files.
+      PR diffs show <em>what</em> changed. <span class="text-text-primary font-medium">vibe-replay</span> shows <em>why</em>. Turn AI coding sessions into interactive, shareable replays &mdash; one command, one HTML file.
     </p>
 
     <!-- Install command -->
@@ -328,14 +328,17 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
       </div>
     </a>
 
-    <!-- Big CTA below mockup -->
-    <div class="mt-10 animate-slide-up" style="animation-delay: 0.5s">
+    <!-- CTAs below mockup -->
+    <div class="mt-10 animate-slide-up flex flex-col sm:flex-row items-center justify-center gap-4" style="animation-delay: 0.5s">
       <a href={DEMO_URL} class="group inline-flex items-center gap-3 px-8 py-4 rounded-xl bg-accent hover:bg-accent-dim text-surface font-semibold text-lg transition-all shadow-lg shadow-accent/20 hover:shadow-accent/30">
         <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
         Watch a real session
         <svg class="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"/></svg>
       </a>
-      <p class="text-text-muted text-sm mt-3 font-mono">Annotations, editor mode &amp; token tracking — built in this session</p>
+      <a href="/explore" class="group inline-flex items-center gap-2 px-6 py-4 rounded-xl border border-border hover:border-accent/40 text-text-secondary hover:text-text-primary font-semibold text-lg transition-all">
+        Explore replays
+        <svg class="w-5 h-5 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"/></svg>
+      </a>
     </div>
   </div>
 </section>
