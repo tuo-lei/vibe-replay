@@ -525,11 +525,11 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
     // Skip animation for users who prefer reduced motion
     const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (prefersReducedMotion) {
-      // Keep terminal in flow (visibility:hidden) so the absolute viewer has height
-      terminal.style.visibility = "hidden";
+      terminal.style.display = "none";
       viewer.classList.remove("hidden");
       viewer.style.opacity = "1";
       viewer.style.transform = "";
+      viewer.style.position = "relative";
       return;
     }
 
