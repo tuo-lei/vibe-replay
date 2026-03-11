@@ -341,9 +341,39 @@
     <!-- Section CTA -->
     <div class="mt-24 text-center">
       <p class="text-text-secondary text-lg mb-6">Try it on your own sessions &mdash; takes 10 seconds.</p>
-      <div class="inline-flex items-center gap-4">
-        <code class="px-5 py-3 rounded-lg bg-surface-1 border border-border font-mono text-base text-text-primary">$ npx vibe-replay</code>
+      <div class="group relative inline-block">
+        <div class="absolute -inset-0.5 bg-gradient-to-r from-accent/50 to-cyan-400/50 rounded-lg blur opacity-40 group-hover:opacity-60 transition"></div>
+        <button
+          id="hiw-copy-btn"
+          class="relative flex items-center gap-3 px-6 py-3.5 bg-surface-1 border border-border rounded-lg font-mono text-base hover:border-accent/50 transition-all cursor-pointer"
+        >
+          <span class="text-text-muted select-none">$</span>
+          <span class="text-text-primary">npx vibe-replay</span>
+          <svg id="hiw-copy-icon" class="w-4 h-4 text-text-muted hover:text-accent transition-colors ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" stroke-width="2"/>
+            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" stroke-width="2"/>
+          </svg>
+          <svg id="hiw-check-icon" class="w-4 h-4 text-accent ml-2 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <polyline points="20 6 9 17 4 12" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
       </div>
     </div>
+
+<script>
+  document.getElementById("hiw-copy-btn")?.addEventListener("click", () => {
+    navigator.clipboard.writeText("npx vibe-replay");
+    const copyIcon = document.getElementById("hiw-copy-icon");
+    const checkIcon = document.getElementById("hiw-check-icon");
+    if (copyIcon && checkIcon) {
+      copyIcon.classList.add("hidden");
+      checkIcon.classList.remove("hidden");
+      setTimeout(() => {
+        copyIcon.classList.remove("hidden");
+        checkIcon.classList.add("hidden");
+      }, 2000);
+    }
+  });
+</script>
   </div>
 </section>
