@@ -35,6 +35,31 @@ describe("resolveGenerateInputs", () => {
     expect(resolved.ok === false && resolved.error).toBe("filePaths must be an array of strings");
   });
 
+  it("rejects filePaths arrays with non-string entries", () => {
+    const resolved = resolveGenerateInputs(
+      {
+        provider: "cursor",
+        filePaths: ["/tmp/session.jsonl", 42],
+      },
+      [],
+    );
+    expect(resolved.ok).toBe(false);
+    expect(resolved.ok === false && resolved.error).toBe("filePaths must be an array of strings");
+  });
+
+  it("rejects non-array toolPaths payload", () => {
+    const resolved = resolveGenerateInputs(
+      {
+        provider: "cursor",
+        filePaths: ["/tmp/session.jsonl"],
+        toolPaths: "not-an-array",
+      },
+      [],
+    );
+    expect(resolved.ok).toBe(false);
+    expect(resolved.ok === false && resolved.error).toBe("toolPaths must be an array of strings");
+  });
+
   it("uses explicit file paths and falls back to discovered tool paths", () => {
     const resolved = resolveGenerateInputs(
       {
@@ -110,6 +135,32 @@ describe("resolveGenerateInputs", () => {
         sessionSlug: "aaaaaaaa",
       },
       [makeSession({ provider: "claude-code", filePaths: [], toolPaths: [] })],
+    );
+    expect(resolved.ok).toBe(false);
+    expect(resolved.ok === false && resolved.error).toContain("filePaths is required");
+  });
+
+  it("rejects empty Cursor paths when session slug is unsafe", () => {
+    const resolved = resolveGenerateInputs(
+      {
+        provider: "cursor",
+        filePaths: [],
+        sessionSlug: "../../../etc/passwd",
+      },
+      [makeSession({ filePaths: [], toolPaths: [] })],
+    );
+    expect(resolved.ok).toBe(false);
+    expect(resolved.ok === false && resolved.error).toContain("filePaths is required");
+  });
+
+  it("rejects empty Cursor paths when session slug does not resolve", () => {
+    const resolved = resolveGenerateInputs(
+      {
+        provider: "cursor",
+        filePaths: [],
+        sessionSlug: "missing01",
+      },
+      [makeSession({ slug: "different", filePaths: [], toolPaths: [] })],
     );
     expect(resolved.ok).toBe(false);
     expect(resolved.ok === false && resolved.error).toContain("filePaths is required");

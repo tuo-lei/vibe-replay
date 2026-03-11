@@ -74,7 +74,8 @@ type GenerateInputResolution =
 function toStringArray(value: unknown): string[] | null {
   if (value === undefined) return [];
   if (!Array.isArray(value)) return null;
-  return value.filter((item): item is string => typeof item === "string");
+  if (value.some((item) => typeof item !== "string")) return null;
+  return value;
 }
 
 export function resolveGenerateInputs(
