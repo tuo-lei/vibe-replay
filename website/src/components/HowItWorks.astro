@@ -260,16 +260,78 @@
             <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-accent/10 to-cyan-400/5 flex items-center justify-center text-accent font-mono text-sm font-bold">4</span>
             <h3 class="text-xl font-semibold">Share to the world</h3>
           </div>
-          <p class="text-text-secondary leading-relaxed">One flag publishes to GitHub Gist and your session appears on vibe-replay.com — searchable, permanent, no expiry.</p>
+          <p class="text-text-secondary leading-relaxed">Publish to GitHub Gist with one click. Your replay gets a permanent link on vibe-replay.com &mdash; and shows up on the Explore page for the community.</p>
         </div>
-        <div class="md:w-3/5 rounded-xl border border-border bg-surface-1 p-5 font-mono text-sm space-y-4">
-          <div class="space-y-1.5">
-            <div><span class="text-accent">$</span> <span class="text-text-primary">npx vibe-replay -s last --gist</span></div>
-            <div class="text-emerald-400">&nbsp; ✓ Published → <a href="/explore" class="hover:underline">vibe-replay.com/view/?gist=abc123</a></div>
+        <div class="md:w-3/5 rounded-xl border border-[#30363d] bg-[#0d1117] overflow-hidden font-mono text-xs">
+          <!-- Explore page header -->
+          <div class="flex items-center justify-between px-4 py-2.5 border-b border-[#30363d] bg-[#161b22]">
+            <div class="flex items-center gap-2">
+              <span class="text-[#3fb950] font-semibold text-sm">vibe-replay</span>
+              <span class="text-[#30363d]">|</span>
+              <span class="text-[#e6edf3] text-[11px]">Explore</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <svg class="w-3.5 h-3.5 text-[#8b949e]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+              <span class="text-[10px] text-[#8b949e]">Search replays...</span>
+            </div>
           </div>
-          <div class="border-t border-border pt-3 flex items-center gap-2 text-xs text-text-muted">
-            <svg class="w-3.5 h-3.5 text-accent shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-            Discoverable on <a href="/explore" class="text-accent hover:underline ml-1">vibe-replay.com/explore</a>
+          <!-- Replay cards -->
+          <div class="p-3 space-y-2">
+            <!-- Featured card -->
+            <div class="rounded-xl bg-[#161b22] border border-[#3fb950]/30 px-4 py-3 space-y-2">
+              <div class="flex items-center justify-between">
+                <span class="text-[#e6edf3] text-sm font-medium">Comment feature in Vibe Replay</span>
+                <span class="text-[10px] text-[#3fb950] px-1.5 py-0.5 rounded-full bg-[#3fb950]/10">Live</span>
+              </div>
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <span class="px-1.5 py-0.5 rounded-md bg-[#1a1a24] text-[#8b949e]">14 turns</span>
+                <span class="px-1.5 py-0.5 rounded-md bg-[#d29922]/15 text-[#d29922]">408 tools</span>
+                <span class="px-1.5 py-0.5 rounded-md bg-[#58a6ff]/15 text-[#58a6ff]">18 files</span>
+                <span class="px-1.5 py-0.5 rounded-md bg-[#3fb950]/10 text-[#3fb950]">58m</span>
+              </div>
+              <div class="flex items-center gap-2 text-[10px] text-[#8b949e]">
+                <span class="px-1.5 py-0.5 rounded-full bg-[#d29922]/15 text-[#D97706] font-medium uppercase tracking-wide">Claude</span>
+                <span>@tuo-lei</span>
+                <span class="text-[#30363d]">&middot;</span>
+                <span>Mar 8, 2026</span>
+              </div>
+            </div>
+            <!-- Another card -->
+            <div class="rounded-xl bg-[#161b22] border border-[#30363d] px-4 py-3 space-y-2 opacity-70">
+              <div class="flex items-center justify-between">
+                <span class="text-[#e6edf3] text-sm font-medium">Refactor auth to use JWT tokens</span>
+                <span class="text-[10px] text-[#3fb950] px-1.5 py-0.5 rounded-full bg-[#3fb950]/10">Live</span>
+              </div>
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <span class="px-1.5 py-0.5 rounded-md bg-[#1a1a24] text-[#8b949e]">9 turns</span>
+                <span class="px-1.5 py-0.5 rounded-md bg-[#d29922]/15 text-[#d29922]">42 tools</span>
+                <span class="px-1.5 py-0.5 rounded-md bg-[#58a6ff]/15 text-[#58a6ff]">7 files</span>
+              </div>
+              <div class="flex items-center gap-2 text-[10px] text-[#8b949e]">
+                <span class="px-1.5 py-0.5 rounded-full bg-[#0096FF]/15 text-[#0096FF] font-medium uppercase tracking-wide">Cursor</span>
+                <span>@dev-user</span>
+                <span class="text-[#30363d]">&middot;</span>
+                <span>Mar 7, 2026</span>
+              </div>
+            </div>
+          </div>
+          <!-- Footer benefits -->
+          <div class="flex items-center justify-between px-4 py-2.5 border-t border-[#30363d] bg-[#161b22] text-[10px] text-[#8b949e]">
+            <div class="flex items-center gap-3">
+              <span class="flex items-center gap-1">
+                <svg class="w-3 h-3 text-[#3fb950]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+                Free hosting
+              </span>
+              <span class="flex items-center gap-1">
+                <svg class="w-3 h-3 text-[#3fb950]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+                You own it
+              </span>
+              <span class="flex items-center gap-1">
+                <svg class="w-3 h-3 text-[#3fb950]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+                Delete anytime
+              </span>
+            </div>
+            <a href="/explore" class="text-[#3fb950] hover:underline">Explore all &rarr;</a>
           </div>
         </div>
       </div>
