@@ -114,15 +114,15 @@ program
         message: "What would you like to do?",
         choices: [
           {
-            name: `${chalk.bold.cyan("◆")} ${chalk.bold("Dashboard")} ${chalk.dim("— browse, annotate, share & export all replays")} ${chalk.cyan("(recommended)")}`,
+            name: `${chalk.bold.cyan("○")} ${chalk.bold("Dashboard")} ${chalk.dim("— browse, annotate, share & export all replays")} ${chalk.cyan("(recommended)")}`,
             value: "dashboard" as const,
           },
           {
-            name: `${chalk.bold.green("▶")} ${chalk.bold("New Replay")} ${chalk.dim("— pick a session and generate a replay")}`,
+            name: `${chalk.bold.green("○")} ${chalk.bold("New Replay")} ${chalk.dim("— pick a session and generate a replay")}`,
             value: "sessions" as const,
           },
           {
-            name: `${chalk.bold.magenta("◎")} ${chalk.bold("Open Replay")} ${chalk.dim("— quick-open an existing replay in browser")}`,
+            name: `${chalk.bold.magenta("○")} ${chalk.bold("Open Replay")} ${chalk.dim("— quick-open an existing replay in browser")}`,
             value: "replays" as const,
           },
         ],

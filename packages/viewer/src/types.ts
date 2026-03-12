@@ -3,8 +3,11 @@ export type {
   Annotation,
   DataSource,
   DataSourceInfo,
+  PrLink,
   ReplaySession,
   Scene,
+  TokenUsage,
+  TurnStat,
 } from "@vibe-replay/types";
 
 // Re-import for local use in this file
@@ -14,6 +17,7 @@ import type { ReplaySession } from "@vibe-replay/types";
 
 export interface SessionSummary {
   slug: string;
+  sessionId?: string;
   title?: string;
   provider: string;
   model?: string;

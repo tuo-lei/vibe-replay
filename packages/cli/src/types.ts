@@ -3,8 +3,11 @@ export type {
   Annotation,
   DataSource,
   DataSourceInfo,
+  PrLink,
   ReplaySession,
   Scene,
+  TokenUsage,
+  TurnStat,
 } from "@vibe-replay/types";
 
 // CLI-only types below

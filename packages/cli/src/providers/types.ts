@@ -1,19 +1,13 @@
+import type { PrLink, TokenUsage, TurnStat } from "@vibe-replay/types";
 import type { DataSource, DataSourceInfo, ParsedTurn, SessionInfo } from "../types.js";
 
-export type { DataSource, DataSourceInfo };
+export type { DataSource, DataSourceInfo, TokenUsage };
 
 export interface Provider {
   name: string;
   displayName: string;
   discover(): Promise<SessionInfo[]>;
   parse(filePaths: string | string[], sessionInfo?: SessionInfo): Promise<ProviderParseResult>;
-}
-
-export interface TokenUsage {
-  inputTokens: number;
-  outputTokens: number;
-  cacheCreationTokens: number;
-  cacheReadTokens: number;
 }
 
 export interface Compaction {
@@ -38,4 +32,8 @@ export interface ProviderParseResult {
   /** Per-model token usage breakdown for accurate cost estimation */
   tokenUsageByModel?: Record<string, TokenUsage>;
   compactions?: Compaction[];
+  /** Per-turn metrics (indexed by user-prompt turn, 0-based) */
+  turnStats?: TurnStat[];
+  /** PR links associated with the session */
+  prLinks?: PrLink[];
 }

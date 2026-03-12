@@ -12,7 +12,7 @@ interface Props {
 
 const TABS: { key: ActiveView; label: string }[] = [
   { key: "replay", label: "Replay" },
-  { key: "summary", label: "Summary" },
+  { key: "summary", label: "Insights" },
   { key: "export", label: "Export" },
 ];
 

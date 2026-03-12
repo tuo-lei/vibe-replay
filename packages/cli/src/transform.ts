@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { estimateCost, estimateCostSimple } from "./pricing.js";
+import { estimateCost, estimateCostSimple, getModelContextLimit } from "./pricing.js";
 import type { ProviderParseResult } from "./providers/types.js";
 import type { ReplaySession, Scene } from "./types.js";
 
@@ -79,6 +79,7 @@ export function transformToReplay(
           toolBlock._images,
         );
         (scene as any).timestamp = turn.timestamp;
+        (scene as any).isError = !!toolBlock._isError;
         scenes.push(scene);
         toolCalls++;
       }
@@ -93,6 +94,12 @@ export function transformToReplay(
     // Empty string falls back to Sonnet rates via getModelPricing default
     costEstimate = estimateCostSimple(parsed.tokenUsage, parsed.model || "");
   }
+
+  const derivedDurationMs = deriveDurationFromRange(parsed.startTime, parsed.endTime);
+  const durationMs =
+    parsed.totalDurationMs && parsed.totalDurationMs > 0
+      ? parsed.totalDurationMs
+      : derivedDurationMs;
 
   return {
     meta: {
@@ -113,14 +120,26 @@ export function transformToReplay(
         userPrompts,
         toolCalls,
         thinkingBlocks,
-        durationMs: parsed.totalDurationMs,
+        durationMs,
         tokenUsage: parsed.tokenUsage,
         costEstimate,
+        ...(parsed.turnStats ? { turnStats: parsed.turnStats } : {}),
       },
+      ...(parsed.model ? { contextLimit: getModelContextLimit(parsed.model) } : {}),
+      ...(parsed.tokenUsageByModel ? { tokenUsageByModel: parsed.tokenUsageByModel } : {}),
+      ...(parsed.prLinks && parsed.prLinks.length > 0 ? { prLinks: parsed.prLinks } : {}),
       compactions: parsed.compactions,
     },
     scenes,
   };
+}
+
+function deriveDurationFromRange(start?: string, end?: string): number | undefined {
+  if (!start || !end) return undefined;
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return undefined;
+  return Math.round(endMs - startMs);
 }
 
 function buildToolScene(

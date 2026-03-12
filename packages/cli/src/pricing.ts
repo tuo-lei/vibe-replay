@@ -78,6 +78,32 @@ export function getModelPricing(model: string): ModelPricing {
   return DEFAULT_PRICING;
 }
 
+// Non-Claude context window limits. Claude models are handled by name detection below.
+const MODEL_CONTEXT_LIMITS: Record<string, number> = {
+  "gpt-4o": 128_000,
+  "gpt-4-turbo": 128_000,
+  "gpt-4": 8_192,
+  "gemini-2": 1_000_000,
+  "gemini-1.5": 1_000_000,
+  deepseek: 128_000,
+};
+
+/**
+ * Resolve context window limit for a model ID string.
+ * Returns undefined if model is unknown.
+ */
+export function getModelContextLimit(model: string): number | undefined {
+  const lower = model.toLowerCase();
+  if (lower.includes("opus") || lower.includes("sonnet") || lower.includes("haiku")) {
+    // All Claude models: 200K
+    return 200_000;
+  }
+  for (const [key, limit] of Object.entries(MODEL_CONTEXT_LIMITS)) {
+    if (lower.includes(key)) return limit;
+  }
+  return undefined;
+}
+
 /** Calculate cost in USD for a single token usage bucket at a given pricing. */
 function computeCost(usage: TokenUsage, pricing: ModelPricing): number {
   return (

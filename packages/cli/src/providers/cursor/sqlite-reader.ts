@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import type { TokenUsage, TurnStat } from "@vibe-replay/types";
 import type { ContentBlock, ParsedTurn, SessionInfo } from "../../types.js";
 import type { ProviderParseResult } from "../types.js";
 
@@ -98,6 +99,126 @@ function toIsoTimestamp(value: unknown): string | undefined {
     return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
   }
   return undefined;
+}
+
+function toNonNegativeInt(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value >= 0 ? Math.round(value) : 0;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 0) return Math.round(parsed);
+  }
+  return 0;
+}
+
+function toPositiveMs(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return Math.round(value);
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    const msMatch = trimmed.match(/^([0-9]+(?:\.[0-9]+)?)\s*ms$/i);
+    if (msMatch) return Math.round(Number(msMatch[1]));
+    const secMatch = trimmed.match(/^([0-9]+(?:\.[0-9]+)?)\s*s(ec(?:onds?)?)?$/i);
+    if (secMatch) return Math.round(Number(secMatch[1]) * 1000);
+    const parsed = Number(trimmed);
+    if (Number.isFinite(parsed) && parsed > 0) return Math.round(parsed);
+  }
+  return undefined;
+}
+
+function hasAnyTokens(usage: TokenUsage | undefined): boolean {
+  if (!usage) return false;
+  return (
+    usage.inputTokens > 0 ||
+    usage.outputTokens > 0 ||
+    usage.cacheCreationTokens > 0 ||
+    usage.cacheReadTokens > 0
+  );
+}
+
+function emptyTokenUsage(): TokenUsage {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheCreationTokens: 0,
+    cacheReadTokens: 0,
+  };
+}
+
+function addTokenUsage(target: TokenUsage, delta: TokenUsage): void {
+  target.inputTokens += delta.inputTokens;
+  target.outputTokens += delta.outputTokens;
+  target.cacheCreationTokens += delta.cacheCreationTokens;
+  target.cacheReadTokens += delta.cacheReadTokens;
+}
+
+function cloneTokenUsage(usage: TokenUsage): TokenUsage {
+  return {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cacheCreationTokens: usage.cacheCreationTokens,
+    cacheReadTokens: usage.cacheReadTokens,
+  };
+}
+
+function tokenUsageHasDrop(current: TokenUsage, previous: TokenUsage): boolean {
+  return (
+    current.inputTokens < previous.inputTokens ||
+    current.outputTokens < previous.outputTokens ||
+    current.cacheCreationTokens < previous.cacheCreationTokens ||
+    current.cacheReadTokens < previous.cacheReadTokens
+  );
+}
+
+function tokenUsageDelta(current: TokenUsage, previous: TokenUsage): TokenUsage {
+  return {
+    inputTokens: Math.max(0, current.inputTokens - previous.inputTokens),
+    outputTokens: Math.max(0, current.outputTokens - previous.outputTokens),
+    cacheCreationTokens: Math.max(0, current.cacheCreationTokens - previous.cacheCreationTokens),
+    cacheReadTokens: Math.max(0, current.cacheReadTokens - previous.cacheReadTokens),
+  };
+}
+
+function estimateTokenIncrement(
+  snapshot: TokenUsage,
+  previousSnapshot: TokenUsage | undefined,
+): { increment: TokenUsage; nextSnapshot: TokenUsage } {
+  if (!previousSnapshot || !hasAnyTokens(previousSnapshot)) {
+    return { increment: cloneTokenUsage(snapshot), nextSnapshot: cloneTokenUsage(snapshot) };
+  }
+  if (tokenUsageHasDrop(snapshot, previousSnapshot)) {
+    // Cursor payloads can reset across branches/resumes; treat new snapshot as fresh baseline.
+    return { increment: cloneTokenUsage(snapshot), nextSnapshot: cloneTokenUsage(snapshot) };
+  }
+  return {
+    increment: tokenUsageDelta(snapshot, previousSnapshot),
+    nextSnapshot: cloneTokenUsage(snapshot),
+  };
+}
+
+function tokenUsageFromCursorTokenCount(value: unknown): TokenUsage | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const obj = value as Record<string, any>;
+  const usage: TokenUsage = {
+    inputTokens: toNonNegativeInt(obj.inputTokens ?? obj.input_tokens),
+    outputTokens: toNonNegativeInt(obj.outputTokens ?? obj.output_tokens),
+    cacheCreationTokens: toNonNegativeInt(
+      obj.cacheCreationTokens ?? obj.cache_creation_input_tokens,
+    ),
+    cacheReadTokens: toNonNegativeInt(obj.cacheReadTokens ?? obj.cache_read_input_tokens),
+  };
+  return hasAnyTokens(usage) ? usage : undefined;
+}
+
+function computeDurationFromIsoRange(start?: string, end?: string): number | undefined {
+  if (!start || !end) return undefined;
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return undefined;
+  return Math.round(endMs - startMs);
 }
 
 async function resolveProjectRootFromPath(rawPath: string): Promise<string | null> {
@@ -494,12 +615,21 @@ async function parseCursorStoreDb(sessionId: string): Promise<ProviderParseResul
     }
     stmt.free();
 
-    const turns = messagesToTurns(messages);
+    const { turns, turnStats, totalDurationMs } = messagesToTurns(messages);
     const slug = sessionId.slice(0, 8);
 
     const firstUser = turns.find((t) => t.role === "user");
     const firstText = firstUser?.blocks.find((b) => b.type === "text");
     const title = metaJson.name || (firstText as any)?.text?.slice(0, 80);
+    const hasDurationStats = turnStats.some((stat) => (stat.durationMs || 0) > 0);
+
+    const notes: string[] = [];
+    if (hasDurationStats) {
+      notes.push("Per-turn duration is estimated from Cursor tool execution metadata.");
+    } else {
+      notes.push("Per-turn duration metrics are unavailable for this Cursor SQLite session.");
+    }
+    notes.push("Token usage is unavailable for this Cursor SQLite session.");
 
     return {
       sessionId,
@@ -508,11 +638,14 @@ async function parseCursorStoreDb(sessionId: string): Promise<ProviderParseResul
       cwd: "",
       model: metaJson.lastUsedModel,
       startTime: metaJson.createdAt ? new Date(metaJson.createdAt).toISOString() : undefined,
+      ...(totalDurationMs !== undefined ? { totalDurationMs } : {}),
+      ...(turnStats.length > 0 ? { turnStats } : {}),
       turns,
       dataSource: "sqlite",
       dataSourceInfo: {
         primary: "sqlite",
         sources: ["cursor/chats/<workspace-hash>/<session-id>/store.db"],
+        notes,
       },
     };
   } finally {
@@ -585,6 +718,60 @@ function extractToolResultText(value: unknown): string {
   return JSON.stringify(obj, null, 2);
 }
 
+function hasToolError(value: unknown): boolean {
+  if (!value) return false;
+  if (typeof value === "string") {
+    const parsed = parseJson(value);
+    if (!parsed) return false;
+    return hasToolError(parsed);
+  }
+  if (Array.isArray(value)) return value.some((item) => hasToolError(item));
+  if (typeof value !== "object") return false;
+
+  const obj = value as Record<string, any>;
+  if (obj.isError === true) return true;
+  if (obj.failure) return true;
+  if (obj.rejected && obj.rejected !== false) return true;
+  if (typeof obj.error === "string" && obj.error.trim()) return true;
+  if (obj.error === true) return true;
+  if (obj.output && typeof obj.output === "object") {
+    const output = obj.output as Record<string, any>;
+    if (output.failure) return true;
+    if (output.success === false) return true;
+  }
+  return false;
+}
+
+function extractToolExecutionTimeMs(value: unknown): number | undefined {
+  if (!value) return undefined;
+  if (typeof value === "string") {
+    const parsed = parseJson(value);
+    return parsed ? extractToolExecutionTimeMs(parsed) : toPositiveMs(value);
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const ms = extractToolExecutionTimeMs(item);
+      if (ms !== undefined) return ms;
+    }
+    return undefined;
+  }
+  if (typeof value !== "object") return undefined;
+
+  const obj = value as Record<string, any>;
+  const direct =
+    toPositiveMs(obj.localExecutionTimeMs) ??
+    toPositiveMs(obj.executionTimeMs) ??
+    toPositiveMs(obj.executionTime);
+  if (direct !== undefined) return direct;
+  if (obj.output && typeof obj.output === "object") {
+    const output = obj.output as Record<string, any>;
+    const successMs = extractToolExecutionTimeMs(output.success);
+    if (successMs !== undefined) return successMs;
+    return extractToolExecutionTimeMs(output.failure);
+  }
+  return undefined;
+}
+
 function parseToolFormerBlock(
   bubbleId: string,
   toolFormerData: Record<string, any>,
@@ -603,7 +790,129 @@ function parseToolFormerBlock(
     name: mapCursorToolName(name),
     input: mapToolArgs(name, paramsRaw),
     _result: result,
+    ...(hasToolError(toolFormerData.result) ? { _isError: true } : {}),
   } as any;
+}
+
+interface GlobalStateTurnEntry {
+  turn: ParsedTurn;
+  bubble: Record<string, any>;
+}
+
+function extractBubbleModelName(
+  bubble: Record<string, any>,
+  fallbackModel: string | undefined,
+): string | undefined {
+  const fromModelInfo =
+    bubble.modelInfo &&
+    typeof bubble.modelInfo === "object" &&
+    typeof bubble.modelInfo.modelName === "string"
+      ? bubble.modelInfo.modelName
+      : undefined;
+  const fromBubble = typeof bubble.modelName === "string" ? bubble.modelName : undefined;
+  const fromConfig =
+    bubble.modelConfig &&
+    typeof bubble.modelConfig === "object" &&
+    typeof bubble.modelConfig.modelName === "string"
+      ? bubble.modelConfig.modelName
+      : undefined;
+  return fromModelInfo || fromBubble || fromConfig || fallbackModel;
+}
+
+function extractBubbleDurationMs(bubble: Record<string, any>): number | undefined {
+  const thinkingMs = toPositiveMs(bubble.thinkingDurationMs);
+  const toolMs = extractToolExecutionTimeMs((bubble.toolFormerData as any)?.result);
+  if (thinkingMs !== undefined && toolMs !== undefined) return thinkingMs + toolMs;
+  return thinkingMs ?? toolMs;
+}
+
+function buildGlobalStateMetrics(
+  entries: GlobalStateTurnEntry[],
+  fallbackModel: string | undefined,
+  sessionTokenUsage?: TokenUsage,
+): {
+  tokenUsage?: TokenUsage;
+  tokenUsageByModel?: Record<string, TokenUsage>;
+  turnStats?: TurnStat[];
+  totalDurationMs?: number;
+} {
+  if (entries.length === 0) return {};
+
+  const totals = emptyTokenUsage();
+  const byModel: Record<string, TokenUsage> = {};
+  const turnStats: TurnStat[] = [];
+  const lastSnapshotByModel = new Map<string, TokenUsage>();
+  let currentTurnIndex = -1;
+
+  for (const entry of entries) {
+    if (entry.turn.role === "user") {
+      currentTurnIndex++;
+      turnStats.push({ turnIndex: currentTurnIndex });
+      continue;
+    }
+
+    if (currentTurnIndex < 0) continue;
+    const current = turnStats[currentTurnIndex];
+
+    const bubbleModel = extractBubbleModelName(entry.bubble, fallbackModel);
+    if (!current.model && bubbleModel) {
+      current.model = bubbleModel;
+    }
+
+    const bubbleUsage = tokenUsageFromCursorTokenCount(entry.bubble.tokenCount);
+    if (bubbleUsage) {
+      const usageModel = bubbleModel || "unknown";
+      const previousSnapshot = lastSnapshotByModel.get(usageModel);
+      const { increment, nextSnapshot } = estimateTokenIncrement(bubbleUsage, previousSnapshot);
+      lastSnapshotByModel.set(usageModel, nextSnapshot);
+
+      if (hasAnyTokens(increment)) {
+        if (!current.tokenUsage) current.tokenUsage = emptyTokenUsage();
+        addTokenUsage(current.tokenUsage, increment);
+        addTokenUsage(totals, increment);
+
+        if (!byModel[usageModel]) byModel[usageModel] = emptyTokenUsage();
+        addTokenUsage(byModel[usageModel], increment);
+      }
+
+      current.contextTokens = Math.max(
+        current.contextTokens || 0,
+        bubbleUsage.inputTokens + bubbleUsage.cacheReadTokens + bubbleUsage.cacheCreationTokens,
+      );
+    }
+
+    const bubbleDurationMs = extractBubbleDurationMs(entry.bubble);
+    if (bubbleDurationMs !== undefined) {
+      current.durationMs = (current.durationMs || 0) + bubbleDurationMs;
+    }
+  }
+
+  for (const stat of turnStats) {
+    if (stat.tokenUsage && !hasAnyTokens(stat.tokenUsage)) {
+      delete stat.tokenUsage;
+    }
+    if ((stat.durationMs || 0) <= 0) {
+      delete stat.durationMs;
+    }
+    if ((stat.contextTokens || 0) <= 0) {
+      delete stat.contextTokens;
+    }
+  }
+
+  const totalDurationMs =
+    turnStats.length > 0
+      ? turnStats.reduce((sum, stat) => sum + (stat.durationMs || 0), 0) || undefined
+      : undefined;
+
+  const totalTokens =
+    sessionTokenUsage && hasAnyTokens(sessionTokenUsage) ? sessionTokenUsage : totals;
+
+  return {
+    ...(hasAnyTokens(totalTokens) ? { tokenUsage: totalTokens } : {}),
+    ...(Object.keys(byModel).length > 0 ? { tokenUsageByModel: byModel } : {}),
+    ...(turnStats.length > 0 ? { turnStats } : {}),
+    ...(totalDurationMs !== undefined ? { totalDurationMs } : {}),
+  };
 }
 
 function bubbleToTurn(bubble: Record<string, any>): ParsedTurn | null {
@@ -667,7 +976,7 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
     if (countComposerConversationHeaders(composer) === 0) return null;
     const headers = composer.fullConversationHeadersOnly as any[];
 
-    const turns: ParsedTurn[] = [];
+    const entries: GlobalStateTurnEntry[] = [];
     const bubbleStmt = db.prepare("SELECT value FROM cursorDiskKV WHERE key = ?");
     for (const header of headers) {
       const bubbleId =
@@ -683,7 +992,7 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
           const bubble = parseJson<Record<string, any>>(rawBubble);
           if (bubble) {
             const turn = bubbleToTurn(bubble);
-            if (turn) turns.push(turn);
+            if (turn) entries.push({ turn, bubble });
           }
         }
       } finally {
@@ -692,6 +1001,7 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
     }
     bubbleStmt.free();
 
+    const turns = entries.map((entry) => entry.turn);
     if (turns.length === 0) return null;
 
     const firstUser = turns.find((t) => t.role === "user");
@@ -704,6 +1014,36 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
         ? composer.modelConfig.modelName
         : undefined;
 
+    const startTime = toIsoTimestamp(composer.createdAt);
+    const endTime = toIsoTimestamp(composer.lastUpdatedAt);
+    const sessionTokenUsage = tokenUsageFromCursorTokenCount(composer.tokenCount);
+    const metrics = buildGlobalStateMetrics(entries, modelName, sessionTokenUsage);
+    const totalDurationMs =
+      metrics.totalDurationMs ?? computeDurationFromIsoRange(startTime, endTime);
+
+    const notes = ["cursorDiskKV keys: composerData:* + bubbleId:*"];
+    if (!metrics.tokenUsage) {
+      notes.push("Token usage is unavailable in this Cursor global-state session.");
+    } else if (metrics.tokenUsageByModel?.unknown) {
+      notes.push("Model attribution is partial; some token usage is grouped under 'unknown'.");
+      notes.push("Token usage is estimated from Cursor token snapshots and may be approximate.");
+    } else {
+      notes.push("Token usage is estimated from Cursor token snapshots.");
+    }
+    if (metrics.totalDurationMs !== undefined) {
+      notes.push("Duration is estimated from Cursor thinking and tool execution timing.");
+    } else if (totalDurationMs !== undefined) {
+      notes.push("Duration is estimated from session start/end timestamps.");
+    }
+    const hasDetailedTurnStats = Boolean(
+      metrics.turnStats?.some(
+        (stat) => !!stat.durationMs || !!stat.contextTokens || !!stat.tokenUsage,
+      ),
+    );
+    if (!hasDetailedTurnStats) {
+      notes.push("Per-turn metrics are limited for this session.");
+    }
+
     return {
       sessionId,
       slug: sessionId.slice(0, 8),
@@ -712,14 +1052,18 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
         (firstText?.text as string | undefined)?.slice(0, 80),
       cwd: inferredProject || "",
       model: modelName,
-      startTime: toIsoTimestamp(composer.createdAt),
-      endTime: toIsoTimestamp(composer.lastUpdatedAt),
+      startTime,
+      endTime,
+      ...(totalDurationMs !== undefined ? { totalDurationMs } : {}),
+      ...(metrics.tokenUsage ? { tokenUsage: metrics.tokenUsage } : {}),
+      ...(metrics.tokenUsageByModel ? { tokenUsageByModel: metrics.tokenUsageByModel } : {}),
+      ...(metrics.turnStats ? { turnStats: metrics.turnStats } : {}),
       turns,
       dataSource: "global-state",
       dataSourceInfo: {
         primary: "global-state",
         sources: ["cursor/user/globalStorage/state.vscdb"],
-        notes: ["cursorDiskKV keys: composerData:* + bubbleId:*"],
+        notes,
       },
     };
   } catch {
@@ -729,20 +1073,39 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
   }
 }
 
-function buildToolResultMap(messages: CursorMessage[]): Map<string, CursorBlock> {
-  const map = new Map<string, CursorBlock>();
+interface CursorToolResult {
+  result: string;
+  isError?: boolean;
+  executionTimeMs?: number;
+}
+
+function buildToolResultMap(messages: CursorMessage[]): Map<string, CursorToolResult> {
+  const map = new Map<string, CursorToolResult>();
   for (const msg of messages) {
     if (msg.role !== "tool" || !Array.isArray(msg.content)) continue;
     for (const block of msg.content) {
       if (block.type === "tool-result" && block.toolCallId) {
-        map.set(block.toolCallId, block);
+        const resultText = extractToolResultText(block.result);
+        const topLevelResult = msg.providerOptions?.cursor?.highLevelToolCallResult;
+        const combinedSource = topLevelResult || block.result;
+        map.set(block.toolCallId, {
+          result: resultText,
+          ...(hasToolError(combinedSource) ? { isError: true } : {}),
+          ...(extractToolExecutionTimeMs(combinedSource) !== undefined
+            ? { executionTimeMs: extractToolExecutionTimeMs(combinedSource) }
+            : {}),
+        });
       }
     }
   }
   return map;
 }
 
-function messagesToTurns(messages: CursorMessage[]): ParsedTurn[] {
+function messagesToTurns(messages: CursorMessage[]): {
+  turns: ParsedTurn[];
+  turnStats: TurnStat[];
+  totalDurationMs?: number;
+} {
   const toolResults = buildToolResultMap(messages);
   const turns: ParsedTurn[] = [];
 
@@ -769,7 +1132,12 @@ function messagesToTurns(messages: CursorMessage[]): ParsedTurn[] {
     }
   }
 
-  return turns;
+  const turnStats = buildStoreTurnStats(turns);
+  const totalDurationMs =
+    turnStats.length > 0
+      ? turnStats.reduce((sum, stat) => sum + (stat.durationMs || 0), 0) || undefined
+      : undefined;
+  return { turns, turnStats, totalDurationMs };
 }
 
 const SYSTEM_CONTEXT_RE = /^<(?:user_info|system_reminder|agent_transcripts|rules|git_status)>/;
@@ -794,7 +1162,7 @@ function parseUserContent(content: string | CursorBlock[] | undefined): ContentB
 
 function parseAssistantContent(
   content: string | CursorBlock[] | undefined,
-  toolResults: Map<string, CursorBlock>,
+  toolResults: Map<string, CursorToolResult>,
 ): ContentBlock[] {
   if (!content) return [];
   if (typeof content === "string") {
@@ -815,11 +1183,40 @@ function parseAssistantContent(
         name: mapCursorToolName(b.toolName),
         input: mapToolArgs(b.toolName, b.args || {}),
         _result: result?.result || "",
+        ...(result?.isError ? { _isError: true } : {}),
+        ...(result?.executionTimeMs ? { _durationMs: result.executionTimeMs } : {}),
       };
       blocks.push(toolBlock);
     }
   }
   return blocks;
+}
+
+function buildStoreTurnStats(turns: ParsedTurn[]): TurnStat[] {
+  const turnStats: TurnStat[] = [];
+  let currentTurnIndex = -1;
+
+  for (const turn of turns) {
+    if (turn.role === "user") {
+      currentTurnIndex++;
+      turnStats.push({ turnIndex: currentTurnIndex });
+      continue;
+    }
+
+    if (currentTurnIndex < 0) continue;
+    const current = turnStats[currentTurnIndex];
+    if (!current.model && turn.model) current.model = turn.model;
+
+    for (const block of turn.blocks as any[]) {
+      if (block?.type !== "tool_use") continue;
+      const ms = toPositiveMs(block._durationMs);
+      if (ms !== undefined) {
+        current.durationMs = (current.durationMs || 0) + ms;
+      }
+    }
+  }
+
+  return turnStats;
 }
 
 function mapCursorToolName(name: string): string {
@@ -941,3 +1338,9 @@ function extractModel(msg: CursorMessage): string | undefined {
   }
   return undefined;
 }
+
+export const __testables = {
+  buildGlobalStateMetrics,
+  buildStoreTurnStats,
+  estimateTokenIncrement,
+};
