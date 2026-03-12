@@ -509,6 +509,31 @@ describe("transform — metadata", () => {
     expect(replay.meta.generator).toEqual(gen);
   });
 
+  it("falls back to start/end timestamps for duration when provider duration is missing", () => {
+    const replay = transformToReplay(
+      buildParsed({
+        startTime: "2025-01-01T00:00:00.000Z",
+        endTime: "2025-01-01T00:02:30.000Z",
+      }),
+      "cursor",
+      "~/project",
+    );
+    expect(replay.meta.stats.durationMs).toBe(150000);
+  });
+
+  it("prefers provider-reported duration over timestamp-derived fallback", () => {
+    const replay = transformToReplay(
+      buildParsed({
+        startTime: "2025-01-01T00:00:00.000Z",
+        endTime: "2025-01-01T00:10:00.000Z",
+        totalDurationMs: 42000,
+      }),
+      "cursor",
+      "~/project",
+    );
+    expect(replay.meta.stats.durationMs).toBe(42000);
+  });
+
   it("stats count scenes correctly", () => {
     const replay = transformToReplay(
       buildParsed({

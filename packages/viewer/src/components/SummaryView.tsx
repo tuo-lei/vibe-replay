@@ -58,10 +58,27 @@ function useChartHover(turnCount: number) {
   return { hovered, ref, onMouseMove, onMouseLeave };
 }
 
+function getDataQualityNotes(meta: ReplaySession["meta"]): string[] {
+  const notes = [...(meta.dataSourceInfo?.notes || [])];
+
+  if (
+    meta.provider === "cursor" &&
+    (meta.dataSource === "sqlite" || meta.dataSource === "global-state")
+  ) {
+    notes.unshift("Some Cursor metrics are estimates and may be incomplete for this session.");
+  }
+  if (!meta.stats.tokenUsage) {
+    notes.push("Token and cost metrics may be unavailable.");
+  }
+
+  return [...new Set(notes)];
+}
+
 // --- Main component ---
 
 export default function SummaryView({ session }: Props) {
   const { meta, scenes } = session;
+  const dataQualityNotes = useMemo(() => getDataQualityNotes(meta), [meta]);
   // File table merges edited + read-only into one component
 
   const stats = useMemo(() => {
@@ -236,6 +253,21 @@ export default function SummaryView({ session }: Props) {
             </span>
           )}
         </div>
+
+        {dataQualityNotes.length > 0 && (
+          <div className="rounded border border-terminal-orange/40 bg-terminal-orange/10 px-3 py-2">
+            <div className="text-[10px] font-sans font-semibold text-terminal-orange uppercase tracking-widest mb-1">
+              Data Quality
+            </div>
+            <div className="space-y-0.5">
+              {dataQualityNotes.slice(0, 4).map((note) => (
+                <div key={note} className="text-xs font-mono text-terminal-dim">
+                  {note}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Overview: Key Metrics + Duration/Cost + Tokens */}
         <div>

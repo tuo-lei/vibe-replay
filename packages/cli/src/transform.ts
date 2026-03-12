@@ -95,6 +95,12 @@ export function transformToReplay(
     costEstimate = estimateCostSimple(parsed.tokenUsage, parsed.model || "");
   }
 
+  const derivedDurationMs = deriveDurationFromRange(parsed.startTime, parsed.endTime);
+  const durationMs =
+    parsed.totalDurationMs && parsed.totalDurationMs > 0
+      ? parsed.totalDurationMs
+      : derivedDurationMs;
+
   return {
     meta: {
       sessionId: parsed.sessionId,
@@ -114,7 +120,7 @@ export function transformToReplay(
         userPrompts,
         toolCalls,
         thinkingBlocks,
-        durationMs: parsed.totalDurationMs,
+        durationMs,
         tokenUsage: parsed.tokenUsage,
         costEstimate,
         ...(parsed.turnStats ? { turnStats: parsed.turnStats } : {}),
@@ -126,6 +132,14 @@ export function transformToReplay(
     },
     scenes,
   };
+}
+
+function deriveDurationFromRange(start?: string, end?: string): number | undefined {
+  if (!start || !end) return undefined;
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return undefined;
+  return Math.round(endMs - startMs);
 }
 
 function buildToolScene(
