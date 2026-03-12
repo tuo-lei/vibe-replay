@@ -8,7 +8,7 @@
     "build": "astro build",
     "preview": "astro preview"
   },
-  "dependencies": {
+  "devDependencies": {
     "@astrojs/sitemap": "^3.7.1",
     "@tailwindcss/vite": "^4.2.1",
     "astro": "^6.0.3",

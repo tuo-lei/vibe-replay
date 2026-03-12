@@ -13,9 +13,11 @@ const {
   canonicalPath,
 } = Astro.props;
 
+const siteBase = import.meta.env.SITE;
 const canonicalURL = canonicalPath
-  ? new URL(canonicalPath, "https://vibe-replay.com").href
-  : new URL(Astro.url.pathname, "https://vibe-replay.com").href;
+  ? new URL(canonicalPath, siteBase).href
+  : new URL(Astro.url.pathname, siteBase).href;
+const ogImage = new URL("/og.png", siteBase).href;
 ---
 
 <!doctype html>
@@ -33,20 +35,20 @@ const canonicalURL = canonicalPath
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
     <meta property="og:url" content={canonicalURL} />
-    <meta property="og:image" content="https://vibe-replay.com/og.png" />
+    <meta property="og:image" content={ogImage} />
     <meta property="og:site_name" content="vibe-replay" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
-    <meta name="twitter:image" content="https://vibe-replay.com/og.png" />
+    <meta name="twitter:image" content={ogImage} />
 
     <!-- Structured Data -->
     <script type="application/ld+json" set:html={JSON.stringify({
       "@context": "https://schema.org",
       "@type": "WebApplication",
       "name": "vibe-replay",
-      "url": "https://vibe-replay.com",
-      "description": "Turn AI coding sessions into interactive, shareable web replays. Supports Claude Code and Cursor.",
+      "url": siteBase,
+      "description": description,
       "applicationCategory": "DeveloperApplication",
       "operatingSystem": "Any",
       "offers": {

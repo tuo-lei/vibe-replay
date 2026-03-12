@@ -138,7 +138,7 @@ importers:
         version: 4.0.18(@types/node@24.12.0)(jiti@1.21.7)(lightningcss@1.31.1)(tsx@4.21.0)(yaml@2.8.2)
 
   website:
-    dependencies:
+    devDependencies:
       '@astrojs/sitemap':
         specifier: ^3.7.1
         version: 3.7.1
