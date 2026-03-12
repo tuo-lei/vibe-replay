@@ -145,8 +145,8 @@ export default function SummaryView({ session }: Props) {
               f.turnEdits.set(turnIdx, (f.turnEdits.get(turnIdx) || 0) + 1);
               const oldL = scene.diff.oldContent ? scene.diff.oldContent.split("\n").length : 0;
               const newL = scene.diff.newContent ? scene.diff.newContent.split("\n").length : 0;
-              f.linesAdded += newL;
-              f.linesRemoved += oldL;
+              f.linesAdded += Math.max(0, newL - oldL);
+              f.linesRemoved += Math.max(0, oldL - newL);
             }
           } else if (tn === "Bash") {
             if (scene.bashOutput) {

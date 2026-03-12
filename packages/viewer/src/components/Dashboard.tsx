@@ -13,6 +13,14 @@ function normalizeTitleText(value?: string): string {
   return (value || "").replace(/\s+/g, " ").trim().slice(0, TITLE_MAX_CHARS);
 }
 
+const MoreDotsIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+    <circle cx="8" cy="3" r="1.5" />
+    <circle cx="8" cy="8" r="1.5" />
+    <circle cx="8" cy="13" r="1.5" />
+  </svg>
+);
+
 function parseCachedList<T>(payload: unknown): CachedListResponse<T> | null {
   if (!payload || typeof payload !== "object") return null;
   const obj = payload as { sessions?: unknown; cachedAt?: unknown };
@@ -228,11 +236,7 @@ function SessionMoreMenu({
         className="h-7 w-7 flex items-center justify-center rounded-md bg-terminal-surface-2 text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors duration-200"
         title="More actions"
       >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-          <circle cx="8" cy="3" r="1.5" />
-          <circle cx="8" cy="8" r="1.5" />
-          <circle cx="8" cy="13" r="1.5" />
-        </svg>
+        <MoreDotsIcon />
       </button>
       {open && (
         <div className="absolute right-0 top-full mt-1 z-50 min-w-[140px] rounded-lg bg-terminal-surface-2 border border-terminal-border shadow-layer-md py-1">

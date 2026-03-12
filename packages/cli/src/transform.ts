@@ -79,7 +79,7 @@ export function transformToReplay(
           toolBlock._images,
         );
         (scene as any).timestamp = turn.timestamp;
-        if (toolBlock._isError) (scene as any).isError = true;
+        (scene as any).isError = !!toolBlock._isError;
         scenes.push(scene);
         toolCalls++;
       }

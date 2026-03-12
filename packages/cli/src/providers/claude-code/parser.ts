@@ -427,8 +427,8 @@ function buildTurnStats(
       lastTimestamp = turn.timestamp || lastTimestamp;
     }
   }
-  // Close last group
-  if (currentMsgIds.length > 0 || turnGroups.length > 0) {
+  // Close last group (only if it has assistant messages to avoid empty trailing entry)
+  if (currentMsgIds.length > 0) {
     turnGroups.push({ msgIds: currentMsgIds, endTimestamp: lastTimestamp });
   }
 
