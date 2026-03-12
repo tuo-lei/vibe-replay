@@ -201,6 +201,66 @@ function EditableTitle({
   );
 }
 
+/** "..." menu for session cards (archive only) */
+function SessionMoreMenu({
+  onArchive,
+  isArchived,
+}: {
+  onArchive: () => void;
+  isArchived: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="h-7 w-7 flex items-center justify-center rounded-md bg-terminal-surface-2 text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors duration-200"
+        title="More actions"
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+          <circle cx="8" cy="3" r="1.5" />
+          <circle cx="8" cy="8" r="1.5" />
+          <circle cx="8" cy="13" r="1.5" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-50 min-w-[140px] rounded-lg bg-terminal-surface-2 border border-terminal-border shadow-layer-md py-1">
+          <button
+            onClick={() => {
+              onArchive();
+              setOpen(false);
+            }}
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-sans text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors"
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            >
+              <path d="M2 4h12v2H2zM3 6v7h10V6M6.5 8h3" />
+            </svg>
+            {isArchived ? "Unarchive" : "Archive"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Shared card for displaying a replay — used by both Sessions and Replays tabs */
 function ReplayCard({
   summary: s,
@@ -230,6 +290,21 @@ function ReplayCard({
   isArchived?: boolean;
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close menu on outside click
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+        setConfirmingDelete(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [menuOpen]);
 
   return (
     <div
@@ -255,12 +330,14 @@ function ReplayCard({
               </div>
             </div>
           )}
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
           {s.gist && !s.gist.outdated && (
             <a
               href={s.gist.viewerUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-xs font-mono px-1.5 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis transition-colors duration-200 shrink-0"
+              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0"
               title={`View on vibe-replay.com`}
             >
               <svg
@@ -280,32 +357,48 @@ function ReplayCard({
             <button
               onClick={onPublishGist}
               disabled={isPublishing}
-              className="inline-flex items-center gap-1 text-xs font-mono px-1.5 py-0.5 rounded bg-terminal-orange-subtle text-terminal-orange hover:bg-terminal-orange-emphasis transition-colors duration-200 disabled:opacity-50 shrink-0"
+              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-orange-subtle text-terminal-orange hover:bg-terminal-orange-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50"
             >
               {isPublishing ? "Syncing..." : "Out of sync"}
             </button>
           )}
-        </div>
-        <div className="flex items-center gap-1 shrink-0 h-8">
-          <button
-            onClick={onOpen}
-            className="h-7 px-3 text-xs font-sans font-semibold rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 ease-material flex items-center justify-center shrink-0"
-          >
-            Open
-          </button>
+          {ghAvailable && onPublishGist && !s.gist?.gistId && (
+            <button
+              onClick={onPublishGist}
+              disabled={isPublishing}
+              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50"
+              title="Publish to Gist"
+            >
+              {isPublishing ? (
+                <span className="animate-pulse">...</span>
+              ) : (
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                >
+                  <path d="M8 2v8M5 5l3-3 3 3M3 11v2h10v-2" />
+                </svg>
+              )}
+              Upload
+            </button>
+          )}
           {onRegenerate && (
             <button
               onClick={onRegenerate}
               disabled={isRegenerating}
-              className="w-8 h-8 flex items-center justify-center rounded-md text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/80 transition-colors disabled:opacity-50"
+              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50"
               title="Redo"
             >
               {isRegenerating ? (
-                <span className="animate-pulse text-terminal-green">...</span>
+                <span className="animate-pulse">...</span>
               ) : (
                 <svg
-                  width="14"
-                  height="14"
+                  width="12"
+                  height="12"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -319,85 +412,99 @@ function ReplayCard({
                   <path d="M8 16H3v5" />
                 </svg>
               )}
+              Redo
             </button>
           )}
-          {ghAvailable && onPublishGist && !s.gist?.gistId && (
-            <button
-              onClick={onPublishGist}
-              disabled={isPublishing}
-              className="w-8 h-8 flex items-center justify-center rounded-md text-terminal-dim hover:text-terminal-purple hover:bg-terminal-purple-subtle transition-colors duration-200 disabled:opacity-50"
-              title="Publish to Gist"
-            >
-              {isPublishing ? (
-                <span className="text-terminal-purple animate-pulse">...</span>
-              ) : (
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                >
-                  <path d="M8 2v8M5 5l3-3 3 3M3 11v2h10v-2" />
-                </svg>
-              )}
-            </button>
-          )}
-          {onDelete &&
-            (confirmingDelete ? (
-              <div className="flex items-center gap-1 pl-1">
-                <button
-                  onClick={() => {
-                    onDelete();
-                    setConfirmingDelete(false);
-                  }}
-                  className="h-7 px-2 text-xs font-mono rounded-md bg-terminal-red-subtle text-terminal-red hover:bg-terminal-red-emphasis transition-colors duration-200"
-                >
-                  Confirm
-                </button>
-                <button
-                  onClick={() => setConfirmingDelete(false)}
-                  className="h-7 px-2 text-xs font-mono rounded-md text-terminal-dim hover:text-terminal-text transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-            ) : (
+          <button
+            onClick={onOpen}
+            className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 ease-material flex items-center justify-center shrink-0"
+          >
+            Open
+          </button>
+          {(onDelete || onArchive) && (
+            <div className="relative" ref={menuRef}>
               <button
-                onClick={() => setConfirmingDelete(true)}
-                className="w-8 h-8 flex items-center justify-center rounded-md text-terminal-dim hover:text-terminal-red hover:bg-terminal-red-subtle transition-colors duration-200"
-                title="Delete"
+                onClick={() => {
+                  setMenuOpen((v) => !v);
+                  setConfirmingDelete(false);
+                }}
+                className="h-7 w-7 flex items-center justify-center rounded-md bg-terminal-surface-2 text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors duration-200"
+                title="More actions"
               >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                >
-                  <path d="M3 4h10M5.5 4V3a1 1 0 011-1h3a1 1 0 011 1v1M6.5 7v4M9.5 7v4M4.5 4l.5 9a1 1 0 001 1h4a1 1 0 001-1l.5-9" />
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                  <circle cx="8" cy="3" r="1.5" />
+                  <circle cx="8" cy="8" r="1.5" />
+                  <circle cx="8" cy="13" r="1.5" />
                 </svg>
               </button>
-            ))}
-          {onArchive && (
-            <button
-              onClick={onArchive}
-              className="w-8 h-8 flex items-center justify-center text-terminal-dim hover:text-terminal-text transition-colors"
-              title={isArchived ? "Unarchive" : "Archive"}
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              >
-                <path d="M2 4h12v2H2zM3 6v7h10V6M6.5 8h3" />
-              </svg>
-            </button>
+              {menuOpen && (
+                <div className="absolute right-0 top-full mt-1 z-50 min-w-[140px] rounded-lg bg-terminal-surface-2 border border-terminal-border shadow-layer-md py-1">
+                  {onArchive && (
+                    <button
+                      onClick={() => {
+                        onArchive();
+                        setMenuOpen(false);
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-sans text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors"
+                    >
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                      >
+                        <path d="M2 4h12v2H2zM3 6v7h10V6M6.5 8h3" />
+                      </svg>
+                      {isArchived ? "Unarchive" : "Archive"}
+                    </button>
+                  )}
+                  {onDelete && (
+                    <>
+                      {onArchive && <div className="mx-2 my-1 border-t border-terminal-border" />}
+                      {confirmingDelete ? (
+                        <div className="flex items-center gap-1 px-2 py-1">
+                          <button
+                            onClick={() => {
+                              onDelete();
+                              setConfirmingDelete(false);
+                              setMenuOpen(false);
+                            }}
+                            className="h-6 px-2 text-xs font-sans rounded bg-terminal-red-subtle text-terminal-red hover:bg-terminal-red-emphasis transition-colors duration-200"
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            onClick={() => setConfirmingDelete(false)}
+                            className="h-6 px-2 text-xs font-sans rounded text-terminal-dim hover:text-terminal-text transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setConfirmingDelete(true)}
+                          className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-sans text-terminal-red hover:bg-terminal-red-subtle transition-colors"
+                        >
+                          <svg
+                            width="13"
+                            height="13"
+                            viewBox="0 0 16 16"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.5"
+                          >
+                            <path d="M3 4h10M5.5 4V3a1 1 0 011-1h3a1 1 0 011 1v1M6.5 7v4M9.5 7v4M4.5 4l.5 9a1 1 0 001 1h4a1 1 0 001-1l.5-9" />
+                          </svg>
+                          Delete
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -646,6 +753,8 @@ function SessionsPanel() {
   const titleInputRef = useRef<HTMLInputElement>(null);
   const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());
   const [showArchived, setShowArchived] = useState(false);
+  const [ghAvailable, setGhAvailable] = useState<boolean | null>(null);
+  const [publishingSlug, setPublishingSlug] = useState<string | null>(null);
 
   const loadSources = useCallback(async (opts?: { forceRefresh?: boolean }) => {
     setLoading(true);
@@ -711,6 +820,10 @@ function SessionsPanel() {
 
   useEffect(() => {
     void loadSources();
+    fetch("/api/gh-status")
+      .then((r) => r.json())
+      .then((data: { available: boolean }) => setGhAvailable(data.available))
+      .catch(() => setGhAvailable(false));
   }, [loadSources]);
 
   useEffect(() => {
@@ -774,6 +887,57 @@ function SessionsPanel() {
       setGenerateError(err.message);
     } finally {
       setGeneratingSlug(null);
+    }
+  };
+
+  const handlePublishGist = async (slug: string) => {
+    setPublishingSlug(slug);
+    try {
+      const resp = await fetch(`/api/publish/gist?slug=${encodeURIComponent(slug)}`, {
+        method: "POST",
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data.error || "Publish failed");
+      }
+      const result = await resp.json();
+      setSources((prev) =>
+        prev.map((s) =>
+          s.slug === slug && s.replay
+            ? {
+                ...s,
+                replay: {
+                  ...s.replay,
+                  gist: {
+                    gistId: result.gistId,
+                    viewerUrl: result.viewerUrl,
+                    updatedAt: new Date().toISOString(),
+                    outdated: false,
+                  },
+                },
+              }
+            : s,
+        ),
+      );
+    } catch (err: any) {
+      console.error("Gist publish error:", err.message);
+    } finally {
+      setPublishingSlug(null);
+    }
+  };
+
+  const handleDeleteReplay = async (slug: string) => {
+    try {
+      const resp = await fetch(`/api/sessions/${encodeURIComponent(slug)}`, {
+        method: "DELETE",
+      });
+      if (!resp.ok) return;
+      // Remove the replay from the source so the card switches to "Generate"
+      setSources((prev) =>
+        prev.map((s) => (s.slug === slug ? { ...s, replay: undefined, existingReplay: null } : s)),
+      );
+    } catch {
+      // ignore
     }
   };
 
@@ -1167,7 +1331,11 @@ function SessionsPanel() {
                       onTitleSave={handleTitleSave}
                       onRegenerate={() => handleGenerate(s)}
                       isRegenerating={generatingSlug === s.slug}
+                      onDelete={() => handleDeleteReplay(s.slug)}
+                      onPublishGist={() => handlePublishGist(s.slug)}
                       onArchive={() => toggleArchive(s.slug)}
+                      ghAvailable={ghAvailable === true}
+                      isPublishing={publishingSlug === s.slug}
                       isArchived={isArchived}
                     />
                   );
@@ -1228,7 +1396,7 @@ function SessionsPanel() {
                           <button
                             onClick={() => handleGenerate(s)}
                             disabled={generatingSlug === s.slug}
-                            className="px-3 py-1.5 text-xs font-mono rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-colors duration-200 disabled:opacity-50 font-medium"
+                            className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 ease-material flex items-center justify-center disabled:opacity-50"
                           >
                             {generatingSlug === s.slug ? (
                               <span className="animate-pulse">Generating...</span>
@@ -1236,22 +1404,10 @@ function SessionsPanel() {
                               "Generate"
                             )}
                           </button>
-                          <button
-                            onClick={() => toggleArchive(s.slug)}
-                            className="p-1 text-terminal-dim hover:text-terminal-text transition-colors"
-                            title={isArchived ? "Unarchive" : "Archive"}
-                          >
-                            <svg
-                              width="14"
-                              height="14"
-                              viewBox="0 0 16 16"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="1.5"
-                            >
-                              <path d="M2 4h12v2H2zM3 6v7h10V6M6.5 8h3" />
-                            </svg>
-                          </button>
+                          <SessionMoreMenu
+                            onArchive={() => toggleArchive(s.slug)}
+                            isArchived={isArchived}
+                          />
                         </div>
                       </div>
                     </div>
@@ -1316,6 +1472,7 @@ function ReplaysPanel() {
   const [filter, setFilter] = useState("");
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [publishingSlug, setPublishingSlug] = useState<string | null>(null);
+  const [regeneratingSlug, setRegeneratingSlug] = useState<string | null>(null);
   const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());
   const [showArchived, setShowArchived] = useState(false);
   const [selectedProject, setSelectedProject] = useState<string>(ALL_PROJECTS);
@@ -1472,6 +1629,29 @@ function ReplaysPanel() {
       console.error("Gist publish error:", err.message);
     } finally {
       setPublishingSlug(null);
+    }
+  };
+
+  const handleRegenerate = async (s: SessionSummary) => {
+    setRegeneratingSlug(s.slug);
+    try {
+      const resp = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: s.provider,
+          sessionSlug: s.slug,
+          sessionProject: s.project,
+          title: s.title || undefined,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || "Regeneration failed");
+      navigateTo({ view: null, session: data.slug });
+    } catch (err: any) {
+      console.error("Regenerate error:", err.message);
+    } finally {
+      setRegeneratingSlug(null);
     }
   };
 
@@ -1807,9 +1987,11 @@ function ReplaysPanel() {
                     onTitleSave={handleTitleSave}
                     onDelete={() => confirmDelete(s.slug)}
                     onPublishGist={() => handlePublishGist(s.slug)}
+                    onRegenerate={() => handleRegenerate(s)}
                     onArchive={() => toggleArchive(s.slug)}
                     ghAvailable={ghAvailable === true}
                     isPublishing={publishingSlug === s.slug}
+                    isRegenerating={regeneratingSlug === s.slug}
                     isArchived={isArchived}
                   />
                 );
