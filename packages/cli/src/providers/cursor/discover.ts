@@ -142,6 +142,8 @@ async function extractSessionInfo(
       } catch {}
     }
 
+    if (!firstPrompt) return null;
+
     // Use file mtime as timestamp (Cursor doesn't store timestamps in JSONL)
     const timestamp = new Date(mtimeMs).toISOString();
 
@@ -158,7 +160,7 @@ async function extractSessionInfo(
       filePath,
       filePaths: [filePath],
       toolPaths,
-      firstPrompt: firstPrompt || "(no prompt found)",
+      firstPrompt,
     };
   } catch {
     return null;

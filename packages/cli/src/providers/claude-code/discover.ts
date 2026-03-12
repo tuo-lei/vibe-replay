@@ -127,7 +127,7 @@ export async function extractSessionInfo(
       } catch {}
     }
 
-    if (!sessionId) return null;
+    if (!sessionId || prompts.length === 0) return null;
 
     // Fallback timestamp: scan last lines for system/turn_duration with timestamp
     if (!timestamp) {
@@ -161,8 +161,8 @@ export async function extractSessionInfo(
       fileSize,
       filePath,
       filePaths: [filePath],
-      firstPrompt: prompts[0] || "(no prompt found)",
-      prompts: prompts.length > 0 ? prompts : undefined,
+      firstPrompt: prompts[0],
+      prompts,
     };
   } catch {
     return null;
