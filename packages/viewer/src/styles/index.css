@@ -43,6 +43,9 @@
   --purple-subtle: rgba(179, 146, 240, 0.15);
   --purple-emphasis: rgba(179, 146, 240, 0.25);
 
+  --cyan: #56d4dd;
+  --cyan-subtle: rgba(86, 212, 221, 0.15);
+
   /* Layered shadow color (hue-matched to dark bg) */
   --shadow-color: 215 28% 4%;
   --shadow-sm: 0 1px 2px hsl(var(--shadow-color) / 0.5);
@@ -86,6 +89,9 @@
   --purple: #8250df;
   --purple-subtle: rgba(130, 80, 223, 0.1);
   --purple-emphasis: rgba(130, 80, 223, 0.2);
+
+  --cyan: #0e7c86;
+  --cyan-subtle: rgba(14, 124, 134, 0.1);
 
   /* Layered shadow color (warm gray for light mode) */
   --shadow-color: 220 10% 50%;

@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { estimateCost, estimateCostSimple } from "./pricing.js";
+import { estimateCost, estimateCostSimple, getModelContextLimit } from "./pricing.js";
 import type { ProviderParseResult } from "./providers/types.js";
 import type { ReplaySession, Scene } from "./types.js";
 
@@ -79,6 +79,7 @@ export function transformToReplay(
           toolBlock._images,
         );
         (scene as any).timestamp = turn.timestamp;
+        if (toolBlock._isError) (scene as any).isError = true;
         scenes.push(scene);
         toolCalls++;
       }
@@ -116,7 +117,11 @@ export function transformToReplay(
         durationMs: parsed.totalDurationMs,
         tokenUsage: parsed.tokenUsage,
         costEstimate,
+        ...(parsed.turnStats ? { turnStats: parsed.turnStats } : {}),
       },
+      ...(parsed.model ? { contextLimit: getModelContextLimit(parsed.model) } : {}),
+      ...(parsed.tokenUsageByModel ? { tokenUsageByModel: parsed.tokenUsageByModel } : {}),
+      ...(parsed.prLinks && parsed.prLinks.length > 0 ? { prLinks: parsed.prLinks } : {}),
       compactions: parsed.compactions,
     },
     scenes,

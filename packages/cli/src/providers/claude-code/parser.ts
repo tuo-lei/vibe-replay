@@ -1,5 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { PrLink, TurnStat } from "@vibe-replay/types";
 import type { ContentBlock, ParsedTurn, RawMessage } from "../../types.js";
 import type { Compaction, ProviderParseResult, TokenUsage } from "../types.js";
 
@@ -42,13 +43,22 @@ export async function parseClaudeCodeSession(
   // Compaction events
   const compactions: Compaction[] = [];
 
+  // Per-turn duration events (timestamp → durationMs)
+  const turnDurations: Array<{ timestamp: string; durationMs: number }> = [];
+
+  // PR link events
+  const prLinks: PrLink[] = [];
+
   // Group assistant messages by message.id
   const assistantBlocks = new Map<string, ContentBlock[]>();
   const assistantTimestamps = new Map<string, string>();
+  const assistantModels = new Map<string, string>();
   const assistantOrder: string[] = [];
 
   // Collect tool results by tool_use_id
   const toolResults = new Map<string, string>();
+  // Collect tool error flags by tool_use_id
+  const toolErrors = new Map<string, boolean>();
   // Collect images from tool results (base64 data URIs) by tool_use_id
   const toolImages = new Map<string, string[]>();
 
@@ -84,10 +94,26 @@ export async function parseClaudeCodeSession(
     // Full subagent usage is read from subagent JSONL files instead.
     if (obj.type === "progress") continue;
 
+    // PR link events (deduplicate by URL)
+    if (obj.type === "pr-link") {
+      const d = obj.data || (obj as any);
+      if (d.prNumber && d.prUrl && !prLinks.some((p) => p.prUrl === d.prUrl)) {
+        prLinks.push({
+          prNumber: d.prNumber,
+          prUrl: d.prUrl,
+          prRepository: d.prRepository || "",
+        });
+      }
+      continue;
+    }
+
     if (obj.type === "system") {
       if (obj.subtype === "turn_duration" && obj.durationMs) {
         totalDurationMs += obj.durationMs;
-        if (obj.timestamp) endTime = obj.timestamp;
+        if (obj.timestamp) {
+          endTime = obj.timestamp;
+          turnDurations.push({ timestamp: obj.timestamp, durationMs: obj.durationMs });
+        }
       }
       if (obj.subtype === "compact_boundary" && obj.timestamp) {
         const cm = (obj as any).compactMetadata;
@@ -132,6 +158,10 @@ export async function parseClaudeCodeSession(
         if (block.type === "tool_result") {
           const resultText = extractToolResultText(block);
           toolResults.set(block.tool_use_id, resultText);
+          // Capture is_error flag
+          if ((block as any).is_error) {
+            toolErrors.set(block.tool_use_id, true);
+          }
           const images = extractImages(block);
           if (images.length > 0) {
             toolImages.set(block.tool_use_id, images);
@@ -177,6 +207,11 @@ export async function parseClaudeCodeSession(
         usageByMsgId.set(msgId, { ...usage, model: obj.message.model });
       }
 
+      // Track per-message model
+      if (obj.message.model && msgId) {
+        assistantModels.set(msgId, obj.message.model);
+      }
+
       if (!assistantBlocks.has(msgId)) {
         assistantBlocks.set(msgId, []);
         assistantOrder.push(msgId);
@@ -204,15 +239,22 @@ export async function parseClaudeCodeSession(
       if (block.type === "tool_use") {
         const result = toolResults.get(block.id) || "";
         const images = toolImages.get(block.id);
-        return { ...block, _result: result, _images: images };
+        const isError = toolErrors.get(block.id);
+        return {
+          ...block,
+          _result: result,
+          _images: images,
+          ...(isError ? { _isError: true } : {}),
+        };
       }
       return block;
     });
+    const msgModel = assistantModels.get(msgId);
     assistantTurns.push({
       turn: {
         role: "assistant",
         messageId: msgId,
-        model,
+        model: msgModel || model,
         timestamp: assistantTimestamps.get(msgId),
         blocks: enrichedBlocks,
       },
@@ -279,6 +321,9 @@ export async function parseClaudeCodeSession(
     tokenUsageByModel = byModel;
   }
 
+  // Build per-user-turn stats: aggregate token usage + model + duration for each user turn
+  const turnStats = buildTurnStats(finalTurns, usageByMsgId, turnDurations);
+
   return {
     sessionId,
     slug,
@@ -292,6 +337,8 @@ export async function parseClaudeCodeSession(
     tokenUsage,
     tokenUsageByModel,
     compactions: compactions.length > 0 ? compactions : undefined,
+    turnStats: turnStats.length > 0 ? turnStats : undefined,
+    prLinks: prLinks.length > 0 ? prLinks : undefined,
   };
 }
 
@@ -339,6 +386,111 @@ function extractToolResultText(block: ContentBlock): string {
       .join("\n");
   }
   return JSON.stringify(content);
+}
+
+/**
+ * Build per-user-turn stats by aggregating assistant messageId token usage + model + duration.
+ * A "turn" = one user prompt + all assistant responses until the next user prompt.
+ */
+function buildTurnStats(
+  finalTurns: ParsedTurn[],
+  usageByMsgId: Map<
+    string,
+    {
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_creation_input_tokens?: number;
+      cache_read_input_tokens?: number;
+      model?: string;
+    }
+  >,
+  turnDurations: Array<{ timestamp: string; durationMs: number }>,
+): TurnStat[] {
+  if (usageByMsgId.size === 0 && turnDurations.length === 0) return [];
+
+  // Group assistant messageIds by user-turn index (0-based)
+  // A user turn boundary = where role === "user" and subtype is not compaction-summary
+  const turnGroups: Array<{ msgIds: string[]; endTimestamp: string }> = [];
+  let currentMsgIds: string[] = [];
+  let lastTimestamp = "";
+
+  for (const turn of finalTurns) {
+    if (turn.role === "user" && turn.subtype !== "compaction-summary") {
+      if (turnGroups.length > 0 || currentMsgIds.length > 0) {
+        // Close previous turn group
+        turnGroups.push({ msgIds: currentMsgIds, endTimestamp: lastTimestamp });
+        currentMsgIds = [];
+      } else if (turnGroups.length === 0 && currentMsgIds.length === 0) {
+        // First user turn — nothing to close yet, but start a new group
+      }
+    }
+    if (turn.role === "assistant" && turn.messageId) {
+      currentMsgIds.push(turn.messageId);
+      lastTimestamp = turn.timestamp || lastTimestamp;
+    }
+  }
+  // Close last group
+  if (currentMsgIds.length > 0 || turnGroups.length > 0) {
+    turnGroups.push({ msgIds: currentMsgIds, endTimestamp: lastTimestamp });
+  }
+
+  // Sort duration events by timestamp for matching
+  const sortedDurations = [...turnDurations].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  let durationIdx = 0;
+
+  const stats: TurnStat[] = [];
+  for (let i = 0; i < turnGroups.length; i++) {
+    const group = turnGroups[i];
+    let turnTokens: TokenUsage | undefined;
+    let turnModel: string | undefined;
+    let maxContextTokens = 0;
+
+    for (const msgId of group.msgIds) {
+      const u = usageByMsgId.get(msgId);
+      if (!u) continue;
+      if (!turnModel && u.model) turnModel = u.model;
+
+      if (!turnTokens) {
+        turnTokens = {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 0,
+        };
+      }
+      turnTokens.inputTokens += u.input_tokens || 0;
+      turnTokens.outputTokens += u.output_tokens || 0;
+      turnTokens.cacheCreationTokens += u.cache_creation_input_tokens || 0;
+      turnTokens.cacheReadTokens += u.cache_read_input_tokens || 0;
+
+      // Context window = total prompt tokens for this single API call
+      const msgContext =
+        (u.input_tokens || 0) +
+        (u.cache_read_input_tokens || 0) +
+        (u.cache_creation_input_tokens || 0);
+      if (msgContext > maxContextTokens) maxContextTokens = msgContext;
+    }
+
+    // Match duration: find the first duration event whose timestamp >= group's end timestamp
+    // (turn_duration fires after assistant messages complete)
+    let durationMs: number | undefined;
+    if (durationIdx < sortedDurations.length && group.endTimestamp) {
+      // Consume durations that fall within or after this turn's assistant messages
+      if (sortedDurations[durationIdx].timestamp >= group.endTimestamp || group.msgIds.length > 0) {
+        durationMs = sortedDurations[durationIdx].durationMs;
+        durationIdx++;
+      }
+    }
+
+    const stat: TurnStat = { turnIndex: i };
+    if (turnModel) stat.model = turnModel;
+    if (durationMs !== undefined) stat.durationMs = durationMs;
+    if (turnTokens) stat.tokenUsage = turnTokens;
+    if (maxContextTokens > 0) stat.contextTokens = maxContextTokens;
+    stats.push(stat);
+  }
+
+  return stats;
 }
 
 /**

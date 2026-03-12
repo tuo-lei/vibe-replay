@@ -1,5 +1,27 @@
 export type DataSource = "jsonl" | "sqlite" | "jsonl+tools" | "global-state";
 
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+}
+
+export interface TurnStat {
+  turnIndex: number;
+  model?: string;
+  durationMs?: number;
+  tokenUsage?: TokenUsage;
+  /** Total prompt tokens (input + cacheRead + cacheCreation) — the context window usage for this turn */
+  contextTokens?: number;
+}
+
+export interface PrLink {
+  prNumber: number;
+  prUrl: string;
+  prRepository: string;
+}
+
 export type Scene =
   | { type: "user-prompt"; content: string; timestamp?: string; images?: string[] }
   | { type: "compaction-summary"; content: string; timestamp?: string }
@@ -11,6 +33,7 @@ export type Scene =
       input: Record<string, any>;
       result: string;
       timestamp?: string;
+      isError?: boolean;
       diff?: { filePath: string; oldContent: string; newContent: string };
       bashOutput?: { command: string; stdout: string };
       images?: string[];
@@ -58,14 +81,14 @@ export interface ReplaySession {
       toolCalls: number;
       thinkingBlocks?: number;
       durationMs?: number;
-      tokenUsage?: {
-        inputTokens: number;
-        outputTokens: number;
-        cacheCreationTokens: number;
-        cacheReadTokens: number;
-      };
+      tokenUsage?: TokenUsage;
       costEstimate?: number;
+      turnStats?: TurnStat[];
     };
+    /** Max context window tokens for the primary model (e.g. 200000 for Claude) */
+    contextLimit?: number;
+    tokenUsageByModel?: Record<string, TokenUsage>;
+    prLinks?: PrLink[];
     compactions?: Array<{
       timestamp: string;
       trigger: string;

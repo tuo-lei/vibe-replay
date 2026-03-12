@@ -713,7 +713,7 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
                       <button
                         onClick={() => setActiveView("summary")}
                         className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest hover:text-terminal-green transition-colors"
-                        title="Open Summary view"
+                        title="Open Insights view"
                       >
                         Stats
                       </button>
