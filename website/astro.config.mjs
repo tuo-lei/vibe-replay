@@ -1,11 +1,13 @@
-import tailwind from "@astrojs/tailwind";
+import sitemap from "@astrojs/sitemap";
+import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "astro/config";
 
 export default defineConfig({
-  integrations: [tailwind()],
-  output: "static",
+  site: "https://vibe-replay.com",
+  integrations: [sitemap()],
   vite: {
     plugins: [
+      tailwindcss(),
       {
         name: "public-dir-index",
         configureServer(server) {
