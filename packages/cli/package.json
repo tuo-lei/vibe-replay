@@ -1,6 +1,6 @@
 {
   "name": "vibe-replay",
-  "version": "0.0.10",
+  "version": "0.0.11",
   "description": "Turn AI coding sessions into animated, interactive web replays. One command, one HTML file, share anywhere.",
   "type": "module",
   "license": "MIT",
