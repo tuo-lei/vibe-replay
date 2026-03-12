@@ -420,8 +420,6 @@ function buildTurnStats(
         // Close previous turn group
         turnGroups.push({ msgIds: currentMsgIds, endTimestamp: lastTimestamp });
         currentMsgIds = [];
-      } else if (turnGroups.length === 0 && currentMsgIds.length === 0) {
-        // First user turn — nothing to close yet, but start a new group
       }
     }
     if (turn.role === "assistant" && turn.messageId) {
@@ -471,15 +469,11 @@ function buildTurnStats(
       if (msgContext > maxContextTokens) maxContextTokens = msgContext;
     }
 
-    // Match duration: find the first duration event whose timestamp >= group's end timestamp
-    // (turn_duration fires after assistant messages complete)
+    // Match duration sequentially — turn_duration events fire in order, one per user turn
     let durationMs: number | undefined;
-    if (durationIdx < sortedDurations.length && group.endTimestamp) {
-      // Consume durations that fall within or after this turn's assistant messages
-      if (sortedDurations[durationIdx].timestamp >= group.endTimestamp || group.msgIds.length > 0) {
-        durationMs = sortedDurations[durationIdx].durationMs;
-        durationIdx++;
-      }
+    if (durationIdx < sortedDurations.length) {
+      durationMs = sortedDurations[durationIdx].durationMs;
+      durationIdx++;
     }
 
     const stat: TurnStat = { turnIndex: i };

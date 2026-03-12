@@ -78,25 +78,13 @@ export function getModelPricing(model: string): ModelPricing {
   return DEFAULT_PRICING;
 }
 
-// Context window limits (max input tokens) by model family.
-// Returns undefined for unknown models so the viewer can decide whether to show the limit line.
+// Non-Claude context window limits. Claude models are handled by name detection below.
 const MODEL_CONTEXT_LIMITS: Record<string, number> = {
-  // Claude 4.x family
-  "opus-4": 200_000,
-  "sonnet-4": 200_000,
-  "haiku-4": 200_000,
-  // Claude 3.x family
-  "opus-3": 200_000,
-  "sonnet-3": 200_000,
-  "haiku-3": 200_000,
-  // GPT-4o (Cursor)
   "gpt-4o": 128_000,
   "gpt-4-turbo": 128_000,
   "gpt-4": 8_192,
-  // Gemini (Cursor)
   "gemini-2": 1_000_000,
   "gemini-1.5": 1_000_000,
-  // DeepSeek
   deepseek: 128_000,
 };
 
