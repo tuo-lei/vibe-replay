@@ -60,6 +60,7 @@ interface GenerateRequestBody {
   title?: unknown;
   sessionSlug?: string;
   sessionProject?: string;
+  sessionId?: string;
 }
 
 interface ResolvedGenerateInputs {
@@ -105,6 +106,10 @@ export function resolveGenerateInputs(
       );
     }
     sessionInfo = sessionInfo || slugMatches[0];
+  }
+  // Fallback: match by sessionId (covers old JSONL files where slug differs from replay slug)
+  if (!sessionInfo && typeof body.sessionId === "string" && body.sessionId) {
+    sessionInfo = discoveredSessions.find((s) => s.sessionId === body.sessionId);
   }
 
   const fallbackFilePaths = sessionInfo?.filePaths || [];
@@ -215,6 +220,7 @@ async function scanSessionsFromDir(baseDir: string): Promise<any[]> {
       results.push({
         slug: entry,
         baseDir,
+        sessionId: session.meta.sessionId,
         title: session.meta.title,
         provider: session.meta.provider,
         model: session.meta.model,
@@ -575,6 +581,7 @@ export async function startServer(
           replay: replay
             ? {
                 slug: replay.slug,
+                sessionId: replay.sessionId,
                 title: replay.title,
                 provider: replay.provider,
                 model: replay.model,

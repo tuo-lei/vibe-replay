@@ -1642,6 +1642,7 @@ function ReplaysPanel() {
           provider: s.provider,
           sessionSlug: s.slug,
           sessionProject: s.project,
+          sessionId: s.sessionId || undefined,
           title: s.title || undefined,
         }),
       });

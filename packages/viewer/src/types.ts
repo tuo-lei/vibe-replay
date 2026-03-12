@@ -17,6 +17,7 @@ import type { ReplaySession } from "@vibe-replay/types";
 
 export interface SessionSummary {
   slug: string;
+  sessionId?: string;
   title?: string;
   provider: string;
   model?: string;

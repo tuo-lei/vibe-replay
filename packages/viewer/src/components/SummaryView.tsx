@@ -62,7 +62,7 @@ function useChartHover(turnCount: number) {
 
 export default function SummaryView({ session }: Props) {
   const { meta, scenes } = session;
-  const [showReadOnly, setShowReadOnly] = useState(false);
+  // File table merges edited + read-only into one component
 
   const stats = useMemo(() => {
     // --- Per-turn tracking ---
@@ -215,8 +215,6 @@ export default function SummaryView({ session }: Props) {
     };
   }, [scenes, meta]);
 
-  const heatmapFiles = stats.editedFiles.slice(0, 8);
-  const activeTurns = stats.turns.filter((t) => t.toolCount > 0);
   const hasTurnStats = meta.stats.turnStats && meta.stats.turnStats.length > 1;
   // Build turn labels (user prompt snippets) for chart tooltips
   const turnLabels = useMemo(
@@ -357,139 +355,14 @@ export default function SummaryView({ session }: Props) {
           </div>
         )}
 
-        {/* Prompt Timeline (Enhanced) */}
+        {/* Per-Turn Breakdown Table */}
         {stats.turns.length > 0 && (
-          <div>
-            <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
-              Prompt Timeline
-            </div>
-            <div className="space-y-1">
-              {stats.turns.map((t) => {
-                const maxTools = Math.max(...stats.turns.map((x) => x.toolCount), 1);
-                const barW = (t.toolCount / maxTools) * 100;
-                return (
-                  <div
-                    key={t.sceneIndex}
-                    className="flex items-center gap-1.5 text-xs font-mono py-1 px-2 rounded hover:bg-terminal-surface-hover transition-colors"
-                  >
-                    <span className="text-terminal-green shrink-0 w-5 text-right tabular-nums">
-                      {String(t.index).padStart(2, "0")}
-                    </span>
-                    <span className="text-terminal-text flex-1 min-w-0 truncate">{t.text}</span>
-                    {/* Mini activity bar */}
-                    <div className="shrink-0 w-14 h-1.5 rounded-full bg-terminal-surface overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-terminal-orange"
-                        style={{ width: `${barW}%` }}
-                      />
-                    </div>
-                    <span className="text-terminal-dim shrink-0 w-10 text-right tabular-nums">
-                      {t.toolCount}
-                    </span>
-                    {t.errorCount > 0 && (
-                      <span className="text-terminal-red shrink-0 text-[10px] tabular-nums">
-                        {t.errorCount}err
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <TurnTable turns={stats.turns} turnStats={meta.stats.turnStats} />
         )}
 
-        {/* File Impact */}
-        {stats.editedFiles.length > 0 && (
-          <div>
-            <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
-              File Impact
-              <span className="normal-case tracking-normal ml-1.5">
-                ({stats.editedFiles.length} modified
-                {stats.readOnlyFiles.length > 0 && `, ${stats.readOnlyFiles.length} read-only`})
-              </span>
-            </div>
-            <div className="space-y-1">
-              {stats.editedFiles.map((f) => {
-                const maxEdits = stats.editedFiles[0]?.editCount || 1;
-                const barW = (f.editCount / maxEdits) * 100;
-                const isHot = f.editCount >= 10;
-                return (
-                  <div
-                    key={f.path}
-                    className="flex items-center gap-2 text-xs font-mono px-2 py-1 rounded hover:bg-terminal-surface-hover transition-colors"
-                  >
-                    <span className="text-terminal-text flex-1 min-w-0 truncate" title={f.path}>
-                      {f.path}
-                    </span>
-                    <div className="shrink-0 w-16 h-2 rounded-full bg-terminal-surface overflow-hidden">
-                      <div
-                        className={`h-full rounded-full ${isHot ? "bg-terminal-red" : "bg-terminal-orange"}`}
-                        style={{ width: `${barW}%` }}
-                      />
-                    </div>
-                    <span
-                      className={`shrink-0 w-[52px] text-right tabular-nums ${isHot ? "text-terminal-red" : "text-terminal-dim"}`}
-                    >
-                      {f.editCount} edit{f.editCount !== 1 ? "s" : ""}
-                    </span>
-                    {f.readCount > 0 && (
-                      <span className="shrink-0 w-[52px] text-right tabular-nums text-terminal-dimmer">
-                        {f.readCount} read{f.readCount !== 1 ? "s" : ""}
-                      </span>
-                    )}
-                    {isHot && (
-                      <span
-                        className="text-terminal-red shrink-0"
-                        title="Hotspot: frequently edited"
-                      >
-                        ●
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-              {/* Read-only files toggle */}
-              {stats.readOnlyFiles.length > 0 && (
-                <div>
-                  <button
-                    type="button"
-                    className="text-[10px] font-mono text-terminal-dimmer hover:text-terminal-dim mt-1 px-2"
-                    onClick={() => setShowReadOnly(!showReadOnly)}
-                  >
-                    {showReadOnly ? "▾" : "▸"} {stats.readOnlyFiles.length} read-only file
-                    {stats.readOnlyFiles.length !== 1 ? "s" : ""}
-                  </button>
-                  {showReadOnly && (
-                    <div className="space-y-0.5 pl-2 border-l border-terminal-border-subtle ml-2 mt-1">
-                      {stats.readOnlyFiles.slice(0, 20).map((f) => (
-                        <div
-                          key={f.path}
-                          className="flex items-center gap-2 text-xs font-mono text-terminal-dimmer px-2 py-0.5"
-                        >
-                          <span className="flex-1 min-w-0 truncate" title={f.path}>
-                            {f.path}
-                          </span>
-                          <span className="shrink-0 tabular-nums">
-                            {f.readCount} read{f.readCount !== 1 ? "s" : ""}
-                          </span>
-                        </div>
-                      ))}
-                      {stats.readOnlyFiles.length > 20 && (
-                        <div className="text-[10px] font-mono text-terminal-dimmer px-2">
-                          ... and {stats.readOnlyFiles.length - 20} more
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* File × Turn Heatmap */}
-        {heatmapFiles.length >= 2 && activeTurns.length >= 2 && (
-          <FileHeatmap files={heatmapFiles} turns={activeTurns} />
+        {/* File Impact Table */}
+        {(stats.editedFiles.length > 0 || stats.readOnlyFiles.length > 0) && (
+          <FileTable editedFiles={stats.editedFiles} readOnlyFiles={stats.readOnlyFiles} />
         )}
 
         {/* Activity Distribution */}
@@ -1048,71 +921,366 @@ function ModelBreakdown({
   );
 }
 
-function FileHeatmap({ files, turns }: { files: FileInfo[]; turns: TurnInfo[] }) {
-  let maxEdits = 0;
-  for (const f of files) {
-    for (const [, count] of f.turnEdits) {
-      if (count > maxEdits) maxEdits = count;
+const TURN_TABLE_COLLAPSE = 20;
+
+function TurnTable({ turns, turnStats }: { turns: TurnInfo[]; turnStats?: TurnStat[] }) {
+  const [expanded, setExpanded] = useState(false);
+
+  // Merge turn info with turnStats by index
+  const { rows, compactionAfter } = useMemo(() => {
+    const maxTools = Math.max(...turns.map((t) => t.toolCount), 1);
+    const maxDuration = Math.max(...(turnStats?.map((t) => t.durationMs || 0) || [0]), 1);
+    const maxContext = Math.max(...(turnStats?.map((t) => t.contextTokens || 0) || [0]), 1);
+    const maxOutput = Math.max(
+      ...(turnStats?.map((t) => t.tokenUsage?.outputTokens || 0) || [0]),
+      1,
+    );
+
+    // Detect compaction: context drops > 50% between consecutive turns
+    const compSet = new Set<number>();
+    if (turnStats) {
+      for (let i = 0; i < turnStats.length - 1; i++) {
+        const cur = turnStats[i]?.contextTokens || 0;
+        const next = turnStats[i + 1]?.contextTokens || 0;
+        if (cur > 0 && next > 0 && next < cur * 0.5) {
+          compSet.add(i); // compaction happened after turn i
+        }
+      }
     }
-  }
-  if (maxEdits === 0) return null;
+
+    const mapped = turns.map((t, i) => {
+      const ts = turnStats?.[i];
+      return {
+        ...t,
+        durationMs: ts?.durationMs,
+        contextTokens: ts?.contextTokens,
+        outputTokens: ts?.tokenUsage?.outputTokens,
+        toolRatio: t.toolCount / maxTools,
+        durationRatio: (ts?.durationMs || 0) / maxDuration,
+        contextRatio: (ts?.contextTokens || 0) / maxContext,
+        outputRatio: (ts?.tokenUsage?.outputTokens || 0) / maxOutput,
+      };
+    });
+
+    return { rows: mapped, compactionAfter: compSet };
+  }, [turns, turnStats]);
+
+  const hasStats = turnStats && turnStats.length > 0;
+  const hasDuration = hasStats && turnStats.some((t) => t.durationMs);
+  const hasContext = hasStats && turnStats.some((t) => t.contextTokens);
+  const hasTokens = hasStats && turnStats.some((t) => t.tokenUsage);
+  const colCount = 3 + (hasDuration ? 1 : 0) + (hasContext ? 1 : 0) + (hasTokens ? 1 : 0);
+
+  const needsCollapse = rows.length > TURN_TABLE_COLLAPSE;
+  const visibleRows = needsCollapse && !expanded ? rows.slice(0, TURN_TABLE_COLLAPSE) : rows;
 
   return (
     <div>
       <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
-        File × Turn Heatmap
+        Per-Turn Breakdown
       </div>
-      <div className="space-y-0.5">
-        {/* Turn numbers header */}
-        <div className="flex items-center gap-0.5">
-          <span className="shrink-0 w-28" />
-          <div className="flex-1 flex gap-0.5">
-            {turns.map((t) => (
-              <div
-                key={t.index}
-                className="flex-1 text-[7px] font-mono text-terminal-dimmer text-center tabular-nums leading-none"
-                title={`Turn ${t.index}: ${t.text.slice(0, 60)}`}
-              >
-                {t.index}
-              </div>
+      <div className="overflow-x-auto rounded border border-terminal-border-subtle">
+        <table className="w-full text-[11px] font-mono border-collapse">
+          <thead>
+            <tr className="text-terminal-dimmer text-left">
+              <th className="px-2 py-1.5 font-semibold w-7">#</th>
+              <th className="px-2 py-1.5 font-semibold">Prompt</th>
+              <th className="px-2 py-1.5 font-semibold text-right w-14">Tools</th>
+              {hasDuration && (
+                <th className="px-2 py-1.5 font-semibold text-right w-16">Duration</th>
+              )}
+              {hasContext && <th className="px-2 py-1.5 font-semibold text-right w-16">Context</th>}
+              {hasTokens && <th className="px-2 py-1.5 font-semibold text-right w-14">Output</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {visibleRows.map((r, i) => (
+              <TurnRow
+                key={r.sceneIndex}
+                row={r}
+                hasDuration={!!hasDuration}
+                hasContext={!!hasContext}
+                hasTokens={!!hasTokens}
+                colCount={colCount}
+                showCompaction={compactionAfter.has(i)}
+              />
             ))}
+          </tbody>
+          {needsCollapse && (
+            <tfoot>
+              <tr>
+                <td colSpan={colCount}>
+                  <button
+                    type="button"
+                    className="w-full py-1.5 text-[11px] font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors"
+                    onClick={() => setExpanded(!expanded)}
+                  >
+                    {expanded
+                      ? "▴ Collapse"
+                      : `▾ Show all ${rows.length} turns (${rows.length - TURN_TABLE_COLLAPSE} more)`}
+                  </button>
+                </td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function TurnRow({
+  row: r,
+  hasDuration,
+  hasContext,
+  hasTokens,
+  colCount,
+  showCompaction,
+}: {
+  row: {
+    index: number;
+    text: string;
+    sceneIndex: number;
+    toolCount: number;
+    errorCount: number;
+    durationMs?: number;
+    contextTokens?: number;
+    outputTokens?: number;
+    toolRatio: number;
+    durationRatio: number;
+    contextRatio: number;
+    outputRatio: number;
+  };
+  hasDuration: boolean;
+  hasContext: boolean;
+  hasTokens: boolean;
+  colCount: number;
+  showCompaction: boolean;
+}) {
+  return (
+    <>
+      <tr className="border-t border-terminal-border-subtle hover:bg-terminal-surface-hover transition-colors">
+        <td className="px-2 py-1 text-terminal-green tabular-nums">
+          {String(r.index).padStart(2, "0")}
+        </td>
+        <td className="px-2 py-1 text-terminal-text max-w-0">
+          <div className="truncate" title={r.text}>
+            {r.text}
+            {r.errorCount > 0 && (
+              <span className="text-terminal-red ml-1.5">{r.errorCount} err</span>
+            )}
           </div>
-        </div>
-        {/* File rows */}
-        {files.map((f) => {
-          const filename = f.path.split("/").pop() || f.path;
-          return (
-            <div key={f.path} className="flex items-center gap-0.5">
-              <span
-                className="shrink-0 w-28 text-[10px] font-mono text-terminal-dim text-right truncate pr-1"
-                title={f.path}
-              >
-                {filename}
+        </td>
+        <td className="px-2 py-1 text-right tabular-nums">
+          <HeatCell value={r.toolCount} ratio={r.toolRatio} color="--orange" />
+        </td>
+        {hasDuration && (
+          <td className="px-2 py-1 text-right tabular-nums">
+            <HeatCell
+              value={r.durationMs ? formatDuration(r.durationMs) : "—"}
+              ratio={r.durationRatio}
+              color="--blue"
+            />
+          </td>
+        )}
+        {hasContext && (
+          <td className="px-2 py-1 text-right tabular-nums">
+            <HeatCell
+              value={r.contextTokens ? fmtNum(r.contextTokens) : "—"}
+              ratio={r.contextRatio}
+              color="--cyan"
+            />
+          </td>
+        )}
+        {hasTokens && (
+          <td className="px-2 py-1 text-right tabular-nums">
+            <HeatCell
+              value={r.outputTokens ? fmtNum(r.outputTokens) : "—"}
+              ratio={r.outputRatio}
+              color="--green"
+            />
+          </td>
+        )}
+      </tr>
+      {showCompaction && (
+        <tr>
+          <td colSpan={colCount} className="px-0 py-0">
+            <div className="flex items-center gap-2 px-2 py-0.5 bg-terminal-red/5">
+              <div className="flex-1 border-t border-dashed border-terminal-red/40" />
+              <span className="text-[10px] font-mono text-terminal-red/70 shrink-0">
+                context compacted
               </span>
-              <div className="flex-1 flex gap-0.5">
-                {turns.map((t) => {
-                  const count = f.turnEdits.get(t.index) || 0;
-                  const opacity = count > 0 ? 0.3 + (count / maxEdits) * 0.7 : 0;
-                  return (
-                    <div
-                      key={t.index}
-                      className="flex-1 h-3 rounded-[2px]"
-                      style={{
-                        backgroundColor: count > 0 ? `var(--orange)` : "var(--surface)",
-                        opacity: count > 0 ? opacity : 0.3,
-                      }}
-                      title={
-                        count > 0
-                          ? `${filename}: ${count} edit${count !== 1 ? "s" : ""} in turn ${t.index}`
-                          : undefined
-                      }
-                    />
-                  );
-                })}
-              </div>
+              <div className="flex-1 border-t border-dashed border-terminal-red/40" />
             </div>
-          );
-        })}
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+/** Table cell with heatmap background fill proportional to ratio */
+function HeatCell({
+  value,
+  ratio,
+  color,
+}: {
+  value: string | number;
+  ratio: number;
+  color: string;
+}) {
+  return (
+    <span
+      className="inline-block w-full px-1 py-0.5 rounded-sm text-terminal-text"
+      style={{
+        backgroundColor:
+          ratio > 0
+            ? `color-mix(in srgb, var(${color}) ${Math.round(ratio * 40)}%, transparent)`
+            : undefined,
+      }}
+    >
+      {value}
+    </span>
+  );
+}
+
+const FILE_TABLE_COLLAPSE = 20;
+
+function FileTable({
+  editedFiles,
+  readOnlyFiles,
+}: {
+  editedFiles: FileInfo[];
+  readOnlyFiles: FileInfo[];
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  // Merge edited + read-only, edited first (sorted by edits desc), then read-only (sorted by reads desc)
+  const allFiles = useMemo(() => [...editedFiles, ...readOnlyFiles], [editedFiles, readOnlyFiles]);
+
+  const maxEdits = useMemo(() => Math.max(...allFiles.map((f) => f.editCount), 1), [allFiles]);
+  const maxReads = useMemo(() => Math.max(...allFiles.map((f) => f.readCount), 1), [allFiles]);
+  const maxLines = useMemo(
+    () => Math.max(...allFiles.map((f) => f.linesAdded + f.linesRemoved), 1),
+    [allFiles],
+  );
+  const hasLines = allFiles.some((f) => f.linesAdded > 0 || f.linesRemoved > 0);
+  const hasTurnSpread = allFiles.some((f) => f.turnEdits.size > 0);
+
+  const needsCollapse = allFiles.length > FILE_TABLE_COLLAPSE;
+  const visibleFiles =
+    needsCollapse && !expanded ? allFiles.slice(0, FILE_TABLE_COLLAPSE) : allFiles;
+  const colCount = 3 + (hasLines ? 1 : 0) + (hasTurnSpread ? 1 : 0);
+
+  return (
+    <div>
+      <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
+        File Impact
+        <span className="normal-case tracking-normal ml-1.5">
+          ({editedFiles.length} modified
+          {readOnlyFiles.length > 0 && `, ${readOnlyFiles.length} read-only`})
+        </span>
+      </div>
+      <div className="overflow-x-auto rounded border border-terminal-border-subtle">
+        <table className="w-full text-[11px] font-mono border-collapse">
+          <thead>
+            <tr className="text-terminal-dimmer text-left">
+              <th className="px-2 py-1.5 font-semibold">File</th>
+              <th className="px-2 py-1.5 font-semibold text-right w-14">Edits</th>
+              <th className="px-2 py-1.5 font-semibold text-right w-14">Reads</th>
+              {hasLines && <th className="px-2 py-1.5 font-semibold text-right w-20">+/−</th>}
+              {hasTurnSpread && (
+                <th className="px-2 py-1.5 font-semibold text-right w-14">Turns</th>
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {visibleFiles.map((f) => {
+              const filename = f.path.split("/").pop() || f.path;
+              const isEdited = f.editCount > 0;
+              return (
+                <tr
+                  key={f.path}
+                  className="border-t border-terminal-border-subtle hover:bg-terminal-surface-hover transition-colors"
+                >
+                  <td className="px-2 py-1 max-w-0">
+                    <div
+                      className={`truncate ${isEdited ? "text-terminal-text" : "text-terminal-dimmer"}`}
+                      title={f.path}
+                    >
+                      {filename}
+                      <span className="text-terminal-dimmer ml-1">
+                        {f.path.slice(0, f.path.length - filename.length - 1)}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="px-2 py-1 text-right tabular-nums">
+                    {f.editCount > 0 ? (
+                      <HeatCell
+                        value={f.editCount}
+                        ratio={f.editCount / maxEdits}
+                        color="--orange"
+                      />
+                    ) : (
+                      <span className="text-terminal-dimmer">—</span>
+                    )}
+                  </td>
+                  <td className="px-2 py-1 text-right tabular-nums">
+                    {f.readCount > 0 ? (
+                      <HeatCell value={f.readCount} ratio={f.readCount / maxReads} color="--blue" />
+                    ) : (
+                      <span className="text-terminal-dimmer">—</span>
+                    )}
+                  </td>
+                  {hasLines && (
+                    <td className="px-2 py-1 text-right tabular-nums">
+                      {f.linesAdded > 0 || f.linesRemoved > 0 ? (
+                        <span
+                          className="inline-block w-full px-1 py-0.5 rounded-sm"
+                          style={{
+                            backgroundColor: `color-mix(in srgb, var(--green) ${Math.round(((f.linesAdded + f.linesRemoved) / maxLines) * 30)}%, transparent)`,
+                          }}
+                        >
+                          <span className="text-terminal-green">+{f.linesAdded}</span>
+                          <span className="text-terminal-dimmer">/</span>
+                          <span className="text-terminal-red">−{f.linesRemoved}</span>
+                        </span>
+                      ) : (
+                        <span className="text-terminal-dimmer">—</span>
+                      )}
+                    </td>
+                  )}
+                  {hasTurnSpread && (
+                    <td className="px-2 py-1 text-right tabular-nums">
+                      {f.turnEdits.size > 0 ? (
+                        <span className="text-terminal-dim">{f.turnEdits.size}</span>
+                      ) : (
+                        <span className="text-terminal-dimmer">—</span>
+                      )}
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+          {needsCollapse && (
+            <tfoot>
+              <tr>
+                <td colSpan={colCount}>
+                  <button
+                    type="button"
+                    className="w-full py-1.5 text-[11px] font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors"
+                    onClick={() => setExpanded(!expanded)}
+                  >
+                    {expanded
+                      ? "▴ Collapse"
+                      : `▾ Show all ${allFiles.length} files (${allFiles.length - FILE_TABLE_COLLAPSE} more)`}
+                  </button>
+                </td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
       </div>
     </div>
   );
