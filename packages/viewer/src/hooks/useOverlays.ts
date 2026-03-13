@@ -251,66 +251,76 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
     [isEditor],
   );
 
-  const cancelStudio = isEditor
-    ? () => {
-        if (abortRef.current) abortRef.current.abort();
-      }
-    : null;
-
-  const runTranslate =
-    isEditor && studioToolName
-      ? async (opts: { targetLang: string; sourceLang?: string }) => {
-          const controller = new AbortController();
-          abortRef.current = controller;
-          setTranslating(true);
-          try {
-            const resp = await fetch(apiUrl("/api/studio/translate"), {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                toolName: studioToolName,
-                targetLang: opts.targetLang,
-                sourceLang: opts.sourceLang,
-              }),
-              signal: controller.signal,
-            });
-            const data = await resp.json();
-            if (!resp.ok) throw new Error(data.error || "Translation failed");
-            if (data.overlays) setOverlaysState(data.overlays as SessionOverlays);
-            return data.stats as { translated: number; skipped: number };
-          } finally {
-            abortRef.current = null;
-            setTranslating(false);
+  const cancelStudio = useMemo(
+    () =>
+      isEditor
+        ? () => {
+            if (abortRef.current) abortRef.current.abort();
           }
-        }
-      : null;
+        : null,
+    [isEditor],
+  );
 
-  const runTone =
-    isEditor && studioToolName
-      ? async (opts: { style: "professional" | "neutral" | "friendly" }) => {
-          const controller = new AbortController();
-          abortRef.current = controller;
-          setToningDown(true);
-          try {
-            const resp = await fetch(apiUrl("/api/studio/tone"), {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                toolName: studioToolName,
-                style: opts.style,
-              }),
-              signal: controller.signal,
-            });
-            const data = await resp.json();
-            if (!resp.ok) throw new Error(data.error || "Tone adjustment failed");
-            if (data.overlays) setOverlaysState(data.overlays as SessionOverlays);
-            return data.stats as { adjusted: number; skipped: number };
-          } finally {
-            abortRef.current = null;
-            setToningDown(false);
+  const runTranslate = useMemo(
+    () =>
+      isEditor && studioToolName
+        ? async (opts: { targetLang: string; sourceLang?: string }) => {
+            const controller = new AbortController();
+            abortRef.current = controller;
+            setTranslating(true);
+            try {
+              const resp = await fetch(apiUrl("/api/studio/translate"), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  toolName: studioToolName,
+                  targetLang: opts.targetLang,
+                  sourceLang: opts.sourceLang,
+                }),
+                signal: controller.signal,
+              });
+              const data = await resp.json();
+              if (!resp.ok) throw new Error(data.error || "Translation failed");
+              if (data.overlays) setOverlaysState(data.overlays as SessionOverlays);
+              return data.stats as { translated: number; skipped: number };
+            } finally {
+              abortRef.current = null;
+              setTranslating(false);
+            }
           }
-        }
-      : null;
+        : null,
+    [isEditor, studioToolName],
+  );
+
+  const runTone = useMemo(
+    () =>
+      isEditor && studioToolName
+        ? async (opts: { style: "professional" | "neutral" | "friendly" }) => {
+            const controller = new AbortController();
+            abortRef.current = controller;
+            setToningDown(true);
+            try {
+              const resp = await fetch(apiUrl("/api/studio/tone"), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  toolName: studioToolName,
+                  style: opts.style,
+                }),
+                signal: controller.signal,
+              });
+              const data = await resp.json();
+              if (!resp.ok) throw new Error(data.error || "Tone adjustment failed");
+              if (data.overlays) setOverlaysState(data.overlays as SessionOverlays);
+              return data.stats as { adjusted: number; skipped: number };
+            } finally {
+              abortRef.current = null;
+              setToningDown(false);
+            }
+          }
+        : null,
+    [isEditor, studioToolName],
+  );
 
   return {
     overlays,

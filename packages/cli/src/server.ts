@@ -976,6 +976,9 @@ export async function startServer(
     } catch {
       return c.json({ error: "invalid JSON body" }, 400);
     }
+    if (!body || !Array.isArray(body.overlays)) {
+      return c.json({ error: "invalid overlays shape" }, 400);
+    }
     try {
       await saveOverlays(baseDir, result.slug, body);
     } catch {
