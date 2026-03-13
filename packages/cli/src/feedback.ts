@@ -11,7 +11,7 @@
 
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import type { Annotation, ReplaySession } from "./types.js";
+import type { Annotation, OverlaySource, ReplaySession, SceneOverlay } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -691,6 +691,252 @@ export async function generateFeedback(
   }
 
   return { annotations: feedbackToAnnotations(result), result };
+}
+
+// ---------------------------------------------------------------------------
+// Translation
+// ---------------------------------------------------------------------------
+
+function buildTranslationPrompt(
+  session: ReplaySession,
+  opts: { targetLang: string; sourceLang?: string },
+): { prompt: string; userPromptScenes: Array<{ index: number; content: string }> } {
+  const userPromptScenes = session.scenes
+    .map((s, i) => (s.type === "user-prompt" ? { index: i, content: s.content } : null))
+    .filter((s): s is { index: number; content: string } => s !== null);
+
+  const scenesBlock = userPromptScenes
+    .map((s) => `--- SCENE ${s.index} ---\n${s.content}`)
+    .join("\n\n");
+
+  const sourcePart = opts.sourceLang ? `from ${opts.sourceLang} ` : "";
+
+  const prompt = `You are a translation assistant for AI coding sessions. Translate the following user prompts ${sourcePart}to ${opts.targetLang}.
+
+## Rules
+- Only translate natural language text
+- Preserve code blocks, file paths, variable names, CLI commands, and technical identifiers verbatim
+- Preserve markdown formatting
+- Keep widely-used technical jargon in their original form (API, endpoint, middleware, etc.)
+- Maintain the original intent and tone
+- If a prompt is already entirely in ${opts.targetLang}, return it unchanged with "unchanged": true
+
+## User Prompts to Translate
+
+${scenesBlock}
+
+## Required Output
+Respond with ONLY a valid JSON object. No markdown code fences. No explanation before or after.
+
+Schema:
+{
+  "translations": [
+    {
+      "sceneIndex": <number>,
+      "translated": "<string: the translated text>",
+      "unchanged": <boolean: true if prompt was already in target language>
+    }
+  ]
+}
+
+CRITICAL RULES:
+- DO NOT use any tools, file reads, or web searches
+- Output ONLY the JSON object — no other text
+- You MUST include an entry for every scene index: [${userPromptScenes.map((s) => s.index).join(", ")}]
+- Preserve all code blocks and inline code exactly as-is`;
+
+  return { prompt, userPromptScenes };
+}
+
+interface TranslationResult {
+  overlays: SceneOverlay[];
+  stats: { translated: number; skipped: number };
+}
+
+export async function generateTranslation(
+  session: ReplaySession,
+  tool: FeedbackTool,
+  opts: { targetLang: string; sourceLang?: string },
+): Promise<TranslationResult | null> {
+  if (session.meta.stats.userPrompts === 0) return null;
+
+  const { prompt, userPromptScenes } = buildTranslationPrompt(session, opts);
+  const output = await executeFeedback(prompt, tool);
+  const json = extractJson(output);
+  if (!json) return null;
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return null;
+  }
+
+  if (!parsed || !Array.isArray(parsed.translations)) return null;
+
+  const now = new Date().toISOString();
+  const validIndices = new Set(userPromptScenes.map((s) => s.index));
+  const overlays: SceneOverlay[] = [];
+  let skipped = 0;
+
+  for (const item of parsed.translations) {
+    if (!item || typeof item.sceneIndex !== "number") continue;
+    if (!validIndices.has(item.sceneIndex)) continue;
+    if (typeof item.translated !== "string") continue;
+
+    const scene = userPromptScenes.find((s) => s.index === item.sceneIndex);
+    if (!scene) continue;
+
+    if (item.unchanged || item.translated.trim() === scene.content.trim()) {
+      skipped++;
+      continue;
+    }
+
+    const source: OverlaySource = {
+      type: "translate",
+      params: { from: opts.sourceLang || "auto", to: opts.targetLang },
+    };
+
+    overlays.push({
+      id: randomUUID(),
+      sceneIndex: item.sceneIndex,
+      field: "content",
+      originalValue: scene.content,
+      modifiedValue: item.translated,
+      source,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  return { overlays, stats: { translated: overlays.length, skipped } };
+}
+
+// ---------------------------------------------------------------------------
+// Tone Adjustment
+// ---------------------------------------------------------------------------
+
+function buildTonePrompt(
+  session: ReplaySession,
+  opts: { style: "professional" | "neutral" | "friendly" },
+): { prompt: string; userPromptScenes: Array<{ index: number; content: string }> } {
+  const userPromptScenes = session.scenes
+    .map((s, i) => (s.type === "user-prompt" ? { index: i, content: s.content } : null))
+    .filter((s): s is { index: number; content: string } => s !== null);
+
+  const scenesBlock = userPromptScenes
+    .map((s) => `--- SCENE ${s.index} ---\n${s.content}`)
+    .join("\n\n");
+
+  const styleGuide: Record<string, string> = {
+    professional:
+      "Direct but respectful, suitable for work sharing. Remove frustration and harshness while keeping clarity.",
+    neutral: "Factual and unemotional, like technical documentation. Strip all emotional language.",
+    friendly: "Warm and collaborative, like messaging a teammate. Keep it casual but constructive.",
+  };
+
+  const prompt = `You are a tone adjustment assistant for AI coding sessions. Rewrite the following user prompts to be more ${opts.style}.
+
+## Style Guide: ${opts.style}
+${styleGuide[opts.style]}
+
+## Rules
+- Preserve the EXACT technical meaning and intent of each prompt
+- Remove frustration, harsh language, profanity, or passive-aggressive tone
+- Keep code references, file paths, and technical terms unchanged
+- If a prompt's tone is already appropriate, return it unchanged with "unchanged": true
+- Do NOT add excessive politeness or corporate-speak — keep it natural
+- Preserve code blocks and markdown formatting
+
+## User Prompts to Adjust
+
+${scenesBlock}
+
+## Required Output
+Respond with ONLY a valid JSON object. No markdown code fences. No explanation before or after.
+
+Schema:
+{
+  "adjustments": [
+    {
+      "sceneIndex": <number>,
+      "adjusted": "<string: the tone-adjusted text>",
+      "unchanged": <boolean: true if prompt tone was already appropriate>
+    }
+  ]
+}
+
+CRITICAL RULES:
+- DO NOT use any tools, file reads, or web searches
+- Output ONLY the JSON object — no other text
+- You MUST include an entry for every scene index: [${userPromptScenes.map((s) => s.index).join(", ")}]
+- Preserve all code blocks and inline code exactly as-is`;
+
+  return { prompt, userPromptScenes };
+}
+
+interface ToneResult {
+  overlays: SceneOverlay[];
+  stats: { adjusted: number; skipped: number };
+}
+
+export async function generateToneAdjustment(
+  session: ReplaySession,
+  tool: FeedbackTool,
+  opts: { style: "professional" | "neutral" | "friendly" },
+): Promise<ToneResult | null> {
+  if (session.meta.stats.userPrompts === 0) return null;
+
+  const { prompt, userPromptScenes } = buildTonePrompt(session, opts);
+  const output = await executeFeedback(prompt, tool);
+  const json = extractJson(output);
+  if (!json) return null;
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return null;
+  }
+
+  if (!parsed || !Array.isArray(parsed.adjustments)) return null;
+
+  const now = new Date().toISOString();
+  const validIndices = new Set(userPromptScenes.map((s) => s.index));
+  const overlays: SceneOverlay[] = [];
+  let skipped = 0;
+
+  for (const item of parsed.adjustments) {
+    if (!item || typeof item.sceneIndex !== "number") continue;
+    if (!validIndices.has(item.sceneIndex)) continue;
+    if (typeof item.adjusted !== "string") continue;
+
+    const scene = userPromptScenes.find((s) => s.index === item.sceneIndex);
+    if (!scene) continue;
+
+    if (item.unchanged || item.adjusted.trim() === scene.content.trim()) {
+      skipped++;
+      continue;
+    }
+
+    const source: OverlaySource = {
+      type: "tone",
+      params: { style: opts.style },
+    };
+
+    overlays.push({
+      id: randomUUID(),
+      sceneIndex: item.sceneIndex,
+      field: "content",
+      originalValue: scene.content,
+      modifiedValue: item.adjusted,
+      source,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  return { overlays, stats: { adjusted: overlays.length, skipped } };
 }
 
 // ---------------------------------------------------------------------------

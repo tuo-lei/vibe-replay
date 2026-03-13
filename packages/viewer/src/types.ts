@@ -3,9 +3,12 @@ export type {
   Annotation,
   DataSource,
   DataSourceInfo,
+  OverlaySource,
   PrLink,
   ReplaySession,
   Scene,
+  SceneOverlay,
+  SessionOverlays,
   TokenUsage,
   TurnStat,
 } from "@vibe-replay/types";

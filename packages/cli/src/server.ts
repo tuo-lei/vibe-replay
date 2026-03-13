@@ -9,7 +9,12 @@ import { Hono } from "hono";
 import open from "open";
 import { readFileCache, writeFileCache } from "./cache.js";
 import { cleanPromptText } from "./clean-prompt.js";
-import { detectFeedbackTools, generateFeedback } from "./feedback.js";
+import {
+  detectFeedbackTools,
+  generateFeedback,
+  generateToneAdjustment,
+  generateTranslation,
+} from "./feedback.js";
 import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.js";
 import { generateOutput } from "./generator.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
@@ -21,7 +26,7 @@ import {
 } from "./publishers/gist.js";
 import { scanForSecrets } from "./scan.js";
 import { transformToReplay } from "./transform.js";
-import type { Annotation, ReplaySession, SessionInfo } from "./types.js";
+import type { Annotation, ReplaySession, SessionInfo, SessionOverlays } from "./types.js";
 import { CLI_VERSION } from "./version.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -381,6 +386,35 @@ async function saveAnnotations(
 ): Promise<void> {
   const annPath = join(baseDir, slug, "annotations.json");
   await writeFile(annPath, JSON.stringify(annotations, null, 2), "utf-8");
+}
+
+// ─── Overlay persistence ────────────────────────────────────────────────────
+
+const EMPTY_OVERLAYS: SessionOverlays = { version: 1, overlays: [] };
+
+async function loadOverlays(baseDir: string, slug: string): Promise<SessionOverlays> {
+  const dirs = [join(baseDir, slug), resolve("./vibe-replay", slug)];
+  for (const dir of dirs) {
+    try {
+      const raw = await readFile(join(dir, "overlays.json"), "utf-8");
+      const parsed = JSON.parse(raw) as SessionOverlays;
+      if (parsed && typeof parsed === "object" && Array.isArray(parsed.overlays)) {
+        return parsed;
+      }
+    } catch {
+      /* not found */
+    }
+  }
+  return EMPTY_OVERLAYS;
+}
+
+async function saveOverlays(
+  baseDir: string,
+  slug: string,
+  overlays: SessionOverlays,
+): Promise<void> {
+  const overlayPath = join(baseDir, slug, "overlays.json");
+  await writeFile(overlayPath, JSON.stringify(overlays, null, 2), "utf-8");
 }
 
 export async function startServer(
@@ -897,6 +931,131 @@ export async function startServer(
         annotations: newAnnotations,
         score: fb.result.score,
         itemCount: fb.result.feedbackItems.length,
+      });
+    } catch (err) {
+      return c.json({ error: getErrorMessage(err) }, 500);
+    }
+  });
+
+  // --- Overlays (requires slug) ---
+  app.get("/api/overlays", async (c) => {
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+    const overlays = await loadOverlays(baseDir, result.slug);
+    return c.json(overlays);
+  });
+
+  app.post("/api/overlays", async (c) => {
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+    let body: SessionOverlays;
+    try {
+      body = await c.req.json<SessionOverlays>();
+    } catch {
+      return c.json({ error: "invalid JSON body" }, 400);
+    }
+    try {
+      await saveOverlays(baseDir, result.slug, body);
+    } catch {
+      /* ignore */
+    }
+    return c.json({ ok: true });
+  });
+
+  // --- AI Studio: Translate (requires slug) ---
+  app.post("/api/studio/translate", async (c) => {
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+
+    try {
+      const body = await c.req
+        .json<{ toolName?: string; targetLang?: string; sourceLang?: string }>()
+        .catch(() => ({}));
+      const detected = await detectFeedbackTools();
+      if (detected.tools.length === 0) {
+        return c.json({ error: "No AI CLI tool available (claude, agent, or opencode)" }, 400);
+      }
+      const toolName = typeof body.toolName === "string" ? body.toolName : undefined;
+      const tool = toolName
+        ? detected.tools.find((t) => t.name === toolName) || null
+        : detected.defaultTool;
+      if (!tool) {
+        return c.json({ error: `Requested tool is not available: ${toolName}` }, 400);
+      }
+
+      const targetSession = await loadSessionFromDisk(baseDir, result.slug);
+      const targetLang = typeof body.targetLang === "string" ? body.targetLang : "English";
+      const sourceLang = typeof body.sourceLang === "string" ? body.sourceLang : undefined;
+
+      const translationResult = await generateTranslation(targetSession, tool, {
+        targetLang,
+        sourceLang,
+      });
+      if (!translationResult) {
+        return c.json({ error: "Could not generate translations (invalid AI output)" }, 500);
+      }
+
+      // Merge with existing overlays: replace translate-sourced ones, keep others
+      const existing = await loadOverlays(baseDir, result.slug);
+      const nonTranslateOverlays = existing.overlays.filter((o) => o.source.type !== "translate");
+      const merged: SessionOverlays = {
+        version: 1,
+        overlays: [...nonTranslateOverlays, ...translationResult.overlays],
+      };
+      await saveOverlays(baseDir, result.slug, merged);
+
+      return c.json({
+        overlays: merged,
+        stats: translationResult.stats,
+      });
+    } catch (err) {
+      return c.json({ error: getErrorMessage(err) }, 500);
+    }
+  });
+
+  // --- AI Studio: Tone Adjustment (requires slug) ---
+  app.post("/api/studio/tone", async (c) => {
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+
+    try {
+      const body = await c.req.json<{ toolName?: string; style?: string }>().catch(() => ({}));
+      const detected = await detectFeedbackTools();
+      if (detected.tools.length === 0) {
+        return c.json({ error: "No AI CLI tool available (claude, agent, or opencode)" }, 400);
+      }
+      const toolName = typeof body.toolName === "string" ? body.toolName : undefined;
+      const tool = toolName
+        ? detected.tools.find((t) => t.name === toolName) || null
+        : detected.defaultTool;
+      if (!tool) {
+        return c.json({ error: `Requested tool is not available: ${toolName}` }, 400);
+      }
+
+      const targetSession = await loadSessionFromDisk(baseDir, result.slug);
+      const style =
+        typeof body.style === "string" &&
+        ["professional", "neutral", "friendly"].includes(body.style)
+          ? (body.style as "professional" | "neutral" | "friendly")
+          : "professional";
+
+      const toneResult = await generateToneAdjustment(targetSession, tool, { style });
+      if (!toneResult) {
+        return c.json({ error: "Could not adjust tone (invalid AI output)" }, 500);
+      }
+
+      // Merge: replace tone-sourced overlays, keep others
+      const existing = await loadOverlays(baseDir, result.slug);
+      const nonToneOverlays = existing.overlays.filter((o) => o.source.type !== "tone");
+      const merged: SessionOverlays = {
+        version: 1,
+        overlays: [...nonToneOverlays, ...toneResult.overlays],
+      };
+      await saveOverlays(baseDir, result.slug, merged);
+
+      return c.json({
+        overlays: merged,
+        stats: toneResult.stats,
       });
     } catch (err) {
       return c.json({ error: getErrorMessage(err) }, 500);

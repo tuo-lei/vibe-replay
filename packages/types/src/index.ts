@@ -57,6 +57,35 @@ export interface DataSourceInfo {
   notes?: string[];
 }
 
+// ---------------------------------------------------------------------------
+// Scene Overlay System — non-destructive modifications for AI Studio
+// ---------------------------------------------------------------------------
+
+export type OverlaySource =
+  | { type: "translate"; params: { from: string; to: string } }
+  | { type: "tone"; params: { style: "professional" | "neutral" | "friendly" } }
+  | { type: "manual" };
+
+export interface SceneOverlay {
+  id: string;
+  sceneIndex: number;
+  /** Which field was modified */
+  field: "content";
+  /** Snapshot of the original value (from replay.json) for diffing and reverting */
+  originalValue: string;
+  /** The current modified value to display/export */
+  modifiedValue: string;
+  /** What created or last modified this overlay */
+  source: OverlaySource;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SessionOverlays {
+  version: 1;
+  overlays: SceneOverlay[];
+}
+
 export interface ReplaySession {
   meta: {
     sessionId: string;
