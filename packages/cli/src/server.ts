@@ -9,7 +9,12 @@ import { Hono } from "hono";
 import open from "open";
 import { readFileCache, writeFileCache } from "./cache.js";
 import { cleanPromptText } from "./clean-prompt.js";
-import { detectFeedbackTools, generateFeedback } from "./feedback.js";
+import {
+  detectFeedbackTools,
+  generateFeedback,
+  generateToneAdjustment,
+  generateTranslation,
+} from "./feedback.js";
 import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.js";
 import { generateOutput } from "./generator.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
@@ -21,7 +26,7 @@ import {
 } from "./publishers/gist.js";
 import { scanForSecrets } from "./scan.js";
 import { transformToReplay } from "./transform.js";
-import type { Annotation, ReplaySession, SessionInfo } from "./types.js";
+import type { Annotation, ReplaySession, SessionInfo, SessionOverlays } from "./types.js";
 import { CLI_VERSION } from "./version.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -383,6 +388,35 @@ async function saveAnnotations(
   await writeFile(annPath, JSON.stringify(annotations, null, 2), "utf-8");
 }
 
+// ─── Overlay persistence ────────────────────────────────────────────────────
+
+const EMPTY_OVERLAYS: SessionOverlays = { version: 1, overlays: [] };
+
+async function loadOverlays(baseDir: string, slug: string): Promise<SessionOverlays> {
+  const dirs = [join(baseDir, slug), resolve("./vibe-replay", slug)];
+  for (const dir of dirs) {
+    try {
+      const raw = await readFile(join(dir, "overlays.json"), "utf-8");
+      const parsed = JSON.parse(raw) as SessionOverlays;
+      if (parsed && typeof parsed === "object" && Array.isArray(parsed.overlays)) {
+        return parsed;
+      }
+    } catch {
+      /* not found */
+    }
+  }
+  return EMPTY_OVERLAYS;
+}
+
+async function saveOverlays(
+  baseDir: string,
+  slug: string,
+  overlays: SessionOverlays,
+): Promise<void> {
+  const overlayPath = join(baseDir, slug, "overlays.json");
+  await writeFile(overlayPath, JSON.stringify(overlays, null, 2), "utf-8");
+}
+
 export async function startServer(
   baseDir: string,
   opts?: {
@@ -733,16 +767,26 @@ export async function startServer(
     const targetDir = join(baseDir, result.slug);
 
     try {
-      const targetSession = await loadSessionFromDisk(baseDir, result.slug);
+      const rawSession = await loadSessionFromDisk(baseDir, result.slug);
+      const overlaysData = await loadOverlays(baseDir, result.slug);
+      const targetSession = sessionWithEffectiveContent(rawSession, overlaysData);
 
-      await writeFile(join(targetDir, "replay.json"), JSON.stringify(targetSession), "utf-8");
+      // Write effective content for gist, then restore the original replay.json
+      const replayPath = join(targetDir, "replay.json");
+      const originalContent = await readFile(replayPath, "utf-8");
+      await writeFile(replayPath, JSON.stringify(targetSession), "utf-8");
 
-      const title = targetSession.meta.title || targetSession.meta.slug;
-      const savedGist = await loadSavedGistInfo(targetDir);
-      const gistResult = await publishGist(targetDir, title, {
-        overwrite: savedGist || undefined,
-      });
-      return c.json(gistResult);
+      try {
+        const title = targetSession.meta.title || targetSession.meta.slug;
+        const savedGist = await loadSavedGistInfo(targetDir);
+        const gistResult = await publishGist(targetDir, title, {
+          overwrite: savedGist || undefined,
+        });
+        return c.json(gistResult);
+      } finally {
+        // Always restore original replay.json
+        await writeFile(replayPath, originalContent, "utf-8");
+      }
     } catch (err) {
       return c.json({ error: getErrorMessage(err) }, 500);
     }
@@ -755,9 +799,19 @@ export async function startServer(
     const targetDir = join(baseDir, result.slug);
 
     try {
-      const targetSession = await loadSessionFromDisk(baseDir, result.slug);
-      const outputPath = await generateOutput(targetSession, targetDir);
-      return c.json({ path: outputPath });
+      const rawSession = await loadSessionFromDisk(baseDir, result.slug);
+      const overlaysData = await loadOverlays(baseDir, result.slug);
+      const targetSession = sessionWithEffectiveContent(rawSession, overlaysData);
+
+      // generateOutput writes replay.json — save/restore to avoid destructive overwrite
+      const replayPath = join(targetDir, "replay.json");
+      const originalContent = await readFile(replayPath, "utf-8");
+      try {
+        const outputPath = await generateOutput(targetSession, targetDir);
+        return c.json({ path: outputPath });
+      } finally {
+        await writeFile(replayPath, originalContent, "utf-8");
+      }
     } catch (err) {
       return c.json({ error: getErrorMessage(err) }, 500);
     }
@@ -797,7 +851,9 @@ export async function startServer(
     const targetDir = join(baseDir, result.slug);
 
     try {
-      const targetSession = await loadSessionFromDisk(baseDir, result.slug);
+      const rawSession = await loadSessionFromDisk(baseDir, result.slug);
+      const overlaysData = await loadOverlays(baseDir, result.slug);
+      const targetSession = sessionWithEffectiveContent(rawSession, overlaysData);
 
       // Check for a previously published gist to use as replay URL
       const gist = await loadSavedGistInfo(targetDir);
@@ -897,6 +953,187 @@ export async function startServer(
         annotations: newAnnotations,
         score: fb.result.score,
         itemCount: fb.result.feedbackItems.length,
+      });
+    } catch (err) {
+      return c.json({ error: getErrorMessage(err) }, 500);
+    }
+  });
+
+  // --- Overlays (requires slug) ---
+  app.get("/api/overlays", async (c) => {
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+    const overlays = await loadOverlays(baseDir, result.slug);
+    return c.json(overlays);
+  });
+
+  app.post("/api/overlays", async (c) => {
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+    let body: SessionOverlays;
+    try {
+      body = await c.req.json<SessionOverlays>();
+    } catch {
+      return c.json({ error: "invalid JSON body" }, 400);
+    }
+    if (!body || !Array.isArray(body.overlays)) {
+      return c.json({ error: "invalid overlays shape" }, 400);
+    }
+    try {
+      await saveOverlays(baseDir, result.slug, body);
+    } catch {
+      /* ignore */
+    }
+    return c.json({ ok: true });
+  });
+
+  // --- Overlay chaining helper ---
+  // When running a new operation (translate/tone), use effective content from existing
+  // overlays so operations chain correctly (e.g. soften AFTER translate works on translated text)
+  function sessionWithEffectiveContent(
+    session: ReplaySession,
+    existing: SessionOverlays,
+  ): ReplaySession {
+    if (existing.overlays.length === 0) return session;
+    // For each scene, find the latest overlay by updatedAt
+    const latestByScene = new Map<number, { value: string; time: string }>();
+    for (const o of existing.overlays) {
+      const current = latestByScene.get(o.sceneIndex);
+      if (!current || o.updatedAt > current.time) {
+        latestByScene.set(o.sceneIndex, { value: o.modifiedValue, time: o.updatedAt });
+      }
+    }
+    if (latestByScene.size === 0) return session;
+    return {
+      ...session,
+      scenes: session.scenes.map((scene, i) => {
+        const entry = latestByScene.get(i);
+        if (!entry) return scene;
+        if (scene.type === "user-prompt" || scene.type === "text-response") {
+          return { ...scene, content: entry.value };
+        }
+        return scene;
+      }),
+    };
+  }
+
+  // After generation, fix originalValue to be the TRUE original from the unmodified session
+  function fixOriginalValues(
+    overlays: import("./types.js").SceneOverlay[],
+    originalSession: ReplaySession,
+  ) {
+    for (const overlay of overlays) {
+      const scene = originalSession.scenes[overlay.sceneIndex];
+      if (scene && (scene.type === "user-prompt" || scene.type === "text-response")) {
+        overlay.originalValue = scene.content;
+      }
+    }
+  }
+
+  // --- AI Studio: Translate (requires slug) ---
+  app.post("/api/studio/translate", async (c) => {
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+
+    try {
+      const body = await c.req
+        .json<{ toolName?: string; targetLang?: string; sourceLang?: string }>()
+        .catch(() => ({}));
+      const detected = await detectFeedbackTools();
+      if (detected.tools.length === 0) {
+        return c.json({ error: "No AI CLI tool available (claude, agent, or opencode)" }, 400);
+      }
+      const toolName = typeof body.toolName === "string" ? body.toolName : undefined;
+      const tool = toolName
+        ? detected.tools.find((t) => t.name === toolName) || null
+        : detected.defaultTool;
+      if (!tool) {
+        return c.json({ error: `Requested tool is not available: ${toolName}` }, 400);
+      }
+
+      const targetSession = await loadSessionFromDisk(baseDir, result.slug);
+      const targetLang = typeof body.targetLang === "string" ? body.targetLang : "English";
+      const sourceLang = typeof body.sourceLang === "string" ? body.sourceLang : undefined;
+
+      // Load existing overlays BEFORE generation so we can chain operations
+      const existing = await loadOverlays(baseDir, result.slug);
+      // Remove translate overlays — we're replacing them. Keep others (tone etc.) for chaining.
+      const nonTranslateOverlays = existing.overlays.filter((o) => o.source.type !== "translate");
+      const chainBase: SessionOverlays = { version: 1, overlays: nonTranslateOverlays };
+      const effectiveSession = sessionWithEffectiveContent(targetSession, chainBase);
+
+      const translationResult = await generateTranslation(effectiveSession, tool, {
+        targetLang,
+        sourceLang,
+      });
+      if (!translationResult) {
+        return c.json({ error: "Could not generate translations (invalid AI output)" }, 500);
+      }
+      // Restore true originalValue from the unmodified session
+      fixOriginalValues(translationResult.overlays, targetSession);
+      const merged: SessionOverlays = {
+        version: 1,
+        overlays: [...nonTranslateOverlays, ...translationResult.overlays],
+      };
+      await saveOverlays(baseDir, result.slug, merged);
+
+      return c.json({
+        overlays: merged,
+        stats: translationResult.stats,
+      });
+    } catch (err) {
+      return c.json({ error: getErrorMessage(err) }, 500);
+    }
+  });
+
+  // --- AI Studio: Tone Adjustment (requires slug) ---
+  app.post("/api/studio/tone", async (c) => {
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+
+    try {
+      const body = await c.req.json<{ toolName?: string; style?: string }>().catch(() => ({}));
+      const detected = await detectFeedbackTools();
+      if (detected.tools.length === 0) {
+        return c.json({ error: "No AI CLI tool available (claude, agent, or opencode)" }, 400);
+      }
+      const toolName = typeof body.toolName === "string" ? body.toolName : undefined;
+      const tool = toolName
+        ? detected.tools.find((t) => t.name === toolName) || null
+        : detected.defaultTool;
+      if (!tool) {
+        return c.json({ error: `Requested tool is not available: ${toolName}` }, 400);
+      }
+
+      const targetSession = await loadSessionFromDisk(baseDir, result.slug);
+      const style =
+        typeof body.style === "string" &&
+        ["professional", "neutral", "friendly"].includes(body.style)
+          ? (body.style as "professional" | "neutral" | "friendly")
+          : "professional";
+
+      // Load existing overlays BEFORE generation so we can chain operations
+      const existing = await loadOverlays(baseDir, result.slug);
+      // Remove tone overlays — we're replacing them. Keep others (translate etc.) for chaining.
+      const nonToneOverlays = existing.overlays.filter((o) => o.source.type !== "tone");
+      const chainBase: SessionOverlays = { version: 1, overlays: nonToneOverlays };
+      const effectiveSession = sessionWithEffectiveContent(targetSession, chainBase);
+
+      const toneResult = await generateToneAdjustment(effectiveSession, tool, { style });
+      if (!toneResult) {
+        return c.json({ error: "Could not adjust tone (invalid AI output)" }, 500);
+      }
+      // Restore true originalValue from the unmodified session
+      fixOriginalValues(toneResult.overlays, targetSession);
+      const merged: SessionOverlays = {
+        version: 1,
+        overlays: [...nonToneOverlays, ...toneResult.overlays],
+      };
+      await saveOverlays(baseDir, result.slug, merged);
+
+      return c.json({
+        overlays: merged,
+        stats: toneResult.stats,
       });
     } catch (err) {
       return c.json({ error: getErrorMessage(err) }, 500);

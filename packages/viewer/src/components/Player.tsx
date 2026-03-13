@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAnnotations } from "../hooks/useAnnotations";
+import { useOverlays } from "../hooks/useOverlays";
 import { usePlayback } from "../hooks/usePlayback";
 import type { ViewerMode } from "../hooks/useSessionLoader";
 import { getEffectivePrefs, type ViewPrefs } from "../hooks/useViewPrefs";
 import type { ReplaySession } from "../types";
+import AiStudioDrawer from "./AiStudioDrawer";
 import CommentDrawer from "./CommentDrawer";
 import Controls from "./Controls";
 import ConversationView from "./ConversationView";
@@ -40,18 +42,13 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
   const [_navJumpSeq, setNavJumpSeq] = useState(0);
   const [activeView, setActiveView] = useState<ActiveView>("replay");
   const [commentDrawerOpen, setCommentDrawerOpen] = useState(false);
+  const [studioDrawerOpen, setStudioDrawerOpen] = useState(false);
   const [commentTargetScene, setCommentTargetScene] = useState<number | null>(null);
   const [isOutlineOpen, setIsOutlineOpen] = useState(true);
   const annotationActions = useAnnotations(session, viewerMode);
-  const {
-    annotations,
-    runAiCoach,
-    aiCoachRunning,
-    cancelAiCoach,
-    aiCoachTools,
-    aiCoachToolName,
-    setAiCoachToolName,
-  } = annotationActions;
+  const overlayActions = useOverlays(session, viewerMode);
+  const { effectiveSession } = overlayActions;
+  const { annotations } = annotationActions;
 
   const effectivePrefs = getEffectivePrefs(viewPrefs);
 
@@ -79,11 +76,6 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
   const navFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Flag to suppress auto-scroll when scene advance comes from scroll-to-reveal
   const scrollRevealRef = useRef(false);
-  const [coachStatus, setCoachStatus] = useState<{
-    type: "success" | "error";
-    text: string;
-  } | null>(null);
-  const [showCoachConfirm, setShowCoachConfirm] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
 
   // Cmd+K / Ctrl+K to open search
@@ -402,32 +394,15 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
     };
   }, []);
 
-  const hasAiCoach = !!runAiCoach && !isReadOnly;
+  const hasAiStudio = viewerMode === "editor";
   const hasAiFeedback = useMemo(
     () => annotations.some((a) => a.author === "vibe-feedback"),
     [annotations],
   );
 
-  const handleRunCoach = useCallback(async () => {
-    if (!runAiCoach) return;
-    setCoachStatus(null);
-    try {
-      const result = await runAiCoach();
-      setCoachStatus({
-        type: "success",
-        text: `Score ${result.score}/10 — ${result.itemCount} comment(s) added`,
-      });
-      setShowCoachConfirm(false);
-      setCommentDrawerOpen(true);
-    } catch (e: any) {
-      if (e?.name === "AbortError") return;
-      setCoachStatus({ type: "error", text: e?.message || "AI Coach failed" });
-    }
-  }, [runAiCoach]);
-
   // Show landing page before playback starts
   if (!landed) {
-    return <LandingHero session={session} onStart={handleStart} />;
+    return <LandingHero session={effectiveSession} onStart={handleStart} />;
   }
 
   const { meta } = session;
@@ -444,222 +419,95 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
           rightContent={
             activeView === "replay" ? (
               <div className="flex items-center gap-3">
-                {/* Comments Status */}
-                <div className="flex items-center gap-2">
+                {/* Global overlay toggle — iOS pill style */}
+                {overlayActions.overlayCount > 0 && (
                   <button
-                    onClick={() => setCommentDrawerOpen(true)}
-                    className="flex items-center gap-1.5 text-xs font-mono font-semibold text-terminal-text hover:text-terminal-green transition-colors"
-                    title="Open comments"
+                    onClick={() => overlayActions.toggleAllOriginals()}
+                    className="flex items-center gap-2 text-xs font-mono text-terminal-dim"
+                    title={
+                      overlayActions.showAllOriginals
+                        ? "Showing originals — click to show modified"
+                        : "Showing modified — click to show originals"
+                    }
                   >
+                    <span className="hidden sm:inline">
+                      {overlayActions.showAllOriginals ? "Original" : "Modified"}
+                    </span>
+                    <span
+                      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-200 ${
+                        overlayActions.showAllOriginals
+                          ? "bg-terminal-surface border border-terminal-border"
+                          : "bg-terminal-purple brightness-75"
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                          overlayActions.showAllOriginals
+                            ? "translate-x-[3px]"
+                            : "translate-x-[17px]"
+                        }`}
+                      />
+                    </span>
+                  </button>
+                )}
+
+                {/* Comments */}
+                <button
+                  onClick={() => setCommentDrawerOpen(true)}
+                  className="flex items-center gap-1.5 text-xs font-mono font-semibold text-terminal-text hover:text-terminal-green transition-colors"
+                  title="Open comments"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="text-terminal-dim"
+                  >
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                  </svg>
+                  <span className="hidden sm:inline">Comments</span>
+                  {annotationActions.annotations.length > 0 && (
+                    <span className="ml-0.5 px-1 py-0.5 rounded bg-terminal-black text-[10px] text-terminal-text border border-terminal-border tabular-nums leading-none">
+                      {annotationActions.annotations.length}
+                    </span>
+                  )}
+                </button>
+
+                {/* AI Studio button */}
+                {hasAiStudio && (
+                  <button
+                    onClick={() => setStudioDrawerOpen(true)}
+                    className="pl-2 pr-3 py-1 text-[10px] sm:text-[11px] font-mono rounded bg-[rgba(168,85,247,0.1)] hover:bg-[rgba(168,85,247,0.2)] border border-[rgba(168,85,247,0.3)] hover:border-[rgba(168,85,247,0.5)] text-terminal-purple transition-all flex items-center gap-1.5 relative overflow-hidden group shadow-sm"
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
-                      width="14"
-                      height="14"
+                      width="12"
+                      height="12"
                       viewBox="0 0 24 24"
                       fill="none"
                       stroke="currentColor"
                       strokeWidth="2"
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      className="text-terminal-dim"
+                      className="text-[#c084fc]"
                     >
-                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                      <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
                     </svg>
-                    <span className="hidden sm:inline">Comments</span>
-                    {annotationActions.annotations.length > 0 && (
-                      <span className="ml-0.5 px-1 py-0.5 rounded bg-terminal-black text-[10px] text-terminal-text border border-terminal-border tabular-nums leading-none">
-                        {annotationActions.annotations.length}
+                    <span className="font-semibold tracking-wide">AI Studio</span>
+                    {(hasAiFeedback || overlayActions.overlayCount > 0) && (
+                      <span className="relative flex h-1.5 w-1.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-terminal-purple opacity-75" />
+                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-terminal-purple" />
                       </span>
                     )}
                   </button>
-
-                  <div className="h-3 w-px bg-terminal-border hidden sm:block" />
-
-                  <div className="text-[11px] font-mono flex items-center gap-1.5 hidden sm:flex">
-                    {coachStatus ? (
-                      <span
-                        className={
-                          coachStatus.type === "success"
-                            ? "text-terminal-green"
-                            : "text-terminal-red"
-                        }
-                      >
-                        {coachStatus.text}
-                      </span>
-                    ) : hasAiFeedback ? (
-                      <span className="text-terminal-purple flex items-center gap-1.5">
-                        <span className="relative flex h-1.5 w-1.5">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-terminal-purple opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-terminal-purple"></span>
-                        </span>
-                        AI Coach added
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-
-                {/* AI Coach Actions */}
-                {hasAiCoach && (
-                  <div className="relative flex items-center gap-2 shrink-0">
-                    <button
-                      onClick={() => {
-                        if (!aiCoachRunning) setShowCoachConfirm((v) => !v);
-                      }}
-                      disabled={aiCoachRunning}
-                      className="pl-2 pr-3 py-1 text-[10px] sm:text-[11px] font-mono rounded bg-[rgba(168,85,247,0.1)] hover:bg-[rgba(168,85,247,0.2)] border border-[rgba(168,85,247,0.3)] hover:border-[rgba(168,85,247,0.5)] text-terminal-purple transition-all disabled:opacity-50 flex items-center gap-1.5 relative overflow-hidden group shadow-sm"
-                    >
-                      <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
-                      {aiCoachRunning ? (
-                        <svg
-                          className="animate-spin h-3.5 w-3.5 text-terminal-purple"
-                          xmlns="http://www.w3.org/2000/svg"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                        >
-                          <circle
-                            className="opacity-25"
-                            cx="12"
-                            cy="12"
-                            r="10"
-                            stroke="currentColor"
-                            strokeWidth="4"
-                          ></circle>
-                          <path
-                            className="opacity-75"
-                            fill="currentColor"
-                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                          ></path>
-                        </svg>
-                      ) : (
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          width="12"
-                          height="12"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          className="text-[#c084fc]"
-                        >
-                          <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-                        </svg>
-                      )}
-                      <span className="font-semibold tracking-wide">
-                        {aiCoachRunning
-                          ? "Analyzing..."
-                          : hasAiFeedback
-                            ? "Re-run Coach"
-                            : "AI Coach"}
-                      </span>
-                    </button>
-                    {aiCoachRunning && cancelAiCoach && (
-                      <button
-                        onClick={cancelAiCoach}
-                        className="p-1 rounded-full bg-terminal-black border border-terminal-border text-terminal-dim hover:text-terminal-red hover:border-terminal-red/30 transition-colors"
-                        title="Cancel AI Coach"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          width="10"
-                          height="10"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <line x1="18" y1="6" x2="6" y2="18"></line>
-                          <line x1="6" y1="6" x2="18" y2="18"></line>
-                        </svg>
-                      </button>
-                    )}
-
-                    {/* Dropdown confirm popover */}
-                    {showCoachConfirm && !aiCoachRunning && (
-                      <>
-                        <div
-                          className="fixed inset-0 z-40"
-                          onClick={() => setShowCoachConfirm(false)}
-                        />
-                        <div className="absolute right-0 top-full mt-2 z-50 w-72 bg-terminal-bg border border-terminal-border-subtle rounded-2xl shadow-layer-xl overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150">
-                          {/* Header */}
-                          <div className="px-4 pt-4 pb-3">
-                            <div className="flex items-center gap-2 mb-1.5">
-                              <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                width="14"
-                                height="14"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                className="text-terminal-purple"
-                              >
-                                <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-                              </svg>
-                              <span className="text-xs font-sans font-semibold text-terminal-text">
-                                Run AI Coach
-                              </span>
-                            </div>
-                            <p className="text-[11px] font-mono text-terminal-dim leading-relaxed">
-                              Analyzes your prompts using a local CLI tool. Uses tokens from your
-                              own account.
-                            </p>
-                          </div>
-
-                          {hasAiFeedback && (
-                            <div className="mx-4 mb-3 text-[11px] font-mono text-terminal-orange px-2.5 py-1.5 rounded-lg bg-terminal-orange-subtle/40 border border-terminal-orange/10">
-                              Existing AI feedback will be replaced.
-                            </div>
-                          )}
-
-                          {/* Tool selector */}
-                          <div className="mx-4 mb-4 flex items-center justify-between">
-                            <span className="text-[11px] font-mono text-terminal-dim">Tool</span>
-                            {aiCoachTools.length > 1 && setAiCoachToolName ? (
-                              <select
-                                value={aiCoachToolName || ""}
-                                onChange={(e) => setAiCoachToolName(e.target.value)}
-                                className="bg-terminal-surface border border-terminal-border rounded-lg px-2.5 py-1 text-[11px] font-mono text-terminal-text outline-none cursor-pointer hover:border-terminal-purple/30 transition-colors"
-                              >
-                                {aiCoachTools.map((t) => (
-                                  <option key={t.name} value={t.name}>
-                                    {t.name}
-                                  </option>
-                                ))}
-                              </select>
-                            ) : (
-                              <span className="text-[11px] font-mono font-medium text-terminal-text px-2.5 py-1 rounded-lg bg-terminal-surface border border-terminal-border">
-                                {aiCoachToolName}
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Actions */}
-                          <div className="flex border-t border-terminal-border-subtle">
-                            <button
-                              onClick={() => setShowCoachConfirm(false)}
-                              className="flex-1 px-4 py-2.5 text-[11px] font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface transition-colors"
-                            >
-                              Cancel
-                            </button>
-                            <div className="w-px bg-terminal-border-subtle" />
-                            <button
-                              onClick={() => void handleRunCoach()}
-                              className="flex-1 px-4 py-2.5 text-[11px] font-mono font-semibold text-terminal-purple hover:bg-terminal-purple-subtle/30 transition-colors"
-                            >
-                              Run
-                            </button>
-                          </div>
-                        </div>
-                      </>
-                    )}
-                  </div>
                 )}
               </div>
             ) : undefined
@@ -705,6 +553,7 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
                       scenes={session.scenes}
                       currentIndex={currentIndex}
                       onSeek={seekFromNavigation}
+                      overlayActions={overlayActions}
                     />
                   </div>
                   {/* Compact Stats (bottom) */}
@@ -803,6 +652,7 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
                     annotationCounts={annotationActions.annotationCounts}
                     onSeek={seekFromNavigation}
                     state={state}
+                    overlayActions={overlayActions}
                     onComment={
                       isReadOnly
                         ? undefined
@@ -816,7 +666,7 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
 
                 {/* Search overlay */}
                 <SearchOverlay
-                  scenes={session.scenes}
+                  scenes={effectiveSession.scenes}
                   open={searchOpen}
                   onClose={() => setSearchOpen(false)}
                   onSeek={(i) => {
@@ -828,13 +678,13 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
             </div>
           )}
 
-          {activeView === "summary" && <SummaryView session={session} />}
+          {activeView === "summary" && <SummaryView session={effectiveSession} />}
           {activeView === "export" && (
             <ExportView
               actions={annotationActions}
               viewerMode={viewerMode}
               readOnly={isReadOnly}
-              session={session}
+              session={effectiveSession}
             />
           )}
         </div>
@@ -872,12 +722,20 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
         open={commentDrawerOpen}
         onClose={() => setCommentDrawerOpen(false)}
         actions={annotationActions}
-        scenes={session.scenes}
+        scenes={effectiveSession.scenes}
         currentIndex={currentIndex}
         onSeek={seekFromNavigation}
         addingForScene={commentTargetScene}
         onClearAddingTarget={() => setCommentTargetScene(null)}
         readOnly={isReadOnly}
+      />
+
+      {/* AI Studio drawer (slides from right) */}
+      <AiStudioDrawer
+        open={studioDrawerOpen}
+        onClose={() => setStudioDrawerOpen(false)}
+        annotationActions={annotationActions}
+        overlayActions={overlayActions}
       />
 
       {/* Mobile sidebar drawer */}
@@ -931,9 +789,10 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
                   seekFromNavigation(i);
                   setMobileDrawerOpen(false);
                 }}
+                overlayActions={overlayActions}
               />
             ) : (
-              <SummaryView session={session} />
+              <SummaryView session={effectiveSession} />
             )}
           </div>
         </div>

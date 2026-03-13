@@ -1,10 +1,12 @@
 import { useMemo } from "react";
+import type { OverlayActions } from "../hooks/useOverlays";
 import type { Scene } from "../types";
 
 interface Props {
   scenes: Scene[];
   currentIndex: number;
   onSeek: (index: number) => void;
+  overlayActions?: OverlayActions;
 }
 
 interface TurnOutline {
@@ -27,7 +29,7 @@ interface CompactionOutline {
 
 type OutlineItem = TurnOutline | CompactionOutline;
 
-export default function Minimap({ scenes, currentIndex, onSeek }: Props) {
+export default function Minimap({ scenes, currentIndex, onSeek, overlayActions }: Props) {
   const items = useMemo(() => {
     const result: OutlineItem[] = [];
     let current: TurnOutline | null = null;
@@ -40,11 +42,13 @@ export default function Minimap({ scenes, currentIndex, onSeek }: Props) {
           result.push(current);
         }
         turnCount++;
+        const effectiveContent = overlayActions?.getEffectiveContent(i);
+        const displayContent = effectiveContent ?? scene.content;
         current = {
           kind: "turn",
           turnNumber: turnCount,
           promptIndex: i,
-          prompt: scene.content.replace(/\n/g, " ").slice(0, 120),
+          prompt: displayContent.replace(/\n/g, " ").slice(0, 120),
           toolCalls: 0,
           toolNames: [],
           thinkingBlocks: 0,
@@ -75,7 +79,7 @@ export default function Minimap({ scenes, currentIndex, onSeek }: Props) {
     });
     if (current) result.push(current);
     return result;
-  }, [scenes]);
+  }, [scenes, overlayActions?.getEffectiveContent]);
 
   const activeIdx = useMemo(() => {
     for (let i = items.length - 1; i >= 0; i--) {

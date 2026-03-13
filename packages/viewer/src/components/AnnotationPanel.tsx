@@ -72,19 +72,7 @@ export default function AnnotationPanel({
   onClearAddingTarget,
   readOnly = false,
 }: Props) {
-  const {
-    annotations,
-    add,
-    update,
-    remove,
-    runAiCoach,
-    cancelAiCoach,
-    aiCoachRunning,
-    aiCoachTool,
-    aiCoachTools,
-    aiCoachToolName,
-    setAiCoachToolName,
-  } = actions;
+  const { annotations, add, update, remove } = actions;
   const [internalAdding, setInternalAdding] = useState<number | null>(null);
   const [newBody, setNewBody] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -93,11 +81,6 @@ export default function AnnotationPanel({
   const editTextareaRef = useRef<HTMLTextAreaElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const addFormRef = useRef<HTMLDivElement>(null);
-  const [coachStatus, setCoachStatus] = useState<{
-    type: "success" | "error";
-    text: string;
-  } | null>(null);
-  const [showAiCoachConfirm, setShowAiCoachConfirm] = useState(false);
 
   // External target from clicking a card's comment icon
   const activeAdding = addingForScene ?? internalAdding;
@@ -181,25 +164,6 @@ export default function AnnotationPanel({
   const addingLabelColor =
     activeAdding !== null && scenes[activeAdding] ? sceneLabelColor(scenes[activeAdding]) : "";
 
-  const hasAiCoach = !!runAiCoach && !readOnly;
-  const hasAiFeedback = annotations.some((a) => a.author === "vibe-feedback");
-
-  const handleRunCoach = useCallback(async () => {
-    if (!runAiCoach) return;
-    setCoachStatus(null);
-    try {
-      const result = await runAiCoach();
-      setCoachStatus({
-        type: "success",
-        text: `Score ${result.score}/10 — ${result.itemCount} comment(s) added`,
-      });
-      setShowAiCoachConfirm(false);
-    } catch (e: any) {
-      if (e?.name === "AbortError") return;
-      setCoachStatus({ type: "error", text: e?.message || "AI Coach failed" });
-    }
-  }, [runAiCoach]);
-
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -216,105 +180,6 @@ export default function AnnotationPanel({
           <span className="text-xs font-mono text-terminal-dim">{annotations.length}</span>
         </div>
       </div>
-
-      {/* AI Coach CTA — lives with comments, not export */}
-      {hasAiCoach && (
-        <div className="px-3 py-3 border-b border-terminal-border-subtle bg-terminal-purple-subtle/10">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-xs font-mono font-semibold text-terminal-purple">
-                AI Coach
-                {hasAiFeedback && (
-                  <span className="ml-1 text-[10px] font-normal text-terminal-dim">
-                    (feedback present)
-                  </span>
-                )}
-              </div>
-              <div className="text-[11px] font-mono text-terminal-dim mt-0.5">
-                AI analysis of your prompting technique. Adds inline comments to this replay.
-              </div>
-              {aiCoachTools.length > 1 && setAiCoachToolName ? (
-                <label className="mt-1 inline-flex items-center gap-1 text-[11px] font-mono text-terminal-dim">
-                  Tool
-                  <select
-                    value={aiCoachToolName || aiCoachTool?.name || ""}
-                    onChange={(e) => setAiCoachToolName(e.target.value)}
-                    className="bg-terminal-surface rounded px-1.5 py-0.5 text-[11px] font-mono text-terminal-text"
-                  >
-                    {aiCoachTools.map((tool) => (
-                      <option key={tool.name} value={tool.name}>
-                        {tool.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : aiCoachToolName ? (
-                <div className="mt-1 text-[11px] font-mono text-terminal-dim">
-                  via <span className="text-terminal-text">{aiCoachToolName}</span> &middot; uses
-                  your tokens
-                </div>
-              ) : null}
-            </div>
-            <div className="shrink-0 flex flex-col items-end gap-1">
-              <button
-                onClick={() => {
-                  if (hasAiFeedback && !showAiCoachConfirm) {
-                    setShowAiCoachConfirm(true);
-                    return;
-                  }
-                  void handleRunCoach();
-                }}
-                disabled={aiCoachRunning}
-                className="px-3 py-1.5 text-[11px] font-mono rounded-full bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis transition-colors disabled:opacity-60"
-              >
-                {aiCoachRunning
-                  ? "Analyzing..."
-                  : hasAiFeedback
-                    ? "Re-run AI Coach"
-                    : "AI Coach (beta)"}
-              </button>
-              {aiCoachRunning && cancelAiCoach && (
-                <button
-                  onClick={cancelAiCoach}
-                  className="text-[10px] font-mono text-terminal-dim hover:text-terminal-text transition-colors"
-                >
-                  Cancel
-                </button>
-              )}
-            </div>
-          </div>
-          {showAiCoachConfirm && !aiCoachRunning && (
-            <div className="mt-2 flex items-start gap-2">
-              <div className="text-[11px] font-mono text-terminal-orange flex-1">
-                Re-running AI Coach will replace existing AI feedback comments. Continue?
-              </div>
-              <div className="flex gap-1.5 shrink-0">
-                <button
-                  onClick={() => setShowAiCoachConfirm(false)}
-                  className="px-2 py-0.5 text-[11px] font-mono text-terminal-dim hover:text-terminal-text transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => void handleRunCoach()}
-                  className="px-2 py-0.5 text-[11px] font-mono bg-terminal-purple-subtle text-terminal-purple rounded hover:bg-terminal-purple-emphasis transition-colors"
-                >
-                  Run
-                </button>
-              </div>
-            </div>
-          )}
-          {coachStatus && (
-            <div
-              className={`mt-2 text-[11px] font-mono ${
-                coachStatus.type === "success" ? "text-terminal-green" : "text-terminal-red"
-              }`}
-            >
-              {coachStatus.text}
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Annotation list */}
       <div ref={panelRef} className="flex-1 overflow-y-auto">
