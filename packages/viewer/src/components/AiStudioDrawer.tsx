@@ -40,7 +40,7 @@ export default function AiStudioDrawer({
 
       {/* Panel */}
       <div
-        className={`absolute top-0 right-0 bottom-0 w-80 bg-terminal-bg border-l border-terminal-border-subtle shadow-layer-xl flex flex-col transition-transform duration-300 ease-material-decel ${
+        className={`absolute top-0 right-0 bottom-0 w-96 bg-terminal-bg border-l border-terminal-border-subtle shadow-layer-xl flex flex-col transition-transform duration-300 ease-material-decel ${
           open ? "translate-x-0" : "translate-x-full"
         }`}
         onClick={(e) => e.stopPropagation()}

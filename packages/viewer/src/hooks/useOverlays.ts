@@ -24,6 +24,10 @@ export interface OverlayActions {
   showOriginal: Set<number>;
   /** Toggle showing original text for a scene */
   toggleOriginal: (sceneIndex: number) => void;
+  /** Whether all scenes are showing originals (global toggle) */
+  showAllOriginals: boolean;
+  /** Toggle all scenes between original and modified */
+  toggleAllOriginals: () => void;
   /** AI Studio tool info */
   studioTools: Array<{ name: string }>;
   studioToolName: string | null;
@@ -64,6 +68,7 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
   const isEditor = mode === "editor";
   const [overlays, setOverlaysState] = useState<SessionOverlays>(EMPTY_OVERLAYS);
   const [showOriginal, setShowOriginal] = useState<Set<number>>(new Set());
+  const [showAllOriginals, setShowAllOriginals] = useState(false);
 
   // Tool detection (same endpoint as AI Coach, reused)
   const [studioTools, setStudioTools] = useState<Array<{ name: string }>>([]);
@@ -128,12 +133,13 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
   const getEffectiveContent = useCallback(
     (sceneIndex: number): string | null => {
       const scene = session.scenes[sceneIndex];
-      if (!scene || scene.type !== "user-prompt") return null;
-      if (showOriginal.has(sceneIndex)) return scene.content;
+      if (!scene) return null;
+      if (scene.type !== "user-prompt" && scene.type !== "text-response") return null;
+      if (showAllOriginals || showOriginal.has(sceneIndex)) return scene.content;
       const overlay = overlays.overlays.find((o) => o.sceneIndex === sceneIndex);
       return overlay ? overlay.modifiedValue : scene.content;
     },
-    [session.scenes, overlays, showOriginal],
+    [session.scenes, overlays, showOriginal, showAllOriginals],
   );
 
   const hasOverlay = useCallback(
@@ -185,6 +191,10 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
       else next.add(sceneIndex);
       return next;
     });
+  }, []);
+
+  const toggleAllOriginals = useCallback(() => {
+    setShowAllOriginals((prev) => !prev);
   }, []);
 
   const setStudioToolName = isEditor ? (name: string) => setStudioToolNameState(name) : null;
@@ -262,6 +272,8 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
     updateOverlay,
     showOriginal,
     toggleOriginal,
+    showAllOriginals,
+    toggleAllOriginals,
     studioTools,
     studioToolName,
     setStudioToolName,

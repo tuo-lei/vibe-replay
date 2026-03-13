@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
+import type { OverlayActions } from "../hooks/useOverlays";
 import type { EffectivePrefs } from "../hooks/useViewPrefs";
 import type { Scene } from "../types";
 import CompactionSummaryBlock from "./CompactionSummaryBlock";
@@ -17,6 +18,7 @@ interface Props {
   annotationCounts?: Map<number, number>;
   onComment?: (sceneIndex: number) => void;
   state?: string;
+  overlayActions?: OverlayActions;
 }
 
 interface TurnGroup {
@@ -52,6 +54,7 @@ export default function ConversationView({
   onComment,
   onSeek,
   state,
+  overlayActions,
 }: Props & { onSeek?: (index: number) => void }) {
   // Pre-compute ALL groups once — stable across playback ticks
   const allGroups = useMemo(() => {
@@ -121,6 +124,7 @@ export default function ConversationView({
             annotatedScenes={annotatedScenes}
             annotationCounts={annotationCounts}
             onComment={onComment}
+            overlayActions={overlayActions}
           />
         </LazyGroup>
       ))}
@@ -279,6 +283,7 @@ const GroupCard = memo(function GroupCard({
   annotatedScenes: _annotatedScenes,
   annotationCounts,
   onComment,
+  overlayActions,
 }: {
   group: TurnGroup;
   currentIndex: number;
@@ -288,6 +293,7 @@ const GroupCard = memo(function GroupCard({
   annotatedScenes?: Set<number>;
   annotationCounts?: Map<number, number>;
   onComment?: (sceneIndex: number) => void;
+  overlayActions?: OverlayActions;
 }) {
   const [hovered, setHovered] = useState(false);
 
@@ -373,15 +379,48 @@ const GroupCard = memo(function GroupCard({
           )}
         </div>
         <div className="text-left">
-          {visibleScenes.map(({ scene, index }) => (
-            <div key={index} className="scene-enter">
-              <SceneBlock
-                scene={scene}
-                isActive={index === currentIndex}
-                collapseTools={effectivePrefs.collapseAllTools}
-              />
-            </div>
-          ))}
+          {visibleScenes.map(({ scene, index }) => {
+            const overlay = overlayActions?.getOverlay(index);
+            const effectiveContent = overlayActions?.getEffectiveContent(index);
+            const isShowingOriginal = overlayActions?.showOriginal.has(index);
+            return (
+              <div key={index} className="scene-enter">
+                <SceneBlock
+                  scene={scene}
+                  isActive={index === currentIndex}
+                  collapseTools={effectivePrefs.collapseAllTools}
+                  effectiveContent={
+                    scene.type === "user-prompt" && effectiveContent != null
+                      ? effectiveContent
+                      : undefined
+                  }
+                />
+                {overlay && (
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple">
+                      {overlay.source.type === "translate"
+                        ? "Translated"
+                        : overlay.source.type === "tone"
+                          ? "Softened"
+                          : "Modified"}
+                    </span>
+                    <button
+                      onClick={() => overlayActions?.toggleOriginal(index)}
+                      className="text-[10px] font-mono text-terminal-dim hover:text-terminal-text transition-colors"
+                    >
+                      {isShowingOriginal ? "Show modified" : "Show original"}
+                    </button>
+                    <button
+                      onClick={() => overlayActions?.revertOverlay(overlay.id)}
+                      className="text-[10px] font-mono text-terminal-dim hover:text-terminal-red transition-colors"
+                    >
+                      Revert
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     );
@@ -442,6 +481,7 @@ const GroupCard = memo(function GroupCard({
         timestamp={group.timestamp}
         annotationCounts={annotationCounts}
         onComment={onComment}
+        overlayActions={overlayActions}
       />
     );
   }
@@ -492,6 +532,7 @@ const GroupCard = memo(function GroupCard({
           collapseTools={effectivePrefs.collapseAllTools}
           annotationCounts={annotationCounts}
           onComment={onComment}
+          overlayActions={overlayActions}
         />
       </div>
     </div>
@@ -521,6 +562,7 @@ function CompactAssistantGroup({
   timestamp,
   annotationCounts,
   onComment,
+  overlayActions,
 }: {
   /** All scenes in the group — used for stable stats (not affected by playback progress) */
   allScenes: { scene: Scene; index: number }[];
@@ -533,6 +575,7 @@ function CompactAssistantGroup({
   timestamp?: string;
   annotationCounts?: Map<number, number>;
   onComment?: (sceneIndex: number) => void;
+  overlayActions?: OverlayActions;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -707,7 +750,10 @@ function CompactAssistantGroup({
       {lastTextResponse && !expanded && (
         <div className="mb-2">
           <TextResponseBlock
-            content={(lastTextResponse.scene as Extract<Scene, { type: "text-response" }>).content}
+            content={
+              overlayActions?.getEffectiveContent(lastTextResponse.index) ??
+              (lastTextResponse.scene as Extract<Scene, { type: "text-response" }>).content
+            }
             isActive={lastTextResponse.index === currentIndex}
           />
         </div>
@@ -718,13 +764,22 @@ function CompactAssistantGroup({
         <div className="space-y-2 mb-2">
           {filteredScenes.map(({ scene, index }) => {
             const count = annotationCounts?.get(index) || 0;
+            const ec =
+              scene.type === "text-response"
+                ? (overlayActions?.getEffectiveContent(index) ?? undefined)
+                : undefined;
             return (
               <div
                 key={index}
                 data-scene-index={index}
                 className={`group/scene relative scene-enter ${onComment ? "pr-7" : ""}`}
               >
-                <SceneBlock scene={scene} isActive={index === currentIndex} collapseTools={false} />
+                <SceneBlock
+                  scene={scene}
+                  isActive={index === currentIndex}
+                  collapseTools={false}
+                  effectiveContent={ec}
+                />
                 {onComment && (
                   <button
                     onClick={(e) => {
@@ -774,12 +829,14 @@ function BatchedScenes({
   collapseTools,
   annotationCounts,
   onComment,
+  overlayActions,
 }: {
   scenes: { scene: Scene; index: number }[];
   currentIndex: number;
   collapseTools: boolean;
   annotationCounts?: Map<number, number>;
   onComment?: (sceneIndex: number) => void;
+  overlayActions?: OverlayActions;
 }) {
   // Group consecutive tool calls with the same toolName (only batchable ones)
   const batches: { scene: Scene; index: number }[][] = [];
@@ -812,6 +869,10 @@ function BatchedScenes({
         if (batch.length <= 1) {
           const { scene, index } = batch[0];
           const count = annotationCounts?.get(index) || 0;
+          const effectiveContent =
+            scene.type === "text-response" ? overlayActions?.getEffectiveContent(index) : undefined;
+          const overlay =
+            scene.type === "text-response" ? overlayActions?.getOverlay(index) : undefined;
           return (
             <div
               key={index}
@@ -822,7 +883,27 @@ function BatchedScenes({
                 scene={scene}
                 isActive={index === currentIndex}
                 collapseTools={collapseTools}
+                effectiveContent={effectiveContent ?? undefined}
               />
+              {overlay && (
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple">
+                    {overlay.source.type === "translate" ? "Translated" : "Modified"}
+                  </span>
+                  <button
+                    onClick={() => overlayActions?.toggleOriginal(index)}
+                    className="text-[10px] font-mono text-terminal-dim hover:text-terminal-text transition-colors"
+                  >
+                    {overlayActions?.showOriginal.has(index) ? "Show modified" : "Show original"}
+                  </button>
+                  <button
+                    onClick={() => overlayActions?.revertOverlay(overlay.id)}
+                    className="text-[10px] font-mono text-terminal-dim hover:text-terminal-red transition-colors"
+                  >
+                    Revert
+                  </button>
+                </div>
+              )}
               {onComment && (
                 <button
                   onClick={(e) => {
@@ -1001,20 +1082,28 @@ const SceneBlock = memo(function SceneBlock({
   scene,
   isActive,
   collapseTools,
+  effectiveContent,
 }: {
   scene: Scene;
   isActive: boolean;
   collapseTools: boolean;
+  effectiveContent?: string;
 }) {
   switch (scene.type) {
     case "user-prompt":
-      return <UserPromptBlock content={scene.content} images={scene.images} isActive={isActive} />;
+      return (
+        <UserPromptBlock
+          content={effectiveContent ?? scene.content}
+          images={scene.images}
+          isActive={isActive}
+        />
+      );
     case "compaction-summary":
       return <CompactionSummaryBlock content={scene.content} isActive={isActive} />;
     case "thinking":
       return <ThinkingBlock content={scene.content} isActive={isActive} />;
     case "text-response":
-      return <TextResponseBlock content={scene.content} isActive={isActive} />;
+      return <TextResponseBlock content={effectiveContent ?? scene.content} isActive={isActive} />;
     case "tool-call":
       return <ToolCallBlock scene={scene} isActive={isActive} forceCollapse={collapseTools} />;
   }

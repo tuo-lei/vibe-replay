@@ -44,6 +44,75 @@ function Spinner({ className = "" }: { className?: string }) {
   );
 }
 
+function ToolExplainer({ toolName }: { toolName: string | null }) {
+  if (toolName === "claude") {
+    return (
+      <div className="mt-2 text-xs font-mono text-terminal-dim leading-relaxed space-y-1">
+        <p>
+          Runs{" "}
+          <code className="px-1 py-0.5 rounded bg-terminal-surface-inset text-terminal-text">
+            claude -p
+          </code>{" "}
+          locally with your prompt piped to stdin. Uses your existing auth and token quota.
+        </p>
+        <p className="text-terminal-dimmer">
+          Auth issues? Run{" "}
+          <code className="px-1 py-0.5 rounded bg-terminal-surface-inset text-terminal-text">
+            claude
+          </code>{" "}
+          in your terminal to re-login.
+        </p>
+      </div>
+    );
+  }
+  if (toolName === "agent") {
+    return (
+      <div className="mt-2 text-xs font-mono text-terminal-dim leading-relaxed space-y-1">
+        <p>
+          Runs{" "}
+          <code className="px-1 py-0.5 rounded bg-terminal-surface-inset text-terminal-text">
+            agent -p
+          </code>{" "}
+          locally with your prompt piped to stdin. Uses your Cursor subscription or API key.
+        </p>
+        <p className="text-terminal-dimmer">
+          Auth issues? Check Cursor IDE settings or run{" "}
+          <code className="px-1 py-0.5 rounded bg-terminal-surface-inset text-terminal-text">
+            agent
+          </code>{" "}
+          in your terminal.
+        </p>
+      </div>
+    );
+  }
+  if (toolName === "opencode") {
+    return (
+      <div className="mt-2 text-xs font-mono text-terminal-dim leading-relaxed space-y-1">
+        <p>
+          Runs{" "}
+          <code className="px-1 py-0.5 rounded bg-terminal-surface-inset text-terminal-text">
+            opencode run
+          </code>{" "}
+          locally with your prompt piped to stdin. Uses your existing OpenCode configuration.
+        </p>
+        <p className="text-terminal-dimmer">
+          Not working? Run{" "}
+          <code className="px-1 py-0.5 rounded bg-terminal-surface-inset text-terminal-text">
+            opencode
+          </code>{" "}
+          in your terminal to verify setup.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <p className="mt-2 text-xs font-mono text-terminal-dim leading-relaxed">
+      Runs <span className="text-terminal-text font-medium">{toolName}</span> locally on your
+      machine using your existing auth.
+    </p>
+  );
+}
+
 const TARGET_LANGUAGES = [
   "English",
   "Chinese (Simplified)",
@@ -74,9 +143,7 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
     cancelStudio,
     runTranslate,
     runTone,
-    overlays,
     overlayCount,
-    revertOverlay,
     revertAll,
   } = overlayActions;
 
@@ -142,7 +209,7 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
       const result = await runTranslate({ targetLang });
       setTranslateStatus({
         type: "success",
-        text: `${result.translated} prompt(s) translated, ${result.skipped} unchanged`,
+        text: `${result.translated} message(s) translated, ${result.skipped} unchanged`,
       });
     } catch (e: any) {
       if (e?.name === "AbortError") return;
@@ -167,7 +234,7 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
   }, [runTone, toneStyle]);
 
   const hasExistingOverlays = (type: string) =>
-    overlays.overlays.some((o) => o.source.type === type);
+    overlayActions.overlays.overlays.some((o) => o.source.type === type);
 
   const handleFeatureRun = (feature: "coach" | "translate" | "tone") => {
     if (feature === "coach" && hasAiFeedback) {
@@ -191,13 +258,13 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
   if (!studioToolsAvailable && aiCoachTools.length === 0) {
     return (
       <div className="flex flex-col h-full">
-        <div className="px-3 py-2 border-b border-terminal-border-subtle flex items-center gap-2">
+        <div className="px-4 py-2.5 border-b border-terminal-border-subtle flex items-center gap-2">
           <SparkleIcon size={12} />
           <span className="text-[10px] font-sans font-semibold text-terminal-text uppercase tracking-widest">
             AI Studio
           </span>
         </div>
-        <div className="flex-1 flex flex-col items-center justify-center px-5 py-8 text-center">
+        <div className="flex-1 flex flex-col items-center justify-center px-6 py-8 text-center">
           <div className="w-10 h-10 rounded-xl bg-terminal-surface flex items-center justify-center mb-3">
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -216,11 +283,11 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
               <line x1="12" y1="16" x2="12.01" y2="16" />
             </svg>
           </div>
-          <div className="text-xs font-sans font-semibold text-terminal-text mb-1">
+          <div className="text-sm font-sans font-semibold text-terminal-text mb-1">
             No AI tools detected
           </div>
-          <p className="text-[11px] font-mono text-terminal-dim mb-4 leading-relaxed">
-            AI Studio requires a local CLI tool to run. Install one of the following:
+          <p className="text-xs font-mono text-terminal-dim mb-4 leading-relaxed">
+            AI Studio requires a local CLI tool. Install one of the following:
           </p>
           <div className="w-full space-y-2 text-left">
             {[
@@ -232,54 +299,31 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
                 key={t.name}
                 className="px-3 py-2 rounded-lg bg-terminal-surface border border-terminal-border-subtle"
               >
-                <div className="text-[11px] font-sans font-medium text-terminal-text flex items-center gap-1.5">
+                <div className="text-xs font-sans font-medium text-terminal-text flex items-center gap-1.5">
                   {t.name}
                   {t.rec && (
-                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-terminal-green-subtle text-terminal-green">
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-green-subtle text-terminal-green">
                       recommended
                     </span>
                   )}
                 </div>
-                <div className="text-[10px] font-mono text-terminal-dim mt-0.5 break-all">
-                  {t.cmd}
-                </div>
+                <div className="text-xs font-mono text-terminal-dim mt-0.5 break-all">{t.cmd}</div>
               </div>
             ))}
           </div>
-          <div className="mt-4 px-3 py-2.5 rounded-lg bg-terminal-surface/50 border border-terminal-border-subtle">
-            <div className="text-[10px] font-sans font-semibold text-terminal-dim mb-1.5">
-              How it works
-            </div>
-            <ul className="space-y-1 text-[10px] font-mono text-terminal-dimmer leading-relaxed">
-              <li className="flex items-start gap-1.5">
-                <span className="text-terminal-green mt-px shrink-0">&bull;</span>
-                AI Studio runs the CLI tool in headless mode on your machine
-              </li>
-              <li className="flex items-start gap-1.5">
-                <span className="text-terminal-green mt-px shrink-0">&bull;</span>
-                Uses the API key already configured in the tool — billed to your own account
-              </li>
-              <li className="flex items-start gap-1.5">
-                <span className="text-terminal-green mt-px shrink-0">&bull;</span>
-                Zero data sent to vibe-replay servers — all processing stays local
-              </li>
-            </ul>
-          </div>
+          <p className="mt-4 text-xs font-mono text-terminal-dimmer leading-relaxed text-center">
+            AI Studio runs the CLI tool in headless mode,{" "}
+            <span className="text-terminal-green font-medium">locally</span> on your machine.
+          </p>
         </div>
       </div>
     );
   }
 
-  const sourceLabel = (type: string) => {
-    if (type === "translate") return "Translated";
-    if (type === "tone") return "Softened";
-    return "Modified";
-  };
-
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="px-3 py-2 border-b border-terminal-border-subtle flex items-center justify-between">
+      <div className="px-4 py-2.5 border-b border-terminal-border-subtle flex items-center justify-between">
         <div className="flex items-center gap-2">
           <SparkleIcon size={12} />
           <span className="text-[10px] font-sans font-semibold text-terminal-text uppercase tracking-widest">
@@ -287,17 +331,20 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
           </span>
         </div>
         {overlayCount > 0 && (
-          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple tabular-nums">
-            {overlayCount} modified
-          </span>
+          <button
+            onClick={revertAll}
+            className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-red-subtle hover:text-terminal-red transition-colors"
+          >
+            Revert All ({overlayCount})
+          </button>
         )}
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {/* Tool status — how it works */}
-        <div className="px-3 py-2.5 border-b border-terminal-border-subtle bg-terminal-surface/30">
+        {/* Tool status */}
+        <div className="px-4 py-3 border-b border-terminal-border-subtle bg-terminal-surface/30">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-mono text-terminal-dim">Tool</span>
+            <span className="text-xs font-mono text-terminal-dim">Tool</span>
             {tools.length > 1 && setStudioToolName ? (
               <select
                 value={toolName || ""}
@@ -305,7 +352,7 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
                   setStudioToolName(e.target.value);
                   if (setAiCoachToolName) setAiCoachToolName(e.target.value);
                 }}
-                className="bg-terminal-surface border border-terminal-border rounded-lg px-2 py-0.5 text-[11px] font-mono text-terminal-text outline-none cursor-pointer hover:border-terminal-purple/30 transition-colors"
+                className="bg-terminal-surface border border-terminal-border rounded-lg px-2 py-0.5 text-xs font-mono text-terminal-text outline-none cursor-pointer hover:border-terminal-purple/30 transition-colors"
               >
                 {tools.map((t) => (
                   <option key={t.name} value={t.name}>
@@ -314,85 +361,44 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
                 ))}
               </select>
             ) : (
-              <span className="text-[11px] font-mono font-medium text-terminal-text px-2 py-0.5 rounded-lg bg-terminal-surface border border-terminal-border">
+              <span className="text-xs font-mono font-medium text-terminal-text px-2 py-0.5 rounded-lg bg-terminal-surface border border-terminal-border">
                 {toolName}
               </span>
             )}
           </div>
-          <div className="mt-2 space-y-1.5">
-            <div className="flex items-start gap-2">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="text-terminal-green mt-0.5 shrink-0"
-              >
-                <rect width="18" height="18" x="3" y="3" rx="2" />
-                <path d="m8 12 3 3 5-6" />
-              </svg>
-              <span className="text-[10px] font-mono text-terminal-dim leading-relaxed">
-                Runs <span className="text-terminal-text font-medium">{toolName}</span> in headless
-                mode on your machine — your session data never leaves localhost
-              </span>
-            </div>
-            <div className="flex items-start gap-2">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="text-terminal-green mt-0.5 shrink-0"
-              >
-                <rect width="18" height="18" x="3" y="3" rx="2" />
-                <path d="m8 12 3 3 5-6" />
-              </svg>
-              <span className="text-[10px] font-mono text-terminal-dim leading-relaxed">
-                Uses the API key you already configured in{" "}
-                <span className="text-terminal-text font-medium">{toolName}</span> — billed to your
-                own account, not ours
-              </span>
-            </div>
-            <div className="flex items-start gap-2">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="text-terminal-green mt-0.5 shrink-0"
-              >
-                <rect width="18" height="18" x="3" y="3" rx="2" />
-                <path d="m8 12 3 3 5-6" />
-              </svg>
-              <span className="text-[10px] font-mono text-terminal-dim leading-relaxed">
-                Zero data sent to vibe-replay servers — all processing is local
-              </span>
-            </div>
-          </div>
+          <ToolExplainer toolName={toolName} />
         </div>
 
         {/* Feature cards */}
-        <div className="p-3 space-y-2.5">
+        <div className="p-4 space-y-3">
           {/* AI Coach */}
           {hasAiCoach && (
             <FeatureCard
               title="AI Coach"
-              description="Analyze your prompting technique and get actionable feedback as inline comments."
+              preview={
+                <div className="mt-2.5 rounded-lg bg-terminal-surface-inset border border-terminal-border overflow-hidden">
+                  <div className="px-3 py-2.5 border-b border-terminal-border-subtle">
+                    <div className="text-xs font-mono text-terminal-green leading-relaxed">
+                      Fix the login bug users reported
+                    </div>
+                  </div>
+                  <div className="px-3 py-2 flex items-start gap-2">
+                    <span className="text-xs shrink-0">{"\uD83D\uDCAC"}</span>
+                    <span className="text-xs font-mono text-terminal-blue leading-relaxed">
+                      Be specific — which file? what error?
+                    </span>
+                  </div>
+                  <div className="px-3 py-2 border-t border-terminal-border-subtle flex items-center gap-2">
+                    <span className="text-xs font-mono font-semibold text-terminal-orange">
+                      6/10
+                    </span>
+                    <span className="text-xs font-mono text-terminal-dimmer">
+                      {"·"} 4 comments added inline
+                    </span>
+                  </div>
+                </div>
+              }
+              description="Score your prompting technique and get inline coaching comments."
               running={aiCoachRunning}
               disabled={isAnyRunning}
               status={coachStatus}
@@ -411,7 +417,27 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
           {runTranslate && (
             <FeatureCard
               title="Translate"
-              description="Translate user prompts for sharing with international colleagues."
+              preview={
+                <div className="mt-2.5 rounded-lg bg-terminal-surface-inset border border-terminal-border overflow-hidden">
+                  <div className="px-3 py-2.5 space-y-1">
+                    <div className="text-xs font-mono text-terminal-dim line-through opacity-60">
+                      {"\u8FD9\u4E2Abug\u600E\u4E48\u4FEE\uFF1F"}
+                    </div>
+                    <div className="text-xs font-mono text-terminal-green">
+                      How to fix this bug?
+                    </div>
+                  </div>
+                  <div className="px-3 py-2.5 border-t border-terminal-border-subtle space-y-1">
+                    <div className="text-xs font-mono text-terminal-dim line-through opacity-60">
+                      {"\u5DF2\u5199\u5165\u3002\u4EE5\u540E\u7528\u4E2D\u6587\u95EE\u6211..."}
+                    </div>
+                    <div className="text-xs font-mono text-terminal-blue">
+                      Done. Ask me in Chinese...
+                    </div>
+                  </div>
+                </div>
+              }
+              description="Translate all prompts and responses for sharing with international teams."
               running={translating}
               disabled={isAnyRunning}
               status={translateStatus}
@@ -424,13 +450,13 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
               onConfirmRerun={() => void handleRunTranslate()}
               onCancelRerun={() => setShowRerunConfirm(null)}
               config={
-                <div className="flex items-center gap-2 mt-2">
-                  <span className="text-[10px] font-mono text-terminal-dim">Target</span>
+                <div className="flex items-center gap-2 mt-2.5">
+                  <span className="text-xs font-mono text-terminal-dim shrink-0">Target</span>
                   <select
                     value={targetLang}
                     onChange={(e) => setTargetLang(e.target.value)}
                     disabled={isAnyRunning}
-                    className="flex-1 bg-terminal-surface border border-terminal-border rounded px-2 py-0.5 text-[11px] font-mono text-terminal-text outline-none disabled:opacity-50"
+                    className="flex-1 bg-terminal-surface border border-terminal-border rounded px-2 py-1 text-xs font-mono text-terminal-text outline-none disabled:opacity-50"
                   >
                     {TARGET_LANGUAGES.map((lang) => (
                       <option key={lang} value={lang}>
@@ -447,7 +473,27 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
           {runTone && (
             <FeatureCard
               title="Soften Tone"
-              description="Make prompts more professional and constructive for comfortable sharing."
+              preview={
+                <div className="mt-2.5 rounded-lg bg-terminal-surface-inset border border-terminal-border overflow-hidden">
+                  <div className="px-3 py-2.5 space-y-1">
+                    <div className="text-xs font-mono text-terminal-red line-through opacity-60">
+                      this code is mass garbage, mass delete it
+                    </div>
+                    <div className="text-xs font-mono text-terminal-green">
+                      Let's refactor this module for clarity
+                    </div>
+                  </div>
+                  <div className="px-3 py-2.5 border-t border-terminal-border-subtle space-y-1">
+                    <div className="text-xs font-mono text-terminal-red line-through opacity-60">
+                      are you stupid? I said fix the auth
+                    </div>
+                    <div className="text-xs font-mono text-terminal-green">
+                      The auth issue is still present, could you revisit?
+                    </div>
+                  </div>
+                </div>
+              }
+              description="Rewrite harsh or blunt prompts into professional, constructive language."
               running={toningDown}
               disabled={isAnyRunning}
               status={toneStatus}
@@ -460,15 +506,15 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
               onConfirmRerun={() => void handleRunTone()}
               onCancelRerun={() => setShowRerunConfirm(null)}
               config={
-                <div className="flex items-center gap-2 mt-2">
-                  <span className="text-[10px] font-mono text-terminal-dim">Style</span>
+                <div className="flex items-center gap-2 mt-2.5">
+                  <span className="text-xs font-mono text-terminal-dim shrink-0">Style</span>
                   <select
                     value={toneStyle}
                     onChange={(e) =>
                       setToneStyle(e.target.value as "professional" | "neutral" | "friendly")
                     }
                     disabled={isAnyRunning}
-                    className="flex-1 bg-terminal-surface border border-terminal-border rounded px-2 py-0.5 text-[11px] font-mono text-terminal-text outline-none disabled:opacity-50"
+                    className="flex-1 bg-terminal-surface border border-terminal-border rounded px-2 py-1 text-xs font-mono text-terminal-text outline-none disabled:opacity-50"
                   >
                     {TONE_STYLES.map((s) => (
                       <option key={s.value} value={s.value}>
@@ -481,67 +527,19 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
             />
           )}
         </div>
-
-        {/* Modifications list */}
-        {overlayCount > 0 && (
-          <div className="border-t border-terminal-border-subtle">
-            <div className="px-3 py-2 flex items-center justify-between">
-              <span className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest">
-                Modifications
-              </span>
-              <button
-                onClick={revertAll}
-                className="text-[10px] font-mono text-terminal-dim hover:text-terminal-red transition-colors"
-              >
-                Revert All
-              </button>
-            </div>
-            <div className="px-3 pb-3 space-y-1.5">
-              {overlays.overlays.map((overlay) => (
-                <div
-                  key={overlay.id}
-                  className="px-2.5 py-2 rounded-lg bg-terminal-surface/50 border border-terminal-border-subtle"
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[10px] font-mono text-terminal-dim">
-                      Scene {overlay.sceneIndex}
-                      <span className="mx-1 text-terminal-border">&middot;</span>
-                      <span className="text-terminal-purple">
-                        {sourceLabel(overlay.source.type)}
-                      </span>
-                    </span>
-                    <button
-                      onClick={() => revertOverlay(overlay.id)}
-                      className="text-[10px] font-mono text-terminal-dim hover:text-terminal-red transition-colors"
-                    >
-                      Revert
-                    </button>
-                  </div>
-                  <div className="text-[10px] font-mono text-terminal-dimmer line-clamp-1">
-                    {overlay.originalValue.slice(0, 60)}
-                    {overlay.originalValue.length > 60 ? "..." : ""}
-                  </div>
-                  <div className="text-[10px] font-mono text-terminal-text line-clamp-1 mt-0.5">
-                    &rarr; {overlay.modifiedValue.slice(0, 60)}
-                    {overlay.modifiedValue.length > 60 ? "..." : ""}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// FeatureCard sub-component
+// FeatureCard sub-component — vertical stacking layout
 // ---------------------------------------------------------------------------
 
 interface FeatureCardProps {
   title: string;
-  description: string;
+  preview?: React.ReactNode;
+  description?: string;
   running: boolean;
   disabled: boolean;
   status: { type: "success" | "error"; text: string } | null;
@@ -558,6 +556,7 @@ interface FeatureCardProps {
 
 function FeatureCard({
   title,
+  preview,
   description,
   running,
   disabled,
@@ -574,44 +573,44 @@ function FeatureCard({
 }: FeatureCardProps) {
   return (
     <div className="rounded-xl border border-terminal-border-subtle bg-terminal-surface/30 overflow-hidden">
-      <div className="px-3 py-2.5">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <div className="text-[11px] font-sans font-semibold text-terminal-text">{title}</div>
-            <div className="text-[10px] font-mono text-terminal-dim mt-0.5 leading-relaxed">
-              {description}
-            </div>
+      <div className="px-4 py-3">
+        <div className="text-sm font-sans font-semibold text-terminal-text">{title}</div>
+        {preview}
+        {description && (
+          <div className="text-xs font-mono text-terminal-dim mt-2 leading-relaxed">
+            {description}
           </div>
-          <div className="shrink-0 flex items-center gap-1.5">
-            {running && onCancel && (
-              <button
-                onClick={onCancel}
-                className="text-[10px] font-mono text-terminal-dim hover:text-terminal-text transition-colors"
-              >
-                Cancel
-              </button>
-            )}
-            <button
-              onClick={onRun}
-              disabled={disabled}
-              className="px-2.5 py-1 text-[10px] font-mono rounded-lg bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis transition-colors disabled:opacity-40 flex items-center gap-1.5 whitespace-nowrap"
-            >
-              {running ? (
-                <>
-                  <Spinner className="text-terminal-purple" />
-                  {runningLabel}
-                </>
-              ) : (
-                buttonLabel
-              )}
-            </button>
-          </div>
-        </div>
+        )}
         {config}
+        {/* Action row */}
+        <div className="flex items-center gap-2 mt-3">
+          <button
+            onClick={onRun}
+            disabled={disabled}
+            className="px-3.5 py-1.5 text-xs font-mono rounded-lg bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis transition-colors disabled:opacity-40 flex items-center gap-1.5"
+          >
+            {running ? (
+              <>
+                <Spinner className="text-terminal-purple" />
+                {runningLabel}
+              </>
+            ) : (
+              buttonLabel
+            )}
+          </button>
+          {running && onCancel && (
+            <button
+              onClick={onCancel}
+              className="text-xs font-mono text-terminal-dim hover:text-terminal-text transition-colors"
+            >
+              Cancel
+            </button>
+          )}
+        </div>
       </div>
       {showRerunConfirm && !running && (
-        <div className="px-3 pb-2.5">
-          <div className="flex items-center gap-2 text-[10px] font-mono">
+        <div className="px-4 pb-3">
+          <div className="flex items-center gap-2 text-xs font-mono">
             <span className="text-terminal-orange flex-1">{rerunWarning}</span>
             <button
               onClick={onCancelRerun}
@@ -630,7 +629,7 @@ function FeatureCard({
       )}
       {status && (
         <div
-          className={`px-3 pb-2.5 text-[10px] font-mono ${
+          className={`px-4 pb-3 text-xs font-mono ${
             status.type === "success" ? "text-terminal-green" : "text-terminal-red"
           }`}
         >

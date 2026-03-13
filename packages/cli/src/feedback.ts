@@ -700,18 +700,22 @@ export async function generateFeedback(
 function buildTranslationPrompt(
   session: ReplaySession,
   opts: { targetLang: string; sourceLang?: string },
-): { prompt: string; userPromptScenes: Array<{ index: number; content: string }> } {
-  const userPromptScenes = session.scenes
-    .map((s, i) => (s.type === "user-prompt" ? { index: i, content: s.content } : null))
+): { prompt: string; translatableScenes: Array<{ index: number; content: string }> } {
+  const translatableScenes = session.scenes
+    .map((s, i) =>
+      s.type === "user-prompt" || s.type === "text-response"
+        ? { index: i, content: s.content }
+        : null,
+    )
     .filter((s): s is { index: number; content: string } => s !== null);
 
-  const scenesBlock = userPromptScenes
+  const scenesBlock = translatableScenes
     .map((s) => `--- SCENE ${s.index} ---\n${s.content}`)
     .join("\n\n");
 
   const sourcePart = opts.sourceLang ? `from ${opts.sourceLang} ` : "";
 
-  const prompt = `You are a translation assistant for AI coding sessions. Translate the following user prompts ${sourcePart}to ${opts.targetLang}.
+  const prompt = `You are a translation assistant for AI coding sessions. Translate the following conversation messages (user prompts and assistant responses) ${sourcePart}to ${opts.targetLang}.
 
 ## Rules
 - Only translate natural language text
@@ -719,9 +723,9 @@ function buildTranslationPrompt(
 - Preserve markdown formatting
 - Keep widely-used technical jargon in their original form (API, endpoint, middleware, etc.)
 - Maintain the original intent and tone
-- If a prompt is already entirely in ${opts.targetLang}, return it unchanged with "unchanged": true
+- If a message is already entirely in ${opts.targetLang}, return it unchanged with "unchanged": true
 
-## User Prompts to Translate
+## Messages to Translate
 
 ${scenesBlock}
 
@@ -734,7 +738,7 @@ Schema:
     {
       "sceneIndex": <number>,
       "translated": "<string: the translated text>",
-      "unchanged": <boolean: true if prompt was already in target language>
+      "unchanged": <boolean: true if message was already in target language>
     }
   ]
 }
@@ -742,10 +746,10 @@ Schema:
 CRITICAL RULES:
 - DO NOT use any tools, file reads, or web searches
 - Output ONLY the JSON object — no other text
-- You MUST include an entry for every scene index: [${userPromptScenes.map((s) => s.index).join(", ")}]
+- You MUST include an entry for every scene index: [${translatableScenes.map((s) => s.index).join(", ")}]
 - Preserve all code blocks and inline code exactly as-is`;
 
-  return { prompt, userPromptScenes };
+  return { prompt, translatableScenes };
 }
 
 interface TranslationResult {
@@ -758,9 +762,9 @@ export async function generateTranslation(
   tool: FeedbackTool,
   opts: { targetLang: string; sourceLang?: string },
 ): Promise<TranslationResult | null> {
-  if (session.meta.stats.userPrompts === 0) return null;
+  if (session.scenes.length === 0) return null;
 
-  const { prompt, userPromptScenes } = buildTranslationPrompt(session, opts);
+  const { prompt, translatableScenes } = buildTranslationPrompt(session, opts);
   const output = await executeFeedback(prompt, tool);
   const json = extractJson(output);
   if (!json) return null;
@@ -775,7 +779,7 @@ export async function generateTranslation(
   if (!parsed || !Array.isArray(parsed.translations)) return null;
 
   const now = new Date().toISOString();
-  const validIndices = new Set(userPromptScenes.map((s) => s.index));
+  const validIndices = new Set(translatableScenes.map((s) => s.index));
   const overlays: SceneOverlay[] = [];
   let skipped = 0;
 
@@ -784,7 +788,7 @@ export async function generateTranslation(
     if (!validIndices.has(item.sceneIndex)) continue;
     if (typeof item.translated !== "string") continue;
 
-    const scene = userPromptScenes.find((s) => s.index === item.sceneIndex);
+    const scene = translatableScenes.find((s) => s.index === item.sceneIndex);
     if (!scene) continue;
 
     if (item.unchanged || item.translated.trim() === scene.content.trim()) {
