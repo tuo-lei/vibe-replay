@@ -279,7 +279,8 @@ export function fmtNum(n: number): string {
   return n.toString();
 }
 
-export function formatDuration(ms: number): string {
+export function formatDuration(ms?: number): string {
+  if (!ms) return "";
   const secs = Math.floor(ms / 1000);
   if (secs < 60) return `${secs}s`;
   const mins = Math.floor(secs / 60);
