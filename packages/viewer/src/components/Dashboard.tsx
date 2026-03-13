@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SessionSummary, SourceSession } from "../types";
+import { formatDuration } from "./StatsPanel";
 
 type Tab = "sessions" | "replays";
 type CachedListResponse<T> = {
   sessions: T[];
   cachedAt?: string;
 };
+function getErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  return "Unknown error";
+}
+
 const CACHE_REFRESH_TTL_MS = 5 * 60 * 1000;
 const TITLE_MAX_CHARS = 120;
 
@@ -60,16 +67,6 @@ function isCacheFresh(iso?: string, ttlMs = CACHE_REFRESH_TTL_MS): boolean {
   if (!iso) return false;
   const ageMs = Date.now() - new Date(iso).getTime();
   return Number.isFinite(ageMs) && ageMs >= 0 && ageMs < ttlMs;
-}
-
-function formatDuration(ms?: number): string {
-  if (!ms) return "";
-  const secs = Math.floor(ms / 1000);
-  if (secs < 60) return `${secs}s`;
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m ${secs % 60}s`;
-  const hrs = Math.floor(mins / 60);
-  return `${hrs}h ${mins % 60}m`;
 }
 
 function formatDate(iso: string): string {
@@ -800,9 +797,9 @@ function SessionsPanel() {
       setSources(fresh.sessions);
       setLastRefreshedAt(new Date().toISOString());
       setStaleCachedAt(null);
-    } catch (err: any) {
+    } catch (err) {
       if (!servedFromCache) {
-        setError(err.message || "Failed to load sessions");
+        setError(getErrorMessage(err) || "Failed to load sessions");
       } else {
         setRefreshError("Failed to refresh latest sessions. Showing cached data.");
       }
@@ -814,12 +811,22 @@ function SessionsPanel() {
 
   const toggleArchive = async (slug: string) => {
     const isArchived = archivedSlugs.has(slug);
-    await fetch(`/api/archive/${slug}`, { method: isArchived ? "DELETE" : "POST" });
     setArchivedSlugs((prev) => {
       const next = new Set(prev);
       isArchived ? next.delete(slug) : next.add(slug);
       return next;
     });
+    try {
+      const resp = await fetch(`/api/archive/${slug}`, { method: isArchived ? "DELETE" : "POST" });
+      if (!resp.ok) throw new Error("Archive toggle failed");
+    } catch (err) {
+      console.error("Archive toggle failed:", getErrorMessage(err));
+      setArchivedSlugs((prev) => {
+        const next = new Set(prev);
+        isArchived ? next.add(slug) : next.delete(slug);
+        return next;
+      });
+    }
   };
 
   useEffect(() => {
@@ -887,8 +894,8 @@ function SessionsPanel() {
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || "Generation failed");
       navigateTo({ view: null, session: data.slug });
-    } catch (err: any) {
-      setGenerateError(err.message);
+    } catch (err) {
+      setGenerateError(getErrorMessage(err));
     } finally {
       setGeneratingSlug(null);
     }
@@ -923,8 +930,8 @@ function SessionsPanel() {
             : s,
         ),
       );
-    } catch (err: any) {
-      console.error("Gist publish error:", err.message);
+    } catch (err) {
+      console.error("Gist publish error:", getErrorMessage(err));
     } finally {
       setPublishingSlug(null);
     }
@@ -1523,7 +1530,7 @@ function ReplaysPanel() {
 
       try {
         const resp = await fetch("/api/sessions");
-        if (!resp.ok) throw new Error();
+        if (!resp.ok) throw new Error("Failed to load sessions");
         const data = (await resp.json()) as SessionSummary[];
         if (!mounted) return;
         setSessions(data);
@@ -1562,12 +1569,22 @@ function ReplaysPanel() {
 
   const toggleArchive = async (slug: string) => {
     const isArchived = archivedSlugs.has(slug);
-    await fetch(`/api/archive/${slug}`, { method: isArchived ? "DELETE" : "POST" });
     setArchivedSlugs((prev) => {
       const next = new Set(prev);
       isArchived ? next.delete(slug) : next.add(slug);
       return next;
     });
+    try {
+      const resp = await fetch(`/api/archive/${slug}`, { method: isArchived ? "DELETE" : "POST" });
+      if (!resp.ok) throw new Error("Archive toggle failed");
+    } catch (err) {
+      console.error("Archive toggle failed:", getErrorMessage(err));
+      setArchivedSlugs((prev) => {
+        const next = new Set(prev);
+        isArchived ? next.add(slug) : next.delete(slug);
+        return next;
+      });
+    }
   };
 
   const handleTitleSave = async (slug: string, title: string) => {
@@ -1629,8 +1646,8 @@ function ReplaysPanel() {
             : s,
         ),
       );
-    } catch (err: any) {
-      console.error("Gist publish error:", err.message);
+    } catch (err) {
+      console.error("Gist publish error:", getErrorMessage(err));
     } finally {
       setPublishingSlug(null);
     }
@@ -1653,8 +1670,8 @@ function ReplaysPanel() {
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || "Regeneration failed");
       navigateTo({ view: null, session: data.slug });
-    } catch (err: any) {
-      console.error("Regenerate error:", err.message);
+    } catch (err) {
+      console.error("Regenerate error:", getErrorMessage(err));
     } finally {
       setRegeneratingSlug(null);
     }

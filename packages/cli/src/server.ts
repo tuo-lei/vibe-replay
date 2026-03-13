@@ -41,6 +41,12 @@ function requireSlug(raw: string | undefined): { slug: string } | { error: strin
   return { slug };
 }
 
+function getErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  return "Unknown error";
+}
+
 const MAX_TITLE_CHARS = 120;
 
 function normalizeTitle(title: string): string | undefined {
@@ -462,8 +468,8 @@ export async function startServer(
       await refreshReplaysCache();
 
       return c.json({ ok: true, title: target.meta.title });
-    } catch (err: any) {
-      return c.json({ error: err.message || "Update failed" }, 500);
+    } catch (err) {
+      return c.json({ error: getErrorMessage(err) }, 500);
     }
   });
 
@@ -476,8 +482,8 @@ export async function startServer(
       await rm(join(baseDir, slug), { recursive: true });
       await refreshReplaysCache();
       return c.json({ ok: true });
-    } catch (err: any) {
-      return c.json({ error: err.message || "Delete failed" }, 500);
+    } catch (err) {
+      return c.json({ error: getErrorMessage(err) }, 500);
     }
   });
 
@@ -601,8 +607,8 @@ export async function startServer(
 
       await writeFileCache(sourcesCacheKey, result);
       return c.json({ sessions: result });
-    } catch (err: any) {
-      return c.json({ error: err.message || "Source discovery failed" }, 500);
+    } catch (err) {
+      return c.json({ error: getErrorMessage(err) }, 500);
     }
   });
 
@@ -674,8 +680,8 @@ export async function startServer(
         },
         warnings: warnings.length > 0 ? warnings : undefined,
       });
-    } catch (err: any) {
-      return c.json({ error: err.message || "Generation failed" }, 500);
+    } catch (err) {
+      return c.json({ error: getErrorMessage(err) }, 500);
     }
   });
 
@@ -737,8 +743,8 @@ export async function startServer(
         overwrite: savedGist || undefined,
       });
       return c.json(gistResult);
-    } catch (err: any) {
-      return c.json({ error: err.message || "Gist publish failed" }, 500);
+    } catch (err) {
+      return c.json({ error: getErrorMessage(err) }, 500);
     }
   });
 
@@ -752,8 +758,8 @@ export async function startServer(
       const targetSession = await loadSessionFromDisk(baseDir, result.slug);
       const outputPath = await generateOutput(targetSession, targetDir);
       return c.json({ path: outputPath });
-    } catch (err: any) {
-      return c.json({ error: err.message || "HTML export failed" }, 500);
+    } catch (err) {
+      return c.json({ error: getErrorMessage(err) }, 500);
     }
   });
 
@@ -822,8 +828,8 @@ export async function startServer(
         replayUrl,
         warnings: warnings.length > 0 ? warnings : undefined,
       });
-    } catch (err: any) {
-      return c.json({ error: err.message || "GitHub export failed" }, 500);
+    } catch (err) {
+      return c.json({ error: getErrorMessage(err) }, 500);
     }
   });
 
@@ -892,8 +898,8 @@ export async function startServer(
         score: fb.result.score,
         itemCount: fb.result.feedbackItems.length,
       });
-    } catch (err: any) {
-      return c.json({ error: err.message || "Feedback generation failed" }, 500);
+    } catch (err) {
+      return c.json({ error: getErrorMessage(err) }, 500);
     }
   });
 

@@ -1,19 +1,10 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { ReplaySession } from "../types";
+import { formatDuration } from "./StatsPanel";
 
 interface Props {
   session: ReplaySession;
   onStart: (autoPlay?: boolean) => void;
-}
-
-function formatDuration(ms?: number): string {
-  if (!ms) return "";
-  const secs = Math.floor(ms / 1000);
-  if (secs < 60) return `${secs}s`;
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m ${secs % 60}s`;
-  const hrs = Math.floor(mins / 60);
-  return `${hrs}h ${mins % 60}m`;
 }
 
 export default function LandingHero({ session, onStart }: Props) {
