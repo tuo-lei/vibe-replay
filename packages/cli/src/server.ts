@@ -771,14 +771,22 @@ export async function startServer(
       const overlaysData = await loadOverlays(baseDir, result.slug);
       const targetSession = sessionWithEffectiveContent(rawSession, overlaysData);
 
-      await writeFile(join(targetDir, "replay.json"), JSON.stringify(targetSession), "utf-8");
+      // Write effective content for gist, then restore the original replay.json
+      const replayPath = join(targetDir, "replay.json");
+      const originalContent = await readFile(replayPath, "utf-8");
+      await writeFile(replayPath, JSON.stringify(targetSession), "utf-8");
 
-      const title = targetSession.meta.title || targetSession.meta.slug;
-      const savedGist = await loadSavedGistInfo(targetDir);
-      const gistResult = await publishGist(targetDir, title, {
-        overwrite: savedGist || undefined,
-      });
-      return c.json(gistResult);
+      try {
+        const title = targetSession.meta.title || targetSession.meta.slug;
+        const savedGist = await loadSavedGistInfo(targetDir);
+        const gistResult = await publishGist(targetDir, title, {
+          overwrite: savedGist || undefined,
+        });
+        return c.json(gistResult);
+      } finally {
+        // Always restore original replay.json
+        await writeFile(replayPath, originalContent, "utf-8");
+      }
     } catch (err) {
       return c.json({ error: getErrorMessage(err) }, 500);
     }
@@ -794,8 +802,16 @@ export async function startServer(
       const rawSession = await loadSessionFromDisk(baseDir, result.slug);
       const overlaysData = await loadOverlays(baseDir, result.slug);
       const targetSession = sessionWithEffectiveContent(rawSession, overlaysData);
-      const outputPath = await generateOutput(targetSession, targetDir);
-      return c.json({ path: outputPath });
+
+      // generateOutput writes replay.json — save/restore to avoid destructive overwrite
+      const replayPath = join(targetDir, "replay.json");
+      const originalContent = await readFile(replayPath, "utf-8");
+      try {
+        const outputPath = await generateOutput(targetSession, targetDir);
+        return c.json({ path: outputPath });
+      } finally {
+        await writeFile(replayPath, originalContent, "utf-8");
+      }
     } catch (err) {
       return c.json({ error: getErrorMessage(err) }, 500);
     }

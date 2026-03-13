@@ -389,11 +389,7 @@ const GroupCard = memo(function GroupCard({
                   scene={scene}
                   isActive={index === currentIndex}
                   collapseTools={effectivePrefs.collapseAllTools}
-                  effectiveContent={
-                    scene.type === "user-prompt" && effectiveContent != null
-                      ? effectiveContent
-                      : undefined
-                  }
+                  effectiveContent={effectiveContent ?? undefined}
                 />
                 {sceneOverlays.length > 0 && (
                   <div className="flex items-center gap-2 mt-1.5">
