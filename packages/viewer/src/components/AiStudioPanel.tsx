@@ -246,10 +246,25 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
               </div>
             ))}
           </div>
-          <p className="mt-4 text-[10px] font-mono text-terminal-dimmer leading-relaxed">
-            All tools run locally using your own API token. No session data is sent to vibe-replay
-            servers.
-          </p>
+          <div className="mt-4 px-3 py-2.5 rounded-lg bg-terminal-surface/50 border border-terminal-border-subtle">
+            <div className="text-[10px] font-sans font-semibold text-terminal-dim mb-1.5">
+              How it works
+            </div>
+            <ul className="space-y-1 text-[10px] font-mono text-terminal-dimmer leading-relaxed">
+              <li className="flex items-start gap-1.5">
+                <span className="text-terminal-green mt-px shrink-0">&bull;</span>
+                AI Studio runs the CLI tool in headless mode on your machine
+              </li>
+              <li className="flex items-start gap-1.5">
+                <span className="text-terminal-green mt-px shrink-0">&bull;</span>
+                Uses the API key already configured in the tool — billed to your own account
+              </li>
+              <li className="flex items-start gap-1.5">
+                <span className="text-terminal-green mt-px shrink-0">&bull;</span>
+                Zero data sent to vibe-replay servers — all processing stays local
+              </li>
+            </ul>
+          </div>
         </div>
       </div>
     );
@@ -279,7 +294,7 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {/* Tool status */}
+        {/* Tool status — how it works */}
         <div className="px-3 py-2.5 border-b border-terminal-border-subtle bg-terminal-surface/30">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-mono text-terminal-dim">Tool</span>
@@ -304,9 +319,71 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
               </span>
             )}
           </div>
-          <p className="text-[10px] font-mono text-terminal-dimmer mt-1 leading-relaxed">
-            Runs locally using your own API token. No data sent to vibe-replay servers.
-          </p>
+          <div className="mt-2 space-y-1.5">
+            <div className="flex items-start gap-2">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="text-terminal-green mt-0.5 shrink-0"
+              >
+                <rect width="18" height="18" x="3" y="3" rx="2" />
+                <path d="m8 12 3 3 5-6" />
+              </svg>
+              <span className="text-[10px] font-mono text-terminal-dim leading-relaxed">
+                Runs <span className="text-terminal-text font-medium">{toolName}</span> in headless
+                mode on your machine — your session data never leaves localhost
+              </span>
+            </div>
+            <div className="flex items-start gap-2">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="text-terminal-green mt-0.5 shrink-0"
+              >
+                <rect width="18" height="18" x="3" y="3" rx="2" />
+                <path d="m8 12 3 3 5-6" />
+              </svg>
+              <span className="text-[10px] font-mono text-terminal-dim leading-relaxed">
+                Uses the API key you already configured in{" "}
+                <span className="text-terminal-text font-medium">{toolName}</span> — billed to your
+                own account, not ours
+              </span>
+            </div>
+            <div className="flex items-start gap-2">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="text-terminal-green mt-0.5 shrink-0"
+              >
+                <rect width="18" height="18" x="3" y="3" rx="2" />
+                <path d="m8 12 3 3 5-6" />
+              </svg>
+              <span className="text-[10px] font-mono text-terminal-dim leading-relaxed">
+                Zero data sent to vibe-replay servers — all processing is local
+              </span>
+            </div>
+          </div>
         </div>
 
         {/* Feature cards */}
