@@ -767,7 +767,9 @@ export async function startServer(
     const targetDir = join(baseDir, result.slug);
 
     try {
-      const targetSession = await loadSessionFromDisk(baseDir, result.slug);
+      const rawSession = await loadSessionFromDisk(baseDir, result.slug);
+      const overlaysData = await loadOverlays(baseDir, result.slug);
+      const targetSession = sessionWithEffectiveContent(rawSession, overlaysData);
 
       await writeFile(join(targetDir, "replay.json"), JSON.stringify(targetSession), "utf-8");
 
@@ -789,7 +791,9 @@ export async function startServer(
     const targetDir = join(baseDir, result.slug);
 
     try {
-      const targetSession = await loadSessionFromDisk(baseDir, result.slug);
+      const rawSession = await loadSessionFromDisk(baseDir, result.slug);
+      const overlaysData = await loadOverlays(baseDir, result.slug);
+      const targetSession = sessionWithEffectiveContent(rawSession, overlaysData);
       const outputPath = await generateOutput(targetSession, targetDir);
       return c.json({ path: outputPath });
     } catch (err) {
@@ -831,7 +835,9 @@ export async function startServer(
     const targetDir = join(baseDir, result.slug);
 
     try {
-      const targetSession = await loadSessionFromDisk(baseDir, result.slug);
+      const rawSession = await loadSessionFromDisk(baseDir, result.slug);
+      const overlaysData = await loadOverlays(baseDir, result.slug);
+      const targetSession = sessionWithEffectiveContent(rawSession, overlaysData);
 
       // Check for a previously published gist to use as replay URL
       const gist = await loadSavedGistInfo(targetDir);

@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReplaySession, SceneOverlay, SessionOverlays } from "../types";
 import type { ViewerMode } from "./useSessionLoader";
 
 export interface OverlayActions {
   overlays: SessionOverlays;
+  /** Session with overlays baked in — use this for display/export instead of raw session */
+  effectiveSession: ReplaySession;
   /** Get effective content for a scene (overlay if present, otherwise original) */
   getEffectiveContent: (sceneIndex: number) => string | null;
   /** Check if a scene has an active overlay */
@@ -147,6 +149,39 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
     [session.scenes, overlays, showOriginal, showAllOriginals],
   );
 
+  // Baked session: overlays applied to scene content (respects showAllOriginals toggle)
+  const effectiveSession = useMemo((): ReplaySession => {
+    if (overlays.overlays.length === 0 || showAllOriginals) return session;
+    // Build latest overlay per scene
+    const latestByScene = new Map<number, string>();
+    for (const o of overlays.overlays) {
+      const cur = latestByScene.get(o.sceneIndex);
+      if (!cur) {
+        latestByScene.set(o.sceneIndex, o.modifiedValue);
+      } else {
+        const curOverlay = overlays.overlays.find(
+          (x) => x.sceneIndex === o.sceneIndex && x.modifiedValue === cur,
+        );
+        if (curOverlay && o.updatedAt > curOverlay.updatedAt) {
+          latestByScene.set(o.sceneIndex, o.modifiedValue);
+        }
+      }
+    }
+    if (latestByScene.size === 0) return session;
+    return {
+      ...session,
+      scenes: session.scenes.map((scene, i) => {
+        if (showOriginal.has(i)) return scene;
+        const effective = latestByScene.get(i);
+        if (!effective) return scene;
+        if (scene.type === "user-prompt" || scene.type === "text-response") {
+          return { ...scene, content: effective };
+        }
+        return scene;
+      }),
+    };
+  }, [session, overlays, showOriginal, showAllOriginals]);
+
   const hasOverlay = useCallback(
     (sceneIndex: number): boolean => overlays.overlays.some((o) => o.sceneIndex === sceneIndex),
     [overlays],
@@ -274,6 +309,7 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
 
   return {
     overlays,
+    effectiveSession,
     getEffectiveContent,
     hasOverlay,
     getOverlays,

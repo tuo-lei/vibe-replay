@@ -47,6 +47,7 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
   const [isOutlineOpen, setIsOutlineOpen] = useState(true);
   const annotationActions = useAnnotations(session, viewerMode);
   const overlayActions = useOverlays(session, viewerMode);
+  const { effectiveSession } = overlayActions;
   const { annotations } = annotationActions;
 
   const effectivePrefs = getEffectivePrefs(viewPrefs);
@@ -401,7 +402,7 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
 
   // Show landing page before playback starts
   if (!landed) {
-    return <LandingHero session={session} onStart={handleStart} />;
+    return <LandingHero session={effectiveSession} onStart={handleStart} />;
   }
 
   const { meta } = session;
@@ -665,7 +666,7 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
 
                 {/* Search overlay */}
                 <SearchOverlay
-                  scenes={session.scenes}
+                  scenes={effectiveSession.scenes}
                   open={searchOpen}
                   onClose={() => setSearchOpen(false)}
                   onSeek={(i) => {
@@ -677,13 +678,13 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
             </div>
           )}
 
-          {activeView === "summary" && <SummaryView session={session} />}
+          {activeView === "summary" && <SummaryView session={effectiveSession} />}
           {activeView === "export" && (
             <ExportView
               actions={annotationActions}
               viewerMode={viewerMode}
               readOnly={isReadOnly}
-              session={session}
+              session={effectiveSession}
             />
           )}
         </div>
@@ -721,7 +722,7 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
         open={commentDrawerOpen}
         onClose={() => setCommentDrawerOpen(false)}
         actions={annotationActions}
-        scenes={session.scenes}
+        scenes={effectiveSession.scenes}
         currentIndex={currentIndex}
         onSeek={seekFromNavigation}
         addingForScene={commentTargetScene}
@@ -791,7 +792,7 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
                 overlayActions={overlayActions}
               />
             ) : (
-              <SummaryView session={session} />
+              <SummaryView session={effectiveSession} />
             )}
           </div>
         </div>
