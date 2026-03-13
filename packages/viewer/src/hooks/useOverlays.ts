@@ -85,6 +85,8 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
 
   // Save timer for debounced persistence
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track whether initial load has completed to avoid saving on mount
+  const loadedRef = useRef(false);
 
   // Load overlays on mount
   useEffect(() => {
@@ -96,7 +98,10 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
           setOverlaysState(data as SessionOverlays);
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        loadedRef.current = true;
+      });
   }, [isEditor]);
 
   // Detect tools
@@ -118,9 +123,9 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
       .catch(() => {});
   }, [isEditor]);
 
-  // Debounced save to server
+  // Debounced save to server (skip initial load to avoid redundant POST)
   useEffect(() => {
-    if (!isEditor) return;
+    if (!isEditor || !loadedRef.current) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       fetch(apiUrl("/api/overlays"), {
@@ -152,20 +157,17 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
   // Baked session: overlays applied to scene content (respects showAllOriginals toggle)
   const effectiveSession = useMemo((): ReplaySession => {
     if (overlays.overlays.length === 0 || showAllOriginals) return session;
-    // Build latest overlay per scene
-    const latestByScene = new Map<number, string>();
+    // Group overlays by scene, pick latest by updatedAt
+    const grouped = new Map<number, SceneOverlay[]>();
     for (const o of overlays.overlays) {
-      const cur = latestByScene.get(o.sceneIndex);
-      if (!cur) {
-        latestByScene.set(o.sceneIndex, o.modifiedValue);
-      } else {
-        const curOverlay = overlays.overlays.find(
-          (x) => x.sceneIndex === o.sceneIndex && x.modifiedValue === cur,
-        );
-        if (curOverlay && o.updatedAt > curOverlay.updatedAt) {
-          latestByScene.set(o.sceneIndex, o.modifiedValue);
-        }
-      }
+      const arr = grouped.get(o.sceneIndex);
+      if (arr) arr.push(o);
+      else grouped.set(o.sceneIndex, [o]);
+    }
+    const latestByScene = new Map<number, string>();
+    for (const [sceneIndex, sceneOverlays] of grouped) {
+      const latest = sceneOverlays.reduce((a, b) => (a.updatedAt > b.updatedAt ? a : b));
+      latestByScene.set(sceneIndex, latest.modifiedValue);
     }
     if (latestByScene.size === 0) return session;
     return {
@@ -244,7 +246,10 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
     setShowAllOriginals((prev) => !prev);
   }, []);
 
-  const setStudioToolName = isEditor ? (name: string) => setStudioToolNameState(name) : null;
+  const setStudioToolName = useMemo(
+    () => (isEditor ? (name: string) => setStudioToolNameState(name) : null),
+    [isEditor],
+  );
 
   const cancelStudio = isEditor
     ? () => {

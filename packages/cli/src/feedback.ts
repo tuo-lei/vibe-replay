@@ -957,15 +957,18 @@ interface ToneResult {
   stats: { adjusted: number; skipped: number };
 }
 
-export async function generateToneAdjustment(
-  session: ReplaySession,
-  tool: FeedbackTool,
-  opts: { style: "professional" | "neutral" | "friendly" },
-): Promise<ToneResult | null> {
-  if (session.meta.stats.userPrompts === 0) return null;
+/** Max scenes per batch to avoid LLM output truncation */
+const TONE_BATCH_SIZE = 30;
 
-  const { prompt, userPromptScenes } = buildTonePrompt(session, opts);
-  const output = await executeFeedback(prompt, tool);
+/**
+ * Parse a single batch of tone adjustment output into overlays.
+ */
+function parseToneBatch(
+  output: string,
+  batchScenes: Array<{ index: number; content: string }>,
+  opts: { style: "professional" | "neutral" | "friendly" },
+  now: string,
+): { overlays: SceneOverlay[]; skipped: number } | null {
   const json = extractJson(output);
   if (!json) return null;
 
@@ -978,8 +981,7 @@ export async function generateToneAdjustment(
 
   if (!parsed || !Array.isArray(parsed.adjustments)) return null;
 
-  const now = new Date().toISOString();
-  const validIndices = new Set(userPromptScenes.map((s) => s.index));
+  const validIndices = new Set(batchScenes.map((s) => s.index));
   const overlays: SceneOverlay[] = [];
   let skipped = 0;
 
@@ -988,7 +990,7 @@ export async function generateToneAdjustment(
     if (!validIndices.has(item.sceneIndex)) continue;
     if (typeof item.adjusted !== "string") continue;
 
-    const scene = userPromptScenes.find((s) => s.index === item.sceneIndex);
+    const scene = batchScenes.find((s) => s.index === item.sceneIndex);
     if (!scene) continue;
 
     if (item.unchanged || item.adjusted.trim() === scene.content.trim()) {
@@ -1013,7 +1015,71 @@ export async function generateToneAdjustment(
     });
   }
 
-  return { overlays, stats: { adjusted: overlays.length, skipped } };
+  return { overlays, skipped };
+}
+
+/**
+ * Create a sparse scenes array for tone batching (only user-prompt scenes in batch).
+ */
+function rebuildScenesForToneBatch(
+  originalScenes: ReplaySession["scenes"],
+  batch: Array<{ index: number; content: string }>,
+): ReplaySession["scenes"] {
+  const batchIndices = new Set(batch.map((b) => b.index));
+  return originalScenes.map((scene, i) => {
+    if (batchIndices.has(i)) return scene;
+    return { type: "tool-call" as const, toolName: "", input: {}, result: "" };
+  });
+}
+
+export async function generateToneAdjustment(
+  session: ReplaySession,
+  tool: FeedbackTool,
+  opts: { style: "professional" | "neutral" | "friendly" },
+): Promise<ToneResult | null> {
+  if (session.meta.stats.userPrompts === 0) return null;
+
+  // Collect all user-prompt scenes
+  const allScenes = session.scenes
+    .map((s, i) => (s.type === "user-prompt" ? { index: i, content: s.content } : null))
+    .filter((s): s is { index: number; content: string } => s !== null);
+
+  if (allScenes.length === 0) return null;
+
+  // Split into batches to avoid LLM output truncation
+  const batches: Array<{ index: number; content: string }>[] = [];
+  for (let i = 0; i < allScenes.length; i += TONE_BATCH_SIZE) {
+    batches.push(allScenes.slice(i, i + TONE_BATCH_SIZE));
+  }
+
+  const now = new Date().toISOString();
+
+  // Run all batches in parallel
+  const batchResults = await Promise.all(
+    batches.map(async (batch) => {
+      const { prompt } = buildTonePrompt(
+        { ...session, scenes: rebuildScenesForToneBatch(session.scenes, batch) },
+        opts,
+      );
+      const output = await executeFeedback(prompt, tool);
+      return parseToneBatch(output, batch, opts, now);
+    }),
+  );
+
+  const allOverlays: SceneOverlay[] = [];
+  let totalSkipped = 0;
+  for (const result of batchResults) {
+    if (result) {
+      allOverlays.push(...result.overlays);
+      totalSkipped += result.skipped;
+    }
+  }
+
+  if (allOverlays.length === 0 && totalSkipped === 0) return null;
+  return {
+    overlays: allOverlays,
+    stats: { adjusted: allOverlays.length, skipped: totalSkipped },
+  };
 }
 
 // ---------------------------------------------------------------------------
