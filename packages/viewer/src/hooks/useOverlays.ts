@@ -8,14 +8,16 @@ export interface OverlayActions {
   getEffectiveContent: (sceneIndex: number) => string | null;
   /** Check if a scene has an active overlay */
   hasOverlay: (sceneIndex: number) => boolean;
-  /** Get the overlay for a specific scene */
-  getOverlay: (sceneIndex: number) => SceneOverlay | undefined;
+  /** Get all overlays for a specific scene (may have multiple source types) */
+  getOverlays: (sceneIndex: number) => SceneOverlay[];
   /** Total overlay count */
   overlayCount: number;
   /** Set overlays (used after AI Studio operations) */
   setOverlays: (overlays: SessionOverlays) => void;
   /** Revert a single overlay */
   revertOverlay: (id: string) => void;
+  /** Revert all overlays for a scene */
+  revertSceneOverlays: (sceneIndex: number) => void;
   /** Revert all overlays */
   revertAll: () => void;
   /** Update an overlay's modified value (manual edit) */
@@ -136,8 +138,11 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
       if (!scene) return null;
       if (scene.type !== "user-prompt" && scene.type !== "text-response") return null;
       if (showAllOriginals || showOriginal.has(sceneIndex)) return scene.content;
-      const overlay = overlays.overlays.find((o) => o.sceneIndex === sceneIndex);
-      return overlay ? overlay.modifiedValue : scene.content;
+      // When multiple overlays exist for a scene, use the most recently updated one
+      const sceneOverlays = overlays.overlays.filter((o) => o.sceneIndex === sceneIndex);
+      if (sceneOverlays.length === 0) return scene.content;
+      const latest = sceneOverlays.reduce((a, b) => (a.updatedAt > b.updatedAt ? a : b));
+      return latest.modifiedValue;
     },
     [session.scenes, overlays, showOriginal, showAllOriginals],
   );
@@ -147,9 +152,9 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
     [overlays],
   );
 
-  const getOverlay = useCallback(
-    (sceneIndex: number): SceneOverlay | undefined =>
-      overlays.overlays.find((o) => o.sceneIndex === sceneIndex),
+  const getOverlays = useCallback(
+    (sceneIndex: number): SceneOverlay[] =>
+      overlays.overlays.filter((o) => o.sceneIndex === sceneIndex),
     [overlays],
   );
 
@@ -161,6 +166,13 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
     setOverlaysState((prev) => ({
       ...prev,
       overlays: prev.overlays.filter((o) => o.id !== id),
+    }));
+  }, []);
+
+  const revertSceneOverlays = useCallback((sceneIndex: number) => {
+    setOverlaysState((prev) => ({
+      ...prev,
+      overlays: prev.overlays.filter((o) => o.sceneIndex !== sceneIndex),
     }));
   }, []);
 
@@ -264,10 +276,11 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
     overlays,
     getEffectiveContent,
     hasOverlay,
-    getOverlay,
+    getOverlays,
     overlayCount: overlays.overlays.length,
     setOverlays,
     revertOverlay,
+    revertSceneOverlays,
     revertAll,
     updateOverlay,
     showOriginal,

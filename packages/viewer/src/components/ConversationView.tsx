@@ -380,7 +380,7 @@ const GroupCard = memo(function GroupCard({
         </div>
         <div className="text-left">
           {visibleScenes.map(({ scene, index }) => {
-            const overlay = overlayActions?.getOverlay(index);
+            const sceneOverlays = overlayActions?.getOverlays(index) ?? [];
             const effectiveContent = overlayActions?.getEffectiveContent(index);
             const isShowingOriginal = overlayActions?.showOriginal.has(index);
             return (
@@ -395,15 +395,20 @@ const GroupCard = memo(function GroupCard({
                       : undefined
                   }
                 />
-                {overlay && (
+                {sceneOverlays.length > 0 && (
                   <div className="flex items-center gap-2 mt-1.5">
-                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple">
-                      {overlay.source.type === "translate"
-                        ? "Translated"
-                        : overlay.source.type === "tone"
-                          ? "Softened"
-                          : "Modified"}
-                    </span>
+                    {sceneOverlays.map((o) => (
+                      <span
+                        key={o.id}
+                        className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple"
+                      >
+                        {o.source.type === "translate"
+                          ? "Translated"
+                          : o.source.type === "tone"
+                            ? "Softened"
+                            : "Modified"}
+                      </span>
+                    ))}
                     <button
                       onClick={() => overlayActions?.toggleOriginal(index)}
                       className="text-[10px] font-mono text-terminal-dim hover:text-terminal-text transition-colors"
@@ -411,7 +416,7 @@ const GroupCard = memo(function GroupCard({
                       {isShowingOriginal ? "Show modified" : "Show original"}
                     </button>
                     <button
-                      onClick={() => overlayActions?.revertOverlay(overlay.id)}
+                      onClick={() => overlayActions?.revertSceneOverlays(index)}
                       className="text-[10px] font-mono text-terminal-dim hover:text-terminal-red transition-colors"
                     >
                       Revert
@@ -871,8 +876,8 @@ function BatchedScenes({
           const count = annotationCounts?.get(index) || 0;
           const effectiveContent =
             scene.type === "text-response" ? overlayActions?.getEffectiveContent(index) : undefined;
-          const overlay =
-            scene.type === "text-response" ? overlayActions?.getOverlay(index) : undefined;
+          const sceneOverlays =
+            scene.type === "text-response" ? (overlayActions?.getOverlays(index) ?? []) : [];
           return (
             <div
               key={index}
@@ -885,11 +890,20 @@ function BatchedScenes({
                 collapseTools={collapseTools}
                 effectiveContent={effectiveContent ?? undefined}
               />
-              {overlay && (
+              {sceneOverlays.length > 0 && (
                 <div className="flex items-center gap-2 mt-1">
-                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple">
-                    {overlay.source.type === "translate" ? "Translated" : "Modified"}
-                  </span>
+                  {sceneOverlays.map((o) => (
+                    <span
+                      key={o.id}
+                      className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple"
+                    >
+                      {o.source.type === "translate"
+                        ? "Translated"
+                        : o.source.type === "tone"
+                          ? "Softened"
+                          : "Modified"}
+                    </span>
+                  ))}
                   <button
                     onClick={() => overlayActions?.toggleOriginal(index)}
                     className="text-[10px] font-mono text-terminal-dim hover:text-terminal-text transition-colors"
@@ -897,7 +911,7 @@ function BatchedScenes({
                     {overlayActions?.showOriginal.has(index) ? "Show modified" : "Show original"}
                   </button>
                   <button
-                    onClick={() => overlayActions?.revertOverlay(overlay.id)}
+                    onClick={() => overlayActions?.revertSceneOverlays(index)}
                     className="text-[10px] font-mono text-terminal-dim hover:text-terminal-red transition-colors"
                   >
                     Revert

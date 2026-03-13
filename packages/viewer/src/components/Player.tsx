@@ -436,7 +436,7 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
                       className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-200 ${
                         overlayActions.showAllOriginals
                           ? "bg-terminal-surface border border-terminal-border"
-                          : "bg-terminal-purple/70"
+                          : "bg-terminal-purple brightness-75"
                       }`}
                     >
                       <span

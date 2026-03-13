@@ -962,6 +962,49 @@ export async function startServer(
     return c.json({ ok: true });
   });
 
+  // --- Overlay chaining helper ---
+  // When running a new operation (translate/tone), use effective content from existing
+  // overlays so operations chain correctly (e.g. soften AFTER translate works on translated text)
+  function sessionWithEffectiveContent(
+    session: ReplaySession,
+    existing: SessionOverlays,
+  ): ReplaySession {
+    if (existing.overlays.length === 0) return session;
+    // For each scene, find the latest overlay by updatedAt
+    const latestByScene = new Map<number, { value: string; time: string }>();
+    for (const o of existing.overlays) {
+      const current = latestByScene.get(o.sceneIndex);
+      if (!current || o.updatedAt > current.time) {
+        latestByScene.set(o.sceneIndex, { value: o.modifiedValue, time: o.updatedAt });
+      }
+    }
+    if (latestByScene.size === 0) return session;
+    return {
+      ...session,
+      scenes: session.scenes.map((scene, i) => {
+        const entry = latestByScene.get(i);
+        if (!entry) return scene;
+        if (scene.type === "user-prompt" || scene.type === "text-response") {
+          return { ...scene, content: entry.value };
+        }
+        return scene;
+      }),
+    };
+  }
+
+  // After generation, fix originalValue to be the TRUE original from the unmodified session
+  function fixOriginalValues(
+    overlays: import("./types.js").SceneOverlay[],
+    originalSession: ReplaySession,
+  ) {
+    for (const overlay of overlays) {
+      const scene = originalSession.scenes[overlay.sceneIndex];
+      if (scene && (scene.type === "user-prompt" || scene.type === "text-response")) {
+        overlay.originalValue = scene.content;
+      }
+    }
+  }
+
   // --- AI Studio: Translate (requires slug) ---
   app.post("/api/studio/translate", async (c) => {
     const result = requireSlug(c.req.query("slug"));
@@ -987,17 +1030,22 @@ export async function startServer(
       const targetLang = typeof body.targetLang === "string" ? body.targetLang : "English";
       const sourceLang = typeof body.sourceLang === "string" ? body.sourceLang : undefined;
 
-      const translationResult = await generateTranslation(targetSession, tool, {
+      // Load existing overlays BEFORE generation so we can chain operations
+      const existing = await loadOverlays(baseDir, result.slug);
+      // Remove translate overlays — we're replacing them. Keep others (tone etc.) for chaining.
+      const nonTranslateOverlays = existing.overlays.filter((o) => o.source.type !== "translate");
+      const chainBase: SessionOverlays = { version: 1, overlays: nonTranslateOverlays };
+      const effectiveSession = sessionWithEffectiveContent(targetSession, chainBase);
+
+      const translationResult = await generateTranslation(effectiveSession, tool, {
         targetLang,
         sourceLang,
       });
       if (!translationResult) {
         return c.json({ error: "Could not generate translations (invalid AI output)" }, 500);
       }
-
-      // Merge with existing overlays: replace translate-sourced ones, keep others
-      const existing = await loadOverlays(baseDir, result.slug);
-      const nonTranslateOverlays = existing.overlays.filter((o) => o.source.type !== "translate");
+      // Restore true originalValue from the unmodified session
+      fixOriginalValues(translationResult.overlays, targetSession);
       const merged: SessionOverlays = {
         version: 1,
         overlays: [...nonTranslateOverlays, ...translationResult.overlays],
@@ -1039,14 +1087,19 @@ export async function startServer(
           ? (body.style as "professional" | "neutral" | "friendly")
           : "professional";
 
-      const toneResult = await generateToneAdjustment(targetSession, tool, { style });
+      // Load existing overlays BEFORE generation so we can chain operations
+      const existing = await loadOverlays(baseDir, result.slug);
+      // Remove tone overlays — we're replacing them. Keep others (translate etc.) for chaining.
+      const nonToneOverlays = existing.overlays.filter((o) => o.source.type !== "tone");
+      const chainBase: SessionOverlays = { version: 1, overlays: nonToneOverlays };
+      const effectiveSession = sessionWithEffectiveContent(targetSession, chainBase);
+
+      const toneResult = await generateToneAdjustment(effectiveSession, tool, { style });
       if (!toneResult) {
         return c.json({ error: "Could not adjust tone (invalid AI output)" }, 500);
       }
-
-      // Merge: replace tone-sourced overlays, keep others
-      const existing = await loadOverlays(baseDir, result.slug);
-      const nonToneOverlays = existing.overlays.filter((o) => o.source.type !== "tone");
+      // Restore true originalValue from the unmodified session
+      fixOriginalValues(toneResult.overlays, targetSession);
       const merged: SessionOverlays = {
         version: 1,
         overlays: [...nonToneOverlays, ...toneResult.overlays],
