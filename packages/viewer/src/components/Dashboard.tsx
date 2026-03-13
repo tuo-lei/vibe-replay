@@ -819,7 +819,8 @@ function SessionsPanel() {
     try {
       const resp = await fetch(`/api/archive/${slug}`, { method: isArchived ? "DELETE" : "POST" });
       if (!resp.ok) throw new Error("Archive toggle failed");
-    } catch {
+    } catch (err) {
+      console.error("Archive toggle failed:", getErrorMessage(err));
       setArchivedSlugs((prev) => {
         const next = new Set(prev);
         isArchived ? next.add(slug) : next.delete(slug);
@@ -1576,7 +1577,8 @@ function ReplaysPanel() {
     try {
       const resp = await fetch(`/api/archive/${slug}`, { method: isArchived ? "DELETE" : "POST" });
       if (!resp.ok) throw new Error("Archive toggle failed");
-    } catch {
+    } catch (err) {
+      console.error("Archive toggle failed:", getErrorMessage(err));
       setArchivedSlugs((prev) => {
         const next = new Set(prev);
         isArchived ? next.add(slug) : next.delete(slug);

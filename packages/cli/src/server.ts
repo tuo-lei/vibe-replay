@@ -469,7 +469,7 @@ export async function startServer(
 
       return c.json({ ok: true, title: target.meta.title });
     } catch (err) {
-      return c.json({ error: getErrorMessage(err) || "Update failed" }, 500);
+      return c.json({ error: getErrorMessage(err) }, 500);
     }
   });
 
@@ -483,7 +483,7 @@ export async function startServer(
       await refreshReplaysCache();
       return c.json({ ok: true });
     } catch (err) {
-      return c.json({ error: getErrorMessage(err) || "Delete failed" }, 500);
+      return c.json({ error: getErrorMessage(err) }, 500);
     }
   });
 
@@ -608,7 +608,7 @@ export async function startServer(
       await writeFileCache(sourcesCacheKey, result);
       return c.json({ sessions: result });
     } catch (err) {
-      return c.json({ error: getErrorMessage(err) || "Source discovery failed" }, 500);
+      return c.json({ error: getErrorMessage(err) }, 500);
     }
   });
 
@@ -681,7 +681,7 @@ export async function startServer(
         warnings: warnings.length > 0 ? warnings : undefined,
       });
     } catch (err) {
-      return c.json({ error: getErrorMessage(err) || "Generation failed" }, 500);
+      return c.json({ error: getErrorMessage(err) }, 500);
     }
   });
 
@@ -744,7 +744,7 @@ export async function startServer(
       });
       return c.json(gistResult);
     } catch (err) {
-      return c.json({ error: getErrorMessage(err) || "Gist publish failed" }, 500);
+      return c.json({ error: getErrorMessage(err) }, 500);
     }
   });
 
@@ -759,7 +759,7 @@ export async function startServer(
       const outputPath = await generateOutput(targetSession, targetDir);
       return c.json({ path: outputPath });
     } catch (err) {
-      return c.json({ error: getErrorMessage(err) || "HTML export failed" }, 500);
+      return c.json({ error: getErrorMessage(err) }, 500);
     }
   });
 
@@ -829,7 +829,7 @@ export async function startServer(
         warnings: warnings.length > 0 ? warnings : undefined,
       });
     } catch (err) {
-      return c.json({ error: getErrorMessage(err) || "GitHub export failed" }, 500);
+      return c.json({ error: getErrorMessage(err) }, 500);
     }
   });
 
@@ -899,7 +899,7 @@ export async function startServer(
         itemCount: fb.result.feedbackItems.length,
       });
     } catch (err) {
-      return c.json({ error: getErrorMessage(err) || "Feedback generation failed" }, 500);
+      return c.json({ error: getErrorMessage(err) }, 500);
     }
   });
 
