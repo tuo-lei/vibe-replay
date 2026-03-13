@@ -757,15 +757,19 @@ interface TranslationResult {
   stats: { translated: number; skipped: number };
 }
 
-export async function generateTranslation(
-  session: ReplaySession,
-  tool: FeedbackTool,
-  opts: { targetLang: string; sourceLang?: string },
-): Promise<TranslationResult | null> {
-  if (session.scenes.length === 0) return null;
+/** Max scenes per batch to avoid LLM output truncation */
+const TRANSLATE_BATCH_SIZE = 30;
 
-  const { prompt, translatableScenes } = buildTranslationPrompt(session, opts);
-  const output = await executeFeedback(prompt, tool);
+/**
+ * Parse a single batch of translation output into overlays.
+ * Returns overlays + skip count for this batch.
+ */
+function parseTranslationBatch(
+  output: string,
+  batchScenes: Array<{ index: number; content: string }>,
+  opts: { sourceLang?: string; targetLang: string },
+  now: string,
+): { overlays: SceneOverlay[]; skipped: number } | null {
   const json = extractJson(output);
   if (!json) return null;
 
@@ -778,8 +782,7 @@ export async function generateTranslation(
 
   if (!parsed || !Array.isArray(parsed.translations)) return null;
 
-  const now = new Date().toISOString();
-  const validIndices = new Set(translatableScenes.map((s) => s.index));
+  const validIndices = new Set(batchScenes.map((s) => s.index));
   const overlays: SceneOverlay[] = [];
   let skipped = 0;
 
@@ -788,7 +791,7 @@ export async function generateTranslation(
     if (!validIndices.has(item.sceneIndex)) continue;
     if (typeof item.translated !== "string") continue;
 
-    const scene = translatableScenes.find((s) => s.index === item.sceneIndex);
+    const scene = batchScenes.find((s) => s.index === item.sceneIndex);
     if (!scene) continue;
 
     if (item.unchanged || item.translated.trim() === scene.content.trim()) {
@@ -813,7 +816,77 @@ export async function generateTranslation(
     });
   }
 
-  return { overlays, stats: { translated: overlays.length, skipped } };
+  return { overlays, skipped };
+}
+
+export async function generateTranslation(
+  session: ReplaySession,
+  tool: FeedbackTool,
+  opts: { targetLang: string; sourceLang?: string },
+): Promise<TranslationResult | null> {
+  if (session.scenes.length === 0) return null;
+
+  // Collect all translatable scenes
+  const allScenes = session.scenes
+    .map((s, i) =>
+      s.type === "user-prompt" || s.type === "text-response"
+        ? { index: i, content: s.content }
+        : null,
+    )
+    .filter((s): s is { index: number; content: string } => s !== null);
+
+  if (allScenes.length === 0) return null;
+
+  // Split into batches to avoid LLM output truncation
+  const batches: Array<{ index: number; content: string }>[] = [];
+  for (let i = 0; i < allScenes.length; i += TRANSLATE_BATCH_SIZE) {
+    batches.push(allScenes.slice(i, i + TRANSLATE_BATCH_SIZE));
+  }
+
+  const now = new Date().toISOString();
+
+  // Run all batches in parallel
+  const batchResults = await Promise.all(
+    batches.map(async (batch) => {
+      const { prompt } = buildTranslationPrompt(
+        { ...session, scenes: rebuildScenesForBatch(session.scenes, batch) },
+        opts,
+      );
+      const output = await executeFeedback(prompt, tool);
+      return parseTranslationBatch(output, batch, opts, now);
+    }),
+  );
+
+  const allOverlays: SceneOverlay[] = [];
+  let totalSkipped = 0;
+  for (const result of batchResults) {
+    if (result) {
+      allOverlays.push(...result.overlays);
+      totalSkipped += result.skipped;
+    }
+  }
+
+  if (allOverlays.length === 0 && totalSkipped === 0) return null;
+  return {
+    overlays: allOverlays,
+    stats: { translated: allOverlays.length, skipped: totalSkipped },
+  };
+}
+
+/**
+ * Create a sparse scenes array that only contains the batch scenes at their
+ * original indices, so buildTranslationPrompt emits the correct scene indices.
+ */
+function rebuildScenesForBatch(
+  originalScenes: ReplaySession["scenes"],
+  batch: Array<{ index: number; content: string }>,
+): ReplaySession["scenes"] {
+  const batchIndices = new Set(batch.map((b) => b.index));
+  return originalScenes.map((scene, i) => {
+    if (batchIndices.has(i)) return scene;
+    // Replace non-batch scenes with a type that buildTranslationPrompt will skip
+    return { type: "tool-call" as const, toolName: "", input: {}, result: "" };
+  });
 }
 
 // ---------------------------------------------------------------------------
