@@ -1036,6 +1036,8 @@ export async function startServer(
     const exec = promisify(execFile);
 
     const TOOL_CHECK_TIMEOUT_MS = 3000;
+    const CHECK_TIMEOUT_MARKER = "__check_timeout__" as const;
+    const CHECK_TIMEOUT_DETAIL = "check timeout";
 
     interface ToolCheck {
       name: string;
@@ -1052,6 +1054,7 @@ export async function startServer(
       timedOut: boolean;
     }
 
+    type ExtraCheckResult = string | typeof CHECK_TIMEOUT_MARKER | undefined;
     type RunCommand = (cmd: string, args: string[]) => Promise<CommandRunResult>;
 
     function isTimeoutError(err: unknown): boolean {
@@ -1082,85 +1085,89 @@ export async function startServer(
       purpose: string,
       cmd: string,
       versionArgs: string[] = ["--version"],
-      extraCheck?: (run: RunCommand) => Promise<string | null | undefined>,
-    ): Promise<ToolCheck | null> {
+      extraCheck?: (run: RunCommand) => Promise<ExtraCheckResult>,
+    ): Promise<ToolCheck> {
       const whichResult = await runCommand("which", [cmd]);
       if (!whichResult.ok) {
-        if (whichResult.timedOut) return null;
+        if (whichResult.timedOut) {
+          return { name, label, purpose, installed: false, detail: CHECK_TIMEOUT_DETAIL };
+        }
         return { name, label, purpose, installed: false };
       }
 
       let version: string | undefined;
       const versionResult = await runCommand(cmd, versionArgs);
-      if (versionResult.timedOut) return null;
+      if (versionResult.timedOut) {
+        return { name, label, purpose, installed: false, detail: CHECK_TIMEOUT_DETAIL };
+      }
       if (versionResult.ok) {
         version = versionResult.stdout.trim().split("\n")[0];
       }
 
       const detail = extraCheck ? await extraCheck(runCommand) : undefined;
-      if (detail === null) return null;
+      if (detail === CHECK_TIMEOUT_MARKER) {
+        return { name, label, purpose, installed: false, version, detail: CHECK_TIMEOUT_DETAIL };
+      }
 
       return { name, label, purpose, installed: true, version, detail };
     }
 
-    const checks = (
-      await Promise.all([
-        checkCli(
-          "gh",
-          "GitHub CLI",
-          "Publish replays as GitHub Gists",
-          "gh",
-          ["--version"],
-          async (run) => {
-            const auth = await run("gh", ["auth", "status"]);
-            if (auth.timedOut) return null;
-            return auth.ok ? "authenticated" : "not authenticated";
-          },
-        ),
-        checkCli(
-          "claude",
-          "Claude Code",
-          "AI feedback via headless mode",
-          "claude",
-          ["--version"],
-          async (run) => {
-            const auth = await run("claude", ["auth", "status"]);
-            if (auth.timedOut) return null;
-            if (!auth.ok) return "not logged in";
+    const checks = await Promise.all([
+      checkCli(
+        "gh",
+        "GitHub CLI",
+        "Publish replays as GitHub Gists",
+        "gh",
+        ["--version"],
+        async (run) => {
+          const auth = await run("gh", ["auth", "status"]);
+          if (auth.timedOut) return CHECK_TIMEOUT_MARKER;
+          return auth.ok ? "authenticated" : "not authenticated";
+        },
+      ),
+      checkCli(
+        "claude",
+        "Claude Code",
+        "AI feedback via headless mode",
+        "claude",
+        ["--version"],
+        async (run) => {
+          const auth = await run("claude", ["auth", "status"]);
+          if (auth.timedOut) return CHECK_TIMEOUT_MARKER;
+          if (!auth.ok) return "not logged in";
 
-            try {
-              const info = JSON.parse(auth.stdout) as {
-                loggedIn?: boolean;
-                email?: string;
-                authMethod?: string;
-              };
-              if (info.loggedIn) return `${info.email || info.authMethod || "logged in"}`;
-            } catch {
-              // Non-JSON output still means command completed; keep non-blocking fallback detail.
-            }
+          try {
+            const info = JSON.parse(auth.stdout) as {
+              loggedIn?: boolean;
+              email?: string;
+              authMethod?: string;
+            };
+            if (info.loggedIn) return `${info.email || info.authMethod || "logged in"}`;
+          } catch {
+            // Non-JSON output still means command completed; keep non-blocking fallback detail.
+          }
 
-            return "not logged in";
-          },
-        ),
-        checkCli("cursor", "Cursor CLI", "AI feedback via AI Studio", "cursor", [
-          "agent",
-          "--version",
-        ]),
-        checkCli(
-          "opencode",
-          "OpenCode",
-          "AI feedback via headless mode",
-          "opencode",
-          ["--version"],
-          async (run) => {
-            const auth = await run("opencode", ["auth", "list"]);
-            if (auth.timedOut) return null;
-            if (!auth.ok) return undefined;
-            return auth.stdout.includes("0 credentials") ? "no credentials" : "configured";
-          },
-        ),
-      ])
-    ).filter((check): check is ToolCheck => check !== null);
+          return "not logged in";
+        },
+      ),
+      checkCli("cursor", "Cursor CLI", "AI feedback via AI Studio", "cursor", [
+        "agent",
+        "--version",
+      ]),
+      checkCli(
+        "opencode",
+        "OpenCode",
+        "AI feedback via headless mode",
+        "opencode",
+        ["--version"],
+        async (run) => {
+          const auth = await run("opencode", ["auth", "list"]);
+          if (auth.timedOut) return CHECK_TIMEOUT_MARKER;
+          if (!auth.ok) return undefined;
+          return auth.stdout.includes("0 credentials") ? "no credentials" : "configured";
+        },
+      ),
+    ]);
 
     return c.json({ checks });
   });
