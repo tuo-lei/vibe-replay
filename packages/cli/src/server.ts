@@ -1,8 +1,10 @@
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { serve } from "@hono/node-server";
 import chalk from "chalk";
 import { Hono } from "hono";
@@ -873,6 +875,58 @@ export async function startServer(
   app.get("/api/gh-status", async (c) => {
     const status = await checkGhStatus();
     return c.json(status);
+  });
+
+  // System checks — detect available CLI tools for headless mode & publishing
+  app.get("/api/system-checks", async (c) => {
+    const exec = promisify(execFile);
+
+    interface ToolCheck {
+      name: string;
+      label: string;
+      installed: boolean;
+      version?: string;
+      detail?: string;
+    }
+
+    async function checkTool(
+      name: string,
+      label: string,
+      cmd: string,
+      versionArgs: string[] = ["--version"],
+      extraCheck?: () => Promise<string | undefined>,
+    ): Promise<ToolCheck> {
+      try {
+        await exec("which", [cmd]);
+      } catch {
+        return { name, label, installed: false };
+      }
+      let version: string | undefined;
+      try {
+        const { stdout } = await exec(cmd, versionArgs);
+        version = stdout.trim().split("\n")[0];
+      } catch {
+        /* version check failed, still installed */
+      }
+      const detail = extraCheck ? await extraCheck() : undefined;
+      return { name, label, installed: true, version, detail };
+    }
+
+    const checks = await Promise.all([
+      checkTool("gh", "GitHub CLI", "gh", ["--version"], async () => {
+        try {
+          await exec("gh", ["auth", "status"]);
+          return "authenticated";
+        } catch {
+          return "not authenticated";
+        }
+      }),
+      checkTool("claude", "Claude Code", "claude", ["--version"]),
+      checkTool("cursor", "Cursor", "cursor", ["--version"]),
+      checkTool("opencode", "OpenCode", "opencode", ["--version"]),
+    ]);
+
+    return c.json({ checks });
   });
 
   // Gist info for a session (requires slug)

@@ -591,6 +591,62 @@ function RecentReplaysList({
   );
 }
 
+// ─── System Checks ──────────────────────────────────────────────────
+
+interface TC {
+  name: string;
+  label: string;
+  installed: boolean;
+  version?: string;
+  detail?: string;
+}
+
+function SystemChecksSection() {
+  const [checks, setChecks] = useState<TC[] | null>(null);
+  useEffect(() => {
+    fetch("/api/system-checks")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { checks: TC[] } | null) => d?.checks && setChecks(d.checks))
+      .catch(() => {});
+  }, []);
+  if (!checks) return null;
+
+  return (
+    <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm">
+      <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider mb-3">
+        System
+      </h3>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+        {checks.map((t) => (
+          <div
+            key={t.name}
+            className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg bg-terminal-bg"
+          >
+            <div
+              className={`w-2 h-2 rounded-full shrink-0 ${t.installed ? "bg-terminal-green" : "bg-terminal-dim opacity-40"}`}
+            />
+            <div className="min-w-0">
+              <span
+                className={`text-xs font-sans font-medium ${t.installed ? "text-terminal-text" : "text-terminal-dimmer"}`}
+              >
+                {t.label}
+              </span>
+              {t.detail && t.detail !== "authenticated" && (
+                <span className="text-[10px] font-mono text-terminal-orange ml-1">
+                  ({t.detail})
+                </span>
+              )}
+              <p className="text-[10px] font-mono text-terminal-dimmer truncate">
+                {t.installed ? t.version || "installed" : "not installed"}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Icons ───────────────────────────────────────────────────────────
 
 const I = ({ c, children }: { c: string; children: React.ReactNode }) => (
@@ -821,6 +877,8 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
             />
           </div>
         </div>
+
+        <SystemChecksSection />
       </div>
     </div>
   );
