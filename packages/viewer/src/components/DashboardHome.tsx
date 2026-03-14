@@ -203,11 +203,11 @@ function computeInsights(sources: SourceSession[], replays: SessionSummary[]): I
   for (const s of sources) projects.add(s.project);
   for (const r of replays) projects.add(r.project);
 
-  // Activity by day (last 28 days) — grouped by provider
+  // Activity by day (last 30 days) — grouped by provider
   const now = new Date();
   const dayMs = 86400000;
   const activityByDay: InsightStats["activityByDay"] = [];
-  for (let i = 27; i >= 0; i--) {
+  for (let i = 29; i >= 0; i--) {
     const dayStart = new Date(now.getTime() - i * dayMs);
     dayStart.setHours(0, 0, 0, 0);
     const dayEnd = new Date(dayStart.getTime() + dayMs);
@@ -299,10 +299,22 @@ function ActivityChart({ data }: { data: InsightStats["activityByDay"] }) {
   const maxVal = Math.max(...data.map((d) => d.claude + d.cursor), 1);
   const hasActivity = data.some((d) => d.claude > 0 || d.cursor > 0);
 
-  const weekLabels = useMemo(() => {
+  const axisLabels = useMemo(() => {
     const labels: { index: number; label: string }[] = [];
-    for (let i = 0; i < data.length; i += 7) {
-      labels.push({ index: i, label: data[i].label.split(",")[0] });
+    let lastMonth = -1;
+    for (let i = 0; i < data.length; i++) {
+      const d = new Date(data[i].date);
+      const month = d.getMonth();
+      if (month !== lastMonth) {
+        labels.push({
+          index: i,
+          label: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        });
+        lastMonth = month;
+      } else if (d.getDay() === 1 && i > 0) {
+        // Monday — show day number only
+        labels.push({ index: i, label: `${d.getDate()}` });
+      }
     }
     return labels;
   }, [data]);
@@ -310,7 +322,7 @@ function ActivityChart({ data }: { data: InsightStats["activityByDay"] }) {
   if (!hasActivity) {
     return (
       <div className="flex items-center justify-center h-full text-terminal-dimmer text-xs font-mono">
-        No activity in the last 4 weeks
+        No activity in the last 30 days
       </div>
     );
   }
@@ -361,7 +373,7 @@ function ActivityChart({ data }: { data: InsightStats["activityByDay"] }) {
         })}
       </div>
       <div className="flex items-center mt-1.5 relative h-4">
-        {weekLabels.map((w) => (
+        {axisLabels.map((w) => (
           <span
             key={w.index}
             className="absolute text-[9px] font-mono text-terminal-dimmer"
