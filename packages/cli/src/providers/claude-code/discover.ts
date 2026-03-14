@@ -119,8 +119,8 @@ export async function extractSessionInfo(
               ? raw
               : Array.isArray(raw)
                 ? raw
-                    .filter((b: any) => b.type === "text")
-                    .map((b: any) => b.text)
+                    .filter((b: { type: string }) => b.type === "text")
+                    .map((b: { type: string; text?: string }) => b.text ?? "")
                     .join("")
                 : "";
           if (text) {

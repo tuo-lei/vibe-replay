@@ -5,6 +5,7 @@ import { extractSessionInfo } from "../src/providers/claude-code/discover.js";
 
 const FIXTURE_EXT = join(__dirname, "fixtures", "discover-extension.jsonl");
 const FIXTURE_STR = join(__dirname, "fixtures", "discover-boilerplate.jsonl");
+const FIXTURE_EMPTY_ARR = join(__dirname, "fixtures", "discover-empty-array.jsonl");
 
 describe("extractSessionInfo – VS Code extension array content format", () => {
   it("discovers sessions where user message content is an array of blocks", async () => {
@@ -47,6 +48,15 @@ describe("extractSessionInfo – VS Code extension array content format", () => 
     const info = await extractSessionInfo(FIXTURE_EXT, fileStat.size, "/Users/test/project");
 
     expect(info?.timestamp).toBe("2025-07-01T10:00:01Z");
+  });
+});
+
+describe("extractSessionInfo – edge cases", () => {
+  it("returns null for sessions with empty content arrays", async () => {
+    const fileStat = await stat(FIXTURE_EMPTY_ARR);
+    const info = await extractSessionInfo(FIXTURE_EMPTY_ARR, fileStat.size, "/Users/test/project");
+
+    expect(info).toBeNull();
   });
 });
 

@@ -1,0 +1,4 @@
+{"type":"queue-operation","operation":"enqueue","timestamp":"2025-07-01T10:00:00Z","sessionId":"empty-arr-1"}
+{"type":"queue-operation","operation":"dequeue","timestamp":"2025-07-01T10:00:00Z","sessionId":"empty-arr-1"}
+{"parentUuid":null,"isSidechain":false,"type":"user","message":{"role":"user","content":[]},"uuid":"uuid-1","timestamp":"2025-07-01T10:00:01Z","sessionId":"empty-arr-1","version":"2.1.76","cwd":"/Users/test/project"}
+{"type":"system","subtype":"turn_duration","durationMs":1000,"timestamp":"2025-07-01T10:00:05Z"}
