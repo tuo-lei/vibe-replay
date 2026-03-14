@@ -20,6 +20,20 @@ describe("countComposerConversationHeaders", () => {
 });
 
 describe("cursor sqlite metrics helpers", () => {
+  it("retries async initializer after a failure", async () => {
+    let calls = 0;
+    const init = __testables.createRetryableInit(async () => {
+      calls++;
+      if (calls === 1) throw new Error("init failed");
+      return "ok";
+    });
+
+    await expect(init()).rejects.toThrow("init failed");
+    await expect(init()).resolves.toBe("ok");
+    await expect(init()).resolves.toBe("ok");
+    expect(calls).toBe(2);
+  });
+
   it("computes token increments from cumulative snapshots", () => {
     const first = __testables.estimateTokenIncrement(
       {

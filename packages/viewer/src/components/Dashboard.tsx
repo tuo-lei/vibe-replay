@@ -26,6 +26,12 @@ import { formatDuration } from "./StatsPanel";
 
 type Tab = "home" | "sessions" | "replays";
 
+interface SourcesEnrichmentStatus {
+  running: boolean;
+  processed: number;
+  total: number;
+}
+
 const MoreDotsIcon = () => (
   <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
     <circle cx="8" cy="3" r="1.5" />
@@ -591,10 +597,12 @@ function SessionsPanel() {
   const [titleInput, setTitleInput] = useState<{ slug: string; defaultTitle: string } | null>(null);
   const [titleValue, setTitleValue] = useState("");
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const wasEnrichingRef = useRef(false);
   const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());
   const [showArchived, setShowArchived] = useState(false);
   const [ghAvailable, setGhAvailable] = useState<boolean | null>(null);
   const [publishingSlug, setPublishingSlug] = useState<string | null>(null);
+  const [enrichmentStatus, setEnrichmentStatus] = useState<SourcesEnrichmentStatus | null>(null);
 
   const loadSources = useCallback(async (opts?: { forceRefresh?: boolean }) => {
     setLoading(true);
@@ -675,6 +683,42 @@ function SessionsPanel() {
       .then((data: { available: boolean }) => setGhAvailable(data.available))
       .catch(() => setGhAvailable(false));
   }, [loadSources]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | undefined;
+    const refreshSourcesFromCache = async () => {
+      const payload = await fetch("/api/sources/cached")
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
+      const cached = parseCachedList<SourceSession>(payload);
+      if (!cancelled && cached?.sessions.length) {
+        setSources(cached.sessions);
+      }
+    };
+    const poll = async () => {
+      const status = await fetch("/api/sources/enrichment-status")
+        .then((r) => (r.ok ? (r.json() as Promise<SourcesEnrichmentStatus>) : null))
+        .catch(() => null);
+      if (!status || cancelled) return;
+      setEnrichmentStatus(status);
+      if (status.running) {
+        wasEnrichingRef.current = true;
+        await refreshSourcesFromCache();
+      } else if (wasEnrichingRef.current) {
+        wasEnrichingRef.current = false;
+        await refreshSourcesFromCache();
+      }
+    };
+    void poll();
+    timer = window.setInterval(() => {
+      void poll();
+    }, 2500);
+    return () => {
+      cancelled = true;
+      if (timer) window.clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => setRefreshClockMs(Date.now()), 30_000);
@@ -1087,6 +1131,15 @@ function SessionsPanel() {
             ) : staleCachedAt ? (
               <span>Showing stale cache ({formatCacheAge(staleCachedAt)})</span>
             ) : null}
+          </div>
+        )}
+
+        {enrichmentStatus?.running && enrichmentStatus.total > 0 && (
+          <div className="mx-4 mb-2 flex items-center gap-2 rounded-lg px-3 py-2.5 text-xs font-mono bg-terminal-blue-subtle text-terminal-blue shrink-0 shadow-layer-sm">
+            <span className="w-1.5 h-1.5 rounded-full bg-terminal-blue animate-pulse" />
+            <span>
+              BACKFILLING CURSOR STATS... {enrichmentStatus.processed}/{enrichmentStatus.total}
+            </span>
           </div>
         )}
 

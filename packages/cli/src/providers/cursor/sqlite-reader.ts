@@ -11,6 +11,24 @@ const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 
 const MIN_STORE_DB_SIZE = 8192;
 
+function createRetryableInit<T>(factory: () => Promise<T>): () => Promise<T> {
+  let promise: Promise<T> | null = null;
+  return async () => {
+    if (!promise) {
+      promise = factory().catch((err) => {
+        promise = null;
+        throw err;
+      });
+    }
+    return promise;
+  };
+}
+
+const getSqlJs = createRetryableInit(async () => {
+  const mod = await import("sql.js");
+  return mod.default();
+});
+
 export function workspaceHash(absolutePath: string): string {
   return createHash("md5").update(absolutePath).digest("hex");
 }
@@ -70,6 +88,39 @@ async function findStoreDb(sessionId: string): Promise<string | null> {
 export async function storeDbExists(_workspacePath: string, sessionId: string): Promise<boolean> {
   const dbPath = await findStoreDb(sessionId);
   return dbPath !== null;
+}
+
+export async function listStoreDbSessionIds(): Promise<Set<string>> {
+  const sessionIds = new Set<string>();
+  let workspaceDirs: string[];
+  try {
+    workspaceDirs = await readdir(CURSOR_CHATS_DIR);
+  } catch {
+    return sessionIds;
+  }
+
+  for (const wsHash of workspaceDirs) {
+    const wsDir = join(CURSOR_CHATS_DIR, wsHash);
+    const wsStat = await stat(wsDir).catch(() => null);
+    if (!wsStat?.isDirectory()) continue;
+
+    let sessions: string[];
+    try {
+      sessions = await readdir(wsDir);
+    } catch {
+      continue;
+    }
+
+    for (const sessionId of sessions) {
+      if (!SESSION_ID_RE.test(sessionId)) continue;
+      const dbPath = join(wsDir, sessionId, "store.db");
+      const dbStat = await stat(dbPath).catch(() => null);
+      if (!dbStat?.isFile() || dbStat.size < MIN_STORE_DB_SIZE) continue;
+      sessionIds.add(sessionId);
+    }
+  }
+
+  return sessionIds;
 }
 
 function valueToString(value: unknown): string {
@@ -292,14 +343,13 @@ function buildHashToProjectMap(decodedWorkspacePaths: string[]): Map<string, str
  * Returns null if the DB is empty, corrupt, or has no meta table.
  */
 async function readStoreDbMeta(dbPath: string): Promise<ChatMeta | null> {
-  let initSqlJs: any;
+  let SQL: any;
   try {
-    initSqlJs = (await import("sql.js")).default;
+    SQL = await getSqlJs();
   } catch {
     return null;
   }
   const dbBuffer = await readFile(dbPath);
-  const SQL = await initSqlJs();
   const db = new SQL.Database(dbBuffer);
   try {
     const metaRows = db.exec("SELECT value FROM meta WHERE key = '0'");
@@ -410,9 +460,9 @@ export async function discoverGlobalStateOnlySessions(
   const dbPath = await findGlobalStateDb();
   if (!dbPath) return { sessions, sessionIds };
 
-  let initSqlJs: any;
+  let SQL: any;
   try {
-    initSqlJs = (await import("sql.js")).default;
+    SQL = await getSqlJs();
   } catch {
     return { sessions, sessionIds };
   }
@@ -420,7 +470,6 @@ export async function discoverGlobalStateOnlySessions(
   const dbBuffer = await readFile(dbPath).catch(() => null);
   if (!dbBuffer) return { sessions, sessionIds };
 
-  const SQL = await initSqlJs();
   const db = new SQL.Database(dbBuffer);
 
   try {
@@ -568,9 +617,9 @@ export async function parseCursorSqlite(
 }
 
 async function parseCursorStoreDb(sessionId: string): Promise<ProviderParseResult | null> {
-  let initSqlJs: any;
+  let SQL: any;
   try {
-    initSqlJs = (await import("sql.js")).default;
+    SQL = await getSqlJs();
   } catch {
     return null;
   }
@@ -579,7 +628,6 @@ async function parseCursorStoreDb(sessionId: string): Promise<ProviderParseResul
   if (!dbPath) return null;
 
   const dbBuffer = await readFile(dbPath);
-  const SQL = await initSqlJs();
   const db = new SQL.Database(dbBuffer);
 
   try {
@@ -950,9 +998,9 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
   const dbPath = await findGlobalStateDb();
   if (!dbPath) return null;
 
-  let initSqlJs: any;
+  let SQL: any;
   try {
-    initSqlJs = (await import("sql.js")).default;
+    SQL = await getSqlJs();
   } catch {
     return null;
   }
@@ -960,7 +1008,6 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
   const dbBuffer = await readFile(dbPath).catch(() => null);
   if (!dbBuffer) return null;
 
-  const SQL = await initSqlJs();
   const db = new SQL.Database(dbBuffer);
 
   try {
@@ -1342,5 +1389,6 @@ function extractModel(msg: CursorMessage): string | undefined {
 export const __testables = {
   buildGlobalStateMetrics,
   buildStoreTurnStats,
+  createRetryableInit,
   estimateTokenIncrement,
 };

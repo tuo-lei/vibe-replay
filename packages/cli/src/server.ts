@@ -29,7 +29,13 @@ import {
 } from "./publishers/gist.js";
 import { scanForSecrets } from "./scan.js";
 import { transformToReplay } from "./transform.js";
-import type { Annotation, ReplaySession, SessionInfo, SessionOverlays } from "./types.js";
+import type {
+  Annotation,
+  ParsedTurn,
+  ReplaySession,
+  SessionInfo,
+  SessionOverlays,
+} from "./types.js";
 import { CLI_VERSION } from "./version.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -330,6 +336,105 @@ async function loadSessionFromDisk(baseDir: string, slug: string): Promise<Repla
   return session;
 }
 
+interface SourceSummaryRecord {
+  provider: string;
+  slug: string;
+  project: string;
+  sessionId?: string;
+  promptCount?: number;
+  toolCallCount?: number;
+  filePaths: string[];
+  toolPaths?: string[];
+  hasSqlite?: boolean;
+  timestamp: string;
+  [key: string]: unknown;
+}
+
+interface SourcesEnrichmentStatus {
+  running: boolean;
+  processed: number;
+  total: number;
+  updated: number;
+  startedAt?: string;
+  finishedAt?: string;
+  message?: string;
+}
+
+function sourceSessionKey(provider: string, project: string, slug: string): string {
+  return `${provider}::${project}::${slug}`;
+}
+
+function pickSourceRecordForSession(
+  session: Pick<SessionInfo, "provider" | "sessionId" | "project" | "slug">,
+  bySessionId: Map<string, SourceSummaryRecord>,
+  byKey: Map<string, SourceSummaryRecord>,
+): SourceSummaryRecord | undefined {
+  const byIdMatch = bySessionId.get(session.sessionId);
+  return (
+    (byIdMatch?.provider === session.provider ? byIdMatch : undefined) ??
+    byKey.get(sourceSessionKey(session.provider, session.project, session.slug))
+  );
+}
+
+function selectCursorEnrichmentCandidates(
+  merged: SessionInfo[],
+  baseSources: SourceSummaryRecord[],
+  limit = 30,
+): SessionInfo[] {
+  const mergedBySessionId = new Map<string, SessionInfo>();
+  const mergedByKey = new Map<string, SessionInfo>();
+  for (const session of merged) {
+    mergedBySessionId.set(session.sessionId, session);
+    mergedByKey.set(sourceSessionKey(session.provider, session.project, session.slug), session);
+  }
+
+  return baseSources
+    .filter(
+      (s) =>
+        s.provider === "cursor" &&
+        (s.promptCount == null || s.toolCallCount == null) &&
+        (s.hasSqlite || s.filePaths.length > 0),
+    )
+    .map((s) => {
+      const byId = s.sessionId ? mergedBySessionId.get(s.sessionId) : undefined;
+      return byId || mergedByKey.get(sourceSessionKey(s.provider, s.project, s.slug));
+    })
+    .filter((s): s is SessionInfo => Boolean(s))
+    .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+    .slice(0, limit);
+}
+
+function countSessionStats(turns: ParsedTurn[]): {
+  promptCount: number;
+  toolCallCount: number;
+} {
+  let promptCount = 0;
+  let toolCallCount = 0;
+  for (const turn of turns) {
+    if (turn.role === "user" && turn.subtype !== "compaction-summary") {
+      const hasText = turn.blocks.some(
+        (block) =>
+          block.type === "text" && typeof block.text === "string" && block.text.trim().length > 0,
+      );
+      const hasImages = turn.blocks.some(
+        (block) =>
+          typeof block === "object" &&
+          block !== null &&
+          "type" in block &&
+          (block as { type?: unknown }).type === "_user_images" &&
+          "images" in block &&
+          Array.isArray((block as { images?: unknown }).images) &&
+          (block as { images: unknown[] }).images.length > 0,
+      );
+      if (hasText || hasImages) promptCount++;
+    }
+    for (const block of turn.blocks) {
+      if (block.type === "tool_use") toolCallCount++;
+    }
+  }
+  return { promptCount, toolCallCount };
+}
+
 /**
  * Merge multiple JSONL files that share the same slug + project into one entry.
  * Claude Code creates a new file per /resume, but they're the same logical session.
@@ -341,7 +446,8 @@ async function buildSourcesResult(
   merged: SessionInfo[],
   baseDir: string,
   home: string,
-): Promise<Record<string, unknown>[]> {
+  previousSources: SourceSummaryRecord[] = [],
+): Promise<SourceSummaryRecord[]> {
   // Normalize project paths: /Users/xxx/... → ~/...
   for (const s of merged) {
     if (s.project.startsWith(home)) {
@@ -378,18 +484,32 @@ async function buildSourcesResult(
     replayMap.set(r.slug as string, r);
   }
 
+  const previousBySessionId = new Map<string, SourceSummaryRecord>();
+  const previousByKey = new Map<string, SourceSummaryRecord>();
+  for (const prev of previousSources) {
+    const key = sourceSessionKey(prev.provider, prev.project, prev.slug);
+    previousByKey.set(key, prev);
+    if (typeof prev.sessionId === "string" && prev.sessionId) {
+      previousBySessionId.set(prev.sessionId, prev);
+    }
+  }
+
   return merged.map((s) => {
+    const previous = pickSourceRecordForSession(s, previousBySessionId, previousByKey);
     const replay = replayMap.get(s.slug);
+    const promptCount = s.promptCount ?? previous?.promptCount;
+    const toolCallCount = s.toolCallCount ?? previous?.toolCallCount;
     return {
       provider: s.provider,
+      sessionId: s.sessionId,
       slug: s.slug,
       title: s.title,
       project: s.project,
       timestamp: s.timestamp,
       fileSize: s.fileSize,
       lineCount: s.lineCount,
-      promptCount: s.promptCount,
-      toolCallCount: s.toolCallCount,
+      promptCount,
+      toolCallCount,
       firstPrompt: cleanPromptText(s.firstPrompt).slice(0, 200),
       prompts: s.prompts?.map((p) => cleanPromptText(p).slice(0, 200)),
       filePaths: s.filePaths,
@@ -538,6 +658,99 @@ export async function startServer(
       // Best-effort cache refresh for dashboard listing.
     }
   };
+  let sourcesEnrichmentStatus: SourcesEnrichmentStatus = {
+    running: false,
+    processed: 0,
+    total: 0,
+    updated: 0,
+  };
+
+  const enrichCursorStatsInBackground = (
+    merged: SessionInfo[],
+    baseSources: SourceSummaryRecord[],
+  ): void => {
+    if (sourcesEnrichmentStatus.running) return;
+    const cursorProvider = getProvider("cursor");
+    if (!cursorProvider) return;
+
+    const candidates = selectCursorEnrichmentCandidates(merged, baseSources);
+
+    sourcesEnrichmentStatus = {
+      running: true,
+      processed: 0,
+      total: candidates.length,
+      updated: 0,
+      startedAt: new Date().toISOString(),
+      message:
+        candidates.length > 0
+          ? "Computing detailed Cursor stats in background"
+          : "No Cursor stat backfill needed",
+    };
+
+    if (candidates.length === 0) {
+      sourcesEnrichmentStatus = {
+        ...sourcesEnrichmentStatus,
+        running: false,
+        finishedAt: new Date().toISOString(),
+      };
+      return;
+    }
+
+    void (async () => {
+      let changed = false;
+      const enrichedSources = baseSources.map((s) => ({ ...s }));
+      const bySessionId = new Map<string, SourceSummaryRecord>();
+      const byKey = new Map<string, SourceSummaryRecord>();
+      for (const source of enrichedSources) {
+        byKey.set(sourceSessionKey(source.provider, source.project, source.slug), source);
+        if (typeof source.sessionId === "string" && source.sessionId) {
+          bySessionId.set(source.sessionId, source);
+        }
+      }
+
+      for (const session of candidates) {
+        try {
+          const paths = [...session.filePaths, ...(session.toolPaths || [])];
+          const parsed = await cursorProvider.parse(paths, session);
+          const counts = countSessionStats(parsed.turns);
+          const target = pickSourceRecordForSession(session, bySessionId, byKey);
+          if (
+            target &&
+            (target.promptCount !== counts.promptCount ||
+              target.toolCallCount !== counts.toolCallCount)
+          ) {
+            target.promptCount = counts.promptCount;
+            target.toolCallCount = counts.toolCallCount;
+            changed = true;
+            sourcesEnrichmentStatus.updated += 1;
+          }
+        } catch {
+          // Best-effort enrichment only.
+        } finally {
+          sourcesEnrichmentStatus.processed += 1;
+          if (changed && sourcesEnrichmentStatus.processed % 5 === 0) {
+            await writeFileCache(sourcesCacheKey, enrichedSources);
+          }
+        }
+      }
+
+      if (changed) {
+        await writeFileCache(sourcesCacheKey, enrichedSources);
+      }
+      sourcesEnrichmentStatus = {
+        ...sourcesEnrichmentStatus,
+        running: false,
+        finishedAt: new Date().toISOString(),
+      };
+    })().catch(() => {
+      sourcesEnrichmentStatus = {
+        ...sourcesEnrichmentStatus,
+        running: false,
+        finishedAt: new Date().toISOString(),
+        message: "Cursor stat backfill failed",
+      };
+    });
+  };
 
   const app = new Hono();
 
@@ -649,6 +862,10 @@ export async function startServer(
     });
   });
 
+  app.get("/api/sources/enrichment-status", async (c) => {
+    return c.json(sourcesEnrichmentStatus);
+  });
+
   app.get("/api/sources", async (c) => {
     try {
       const providers = getAllProviders();
@@ -659,9 +876,11 @@ export async function startServer(
       }
 
       const merged = mergeSameSessions(allSessions);
-      const result = await buildSourcesResult(merged, baseDir, homedir());
+      const previous = await readFileCache<SourceSummaryRecord[]>(sourcesCacheKey);
+      const result = await buildSourcesResult(merged, baseDir, homedir(), previous?.data || []);
 
       await writeFileCache(sourcesCacheKey, result);
+      enrichCursorStatsInBackground(merged, result);
       return c.json({ sessions: result });
     } catch (err) {
       return c.json({ error: getErrorMessage(err) }, 500);
@@ -692,9 +911,11 @@ export async function startServer(
         }
 
         const merged = mergeSameSessions(allSessions);
-        const result = await buildSourcesResult(merged, baseDir, homedir());
+        const previous = await readFileCache<SourceSummaryRecord[]>(sourcesCacheKey);
+        const result = await buildSourcesResult(merged, baseDir, homedir(), previous?.data || []);
 
         await writeFileCache(sourcesCacheKey, result);
+        enrichCursorStatsInBackground(merged, result);
         await stream.writeSSE({
           data: JSON.stringify({ type: "complete", sessions: result }),
         });
@@ -1353,3 +1574,10 @@ export async function startDashboard(
 ): Promise<void> {
   await startServer(baseDir, { openDashboard: true, externalViewerUrl: opts?.externalViewerUrl });
 }
+
+export const __testables = {
+  countSessionStats,
+  pickSourceRecordForSession,
+  selectCursorEnrichmentCandidates,
+  sourceSessionKey,
+};

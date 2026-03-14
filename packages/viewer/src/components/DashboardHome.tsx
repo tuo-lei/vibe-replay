@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SessionSummary, SourceSession } from "../types";
 import {
   isCacheFresh,
@@ -35,6 +35,16 @@ interface InsightStats {
   replayConversionPct: number;
 }
 
+interface SourcesEnrichmentStatus {
+  running: boolean;
+  processed: number;
+  total: number;
+  updated: number;
+  startedAt?: string;
+  finishedAt?: string;
+  message?: string;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────
 
 function formatCompactDuration(ms: number): string {
@@ -55,11 +65,17 @@ function useDashboardData() {
   const [sources, setSources] = useState<SourceSession[]>([]);
   const [replays, setReplays] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingSources, setLoadingSources] = useState(true);
+  const [loadingReplays, setLoadingReplays] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [scanProgress, setScanProgress] = useState<number | null>(null);
+  const [enrichmentStatus, setEnrichmentStatus] = useState<SourcesEnrichmentStatus | null>(null);
+  const wasEnrichingRef = useRef(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
+    setLoadingSources(true);
+    setLoadingReplays(true);
     setError(null);
 
     try {
@@ -85,6 +101,9 @@ function useDashboardData() {
       const sourceFresh = isCacheFresh(cachedSources?.cachedAt);
       const replayFresh = isCacheFresh(cachedReplays?.cachedAt);
       const refreshPromises: Promise<void>[] = [];
+
+      if (sourceFresh) setLoadingSources(false);
+      if (replayFresh) setLoadingReplays(false);
 
       if (!sourceFresh) {
         // Use SSE stream for discovery with progress reporting
@@ -131,7 +150,7 @@ function useDashboardData() {
                 })
                 .finally(() => resolve());
             };
-          }),
+          }).finally(() => setLoadingSources(false)),
         );
       }
 
@@ -147,7 +166,8 @@ function useDashboardData() {
               if (!cachedReplays?.sessions.length) {
                 setError(err instanceof Error ? err.message : "Failed to load replays");
               }
-            }),
+            })
+            .finally(() => setLoadingReplays(false)),
         );
       }
 
@@ -163,7 +183,57 @@ function useDashboardData() {
     void loadData();
   }, [loadData]);
 
-  return { sources, replays, loading, error, scanProgress };
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | undefined;
+
+    const maybeRefreshSourcesFromCache = async () => {
+      const payload = await fetch("/api/sources/cached")
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
+      const cached = parseCachedList<SourceSession>(payload);
+      if (!cancelled && cached?.sessions.length) {
+        setSources(cached.sessions);
+      }
+    };
+
+    const poll = async () => {
+      const status = await fetch("/api/sources/enrichment-status")
+        .then((r) => (r.ok ? (r.json() as Promise<SourcesEnrichmentStatus>) : null))
+        .catch(() => null);
+      if (!status || cancelled) return;
+      setEnrichmentStatus(status);
+
+      if (status.running) {
+        wasEnrichingRef.current = true;
+        await maybeRefreshSourcesFromCache();
+      } else if (wasEnrichingRef.current) {
+        wasEnrichingRef.current = false;
+        await maybeRefreshSourcesFromCache();
+      }
+    };
+
+    void poll();
+    timer = window.setInterval(() => {
+      void poll();
+    }, 2500);
+
+    return () => {
+      cancelled = true;
+      if (timer) window.clearInterval(timer);
+    };
+  }, []);
+
+  return {
+    sources,
+    replays,
+    loading,
+    loadingSources,
+    loadingReplays,
+    error,
+    scanProgress,
+    enrichmentStatus,
+  };
 }
 
 // ─── Compute Insights ────────────────────────────────────────────────
@@ -181,11 +251,15 @@ function computeInsights(sources: SourceSession[], replays: SessionSummary[]): I
   }
   for (const r of replays) {
     const src = srcBySlug.get(r.slug);
+    const replayToolCalls = r.stats.toolCalls || 0;
     if (!src) {
       totalPrompts += r.stats.userPrompts || 0;
-      totalToolCalls += r.stats.toolCalls || 0;
+      totalToolCalls += replayToolCalls;
     } else if (src.toolCallCount == null) {
-      totalToolCalls += r.stats.toolCalls || 0;
+      totalToolCalls += replayToolCalls;
+    } else if (replayToolCalls > src.toolCallCount) {
+      // Source discovery counts can under-report Cursor tool calls; trust replay stats when higher.
+      totalToolCalls += replayToolCalls - src.toolCallCount;
     }
     totalDuration += r.stats.durationMs || 0;
   }
@@ -438,6 +512,7 @@ function ProviderBadge({ provider }: { provider: string }) {
 
 function RecentSessionsList({
   sessions,
+  isLoading,
   onViewAll,
   onGenerate,
   onViewReplay,
@@ -445,6 +520,7 @@ function RecentSessionsList({
   generateErrorSlug,
 }: {
   sessions: SourceSession[];
+  isLoading: boolean;
   onViewAll: () => void;
   onGenerate: (source: SourceSession) => void;
   onViewReplay: (slug: string) => void;
@@ -454,7 +530,9 @@ function RecentSessionsList({
   if (sessions.length === 0) {
     return (
       <div className="text-center py-6 text-terminal-dimmer text-xs font-mono">
-        No sessions found. Start a coding session with Claude Code or Cursor.
+        {isLoading
+          ? "Loading sessions..."
+          : "No sessions found. Start a coding session with Claude Code or Cursor."}
       </div>
     );
   }
@@ -540,17 +618,19 @@ function RecentSessionsList({
 
 function RecentReplaysList({
   replays,
+  isLoading,
   onViewAll,
   onOpen,
 }: {
   replays: SessionSummary[];
+  isLoading: boolean;
   onViewAll: () => void;
   onOpen: (slug: string) => void;
 }) {
   if (replays.length === 0) {
     return (
       <div className="text-center py-6 text-terminal-dimmer text-xs font-mono">
-        No replays yet. Generate one from the Sessions tab.
+        {isLoading ? "Loading replays..." : "No replays yet. Generate one from the Sessions tab."}
       </div>
     );
   }
@@ -709,7 +789,16 @@ const ToolsIcon = () => (
 // ─── Main Component ──────────────────────────────────────────────────
 
 export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
-  const { sources, replays, loading, error, scanProgress } = useDashboardData();
+  const {
+    sources,
+    replays,
+    loading,
+    loadingSources,
+    loadingReplays,
+    error,
+    scanProgress,
+    enrichmentStatus,
+  } = useDashboardData();
   const insights = useMemo(() => computeInsights(sources, replays), [sources, replays]);
   const [generatingSlug, setGeneratingSlug] = useState<string | null>(null);
   const [generateErrorSlug, setGenerateErrorSlug] = useState<string | null>(null);
@@ -755,6 +844,9 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           <div className="text-sm font-mono text-terminal-dim animate-pulse">
             Loading dashboard...
           </div>
+          <div className="text-xs font-mono text-terminal-dimmer">
+            Cursor history may take longer on large workspaces
+          </div>
         </div>
       </div>
     );
@@ -783,6 +875,15 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
             <div className="w-1.5 h-1.5 rounded-full bg-terminal-green animate-pulse" />
             <span className="text-xs font-mono text-terminal-dim">
               Scanning... {scanProgress} sessions
+            </span>
+          </div>
+        )}
+
+        {enrichmentStatus?.running && enrichmentStatus.total > 0 && (
+          <div className="flex items-center gap-2 px-1">
+            <div className="w-1.5 h-1.5 rounded-full bg-terminal-blue animate-pulse" />
+            <span className="text-xs font-mono text-terminal-dim">
+              Enriching Cursor stats... {enrichmentStatus.processed}/{enrichmentStatus.total}
             </span>
           </div>
         )}
@@ -878,6 +979,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
             </div>
             <RecentSessionsList
               sessions={insights.recentSources}
+              isLoading={loadingSources}
               onViewAll={() => onNavigate("sessions")}
               onGenerate={handleGenerate}
               onViewReplay={handleOpenReplay}
@@ -897,6 +999,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
             </div>
             <RecentReplaysList
               replays={insights.recentReplays}
+              isLoading={loadingReplays}
               onViewAll={() => onNavigate("replays")}
               onOpen={handleOpenReplay}
             />
