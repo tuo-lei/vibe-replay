@@ -20,6 +20,7 @@ function GitHubStarButton() {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    el.innerHTML = "";
     const a = document.createElement("a");
     a.className = "github-button";
     a.href = "https://github.com/tuo-lei/vibe-replay";
@@ -33,6 +34,9 @@ function GitHubStarButton() {
     script.src = "https://buttons.github.io/buttons.js";
     script.async = true;
     el.appendChild(script);
+    return () => {
+      el.innerHTML = "";
+    };
   }, []);
   return <div ref={ref} className="flex items-center" />;
 }
