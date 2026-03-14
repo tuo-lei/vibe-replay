@@ -5,7 +5,7 @@ import type { SessionInfo } from "../../types.js";
 import {
   discoverGlobalStateOnlySessions,
   discoverSqliteOnlySessions,
-  storeDbExists,
+  listStoreDbSessionIds,
 } from "./sqlite-reader.js";
 
 const CURSOR_DIR = join(homedir(), ".cursor", "projects");
@@ -68,8 +68,9 @@ export async function discoverCursorSessions(): Promise<SessionInfo[]> {
   sessions.push(...globalState.sessions);
 
   // Mark transcript-discovered sessions that have any SQLite-backed rich data.
+  const storeDbSessionIds = await listStoreDbSessionIds();
   for (const session of transcriptSessions) {
-    const hasStoreDb = await storeDbExists(session.workspacePath || "", session.sessionId);
+    const hasStoreDb = storeDbSessionIds.has(session.sessionId);
     session.hasSqlite = hasStoreDb || globalState.sessionIds.has(session.sessionId);
   }
 
@@ -163,6 +164,9 @@ async function extractSessionInfo(
       const toolMatches = line.match(toolUseRe);
       if (toolMatches) toolCallCount += toolMatches.length;
     }
+    // Cursor transcript markers can be missing in some flows; tool artifacts are
+    // a better lower bound for real tool activity in the same time window.
+    toolCallCount = Math.max(toolCallCount, toolPaths.length);
 
     // Use file mtime as timestamp (Cursor doesn't store timestamps in JSONL)
     const timestamp = new Date(mtimeMs).toISOString();

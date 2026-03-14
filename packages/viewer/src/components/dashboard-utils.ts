@@ -7,6 +7,16 @@ export type CachedListResponse<T> = {
   cachedAt?: string;
 };
 
+export interface SourcesEnrichmentStatus {
+  running: boolean;
+  processed: number;
+  total: number;
+  updated: number;
+  startedAt?: string;
+  finishedAt?: string;
+  message?: string;
+}
+
 // ─── Cache helpers ───────────────────────────────────────────────────
 
 export const CACHE_REFRESH_TTL_MS = 5 * 60 * 1000;
