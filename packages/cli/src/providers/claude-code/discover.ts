@@ -156,12 +156,16 @@ export async function extractSessionInfo(
       timestamp = fileStat2.mtime.toISOString();
     }
 
-    // Count prompts and tool calls — data already in memory, zero extra I/O
+    // Count user prompts and tool calls — data already in memory, zero extra I/O
+    // Only count user messages that are actual prompts (have text), not tool_result messages
     let promptCount = 0;
     let toolCallCount = 0;
     const toolUseRe = /"type"\s*:\s*"tool_use"/g;
     for (const line of lines) {
-      if (line.includes('"type":"user"') || line.includes('"type": "user"')) {
+      if (
+        (line.includes('"type":"user"') || line.includes('"type": "user"')) &&
+        !line.includes('"tool_result"')
+      ) {
         promptCount++;
       }
       const toolMatches = line.match(toolUseRe);
