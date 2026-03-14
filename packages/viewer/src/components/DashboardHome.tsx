@@ -724,7 +724,7 @@ function SystemChecksSection() {
         .then((r) => (r.ok ? r.json() : null))
         .then((d: { checks?: TC[] } | null) => {
           if (cancelled) return;
-          const resolved = d?.checks?.[0];
+          const resolved = d?.checks?.find((entry) => entry.name === tool.name) || d?.checks?.[0];
           if (!resolved) {
             setChecks((prev) =>
               prev.map((entry) =>
@@ -737,7 +737,15 @@ function SystemChecksSection() {
           }
           setChecks((prev) =>
             prev.map((entry) =>
-              entry.name === tool.name ? { ...resolved, loading: false } : entry,
+              entry.name === tool.name
+                ? {
+                    ...entry,
+                    installed: Boolean(resolved.installed),
+                    version: resolved.version,
+                    detail: resolved.detail,
+                    loading: false,
+                  }
+                : entry,
             ),
           );
         })
