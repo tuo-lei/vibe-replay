@@ -48,6 +48,8 @@ export interface SourceSession {
   timestamp: string;
   fileSize: number;
   lineCount: number;
+  promptCount?: number;
+  toolCallCount?: number;
   firstPrompt: string;
   prompts?: string[];
   filePaths: string[];

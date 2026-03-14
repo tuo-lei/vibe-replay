@@ -156,6 +156,18 @@ export async function extractSessionInfo(
       timestamp = fileStat2.mtime.toISOString();
     }
 
+    // Count prompts and tool calls — data already in memory, zero extra I/O
+    let promptCount = 0;
+    let toolCallCount = 0;
+    const toolUseRe = /"type"\s*:\s*"tool_use"/g;
+    for (const line of lines) {
+      if (line.includes('"type":"user"') || line.includes('"type": "user"')) {
+        promptCount++;
+      }
+      const toolMatches = line.match(toolUseRe);
+      if (toolMatches) toolCallCount += toolMatches.length;
+    }
+
     return {
       provider: "claude-code",
       sessionId,
@@ -172,6 +184,8 @@ export async function extractSessionInfo(
       filePaths: [filePath],
       firstPrompt: prompts[0],
       prompts,
+      promptCount,
+      toolCallCount,
     };
   } catch {
     return null;

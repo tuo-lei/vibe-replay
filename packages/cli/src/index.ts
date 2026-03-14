@@ -641,12 +641,21 @@ function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
       .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
       .flatMap((s) => s.filePaths);
 
+    const promptCount = group.some((s) => s.promptCount != null)
+      ? group.reduce((sum, s) => sum + (s.promptCount || 0), 0)
+      : undefined;
+    const toolCallCount = group.some((s) => s.toolCallCount != null)
+      ? group.reduce((sum, s) => sum + (s.toolCallCount || 0), 0)
+      : undefined;
+
     result.push({
       ...latest,
       lineCount: group.reduce((sum, s) => sum + s.lineCount, 0),
       fileSize: group.reduce((sum, s) => sum + s.fileSize, 0),
       filePaths: allPaths,
       toolPaths: [...new Set(group.flatMap((s) => s.toolPaths || []))],
+      promptCount,
+      toolCallCount,
     });
   }
 

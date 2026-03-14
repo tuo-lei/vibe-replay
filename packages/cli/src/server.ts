@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import chalk from "chalk";
 import { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
 import open from "open";
 import { readFileCache, writeFileCache } from "./cache.js";
 import { cleanPromptText } from "./clean-prompt.js";
@@ -352,12 +353,21 @@ function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
       .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
       .flatMap((s) => s.filePaths);
 
+    const promptCount = group.some((s) => s.promptCount != null)
+      ? group.reduce((sum, s) => sum + (s.promptCount || 0), 0)
+      : undefined;
+    const toolCallCount = group.some((s) => s.toolCallCount != null)
+      ? group.reduce((sum, s) => sum + (s.toolCallCount || 0), 0)
+      : undefined;
+
     result.push({
       ...latest,
       lineCount: group.reduce((sum, s) => sum + s.lineCount, 0),
       fileSize: group.reduce((sum, s) => sum + s.fileSize, 0),
       filePaths: allPaths,
       toolPaths: [...new Set(group.flatMap((s) => s.toolPaths || []))],
+      promptCount,
+      toolCallCount,
     });
   }
 
@@ -609,6 +619,8 @@ export async function startServer(
           timestamp: s.timestamp,
           fileSize: s.fileSize,
           lineCount: s.lineCount,
+          promptCount: s.promptCount,
+          toolCallCount: s.toolCallCount,
           firstPrompt: cleanPromptText(s.firstPrompt).slice(0, 200),
           prompts: s.prompts?.map((p) => cleanPromptText(p).slice(0, 200)),
           filePaths: s.filePaths,
@@ -644,6 +656,119 @@ export async function startServer(
     } catch (err) {
       return c.json({ error: getErrorMessage(err) }, 500);
     }
+  });
+
+  // --- Sources SSE: stream discovery progress to the dashboard ---
+  app.get("/api/sources/stream", (c) => {
+    return streamSSE(c, async (stream) => {
+      try {
+        const providers = getAllProviders();
+        const allSessions: SessionInfo[] = [];
+        let scanned = 0;
+
+        for (const provider of providers) {
+          // Quick file count estimate per provider
+          const sessions = await provider.discover();
+          for (const s of sessions) {
+            allSessions.push(s);
+            scanned++;
+            // Emit progress every 5 sessions to avoid overwhelming the client
+            if (scanned % 5 === 0 || scanned === 1) {
+              await stream.writeSSE({
+                data: JSON.stringify({ type: "progress", scanned }),
+              });
+            }
+          }
+        }
+
+        // Post-process (same as /api/sources)
+        const merged = mergeSameSessions(allSessions);
+        const home = homedir();
+        for (const s of merged) {
+          if (s.project.startsWith(home)) {
+            s.project = `~${s.project.slice(home.length)}`;
+          }
+        }
+
+        const uniqueProjects = [...new Set(merged.map((s) => s.project))];
+        const projectExistsMap = new Map<string, boolean>();
+        const projectIsGitMap = new Map<string, boolean>();
+        for (const p of uniqueProjects) {
+          const resolved2 = p.startsWith("~/") ? join(home, p.slice(2)) : p === "~" ? home : p;
+          try {
+            const s2 = await stat(resolved2);
+            projectExistsMap.set(p, s2.isDirectory());
+            if (s2.isDirectory()) {
+              try {
+                await stat(join(resolved2, ".git"));
+                projectIsGitMap.set(p, true);
+              } catch {
+                projectIsGitMap.set(p, false);
+              }
+            }
+          } catch {
+            projectExistsMap.set(p, false);
+          }
+        }
+
+        const existingReplays = await scanSessions(baseDir);
+        const replayMap = new Map<string, any>();
+        for (const r of existingReplays) {
+          replayMap.set(r.slug as string, r);
+        }
+
+        const result = merged.map((s) => {
+          const replay = replayMap.get(s.slug);
+          return {
+            provider: s.provider,
+            slug: s.slug,
+            title: s.title,
+            project: s.project,
+            timestamp: s.timestamp,
+            fileSize: s.fileSize,
+            lineCount: s.lineCount,
+            promptCount: s.promptCount,
+            toolCallCount: s.toolCallCount,
+            firstPrompt: cleanPromptText(s.firstPrompt).slice(0, 200),
+            prompts: s.prompts?.map((p) => cleanPromptText(p).slice(0, 200)),
+            filePaths: s.filePaths,
+            toolPaths: s.toolPaths,
+            hasSqlite: s.hasSqlite,
+            gitBranch: s.gitBranch,
+            existingReplay: replay ? s.slug : null,
+            projectExists: projectExistsMap.get(s.project) ?? false,
+            isGitRepo: projectIsGitMap.get(s.project) ?? false,
+            replay: replay
+              ? {
+                  slug: replay.slug,
+                  sessionId: replay.sessionId,
+                  title: replay.title,
+                  provider: replay.provider,
+                  model: replay.model,
+                  project: replay.project,
+                  startTime: replay.startTime,
+                  endTime: replay.endTime,
+                  stats: replay.stats,
+                  hasAnnotations: replay.hasAnnotations,
+                  annotationCount: replay.annotationCount,
+                  firstMessage: replay.firstMessage,
+                  messages: replay.messages,
+                  gist: replay.gist,
+                }
+              : undefined,
+          };
+        });
+
+        await writeFileCache(sourcesCacheKey, result);
+        await stream.writeSSE({
+          data: JSON.stringify({ type: "complete", sessions: result }),
+        });
+      } catch (err) {
+        await stream.writeSSE({
+          data: JSON.stringify({ type: "error", message: getErrorMessage(err) }),
+        });
+      }
+    });
   });
 
   // --- Generate: parse a source session into a replay ---

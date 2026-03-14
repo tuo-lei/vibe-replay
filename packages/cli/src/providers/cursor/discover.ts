@@ -144,6 +144,18 @@ async function extractSessionInfo(
 
     if (!firstPrompt) return null;
 
+    // Count prompts and tool calls — data already in memory, zero extra I/O
+    let promptCount = 0;
+    let toolCallCount = 0;
+    const toolUseRe = /"type"\s*:\s*"tool_use"/g;
+    for (const line of lines) {
+      if (line.includes('"role":"user"') || line.includes('"role": "user"')) {
+        promptCount++;
+      }
+      const toolMatches = line.match(toolUseRe);
+      if (toolMatches) toolCallCount += toolMatches.length;
+    }
+
     // Use file mtime as timestamp (Cursor doesn't store timestamps in JSONL)
     const timestamp = new Date(mtimeMs).toISOString();
 
@@ -161,6 +173,8 @@ async function extractSessionInfo(
       filePaths: [filePath],
       toolPaths,
       firstPrompt,
+      promptCount,
+      toolCallCount,
     };
   } catch {
     return null;

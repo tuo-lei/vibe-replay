@@ -54,6 +54,7 @@ function useDashboardData() {
   const [replays, setReplays] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [scanProgress, setScanProgress] = useState<number | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -84,18 +85,51 @@ function useDashboardData() {
       const refreshPromises: Promise<void>[] = [];
 
       if (!sourceFresh) {
+        // Use SSE stream for discovery with progress reporting
         refreshPromises.push(
-          fetch("/api/sources")
-            .then((r) => {
-              if (!r.ok) throw new Error("Failed to load sources");
-              return r.json();
-            })
-            .then((data: { sessions: SourceSession[] }) => setSources(data.sessions))
-            .catch((err) => {
-              if (!cachedSources?.sessions.length) {
-                setError(err instanceof Error ? err.message : "Failed to load sessions");
+          new Promise<void>((resolve) => {
+            setScanProgress(0);
+            const es = new EventSource("/api/sources/stream");
+            es.onmessage = (evt) => {
+              try {
+                const msg = JSON.parse(evt.data);
+                if (msg.type === "progress") {
+                  setScanProgress(msg.scanned);
+                } else if (msg.type === "complete") {
+                  setSources(msg.sessions);
+                  setScanProgress(null);
+                  es.close();
+                  resolve();
+                } else if (msg.type === "error") {
+                  if (!cachedSources?.sessions.length) {
+                    setError(msg.message || "Failed to load sessions");
+                  }
+                  setScanProgress(null);
+                  es.close();
+                  resolve();
+                }
+              } catch {
+                // ignore parse errors
               }
-            }),
+            };
+            es.onerror = () => {
+              // SSE failed — fall back to regular fetch
+              es.close();
+              setScanProgress(null);
+              fetch("/api/sources")
+                .then((r) => {
+                  if (!r.ok) throw new Error("Failed to load sources");
+                  return r.json();
+                })
+                .then((data: { sessions: SourceSession[] }) => setSources(data.sessions))
+                .catch((err) => {
+                  if (!cachedSources?.sessions.length) {
+                    setError(err instanceof Error ? err.message : "Failed to load sessions");
+                  }
+                })
+                .finally(() => resolve());
+            };
+          }),
         );
       }
 
@@ -127,7 +161,7 @@ function useDashboardData() {
     void loadData();
   }, [loadData]);
 
-  return { sources, replays, loading, error };
+  return { sources, replays, loading, error, scanProgress };
 }
 
 // ─── Compute Insights ────────────────────────────────────────────────
@@ -137,16 +171,21 @@ function computeInsights(sources: SourceSession[], replays: SessionSummary[]): I
   let totalToolCalls = 0;
   let totalDuration = 0;
 
-  for (const r of replays) {
-    totalPrompts += r.stats.userPrompts || 0;
-    totalToolCalls += r.stats.toolCalls || 0;
-    totalDuration += r.stats.durationMs || 0;
-  }
-
+  // Source-level counts from lightweight scan, fallback to replay stats
+  const srcBySlug = new Map(sources.map((s) => [s.slug, s]));
   for (const s of sources) {
-    if (!s.existingReplay) {
-      totalPrompts += s.prompts?.length || (s.firstPrompt ? 1 : 0);
+    totalPrompts += s.promptCount ?? (s.prompts?.length || (s.firstPrompt ? 1 : 0));
+    totalToolCalls += s.toolCallCount ?? 0;
+  }
+  for (const r of replays) {
+    const src = srcBySlug.get(r.slug);
+    if (!src) {
+      totalPrompts += r.stats.userPrompts || 0;
+      totalToolCalls += r.stats.toolCalls || 0;
+    } else if (src.toolCallCount == null) {
+      totalToolCalls += r.stats.toolCalls || 0;
     }
+    totalDuration += r.stats.durationMs || 0;
   }
 
   // Provider breakdown
@@ -284,7 +323,7 @@ function ActivityChart({ data }: { data: InsightStats["activityByDay"] }) {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 flex items-end gap-px min-h-0">
+      <div className="flex-1 flex items-stretch gap-px min-h-0">
         {data.map((d) => {
           const total = d.sessions + d.replays;
           const heightPct = Math.max((total / maxVal) * 100, total > 0 ? 4 : 0);
@@ -293,7 +332,7 @@ function ActivityChart({ data }: { data: InsightStats["activityByDay"] }) {
           return (
             <div
               key={d.date}
-              className="flex-1 flex flex-col justify-end group relative"
+              className="flex-1 flex flex-col justify-end h-full group relative"
               title={`${d.label}: ${d.sessions} sessions, ${d.replays} replays`}
             >
               <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-10">
@@ -626,7 +665,7 @@ const ToolsIcon = () => (
 // ─── Main Component ──────────────────────────────────────────────────
 
 export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
-  const { sources, replays, loading, error } = useDashboardData();
+  const { sources, replays, loading, error, scanProgress } = useDashboardData();
   const insights = useMemo(() => computeInsights(sources, replays), [sources, replays]);
   const [generatingSlug, setGeneratingSlug] = useState<string | null>(null);
 
@@ -683,9 +722,30 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     );
   }
 
+  // Count how many sources have scan data vs fallback
+  const sourcesWithCounts = sources.filter((s) => s.promptCount != null).length;
+  const promptSub =
+    sourcesWithCounts === sources.length
+      ? `across ${insights.projectCount} projects`
+      : `${sourcesWithCounts} of ${sources.length} scanned`;
+  const toolSub =
+    sourcesWithCounts === sources.length
+      ? `across ${insights.projectCount} projects`
+      : `${sourcesWithCounts} of ${sources.length} scanned`;
+
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 space-y-6">
+        {/* ─── Scan Progress ─── */}
+        {scanProgress != null && (
+          <div className="flex items-center gap-2 px-1">
+            <div className="w-1.5 h-1.5 rounded-full bg-terminal-green animate-pulse" />
+            <span className="text-xs font-mono text-terminal-dim">
+              Scanning sessions... {scanProgress} discovered
+            </span>
+          </div>
+        )}
+
         {/* ─── Metric Cards ─── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <MetricCard
@@ -705,14 +765,14 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           <MetricCard
             label="Total Prompts"
             value={insights.totalPrompts.toLocaleString()}
-            sub={insights.totalReplays > 0 ? `from ${insights.totalReplays} replays` : undefined}
+            sub={promptSub}
             color="orange"
             icon={<PromptsIcon />}
           />
           <MetricCard
             label="Tool Calls"
             value={insights.totalToolCalls.toLocaleString()}
-            sub={insights.totalReplays > 0 ? `from ${insights.totalReplays} replays` : undefined}
+            sub={toolSub}
             color="purple"
             icon={<ToolsIcon />}
           />
