@@ -85,21 +85,26 @@ program
       process.exit(1);
     }
 
+    const { join: pathJoin } = await import("node:path");
+    const { homedir } = await import("node:os");
+    const replayBaseDir = pathJoin(homedir(), ".vibe-replay");
+
+    // Pre-warm session discovery cache while user reads the menu
+    // Fire-and-forget: never blocks the UI, silently caches results
+    void discoverAllSessions()
+      .then(async (sessions) => {
+        await writeFileCache(SESSION_DISCOVERY_CACHE_KEY, sessions);
+      })
+      .catch(() => {});
+
     // --dashboard: open Dashboard directly
     if (opts.dashboard) {
-      const { join: pathJoin } = await import("node:path");
-      const { homedir } = await import("node:os");
-      const replayBaseDir = pathJoin(homedir(), ".vibe-replay");
       await startDashboard(
         replayBaseDir,
         DEV_MENU_ENABLED ? { externalViewerUrl: "http://localhost:5173" } : undefined,
       );
       return;
     }
-
-    const { join: pathJoin } = await import("node:path");
-    const { homedir } = await import("node:os");
-    const replayBaseDir = pathJoin(homedir(), ".vibe-replay");
 
     let sessionInfo: SessionInfo | undefined;
     let sessionPaths: string | string[];
