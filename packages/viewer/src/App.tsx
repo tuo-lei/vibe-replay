@@ -15,6 +15,41 @@ function navigateTo(params: Record<string, string | null>) {
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
+const REPO = "tuo-lei/vibe-replay";
+
+function GitHubStarButton() {
+  const [stars, setStars] = useState<number | null>(null);
+  useEffect(() => {
+    fetch(`https://api.github.com/repos/${REPO}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { stargazers_count?: number } | null) => {
+        if (d?.stargazers_count != null) setStars(d.stargazers_count);
+      })
+      .catch(() => {});
+  }, []);
+
+  return (
+    <a
+      href={`https://github.com/${REPO}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center h-7 rounded-md bg-terminal-surface hover:bg-terminal-surface-hover text-xs font-sans font-medium transition-colors overflow-hidden"
+    >
+      <span className="inline-flex items-center gap-1.5 px-2.5 text-terminal-dim hover:text-terminal-orange transition-colors">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25z" />
+        </svg>
+        Star
+      </span>
+      {stars != null && (
+        <span className="px-2 border-l border-terminal-border-subtle text-terminal-dim tabular-nums">
+          {stars >= 1000 ? `${(stars / 1000).toFixed(1)}k` : stars}
+        </span>
+      )}
+    </a>
+  );
+}
+
 export default function App() {
   const loadState = useSessionLoader();
   const { theme, toggleTheme } = useTheme();
@@ -92,17 +127,7 @@ export default function App() {
             <span className="text-sm font-sans font-medium text-terminal-text">Dashboard</span>
           </div>
           <div className="flex items-center gap-2">
-            <a
-              href="https://github.com/tuo-lei/vibe-replay"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-terminal-surface text-terminal-dim hover:text-terminal-orange hover:bg-terminal-surface-hover text-xs font-sans font-medium transition-colors"
-            >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25z" />
-              </svg>
-              Star
-            </a>
+            <GitHubStarButton />
             <button
               onClick={toggleTheme}
               className="h-7 w-7 flex items-center justify-center rounded-md bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover text-xs transition-colors"
