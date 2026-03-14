@@ -794,7 +794,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
             icon={<ReplaysIcon />}
           />
           <MetricCard
-            label="Total Prompts"
+            label="User Prompts"
             value={insights.totalPrompts.toLocaleString()}
             sub={countsSub}
             color="orange"
