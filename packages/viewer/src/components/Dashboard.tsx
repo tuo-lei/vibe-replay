@@ -359,9 +359,12 @@ function ReplayCard({
           )}
           <button
             onClick={onOpen}
-            className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 ease-material flex items-center justify-center shrink-0"
+            className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1 shrink-0"
           >
-            Open
+            <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+              <polygon points="4 2 14 8 4 14" />
+            </svg>
+            View
           </button>
           {(onDelete || onArchive) && (
             <div className="relative" ref={menuRef}>
@@ -1247,12 +1250,24 @@ function SessionsPanel() {
                           <button
                             onClick={() => handleGenerate(s)}
                             disabled={generatingSlug === s.slug}
-                            className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 ease-material flex items-center justify-center disabled:opacity-50"
+                            className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1 disabled:opacity-50"
                           >
                             {generatingSlug === s.slug ? (
                               <span className="animate-pulse">Generating...</span>
                             ) : (
-                              "Generate"
+                              <>
+                                <svg
+                                  width="10"
+                                  height="10"
+                                  viewBox="0 0 16 16"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                >
+                                  <path d="M8 2v12M2 8h12" />
+                                </svg>
+                                Generate
+                              </>
                             )}
                           </button>
                           <SessionMoreMenu

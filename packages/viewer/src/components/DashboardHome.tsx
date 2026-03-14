@@ -26,7 +26,7 @@ interface InsightStats {
   totalDuration: number;
   providerBreakdown: { provider: string; count: number; label: string }[];
   projectCount: number;
-  activityByDay: { date: string; label: string; sessions: number; replays: number }[];
+  activityByDay: { date: string; label: string; claude: number; cursor: number }[];
   recentSources: SourceSession[];
   recentReplays: SessionSummary[];
   publishedCount: number;
@@ -203,7 +203,7 @@ function computeInsights(sources: SourceSession[], replays: SessionSummary[]): I
   for (const s of sources) projects.add(s.project);
   for (const r of replays) projects.add(r.project);
 
-  // Activity by day (last 28 days)
+  // Activity by day (last 28 days) — grouped by provider
   const now = new Date();
   const dayMs = 86400000;
   const activityByDay: InsightStats["activityByDay"] = [];
@@ -217,22 +217,16 @@ function computeInsights(sources: SourceSession[], replays: SessionSummary[]): I
       month: "short",
       day: "numeric",
     });
-    let sessionCount = 0;
-    let replayCount = 0;
+    let claude = 0;
+    let cursor = 0;
     for (const s of sources) {
       const ts = new Date(s.timestamp);
-      if (ts >= dayStart && ts < dayEnd) sessionCount++;
+      if (ts >= dayStart && ts < dayEnd) {
+        if (s.provider === "cursor") cursor++;
+        else claude++;
+      }
     }
-    for (const r of replays) {
-      const ts = new Date(r.startTime);
-      if (ts >= dayStart && ts < dayEnd) replayCount++;
-    }
-    activityByDay.push({
-      date: dateStr,
-      label: dayLabel,
-      sessions: sessionCount,
-      replays: replayCount,
-    });
+    activityByDay.push({ date: dateStr, label: dayLabel, claude, cursor });
   }
 
   const totalSessions = sources.length;
@@ -302,8 +296,8 @@ function MetricCard({
 }
 
 function ActivityChart({ data }: { data: InsightStats["activityByDay"] }) {
-  const maxVal = Math.max(...data.map((d) => d.sessions + d.replays), 1);
-  const hasActivity = data.some((d) => d.sessions > 0 || d.replays > 0);
+  const maxVal = Math.max(...data.map((d) => d.claude + d.cursor), 1);
+  const hasActivity = data.some((d) => d.claude > 0 || d.cursor > 0);
 
   const weekLabels = useMemo(() => {
     const labels: { index: number; label: string }[] = [];
@@ -325,37 +319,39 @@ function ActivityChart({ data }: { data: InsightStats["activityByDay"] }) {
     <div className="flex flex-col h-full">
       <div className="flex-1 flex items-stretch gap-px min-h-0">
         {data.map((d) => {
-          const total = d.sessions + d.replays;
+          const total = d.claude + d.cursor;
           const heightPct = Math.max((total / maxVal) * 100, total > 0 ? 4 : 0);
-          const sessionPct = total > 0 ? (d.sessions / total) * 100 : 0;
+          const claudePct = total > 0 ? (d.claude / total) * 100 : 0;
           const isToday = d.date === new Date().toISOString().slice(0, 10);
           return (
             <div
               key={d.date}
               className="flex-1 flex flex-col justify-end h-full group relative"
-              title={`${d.label}: ${d.sessions} sessions, ${d.replays} replays`}
+              title={`${d.label}: ${d.claude} Claude, ${d.cursor} Cursor`}
             >
               <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-10">
                 <div className="bg-terminal-surface-2 border border-terminal-border-subtle rounded-lg px-2.5 py-1.5 shadow-layer-md whitespace-nowrap">
                   <div className="text-[10px] font-mono text-terminal-dim">{d.label}</div>
-                  <div className="text-[10px] font-mono text-terminal-green">
-                    {d.sessions} sessions
-                  </div>
-                  {d.replays > 0 && (
+                  {d.claude > 0 && (
+                    <div className="text-[10px] font-mono text-terminal-orange">
+                      {d.claude} Claude
+                    </div>
+                  )}
+                  {d.cursor > 0 && (
                     <div className="text-[10px] font-mono text-terminal-blue">
-                      {d.replays} replays
+                      {d.cursor} Cursor
                     </div>
                   )}
                 </div>
               </div>
               <div
-                className={`rounded-sm transition-all duration-200 ${isToday ? "ring-1 ring-terminal-green/30" : ""} ${total > 0 ? "hover:opacity-80" : ""}`}
+                className={`rounded-sm transition-all duration-200 ${isToday ? "ring-1 ring-terminal-orange/30" : ""} ${total > 0 ? "hover:opacity-80" : ""}`}
                 style={{
                   height: `${heightPct}%`,
                   minHeight: total > 0 ? "3px" : "0",
                   background:
                     total > 0
-                      ? `linear-gradient(to top, var(--green) ${sessionPct}%, var(--blue) ${sessionPct}%)`
+                      ? `linear-gradient(to top, var(--orange) ${claudePct}%, var(--blue) ${claudePct}%)`
                       : "transparent",
                   opacity: total > 0 ? 0.7 : 0.1,
                 }}
@@ -517,7 +513,7 @@ function RecentSessionsList({
       })}
       <button
         onClick={onViewAll}
-        className="w-full text-center py-2.5 text-xs font-sans font-medium text-terminal-dim hover:text-terminal-green transition-colors rounded-lg hover:bg-terminal-surface-hover"
+        className="w-full py-2 mt-1 text-xs font-sans font-semibold rounded-lg bg-terminal-surface-2 text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors"
       >
         View all sessions &rarr;
       </button>
@@ -587,7 +583,7 @@ function RecentReplaysList({
       ))}
       <button
         onClick={onViewAll}
-        className="w-full text-center py-2.5 text-xs font-sans font-medium text-terminal-dim hover:text-terminal-green transition-colors rounded-lg hover:bg-terminal-surface-hover"
+        className="w-full py-2 mt-1 text-xs font-sans font-semibold rounded-lg bg-terminal-surface-2 text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors"
       >
         View all replays &rarr;
       </button>
@@ -597,69 +593,41 @@ function RecentReplaysList({
 
 // ─── Icons ───────────────────────────────────────────────────────────
 
+const I = ({ c, children }: { c: string; children: React.ReactNode }) => (
+  <svg
+    width="18"
+    height="18"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={c}
+  >
+    {children}
+  </svg>
+);
 const SessionsIcon = () => (
-  <svg
-    width="18"
-    height="18"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.5"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className="text-terminal-green"
-  >
+  <I c="text-terminal-green">
     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-  </svg>
+  </I>
 );
-
 const ReplaysIcon = () => (
-  <svg
-    width="18"
-    height="18"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.5"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className="text-terminal-blue"
-  >
+  <I c="text-terminal-blue">
     <polygon points="5 3 19 12 5 21 5 3" />
-  </svg>
+  </I>
 );
-
 const PromptsIcon = () => (
-  <svg
-    width="18"
-    height="18"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.5"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className="text-terminal-orange"
-  >
+  <I c="text-terminal-orange">
     <polyline points="4 17 10 11 4 5" />
     <line x1="12" y1="19" x2="20" y2="19" />
-  </svg>
+  </I>
 );
-
 const ToolsIcon = () => (
-  <svg
-    width="18"
-    height="18"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.5"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className="text-terminal-purple"
-  >
+  <I c="text-terminal-purple">
     <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
-  </svg>
+  </I>
 );
 
 // ─── Main Component ──────────────────────────────────────────────────
@@ -722,31 +690,23 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     );
   }
 
-  // Count how many sources have scan data vs fallback
-  const sourcesWithCounts = sources.filter((s) => s.promptCount != null).length;
-  const promptSub =
-    sourcesWithCounts === sources.length
-      ? `across ${insights.projectCount} projects`
-      : `${sourcesWithCounts} of ${sources.length} scanned`;
-  const toolSub =
-    sourcesWithCounts === sources.length
-      ? `across ${insights.projectCount} projects`
-      : `${sourcesWithCounts} of ${sources.length} scanned`;
+  const hasCounts = sources.every((s) => s.promptCount != null);
+  const countsSub = hasCounts
+    ? `across ${insights.projectCount} projects`
+    : `${sources.filter((s) => s.promptCount != null).length} of ${sources.length} scanned`;
 
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 space-y-6">
-        {/* ─── Scan Progress ─── */}
         {scanProgress != null && (
           <div className="flex items-center gap-2 px-1">
             <div className="w-1.5 h-1.5 rounded-full bg-terminal-green animate-pulse" />
             <span className="text-xs font-mono text-terminal-dim">
-              Scanning sessions... {scanProgress} discovered
+              Scanning... {scanProgress} sessions
             </span>
           </div>
         )}
 
-        {/* ─── Metric Cards ─── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <MetricCard
             label="Sessions"
@@ -765,20 +725,19 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           <MetricCard
             label="Total Prompts"
             value={insights.totalPrompts.toLocaleString()}
-            sub={promptSub}
+            sub={countsSub}
             color="orange"
             icon={<PromptsIcon />}
           />
           <MetricCard
             label="Tool Calls"
             value={insights.totalToolCalls.toLocaleString()}
-            sub={toolSub}
+            sub={countsSub}
             color="purple"
             icon={<ToolsIcon />}
           />
         </div>
 
-        {/* ─── Activity + Summary Row ─── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
           {/* Activity Chart (2/3 width) */}
           <div className="lg:col-span-2 bg-terminal-surface rounded-xl p-4 shadow-layer-sm">
@@ -788,12 +747,12 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
               </h3>
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-sm bg-terminal-green opacity-70" />
-                  <span className="text-[10px] font-mono text-terminal-dimmer">Sessions</span>
+                  <span className="w-2 h-2 rounded-sm bg-terminal-orange opacity-70" />
+                  <span className="text-[10px] font-mono text-terminal-dimmer">Claude</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-sm bg-terminal-blue opacity-70" />
-                  <span className="text-[10px] font-mono text-terminal-dimmer">Replays</span>
+                  <span className="text-[10px] font-mono text-terminal-dimmer">Cursor</span>
                 </div>
               </div>
             </div>
@@ -827,7 +786,6 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           </div>
         </div>
 
-        {/* ─── Recent Sessions + Replays ─── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm">
             <div className="flex items-center justify-between mb-3">
