@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { SessionSummary, SourceSession } from "../types";
 import {
-  formatCost,
   isCacheFresh,
   navigateTo,
+  normalizeTitleText,
   parseCachedList,
   projectName,
   replaySuggestedTitle,
@@ -23,17 +23,14 @@ interface InsightStats {
   totalReplays: number;
   totalPrompts: number;
   totalToolCalls: number;
-  totalCost: number;
   totalDuration: number;
-  avgPromptsPerSession: number;
-  avgToolsPerSession: number;
-  avgCostPerSession: number;
   providerBreakdown: { provider: string; count: number; label: string }[];
   projectCount: number;
   activityByDay: { date: string; label: string; sessions: number; replays: number }[];
   recentSources: SourceSession[];
   recentReplays: SessionSummary[];
   publishedCount: number;
+  replayConversionPct: number;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -48,12 +45,6 @@ function formatCompactDuration(ms: number): string {
   const days = Math.floor(hours / 24);
   const remHours = hours % 24;
   return remHours > 0 ? `${days}d ${remHours}h` : `${days}d`;
-}
-
-function formatInsightCost(cost: number): string {
-  if (cost === 0) return "$0";
-  if (cost < 0.01) return "<$0.01";
-  return `$${cost.toFixed(2)}`;
 }
 
 // ─── Data Fetching ───────────────────────────────────────────────────
@@ -144,13 +135,11 @@ function useDashboardData() {
 function computeInsights(sources: SourceSession[], replays: SessionSummary[]): InsightStats {
   let totalPrompts = 0;
   let totalToolCalls = 0;
-  let totalCost = 0;
   let totalDuration = 0;
 
   for (const r of replays) {
     totalPrompts += r.stats.userPrompts || 0;
     totalToolCalls += r.stats.toolCalls || 0;
-    totalCost += r.stats.costEstimate || 0;
     totalDuration += r.stats.durationMs || 0;
   }
 
@@ -159,11 +148,6 @@ function computeInsights(sources: SourceSession[], replays: SessionSummary[]): I
       totalPrompts += s.prompts?.length || (s.firstPrompt ? 1 : 0);
     }
   }
-
-  const totalReplays = replays.length;
-  const avgPromptsPerSession = totalReplays > 0 ? totalPrompts / totalReplays : 0;
-  const avgToolsPerSession = totalReplays > 0 ? totalToolCalls / totalReplays : 0;
-  const avgCostPerSession = totalReplays > 0 ? totalCost / totalReplays : 0;
 
   // Provider breakdown
   const providerCounts = new Map<string, number>();
@@ -212,22 +196,24 @@ function computeInsights(sources: SourceSession[], replays: SessionSummary[]): I
     });
   }
 
+  const totalSessions = sources.length;
+  const totalReplays = replays.length;
+  const sessionsWithReplay = sources.filter((s) => s.existingReplay).length;
+  const replayConversionPct = totalSessions > 0 ? (sessionsWithReplay / totalSessions) * 100 : 0;
+
   return {
-    totalSessions: sources.length,
+    totalSessions,
     totalReplays,
     totalPrompts,
     totalToolCalls,
-    totalCost,
     totalDuration,
-    avgPromptsPerSession,
-    avgToolsPerSession,
-    avgCostPerSession,
     providerBreakdown,
     projectCount: projects.size,
     activityByDay,
     recentSources: [...sources].sort((a, b) => b.timestamp.localeCompare(a.timestamp)).slice(0, 5),
     recentReplays: [...replays].sort((a, b) => b.startTime.localeCompare(a.startTime)).slice(0, 5),
     publishedCount: replays.filter((r) => r.gist?.gistId).length,
+    replayConversionPct,
   };
 }
 
@@ -330,7 +316,7 @@ function ActivityChart({ data }: { data: InsightStats["activityByDay"] }) {
                   minHeight: total > 0 ? "3px" : "0",
                   background:
                     total > 0
-                      ? `linear-gradient(to top, var(--color-terminal-green) ${sessionPct}%, var(--color-terminal-blue) ${sessionPct}%)`
+                      ? `linear-gradient(to top, var(--green) ${sessionPct}%, var(--blue) ${sessionPct}%)`
                       : "transparent",
                   opacity: total > 0 ? 0.7 : 0.1,
                 }}
@@ -410,9 +396,15 @@ function ProviderBadge({ provider }: { provider: string }) {
 function RecentSessionsList({
   sessions,
   onViewAll,
+  onGenerate,
+  onViewReplay,
+  generatingSlug,
 }: {
   sessions: SourceSession[];
   onViewAll: () => void;
+  onGenerate: (source: SourceSession) => void;
+  onViewReplay: (slug: string) => void;
+  generatingSlug: string | null;
 }) {
   if (sessions.length === 0) {
     return (
@@ -424,32 +416,66 @@ function RecentSessionsList({
 
   return (
     <div className="space-y-1">
-      {sessions.map((s) => (
-        <div
-          key={`${s.provider}-${s.slug}`}
-          className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-terminal-surface-hover transition-colors duration-200"
-        >
-          <ProviderBadge provider={s.provider} />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-sans text-terminal-text truncate">
-              {sourceSuggestedTitle(s)}
-            </p>
-            <p className="text-[11px] font-mono text-terminal-dimmer truncate">
-              {projectName(s.project)}
-            </p>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {s.existingReplay && (
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-green-subtle text-terminal-green">
-                replay
+      {sessions.map((s) => {
+        const hasReplay = !!s.existingReplay;
+        const isGenerating = generatingSlug === s.slug;
+        return (
+          <div
+            key={`${s.provider}-${s.slug}`}
+            className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-terminal-surface-hover transition-colors duration-200"
+          >
+            <ProviderBadge provider={s.provider} />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-sans text-terminal-text truncate">
+                {sourceSuggestedTitle(s)}
+              </p>
+              <p className="text-[11px] font-mono text-terminal-dimmer truncate">
+                {projectName(s.project)}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-[11px] font-mono text-terminal-dimmer tabular-nums">
+                {timeAgo(s.timestamp)}
               </span>
-            )}
-            <span className="text-[11px] font-mono text-terminal-dimmer tabular-nums">
-              {timeAgo(s.timestamp)}
-            </span>
+              {hasReplay ? (
+                <button
+                  onClick={() => onViewReplay(s.existingReplay!)}
+                  className="h-6 px-2.5 text-[11px] font-sans font-semibold rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 flex items-center gap-1"
+                >
+                  <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                    <polygon points="4 2 14 8 4 14" />
+                  </svg>
+                  View
+                </button>
+              ) : (
+                <button
+                  onClick={() => onGenerate(s)}
+                  disabled={isGenerating}
+                  className="h-6 px-2.5 text-[11px] font-sans font-semibold rounded-md bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200 disabled:opacity-50 flex items-center gap-1"
+                >
+                  {isGenerating ? (
+                    <span className="animate-pulse">...</span>
+                  ) : (
+                    <>
+                      <svg
+                        width="10"
+                        height="10"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      >
+                        <path d="M8 2v12M2 8h12" />
+                      </svg>
+                      Generate
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
       <button
         onClick={onViewAll}
         className="w-full text-center py-2.5 text-xs font-sans font-medium text-terminal-dim hover:text-terminal-green transition-colors rounded-lg hover:bg-terminal-surface-hover"
@@ -530,7 +556,7 @@ function RecentReplaysList({
   );
 }
 
-// ─── Icons (inline SVGs) ─────────────────────────────────────────────
+// ─── Icons ───────────────────────────────────────────────────────────
 
 const SessionsIcon = () => (
   <svg
@@ -602,9 +628,36 @@ const ToolsIcon = () => (
 export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   const { sources, replays, loading, error } = useDashboardData();
   const insights = useMemo(() => computeInsights(sources, replays), [sources, replays]);
+  const [generatingSlug, setGeneratingSlug] = useState<string | null>(null);
 
   const handleOpenReplay = (slug: string) => {
     navigateTo({ view: null, session: slug });
+  };
+
+  const handleGenerate = async (source: SourceSession) => {
+    setGeneratingSlug(source.slug);
+    try {
+      const title = sourceSuggestedTitle(source);
+      const resp = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: source.provider,
+          filePaths: source.filePaths,
+          toolPaths: source.toolPaths,
+          title: normalizeTitleText(title) || undefined,
+          sessionSlug: source.slug,
+          sessionProject: source.project,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || "Generation failed");
+      navigateTo({ view: null, session: data.slug });
+    } catch (err) {
+      console.error("Generate error:", err);
+    } finally {
+      setGeneratingSlug(null);
+    }
   };
 
   if (loading && sources.length === 0 && replays.length === 0) {
@@ -652,22 +705,14 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           <MetricCard
             label="Total Prompts"
             value={insights.totalPrompts.toLocaleString()}
-            sub={
-              insights.avgPromptsPerSession > 0
-                ? `~${Math.round(insights.avgPromptsPerSession)} per session`
-                : undefined
-            }
+            sub={insights.totalReplays > 0 ? `from ${insights.totalReplays} replays` : undefined}
             color="orange"
             icon={<PromptsIcon />}
           />
           <MetricCard
             label="Tool Calls"
             value={insights.totalToolCalls.toLocaleString()}
-            sub={
-              insights.avgToolsPerSession > 0
-                ? `~${Math.round(insights.avgToolsPerSession)} per session`
-                : undefined
-            }
+            sub={insights.totalReplays > 0 ? `from ${insights.totalReplays} replays` : undefined}
             color="purple"
             icon={<ToolsIcon />}
           />
@@ -704,27 +749,17 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
             </h3>
             <ProviderBreakdownCard breakdown={insights.providerBreakdown} />
             <div className="pt-2 border-t border-terminal-border-subtle space-y-2">
-              {insights.totalCost > 0 && (
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-sans text-terminal-dim">Total cost</span>
-                  <span className="text-sm font-mono font-medium text-terminal-green tabular-nums">
-                    {formatInsightCost(insights.totalCost)}
-                  </span>
-                </div>
-              )}
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-sans text-terminal-dim">Replay coverage</span>
+                <span className="text-sm font-mono font-medium text-terminal-green tabular-nums">
+                  {Math.round(insights.replayConversionPct)}%
+                </span>
+              </div>
               {insights.totalDuration > 0 && (
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-sans text-terminal-dim">Total duration</span>
+                  <span className="text-xs font-sans text-terminal-dim">Total replay time</span>
                   <span className="text-sm font-mono font-medium text-terminal-text tabular-nums">
                     {formatCompactDuration(insights.totalDuration)}
-                  </span>
-                </div>
-              )}
-              {insights.totalCost > 0 && insights.avgCostPerSession > 0 && (
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-sans text-terminal-dim">Avg cost/session</span>
-                  <span className="text-xs font-mono text-terminal-dimmer tabular-nums">
-                    {formatCost(insights.avgCostPerSession)}
                   </span>
                 </div>
               )}
@@ -746,6 +781,9 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
             <RecentSessionsList
               sessions={insights.recentSources}
               onViewAll={() => onNavigate("sessions")}
+              onGenerate={handleGenerate}
+              onViewReplay={handleOpenReplay}
+              generatingSlug={generatingSlug}
             />
           </div>
 
