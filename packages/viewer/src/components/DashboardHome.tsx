@@ -697,17 +697,66 @@ interface TC {
   installed: boolean;
   version?: string;
   detail?: string;
+  loading?: boolean;
 }
 
+const SYSTEM_TOOLS: Array<Pick<TC, "name" | "label" | "purpose">> = [
+  { name: "gh", label: "GitHub CLI", purpose: "Publish replays as GitHub Gists" },
+  { name: "claude", label: "Claude Code", purpose: "AI feedback via headless mode" },
+  { name: "cursor", label: "Cursor CLI", purpose: "AI feedback via AI Studio" },
+  { name: "opencode", label: "OpenCode", purpose: "AI feedback via headless mode" },
+];
+
 function SystemChecksSection() {
-  const [checks, setChecks] = useState<TC[] | null>(null);
+  const [checks, setChecks] = useState<TC[]>(() =>
+    SYSTEM_TOOLS.map((tool) => ({
+      ...tool,
+      installed: false,
+      detail: "checking...",
+      loading: true,
+    })),
+  );
+
   useEffect(() => {
-    fetch("/api/system-checks")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: { checks: TC[] } | null) => d?.checks && setChecks(d.checks))
-      .catch(() => {});
+    let cancelled = false;
+    for (const tool of SYSTEM_TOOLS) {
+      fetch(`/api/system-checks?tool=${encodeURIComponent(tool.name)}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d: { checks?: TC[] } | null) => {
+          if (cancelled) return;
+          const resolved = d?.checks?.[0];
+          if (!resolved) {
+            setChecks((prev) =>
+              prev.map((entry) =>
+                entry.name === tool.name
+                  ? { ...entry, installed: false, detail: "check failed", loading: false }
+                  : entry,
+              ),
+            );
+            return;
+          }
+          setChecks((prev) =>
+            prev.map((entry) =>
+              entry.name === tool.name ? { ...resolved, loading: false } : entry,
+            ),
+          );
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setChecks((prev) =>
+            prev.map((entry) =>
+              entry.name === tool.name
+                ? { ...entry, installed: false, detail: "check failed", loading: false }
+                : entry,
+            ),
+          );
+        });
+    }
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
-  if (!checks) return null;
 
   return (
     <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm">
@@ -721,16 +770,32 @@ function SystemChecksSection() {
             className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg bg-terminal-bg"
           >
             <div
-              className={`w-2 h-2 mt-1 rounded-full shrink-0 ${t.installed ? "bg-terminal-green" : "bg-terminal-dim opacity-40"}`}
+              className={`w-2 h-2 mt-1 rounded-full shrink-0 ${
+                t.loading
+                  ? "bg-terminal-blue animate-pulse"
+                  : t.installed
+                    ? "bg-terminal-green"
+                    : "bg-terminal-dim opacity-40"
+              }`}
             />
             <div className="min-w-0">
               <span
-                className={`text-xs font-sans font-medium ${t.installed ? "text-terminal-text" : "text-terminal-dimmer"}`}
+                className={`text-xs font-sans font-medium ${
+                  t.loading
+                    ? "text-terminal-dim"
+                    : t.installed
+                      ? "text-terminal-text"
+                      : "text-terminal-dimmer"
+                }`}
               >
                 {t.label}
               </span>
               <p className="text-[10px] font-mono text-terminal-dimmer truncate">{t.purpose}</p>
-              {t.installed ? (
+              {t.loading ? (
+                <p className="text-[10px] font-mono text-terminal-blue truncate animate-pulse">
+                  checking...
+                </p>
+              ) : t.installed ? (
                 <p className="text-[10px] font-mono text-terminal-green truncate">
                   {t.detail || t.version || "ready"}
                 </p>

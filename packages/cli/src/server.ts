@@ -1112,62 +1112,76 @@ export async function startServer(
       return { name, label, purpose, installed: true, version, detail };
     }
 
-    const checks = await Promise.all([
-      checkCli(
-        "gh",
-        "GitHub CLI",
-        "Publish replays as GitHub Gists",
-        "gh",
-        ["--version"],
-        async (run) => {
-          const auth = await run("gh", ["auth", "status"]);
-          if (auth.timedOut) return CHECK_TIMEOUT_MARKER;
-          return auth.ok ? "authenticated" : "not authenticated";
-        },
-      ),
-      checkCli(
-        "claude",
-        "Claude Code",
-        "AI feedback via headless mode",
-        "claude",
-        ["--version"],
-        async (run) => {
-          const auth = await run("claude", ["auth", "status"]);
-          if (auth.timedOut) return CHECK_TIMEOUT_MARKER;
-          if (!auth.ok) return "not logged in";
+    const toolChecks: Record<string, () => Promise<ToolCheck>> = {
+      gh: () =>
+        checkCli(
+          "gh",
+          "GitHub CLI",
+          "Publish replays as GitHub Gists",
+          "gh",
+          ["--version"],
+          async (run) => {
+            const auth = await run("gh", ["auth", "status"]);
+            if (auth.timedOut) return CHECK_TIMEOUT_MARKER;
+            return auth.ok ? "authenticated" : "not authenticated";
+          },
+        ),
+      claude: () =>
+        checkCli(
+          "claude",
+          "Claude Code",
+          "AI feedback via headless mode",
+          "claude",
+          ["--version"],
+          async (run) => {
+            const auth = await run("claude", ["auth", "status"]);
+            if (auth.timedOut) return CHECK_TIMEOUT_MARKER;
+            if (!auth.ok) return "not logged in";
 
-          try {
-            const info = JSON.parse(auth.stdout) as {
-              loggedIn?: boolean;
-              email?: string;
-              authMethod?: string;
-            };
-            if (info.loggedIn) return `${info.email || info.authMethod || "logged in"}`;
-          } catch {
-            // Non-JSON output still means command completed; keep non-blocking fallback detail.
-          }
+            try {
+              const info = JSON.parse(auth.stdout) as {
+                loggedIn?: boolean;
+                email?: string;
+                authMethod?: string;
+              };
+              if (info.loggedIn) return `${info.email || info.authMethod || "logged in"}`;
+            } catch {
+              // Non-JSON output still means command completed; keep non-blocking fallback detail.
+            }
 
-          return "not logged in";
-        },
-      ),
-      checkCli("cursor", "Cursor CLI", "AI feedback via AI Studio", "cursor", [
-        "agent",
-        "--version",
-      ]),
-      checkCli(
-        "opencode",
-        "OpenCode",
-        "AI feedback via headless mode",
-        "opencode",
-        ["--version"],
-        async (run) => {
-          const auth = await run("opencode", ["auth", "list"]);
-          if (auth.timedOut) return CHECK_TIMEOUT_MARKER;
-          if (!auth.ok) return undefined;
-          return auth.stdout.includes("0 credentials") ? "no credentials" : "configured";
-        },
-      ),
-    ]);
+            return "not logged in";
+          },
+        ),
+      cursor: () =>
+        checkCli("cursor", "Cursor CLI", "AI feedback via AI Studio", "cursor", [
+          "agent",
+          "--version",
+        ]),
+      opencode: () =>
+        checkCli(
+          "opencode",
+          "OpenCode",
+          "AI feedback via headless mode",
+          "opencode",
+          ["--version"],
+          async (run) => {
+            const auth = await run("opencode", ["auth", "list"]);
+            if (auth.timedOut) return CHECK_TIMEOUT_MARKER;
+            if (!auth.ok) return undefined;
+            return auth.stdout.includes("0 credentials") ? "no credentials" : "configured";
+          },
+        ),
+    };
+
+    const requestedTool = c.req.query("tool");
+    if (requestedTool) {
+      const checker = toolChecks[requestedTool];
+      if (!checker) return c.json({ error: `Unknown tool: ${requestedTool}` }, 400);
+      const check = await checker();
+      return c.json({ checks: [check] });
+    }
+
+    const checks = await Promise.all(Object.values(toolChecks).map((check) => check()));
 
     return c.json({ checks });
   });
