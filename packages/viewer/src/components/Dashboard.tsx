@@ -18,6 +18,7 @@ import {
   providerBadgeClass,
   providerBadgeLabel,
   replaySuggestedTitle,
+  type SourcesEnrichmentStatus,
   sourceSuggestedTitle,
   TITLE_MAX_CHARS,
   timeAgo,
@@ -25,12 +26,6 @@ import {
 import { formatDuration } from "./StatsPanel";
 
 type Tab = "home" | "sessions" | "replays";
-
-interface SourcesEnrichmentStatus {
-  running: boolean;
-  processed: number;
-  total: number;
-}
 
 const MoreDotsIcon = () => (
   <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
@@ -603,6 +598,7 @@ function SessionsPanel() {
   const [ghAvailable, setGhAvailable] = useState<boolean | null>(null);
   const [publishingSlug, setPublishingSlug] = useState<string | null>(null);
   const [enrichmentStatus, setEnrichmentStatus] = useState<SourcesEnrichmentStatus | null>(null);
+  const hasCursorSources = sources.some((source) => source.provider === "cursor");
 
   const loadSources = useCallback(async (opts?: { forceRefresh?: boolean }) => {
     setLoading(true);
@@ -685,6 +681,8 @@ function SessionsPanel() {
   }, [loadSources]);
 
   useEffect(() => {
+    if (!loading && !hasCursorSources && !wasEnrichingRef.current) return;
+
     let cancelled = false;
     let timer: number | undefined;
     const refreshSourcesFromCache = async () => {
@@ -718,7 +716,7 @@ function SessionsPanel() {
       cancelled = true;
       if (timer) window.clearInterval(timer);
     };
-  }, []);
+  }, [hasCursorSources, loading]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setRefreshClockMs(Date.now()), 30_000);

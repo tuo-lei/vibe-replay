@@ -722,12 +722,18 @@ export async function startServer(
             target.promptCount = counts.promptCount;
             target.toolCallCount = counts.toolCallCount;
             changed = true;
-            sourcesEnrichmentStatus.updated += 1;
+            sourcesEnrichmentStatus = {
+              ...sourcesEnrichmentStatus,
+              updated: sourcesEnrichmentStatus.updated + 1,
+            };
           }
         } catch {
           // Best-effort enrichment only.
         } finally {
-          sourcesEnrichmentStatus.processed += 1;
+          sourcesEnrichmentStatus = {
+            ...sourcesEnrichmentStatus,
+            processed: sourcesEnrichmentStatus.processed + 1,
+          };
           if (changed && sourcesEnrichmentStatus.processed % 5 === 0) {
             await writeFileCache(sourcesCacheKey, enrichedSources);
           }

@@ -9,6 +9,7 @@ import {
   providerBadgeClass,
   providerBadgeLabel,
   replaySuggestedTitle,
+  type SourcesEnrichmentStatus,
   sourceSuggestedTitle,
   timeAgo,
 } from "./dashboard-utils";
@@ -33,16 +34,6 @@ interface InsightStats {
   recentReplays: SessionSummary[];
   publishedCount: number;
   replayConversionPct: number;
-}
-
-interface SourcesEnrichmentStatus {
-  running: boolean;
-  processed: number;
-  total: number;
-  updated: number;
-  startedAt?: string;
-  finishedAt?: string;
-  message?: string;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -71,6 +62,10 @@ function useDashboardData() {
   const [scanProgress, setScanProgress] = useState<number | null>(null);
   const [enrichmentStatus, setEnrichmentStatus] = useState<SourcesEnrichmentStatus | null>(null);
   const wasEnrichingRef = useRef(false);
+  const hasCursorSources = useMemo(
+    () => sources.some((source) => source.provider === "cursor"),
+    [sources],
+  );
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -184,6 +179,8 @@ function useDashboardData() {
   }, [loadData]);
 
   useEffect(() => {
+    if (!loadingSources && !hasCursorSources && !wasEnrichingRef.current) return;
+
     let cancelled = false;
     let timer: number | undefined;
 
@@ -222,7 +219,7 @@ function useDashboardData() {
       cancelled = true;
       if (timer) window.clearInterval(timer);
     };
-  }, []);
+  }, [hasCursorSources, loadingSources]);
 
   return {
     sources,
@@ -258,7 +255,8 @@ function computeInsights(sources: SourceSession[], replays: SessionSummary[]): I
     } else if (src.toolCallCount == null) {
       totalToolCalls += replayToolCalls;
     } else if (replayToolCalls > src.toolCallCount) {
-      // Source discovery counts can under-report Cursor tool calls; trust replay stats when higher.
+      // Invariant: source and replay represent the same session; replay stats can be more complete.
+      // We only add the delta here to avoid double-counting counts already included from sources.
       totalToolCalls += replayToolCalls - src.toolCallCount;
     }
     totalDuration += r.stats.durationMs || 0;
