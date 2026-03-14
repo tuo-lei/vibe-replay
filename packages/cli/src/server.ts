@@ -877,21 +877,23 @@ export async function startServer(
     return c.json(status);
   });
 
-  // System checks — detect available CLI tools for headless mode & publishing
+  // System checks — detect available tools for publishing & AI feedback
   app.get("/api/system-checks", async (c) => {
     const exec = promisify(execFile);
 
     interface ToolCheck {
       name: string;
       label: string;
+      purpose: string;
       installed: boolean;
       version?: string;
       detail?: string;
     }
 
-    async function checkTool(
+    async function checkCli(
       name: string,
       label: string,
+      purpose: string,
       cmd: string,
       versionArgs: string[] = ["--version"],
       extraCheck?: () => Promise<string | undefined>,
@@ -899,7 +901,7 @@ export async function startServer(
       try {
         await exec("which", [cmd]);
       } catch {
-        return { name, label, installed: false };
+        return { name, label, purpose, installed: false };
       }
       let version: string | undefined;
       try {
@@ -909,21 +911,42 @@ export async function startServer(
         /* version check failed, still installed */
       }
       const detail = extraCheck ? await extraCheck() : undefined;
-      return { name, label, installed: true, version, detail };
+      return { name, label, purpose, installed: true, version, detail };
+    }
+
+    // Cursor is an editor — check data directories, not CLI
+    async function checkCursorData(): Promise<ToolCheck> {
+      const dirs = [join(homedir(), ".cursor", "projects"), join(homedir(), ".cursor", "chats")];
+      const results = await Promise.all(dirs.map((d) => stat(d).catch(() => null)));
+      const found = results.some((s) => s?.isDirectory());
+      return {
+        name: "cursor",
+        label: "Cursor",
+        purpose: "Session discovery from Cursor editor",
+        installed: found,
+        detail: found ? "data found" : undefined,
+      };
     }
 
     const checks = await Promise.all([
-      checkTool("gh", "GitHub CLI", "gh", ["--version"], async () => {
-        try {
-          await exec("gh", ["auth", "status"]);
-          return "authenticated";
-        } catch {
-          return "not authenticated";
-        }
-      }),
-      checkTool("claude", "Claude Code", "claude", ["--version"]),
-      checkTool("cursor", "Cursor", "cursor", ["--version"]),
-      checkTool("opencode", "OpenCode", "opencode", ["--version"]),
+      checkCli(
+        "gh",
+        "GitHub CLI",
+        "Publish replays as GitHub Gists",
+        "gh",
+        ["--version"],
+        async () => {
+          try {
+            await exec("gh", ["auth", "status"]);
+            return "authenticated";
+          } catch {
+            return "not authenticated";
+          }
+        },
+      ),
+      checkCli("claude", "Claude Code", "AI feedback via headless mode", "claude", ["--version"]),
+      checkCursorData(),
+      checkCli("opencode", "OpenCode", "AI feedback via headless mode", "opencode", ["--version"]),
     ]);
 
     return c.json({ checks });

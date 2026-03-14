@@ -596,6 +596,7 @@ function RecentReplaysList({
 interface TC {
   name: string;
   label: string;
+  purpose: string;
   installed: boolean;
   version?: string;
   detail?: string;
@@ -620,24 +621,27 @@ function SystemChecksSection() {
         {checks.map((t) => (
           <div
             key={t.name}
-            className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg bg-terminal-bg"
+            className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg bg-terminal-bg"
           >
             <div
-              className={`w-2 h-2 rounded-full shrink-0 ${t.installed ? "bg-terminal-green" : "bg-terminal-dim opacity-40"}`}
+              className={`w-2 h-2 mt-1 rounded-full shrink-0 ${t.installed ? "bg-terminal-green" : "bg-terminal-dim opacity-40"}`}
             />
             <div className="min-w-0">
-              <span
-                className={`text-xs font-sans font-medium ${t.installed ? "text-terminal-text" : "text-terminal-dimmer"}`}
-              >
-                {t.label}
-              </span>
-              {t.detail && t.detail !== "authenticated" && (
-                <span className="text-[10px] font-mono text-terminal-orange ml-1">
-                  ({t.detail})
+              <div className="flex items-center gap-1.5">
+                <span
+                  className={`text-xs font-sans font-medium ${t.installed ? "text-terminal-text" : "text-terminal-dimmer"}`}
+                >
+                  {t.label}
                 </span>
-              )}
-              <p className="text-[10px] font-mono text-terminal-dimmer truncate">
-                {t.installed ? t.version || "installed" : "not installed"}
+                {t.detail && t.detail !== "authenticated" && t.detail !== "data found" && (
+                  <span className="text-[10px] font-mono text-terminal-orange">({t.detail})</span>
+                )}
+              </div>
+              <p className="text-[10px] font-mono text-terminal-dimmer truncate">{t.purpose}</p>
+              <p
+                className={`text-[10px] font-mono truncate ${t.installed ? "text-terminal-green" : "text-terminal-dimmer"}`}
+              >
+                {t.installed ? t.version || "ready" : "not found"}
               </p>
             </div>
           </div>
