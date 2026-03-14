@@ -914,20 +914,6 @@ export async function startServer(
       return { name, label, purpose, installed: true, version, detail };
     }
 
-    // Cursor is an editor — check data directories, not CLI
-    async function checkCursorData(): Promise<ToolCheck> {
-      const dirs = [join(homedir(), ".cursor", "projects"), join(homedir(), ".cursor", "chats")];
-      const results = await Promise.all(dirs.map((d) => stat(d).catch(() => null)));
-      const found = results.some((s) => s?.isDirectory());
-      return {
-        name: "cursor",
-        label: "Cursor",
-        purpose: "Session discovery from Cursor editor",
-        installed: found,
-        detail: found ? "data found" : undefined,
-      };
-    }
-
     const checks = await Promise.all([
       checkCli(
         "gh",
@@ -961,7 +947,10 @@ export async function startServer(
           }
         },
       ),
-      checkCursorData(),
+      checkCli("cursor", "Cursor CLI", "AI feedback via AI Studio", "cursor", [
+        "agent",
+        "--version",
+      ]),
       checkCli(
         "opencode",
         "OpenCode",
