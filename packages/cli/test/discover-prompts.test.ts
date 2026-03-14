@@ -48,6 +48,24 @@ describe("extractSessionInfo – multi-prompt extraction", () => {
     }
   });
 
+  it("counts promptCount excluding tool_result lines", async () => {
+    const fileStat = await stat(FIXTURE);
+    const info = await extractSessionInfo(FIXTURE, fileStat.size, "/Users/test/project");
+
+    // Lines with "type":"user": 3 (caveat), 5 (/clear), 7 (real), 9 (tool_result), 10 (real)
+    // Line 9 has "tool_result" so it's excluded → promptCount = 4
+    // (lightweight scan can't filter boilerplate — that's the prompts array's job)
+    expect(info?.promptCount).toBe(4);
+  });
+
+  it("counts toolCallCount from tool_use blocks", async () => {
+    const fileStat = await stat(FIXTURE);
+    const info = await extractSessionInfo(FIXTURE, fileStat.size, "/Users/test/project");
+
+    // No "type":"tool_use" in any assistant messages in this fixture
+    expect(info?.toolCallCount).toBe(0);
+  });
+
   it("extracts metadata from init line", async () => {
     const fileStat = await stat(FIXTURE);
     const info = await extractSessionInfo(FIXTURE, fileStat.size, "/Users/test/project");
