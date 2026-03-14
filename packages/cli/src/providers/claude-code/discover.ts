@@ -110,15 +110,24 @@ export async function extractSessionInfo(
         }
 
         // Collect meaningful user prompts (skip boilerplate)
-        if (
-          prompts.length < MAX_PROMPTS &&
-          obj.type === "user" &&
-          obj.message?.role === "user" &&
-          typeof obj.message.content === "string"
-        ) {
-          const cleaned = cleanPromptText(obj.message.content);
-          if (cleaned.length >= 10) {
-            prompts.push(cleaned.slice(0, 200));
+        // Content can be a string (CLI / terminal mode) or an array of content blocks
+        // (VS Code extension native panel sends [{type:"text",text:"..."}])
+        if (prompts.length < MAX_PROMPTS && obj.type === "user" && obj.message?.role === "user") {
+          const raw = obj.message.content;
+          const text =
+            typeof raw === "string"
+              ? raw
+              : Array.isArray(raw)
+                ? raw
+                    .filter((b: any) => b.type === "text")
+                    .map((b: any) => b.text)
+                    .join("")
+                : "";
+          if (text) {
+            const cleaned = cleanPromptText(text);
+            if (cleaned.length >= 10) {
+              prompts.push(cleaned.slice(0, 200));
+            }
           }
         }
 
