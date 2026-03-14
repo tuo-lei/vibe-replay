@@ -15,6 +15,32 @@ function navigateTo(params: Record<string, string | null>) {
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
+function GitHubStarButton() {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.innerHTML = "";
+    const a = document.createElement("a");
+    a.className = "github-button";
+    a.href = "https://github.com/tuo-lei/vibe-replay";
+    a.setAttribute("data-color-scheme", "no-preference: dark; light: dark; dark: dark;");
+    a.setAttribute("data-icon", "octicon-star");
+    a.setAttribute("data-size", "large");
+    a.setAttribute("data-show-count", "true");
+    a.textContent = "Star";
+    el.appendChild(a);
+    const script = document.createElement("script");
+    script.src = "https://buttons.github.io/buttons.js";
+    script.async = true;
+    el.appendChild(script);
+    return () => {
+      el.innerHTML = "";
+    };
+  }, []);
+  return <div ref={ref} className="flex items-center" />;
+}
+
 export default function App() {
   const loadState = useSessionLoader();
   const { theme, toggleTheme } = useTheme();
@@ -91,12 +117,15 @@ export default function App() {
             <span className="text-terminal-border/40 text-sm select-none">|</span>
             <span className="text-sm font-sans font-medium text-terminal-text">Dashboard</span>
           </div>
-          <button
-            onClick={toggleTheme}
-            className="h-7 w-7 flex items-center justify-center rounded-md bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover text-xs transition-colors"
-          >
-            {theme === "dark" ? "\u263E" : "\u2600"}
-          </button>
+          <div className="flex items-center gap-2">
+            <GitHubStarButton />
+            <button
+              onClick={toggleTheme}
+              className="h-7 w-7 flex items-center justify-center rounded-md bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover text-xs transition-colors"
+            >
+              {theme === "dark" ? "\u263E" : "\u2600"}
+            </button>
+          </div>
         </header>
         <Dashboard />
       </div>
@@ -294,6 +323,8 @@ export default function App() {
               </div>
             )}
           </div>
+
+          <GitHubStarButton />
 
           {/* Theme toggle */}
           <button

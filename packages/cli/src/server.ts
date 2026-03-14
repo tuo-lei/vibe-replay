@@ -1,11 +1,14 @@
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { serve } from "@hono/node-server";
 import chalk from "chalk";
 import { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
 import open from "open";
 import { readFileCache, writeFileCache } from "./cache.js";
 import { cleanPromptText } from "./clean-prompt.js";
@@ -331,6 +334,93 @@ async function loadSessionFromDisk(baseDir: string, slug: string): Promise<Repla
  * Merge multiple JSONL files that share the same slug + project into one entry.
  * Claude Code creates a new file per /resume, but they're the same logical session.
  */
+/** Shared post-processing for /api/sources and /api/sources/stream:
+ *  normalizes project paths, checks directory existence + git status,
+ *  looks up existing replays, and maps to the response shape. */
+async function buildSourcesResult(
+  merged: SessionInfo[],
+  baseDir: string,
+  home: string,
+): Promise<Record<string, unknown>[]> {
+  // Normalize project paths: /Users/xxx/... → ~/...
+  for (const s of merged) {
+    if (s.project.startsWith(home)) {
+      s.project = `~${s.project.slice(home.length)}`;
+    }
+  }
+
+  // Check which project directories still exist on disk + are git repos
+  const uniqueProjects = [...new Set(merged.map((s) => s.project))];
+  const projectExistsMap = new Map<string, boolean>();
+  const projectIsGitMap = new Map<string, boolean>();
+  for (const p of uniqueProjects) {
+    const resolved = p.startsWith("~/") ? join(home, p.slice(2)) : p === "~" ? home : p;
+    try {
+      const s = await stat(resolved);
+      projectExistsMap.set(p, s.isDirectory());
+      if (s.isDirectory()) {
+        try {
+          await stat(join(resolved, ".git"));
+          projectIsGitMap.set(p, true);
+        } catch {
+          projectIsGitMap.set(p, false);
+        }
+      }
+    } catch {
+      projectExistsMap.set(p, false);
+    }
+  }
+
+  // Check which source sessions already have replays
+  const existingReplays = await scanSessions(baseDir);
+  const replayMap = new Map<string, any>();
+  for (const r of existingReplays) {
+    replayMap.set(r.slug as string, r);
+  }
+
+  return merged.map((s) => {
+    const replay = replayMap.get(s.slug);
+    return {
+      provider: s.provider,
+      slug: s.slug,
+      title: s.title,
+      project: s.project,
+      timestamp: s.timestamp,
+      fileSize: s.fileSize,
+      lineCount: s.lineCount,
+      promptCount: s.promptCount,
+      toolCallCount: s.toolCallCount,
+      firstPrompt: cleanPromptText(s.firstPrompt).slice(0, 200),
+      prompts: s.prompts?.map((p) => cleanPromptText(p).slice(0, 200)),
+      filePaths: s.filePaths,
+      toolPaths: s.toolPaths,
+      hasSqlite: s.hasSqlite,
+      gitBranch: s.gitBranch,
+      existingReplay: replay ? s.slug : null,
+      projectExists: projectExistsMap.get(s.project) ?? false,
+      isGitRepo: projectIsGitMap.get(s.project) ?? false,
+      replay: replay
+        ? {
+            slug: replay.slug,
+            sessionId: replay.sessionId,
+            title: replay.title,
+            provider: replay.provider,
+            model: replay.model,
+            project: replay.project,
+            startTime: replay.startTime,
+            endTime: replay.endTime,
+            stats: replay.stats,
+            hasAnnotations: replay.hasAnnotations,
+            annotationCount: replay.annotationCount,
+            firstMessage: replay.firstMessage,
+            messages: replay.messages,
+            gist: replay.gist,
+          }
+        : undefined,
+    };
+  });
+}
+
 function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
   const groups = new Map<string, SessionInfo[]>();
   for (const s of sessions) {
@@ -352,12 +442,21 @@ function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
       .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
       .flatMap((s) => s.filePaths);
 
+    const promptCount = group.some((s) => s.promptCount != null)
+      ? group.reduce((sum, s) => sum + (s.promptCount || 0), 0)
+      : undefined;
+    const toolCallCount = group.some((s) => s.toolCallCount != null)
+      ? group.reduce((sum, s) => sum + (s.toolCallCount || 0), 0)
+      : undefined;
+
     result.push({
       ...latest,
       lineCount: group.reduce((sum, s) => sum + s.lineCount, 0),
       fileSize: group.reduce((sum, s) => sum + s.fileSize, 0),
       filePaths: allPaths,
       toolPaths: [...new Set(group.flatMap((s) => s.toolPaths || []))],
+      promptCount,
+      toolCallCount,
     });
   }
 
@@ -559,91 +658,52 @@ export async function startServer(
         allSessions.push(...sessions);
       }
 
-      // Merge multi-file sessions (Claude Code /resume creates new JSONL files)
       const merged = mergeSameSessions(allSessions);
-
-      // Normalize project paths: /Users/xxx/... → ~/...
-      const home = homedir();
-      for (const s of merged) {
-        if (s.project.startsWith(home)) {
-          s.project = `~${s.project.slice(home.length)}`;
-        }
-      }
-
-      // Check which project directories still exist on disk + are git repos
-      const uniqueProjects = [...new Set(merged.map((s) => s.project))];
-      const projectExistsMap = new Map<string, boolean>();
-      const projectIsGitMap = new Map<string, boolean>();
-      for (const p of uniqueProjects) {
-        const resolved = p.startsWith("~/") ? join(home, p.slice(2)) : p === "~" ? home : p;
-        try {
-          const s = await stat(resolved);
-          projectExistsMap.set(p, s.isDirectory());
-          if (s.isDirectory()) {
-            try {
-              await stat(join(resolved, ".git"));
-              projectIsGitMap.set(p, true);
-            } catch {
-              projectIsGitMap.set(p, false);
-            }
-          }
-        } catch {
-          projectExistsMap.set(p, false);
-        }
-      }
-
-      // Check which source sessions already have replays
-      const existingReplays = await scanSessions(baseDir);
-      const replayMap = new Map<string, any>();
-      for (const r of existingReplays) {
-        replayMap.set(r.slug as string, r);
-      }
-
-      const result = merged.map((s) => {
-        const replay = replayMap.get(s.slug);
-        return {
-          provider: s.provider,
-          slug: s.slug,
-          title: s.title,
-          project: s.project,
-          timestamp: s.timestamp,
-          fileSize: s.fileSize,
-          lineCount: s.lineCount,
-          firstPrompt: cleanPromptText(s.firstPrompt).slice(0, 200),
-          prompts: s.prompts?.map((p) => cleanPromptText(p).slice(0, 200)),
-          filePaths: s.filePaths,
-          toolPaths: s.toolPaths,
-          hasSqlite: s.hasSqlite,
-          gitBranch: s.gitBranch,
-          existingReplay: replay ? s.slug : null,
-          projectExists: projectExistsMap.get(s.project) ?? false,
-          isGitRepo: projectIsGitMap.get(s.project) ?? false,
-          replay: replay
-            ? {
-                slug: replay.slug,
-                sessionId: replay.sessionId,
-                title: replay.title,
-                provider: replay.provider,
-                model: replay.model,
-                project: replay.project,
-                startTime: replay.startTime,
-                endTime: replay.endTime,
-                stats: replay.stats,
-                hasAnnotations: replay.hasAnnotations,
-                annotationCount: replay.annotationCount,
-                firstMessage: replay.firstMessage,
-                messages: replay.messages,
-                gist: replay.gist,
-              }
-            : undefined,
-        };
-      });
+      const result = await buildSourcesResult(merged, baseDir, homedir());
 
       await writeFileCache(sourcesCacheKey, result);
       return c.json({ sessions: result });
     } catch (err) {
       return c.json({ error: getErrorMessage(err) }, 500);
     }
+  });
+
+  // --- Sources SSE: stream discovery progress to the dashboard ---
+  app.get("/api/sources/stream", (c) => {
+    return streamSSE(c, async (stream) => {
+      try {
+        const providers = getAllProviders();
+        const allSessions: SessionInfo[] = [];
+        let scanned = 0;
+
+        for (const provider of providers) {
+          // Quick file count estimate per provider
+          const sessions = await provider.discover();
+          for (const s of sessions) {
+            allSessions.push(s);
+            scanned++;
+            // Emit progress every 5 sessions to avoid overwhelming the client
+            if (scanned % 5 === 0 || scanned === 1) {
+              await stream.writeSSE({
+                data: JSON.stringify({ type: "progress", scanned }),
+              });
+            }
+          }
+        }
+
+        const merged = mergeSameSessions(allSessions);
+        const result = await buildSourcesResult(merged, baseDir, homedir());
+
+        await writeFileCache(sourcesCacheKey, result);
+        await stream.writeSSE({
+          data: JSON.stringify({ type: "complete", sessions: result }),
+        });
+      } catch (err) {
+        await stream.writeSSE({
+          data: JSON.stringify({ type: "error", message: getErrorMessage(err) }),
+        });
+      }
+    });
   });
 
   // --- Generate: parse a source session into a replay ---
@@ -748,6 +808,100 @@ export async function startServer(
   app.get("/api/gh-status", async (c) => {
     const status = await checkGhStatus();
     return c.json(status);
+  });
+
+  // System checks — detect available tools for publishing & AI feedback
+  app.get("/api/system-checks", async (c) => {
+    const exec = promisify(execFile);
+
+    interface ToolCheck {
+      name: string;
+      label: string;
+      purpose: string;
+      installed: boolean;
+      version?: string;
+      detail?: string;
+    }
+
+    async function checkCli(
+      name: string,
+      label: string,
+      purpose: string,
+      cmd: string,
+      versionArgs: string[] = ["--version"],
+      extraCheck?: () => Promise<string | undefined>,
+    ): Promise<ToolCheck> {
+      try {
+        await exec("which", [cmd]);
+      } catch {
+        return { name, label, purpose, installed: false };
+      }
+      let version: string | undefined;
+      try {
+        const { stdout } = await exec(cmd, versionArgs);
+        version = stdout.trim().split("\n")[0];
+      } catch {
+        /* version check failed, still installed */
+      }
+      const detail = extraCheck ? await extraCheck() : undefined;
+      return { name, label, purpose, installed: true, version, detail };
+    }
+
+    const checks = await Promise.all([
+      checkCli(
+        "gh",
+        "GitHub CLI",
+        "Publish replays as GitHub Gists",
+        "gh",
+        ["--version"],
+        async () => {
+          try {
+            await exec("gh", ["auth", "status"]);
+            return "authenticated";
+          } catch {
+            return "not authenticated";
+          }
+        },
+      ),
+      checkCli(
+        "claude",
+        "Claude Code",
+        "AI feedback via headless mode",
+        "claude",
+        ["--version"],
+        async () => {
+          try {
+            const { stdout } = await exec("claude", ["auth", "status"]);
+            const info = JSON.parse(stdout);
+            if (info.loggedIn) return `${info.email || info.authMethod || "logged in"}`;
+            return "not logged in";
+          } catch {
+            return "not logged in";
+          }
+        },
+      ),
+      checkCli("cursor", "Cursor CLI", "AI feedback via AI Studio", "cursor", [
+        "agent",
+        "--version",
+      ]),
+      checkCli(
+        "opencode",
+        "OpenCode",
+        "AI feedback via headless mode",
+        "opencode",
+        ["--version"],
+        async () => {
+          try {
+            const { stdout } = await exec("opencode", ["auth", "list"]);
+            return stdout.includes("0 credentials") ? "no credentials" : "configured";
+          } catch {
+            return undefined;
+          }
+        },
+      ),
+    ]);
+
+    return c.json({ checks });
   });
 
   // Gist info for a session (requires slug)

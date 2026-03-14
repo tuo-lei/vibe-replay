@@ -31,6 +31,8 @@ export interface SessionInfo {
   hasSqlite?: boolean; // true if any Cursor SQLite source exists (store.db or global state DB)
   firstPrompt: string;
   prompts?: string[]; // first N meaningful user prompts (cleaned)
+  promptCount?: number; // total user prompts (counted via lightweight scan)
+  toolCallCount?: number; // total tool_use blocks (counted via lightweight scan)
 }
 
 export interface ParsedTurn {

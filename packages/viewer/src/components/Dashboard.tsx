@@ -1,24 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SessionSummary, SourceSession } from "../types";
+import DashboardHome from "./DashboardHome";
+import {
+  cleanPrompt,
+  computeProjectLabels,
+  formatCacheAge,
+  formatCompactAge,
+  formatCost,
+  formatDate,
+  formatSize,
+  getErrorMessage,
+  isCacheFresh,
+  navigateTo,
+  normalizeTitleText,
+  parseCachedList,
+  projectName,
+  providerBadgeClass,
+  providerBadgeLabel,
+  replaySuggestedTitle,
+  sourceSuggestedTitle,
+  TITLE_MAX_CHARS,
+  timeAgo,
+} from "./dashboard-utils";
 import { formatDuration } from "./StatsPanel";
 
-type Tab = "sessions" | "replays";
-type CachedListResponse<T> = {
-  sessions: T[];
-  cachedAt?: string;
-};
-function getErrorMessage(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  if (typeof err === "string") return err;
-  return "Unknown error";
-}
-
-const CACHE_REFRESH_TTL_MS = 5 * 60 * 1000;
-const TITLE_MAX_CHARS = 120;
-
-function normalizeTitleText(value?: string): string {
-  return (value || "").replace(/\s+/g, " ").trim().slice(0, TITLE_MAX_CHARS);
-}
+type Tab = "home" | "sessions" | "replays";
 
 const MoreDotsIcon = () => (
   <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
@@ -28,81 +34,12 @@ const MoreDotsIcon = () => (
   </svg>
 );
 
-function parseCachedList<T>(payload: unknown): CachedListResponse<T> | null {
-  if (!payload || typeof payload !== "object") return null;
-  const obj = payload as { sessions?: unknown; cachedAt?: unknown };
-  if (!Array.isArray(obj.sessions)) return null;
-  return {
-    sessions: obj.sessions as T[],
-    cachedAt: typeof obj.cachedAt === "string" ? obj.cachedAt : undefined,
-  };
-}
-
-function formatCacheAge(iso?: string): string {
-  if (!iso) return "just now";
-  const ageMs = Date.now() - new Date(iso).getTime();
-  if (!Number.isFinite(ageMs) || ageMs < 0) return "just now";
-  const mins = Math.floor(ageMs / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
-function formatCompactAge(iso?: string, nowMs = Date.now()): string {
-  if (!iso) return "";
-  const ageMs = nowMs - new Date(iso).getTime();
-  if (!Number.isFinite(ageMs) || ageMs < 0) return "0m";
-  const mins = Math.floor(ageMs / 60000);
-  if (mins < 60) return `${mins}m`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.floor(hours / 24);
-  return `${days}d`;
-}
-
-function isCacheFresh(iso?: string, ttlMs = CACHE_REFRESH_TTL_MS): boolean {
-  if (!iso) return false;
-  const ageMs = Date.now() - new Date(iso).getTime();
-  return Number.isFinite(ageMs) && ageMs >= 0 && ageMs < ttlMs;
-}
-
-function formatDate(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-}
-
-function formatCost(cost?: number): string {
-  if (!cost) return "";
-  return `$${cost.toFixed(2)}`;
-}
-
-function formatSize(bytes: number): string {
-  const kb = Math.round(bytes / 1024);
-  return kb >= 1024 ? `${(kb / 1024).toFixed(1)}MB` : `${kb}KB`;
-}
-
 function ProviderBadge({ provider }: { provider: string }) {
-  const colors: Record<string, string> = {
-    "claude-code": "bg-terminal-orange-subtle text-terminal-orange",
-    cursor: "bg-terminal-blue-subtle text-terminal-blue",
-  };
-  const cls = colors[provider] || "bg-terminal-surface text-terminal-dim";
-  const label = provider === "claude-code" ? "Claude" : provider === "cursor" ? "Cursor" : provider;
   return (
     <span
-      className={`text-[10px] font-sans font-medium px-2 py-0.5 rounded-full uppercase tracking-wider ${cls}`}
+      className={`text-[10px] font-sans font-medium px-1.5 py-0.5 rounded-full uppercase tracking-wider ${providerBadgeClass(provider)}`}
     >
-      {label}
+      {providerBadgeLabel(provider)}
     </span>
   );
 }
@@ -418,9 +355,12 @@ function ReplayCard({
           )}
           <button
             onClick={onOpen}
-            className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 ease-material flex items-center justify-center shrink-0"
+            className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1 shrink-0"
           >
-            Open
+            <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+              <polygon points="4 2 14 8 4 14" />
+            </svg>
+            View
           </button>
           {(onDelete || onArchive) && (
             <div className="relative" ref={menuRef}>
@@ -630,108 +570,7 @@ function OpenReplayForm() {
   );
 }
 
-function navigateTo(params: Record<string, string | null>) {
-  const url = new URL(window.location.href);
-  for (const [key, value] of Object.entries(params)) {
-    if (value === null) url.searchParams.delete(key);
-    else url.searchParams.set(key, value);
-  }
-  window.history.pushState({}, "", url.toString());
-  window.dispatchEvent(new PopStateEvent("popstate"));
-}
-
 // ─── Sessions Tab (source sessions from providers) ─────────────────
-
-/** Relative time like "2h ago", "3d ago" */
-function timeAgo(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(ms / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  if (days < 30) return `${days}d ago`;
-  return formatDate(iso);
-}
-
-/** Extract the short project name from a path like ~/Code/vibe-replay */
-function projectName(project: string): string {
-  const parts = project.replace(/\/$/, "").split("/");
-  return parts[parts.length - 1] || project;
-}
-
-/** Compute display labels for project paths — always show path, truncated if needed */
-function computeProjectLabels(projects: string[]): Map<string, string> {
-  const labels = new Map<string, string>();
-  for (const p of projects) {
-    labels.set(p, shortenPath(p));
-  }
-  return labels;
-}
-
-/** Shorten a path to fit the sidebar, keeping first + last meaningful segments */
-function shortenPath(path: string): string {
-  const MAX = 26;
-  if (path.length <= MAX) return path;
-
-  const parts = path.split("/");
-  if (parts.length <= 2) return path;
-
-  // Try first + last two segments: ~/…/parent/name
-  const first = parts[0];
-  const lastTwo = parts.slice(-2).join("/");
-  const candidate = `${first}/\u2026/${lastTwo}`;
-  if (candidate.length <= MAX) return candidate;
-
-  // Just first + last
-  const last = parts[parts.length - 1];
-  return `${first}/\u2026/${last}`;
-}
-
-/** Strip system-injected noise from first prompt for display */
-function cleanPrompt(text: string): string {
-  let cleaned = text;
-  // Strip XML tags (opening and closing, including truncated ones)
-  cleaned = cleaned.replace(/<\/?[a-z][a-z0-9-]*>/gi, "");
-  // Strip known Claude Code boilerplate from local command injection
-  cleaned = cleaned.replace(
-    /Caveat:\s*The messages below were generated by the user while running local commands\.[^.]*/g,
-    "",
-  );
-  cleaned = cleaned.replace(/DO NOT respond to these messages[^.]*/g, "");
-  // Strip GitHub export markdown from vibe-replay (image + header + stats line)
-  cleaned = cleaned.replace(/!\[AI Session:[^\]]*]\([^)]+\)/gi, "");
-  cleaned = cleaned.replace(/###\s*AI Coding Session[^\n]*/gi, "");
-  cleaned = cleaned.replace(/\d+\s+prompts?,\s+\d+\s+tools?,[^\n]*/gi, "");
-  // Remove slash commands
-  cleaned = cleaned.replace(/^\/\w+\s*/g, "");
-  // Collapse whitespace
-  cleaned = cleaned.replace(/\s+/g, " ").trim();
-  return cleaned;
-}
-
-function sourceSuggestedTitle(s: SourceSession): string {
-  // Prefer a cleaned version of the provider title (strip markdown / noise)
-  const explicitTitle = s.title ? normalizeTitleText(cleanPrompt(s.title)) : "";
-  if (explicitTitle) return explicitTitle;
-  const promptCandidates = [...(s.prompts || []), s.firstPrompt];
-  for (const candidate of promptCandidates) {
-    const cleaned = normalizeTitleText(cleanPrompt(candidate || ""));
-    if (cleaned) return cleaned;
-  }
-  return s.slug;
-}
-
-function replaySuggestedTitle(s: SessionSummary): string {
-  const explicitTitle = normalizeTitleText(s.title);
-  if (explicitTitle) return explicitTitle;
-  const firstMessage = normalizeTitleText(s.firstMessage);
-  if (firstMessage) return firstMessage;
-  const firstFromMessages = normalizeTitleText(s.messages?.[0]);
-  if (firstFromMessages) return firstFromMessages;
-  return s.slug;
-}
 
 /** "All projects" sentinel */
 const ALL_PROJECTS = "__all__";
@@ -1407,12 +1246,24 @@ function SessionsPanel() {
                           <button
                             onClick={() => handleGenerate(s)}
                             disabled={generatingSlug === s.slug}
-                            className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 ease-material flex items-center justify-center disabled:opacity-50"
+                            className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1 disabled:opacity-50"
                           >
                             {generatingSlug === s.slug ? (
                               <span className="animate-pulse">Generating...</span>
                             ) : (
-                              "Generate"
+                              <>
+                                <svg
+                                  width="10"
+                                  height="10"
+                                  viewBox="0 0 16 16"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                >
+                                  <path d="M8 2v12M2 8h12" />
+                                </svg>
+                                Generate
+                              </>
                             )}
                           </button>
                           <SessionMoreMenu
@@ -2030,7 +1881,21 @@ function ReplaysPanel() {
 
 export default function Dashboard() {
   const isEditor = !!window.__VIBE_REPLAY_EDITOR__;
-  const [tab, setTab] = useState<Tab>(isEditor ? "sessions" : "replays");
+  const [tab, setTab] = useState<Tab>(isEditor ? "home" : "replays");
+
+  const tabButton = (id: Tab, label: string) => (
+    <button
+      key={id}
+      onClick={() => setTab(id)}
+      className={`px-5 py-2 text-xs font-sans font-semibold rounded-lg transition-all duration-200 ease-material ${
+        tab === id
+          ? "bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
+          : "text-terminal-dim hover:text-terminal-text"
+      }`}
+    >
+      {label}
+    </button>
+  );
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -2038,32 +1903,21 @@ export default function Dashboard() {
       {isEditor && (
         <div className="shrink-0 px-5 py-3 border-b border-terminal-border-subtle bg-terminal-surface/30">
           <div className="inline-flex items-center rounded-xl bg-terminal-surface p-0.5 shadow-layer-sm">
-            <button
-              onClick={() => setTab("sessions")}
-              className={`px-5 py-2 text-xs font-sans font-semibold rounded-lg transition-all duration-200 ease-material ${
-                tab === "sessions"
-                  ? "bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
-                  : "text-terminal-dim hover:text-terminal-text"
-              }`}
-            >
-              Sessions
-            </button>
-            <button
-              onClick={() => setTab("replays")}
-              className={`px-5 py-2 text-xs font-sans font-semibold rounded-lg transition-all duration-200 ease-material ${
-                tab === "replays"
-                  ? "bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
-                  : "text-terminal-dim hover:text-terminal-text"
-              }`}
-            >
-              Replays
-            </button>
+            {tabButton("home", "Home")}
+            {tabButton("sessions", "Sessions")}
+            {tabButton("replays", "Replays")}
           </div>
         </div>
       )}
 
       {/* Tab content */}
-      {tab === "sessions" && isEditor ? <SessionsPanel /> : <ReplaysPanel />}
+      {tab === "home" && isEditor ? (
+        <DashboardHome onNavigate={setTab} />
+      ) : tab === "sessions" && isEditor ? (
+        <SessionsPanel />
+      ) : (
+        <ReplaysPanel />
+      )}
     </div>
   );
 }

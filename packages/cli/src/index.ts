@@ -85,21 +85,26 @@ program
       process.exit(1);
     }
 
+    const { join: pathJoin } = await import("node:path");
+    const { homedir } = await import("node:os");
+    const replayBaseDir = pathJoin(homedir(), ".vibe-replay");
+
+    // Pre-warm session discovery cache while user reads the menu
+    // Fire-and-forget: never blocks the UI, silently caches results
+    void discoverAllSessions()
+      .then(async (sessions) => {
+        await writeFileCache(SESSION_DISCOVERY_CACHE_KEY, sessions);
+      })
+      .catch(() => {});
+
     // --dashboard: open Dashboard directly
     if (opts.dashboard) {
-      const { join: pathJoin } = await import("node:path");
-      const { homedir } = await import("node:os");
-      const replayBaseDir = pathJoin(homedir(), ".vibe-replay");
       await startDashboard(
         replayBaseDir,
         DEV_MENU_ENABLED ? { externalViewerUrl: "http://localhost:5173" } : undefined,
       );
       return;
     }
-
-    const { join: pathJoin } = await import("node:path");
-    const { homedir } = await import("node:os");
-    const replayBaseDir = pathJoin(homedir(), ".vibe-replay");
 
     let sessionInfo: SessionInfo | undefined;
     let sessionPaths: string | string[];
@@ -641,12 +646,21 @@ function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
       .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
       .flatMap((s) => s.filePaths);
 
+    const promptCount = group.some((s) => s.promptCount != null)
+      ? group.reduce((sum, s) => sum + (s.promptCount || 0), 0)
+      : undefined;
+    const toolCallCount = group.some((s) => s.toolCallCount != null)
+      ? group.reduce((sum, s) => sum + (s.toolCallCount || 0), 0)
+      : undefined;
+
     result.push({
       ...latest,
       lineCount: group.reduce((sum, s) => sum + s.lineCount, 0),
       fileSize: group.reduce((sum, s) => sum + s.fileSize, 0),
       filePaths: allPaths,
       toolPaths: [...new Set(group.flatMap((s) => s.toolPaths || []))],
+      promptCount,
+      toolCallCount,
     });
   }
 

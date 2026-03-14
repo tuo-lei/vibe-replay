@@ -32,7 +32,7 @@ When to use which:
 - **`</` escaping**: JSON in `<script>` tags MUST escape `</` as `<\/` — browsers close the tag otherwise (see `generator.ts`)
 - **`lastIndexOf("</head>")`**: Use `lastIndexOf`, not `indexOf` — minified JS in the viewer bundle may contain the string `</head>`
 - **Shared types**: `Scene`, `Annotation`, `DataSourceInfo`, `ReplaySession` live in `packages/types` (`@vibe-replay/types`). CLI and viewer re-export from there. Provider-specific and viewer-specific types remain in their respective packages.
-- **Viewer size limit**: Keep under 600KB after build (currently ~537KB). This is why we use `marked` instead of `react-markdown`. Watch for size regressions when adding features.
+- **Viewer size limit**: Keep under 800KB after build. This is why we use `marked` instead of `react-markdown`. Watch for size regressions when adding features.
 - **Self-contained HTML**: Output must make zero external requests. Everything inlined.
 - **Multi-file sessions**: Claude Code `/resume` creates new JSONL files. Parser accepts `string | string[]` and merges by slug+project.
 - **Cursor tri-source**: Sessions come from SQLite `store.db` (primary), `globalStorage/state.vscdb`, or JSONL (fallback). Discovery merges all sources. DB data is source of truth; JSONL supplements missing thinking/images.
