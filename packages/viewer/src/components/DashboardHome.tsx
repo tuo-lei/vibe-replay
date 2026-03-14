@@ -627,22 +627,21 @@ function SystemChecksSection() {
               className={`w-2 h-2 mt-1 rounded-full shrink-0 ${t.installed ? "bg-terminal-green" : "bg-terminal-dim opacity-40"}`}
             />
             <div className="min-w-0">
-              <div className="flex items-center gap-1.5">
-                <span
-                  className={`text-xs font-sans font-medium ${t.installed ? "text-terminal-text" : "text-terminal-dimmer"}`}
-                >
-                  {t.label}
-                </span>
-                {t.detail && t.detail !== "authenticated" && t.detail !== "data found" && (
-                  <span className="text-[10px] font-mono text-terminal-orange">({t.detail})</span>
-                )}
-              </div>
-              <p className="text-[10px] font-mono text-terminal-dimmer truncate">{t.purpose}</p>
-              <p
-                className={`text-[10px] font-mono truncate ${t.installed ? "text-terminal-green" : "text-terminal-dimmer"}`}
+              <span
+                className={`text-xs font-sans font-medium ${t.installed ? "text-terminal-text" : "text-terminal-dimmer"}`}
               >
-                {t.installed ? t.version || "ready" : "not found"}
-              </p>
+                {t.label}
+              </span>
+              <p className="text-[10px] font-mono text-terminal-dimmer truncate">{t.purpose}</p>
+              {t.installed ? (
+                <p className="text-[10px] font-mono text-terminal-green truncate">
+                  {t.detail || t.version || "ready"}
+                </p>
+              ) : (
+                <p className="text-[10px] font-mono text-terminal-orange truncate">
+                  {t.detail || "not found"}
+                </p>
+              )}
             </div>
           </div>
         ))}

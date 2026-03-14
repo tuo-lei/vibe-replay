@@ -944,9 +944,39 @@ export async function startServer(
           }
         },
       ),
-      checkCli("claude", "Claude Code", "AI feedback via headless mode", "claude", ["--version"]),
+      checkCli(
+        "claude",
+        "Claude Code",
+        "AI feedback via headless mode",
+        "claude",
+        ["--version"],
+        async () => {
+          try {
+            const { stdout } = await exec("claude", ["auth", "status"]);
+            const info = JSON.parse(stdout);
+            if (info.loggedIn) return `${info.email || info.authMethod || "logged in"}`;
+            return "not logged in";
+          } catch {
+            return "not logged in";
+          }
+        },
+      ),
       checkCursorData(),
-      checkCli("opencode", "OpenCode", "AI feedback via headless mode", "opencode", ["--version"]),
+      checkCli(
+        "opencode",
+        "OpenCode",
+        "AI feedback via headless mode",
+        "opencode",
+        ["--version"],
+        async () => {
+          try {
+            const { stdout } = await exec("opencode", ["auth", "list"]);
+            return stdout.includes("0 credentials") ? "no credentials" : "configured";
+          } catch {
+            return undefined;
+          }
+        },
+      ),
     ]);
 
     return c.json({ checks });
