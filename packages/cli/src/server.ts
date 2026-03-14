@@ -334,6 +334,93 @@ async function loadSessionFromDisk(baseDir: string, slug: string): Promise<Repla
  * Merge multiple JSONL files that share the same slug + project into one entry.
  * Claude Code creates a new file per /resume, but they're the same logical session.
  */
+/** Shared post-processing for /api/sources and /api/sources/stream:
+ *  normalizes project paths, checks directory existence + git status,
+ *  looks up existing replays, and maps to the response shape. */
+async function buildSourcesResult(
+  merged: SessionInfo[],
+  baseDir: string,
+  home: string,
+): Promise<Record<string, unknown>[]> {
+  // Normalize project paths: /Users/xxx/... → ~/...
+  for (const s of merged) {
+    if (s.project.startsWith(home)) {
+      s.project = `~${s.project.slice(home.length)}`;
+    }
+  }
+
+  // Check which project directories still exist on disk + are git repos
+  const uniqueProjects = [...new Set(merged.map((s) => s.project))];
+  const projectExistsMap = new Map<string, boolean>();
+  const projectIsGitMap = new Map<string, boolean>();
+  for (const p of uniqueProjects) {
+    const resolved = p.startsWith("~/") ? join(home, p.slice(2)) : p === "~" ? home : p;
+    try {
+      const s = await stat(resolved);
+      projectExistsMap.set(p, s.isDirectory());
+      if (s.isDirectory()) {
+        try {
+          await stat(join(resolved, ".git"));
+          projectIsGitMap.set(p, true);
+        } catch {
+          projectIsGitMap.set(p, false);
+        }
+      }
+    } catch {
+      projectExistsMap.set(p, false);
+    }
+  }
+
+  // Check which source sessions already have replays
+  const existingReplays = await scanSessions(baseDir);
+  const replayMap = new Map<string, any>();
+  for (const r of existingReplays) {
+    replayMap.set(r.slug as string, r);
+  }
+
+  return merged.map((s) => {
+    const replay = replayMap.get(s.slug);
+    return {
+      provider: s.provider,
+      slug: s.slug,
+      title: s.title,
+      project: s.project,
+      timestamp: s.timestamp,
+      fileSize: s.fileSize,
+      lineCount: s.lineCount,
+      promptCount: s.promptCount,
+      toolCallCount: s.toolCallCount,
+      firstPrompt: cleanPromptText(s.firstPrompt).slice(0, 200),
+      prompts: s.prompts?.map((p) => cleanPromptText(p).slice(0, 200)),
+      filePaths: s.filePaths,
+      toolPaths: s.toolPaths,
+      hasSqlite: s.hasSqlite,
+      gitBranch: s.gitBranch,
+      existingReplay: replay ? s.slug : null,
+      projectExists: projectExistsMap.get(s.project) ?? false,
+      isGitRepo: projectIsGitMap.get(s.project) ?? false,
+      replay: replay
+        ? {
+            slug: replay.slug,
+            sessionId: replay.sessionId,
+            title: replay.title,
+            provider: replay.provider,
+            model: replay.model,
+            project: replay.project,
+            startTime: replay.startTime,
+            endTime: replay.endTime,
+            stats: replay.stats,
+            hasAnnotations: replay.hasAnnotations,
+            annotationCount: replay.annotationCount,
+            firstMessage: replay.firstMessage,
+            messages: replay.messages,
+            gist: replay.gist,
+          }
+        : undefined,
+    };
+  });
+}
+
 function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
   const groups = new Map<string, SessionInfo[]>();
   for (const s of sessions) {
@@ -571,87 +658,8 @@ export async function startServer(
         allSessions.push(...sessions);
       }
 
-      // Merge multi-file sessions (Claude Code /resume creates new JSONL files)
       const merged = mergeSameSessions(allSessions);
-
-      // Normalize project paths: /Users/xxx/... → ~/...
-      const home = homedir();
-      for (const s of merged) {
-        if (s.project.startsWith(home)) {
-          s.project = `~${s.project.slice(home.length)}`;
-        }
-      }
-
-      // Check which project directories still exist on disk + are git repos
-      const uniqueProjects = [...new Set(merged.map((s) => s.project))];
-      const projectExistsMap = new Map<string, boolean>();
-      const projectIsGitMap = new Map<string, boolean>();
-      for (const p of uniqueProjects) {
-        const resolved = p.startsWith("~/") ? join(home, p.slice(2)) : p === "~" ? home : p;
-        try {
-          const s = await stat(resolved);
-          projectExistsMap.set(p, s.isDirectory());
-          if (s.isDirectory()) {
-            try {
-              await stat(join(resolved, ".git"));
-              projectIsGitMap.set(p, true);
-            } catch {
-              projectIsGitMap.set(p, false);
-            }
-          }
-        } catch {
-          projectExistsMap.set(p, false);
-        }
-      }
-
-      // Check which source sessions already have replays
-      const existingReplays = await scanSessions(baseDir);
-      const replayMap = new Map<string, any>();
-      for (const r of existingReplays) {
-        replayMap.set(r.slug as string, r);
-      }
-
-      const result = merged.map((s) => {
-        const replay = replayMap.get(s.slug);
-        return {
-          provider: s.provider,
-          slug: s.slug,
-          title: s.title,
-          project: s.project,
-          timestamp: s.timestamp,
-          fileSize: s.fileSize,
-          lineCount: s.lineCount,
-          promptCount: s.promptCount,
-          toolCallCount: s.toolCallCount,
-          firstPrompt: cleanPromptText(s.firstPrompt).slice(0, 200),
-          prompts: s.prompts?.map((p) => cleanPromptText(p).slice(0, 200)),
-          filePaths: s.filePaths,
-          toolPaths: s.toolPaths,
-          hasSqlite: s.hasSqlite,
-          gitBranch: s.gitBranch,
-          existingReplay: replay ? s.slug : null,
-          projectExists: projectExistsMap.get(s.project) ?? false,
-          isGitRepo: projectIsGitMap.get(s.project) ?? false,
-          replay: replay
-            ? {
-                slug: replay.slug,
-                sessionId: replay.sessionId,
-                title: replay.title,
-                provider: replay.provider,
-                model: replay.model,
-                project: replay.project,
-                startTime: replay.startTime,
-                endTime: replay.endTime,
-                stats: replay.stats,
-                hasAnnotations: replay.hasAnnotations,
-                annotationCount: replay.annotationCount,
-                firstMessage: replay.firstMessage,
-                messages: replay.messages,
-                gist: replay.gist,
-              }
-            : undefined,
-        };
-      });
+      const result = await buildSourcesResult(merged, baseDir, homedir());
 
       await writeFileCache(sourcesCacheKey, result);
       return c.json({ sessions: result });
@@ -683,83 +691,8 @@ export async function startServer(
           }
         }
 
-        // Post-process (same as /api/sources)
         const merged = mergeSameSessions(allSessions);
-        const home = homedir();
-        for (const s of merged) {
-          if (s.project.startsWith(home)) {
-            s.project = `~${s.project.slice(home.length)}`;
-          }
-        }
-
-        const uniqueProjects = [...new Set(merged.map((s) => s.project))];
-        const projectExistsMap = new Map<string, boolean>();
-        const projectIsGitMap = new Map<string, boolean>();
-        for (const p of uniqueProjects) {
-          const resolved2 = p.startsWith("~/") ? join(home, p.slice(2)) : p === "~" ? home : p;
-          try {
-            const s2 = await stat(resolved2);
-            projectExistsMap.set(p, s2.isDirectory());
-            if (s2.isDirectory()) {
-              try {
-                await stat(join(resolved2, ".git"));
-                projectIsGitMap.set(p, true);
-              } catch {
-                projectIsGitMap.set(p, false);
-              }
-            }
-          } catch {
-            projectExistsMap.set(p, false);
-          }
-        }
-
-        const existingReplays = await scanSessions(baseDir);
-        const replayMap = new Map<string, any>();
-        for (const r of existingReplays) {
-          replayMap.set(r.slug as string, r);
-        }
-
-        const result = merged.map((s) => {
-          const replay = replayMap.get(s.slug);
-          return {
-            provider: s.provider,
-            slug: s.slug,
-            title: s.title,
-            project: s.project,
-            timestamp: s.timestamp,
-            fileSize: s.fileSize,
-            lineCount: s.lineCount,
-            promptCount: s.promptCount,
-            toolCallCount: s.toolCallCount,
-            firstPrompt: cleanPromptText(s.firstPrompt).slice(0, 200),
-            prompts: s.prompts?.map((p) => cleanPromptText(p).slice(0, 200)),
-            filePaths: s.filePaths,
-            toolPaths: s.toolPaths,
-            hasSqlite: s.hasSqlite,
-            gitBranch: s.gitBranch,
-            existingReplay: replay ? s.slug : null,
-            projectExists: projectExistsMap.get(s.project) ?? false,
-            isGitRepo: projectIsGitMap.get(s.project) ?? false,
-            replay: replay
-              ? {
-                  slug: replay.slug,
-                  sessionId: replay.sessionId,
-                  title: replay.title,
-                  provider: replay.provider,
-                  model: replay.model,
-                  project: replay.project,
-                  startTime: replay.startTime,
-                  endTime: replay.endTime,
-                  stats: replay.stats,
-                  hasAnnotations: replay.hasAnnotations,
-                  annotationCount: replay.annotationCount,
-                  firstMessage: replay.firstMessage,
-                  messages: replay.messages,
-                  gist: replay.gist,
-                }
-              : undefined,
-          };
-        });
+        const result = await buildSourcesResult(merged, baseDir, homedir());
 
         await writeFileCache(sourcesCacheKey, result);
         await stream.writeSSE({

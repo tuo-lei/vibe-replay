@@ -6,6 +6,8 @@ import {
   normalizeTitleText,
   parseCachedList,
   projectName,
+  providerBadgeClass,
+  providerBadgeLabel,
   replaySuggestedTitle,
   sourceSuggestedTitle,
   timeAgo,
@@ -425,17 +427,11 @@ function ProviderBreakdownCard({ breakdown }: { breakdown: InsightStats["provide
 }
 
 function ProviderBadge({ provider }: { provider: string }) {
-  const colors: Record<string, string> = {
-    "claude-code": "bg-terminal-orange-subtle text-terminal-orange",
-    cursor: "bg-terminal-blue-subtle text-terminal-blue",
-  };
-  const cls = colors[provider] || "bg-terminal-surface text-terminal-dim";
-  const label = provider === "claude-code" ? "Claude" : provider === "cursor" ? "Cursor" : provider;
   return (
     <span
-      className={`text-[10px] font-sans font-medium px-1.5 py-0.5 rounded-full uppercase tracking-wider ${cls}`}
+      className={`text-[10px] font-sans font-medium px-1.5 py-0.5 rounded-full uppercase tracking-wider ${providerBadgeClass(provider)}`}
     >
-      {label}
+      {providerBadgeLabel(provider)}
     </span>
   );
 }
@@ -446,12 +442,14 @@ function RecentSessionsList({
   onGenerate,
   onViewReplay,
   generatingSlug,
+  generateErrorSlug,
 }: {
   sessions: SourceSession[];
   onViewAll: () => void;
   onGenerate: (source: SourceSession) => void;
   onViewReplay: (slug: string) => void;
   generatingSlug: string | null;
+  generateErrorSlug: string | null;
 }) {
   if (sessions.length === 0) {
     return (
@@ -466,6 +464,7 @@ function RecentSessionsList({
       {sessions.map((s) => {
         const hasReplay = !!s.existingReplay;
         const isGenerating = generatingSlug === s.slug;
+        const hasError = generateErrorSlug === s.slug;
         return (
           <div
             key={`${s.provider}-${s.slug}`}
@@ -498,10 +497,16 @@ function RecentSessionsList({
                 <button
                   onClick={() => onGenerate(s)}
                   disabled={isGenerating}
-                  className="h-6 px-2.5 text-[11px] font-sans font-semibold rounded-md bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200 disabled:opacity-50 flex items-center gap-1"
+                  className={`h-6 px-2.5 text-[11px] font-sans font-semibold rounded-md transition-all duration-200 disabled:opacity-50 flex items-center gap-1 ${
+                    hasError
+                      ? "bg-terminal-red-subtle text-terminal-red"
+                      : "bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis"
+                  }`}
                 >
                   {isGenerating ? (
                     <span className="animate-pulse">...</span>
+                  ) : hasError ? (
+                    "Failed"
                   ) : (
                     <>
                       <svg
@@ -707,6 +712,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   const { sources, replays, loading, error, scanProgress } = useDashboardData();
   const insights = useMemo(() => computeInsights(sources, replays), [sources, replays]);
   const [generatingSlug, setGeneratingSlug] = useState<string | null>(null);
+  const [generateErrorSlug, setGenerateErrorSlug] = useState<string | null>(null);
 
   const handleOpenReplay = (slug: string) => {
     navigateTo({ view: null, session: slug });
@@ -714,6 +720,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
 
   const handleGenerate = async (source: SourceSession) => {
     setGeneratingSlug(source.slug);
+    setGenerateErrorSlug(null);
     try {
       const title = sourceSuggestedTitle(source);
       const resp = await fetch("/api/generate", {
@@ -733,6 +740,8 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
       navigateTo({ view: null, session: data.slug });
     } catch (err) {
       console.error("Generate error:", err);
+      setGenerateErrorSlug(source.slug);
+      setTimeout(() => setGenerateErrorSlug((prev) => (prev === source.slug ? null : prev)), 2000);
     } finally {
       setGeneratingSlug(null);
     }
@@ -873,6 +882,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
               onGenerate={handleGenerate}
               onViewReplay={handleOpenReplay}
               generatingSlug={generatingSlug}
+              generateErrorSlug={generateErrorSlug}
             />
           </div>
 

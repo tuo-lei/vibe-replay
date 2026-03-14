@@ -15,6 +15,8 @@ import {
   normalizeTitleText,
   parseCachedList,
   projectName,
+  providerBadgeClass,
+  providerBadgeLabel,
   replaySuggestedTitle,
   sourceSuggestedTitle,
   TITLE_MAX_CHARS,
@@ -33,17 +35,11 @@ const MoreDotsIcon = () => (
 );
 
 function ProviderBadge({ provider }: { provider: string }) {
-  const colors: Record<string, string> = {
-    "claude-code": "bg-terminal-orange-subtle text-terminal-orange",
-    cursor: "bg-terminal-blue-subtle text-terminal-blue",
-  };
-  const cls = colors[provider] || "bg-terminal-surface text-terminal-dim";
-  const label = provider === "claude-code" ? "Claude" : provider === "cursor" ? "Cursor" : provider;
   return (
     <span
-      className={`text-[10px] font-sans font-medium px-2 py-0.5 rounded-full uppercase tracking-wider ${cls}`}
+      className={`text-[10px] font-sans font-medium px-1.5 py-0.5 rounded-full uppercase tracking-wider ${providerBadgeClass(provider)}`}
     >
-      {label}
+      {providerBadgeLabel(provider)}
     </span>
   );
 }

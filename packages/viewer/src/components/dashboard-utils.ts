@@ -153,6 +153,21 @@ export function navigateTo(params: Record<string, string | null>) {
 
 // ─── Shared UI components ────────────────────────────────────────────
 
+// ─── Shared UI helpers ────────────────────────────────────────────────
+
+export const PROVIDER_BADGE_COLORS: Record<string, string> = {
+  "claude-code": "bg-terminal-orange-subtle text-terminal-orange",
+  cursor: "bg-terminal-blue-subtle text-terminal-blue",
+};
+
+export function providerBadgeLabel(provider: string): string {
+  return provider === "claude-code" ? "Claude" : provider === "cursor" ? "Cursor" : provider;
+}
+
+export function providerBadgeClass(provider: string): string {
+  return PROVIDER_BADGE_COLORS[provider] || "bg-terminal-surface text-terminal-dim";
+}
+
 export function getErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (typeof err === "string") return err;

@@ -157,7 +157,11 @@ export async function extractSessionInfo(
     }
 
     // Count user prompts and tool calls — data already in memory, zero extra I/O
-    // Only count user messages that are actual prompts (have text), not tool_result messages
+    // Only count user messages that are actual prompts (have text), not tool_result messages.
+    // NOTE: The `!line.includes('"tool_result"')` heuristic could theoretically under-count
+    // if a user's actual prompt text literally contains the string "tool_result". This is an
+    // accepted edge case — it's extremely rare in practice and the fast string check avoids
+    // JSON-parsing every line.
     let promptCount = 0;
     let toolCallCount = 0;
     const toolUseRe = /"type"\s*:\s*"tool_use"/g;
