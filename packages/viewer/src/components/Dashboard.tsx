@@ -2037,7 +2037,8 @@ export default function Dashboard() {
 
   const handleTabChange = (id: Tab) => {
     setTab(id);
-    navigateTo({ tab: id });
+    // Clear text filter when switching tabs to avoid cross-tab filter contamination
+    navigateTo({ tab: id, q: null });
   };
 
   const tabButton = (id: Tab, label: string) => (
