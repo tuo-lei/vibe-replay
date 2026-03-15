@@ -1330,13 +1330,15 @@ export async function startServer(
       // Generate GIF
       let gifContent: string | null = null;
       let gifFilePath: string | null = null;
+      let gifWarning: string | undefined;
       try {
         const gifBuffer = await generateGitHubGif(targetSession, { replayUrl });
         gifFilePath = join(targetDir, "session-preview.gif");
         await writeFile(gifFilePath, gifBuffer);
         gifContent = gifBuffer.toString("base64");
-      } catch {
+      } catch (err) {
         // GIF generation is best-effort — SVG still works
+        gifWarning = `GIF generation failed: ${err instanceof Error ? err.message : String(err)}`;
       }
 
       // Generate markdown (prefer GIF for universal GitHub support)
@@ -1361,6 +1363,7 @@ export async function startServer(
         gifContent,
         gifPath: gifFilePath,
         gifGeneratedAt: gifContent ? now : undefined,
+        gifWarning,
         svgGeneratedAt: now,
         mdGeneratedAt: now,
         replayUrl,

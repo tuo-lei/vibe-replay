@@ -8,8 +8,9 @@
  * - Render at exactly 1x (SVG native size) — non-integer scaling creates extra
  *   anti-aliasing shades that the 256-color quantizer can't preserve well
  * - Use prequantize() to consolidate near-identical dark shades before quantize()
- * - 128 colors works better than 256 for terminal/code content (fewer wasted
- *   palette entries on imperceptibly different dark shades)
+ * - 256 colors with snapColorsToPalette gives the best color accuracy — the
+ *   extra palette entries let the quantizer preserve subtle shades while
+ *   snapColorsToPalette pins our exact theme colors in the final palette
  * - rgb565 is the best quantization format gifenc offers
  * - No dithering — it makes text worse (adds noise to sharp edges)
  */
@@ -72,18 +73,19 @@ export async function generateGitHubGif(
         ? "Microsoft YaHei"
         : "Noto Sans CJK SC";
 
+  const defaultMono =
+    process.platform === "darwin"
+      ? "Menlo"
+      : process.platform === "win32"
+        ? "Consolas"
+        : "Liberation Mono";
+
   // Rasterize each frame SVG to RGBA pixels at exactly 1x (SVG native size)
   // Non-integer scaling creates extra anti-aliasing shades that degrade after quantization
   const rasterizedFrames: Array<{ data: Uint8Array; width: number; height: number }> = [];
 
   for (const frame of frames) {
     const svgString = renderStaticFrameSvg(frame, session, ghOpts);
-    const defaultMono =
-      process.platform === "darwin"
-        ? "Menlo"
-        : process.platform === "win32"
-          ? "Consolas"
-          : "Liberation Mono";
     const resvg = new Resvg(svgString, {
       font: {
         loadSystemFonts: true,

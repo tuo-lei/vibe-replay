@@ -25,13 +25,19 @@ export interface AnnotationActions {
   publishGist: (() => Promise<{ gistId: string; gistUrl: string; viewerUrl: string }>) | null;
   /** Editor mode: export HTML via server API */
   exportHtml: (() => Promise<string>) | null;
-  /** Editor mode: export GitHub markdown+SVG via server API */
+  /** Editor mode: export GitHub markdown+SVG+GIF via server API */
   exportGithub:
     | (() => Promise<{
         markdown: string;
         svgContent: string;
         svgPath: string;
         mdPath: string;
+        gifContent: string | null;
+        gifPath: string | null;
+        gifGeneratedAt?: string;
+        gifWarning?: string;
+        svgGeneratedAt?: string;
+        mdGeneratedAt?: string;
         replayUrl?: string;
         warnings?: string[];
       }>)
@@ -358,6 +364,12 @@ export function useAnnotations(
             svgContent: string;
             svgPath: string;
             mdPath: string;
+            gifContent: string | null;
+            gifPath: string | null;
+            gifGeneratedAt?: string;
+            gifWarning?: string;
+            svgGeneratedAt?: string;
+            mdGeneratedAt?: string;
             replayUrl?: string;
             warnings?: string[];
           };

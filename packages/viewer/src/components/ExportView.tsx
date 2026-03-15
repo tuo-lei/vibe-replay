@@ -193,19 +193,18 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
     try {
       const result = await exportGithub();
       await navigator.clipboard.writeText(result.markdown);
-      const r = result as any;
       setGhExportResult({
-        svgContent: r.svgContent,
-        markdown: r.markdown,
-        svgPath: r.svgPath,
-        mdPath: r.mdPath,
-        gifContent: r.gifContent ?? null,
-        gifPath: r.gifPath ?? null,
-        gifGeneratedAt: r.gifGeneratedAt,
-        svgGeneratedAt: r.svgGeneratedAt,
-        mdGeneratedAt: r.mdGeneratedAt,
-        replayUrl: r.replayUrl,
-        warnings: r.warnings,
+        svgContent: result.svgContent,
+        markdown: result.markdown,
+        svgPath: result.svgPath,
+        mdPath: result.mdPath,
+        gifContent: result.gifContent ?? null,
+        gifPath: result.gifPath ?? null,
+        gifGeneratedAt: result.gifGeneratedAt,
+        svgGeneratedAt: result.svgGeneratedAt,
+        mdGeneratedAt: result.mdGeneratedAt,
+        replayUrl: result.replayUrl,
+        warnings: result.warnings,
       });
     } catch (e: any) {
       setGhError(e.message);
