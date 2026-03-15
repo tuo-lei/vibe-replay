@@ -116,7 +116,15 @@ export default function Player({
 
   // Find a good initial scene index that fills the viewport
   // (end of first assistant group, or second user prompt, whichever comes first)
+  // If ?s=<index> is in the URL, use that for deep-linking to a specific scene.
   const initialSeekIndex = useMemo(() => {
+    const urlScene = new URLSearchParams(window.location.search).get("s");
+    if (urlScene !== null) {
+      const parsed = Number(urlScene);
+      if (Number.isFinite(parsed) && parsed >= 0 && parsed < session.scenes.length) {
+        return parsed;
+      }
+    }
     if (userPromptIndices.length >= 2) {
       return userPromptIndices[1];
     }
@@ -170,9 +178,58 @@ export default function Player({
       if (navFocusTimerRef.current) clearTimeout(navFocusTimerRef.current);
       navFocusTimerRef.current = setTimeout(() => setNavFocusIndex(undefined), 2500);
       seekTo(clamped);
+
+      // Fallback scroll: retry until the target DOM element appears, then scroll to it.
+      // The useEffect-based scroll can miss due to render timing; this is more robust.
+      let scrollAttempts = 0;
+      const tryScroll = () => {
+        const el = scrollRef.current;
+        if (!el) return;
+        // Find exact match or nearest preceding data-scene-index
+        let target = el.querySelector(`[data-scene-index="${clamped}"]`) as HTMLElement | null;
+        if (!target) {
+          const blocks = Array.from(el.querySelectorAll("[data-scene-index]")) as HTMLElement[];
+          for (const block of blocks) {
+            const idx = Number(block.getAttribute("data-scene-index"));
+            if (
+              idx <= clamped &&
+              (!target || idx > Number(target.getAttribute("data-scene-index")))
+            ) {
+              target = block;
+            }
+          }
+        }
+        if (target) {
+          const containerRect = el.getBoundingClientRect();
+          const targetRect = target.getBoundingClientRect();
+          const offset = targetRect.top - containerRect.top + el.scrollTop;
+          el.scrollTo({
+            top: Math.max(0, offset - containerRect.height * 0.3),
+            behavior: "smooth",
+          });
+          flashJumpTarget(target);
+          pendingSeekRef.current = null;
+        } else if (++scrollAttempts < 20) {
+          requestAnimationFrame(tryScroll);
+        }
+      };
+      // Wait for React to commit the new visibleCount to the DOM
+      requestAnimationFrame(() => requestAnimationFrame(tryScroll));
     },
     [pause, seekTo, session.scenes.length],
   );
+
+  // Auto-land if URL has ?s= deep-link (skip landing hero, seek + scroll directly)
+  const hasUrlScene = useMemo(
+    () => new URLSearchParams(window.location.search).get("s") !== null,
+    [],
+  );
+  useEffect(() => {
+    if (!landed && hasUrlScene) {
+      setLanded(true);
+      setTimeout(() => seekFromNavigation(initialSeekIndex), 100);
+    }
+  }, [landed, hasUrlScene, initialSeekIndex, seekFromNavigation]);
 
   const seekToNextPromptWithFeedback = useCallback(() => {
     const next = userPromptIndices.find((i) => i > currentIndex);
@@ -408,6 +465,22 @@ export default function Player({
       if (navFocusTimerRef.current) clearTimeout(navFocusTimerRef.current);
     };
   }, []);
+
+  // Sync currentIndex → URL ?s= param (debounced to avoid noise during playback)
+  const urlSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (currentIndex < 0 || !landed) return;
+    if (urlSyncTimer.current) clearTimeout(urlSyncTimer.current);
+    const delay = state === "playing" ? 500 : 0;
+    urlSyncTimer.current = setTimeout(() => {
+      const url = new URL(window.location.href);
+      url.searchParams.set("s", String(currentIndex));
+      window.history.replaceState({}, "", url.toString());
+    }, delay);
+    return () => {
+      if (urlSyncTimer.current) clearTimeout(urlSyncTimer.current);
+    };
+  }, [currentIndex, state, landed]);
 
   const hasAiStudio = viewerMode === "editor";
   const hasAiFeedback = useMemo(

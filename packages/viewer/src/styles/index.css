@@ -271,6 +271,39 @@ button,
   animation: landing-glow 2.5s ease-in-out infinite;
 }
 
+/* Instant tooltip (no delay, pure CSS) */
+.instant-tooltip {
+  position: relative;
+}
+.instant-tooltip .instant-tooltip-text {
+  visibility: hidden;
+  opacity: 0;
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translateX(-50%);
+  margin-top: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-md);
+  color: var(--text);
+  font:
+    11px / 1.4 var(--font-sans),
+    monospace;
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 50;
+  transition: opacity 0.08s ease;
+}
+.instant-tooltip:hover .instant-tooltip-text {
+  visibility: visible;
+  opacity: 1;
+}
+
 /* Hover lift for interactive cards */
 .hover-lift {
   transition:

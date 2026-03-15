@@ -37,7 +37,7 @@ function GitHubStarButton() {
       el.innerHTML = "";
     };
   }, []);
-  return <div ref={ref} className="flex items-center" />;
+  return <div ref={ref} className="flex items-center h-7 overflow-hidden" />;
 }
 
 export default function App() {
@@ -122,9 +122,13 @@ export default function App() {
             >
               vibe-replay
             </button>
-            <span className="inline-flex items-center gap-1.5 text-[10px] font-sans font-bold px-2.5 py-1 rounded-full bg-terminal-green/10 text-terminal-green uppercase tracking-wider border border-terminal-green/20">
+            <span className="instant-tooltip inline-flex items-center gap-1.5 text-[10px] font-sans font-bold px-2.5 py-1 rounded-full bg-terminal-green/10 text-terminal-green uppercase tracking-wider border border-terminal-green/20">
               <span className="w-1.5 h-1.5 rounded-full bg-terminal-green animate-pulse" />
               Live
+              <span className="instant-tooltip-text">
+                Viewer {window.location.host}
+                {import.meta.env.VITE_API_PORT && ` · API :${import.meta.env.VITE_API_PORT}`}
+              </span>
             </span>
             <span className="text-terminal-border/40 text-sm select-none">|</span>
             <span className="text-sm font-sans font-semibold text-terminal-text/90">Dashboard</span>
@@ -171,9 +175,13 @@ export default function App() {
             </a>
           )}
           {isEditor && (
-            <span className="inline-flex items-center gap-1.5 text-[10px] font-sans font-bold px-2.5 py-1 rounded-full bg-terminal-green/10 text-terminal-green uppercase tracking-wider border border-terminal-green/20">
+            <span className="instant-tooltip inline-flex items-center gap-1.5 text-[10px] font-sans font-bold px-2.5 py-1 rounded-full bg-terminal-green/10 text-terminal-green uppercase tracking-wider border border-terminal-green/20">
               <span className="w-1.5 h-1.5 rounded-full bg-terminal-green animate-pulse" />
               Live
+              <span className="instant-tooltip-text">
+                Viewer {window.location.host}
+                {import.meta.env.VITE_API_PORT && ` · API :${import.meta.env.VITE_API_PORT}`}
+              </span>
             </span>
           )}
           {showDashboardBack && (
