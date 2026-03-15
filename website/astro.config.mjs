@@ -2,6 +2,9 @@ import sitemap from "@astrojs/sitemap";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "astro/config";
 
+// When VITE_VIEWER_URL is set (e.g. http://localhost:5173), proxy /view/ to Vite dev server for HMR
+const viewerDevUrl = process.env.VITE_VIEWER_URL;
+
 export default defineConfig({
   site: "https://vibe-replay.com",
   integrations: [sitemap()],
@@ -11,10 +14,17 @@ export default defineConfig({
       {
         name: "public-dir-index",
         configureServer(server) {
-          // Cloudflare Pages serves /view/ → /view/index.html automatically.
-          // Astro dev server does not, so replicate that behavior here.
           server.middlewares.use((req, _res, next) => {
             if (req.url && /^\/view\/(\?|$)/.test(req.url)) {
+              if (viewerDevUrl) {
+                // Proxy to Vite dev server for live HMR
+                const query = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
+                _res.writeHead(302, { Location: `${viewerDevUrl}/${query}` });
+                _res.end();
+                return;
+              }
+              // Cloudflare Pages serves /view/ → /view/index.html automatically.
+              // Astro dev server does not, so replicate that behavior here.
               req.url = req.url.replace("/view/", "/view/index.html");
             }
             next();

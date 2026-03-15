@@ -647,7 +647,9 @@ export async function startServer(
 ): Promise<void> {
   await mkdir(baseDir, { recursive: true });
 
-  const viewerHtml = await loadViewerHtml();
+  const isDevMode = !!opts?.externalViewerUrl;
+  // In dev mode, Vite serves the viewer with HMR — no need to load/cache viewer HTML
+  const viewerHtml = isDevMode ? "" : await loadViewerHtml();
   const cacheKeySuffix = createHash("sha1").update(baseDir).digest("hex").slice(0, 12);
   const sourcesCacheKey = `dashboard-sources-v1-${cacheKeySuffix}`;
   const replaysCacheKey = `dashboard-replays-v1-${cacheKeySuffix}`;
@@ -761,8 +763,16 @@ export async function startServer(
 
   const app = new Hono();
 
-  // Serve viewer HTML with editor flag
+  // Serve viewer HTML with editor flag (prod) or redirect to Vite dev server (dev)
   app.get("/", (c) => {
+    if (isDevMode) {
+      // In dev mode, redirect to Vite dev server which has HMR
+      const viteUrl = new URL(opts!.externalViewerUrl!);
+      // Preserve query params (e.g. ?session=xxx, ?view=dashboard)
+      const incoming = new URL(c.req.url);
+      viteUrl.search = incoming.search;
+      return c.redirect(viteUrl.toString(), 302);
+    }
     const flag = `<script>window.__VIBE_REPLAY_EDITOR__ = true;</script>`;
     const headIdx = viewerHtml.lastIndexOf("</head>");
     const html = `${viewerHtml.slice(0, headIdx) + flag}\n${viewerHtml.slice(headIdx)}`;

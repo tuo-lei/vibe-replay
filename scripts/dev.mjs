@@ -51,13 +51,15 @@ const dashboardMode = process.argv.includes("-d");
 const apiPort = await findFreePort(API_PREFERRED);
 const vitePort = await findFreePort(VITE_PREFERRED);
 
+console.log();
 console.log(
   `[vibe-replay] API port:    ${apiPort}${apiPort !== API_PREFERRED ? ` (${API_PREFERRED} was busy)` : ""}`,
 );
 console.log(
   `[vibe-replay] Viewer port: ${vitePort}${vitePort !== VITE_PREFERRED ? ` (${VITE_PREFERRED} was busy)` : ""}`,
 );
-console.log(`[vibe-replay] Viewer:      http://localhost:${vitePort}`);
+console.log(`[vibe-replay] Viewer:      http://localhost:${vitePort}  (HMR enabled)`);
+console.log(`[vibe-replay] CLI watch:   auto-restarts on packages/cli/src changes`);
 console.log();
 
 // Start Vite dev server (backgrounded) — port + strictPort via env vars in vite.config.ts
@@ -74,8 +76,8 @@ vite.stdout.pipe(logStream);
 vite.stderr.pipe(logStream);
 console.log(`[vibe-replay] Viewer logs: ${logPath}`);
 
-// Start CLI with the chosen ports
-const cliArgs = ["tsx", "packages/cli/src/index.ts"];
+// Start CLI with tsx watch so it auto-restarts on source changes
+const cliArgs = ["tsx", "watch", "--clear-screen=false", "packages/cli/src/index.ts"];
 if (dashboardMode) cliArgs.push("-d");
 
 const cli = spawn("npx", cliArgs, {
