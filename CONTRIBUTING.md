@@ -16,14 +16,14 @@ Requires Node.js >= 20 and pnpm.
 ## Development
 
 ```bash
-pnpm dev          # Full dev mode: viewer (Vite HMR) + CLI together
-pnpm viewer:dev   # Viewer only (http://localhost:5173)
-pnpm cli:dev      # CLI only (tsx, no build step)
-pnpm test         # Run tests
-pnpm start        # Full build + run (simulates real user flow)
+pnpm dev              # Viewer (Vite HMR) + CLI (tsx watch, auto-restart)
+pnpm dev:dashboard    # Same as above, opens dashboard directly
+pnpm dev:website      # Website (Astro HMR) + Viewer (Vite HMR)
+pnpm test             # Run tests
+pnpm start            # Full build + run (simulates real user flow)
 ```
 
-**Daily workflow**: Run `pnpm dev`, choose "Dump to demo.json" in the CLI menu, then open `http://localhost:5173/?file=/demo.json`. Viewer changes hot-reload instantly. CLI/parser changes require re-dumping.
+**Daily workflow**: Run `pnpm dev`, open `http://localhost:5173`. Viewer changes hot-reload instantly via Vite HMR. CLI/API changes auto-restart via `tsx watch`. No manual rebuild or restart needed.
 
 ## Architecture
 

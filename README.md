@@ -82,7 +82,8 @@ After generation:
 git clone https://github.com/tuo-lei/vibe-replay.git
 cd vibe-replay
 pnpm install
-pnpm dev          # Viewer (Vite HMR) + CLI together
+pnpm dev              # Viewer (Vite HMR) + CLI (auto-restart) — full HMR
+pnpm dev:website      # Website (Astro HMR) + Viewer (Vite HMR)
 ```
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for architecture details and development workflow.
