@@ -159,13 +159,20 @@ export default function Player({
     }
   }, [viewPrefs.displayMode, landed, seekTo, initialSeekIndex]);
 
+  // Check if URL has ?s= deep-link (used by multiple auto-land effects below)
+  const hasUrlScene = useMemo(
+    () => new URLSearchParams(window.location.search).get("s") !== null,
+    [],
+  );
+
   // Auto-land if we start on a non-replay view (e.g., direct link to insights)
+  // Skip if URL has ?s= deep-link — that effect handles its own auto-land
   useEffect(() => {
-    if (!landed && activeView !== "replay") {
+    if (!landed && activeView !== "replay" && !hasUrlScene) {
       setLanded(true);
       setTimeout(() => seekTo(initialSeekIndex), 100);
     }
-  }, [activeView, landed, initialSeekIndex, seekTo]);
+  }, [activeView, landed, initialSeekIndex, seekTo, hasUrlScene]);
 
   const seekFromNavigation = useCallback(
     (index: number) => {
@@ -184,10 +191,6 @@ export default function Player({
   );
 
   // Auto-land if URL has ?s= deep-link (skip landing hero, seek + scroll directly)
-  const hasUrlScene = useMemo(
-    () => new URLSearchParams(window.location.search).get("s") !== null,
-    [],
-  );
   useEffect(() => {
     if (!landed && hasUrlScene) {
       setLanded(true);

@@ -6,6 +6,7 @@
  */
 
 import type { ReplaySession, Scene } from "@vibe-replay/types";
+import { isSystemGeneratedMessage } from "../clean-prompt.js";
 
 // ─── Public API ────────────────────────────────────────────
 
@@ -249,6 +250,8 @@ export function extractPhases(scenes: Scene[]): Phase[] {
 
   for (const scene of scenes) {
     if (scene.type === "user-prompt") {
+      // Skip system-generated messages (e.g. <bash-stdout>, <task-notification>)
+      if (isSystemGeneratedMessage(scene.content)) continue;
       if (current) {
         phases.push({
           prompt: current.prompt,

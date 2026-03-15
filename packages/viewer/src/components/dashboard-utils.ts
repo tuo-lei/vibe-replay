@@ -193,6 +193,8 @@ export function navigateTo(
     });
     if (Object.keys(dashboardState).length > 0) {
       sessionStorage.setItem("vibe_dashboard_state", JSON.stringify(dashboardState));
+    } else {
+      sessionStorage.removeItem("vibe_dashboard_state");
     }
   }
 

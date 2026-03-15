@@ -520,6 +520,7 @@ program
       svgSpinner2.succeed(`SVG: ${svgFilePath}`);
 
       // Generate animated GIF
+      let gifGenerated = false;
       const gifSpinner = ora("Generating animated GIF...").start();
       try {
         const gifBuffer = await generateGitHubGif(replay, { replayUrl });
@@ -527,6 +528,7 @@ program
         await writeFile(gifFilePath, gifBuffer);
         const gifSizeKB = Math.round(gifBuffer.length / 1024);
         gifSpinner.succeed(`GIF: ${gifFilePath} (${gifSizeKB} KB)`);
+        gifGenerated = true;
       } catch (err) {
         gifSpinner.fail(
           `GIF generation failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -538,7 +540,7 @@ program
       const markdown = generateGitHubMarkdown(replay, {
         replayUrl,
         svgPath: "./session-preview.svg",
-        gifPath: "./session-preview.gif",
+        gifPath: gifGenerated ? "./session-preview.gif" : undefined,
       });
       const mdFilePath = join(outputDir, "github-summary.md");
       await writeFile(mdFilePath, markdown, "utf-8");
