@@ -28,15 +28,11 @@ export async function generateOutput(session: ReplaySession, outputDir: string):
   }
 
   // Inject session data — escape </ to prevent browser from closing the script tag
-  const jsonData = JSON.stringify(session).replace(/<\//g, "<\\/");
+  const jsonData = escapeJsonForScript(JSON.stringify(session));
   const dataScript = `<script id="vibe-replay-data">window.__VIBE_REPLAY_DATA__ = ${jsonData};</script>`;
   // Use lastIndexOf to find the ACTUAL </head> HTML tag, not a "</head>" string
   // that may appear inside minified JS code within the viewer bundle.
-  const headIdx = viewerHtml.lastIndexOf("</head>");
-  if (headIdx === -1) {
-    throw new Error("Could not find </head> tag in viewer.html — is the build corrupted?");
-  }
-  const outputHtml = `${viewerHtml.slice(0, headIdx) + dataScript}\n${viewerHtml.slice(headIdx)}`;
+  const outputHtml = injectDataScript(viewerHtml, dataScript);
 
   // Update title
   const title = session.meta.title || session.meta.slug;
@@ -69,10 +65,35 @@ export async function generateDevJson(
   return outputPath;
 }
 
-function escapeHtml(s: string): string {
+/** Escape HTML special characters to prevent XSS in title and other injected text. */
+export function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+/**
+ * Escape `</` sequences in JSON strings to prevent browsers from prematurely
+ * closing `<script>` tags when the JSON is embedded inline.
+ */
+export function escapeJsonForScript(json: string): string {
+  return json.replace(/<\//g, "<\\/");
+}
+
+/**
+ * Inject a data `<script>` tag into an HTML document just before the closing `</head>`.
+ * Uses `lastIndexOf` to find the real `</head>` tag — minified JS in the bundle
+ * may contain the literal string `</head>`.
+ *
+ * Returns the modified HTML string.
+ * Throws if no `</head>` tag is found.
+ */
+export function injectDataScript(html: string, scriptTag: string): string {
+  const headIdx = html.lastIndexOf("</head>");
+  if (headIdx === -1) {
+    throw new Error("Could not find </head> tag in viewer.html — is the build corrupted?");
+  }
+  return `${html.slice(0, headIdx) + scriptTag}\n${html.slice(headIdx)}`;
 }

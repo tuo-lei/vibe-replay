@@ -80,7 +80,7 @@ export async function detectFeedbackTools(): Promise<{
 // Session digest — condense session for AI consumption
 // ---------------------------------------------------------------------------
 
-function buildSessionDigest(session: ReplaySession): string {
+export function buildSessionDigest(session: ReplaySession): string {
   const lines: string[] = [];
   const promptCount = session.meta.stats.userPrompts;
 
@@ -372,7 +372,10 @@ function runAgent(prompt: string, cmd: string): Promise<string> {
 // Parsing & validation
 // ---------------------------------------------------------------------------
 
-function parseFeedbackResponse(output: string, session: ReplaySession): FeedbackResult | null {
+export function parseFeedbackResponse(
+  output: string,
+  session: ReplaySession,
+): FeedbackResult | null {
   const json = extractJson(output);
   if (!json) return null;
 
@@ -435,7 +438,7 @@ function parseFeedbackResponse(output: string, session: ReplaySession): Feedback
 }
 
 /** Best-effort JSON extraction from potentially noisy output. */
-function extractJson(raw: string): string | null {
+export function extractJson(raw: string): string | null {
   const str = raw.trim();
 
   // 0. Pre-process: fix common model errors
@@ -482,7 +485,7 @@ function extractJson(raw: string): string | null {
   return null;
 }
 
-function findBalancedJson(str: string): string | null {
+export function findBalancedJson(str: string): string | null {
   let depth = 0;
   let start = -1;
   let inString = false;
@@ -523,7 +526,7 @@ function findBalancedJson(str: string): string | null {
 }
 
 /** Attempt to repair truncated JSON by closing brackets and trimming bad tails. */
-function repairTruncatedJson(str: string): string | null {
+export function repairTruncatedJson(str: string): string | null {
   // Strip trailing partial string/value by finding last valid JSON structure point
   // Look backwards for the last complete value boundary (, } ] or complete string)
   let candidate = str;
@@ -594,7 +597,7 @@ function repairTruncatedJson(str: string): string | null {
 // Annotation conversion
 // ---------------------------------------------------------------------------
 
-function feedbackToAnnotations(feedback: FeedbackResult): Annotation[] {
+export function feedbackToAnnotations(feedback: FeedbackResult): Annotation[] {
   const now = new Date().toISOString();
   const annotations: Annotation[] = [];
 
@@ -1086,7 +1089,7 @@ export async function generateToneAdjustment(
 // Helpers
 // ---------------------------------------------------------------------------
 
-function stripAnsi(str: string): string {
+export function stripAnsi(str: string): string {
   // eslint-disable-next-line no-control-regex
   return str.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "").replace(/\x1B\][^\x07]*\x07/g, "");
 }
