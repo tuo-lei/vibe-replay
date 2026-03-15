@@ -160,7 +160,10 @@ export function navigateTo(
 
   // 1. If we are currently on dashboard, capture its state to sessionStorage
   const isCurrentlyDashboard =
-    url.searchParams.get("view") === "dashboard" || !url.searchParams.has("session");
+    url.searchParams.get("view") === "dashboard" ||
+    (!url.searchParams.has("session") &&
+      !url.searchParams.has("gist") &&
+      !url.searchParams.has("url"));
   if (isCurrentlyDashboard) {
     const dashboardState: Record<string, string> = {};
     DASHBOARD_PARAMS.forEach((p) => {
@@ -203,6 +206,7 @@ export function navigateTo(
     }
     // Clean up viewer params when going back to dashboard
     url.searchParams.delete("v");
+    url.searchParams.delete("s");
   }
 
   for (const [key, value] of Object.entries(params)) {

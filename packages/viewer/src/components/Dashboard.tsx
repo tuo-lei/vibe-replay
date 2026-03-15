@@ -351,7 +351,10 @@ function ReplayCard({
           )}
           {onRegenerate && (
             <button
-              onClick={onRegenerate}
+              onClick={(e) => {
+                e.stopPropagation();
+                onRegenerate();
+              }}
               disabled={isRegenerating}
               className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50"
               title="Redo"
