@@ -14,6 +14,7 @@
     "start": "pnpm build && node packages/cli/dist/index.js",
     "dev": "node scripts/dev.mjs",
     "dev:dashboard": "node scripts/dev.mjs -d",
+    "dev:website": "node scripts/dev-website.mjs",
     "viewer:dev": "pnpm --filter @vibe-replay/viewer dev",
     "cli:dev": "VIBE_REPLAY_DEV_MENU=1 npx tsx packages/cli/src/index.ts",
     "test": "pnpm --filter vibe-replay test && pnpm --filter @vibe-replay/viewer test",
