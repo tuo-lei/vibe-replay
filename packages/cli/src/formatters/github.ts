@@ -14,6 +14,8 @@ export interface GitHubFormatOptions {
   replayUrl?: string;
   /** Relative path to the SVG file (for embedding in markdown) */
   svgPath?: string;
+  /** Relative path to the GIF file (preferred over svgPath when both present) */
+  gifPath?: string;
 }
 
 /**
@@ -34,12 +36,14 @@ export function generateGitHubMarkdown(
 
   const lines: string[] = [];
 
-  // ── SVG preview image (clickable link to full replay) ──
-  if (opts.svgPath) {
+  // ── Preview image (clickable link to full replay) ──
+  // Prefer GIF (works universally on GitHub) over SVG
+  const previewPath = opts.gifPath || opts.svgPath;
+  if (previewPath) {
     if (opts.replayUrl) {
-      lines.push(`[![AI Session: ${escMd(condensedTitle)}](${opts.svgPath})](${opts.replayUrl})`);
+      lines.push(`[![AI Session: ${escMd(condensedTitle)}](${previewPath})](${opts.replayUrl})`);
     } else {
-      lines.push(`![AI Session: ${escMd(condensedTitle)}](${opts.svgPath})`);
+      lines.push(`![AI Session: ${escMd(condensedTitle)}](${previewPath})`);
     }
     lines.push("");
   }
@@ -239,7 +243,7 @@ type GroupedAction =
   | { kind: "search"; description: string }
   | { kind: "text"; summary: string };
 
-function extractPhases(scenes: Scene[]): Phase[] {
+export function extractPhases(scenes: Scene[]): Phase[] {
   const phases: Phase[] = [];
   let current: { prompt: string; rawActions: RawAction[]; scenes: Scene[] } | null = null;
 
@@ -454,44 +458,66 @@ function detectRiskSignals(scenes: Scene[], filesChanged: Map<string, number>): 
 // ─── SVG generation ────────────────────────────────────────
 
 // GitHub dark palette — feels native, looks good on both light/dark backgrounds
+// Colors aligned with viewer design system (packages/viewer/src/styles/index.css)
 const C = {
   bg: "#0d1117",
   headerBg: "#161b22",
   border: "#30363d",
   text: "#e6edf3",
   dim: "#7d8590",
-  blue: "#58a6ff",
+  blue: "#79b8ff",
   green: "#3fb950",
   red: "#f85149",
-  purple: "#bc8cff",
+  purple: "#b392f0",
   orange: "#d29922",
   dotRed: "#ff7b72",
   dotYellow: "#d29922",
   dotGreen: "#3fb950",
 };
 
-const SVG_W = 840;
-const SVG_H = 380;
-const HEADER_H = 36;
+const SVG_W = 960;
+const SVG_H = 540;
+const HEADER_H = 40;
 const FOOTER_H = 40;
-const CONTENT_TOP = HEADER_H + 24;
+const CONTENT_TOP = HEADER_H + 16;
 const MARGIN = 40;
-const FONT = `'SF Mono','Cascadia Code','Fira Code',Menlo,Consolas,'Liberation Mono',monospace`;
+// CJK fonts MUST come before generic families (monospace, sans-serif) — generic names are terminal in CSS font matching
+const FONT = `'SF Mono','Cascadia Code','Fira Code',Menlo,Consolas,'Liberation Mono','PingFang SC','Hiragino Sans GB','Microsoft YaHei','Noto Sans CJK SC',monospace,sans-serif`;
 
-interface SvgFrame {
+// Card layout constants
+const CARD_X = 24;
+const CARD_W = SVG_W - 2 * CARD_X;
+const CARD_R = 10;
+const CARD_PAD = 20;
+const TEXT_X = CARD_X + CARD_PAD;
+const TEXT_RIGHT = CARD_X + CARD_W - CARD_PAD;
+// Max visual columns for text within a card at different font sizes
+// Card text width = SVG_W - 2*CARD_X - 2*CARD_PAD = 960 - 48 - 40 = 872px
+// At 16px monospace ~9.6px/char → 90 cols; at 15px ~9.0px/char → 96 cols
+const MAX_COLS_16 = 88;
+const MAX_COLS_15 = 94;
+
+export interface SvgFrame {
   label: string;
   title: string;
   titleLine2?: string;
   lines: SvgTextLine[];
+  // Conversation turn fields (compact-view style)
+  promptIndex?: number;
+  totalPrompts?: number;
+  userPrompt?: string;
+  responsePreview?: string;
+  responseFullLength?: number;
+  turnStats?: { responses: number; tools: number; breakdown: string };
 }
 
-interface SvgTextLine {
+export interface SvgTextLine {
   text: string;
   color: string;
   bold?: boolean;
 }
 
-function buildSvgFrames(
+export function buildSvgFrames(
   session: ReplaySession,
   phases: Phase[],
   opts: GitHubFormatOptions = {},
@@ -501,100 +527,89 @@ function buildSvgFrames(
   const task = phases[0]?.prompt || meta.title || meta.slug;
   const duration = formatDuration(meta.stats.durationMs);
   const toolStats = computeToolStats(session.scenes);
-
-  // ── Frame 0: Title ──
-  const taskWrap = wrapText(task, 56);
-  const titleFrame: SvgFrame = {
-    label: "TASK",
-    title: taskWrap[0],
-    titleLine2: taskWrap[1],
-    lines: [],
-  };
-  if (meta.model) {
-    titleFrame.lines.push({ text: meta.model, color: C.purple });
-  }
-  // Tool stats summary line
-  const statParts: string[] = [];
-  if (toolStats.responses > 0) statParts.push(`${toolStats.responses} responses`);
-  if (toolStats.totalTools > 0) statParts.push(`${toolStats.totalTools} tools`);
-  if (toolStats.thinking > 0) statParts.push(`${toolStats.thinking} thinking`);
-  if (statParts.length > 0) {
-    titleFrame.lines.push({ text: statParts.join("  ·  "), color: C.dim });
-  }
-  // Tool breakdown line
+  const filesChanged = collectFilesChanged(session.scenes);
   const breakdown = formatToolBreakdown(toolStats);
-  if (breakdown) {
-    titleFrame.lines.push({ text: condenseLine(breakdown, 60), color: C.orange });
-  }
-  const metaLine = [duration, meta.project || meta.cwd].filter(Boolean).join("  ·  ");
-  titleFrame.lines.push({ text: metaLine, color: C.dim });
-  frames.push(titleFrame);
 
-  // ── Phase frames (pick most interesting, max 3) ──
-  const selected = selectKeyPhases(phases, 3);
+  // ── Conversation turn frames (compact-view style) ──
+  // Start directly with conversation turns — no abstract overview
+  const selected = selectKeyPhases(phases, 4);
   for (const phase of selected) {
     const phaseIdx = phases.indexOf(phase) + 1;
-    const promptWrap = wrapText(phase.prompt, 52);
-    const frame: SvgFrame = {
-      label: `STEP ${phaseIdx} OF ${phases.length}`,
-      title: promptWrap[0],
-      titleLine2: promptWrap[1],
+    const phaseStats = computeToolStats(phase.scenes);
+    const responseText = collectTextResponses(phase.scenes);
+    frames.push({
+      label: `#${String(phaseIdx).padStart(2, "0")}`,
+      title: "",
       lines: [],
-    };
-
-    let count = 0;
-    for (const action of phase.actions) {
-      if (count >= 5) {
-        frame.lines.push({
-          text: `    ... +${phase.actions.length - count} more`,
-          color: C.dim,
-        });
-        break;
-      }
-      const line = actionToSvgLine(action);
-      if (line) {
-        frame.lines.push(line);
-        count++;
-      }
-    }
-    frames.push(frame);
+      promptIndex: phaseIdx,
+      totalPrompts: phases.length,
+      userPrompt: phase.prompt,
+      responsePreview: responseText,
+      responseFullLength: responseText.length,
+      turnStats: {
+        responses: phaseStats.responses,
+        tools: phaseStats.totalTools,
+        breakdown: formatToolBreakdown(phaseStats),
+      },
+    });
   }
 
-  // ── Summary frame ──
-  const filesChanged = collectFilesChanged(session.scenes);
-  const summaryStats = [
-    filesChanged.size > 0 ? `${filesChanged.size} files changed` : null,
-    `${meta.stats.userPrompts} prompts`,
-    duration,
-  ]
-    .filter(Boolean)
-    .join("  ·  ");
+  // ── Summary frame (last) — title + key insights ──
+  const title = meta.title || condenseLine(task, 60);
+  const statParts: string[] = [];
+  if (filesChanged.size > 0) statParts.push(`${filesChanged.size} files changed`);
+  statParts.push(`${meta.stats.userPrompts} prompts`);
+  if (duration) statParts.push(duration);
+  const toolParts: string[] = [];
+  if (toolStats.responses > 0) toolParts.push(`${toolStats.responses} responses`);
+  if (toolStats.totalTools > 0) toolParts.push(`${toolStats.totalTools} tools`);
 
-  // Summary tool stats
-  const summaryToolParts: string[] = [];
-  if (toolStats.responses > 0) summaryToolParts.push(`${toolStats.responses} responses`);
-  if (toolStats.totalTools > 0) summaryToolParts.push(`${toolStats.totalTools} tools`);
-  if (toolStats.thinking > 0) summaryToolParts.push(`${toolStats.thinking} thinking`);
-
-  const summaryLines: SvgTextLine[] = [
-    { text: summaryStats, color: C.green },
-    { text: summaryToolParts.join("  ·  "), color: C.dim },
-    { text: condenseLine(breakdown, 60), color: C.orange },
-    { text: "", color: C.dim }, // spacer
-  ];
+  const summaryLines: SvgTextLine[] = [];
+  if (meta.model) summaryLines.push({ text: meta.model, color: C.purple });
+  summaryLines.push({ text: statParts.join("  ·  "), color: C.green });
+  if (toolParts.length > 0) summaryLines.push({ text: toolParts.join("  ·  "), color: C.dim });
+  if (breakdown) summaryLines.push({ text: condenseLine(breakdown, 80), color: C.orange });
+  summaryLines.push({ text: "", color: C.dim });
   if (opts.replayUrl) {
     summaryLines.push({ text: "View full replay  →", color: C.blue, bold: true });
   }
   summaryLines.push({ text: "vibe-replay.com", color: C.dim });
 
-  const summaryFrame: SvgFrame = {
-    label: "COMPLETE",
-    title: meta.title || condenseLine(task, 50),
+  frames.push({
+    label: "SUMMARY",
+    title,
     lines: summaryLines,
-  };
-  frames.push(summaryFrame);
+  });
 
   return frames;
+}
+
+/** Collect all text responses in a phase into a single preview string */
+function collectTextResponses(scenes: Scene[]): string {
+  const texts: string[] = [];
+  for (const scene of scenes) {
+    if (scene.type === "text-response") {
+      const text = scene.content.trim();
+      if (text.length > 10) texts.push(text);
+    }
+  }
+  return stripMarkdown(texts.join("\n\n"));
+}
+
+/** Strip markdown syntax for cleaner plain-text rendering in SVG */
+function stripMarkdown(s: string): string {
+  return s
+    .replace(/^#{1,6}\s+/gm, "") // headers: ## Title → Title
+    .replace(/^---+$/gm, "") // horizontal rules
+    .replace(/\*\*([^*]+)\*\*/g, "$1") // bold: **text** → text
+    .replace(/\*([^*]+)\*/g, "$1") // italic: *text* → text
+    .replace(/`([^`]+)`/g, "$1") // inline code: `code` → code
+    .replace(/^>\s?/gm, "") // blockquotes: > text → text
+    .replace(/^[-*]\s+/gm, "- ") // normalize list markers
+    .replace(/^\d+\.\s+/gm, "") // numbered lists: 1. text → text
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // links: [text](url) → text
+    .replace(/\n{3,}/g, "\n\n") // collapse multiple blank lines
+    .trim();
 }
 
 function selectKeyPhases(phases: Phase[], max: number): Phase[] {
@@ -621,32 +636,6 @@ function selectKeyPhases(phases: Phase[], max: number): Phase[] {
 
   // Maintain original order
   return selected.sort((a, b) => phases.indexOf(a) - phases.indexOf(b));
-}
-
-function actionToSvgLine(action: GroupedAction): SvgTextLine | null {
-  switch (action.kind) {
-    case "read": {
-      const show = action.files.slice(0, 3);
-      const more = action.files.length > 3 ? ` +${action.files.length - 3}` : "";
-      return { text: `    ${show.join(", ")}${more}`, color: C.dim };
-    }
-    case "edit":
-      return { text: `    Edit ${action.file}`, color: C.text };
-    case "create":
-      return { text: `    + ${action.file}`, color: C.green };
-    case "run": {
-      const tag = action.passed === true ? "  [ok]" : action.passed === false ? "  [fail]" : "";
-      const color = action.passed === true ? C.green : action.passed === false ? C.red : C.text;
-      return { text: `    $ ${action.command}${tag}`, color };
-    }
-    case "search":
-      return null; // too noisy for SVG
-    case "text":
-      return {
-        text: `    ${condenseLine(action.summary, 48)}`,
-        color: C.dim,
-      };
-  }
 }
 
 function renderSvg(
@@ -730,54 +719,239 @@ ${framesSvg}
 }
 
 function renderFrame(frame: SvgFrame, index: number): string {
-  const x = MARGIN;
-  let y = CONTENT_TOP;
+  if (frame.userPrompt != null) {
+    return renderTurnFrame(frame, index, `class="frame frame-${index}"`);
+  }
+  return renderInfoFrame(frame, index, `class="frame frame-${index}"`);
+}
+
+function renderInfoFrame(frame: SvgFrame, _index: number, gAttr: string): string {
   const parts: string[] = [];
+  parts.push(`  <g ${gAttr}>`);
 
-  parts.push(`  <g class="frame frame-${index}">`);
+  let y = CONTENT_TOP;
 
-  // Section label (small uppercase)
+  // ── Title card ──
+  const titleLines = frame.titleLine2 ? [frame.title, frame.titleLine2] : [frame.title];
+  const titleCardH = 20 + titleLines.length * 28 + 16;
   parts.push(
-    `    <text x="${x}" y="${y}" fill="${C.dim}" font-size="11" letter-spacing="1.5">${escXml(frame.label)}</text>`,
+    `    <rect x="${CARD_X}" y="${y}" width="${CARD_W}" height="${titleCardH}" rx="${CARD_R}" fill="${C.headerBg}" stroke="${C.border}" stroke-width="1"/>`,
   );
-  y += 10;
 
-  // Thin separator
-  parts.push(
-    `    <line x1="${x}" y1="${y}" x2="${SVG_W - x}" y2="${y}" stroke="${C.border}" stroke-width="1"/>`,
-  );
-  y += 28;
+  y += 20;
 
-  // Title (user prompt) — bold blue
-  parts.push(
-    `    <text x="${x}" y="${y}" fill="${C.blue}" font-size="15" font-weight="600">${escXml(frame.title)}</text>`,
-  );
-  y += 24;
-
-  if (frame.titleLine2) {
+  // Title text (no label — just the session title)
+  for (const line of titleLines) {
     parts.push(
-      `    <text x="${x}" y="${y}" fill="${C.blue}" font-size="15" font-weight="600">${escXml(frame.titleLine2)}</text>`,
+      `    <text x="${TEXT_X}" y="${y}" fill="${C.blue}" font-size="18" font-weight="600">${escXml(line)}</text>`,
     );
-    y += 24;
+    y += 28;
   }
 
-  y += 12; // gap between title and detail lines
+  // ── Details card ──
+  y = CONTENT_TOP + titleCardH + 14;
 
-  // Detail lines
+  const visibleLines = frame.lines.filter((l) => l.text);
+  const spacerCount = frame.lines.filter((l) => !l.text).length;
+  const detailCardH = 18 + visibleLines.length * 26 + spacerCount * 14 + 16;
+  parts.push(
+    `    <rect x="${CARD_X}" y="${y}" width="${CARD_W}" height="${detailCardH}" rx="${CARD_R}" fill="${C.headerBg}" stroke="${C.border}" stroke-width="1"/>`,
+  );
+
+  y += 18;
+
   for (const line of frame.lines) {
     if (!line.text) {
-      y += 12; // blank spacer
+      y += 14;
       continue;
     }
     const weight = line.bold ? ' font-weight="600"' : "";
     parts.push(
-      `    <text x="${x}" y="${y}" fill="${line.color}" font-size="13"${weight}>${escXml(line.text)}</text>`,
+      `    <text x="${TEXT_X}" y="${y}" fill="${line.color}" font-size="16"${weight}>${escXml(line.text)}</text>`,
     );
-    y += 24;
+    y += 26;
   }
 
   parts.push("  </g>");
   return parts.join("\n");
+}
+
+function renderTurnFrame(frame: SvgFrame, _index: number, gAttr: string): string {
+  const parts: string[] = [];
+  parts.push(`  <g ${gAttr}>`);
+
+  const y0 = CONTENT_TOP;
+  const promptLines = wrapMultiLine(frame.userPrompt!, MAX_COLS_16, 2);
+  const hasStats = frame.turnStats && (frame.turnStats.responses > 0 || frame.turnStats.tools > 0);
+  const hasBreakdown = !!frame.turnStats?.breakdown;
+
+  // Heights for each section
+  const promptSectionH = 28 + promptLines.length * 26 + 16;
+
+  // Calculate how many response lines fit to fill the remaining space
+  const fixedH = 20 + promptSectionH + 24 + 28 + (hasStats ? 34 : 0) + 8 + 20; // card padding + prompt + divider + label + stats + gap + bottom
+  const availableForText = SVG_H - FOOTER_H - CONTENT_TOP - fixedH - 8;
+  const maxResponseLines = Math.max(3, Math.floor(availableForText / 24));
+  const responseLines = frame.responsePreview
+    ? wrapMultiLine(frame.responsePreview, MAX_COLS_15, maxResponseLines)
+    : [];
+  const dividerGap = 24;
+  const statsSectionH = 28 + (hasStats ? 34 : 0) + (hasBreakdown && !hasStats ? 24 : 0);
+  const responseSectionH = responseLines.length > 0 ? 8 + responseLines.length * 24 : 0;
+  const cardH = 20 + promptSectionH + dividerGap + statsSectionH + responseSectionH + 20;
+
+  // ── Single unified card ──
+  parts.push(
+    `    <rect x="${CARD_X}" y="${y0}" width="${CARD_W}" height="${cardH}" rx="${CARD_R}" fill="${C.headerBg}" stroke="${C.border}" stroke-width="1"/>`,
+  );
+
+  let y = y0 + 24;
+
+  // ── YOU section ──
+  parts.push(
+    `    <text x="${TEXT_X}" y="${y}" fill="${C.green}" font-size="13" font-weight="700">YOU</text>`,
+  );
+  parts.push(
+    `    <text x="${TEXT_RIGHT}" y="${y}" text-anchor="end" fill="${C.dim}" font-size="13">#${String(frame.promptIndex!).padStart(2, "0")}</text>`,
+  );
+  y += 22;
+
+  for (const line of promptLines) {
+    parts.push(
+      `    <text x="${TEXT_X}" y="${y}" fill="${C.green}" font-size="16">${escXml(line)}</text>`,
+    );
+    y += 26;
+  }
+
+  // ── Divider ──
+  y += 4;
+  parts.push(
+    `    <line x1="${TEXT_X}" y1="${y}" x2="${TEXT_RIGHT}" y2="${y}" stroke="${C.border}" stroke-width="1"/>`,
+  );
+  y += 20;
+
+  // ── ASSISTANT section ──
+  parts.push(
+    `    <text x="${TEXT_X}" y="${y}" fill="${C.text}" font-size="13" font-weight="700">ASSISTANT</text>`,
+  );
+  y += 24;
+
+  // Stats badges + separator + tool breakdown (matches compact view)
+  if (hasStats) {
+    let bx = TEXT_X;
+
+    // "N responses" blue pill
+    if (frame.turnStats!.responses > 0) {
+      const txt = `${frame.turnStats!.responses} responses`;
+      const w = 10 + visualWidth(txt) * 7.8 + 10;
+      parts.push(
+        `    <rect x="${bx}" y="${y - 12}" width="${Math.ceil(w)}" height="20" rx="4" fill="rgba(88,166,255,0.15)"/>`,
+      );
+      parts.push(
+        `    <text x="${bx + w / 2}" y="${y + 1}" text-anchor="middle" fill="${C.blue}" font-size="12">${txt}</text>`,
+      );
+      bx += Math.ceil(w) + 6;
+    }
+
+    // "N tools" orange pill (tool-call color)
+    if (frame.turnStats!.tools > 0) {
+      const txt = `${frame.turnStats!.tools} tools`;
+      const w = 10 + visualWidth(txt) * 7.8 + 10;
+      parts.push(
+        `    <rect x="${bx}" y="${y - 12}" width="${Math.ceil(w)}" height="20" rx="4" fill="rgba(210,153,34,0.15)"/>`,
+      );
+      parts.push(
+        `    <text x="${bx + w / 2}" y="${y + 1}" text-anchor="middle" fill="${C.orange}" font-size="12">${txt}</text>`,
+      );
+      bx += Math.ceil(w) + 6;
+    }
+
+    // Separator + tool breakdown (orange — tool-call color)
+    if (hasBreakdown) {
+      parts.push(
+        `    <line x1="${bx + 4}" y1="${y - 10}" x2="${bx + 4}" y2="${y + 6}" stroke="${C.border}" stroke-width="1"/>`,
+      );
+      bx += 14;
+      parts.push(
+        `    <text x="${bx}" y="${y + 1}" fill="${C.orange}" font-size="12">${escXml(condenseLine(frame.turnStats!.breakdown, 50))}</text>`,
+      );
+    }
+
+    y += 24;
+  }
+
+  // Response text
+  for (const line of responseLines) {
+    parts.push(
+      `    <text x="${TEXT_X}" y="${y}" fill="${C.text}" font-size="15">${escXml(line)}</text>`,
+    );
+    y += 24;
+  }
+
+  // "Show more (N chars)" if response was truncated
+  if (frame.responseFullLength && frame.responsePreview) {
+    const displayedChars = responseLines.join("").replace(/…$/, "").length;
+    const remaining = frame.responseFullLength - displayedChars;
+    if (remaining > 50) {
+      parts.push(
+        `    <text x="${TEXT_X}" y="${y}" fill="${C.orange}" font-size="13">Show more (${remaining} chars)</text>`,
+      );
+    }
+  }
+
+  parts.push("  </g>");
+  return parts.join("\n");
+}
+
+/**
+ * Render a single frame as a complete, static SVG document.
+ * No CSS animation — suitable for rasterization to PNG/GIF.
+ */
+export function renderStaticFrameSvg(
+  frame: SvgFrame,
+  session: ReplaySession,
+  opts: GitHubFormatOptions = {},
+): string {
+  const duration = formatDuration(session.meta.stats.durationMs);
+  const tStats = computeToolStats(session.scenes);
+  const footerParts = [duration];
+  if (tStats.responses > 0) footerParts.push(`${tStats.responses} responses`);
+  if (tStats.totalTools > 0) footerParts.push(`${tStats.totalTools} tools`);
+  const footerLeft = footerParts.filter(Boolean).join(" · ");
+  const footerRight = opts.replayUrl ? "View full replay →" : "vibe-replay.com";
+
+  // Reuse shared rendering logic (no animation class needed)
+  let frameContent: string;
+  if (frame.userPrompt != null) {
+    frameContent = renderTurnFrame(frame, 0, "");
+  } else {
+    frameContent = renderInfoFrame(frame, 0, "");
+  }
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${SVG_W}" height="${SVG_H}" viewBox="0 0 ${SVG_W} ${SVG_H}">
+  <style>
+    text { font-family: ${FONT}; }
+  </style>
+
+  <!-- Background -->
+  <rect width="${SVG_W}" height="${SVG_H}" rx="12" fill="${C.bg}"/>
+
+  <!-- Header bar -->
+  <path d="M0,12 Q0,0 12,0 H${SVG_W - 12} Q${SVG_W},0 ${SVG_W},12 V${HEADER_H} H0 Z" fill="${C.headerBg}"/>
+  <circle cx="24" cy="${HEADER_H / 2}" r="5" fill="${C.dotRed}" opacity="0.9"/>
+  <circle cx="42" cy="${HEADER_H / 2}" r="5" fill="${C.dotYellow}" opacity="0.9"/>
+  <circle cx="60" cy="${HEADER_H / 2}" r="5" fill="${C.dotGreen}" opacity="0.9"/>
+  <text x="${SVG_W / 2}" y="${HEADER_H / 2 + 5}" text-anchor="middle" fill="${C.dim}" font-size="12" letter-spacing="0.5">vibe-replay</text>
+
+  <!-- Footer bar -->
+  <path d="M0,${SVG_H - FOOTER_H} H${SVG_W} V${SVG_H - 12} Q${SVG_W},${SVG_H} ${SVG_W - 12},${SVG_H} H12 Q0,${SVG_H} 0,${SVG_H - 12} Z" fill="${C.headerBg}"/>
+  <line x1="0" y1="${SVG_H - FOOTER_H}" x2="${SVG_W}" y2="${SVG_H - FOOTER_H}" stroke="${C.border}" stroke-width="1"/>
+  <text x="${MARGIN}" y="${SVG_H - FOOTER_H / 2 + 4}" fill="${C.dim}" font-size="11">${escXml(footerLeft)}</text>
+  <text x="${SVG_W - MARGIN}" y="${SVG_H - FOOTER_H / 2 + 4}" text-anchor="end" fill="${C.dim}" font-size="11">${escXml(footerRight)}</text>
+
+  <!-- Static content -->
+${frameContent}
+</svg>`;
 }
 
 // ─── Shared helpers ────────────────────────────────────────
@@ -853,23 +1027,37 @@ function condenseLine(s: string, maxWidth: number): string {
   return `${cleaned.slice(0, i)}…`;
 }
 
-/** Wrap text into 1 or 2 lines, respecting visual width */
-function wrapText(s: string, maxWidth: number): [string] | [string, string] {
+/** Wrap text into multiple lines, respecting visual width. Last line truncates with ellipsis. */
+function wrapMultiLine(s: string, maxWidth: number, maxLines: number): string[] {
   const cleaned = s.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
   if (visualWidth(cleaned) <= maxWidth) return [cleaned];
-  // Find break point at word/CJK boundary
-  let w = 0;
-  let lastSpace = -1;
-  let i = 0;
-  for (const ch of cleaned) {
-    const cw = isCjk(ch.codePointAt(0) || 0) ? 2 : 1;
-    if (w + cw > maxWidth) break;
-    if (ch === " ") lastSpace = i;
-    w += cw;
-    i += ch.length;
+
+  const result: string[] = [];
+  let remaining = cleaned;
+
+  for (let i = 0; i < maxLines && remaining; i++) {
+    if (i === maxLines - 1 || visualWidth(remaining) <= maxWidth) {
+      result.push(condenseLine(remaining, maxWidth));
+      break;
+    }
+
+    let w = 0;
+    let lastSpace = -1;
+    let charIdx = 0;
+    for (const ch of remaining) {
+      const cw = isCjk(ch.codePointAt(0) || 0) ? 2 : 1;
+      if (w + cw > maxWidth) break;
+      if (ch === " ") lastSpace = charIdx;
+      w += cw;
+      charIdx += ch.length;
+    }
+
+    const breakAt = lastSpace > charIdx * 0.3 ? lastSpace : charIdx;
+    result.push(remaining.slice(0, breakAt).trim());
+    remaining = remaining.slice(breakAt).trim();
   }
-  const breakAt = lastSpace > i * 0.3 ? lastSpace : i;
-  return [cleaned.slice(0, breakAt).trim(), condenseLine(cleaned.slice(breakAt).trim(), maxWidth)];
+
+  return result;
 }
 
 function baseName(p: string): string {
@@ -881,12 +1069,22 @@ function escMd(s: string): string {
 }
 
 function escXml(s: string): string {
-  return s
+  return stripEmoji(s)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
+}
+
+/** Strip emoji, PUA (Nerd Font/Powerline icons), and other chars resvg cannot render */
+function stripEmoji(s: string): string {
+  return s
+    .replace(
+      /[\u{1F600}-\u{1F9FF}\u{1FA00}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B50}\u{2B55}\u{1F1E0}-\u{1F1FF}\u{E000}-\u{F8FF}\u{F0000}-\u{FFFFD}]|\u{FE0F}|\u{200D}|\u{20E3}|[\u{E0020}-\u{E007F}]/gu,
+      "",
+    )
+    .replace(/\s+/g, " ");
 }
 
 /** Format a number with max 2 decimal places, stripping trailing zeros */

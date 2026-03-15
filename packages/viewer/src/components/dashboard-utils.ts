@@ -111,8 +111,24 @@ export function normalizeTitleText(value?: string): string {
   return (value || "").replace(/\s+/g, " ").trim().slice(0, TITLE_MAX_CHARS);
 }
 
+/** Detect system-generated user messages that aren't real human prompts */
+function isSystemGeneratedMessage(text: string): boolean {
+  return (
+    text.startsWith("[Request interrupted by user") ||
+    text.startsWith("<command-name>") ||
+    text.startsWith("<command-message>") ||
+    text.startsWith("<local-command-caveat>") ||
+    text.startsWith("<local-command-stdout>") ||
+    text.startsWith("<task-notification>") ||
+    text.startsWith("<bash-input>") ||
+    text.startsWith("<bash-stdout>")
+  );
+}
+
 /** Strip system-injected noise from first prompt for display */
 export function cleanPrompt(text: string): string {
+  // Skip system-generated messages entirely
+  if (isSystemGeneratedMessage(text)) return "";
   let cleaned = text;
   cleaned = cleaned.replace(/<\/?[a-z][a-z0-9-]*>/gi, "");
   cleaned = cleaned.replace(
@@ -131,6 +147,11 @@ export function cleanPrompt(text: string): string {
 export function sourceSuggestedTitle(s: SourceSession): string {
   const explicitTitle = s.title ? normalizeTitleText(cleanPrompt(s.title)) : "";
   if (explicitTitle) return explicitTitle;
+  // Prefer replay title if this session already has a generated replay
+  if (s.replay?.title) {
+    const replayTitle = normalizeTitleText(s.replay.title);
+    if (replayTitle) return replayTitle;
+  }
   const promptCandidates = [...(s.prompts || []), s.firstPrompt];
   for (const candidate of promptCandidates) {
     const cleaned = normalizeTitleText(cleanPrompt(candidate || ""));
