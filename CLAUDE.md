@@ -22,8 +22,8 @@ pnpm dev:dashboard         # Dev mode with dashboard flag (-d)
 ```
 
 When to use which:
-- `pnpm start` — validate full user flow
-- `pnpm dev` — daily iteration (choose "Dump to demo.json", open `localhost:5173/?file=/demo.json`)
+- `pnpm start` — validate full user flow (build + run)
+- `pnpm dev` — daily iteration with full HMR: viewer auto-reloads via Vite, CLI auto-restarts via `tsx watch`
 - `pnpm viewer:dev` — UI-only changes
 - `pnpm cli:dev` — parser/CLI-only changes
 
