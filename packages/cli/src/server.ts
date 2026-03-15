@@ -18,6 +18,7 @@ import {
   generateToneAdjustment,
   generateTranslation,
 } from "./feedback.js";
+import { generateGitHubGif } from "./formatters/gif.js";
 import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.js";
 import { generateOutput } from "./generator.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
@@ -1267,18 +1268,38 @@ export async function startServer(
     try {
       const svgPath = join(targetDir, "session-preview.svg");
       const mdPath = join(targetDir, "github-summary.md");
-      const [svgContent, markdown] = await Promise.all([
+      const gifPath = join(targetDir, "session-preview.gif");
+      const [svgContent, markdown, gifBuf] = await Promise.all([
         readFile(svgPath, "utf-8").catch(() => null),
         readFile(mdPath, "utf-8").catch(() => null),
+        readFile(gifPath).catch(() => null),
       ]);
-      if (!svgContent && !markdown) return c.json({ exists: false });
+      if (!svgContent && !markdown && !gifBuf) return c.json({ exists: false });
       const gist = await loadSavedGistInfo(targetDir);
+      const gifContent = gifBuf ? gifBuf.toString("base64") : null;
+      // Get file modification times for "last generated" display
+      const [gifMtime, svgMtime, mdMtime] = await Promise.all([
+        stat(gifPath)
+          .then((s) => s.mtime.toISOString())
+          .catch(() => null),
+        stat(svgPath)
+          .then((s) => s.mtime.toISOString())
+          .catch(() => null),
+        stat(mdPath)
+          .then((s) => s.mtime.toISOString())
+          .catch(() => null),
+      ]);
       return c.json({
         exists: true,
         svgContent,
         markdown,
         svgPath,
         mdPath,
+        gifContent,
+        gifPath,
+        gifGeneratedAt: gifMtime,
+        svgGeneratedAt: svgMtime,
+        mdGeneratedAt: mdMtime,
         replayUrl: gist?.viewerUrl || undefined,
       });
     } catch {
@@ -1286,7 +1307,7 @@ export async function startServer(
     }
   });
 
-  // Export GitHub markdown + SVG (requires slug)
+  // Export GitHub markdown + SVG + GIF (requires slug)
   app.post("/api/export/github", async (c) => {
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
@@ -1306,10 +1327,23 @@ export async function startServer(
       const svgFilePath = join(targetDir, "session-preview.svg");
       await writeFile(svgFilePath, svgContent, "utf-8");
 
-      // Generate markdown
+      // Generate GIF
+      let gifContent: string | null = null;
+      let gifFilePath: string | null = null;
+      try {
+        const gifBuffer = await generateGitHubGif(targetSession, { replayUrl });
+        gifFilePath = join(targetDir, "session-preview.gif");
+        await writeFile(gifFilePath, gifBuffer);
+        gifContent = gifBuffer.toString("base64");
+      } catch {
+        // GIF generation is best-effort — SVG still works
+      }
+
+      // Generate markdown (prefer GIF for universal GitHub support)
       const markdown = generateGitHubMarkdown(targetSession, {
         replayUrl,
         svgPath: "./session-preview.svg",
+        gifPath: gifContent ? "./session-preview.gif" : undefined,
       });
       const mdFilePath = join(targetDir, "github-summary.md");
       await writeFile(mdFilePath, markdown, "utf-8");
@@ -1318,11 +1352,17 @@ export async function startServer(
       const findings = scanForSecrets(JSON.stringify(targetSession));
       const warnings = findings.map((f) => `[${f.rule}] ${f.match}`);
 
+      const now = new Date().toISOString();
       return c.json({
         markdown,
         svgContent,
         svgPath: svgFilePath,
         mdPath: mdFilePath,
+        gifContent,
+        gifPath: gifFilePath,
+        gifGeneratedAt: gifContent ? now : undefined,
+        svgGeneratedAt: now,
+        mdGeneratedAt: now,
         replayUrl,
         warnings: warnings.length > 0 ? warnings : undefined,
       });

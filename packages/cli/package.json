@@ -43,16 +43,18 @@
   "dependencies": {
     "@hono/node-server": "^1.19.11",
     "@inquirer/prompts": "^7.2.0",
+    "@resvg/resvg-js": "^2.6.2",
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
+    "gifenc": "^1.0.3",
     "hono": "^4.12.5",
     "open": "^10.1.0",
     "ora": "^8.1.0",
     "sql.js": "^1.14.1"
   },
   "devDependencies": {
-    "@vibe-replay/types": "workspace:*",
     "@types/node": "^22.10.0",
+    "@vibe-replay/types": "workspace:*",
     "tsup": "^8.3.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",

@@ -164,6 +164,28 @@ describe("generateGitHubMarkdown", () => {
     expect(md).toContain("https://example.com");
   });
 
+  it("prefers gifPath over svgPath when both are provided", () => {
+    const session = makeSession();
+    const md = generateGitHubMarkdown(session, {
+      svgPath: "./session-preview.svg",
+      gifPath: "./session-preview.gif",
+      replayUrl: "https://example.com",
+    });
+
+    expect(md).toContain("./session-preview.gif");
+    expect(md).not.toContain("./session-preview.svg");
+  });
+
+  it("uses gifPath alone when svgPath is not provided", () => {
+    const session = makeSession();
+    const md = generateGitHubMarkdown(session, {
+      gifPath: "./session-preview.gif",
+    });
+
+    expect(md).toContain("![AI Session:");
+    expect(md).toContain("./session-preview.gif");
+  });
+
   it("shows risk signals for heavily modified files", () => {
     const scenes: Scene[] = [{ type: "user-prompt", content: "Fix everything" }];
     // Add 5 edits to the same file
@@ -285,8 +307,8 @@ describe("generateGitHubSvg", () => {
     const session = makeSession();
     const svg = generateGitHubSvg(session);
 
-    expect(svg).toContain("TASK");
-    expect(svg).toContain("COMPLETE");
+    expect(svg).toContain("#01");
+    expect(svg).toContain("YOU");
   });
 
   it("escapes XML special characters", () => {
@@ -301,13 +323,13 @@ describe("generateGitHubSvg", () => {
     expect(svg).toContain("&amp;");
   });
 
-  it("shows step count and COMPLETE frame", () => {
+  it("shows stats in turn frames", () => {
     const session = makeSession();
     const svg = generateGitHubSvg(session);
 
-    expect(svg).toContain("COMPLETE");
-    expect(svg).toContain("8 tools");
-    expect(svg).toContain("1 response");
+    expect(svg).toContain("ASSISTANT");
+    expect(svg).toContain("tools");
+    expect(svg).toContain("responses");
   });
 
   it("has reasonable file size", () => {
@@ -336,8 +358,8 @@ describe("generateGitHubSvg", () => {
   });
 
   it("truncates long CJK text with ellipsis", () => {
-    // Each CJK char is 2 visual columns, so 100 chars = 200 visual columns → will be truncated
-    const longCjk = "认".repeat(100);
+    // Each CJK char is 2 visual columns, 200 chars = 400 visual cols → exceeds 3 lines of ~88 cols
+    const longCjk = "认".repeat(200);
     const session = makeSession({
       scenes: [{ type: "user-prompt", content: longCjk }],
     });
@@ -414,9 +436,10 @@ describe("generateGitHubSvg", () => {
 
     // The selected phase frames should appear in original order in the SVG
     // Phase 1 (always included as first), then phases 2 and 4 (highest scores)
-    const step1Pos = svg.indexOf("STEP 1 OF 5");
-    const step2Pos = svg.indexOf("STEP 2 OF 5");
-    const step4Pos = svg.indexOf("STEP 4 OF 5");
+    // Turn frames use #01, #02, #04 format with prompt index
+    const step1Pos = svg.indexOf("#01");
+    const step2Pos = svg.indexOf("#02");
+    const step4Pos = svg.indexOf("#04");
 
     expect(step1Pos).toBeGreaterThan(-1);
     expect(step2Pos).toBeGreaterThan(-1);

@@ -4,6 +4,7 @@ import { program } from "commander";
 import ora from "ora";
 import { readFileCache, writeFileCache } from "./cache.js";
 import { cleanPromptText } from "./clean-prompt.js";
+import { generateGitHubGif } from "./formatters/gif.js";
 import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.js";
 import { generateOutput } from "./generator.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
@@ -518,11 +519,26 @@ program
       await writeFile(svgFilePath, svgContent, "utf-8");
       svgSpinner2.succeed(`SVG: ${svgFilePath}`);
 
-      // Generate markdown
+      // Generate animated GIF
+      const gifSpinner = ora("Generating animated GIF...").start();
+      try {
+        const gifBuffer = await generateGitHubGif(replay, { replayUrl });
+        const gifFilePath = join(outputDir, "session-preview.gif");
+        await writeFile(gifFilePath, gifBuffer);
+        const gifSizeKB = Math.round(gifBuffer.length / 1024);
+        gifSpinner.succeed(`GIF: ${gifFilePath} (${gifSizeKB} KB)`);
+      } catch (err) {
+        gifSpinner.fail(
+          `GIF generation failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+
+      // Generate markdown (prefer GIF for universal GitHub support)
       const mdSpinner = ora("Generating GitHub markdown...").start();
       const markdown = generateGitHubMarkdown(replay, {
         replayUrl,
         svgPath: "./session-preview.svg",
+        gifPath: "./session-preview.gif",
       });
       const mdFilePath = join(outputDir, "github-summary.md");
       await writeFile(mdFilePath, markdown, "utf-8");
@@ -539,7 +555,7 @@ program
       console.log(
         chalk.dim("  Tip: ") +
           chalk.white(
-            "Copy session-preview.svg to your repo, then paste the markdown into your PR",
+            "Copy session-preview.gif to your repo, then paste the markdown into your PR",
           ),
       );
       console.log();

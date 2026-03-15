@@ -1,6 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { PrLink, TurnStat } from "@vibe-replay/types";
+import { isSystemGeneratedMessage } from "../../clean-prompt.js";
 import type { ContentBlock, ParsedTurn, RawMessage } from "../../types.js";
 import type { Compaction, ProviderParseResult, TokenUsage } from "../types.js";
 
@@ -340,20 +341,6 @@ export async function parseClaudeCodeSession(
     turnStats: turnStats.length > 0 ? turnStats : undefined,
     prLinks: prLinks.length > 0 ? prLinks : undefined,
   };
-}
-
-/** Detect system-generated user messages that aren't real human prompts */
-function isSystemGeneratedMessage(text: string): boolean {
-  return (
-    text.startsWith("[Request interrupted by user") ||
-    text.startsWith("<command-name>") ||
-    text.startsWith("<command-message>") ||
-    text.startsWith("<local-command-caveat>") ||
-    text.startsWith("<local-command-stdout>") ||
-    text.startsWith("<task-notification>") ||
-    text.startsWith("<bash-input>") ||
-    text.startsWith("<bash-stdout>")
-  );
 }
 
 function extractImages(block: ContentBlock): string[] {

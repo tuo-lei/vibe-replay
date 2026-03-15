@@ -1,4 +1,21 @@
 /**
+ * Detect system-generated user messages that aren't real human prompts.
+ * These should be skipped entirely when looking for meaningful prompts.
+ */
+export function isSystemGeneratedMessage(text: string): boolean {
+  return (
+    text.startsWith("[Request interrupted by user") ||
+    text.startsWith("<command-name>") ||
+    text.startsWith("<command-message>") ||
+    text.startsWith("<local-command-caveat>") ||
+    text.startsWith("<local-command-stdout>") ||
+    text.startsWith("<task-notification>") ||
+    text.startsWith("<bash-input>") ||
+    text.startsWith("<bash-stdout>")
+  );
+}
+
+/**
  * Strip system-injected boilerplate from user prompts.
  * Shared by discover (session scanning) and server (API responses).
  */

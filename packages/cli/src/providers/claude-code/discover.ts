@@ -1,7 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { cleanPromptText } from "../../clean-prompt.js";
+import { cleanPromptText, isSystemGeneratedMessage } from "../../clean-prompt.js";
 import type { SessionInfo } from "../../types.js";
 
 const CLAUDE_DIR = join(homedir(), ".claude", "projects");
@@ -123,7 +123,7 @@ export async function extractSessionInfo(
                     .map((b: { type: string; text?: string }) => b.text ?? "")
                     .join("")
                 : "";
-          if (text) {
+          if (text && !isSystemGeneratedMessage(text)) {
             const cleaned = cleanPromptText(text);
             if (cleaned.length >= 10) {
               prompts.push(cleaned.slice(0, 200));

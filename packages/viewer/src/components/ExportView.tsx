@@ -24,6 +24,11 @@ interface GhExportResult {
   markdown: string | null;
   svgPath: string;
   mdPath: string;
+  gifContent: string | null;
+  gifPath: string | null;
+  gifGeneratedAt?: string;
+  svgGeneratedAt?: string;
+  mdGeneratedAt?: string;
   replayUrl?: string;
   warnings?: string[];
 }
@@ -80,6 +85,13 @@ function relativeTime(iso: string): string {
   }
 }
 
+function formatBytes(len: number, isBase64 = false): string {
+  const bytes = isBase64 ? Math.round(len * 0.75) : len;
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  return kb < 1024 ? `${kb.toFixed(1)} KB` : `${(kb / 1024).toFixed(1)} MB`;
+}
+
 function FilePath({ label, path }: { label: string; path: string }) {
   return (
     <div className="flex items-center gap-2 text-[11px] font-mono text-terminal-dim">
@@ -133,7 +145,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
         .finally(() => setGistInfoLoading(false));
     }
 
-    // Load existing SVG/MD if previously exported
+    // Load existing SVG/MD/GIF if previously exported
     if (exportGithub) {
       fetch(apiUrl("/api/export/github/status"))
         .then((r) => r.json())
@@ -144,6 +156,11 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
               markdown: data.markdown,
               svgPath: data.svgPath,
               mdPath: data.mdPath,
+              gifContent: data.gifContent ?? null,
+              gifPath: data.gifPath ?? null,
+              gifGeneratedAt: data.gifGeneratedAt,
+              svgGeneratedAt: data.svgGeneratedAt,
+              mdGeneratedAt: data.mdGeneratedAt,
               replayUrl: data.replayUrl,
             });
           }
@@ -176,13 +193,19 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
     try {
       const result = await exportGithub();
       await navigator.clipboard.writeText(result.markdown);
+      const r = result as any;
       setGhExportResult({
-        svgContent: result.svgContent,
-        markdown: result.markdown,
-        svgPath: result.svgPath,
-        mdPath: result.mdPath,
-        replayUrl: result.replayUrl,
-        warnings: result.warnings,
+        svgContent: r.svgContent,
+        markdown: r.markdown,
+        svgPath: r.svgPath,
+        mdPath: r.mdPath,
+        gifContent: r.gifContent ?? null,
+        gifPath: r.gifPath ?? null,
+        gifGeneratedAt: r.gifGeneratedAt,
+        svgGeneratedAt: r.svgGeneratedAt,
+        mdGeneratedAt: r.mdGeneratedAt,
+        replayUrl: r.replayUrl,
+        warnings: r.warnings,
       });
     } catch (e: any) {
       setGhError(e.message);
@@ -193,8 +216,8 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
 
   const renderedMarkdown = useMemo(() => {
     if (!ghExportResult?.markdown) return "";
-    // Strip the image line — SVG is shown separately
-    const md = ghExportResult.markdown.replace(/!\[[^\]]*\]\([^)]*\.svg\)\n*/g, "");
+    // Strip the image line — preview is shown separately (GIF or SVG)
+    const md = ghExportResult.markdown.replace(/!\[[^\]]*\]\([^)]*\.(?:svg|gif)\)\n*/g, "");
     return sanitizeHtml(marked.parse(md) as string);
   }, [ghExportResult?.markdown]);
 
@@ -374,6 +397,79 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
             {/* ─── SVG + Markdown (for GitHub PRs/READMEs) ─── */}
             {isEditor && exportGithub && (
               <>
+                {/* GIF Preview Card (preferred — works universally on GitHub) */}
+                {ghExportResult?.gifContent && (
+                  <div className="bg-terminal-surface rounded-2xl border border-terminal-border-subtle shadow-layer-sm overflow-hidden">
+                    <div className="px-5 py-3 flex items-center justify-between border-b border-terminal-border-subtle">
+                      <div>
+                        <div className="text-sm font-mono font-semibold text-terminal-green">
+                          Animated GIF
+                        </div>
+                        <p className="text-[10px] font-mono text-terminal-dim mt-0.5">
+                          Works everywhere: GitHub PRs, issues, READMEs, Slack, Discord.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {ghExportResult.gifGeneratedAt && (
+                          <span className="text-[10px] font-mono text-terminal-dimmer">
+                            {relativeTime(ghExportResult.gifGeneratedAt)}
+                          </span>
+                        )}
+                        <button
+                          onClick={handleExportGithub}
+                          disabled={ghExporting || githubExporting}
+                          className="text-[11px] font-mono text-terminal-dim hover:text-terminal-green transition-colors px-1.5 py-0.5 rounded bg-terminal-bg hover:bg-terminal-surface-hover border border-terminal-border-subtle"
+                          title="Regenerate all exports"
+                        >
+                          {ghExporting || githubExporting ? (
+                            <span className="animate-pulse">...</span>
+                          ) : (
+                            <svg
+                              width="12"
+                              height="12"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+                              <path d="M21 3v5h-5" />
+                              <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+                              <path d="M8 16H3v5" />
+                            </svg>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* GIF preview (auto-animates as <img>) */}
+                    <div className="bg-terminal-bg p-2 flex justify-center border-y border-terminal-border-subtle">
+                      <img
+                        src={`data:image/gif;base64,${ghExportResult.gifContent}`}
+                        alt="Session preview GIF"
+                        className="w-full h-auto block"
+                      />
+                    </div>
+
+                    <div className="px-5 py-3 space-y-1.5 border-t border-terminal-border-subtle">
+                      {ghExportResult.gifPath && (
+                        <FilePath
+                          label="File"
+                          path={`${ghExportResult.gifPath}  (${formatBytes(ghExportResult.gifContent?.length ?? 0, true)})`}
+                        />
+                      )}
+                      <p className="text-[10px] font-mono text-terminal-dimmer leading-relaxed pt-1">
+                        Usage:{" "}
+                        <span className="text-terminal-text">
+                          {"![Session](./session-preview.gif)"}
+                        </span>
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 {/* SVG Preview Card */}
                 {ghExportResult?.svgContent && (
                   <div className="bg-terminal-surface rounded-2xl border border-terminal-border-subtle shadow-layer-sm overflow-hidden">
@@ -386,16 +482,52 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                           Embed in READMEs, PRs, or anywhere that renders SVG.
                         </p>
                       </div>
+                      <div className="flex items-center gap-2">
+                        {ghExportResult.svgGeneratedAt && (
+                          <span className="text-[10px] font-mono text-terminal-dimmer">
+                            {relativeTime(ghExportResult.svgGeneratedAt)}
+                          </span>
+                        )}
+                        <button
+                          onClick={handleExportGithub}
+                          disabled={ghExporting || githubExporting}
+                          className="text-[11px] font-mono text-terminal-dim hover:text-terminal-orange transition-colors px-1.5 py-0.5 rounded bg-terminal-bg hover:bg-terminal-surface-hover border border-terminal-border-subtle"
+                          title="Regenerate all exports"
+                        >
+                          {ghExporting || githubExporting ? (
+                            <span className="animate-pulse">...</span>
+                          ) : (
+                            <svg
+                              width="12"
+                              height="12"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+                              <path d="M21 3v5h-5" />
+                              <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+                              <path d="M8 16H3v5" />
+                            </svg>
+                          )}
+                        </button>
+                      </div>
                     </div>
 
                     {/* Inline SVG render (scaled to fit) */}
                     <div
-                      className="bg-white p-1 [&>svg]:w-full [&>svg]:h-auto [&>svg]:max-h-52 [&>svg]:block"
+                      className="bg-terminal-bg p-2 border-y border-terminal-border-subtle [&>svg]:w-full [&>svg]:h-auto [&>svg]:block"
                       dangerouslySetInnerHTML={{ __html: sanitizedSvg }}
                     />
 
                     <div className="px-5 py-3 space-y-1.5 border-t border-terminal-border-subtle">
-                      <FilePath label="File" path={ghExportResult.svgPath} />
+                      <FilePath
+                        label="File"
+                        path={`${ghExportResult.svgPath}  (${formatBytes(ghExportResult.svgContent?.length ?? 0)})`}
+                      />
                       {ghExportResult.replayUrl && (
                         <div className="flex items-center gap-2 text-[11px] font-mono text-terminal-dim">
                           <span className="text-terminal-dimmer w-8 shrink-0">Link</span>
@@ -423,13 +555,20 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                 {ghExportResult?.markdown && (
                   <div className="bg-terminal-surface rounded-2xl border border-terminal-border-subtle shadow-layer-sm overflow-hidden">
                     <div className="px-5 py-3 flex items-center justify-between border-b border-terminal-border-subtle">
-                      <div>
-                        <div className="text-sm font-mono font-semibold text-terminal-orange">
-                          Markdown Summary
+                      <div className="flex items-center gap-2">
+                        <div>
+                          <div className="text-sm font-mono font-semibold text-terminal-orange">
+                            Markdown Summary
+                          </div>
+                          <p className="text-[10px] font-mono text-terminal-dim mt-0.5">
+                            Paste into GitHub PRs, issues, or README files.
+                          </p>
                         </div>
-                        <p className="text-[10px] font-mono text-terminal-dim mt-0.5">
-                          Paste into GitHub PRs, issues, or README files.
-                        </p>
+                        {ghExportResult.mdGeneratedAt && (
+                          <span className="text-[10px] font-mono text-terminal-dimmer self-start mt-0.5">
+                            {relativeTime(ghExportResult.mdGeneratedAt)}
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-2">
                         <CopyButton text={ghExportResult.markdown} label="Copy MD" />
@@ -502,15 +641,15 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                     {ghExporting || githubExporting
                       ? "Generating..."
                       : ghExportResult
-                        ? "Regenerate SVG + Markdown"
-                        : "Generate SVG + Markdown"}
+                        ? "Regenerate GIF + SVG + Markdown"
+                        : "Generate GIF + SVG + Markdown"}
                   </button>
                   {ghError && (
                     <span className="text-[11px] font-mono text-terminal-red">{ghError}</span>
                   )}
                   {!ghExportResult && (
                     <span className="text-[11px] font-mono text-terminal-dim">
-                      Creates an animated SVG preview and a Markdown summary for GitHub
+                      For GitHub PRs, READMEs, websites, email, Slack, and more
                     </span>
                   )}
                 </div>
