@@ -151,13 +151,73 @@ export function replaySuggestedTitle(s: SessionSummary): string {
 
 // ─── Navigation ──────────────────────────────────────────────────────
 
-export function navigateTo(params: Record<string, string | null>) {
+export function navigateTo(
+  params: Record<string, string | null>,
+  options: { replace?: boolean } = {},
+) {
   const url = new URL(window.location.href);
+  const DASHBOARD_PARAMS = ["tab", "project", "q", "archived"];
+
+  // 1. If we are currently on dashboard, capture its state to sessionStorage
+  const isCurrentlyDashboard =
+    url.searchParams.get("view") === "dashboard" ||
+    (!url.searchParams.has("session") &&
+      !url.searchParams.has("gist") &&
+      !url.searchParams.has("url"));
+  if (isCurrentlyDashboard) {
+    const dashboardState: Record<string, string> = {};
+    DASHBOARD_PARAMS.forEach((p) => {
+      const v = url.searchParams.get(p);
+      if (v) dashboardState[p] = v;
+    });
+    if (Object.keys(dashboardState).length > 0) {
+      sessionStorage.setItem("vibe_dashboard_state", JSON.stringify(dashboardState));
+    }
+  }
+
+  // 2. If we are entering a session, remove dashboard params from URL
+  if (params.session) {
+    DASHBOARD_PARAMS.forEach((p) => {
+      if (params[p] === undefined) {
+        url.searchParams.delete(p);
+      }
+    });
+    // Also remove 'view' if we are going to a session
+    if (params.view === undefined) {
+      url.searchParams.delete("view");
+    }
+  }
+
+  // 3. If we are going back to dashboard, restored saved state if URL is empty
+  const goingToDashboard = params.view === "dashboard" || (params.session === null && !params.view);
+  if (goingToDashboard) {
+    const saved = sessionStorage.getItem("vibe_dashboard_state");
+    if (saved) {
+      try {
+        const state = JSON.parse(saved);
+        Object.entries(state).forEach(([k, v]) => {
+          if (params[k] === undefined && !url.searchParams.has(k)) {
+            url.searchParams.set(k, v as string);
+          }
+        });
+      } catch (e) {
+        console.error("Failed to restore dashboard state", e);
+      }
+    }
+    // Clean up viewer params when going back to dashboard
+    url.searchParams.delete("v");
+    url.searchParams.delete("s");
+  }
+
   for (const [key, value] of Object.entries(params)) {
     if (value === null) url.searchParams.delete(key);
     else url.searchParams.set(key, value);
   }
-  window.history.pushState({}, "", url.toString());
+  if (options.replace) {
+    window.history.replaceState({}, "", url.toString());
+  } else {
+    window.history.pushState({}, "", url.toString());
+  }
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 

@@ -21,9 +21,11 @@ export default defineConfig({
     target: "es2022",
   },
   server: {
+    port: process.env.VITE_PORT ? Number(process.env.VITE_PORT) : undefined,
+    strictPort: !!process.env.VITE_PORT,
     proxy: {
       "/api": {
-        target: "http://localhost:13456",
+        target: `http://localhost:${process.env.VITE_API_PORT || "13456"}`,
         changeOrigin: true,
       },
     },

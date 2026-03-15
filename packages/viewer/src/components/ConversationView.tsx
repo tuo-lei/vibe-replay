@@ -114,7 +114,7 @@ export default function ConversationView({
   return (
     <div className="max-w-4xl mx-auto space-y-5 pb-6">
       {displayGroups.map((group, gi) => (
-        <LazyGroup key={gi} forceRender={Math.abs(gi - currentGroupIdx) <= 5}>
+        <LazyGroup key={gi} forceRender={gi <= currentGroupIdx + 5}>
           <GroupCard
             group={group}
             currentIndex={currentIndex}

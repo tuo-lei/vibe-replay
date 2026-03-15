@@ -1,18 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Dashboard from "./components/Dashboard";
+import { navigateTo } from "./components/dashboard-utils";
 import Player from "./components/Player";
+import type { ActiveView } from "./components/ViewTabBar";
 import { useSessionLoader } from "./hooks/useSessionLoader";
 import { useTheme } from "./hooks/useTheme";
 import { useViewPrefs } from "./hooks/useViewPrefs";
 
-function navigateTo(params: Record<string, string | null>) {
-  const url = new URL(window.location.href);
-  for (const [key, value] of Object.entries(params)) {
-    if (value === null) url.searchParams.delete(key);
-    else url.searchParams.set(key, value);
-  }
-  window.history.pushState({}, "", url.toString());
-  window.dispatchEvent(new PopStateEvent("popstate"));
+function getActiveViewFromUrl(): ActiveView {
+  const params = new URLSearchParams(window.location.search);
+  const v = params.get("v");
+  if (v === "summary" || v === "export") return v;
+  return "replay";
 }
 
 function GitHubStarButton() {
@@ -38,7 +37,7 @@ function GitHubStarButton() {
       el.innerHTML = "";
     };
   }, []);
-  return <div ref={ref} className="flex items-center" />;
+  return <div ref={ref} className="flex items-center h-7 overflow-hidden" />;
 }
 
 export default function App() {
@@ -50,6 +49,19 @@ export default function App() {
   const viewerMode = loadState.status === "ready" ? loadState.mode : "embedded";
   const gistOwner = loadState.status === "ready" ? loadState.gistOwner : undefined;
   const isEditor = viewerMode === "editor";
+
+  const [activeView, setActiveView] = useState<ActiveView>(getActiveViewFromUrl());
+
+  useEffect(() => {
+    const handler = () => setActiveView(getActiveViewFromUrl());
+    window.addEventListener("popstate", handler);
+    return () => window.removeEventListener("popstate", handler);
+  }, []);
+
+  const handleViewChange = (view: ActiveView) => {
+    setActiveView(view);
+    navigateTo({ v: view === "replay" ? null : view });
+  };
 
   const hasThinking = useMemo(
     () => session?.scenes.some((s) => s.type === "thinking") ?? false,
@@ -102,20 +114,24 @@ export default function App() {
   if (loadState.status === "dashboard") {
     return (
       <div className="h-screen bg-terminal-bg flex flex-col overflow-hidden">
-        <header className="border-b border-terminal-border-subtle px-4 md:px-5 py-2.5 md:py-3 flex items-center justify-between shrink-0 bg-terminal-surface/30 backdrop-blur-sm safe-top">
+        <header className="border-b border-terminal-border-subtle px-4 md:px-5 py-2.5 md:py-3 flex items-center justify-between shrink-0 glass-effect z-40 safe-top">
           <div className="flex items-center gap-3">
             <button
               onClick={() => navigateTo({ view: null, session: null })}
-              className="text-sm font-sans font-bold bg-gradient-to-r from-[#3fb950] to-[#79b8ff] bg-clip-text text-transparent hover:opacity-80 transition-opacity"
+              className="text-sm font-sans font-bold bg-gradient-to-r from-terminal-green to-terminal-blue bg-clip-text text-transparent hover:opacity-80 transition-opacity"
             >
               vibe-replay
             </button>
-            <span className="inline-flex items-center gap-1 text-[10px] font-sans font-medium px-2 py-0.5 rounded-full bg-terminal-green-subtle text-terminal-green uppercase tracking-wider">
+            <span className="instant-tooltip inline-flex items-center gap-1.5 text-[10px] font-sans font-bold px-2.5 py-1 rounded-full bg-terminal-green/10 text-terminal-green uppercase tracking-wider border border-terminal-green/20">
               <span className="w-1.5 h-1.5 rounded-full bg-terminal-green animate-pulse" />
-              Local
+              Live
+              <span className="instant-tooltip-text">
+                Viewer {window.location.host}
+                {import.meta.env.VITE_API_PORT && ` · API :${import.meta.env.VITE_API_PORT}`}
+              </span>
             </span>
             <span className="text-terminal-border/40 text-sm select-none">|</span>
-            <span className="text-sm font-sans font-medium text-terminal-text">Dashboard</span>
+            <span className="text-sm font-sans font-semibold text-terminal-text/90">Dashboard</span>
           </div>
           <div className="flex items-center gap-2">
             <GitHubStarButton />
@@ -138,21 +154,34 @@ export default function App() {
 
   return (
     <div className="h-screen bg-terminal-bg flex flex-col overflow-hidden">
-      <header className="relative z-30 border-b border-terminal-border-subtle px-4 md:px-5 py-2.5 md:py-3 flex items-center justify-between shrink-0 bg-terminal-surface/30 backdrop-blur-sm safe-top">
+      <header className="relative z-40 border-b border-terminal-border-subtle px-4 md:px-5 py-2.5 md:py-3 flex items-center justify-between shrink-0 glass-effect safe-top">
         {/* Left: branding + session info */}
         <div className="flex items-center gap-2 md:gap-3 min-w-0">
-          <a
-            href="https://vibe-replay.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm font-sans font-bold shrink-0 hover:opacity-80 transition-opacity bg-gradient-to-r from-[#3fb950] to-[#79b8ff] bg-clip-text text-transparent"
-          >
-            vibe-replay
-          </a>
+          {isEditor ? (
+            <button
+              onClick={() => navigateTo({ view: "dashboard", session: null })}
+              className="text-sm font-sans font-bold shrink-0 hover:opacity-80 transition-opacity bg-gradient-to-r from-terminal-green to-terminal-blue bg-clip-text text-transparent"
+            >
+              vibe-replay
+            </button>
+          ) : (
+            <a
+              href="https://vibe-replay.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm font-sans font-bold shrink-0 hover:opacity-80 transition-opacity bg-gradient-to-r from-terminal-green to-terminal-blue bg-clip-text text-transparent"
+            >
+              vibe-replay
+            </a>
+          )}
           {isEditor && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-sans font-medium px-2 py-0.5 rounded-full bg-terminal-green-subtle text-terminal-green uppercase tracking-wider">
+            <span className="instant-tooltip inline-flex items-center gap-1.5 text-[10px] font-sans font-bold px-2.5 py-1 rounded-full bg-terminal-green/10 text-terminal-green uppercase tracking-wider border border-terminal-green/20">
               <span className="w-1.5 h-1.5 rounded-full bg-terminal-green animate-pulse" />
-              Local
+              Live
+              <span className="instant-tooltip-text">
+                Viewer {window.location.host}
+                {import.meta.env.VITE_API_PORT && ` · API :${import.meta.env.VITE_API_PORT}`}
+              </span>
             </span>
           )}
           {showDashboardBack && (
@@ -185,9 +214,12 @@ export default function App() {
               </span>
               <span
                 className="hidden md:inline text-terminal-text text-xs font-sans font-medium truncate max-w-[300px]"
-                title={meta.project}
+                title={meta.title}
               >
                 {meta.title}
+              </span>
+              <span className="shrink-0 px-1.5 py-0.5 text-[10px] font-mono rounded bg-terminal-surface text-terminal-dimmer border border-terminal-border-subtle uppercase tracking-tight">
+                {meta.project || "No Project"}
               </span>
             </>
           )}
@@ -212,7 +244,7 @@ export default function App() {
           {/* Dashboard button (editor mode only, when not already navigated from dashboard) */}
           {isEditor && !showDashboardBack && (
             <button
-              onClick={() => navigateTo({ view: "dashboard" })}
+              onClick={() => navigateTo({ view: "dashboard", session: null })}
               className="h-7 px-2.5 flex items-center gap-1.5 rounded-md bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover text-xs font-sans font-medium transition-colors"
               title="All replays"
             >
@@ -336,7 +368,13 @@ export default function App() {
           </button>
         </div>
       </header>
-      <Player session={session!} viewPrefs={prefs} viewerMode={viewerMode} />
+      <Player
+        session={session!}
+        viewPrefs={prefs}
+        viewerMode={viewerMode}
+        activeView={activeView}
+        setActiveView={handleViewChange}
+      />
     </div>
   );
 }

@@ -101,7 +101,9 @@ program
     if (opts.dashboard) {
       await startDashboard(
         replayBaseDir,
-        DEV_MENU_ENABLED ? { externalViewerUrl: "http://localhost:5173" } : undefined,
+        DEV_MENU_ENABLED
+          ? { externalViewerUrl: `http://localhost:${process.env.VIBE_VIEWER_PORT || "5173"}` }
+          : undefined,
       );
       return;
     }
@@ -136,7 +138,9 @@ program
       if (topChoice === "dashboard") {
         await startDashboard(
           replayBaseDir,
-          DEV_MENU_ENABLED ? { externalViewerUrl: "http://localhost:5173" } : undefined,
+          DEV_MENU_ENABLED
+            ? { externalViewerUrl: `http://localhost:${process.env.VIBE_VIEWER_PORT || "5173"}` }
+            : undefined,
         );
         return;
       }
@@ -438,7 +442,9 @@ program
     } else if (target === "editor") {
       await startServer(join(home, ".vibe-replay"), {
         openSlug: slug,
-        externalViewerUrl: DEV_MENU_ENABLED ? "http://localhost:5173" : undefined,
+        externalViewerUrl: DEV_MENU_ENABLED
+          ? `http://localhost:${process.env.VIBE_VIEWER_PORT || "5173"}`
+          : undefined,
       });
       return; // startServer blocks until Ctrl+C
     } else if (target === "gist") {

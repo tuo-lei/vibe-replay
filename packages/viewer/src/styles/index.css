@@ -56,6 +56,7 @@
   --shadow-xl:
     0 2px 4px hsl(var(--shadow-color) / 0.4), 0 8px 16px hsl(var(--shadow-color) / 0.3),
     0 24px 48px hsl(var(--shadow-color) / 0.25);
+  --surface-subtle-glass: rgba(13, 17, 23, 0.7);
 }
 
 .light {
@@ -103,6 +104,7 @@
   --shadow-xl:
     0 2px 4px hsl(var(--shadow-color) / 0.08), 0 8px 16px hsl(var(--shadow-color) / 0.06),
     0 24px 48px hsl(var(--shadow-color) / 0.05);
+  --surface-subtle-glass: rgba(255, 255, 255, 0.75);
 }
 
 /* Smooth theme transition — scoped to avoid interfering with animations */
@@ -269,19 +271,107 @@ button,
   animation: landing-glow 2.5s ease-in-out infinite;
 }
 
+/* Instant tooltip (no delay, pure CSS) */
+.instant-tooltip {
+  position: relative;
+}
+.instant-tooltip .instant-tooltip-text {
+  visibility: hidden;
+  opacity: 0;
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translateX(-50%);
+  margin-top: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-md);
+  color: var(--text);
+  font:
+    11px / 1.4 var(--font-sans),
+    monospace;
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 50;
+  transition: opacity 0.08s ease;
+}
+.instant-tooltip:hover .instant-tooltip-text {
+  visibility: visible;
+  opacity: 1;
+}
+
 /* Hover lift for interactive cards */
 .hover-lift {
   transition:
-    transform 0.2s cubic-bezier(0.4, 0, 0.2, 1),
-    box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transform 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275),
+    box-shadow 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275),
+    background-color 0.2s ease;
 }
 .hover-lift:hover {
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
+/* Glassmorphism utility */
+.glass-effect {
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  background-color: var(--surface-subtle-glass);
+}
+
+/* Premium card with subtle gradient border */
+.premium-card {
+  position: relative;
+}
+
+.premium-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  padding: 1px;
+  border-radius: inherit;
+  background: linear-gradient(135deg, var(--green-subtle), var(--blue-subtle));
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+/* Skeleton Loading Animation */
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 25%,
+    var(--surface-hover) 50%,
+    var(--surface-2) 75%
+  );
+  background-size: 1000px 100%;
+  animation: shimmer 2s infinite linear;
+  border-radius: 4px;
 }
 
 /* Subtle dot-grid background for premium texture */
 .bg-dot-grid {
-  background-image: radial-gradient(circle, var(--border) 0.5px, transparent 0.5px);
+  background-image: radial-gradient(circle, var(--text) 1px, transparent 1px);
   background-size: 24px 24px;
   opacity: 0.03;
 }

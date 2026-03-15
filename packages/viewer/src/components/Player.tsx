@@ -23,6 +23,8 @@ interface Props {
   session: ReplaySession;
   viewPrefs: ViewPrefs;
   viewerMode?: ViewerMode;
+  activeView: ActiveView;
+  setActiveView: (view: ActiveView) => void;
 }
 
 function flashJumpTarget(el: HTMLElement) {
@@ -35,12 +37,17 @@ function flashJumpTarget(el: HTMLElement) {
   }, 900);
 }
 
-export default function Player({ session, viewPrefs, viewerMode = "embedded" }: Props) {
+export default function Player({
+  session,
+  viewPrefs,
+  viewerMode = "embedded",
+  activeView,
+  setActiveView,
+}: Props) {
   const isReadOnly = viewerMode === "readonly";
   const [landed, setLanded] = useState(false);
   const [navFocusIndex, setNavFocusIndex] = useState<number | undefined>(undefined);
   const [_navJumpSeq, setNavJumpSeq] = useState(0);
-  const [activeView, setActiveView] = useState<ActiveView>("replay");
   const [commentDrawerOpen, setCommentDrawerOpen] = useState(false);
   const [studioDrawerOpen, setStudioDrawerOpen] = useState(false);
   const [commentTargetScene, setCommentTargetScene] = useState<number | null>(null);
@@ -109,7 +116,15 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
 
   // Find a good initial scene index that fills the viewport
   // (end of first assistant group, or second user prompt, whichever comes first)
+  // If ?s=<index> is in the URL, use that for deep-linking to a specific scene.
   const initialSeekIndex = useMemo(() => {
+    const urlScene = new URLSearchParams(window.location.search).get("s");
+    if (urlScene !== null) {
+      const parsed = Number(urlScene);
+      if (Number.isFinite(parsed) && parsed >= 0 && parsed < session.scenes.length) {
+        return parsed;
+      }
+    }
     if (userPromptIndices.length >= 2) {
       return userPromptIndices[1];
     }
@@ -144,6 +159,14 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
     }
   }, [viewPrefs.displayMode, landed, seekTo, initialSeekIndex]);
 
+  // Auto-land if we start on a non-replay view (e.g., direct link to insights)
+  useEffect(() => {
+    if (!landed && activeView !== "replay") {
+      setLanded(true);
+      setTimeout(() => seekTo(initialSeekIndex), 100);
+    }
+  }, [activeView, landed, initialSeekIndex, seekTo]);
+
   const seekFromNavigation = useCallback(
     (index: number) => {
       const clamped = Math.max(0, Math.min(index, session.scenes.length - 1));
@@ -155,9 +178,22 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
       if (navFocusTimerRef.current) clearTimeout(navFocusTimerRef.current);
       navFocusTimerRef.current = setTimeout(() => setNavFocusIndex(undefined), 2500);
       seekTo(clamped);
+      // Scroll + flash is handled by the manual-nav useEffect below (depends on [currentIndex]).
     },
     [pause, seekTo, session.scenes.length],
   );
+
+  // Auto-land if URL has ?s= deep-link (skip landing hero, seek + scroll directly)
+  const hasUrlScene = useMemo(
+    () => new URLSearchParams(window.location.search).get("s") !== null,
+    [],
+  );
+  useEffect(() => {
+    if (!landed && hasUrlScene) {
+      setLanded(true);
+      setTimeout(() => seekFromNavigation(initialSeekIndex), 100);
+    }
+  }, [landed, hasUrlScene, initialSeekIndex, seekFromNavigation]);
 
   const seekToNextPromptWithFeedback = useCallback(() => {
     const next = userPromptIndices.find((i) => i > currentIndex);
@@ -375,7 +411,7 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
       }
 
       attempts += 1;
-      if (attempts < 12) {
+      if (attempts < 30) {
         setTimeout(tryLocateAndFocus, 80);
       } else {
         pendingSeekRef.current = null;
@@ -394,14 +430,30 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
     };
   }, []);
 
+  // Sync currentIndex → URL ?s= param (debounced to avoid noise during playback)
+  const urlSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (currentIndex < 0 || !landed) return;
+    if (urlSyncTimer.current) clearTimeout(urlSyncTimer.current);
+    const delay = state === "playing" ? 500 : 0;
+    urlSyncTimer.current = setTimeout(() => {
+      const url = new URL(window.location.href);
+      url.searchParams.set("s", String(currentIndex));
+      window.history.replaceState({}, "", url.toString());
+    }, delay);
+    return () => {
+      if (urlSyncTimer.current) clearTimeout(urlSyncTimer.current);
+    };
+  }, [currentIndex, state, landed]);
+
   const hasAiStudio = viewerMode === "editor";
   const hasAiFeedback = useMemo(
     () => annotations.some((a) => a.author === "vibe-feedback"),
     [annotations],
   );
 
-  // Show landing page before playback starts
-  if (!landed) {
+  // Show landing page before playback starts, but only if we are in the replay view
+  if (!landed && activeView === "replay") {
     return <LandingHero session={effectiveSession} onStart={handleStart} />;
   }
 
