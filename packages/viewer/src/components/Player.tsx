@@ -178,43 +178,7 @@ export default function Player({
       if (navFocusTimerRef.current) clearTimeout(navFocusTimerRef.current);
       navFocusTimerRef.current = setTimeout(() => setNavFocusIndex(undefined), 2500);
       seekTo(clamped);
-
-      // Fallback scroll: retry until the target DOM element appears, then scroll to it.
-      // The useEffect-based scroll can miss due to render timing; this is more robust.
-      let scrollAttempts = 0;
-      const tryScroll = () => {
-        const el = scrollRef.current;
-        if (!el) return;
-        // Find exact match or nearest preceding data-scene-index
-        let target = el.querySelector(`[data-scene-index="${clamped}"]`) as HTMLElement | null;
-        if (!target) {
-          const blocks = Array.from(el.querySelectorAll("[data-scene-index]")) as HTMLElement[];
-          for (const block of blocks) {
-            const idx = Number(block.getAttribute("data-scene-index"));
-            if (
-              idx <= clamped &&
-              (!target || idx > Number(target.getAttribute("data-scene-index")))
-            ) {
-              target = block;
-            }
-          }
-        }
-        if (target) {
-          const containerRect = el.getBoundingClientRect();
-          const targetRect = target.getBoundingClientRect();
-          const offset = targetRect.top - containerRect.top + el.scrollTop;
-          el.scrollTo({
-            top: Math.max(0, offset - containerRect.height * 0.3),
-            behavior: "smooth",
-          });
-          flashJumpTarget(target);
-          pendingSeekRef.current = null;
-        } else if (++scrollAttempts < 20) {
-          requestAnimationFrame(tryScroll);
-        }
-      };
-      // Wait for React to commit the new visibleCount to the DOM
-      requestAnimationFrame(() => requestAnimationFrame(tryScroll));
+      // Scroll + flash is handled by the manual-nav useEffect below (depends on [currentIndex]).
     },
     [pause, seekTo, session.scenes.length],
   );
@@ -447,7 +411,7 @@ export default function Player({
       }
 
       attempts += 1;
-      if (attempts < 12) {
+      if (attempts < 30) {
         setTimeout(tryLocateAndFocus, 80);
       } else {
         pendingSeekRef.current = null;
