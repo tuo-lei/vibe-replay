@@ -15,8 +15,6 @@ pnpm start                 # Build + run interactive picker
 pnpm dev                   # Viewer (Vite HMR) + CLI (tsx watch) together
 pnpm dev:dashboard         # Dev mode with dashboard flag (-d)
 pnpm dev:website           # Website (Astro HMR) + Viewer (Vite HMR) together
-pnpm viewer:dev            # Viewer only
-pnpm cli:dev               # CLI only (tsx)
 pnpm test                  # Run tests
 pnpm lint                  # Lint + format (auto-fix)
 pnpm lint:check            # Lint check (no fix, for CI)
@@ -26,8 +24,6 @@ When to use which:
 - `pnpm start` — validate full user flow (build + run)
 - `pnpm dev` — daily iteration with full HMR: viewer auto-reloads via Vite, CLI auto-restarts via `tsx watch`
 - `pnpm dev:website` — website + viewer iteration: Astro HMR + `/view/` redirects to Vite viewer
-- `pnpm viewer:dev` — UI-only changes
-- `pnpm cli:dev` — parser/CLI-only changes
 
 ## Gotchas
 
