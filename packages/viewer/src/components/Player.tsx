@@ -23,6 +23,8 @@ interface Props {
   session: ReplaySession;
   viewPrefs: ViewPrefs;
   viewerMode?: ViewerMode;
+  activeView: ActiveView;
+  setActiveView: (view: ActiveView) => void;
 }
 
 function flashJumpTarget(el: HTMLElement) {
@@ -35,12 +37,17 @@ function flashJumpTarget(el: HTMLElement) {
   }, 900);
 }
 
-export default function Player({ session, viewPrefs, viewerMode = "embedded" }: Props) {
+export default function Player({
+  session,
+  viewPrefs,
+  viewerMode = "embedded",
+  activeView,
+  setActiveView,
+}: Props) {
   const isReadOnly = viewerMode === "readonly";
   const [landed, setLanded] = useState(false);
   const [navFocusIndex, setNavFocusIndex] = useState<number | undefined>(undefined);
   const [_navJumpSeq, setNavJumpSeq] = useState(0);
-  const [activeView, setActiveView] = useState<ActiveView>("replay");
   const [commentDrawerOpen, setCommentDrawerOpen] = useState(false);
   const [studioDrawerOpen, setStudioDrawerOpen] = useState(false);
   const [commentTargetScene, setCommentTargetScene] = useState<number | null>(null);
@@ -143,6 +150,14 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
       }
     }
   }, [viewPrefs.displayMode, landed, seekTo, initialSeekIndex]);
+
+  // Auto-land if we start on a non-replay view (e.g., direct link to insights)
+  useEffect(() => {
+    if (!landed && activeView !== "replay") {
+      setLanded(true);
+      setTimeout(() => seekTo(initialSeekIndex), 100);
+    }
+  }, [activeView, landed, initialSeekIndex, seekTo]);
 
   const seekFromNavigation = useCallback(
     (index: number) => {
@@ -400,8 +415,8 @@ export default function Player({ session, viewPrefs, viewerMode = "embedded" }: 
     [annotations],
   );
 
-  // Show landing page before playback starts
-  if (!landed) {
+  // Show landing page before playback starts, but only if we are in the replay view
+  if (!landed && activeView === "replay") {
     return <LandingHero session={effectiveSession} onStart={handleStart} />;
   }
 

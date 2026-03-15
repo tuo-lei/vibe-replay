@@ -18,7 +18,7 @@ import { formatDuration } from "./StatsPanel";
 // ─── Types ───────────────────────────────────────────────────────────
 
 interface DashboardHomeProps {
-  onNavigate: (view: "sessions" | "replays") => void;
+  onNavigate: (view: "home" | "sessions" | "replays") => void;
 }
 
 interface InsightStats {
@@ -346,24 +346,60 @@ function MetricCard({
     purple: "text-terminal-purple",
   };
   const bgColor: Record<string, string> = {
-    green: "bg-terminal-green-subtle",
-    blue: "bg-terminal-blue-subtle",
-    orange: "bg-terminal-orange-subtle",
-    purple: "bg-terminal-purple-subtle",
+    green: "bg-terminal-green/10",
+    blue: "bg-terminal-blue/10",
+    orange: "bg-terminal-orange/10",
+    purple: "bg-terminal-purple/10",
   };
+  const gradientBorder: Record<string, string> = {
+    green: "from-terminal-green/20 to-terminal-blue/10",
+    blue: "from-terminal-blue/20 to-terminal-cyan/10",
+    orange: "from-terminal-orange/20 to-terminal-red/10",
+    purple: "from-terminal-purple/20 to-terminal-blue/10",
+  };
+
   return (
-    <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm hover:bg-terminal-surface-hover transition-colors duration-200">
-      <div className="flex items-start justify-between">
-        <div className="space-y-1">
-          <p className="text-xs font-sans text-terminal-dim uppercase tracking-wider">{label}</p>
-          <p className={`text-2xl font-mono font-bold tabular-nums ${textColor[color]}`}>{value}</p>
-          {sub && <p className="text-xs font-mono text-terminal-dimmer">{sub}</p>}
+    <div className="premium-card bg-terminal-surface rounded-xl p-5 shadow-layer-sm hover:bg-terminal-surface-hover transition-all duration-300 hover-lift group">
+      <div className="flex items-start justify-between relative z-10">
+        <div className="space-y-1.5">
+          <p className="text-[10px] font-sans font-bold text-terminal-dim uppercase tracking-widest opacity-80 group-hover:opacity-100 transition-opacity">
+            {label}
+          </p>
+          <p
+            className={`text-3xl font-mono font-bold tabular-nums tracking-tight ${textColor[color]}`}
+          >
+            {value}
+          </p>
+          {sub && (
+            <p className="text-[11px] font-mono text-terminal-dimmer flex items-center gap-1.5">
+              <span className={`w-1 h-1 rounded-full ${textColor[color]} opacity-50`} />
+              {sub}
+            </p>
+          )}
         </div>
         <div
-          className={`w-9 h-9 rounded-lg flex items-center justify-center ${bgColor[color]} opacity-70`}
+          className={`w-11 h-11 rounded-xl flex items-center justify-center ${bgColor[color]} border border-white/5 shadow-inner transition-transform duration-300 group-hover:scale-110 group-hover:rotate-3`}
         >
           {icon}
         </div>
+      </div>
+      <div
+        className={`absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 bg-gradient-to-br ${gradientBorder[color]} blur-2xl -z-10 pointer-events-none`}
+      />
+    </div>
+  );
+}
+
+function MetricCardSkeleton() {
+  return (
+    <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm space-y-3">
+      <div className="flex justify-between">
+        <div className="space-y-2 flex-1">
+          <div className="h-3 w-20 skeleton opacity-40" />
+          <div className="h-8 w-24 skeleton opacity-60" />
+          <div className="h-3 w-32 skeleton opacity-30" />
+        </div>
+        <div className="w-11 h-11 rounded-xl skeleton opacity-20" />
       </div>
     </div>
   );
@@ -434,12 +470,16 @@ function ActivityChart({ data }: { data: InsightStats["activityByDay"] }) {
                 className={`rounded-sm transition-all duration-200 ${isToday ? "ring-1 ring-terminal-orange/30" : ""} ${total > 0 ? "hover:opacity-80" : ""}`}
                 style={{
                   height: `${heightPct}%`,
-                  minHeight: total > 0 ? "3px" : "0",
+                  minHeight: total > 0 ? "4px" : "0",
                   background:
                     total > 0
                       ? `linear-gradient(to top, var(--orange) ${claudePct}%, var(--blue) ${claudePct}%)`
                       : "transparent",
-                  opacity: total > 0 ? 0.7 : 0.1,
+                  opacity: total > 0 ? 0.8 : 0.05,
+                  boxShadow:
+                    total > 0
+                      ? `0 0 10px ${d.claude > d.cursor ? "var(--orange-subtle)" : "var(--blue-subtle)"}`
+                      : "none",
                 }}
               />
             </div>
@@ -907,16 +947,22 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     }
   };
 
-  if (loading && sources.length === 0 && replays.length === 0) {
+  if (loading && !sources.length && !replays.length) {
     return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="text-center space-y-2">
-          <div className="w-1.5 h-1.5 rounded-full bg-terminal-green animate-pulse mx-auto" />
-          <div className="text-sm font-mono text-terminal-dim animate-pulse">
-            Loading dashboard...
+      <div className="flex-1 overflow-auto p-4 md:p-8 space-y-8 animate-in fade-in duration-500">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <MetricCardSkeleton key={i} />
+          ))}
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 space-y-6">
+            <div className="bg-terminal-surface rounded-xl p-6 h-[300px] skeleton opacity-10" />
+            <div className="bg-terminal-surface rounded-xl p-6 h-[400px] skeleton opacity-10" />
           </div>
-          <div className="text-xs font-mono text-terminal-dimmer">
-            Cursor history may take longer on large workspaces
+          <div className="space-y-6">
+            <div className="bg-terminal-surface rounded-xl p-6 h-[250px] skeleton opacity-10" />
+            <div className="bg-terminal-surface rounded-xl p-6 h-[350px] skeleton opacity-10" />
           </div>
         </div>
       </div>

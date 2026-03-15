@@ -27,6 +27,20 @@ import { formatDuration } from "./StatsPanel";
 
 type Tab = "home" | "sessions" | "replays";
 
+// ─── URL state parsers (module-level for stable references) ─────────
+function getProjectFromUrl(): string {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("project") || ALL_PROJECTS;
+}
+function getFilterFromUrl(): string {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("q") || "";
+}
+function getShowArchivedFromUrl(): boolean {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("archived") === "true";
+}
+
 const MoreDotsIcon = () => (
   <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
     <circle cx="8" cy="3" r="1.5" />
@@ -247,18 +261,21 @@ function ReplayCard({
 
   return (
     <div
-      className={`bg-terminal-surface rounded-xl px-5 py-4 hover:bg-terminal-surface-hover transition-colors duration-200 ease-material space-y-2.5 shadow-layer-sm hover-lift ${isArchived ? "opacity-50" : ""}`}
+      onClick={onOpen}
+      className={`bg-terminal-surface rounded-xl px-5 py-5 hover:bg-terminal-surface-hover transition-all duration-300 ease-material space-y-3.5 shadow-layer-sm cursor-pointer hover-lift ${isArchived ? "opacity-50" : ""}`}
     >
       {/* Row 1: title + badges + actions */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex-1 flex items-center gap-2 min-w-0">
           {onTitleSave ? (
-            <EditableTitle
-              slug={s.slug}
-              title={s.title}
-              fallbackTitle={replaySuggestedTitle(s)}
-              onSave={onTitleSave}
-            />
+            <div onClick={(e) => e.stopPropagation()}>
+              <EditableTitle
+                slug={s.slug}
+                title={s.title}
+                fallbackTitle={replaySuggestedTitle(s)}
+                onSave={onTitleSave}
+              />
+            </div>
           ) : (
             <div className="flex-1 min-w-0">
               <span className="text-sm font-sans font-medium text-terminal-text truncate block">
@@ -276,6 +293,7 @@ function ReplayCard({
               href={s.gist.viewerUrl}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
               className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0"
               title={`View on vibe-replay.com`}
             >
@@ -294,7 +312,10 @@ function ReplayCard({
           )}
           {s.gist?.outdated && onPublishGist && (
             <button
-              onClick={onPublishGist}
+              onClick={(e) => {
+                e.stopPropagation();
+                onPublishGist();
+              }}
               disabled={isPublishing}
               className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-orange-subtle text-terminal-orange hover:bg-terminal-orange-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50"
             >
@@ -303,7 +324,10 @@ function ReplayCard({
           )}
           {ghAvailable && onPublishGist && !s.gist?.gistId && (
             <button
-              onClick={onPublishGist}
+              onClick={(e) => {
+                e.stopPropagation();
+                onPublishGist();
+              }}
               disabled={isPublishing}
               className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50"
               title="Publish to Gist"
@@ -408,7 +432,8 @@ function ReplayCard({
                       {confirmingDelete ? (
                         <div className="flex items-center gap-1 px-2 py-1">
                           <button
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation();
                               onDelete();
                               setConfirmingDelete(false);
                               setMenuOpen(false);
@@ -585,8 +610,36 @@ function SessionsPanel() {
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const [refreshClockMs, setRefreshClockMs] = useState(() => Date.now());
-  const [selectedProject, setSelectedProject] = useState<string>(ALL_PROJECTS);
-  const [filter, setFilter] = useState("");
+  const [selectedProject, setSelectedProject] = useState<string>(getProjectFromUrl());
+  const [filter, setFilter] = useState(getFilterFromUrl());
+  const [showArchived, setShowArchived] = useState(getShowArchivedFromUrl());
+
+  useEffect(() => {
+    const handler = () => {
+      setSelectedProject(getProjectFromUrl());
+      setFilter(getFilterFromUrl());
+      setShowArchived(getShowArchivedFromUrl());
+    };
+    window.addEventListener("popstate", handler);
+    return () => window.removeEventListener("popstate", handler);
+  }, []);
+
+  const handleProjectChange = (project: string) => {
+    setSelectedProject(project);
+    navigateTo({ project: project === ALL_PROJECTS ? null : project });
+  };
+
+  const handleFilterChange = (val: string) => {
+    setFilter(val);
+    navigateTo({ q: val || null }, { replace: true });
+  };
+
+  const handleToggleArchived = () => {
+    const next = !showArchived;
+    setShowArchived(next);
+    navigateTo({ archived: next ? "true" : null });
+  };
+
   const [generatingSlug, setGeneratingSlug] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [titleInput, setTitleInput] = useState<{ slug: string; defaultTitle: string } | null>(null);
@@ -594,7 +647,6 @@ function SessionsPanel() {
   const titleInputRef = useRef<HTMLInputElement>(null);
   const wasEnrichingRef = useRef(false);
   const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());
-  const [showArchived, setShowArchived] = useState(false);
   const [ghAvailable, setGhAvailable] = useState<boolean | null>(null);
   const [publishingSlug, setPublishingSlug] = useState<string | null>(null);
   const [enrichmentStatus, setEnrichmentStatus] = useState<SourcesEnrichmentStatus | null>(null);
@@ -937,7 +989,7 @@ function SessionsPanel() {
         <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
           {/* All projects */}
           <button
-            onClick={() => setSelectedProject(ALL_PROJECTS)}
+            onClick={() => handleProjectChange(ALL_PROJECTS)}
             className={`w-full text-left px-3 py-2.5 text-xs font-sans rounded-lg transition-all duration-200 ease-material flex items-center justify-between ${
               selectedProject === ALL_PROJECTS
                 ? "bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
@@ -968,7 +1020,7 @@ function SessionsPanel() {
             return (
               <button
                 key={project}
-                onClick={() => setSelectedProject(project)}
+                onClick={() => handleProjectChange(project)}
                 title={project}
                 className={`w-full text-left px-3 py-2.5 rounded-lg transition-all duration-200 ease-material group ${
                   isActive
@@ -1038,7 +1090,7 @@ function SessionsPanel() {
         <div className="md:hidden px-3 pt-3">
           <select
             value={selectedProject}
-            onChange={(e) => setSelectedProject(e.target.value)}
+            onChange={(e) => handleProjectChange(e.target.value)}
             className="w-full bg-terminal-surface rounded-lg px-3 py-2.5 text-sm font-sans text-terminal-text outline-none shadow-layer-sm"
           >
             <option value={ALL_PROJECTS}>All projects ({sources.length})</option>
@@ -1088,14 +1140,14 @@ function SessionsPanel() {
               </svg>
               <input
                 value={filter}
-                onChange={(e) => setFilter(e.target.value)}
+                onChange={(e) => handleFilterChange(e.target.value)}
                 placeholder="Filter by branch, title, prompt..."
                 className="w-full bg-terminal-surface rounded-lg pl-9 pr-3 py-2.5 text-sm font-mono text-terminal-text placeholder:text-terminal-dimmer outline-none ring-1 ring-transparent focus:ring-terminal-green/40 transition-shadow duration-200 shadow-layer-sm"
               />
             </div>
             {archivedCount > 0 && (
               <button
-                onClick={() => setShowArchived(!showArchived)}
+                onClick={handleToggleArchived}
                 className={`shrink-0 px-2.5 py-2 text-xs font-mono rounded-lg transition-colors duration-200 ${
                   showArchived
                     ? "bg-terminal-orange-subtle text-terminal-orange"
@@ -1258,7 +1310,8 @@ function SessionsPanel() {
                 return (
                   <div
                     key={`${s.provider}-${s.slug}`}
-                    className={`bg-terminal-surface rounded-xl px-5 py-4 hover:bg-terminal-surface-hover transition-colors duration-200 ease-material space-y-2.5 shadow-layer-sm hover-lift ${isArchived ? "opacity-50" : ""}`}
+                    onClick={() => handleGenerate(s)}
+                    className={`bg-terminal-surface rounded-xl px-5 py-4 hover:bg-terminal-surface-hover transition-all duration-300 ease-material space-y-2.5 shadow-layer-sm cursor-pointer hover-lift ${isArchived ? "opacity-50" : ""}`}
                   >
                     {/* Row 1: title + meta (left) / time + actions (right) */}
                     <div className="flex items-start justify-between gap-3">
@@ -1295,7 +1348,10 @@ function SessionsPanel() {
                         </span>
                         <div className="flex items-center gap-1.5">
                           <button
-                            onClick={() => handleGenerate(s)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleGenerate(s);
+                            }}
                             disabled={generatingSlug === s.slug}
                             className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1 disabled:opacity-50"
                           >
@@ -1382,13 +1438,40 @@ function ReplaysPanel() {
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const [refreshClockMs, setRefreshClockMs] = useState(() => Date.now());
   const [ghAvailable, setGhAvailable] = useState<boolean | null>(null);
-  const [filter, setFilter] = useState("");
+  const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [publishingSlug, setPublishingSlug] = useState<string | null>(null);
   const [regeneratingSlug, setRegeneratingSlug] = useState<string | null>(null);
-  const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());
-  const [showArchived, setShowArchived] = useState(false);
-  const [selectedProject, setSelectedProject] = useState<string>(ALL_PROJECTS);
+
+  const [filter, setFilter] = useState(getFilterFromUrl());
+  const [selectedProject, setSelectedProject] = useState<string>(getProjectFromUrl());
+  const [showArchived, setShowArchived] = useState(getShowArchivedFromUrl());
+
+  useEffect(() => {
+    const handler = () => {
+      setSelectedProject(getProjectFromUrl());
+      setFilter(getFilterFromUrl());
+      setShowArchived(getShowArchivedFromUrl());
+    };
+    window.addEventListener("popstate", handler);
+    return () => window.removeEventListener("popstate", handler);
+  }, []);
+
+  const handleProjectChange = (project: string) => {
+    setSelectedProject(project);
+    navigateTo({ project: project === ALL_PROJECTS ? null : project });
+  };
+
+  const handleFilterChange = (val: string) => {
+    setFilter(val);
+    navigateTo({ q: val || null }, { replace: true });
+  };
+
+  const handleToggleArchived = () => {
+    const next = !showArchived;
+    setShowArchived(next);
+    navigateTo({ archived: next ? "true" : null });
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -1661,7 +1744,7 @@ function ReplaysPanel() {
         <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
           {/* All projects */}
           <button
-            onClick={() => setSelectedProject(ALL_PROJECTS)}
+            onClick={() => handleProjectChange(ALL_PROJECTS)}
             className={`w-full text-left px-3 py-2.5 text-xs font-mono rounded-lg transition-all duration-200 ease-material flex items-center justify-between ${
               selectedProject === ALL_PROJECTS
                 ? "bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
@@ -1690,7 +1773,7 @@ function ReplaysPanel() {
             return (
               <button
                 key={project}
-                onClick={() => setSelectedProject(project)}
+                onClick={() => handleProjectChange(project)}
                 title={project}
                 className={`w-full text-left px-3 py-2.5 rounded-lg transition-all duration-200 ease-material group ${
                   isActive
@@ -1744,7 +1827,7 @@ function ReplaysPanel() {
         <div className="md:hidden px-3 pt-3">
           <select
             value={selectedProject}
-            onChange={(e) => setSelectedProject(e.target.value)}
+            onChange={(e) => handleProjectChange(e.target.value)}
             className="w-full bg-terminal-surface rounded-lg px-3 py-2.5 text-sm font-mono text-terminal-text outline-none shadow-layer-sm"
           >
             <option value={ALL_PROJECTS}>All replays ({visibleSessions.length})</option>
@@ -1791,14 +1874,14 @@ function ReplaysPanel() {
                 </svg>
                 <input
                   value={filter}
-                  onChange={(e) => setFilter(e.target.value)}
+                  onChange={(e) => handleFilterChange(e.target.value)}
                   placeholder="Filter replays..."
                   className="w-full bg-terminal-surface rounded-lg pl-9 pr-3 py-2.5 text-sm font-mono text-terminal-text placeholder:text-terminal-dimmer outline-none ring-1 ring-transparent focus:ring-terminal-green/40 transition-shadow duration-200 shadow-layer-sm"
                 />
               </div>
               {archivedCount > 0 && (
                 <button
-                  onClick={() => setShowArchived(!showArchived)}
+                  onClick={handleToggleArchived}
                   className={`shrink-0 px-2.5 py-2 text-xs font-mono rounded-lg transition-colors duration-200 ${
                     showArchived
                       ? "bg-terminal-orange-subtle text-terminal-orange"
@@ -1832,14 +1915,14 @@ function ReplaysPanel() {
               </svg>
               <input
                 value={filter}
-                onChange={(e) => setFilter(e.target.value)}
+                onChange={(e) => handleFilterChange(e.target.value)}
                 placeholder="Filter replays..."
                 className="w-full bg-terminal-surface rounded-lg pl-9 pr-3 py-2.5 text-sm font-mono text-terminal-text placeholder:text-terminal-dimmer outline-none ring-1 ring-transparent focus:ring-terminal-green/40 transition-shadow duration-200 shadow-layer-sm"
               />
             </div>
             {archivedCount > 0 && (
               <button
-                onClick={() => setShowArchived(!showArchived)}
+                onClick={handleToggleArchived}
                 className={`shrink-0 px-2.5 py-2 text-xs font-mono rounded-lg transition-colors duration-200 ${
                   showArchived
                     ? "bg-terminal-orange-subtle text-terminal-orange"
@@ -1932,12 +2015,32 @@ function ReplaysPanel() {
 
 export default function Dashboard() {
   const isEditor = !!window.__VIBE_REPLAY_EDITOR__;
-  const [tab, setTab] = useState<Tab>(isEditor ? "home" : "replays");
+
+  // Sync tab with URL query param
+  const getTabFromUrl = useCallback((): Tab => {
+    const params = new URLSearchParams(window.location.search);
+    const t = params.get("tab") as Tab;
+    if (t === "home" || t === "sessions" || t === "replays") return t;
+    return isEditor ? "home" : "replays";
+  }, [isEditor]);
+
+  const [tab, setTab] = useState<Tab>(getTabFromUrl());
+
+  useEffect(() => {
+    const handler = () => setTab(getTabFromUrl());
+    window.addEventListener("popstate", handler);
+    return () => window.removeEventListener("popstate", handler);
+  }, [getTabFromUrl]);
+
+  const handleTabChange = (id: Tab) => {
+    setTab(id);
+    navigateTo({ tab: id });
+  };
 
   const tabButton = (id: Tab, label: string) => (
     <button
       key={id}
-      onClick={() => setTab(id)}
+      onClick={() => handleTabChange(id)}
       className={`px-5 py-2 text-xs font-sans font-semibold rounded-lg transition-all duration-200 ease-material ${
         tab === id
           ? "bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
@@ -1963,7 +2066,7 @@ export default function Dashboard() {
 
       {/* Tab content */}
       {tab === "home" && isEditor ? (
-        <DashboardHome onNavigate={setTab} />
+        <DashboardHome onNavigate={handleTabChange} />
       ) : tab === "sessions" && isEditor ? (
         <SessionsPanel />
       ) : (
