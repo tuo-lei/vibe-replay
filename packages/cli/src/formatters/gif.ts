@@ -7,7 +7,7 @@
  * Quality notes (from research):
  * - Render at exactly 1x (SVG native size) — non-integer scaling creates extra
  *   anti-aliasing shades that the 256-color quantizer can't preserve well
- * - Use prequantize() to consolidate near-identical dark shades before quantize()
+ * - snapColorsToPalette() pins exact theme colors after quantization
  * - 256 colors with snapColorsToPalette gives the best color accuracy — the
  *   extra palette entries let the quantizer preserve subtle shades while
  *   snapColorsToPalette pins our exact theme colors in the final palette
@@ -98,7 +98,7 @@ export async function generateGitHubGif(
     });
     const rendered = resvg.render();
     rasterizedFrames.push({
-      data: new Uint8Array(rendered.pixels.buffer),
+      data: new Uint8Array(rendered.pixels),
       width: rendered.width,
       height: rendered.height,
     });
@@ -111,7 +111,7 @@ export async function generateGitHubGif(
   const gif = gifenc.GIFEncoder();
 
   for (let i = 0; i < rasterizedFrames.length; i++) {
-    // Clone data — prequantize modifies in place
+    // Clone data — quantize reads via shared Uint32Array view
     const data = new Uint8Array(rasterizedFrames[i].data);
 
     // Quantize then snap palette to exact theme colors

@@ -216,7 +216,11 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
   const renderedMarkdown = useMemo(() => {
     if (!ghExportResult?.markdown) return "";
     // Strip the image line — preview is shown separately (GIF or SVG)
-    const md = ghExportResult.markdown.replace(/!\[[^\]]*\]\([^)]*\.(?:svg|gif)\)\n*/g, "");
+    // Handles both plain images ![alt](path.gif) and clickable [![alt](path.gif)](url)
+    const md = ghExportResult.markdown.replace(
+      /\[?!\[[^\]]*\]\([^)]*\.(?:svg|gif)\)\]?(?:\([^)]*\))?\n*/g,
+      "",
+    );
     return sanitizeHtml(marked.parse(md) as string);
   }, [ghExportResult?.markdown]);
 

@@ -1,3 +1,4 @@
+import { isSystemGeneratedMessage } from "@vibe-replay/types";
 import type { SessionSummary, SourceSession } from "../types";
 
 // ─── Shared types ────────────────────────────────────────────────────
@@ -111,20 +112,6 @@ export function normalizeTitleText(value?: string): string {
   return (value || "").replace(/\s+/g, " ").trim().slice(0, TITLE_MAX_CHARS);
 }
 
-/** Detect system-generated user messages that aren't real human prompts */
-function isSystemGeneratedMessage(text: string): boolean {
-  return (
-    text.startsWith("[Request interrupted by user") ||
-    text.startsWith("<command-name>") ||
-    text.startsWith("<command-message>") ||
-    text.startsWith("<local-command-caveat>") ||
-    text.startsWith("<local-command-stdout>") ||
-    text.startsWith("<task-notification>") ||
-    text.startsWith("<bash-input>") ||
-    text.startsWith("<bash-stdout>")
-  );
-}
-
 /** Strip system-injected noise from first prompt for display */
 export function cleanPrompt(text: string): string {
   // Skip system-generated messages entirely
@@ -193,6 +180,8 @@ export function navigateTo(
     });
     if (Object.keys(dashboardState).length > 0) {
       sessionStorage.setItem("vibe_dashboard_state", JSON.stringify(dashboardState));
+    } else {
+      sessionStorage.removeItem("vibe_dashboard_state");
     }
   }
 

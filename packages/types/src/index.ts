@@ -1,3 +1,24 @@
+// ─── Runtime helpers (shared by CLI and viewer) ─────────────────────
+
+/**
+ * Detect system-generated user messages that aren't real human prompts.
+ * These should be skipped entirely when looking for meaningful prompts.
+ */
+export function isSystemGeneratedMessage(text: string): boolean {
+  return (
+    text.startsWith("[Request interrupted by user") ||
+    text.startsWith("<command-name>") ||
+    text.startsWith("<command-message>") ||
+    text.startsWith("<local-command-caveat>") ||
+    text.startsWith("<local-command-stdout>") ||
+    text.startsWith("<task-notification>") ||
+    text.startsWith("<bash-input>") ||
+    text.startsWith("<bash-stdout>")
+  );
+}
+
+// ─── Types ───────────────────────────────────────────────────────────
+
 export type DataSource = "jsonl" | "sqlite" | "jsonl+tools" | "global-state";
 
 export interface TokenUsage {
