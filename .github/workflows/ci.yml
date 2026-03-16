@@ -88,3 +88,18 @@ jobs:
           # Verify the CLI actually runs
           npx vibe-replay --version
           echo "Publish simulation passed — package installs and runs correctly"
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install chromium --with-deps
+      - run: pnpm test:e2e
