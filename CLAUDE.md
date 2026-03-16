@@ -15,7 +15,8 @@ pnpm start                 # Build + run interactive picker
 pnpm dev                   # Viewer (Vite HMR) + CLI (tsx watch) together
 pnpm dev:dashboard         # Dev mode with dashboard flag (-d)
 pnpm dev:website           # Website (Astro HMR) + Viewer (Vite HMR) together
-pnpm test                  # Run tests
+pnpm test                  # Run unit tests
+pnpm test:e2e              # Run E2E tests (requires pnpm build first)
 pnpm lint                  # Lint + format (auto-fix)
 pnpm lint:check            # Lint check (no fix, for CI)
 ```
