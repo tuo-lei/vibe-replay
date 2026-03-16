@@ -215,6 +215,17 @@ describe("cursor sqlite metrics helpers", () => {
     expect(mapped.new_string).toContain("new c");
   });
 
+  it("preserves context lines when parsing ApplyPatch diff text", () => {
+    const mapped = __testables.mapToolArgs(
+      "ApplyPatch",
+      "*** Begin Patch\n*** Update File: /tmp/ctx.ts\n@@\n shared before\n-old value\n+new value\n shared after\n*** End Patch",
+    ) as any;
+    expect(mapped.old_string).toContain("shared before");
+    expect(mapped.old_string).toContain("shared after");
+    expect(mapped.new_string).toContain("shared before");
+    expect(mapped.new_string).toContain("shared after");
+  });
+
   it("maps global-state Cursor tool aliases to canonical names", () => {
     expect(__testables.mapCursorToolName("run_terminal_cmd")).toBe("Bash");
     expect(__testables.mapCursorToolName("read_file")).toBe("Read");

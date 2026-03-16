@@ -1419,6 +1419,10 @@ function parseApplyPatchArgs(rawPatch: string): Record<string, any> {
       oldLines.push(line.slice(1));
     } else if (line.startsWith("+")) {
       newLines.push(line.slice(1));
+    } else if (line.startsWith(" ")) {
+      const shared = line.slice(1);
+      oldLines.push(shared);
+      newLines.push(shared);
     }
   }
   return {
