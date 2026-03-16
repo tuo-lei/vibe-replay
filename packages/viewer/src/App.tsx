@@ -51,6 +51,7 @@ export default function App() {
   const isEditor = viewerMode === "editor";
 
   const [activeView, setActiveView] = useState<ActiveView>(getActiveViewFromUrl());
+  const returnToLandingRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const handler = () => setActiveView(getActiveViewFromUrl());
@@ -212,12 +213,17 @@ export default function App() {
               <span className="hidden md:inline text-terminal-border/40 text-sm select-none">
                 |
               </span>
-              <span
-                className="hidden md:inline text-terminal-text text-xs font-sans font-medium truncate max-w-[300px]"
-                title={meta.title}
+              <button
+                type="button"
+                onClick={() => {
+                  returnToLandingRef.current?.();
+                  handleViewChange("replay");
+                }}
+                className="hidden md:inline text-terminal-text text-xs font-sans font-medium truncate max-w-[300px] hover:text-terminal-green transition-colors"
+                title="Back to landing page"
               >
                 {meta.title}
-              </span>
+              </button>
               <span className="shrink-0 px-1.5 py-0.5 text-[10px] font-mono rounded bg-terminal-surface text-terminal-dimmer border border-terminal-border-subtle uppercase tracking-tight">
                 {meta.project || "No Project"}
               </span>
@@ -374,6 +380,7 @@ export default function App() {
         viewerMode={viewerMode}
         activeView={activeView}
         setActiveView={handleViewChange}
+        returnToLandingRef={returnToLandingRef}
       />
     </div>
   );

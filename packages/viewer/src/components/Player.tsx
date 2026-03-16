@@ -25,6 +25,8 @@ interface Props {
   viewerMode?: ViewerMode;
   activeView: ActiveView;
   setActiveView: (view: ActiveView) => void;
+  /** Ref that Player populates with a function to return to the landing page */
+  returnToLandingRef?: React.MutableRefObject<(() => void) | null>;
 }
 
 function flashJumpTarget(el: HTMLElement) {
@@ -43,9 +45,29 @@ export default function Player({
   viewerMode = "embedded",
   activeView,
   setActiveView,
+  returnToLandingRef,
 }: Props) {
   const isReadOnly = viewerMode === "readonly";
   const [landed, setLanded] = useState(false);
+
+  // Expose a callback so the parent header can return to the landing page
+  useEffect(() => {
+    if (returnToLandingRef) {
+      returnToLandingRef.current = () => {
+        setLanded(false);
+        // Clear ?s= deep-link so the auto-land effect doesn't immediately re-land
+        setHasUrlScene(false);
+        const url = new URL(window.location.href);
+        if (url.searchParams.has("s")) {
+          url.searchParams.delete("s");
+          window.history.replaceState({}, "", url.toString());
+        }
+      };
+      return () => {
+        returnToLandingRef.current = null;
+      };
+    }
+  }, [returnToLandingRef]);
   const [navFocusIndex, setNavFocusIndex] = useState<number | undefined>(undefined);
   const [_navJumpSeq, setNavJumpSeq] = useState(0);
   const [commentDrawerOpen, setCommentDrawerOpen] = useState(false);
@@ -147,6 +169,8 @@ export default function Player({
     [play, seekTo, initialSeekIndex],
   );
 
+  const handleViewInsights = useCallback(() => setActiveView("summary"), [setActiveView]);
+
   // Auto-land when user changes display mode from the header while on landing page
   const prevModeRef = useRef(viewPrefs.displayMode);
   useEffect(() => {
@@ -159,10 +183,10 @@ export default function Player({
     }
   }, [viewPrefs.displayMode, landed, seekTo, initialSeekIndex]);
 
-  // Check if URL has ?s= deep-link (used by multiple auto-land effects below)
-  const hasUrlScene = useMemo(
+  // Track whether URL has ?s= deep-link (used by auto-land effects below).
+  // Starts from URL on mount, but can be cleared when returning to landing.
+  const [hasUrlScene, setHasUrlScene] = useState(
     () => new URLSearchParams(window.location.search).get("s") !== null,
-    [],
   );
 
   // Auto-land if we start on a non-replay view (e.g., direct link to insights)
@@ -457,7 +481,13 @@ export default function Player({
 
   // Show landing page before playback starts, but only if we are in the replay view
   if (!landed && activeView === "replay") {
-    return <LandingHero session={effectiveSession} onStart={handleStart} />;
+    return (
+      <LandingHero
+        session={effectiveSession}
+        onStart={handleStart}
+        onViewInsights={handleViewInsights}
+      />
+    );
   }
 
   const { meta } = session;
