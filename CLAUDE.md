@@ -12,20 +12,18 @@ pnpm monorepo: `packages/cli` (npm: `vibe-replay`), `packages/viewer` (React →
 pnpm install               # Install deps
 pnpm build                 # Full build: viewer → cli
 pnpm start                 # Build + run interactive picker
-pnpm dev                   # Viewer (Vite HMR) + CLI together
-pnpm viewer:dev            # Viewer only
-pnpm cli:dev               # CLI only (tsx)
+pnpm dev                   # Viewer (Vite HMR) + CLI (tsx watch) together
+pnpm dev:dashboard         # Dev mode with dashboard flag (-d)
+pnpm dev:website           # Website (Astro HMR) + Viewer (Vite HMR) together
 pnpm test                  # Run tests
 pnpm lint                  # Lint + format (auto-fix)
 pnpm lint:check            # Lint check (no fix, for CI)
-pnpm dev:dashboard         # Dev mode with dashboard flag (-d)
 ```
 
 When to use which:
-- `pnpm start` — validate full user flow
-- `pnpm dev` — daily iteration (choose "Dump to demo.json", open `localhost:5173/?file=/demo.json`)
-- `pnpm viewer:dev` — UI-only changes
-- `pnpm cli:dev` — parser/CLI-only changes
+- `pnpm start` — validate full user flow (build + run)
+- `pnpm dev` — daily iteration with full HMR: viewer auto-reloads via Vite, CLI auto-restarts via `tsx watch`
+- `pnpm dev:website` — website + viewer iteration: Astro HMR + `/view/` redirects to Vite viewer
 
 ## Gotchas
 
