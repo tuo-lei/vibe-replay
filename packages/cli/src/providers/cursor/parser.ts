@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { basename, extname, join } from "node:path";
 import type { ParsedTurn, SessionInfo } from "../../types.js";
 import type { DataSourceInfo, ProviderParseResult } from "../types.js";
-import { parseCursorSqlite } from "./sqlite-reader.js";
+import { isSystemContextText, parseCursorSqlite } from "./sqlite-reader.js";
 
 function toErrorMessage(err: unknown): string {
   if (err instanceof Error && err.message) return err.message;
@@ -157,6 +157,7 @@ async function parseCursorJsonl(
       for (const block of contentBlocks) {
         if (block.type === "text" && block.text) {
           let text = stripUserQueryWrapper(block.text);
+          if (role === "user" && isSystemContextText(text)) continue;
           const extracted = extractImageFilePathsFromText(text);
           text = normalizeImagePlaceholderLines(extracted.cleanedText);
           for (const imagePath of extracted.paths) imageFilePaths.add(imagePath);

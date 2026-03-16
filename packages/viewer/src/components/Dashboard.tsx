@@ -2043,8 +2043,8 @@ export default function Dashboard() {
 
   const handleTabChange = (id: Tab) => {
     setTab(id);
-    // Clear text filter when switching tabs to avoid cross-tab filter contamination
-    navigateTo({ tab: id, q: null });
+    // Reset cross-tab list state to avoid landing on empty views due to stale project/filter params.
+    navigateTo({ tab: id, project: null, q: null, archived: null });
   };
 
   const tabButton = (id: Tab, label: string) => (

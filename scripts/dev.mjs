@@ -4,8 +4,9 @@
  * so multiple `pnpm dev` sessions can run simultaneously without conflicts.
  *
  * Usage:
- *   node scripts/dev.mjs            # normal dev
- *   node scripts/dev.mjs -d         # dashboard mode (passes -d to CLI)
+ *   node scripts/dev.mjs            # dashboard-first dev (default)
+ *   node scripts/dev.mjs -d         # explicit dashboard mode (same as default)
+ *   node scripts/dev.mjs --menu     # interactive CLI menu mode
  */
 import { spawn } from "node:child_process";
 import { watch } from "node:fs";
@@ -14,7 +15,9 @@ import { findFreePort } from "./dev-utils.mjs";
 const VITE_PREFERRED = 5173;
 const API_PREFERRED = 13456;
 
-const dashboardMode = process.argv.includes("-d");
+const forceDashboard = process.argv.includes("-d");
+const menuMode = process.argv.includes("--menu");
+const dashboardMode = forceDashboard || !menuMode;
 
 // Find two non-colliding free ports
 const apiPort = await findFreePort(API_PREFERRED);
@@ -29,6 +32,9 @@ console.log(
 );
 console.log(`[vibe-replay] Viewer:      http://localhost:${vitePort}  (HMR enabled)`);
 console.log(`[vibe-replay] CLI watch:   auto-restarts on packages/cli/src changes`);
+console.log(
+  `[vibe-replay] Mode:        ${dashboardMode ? "dashboard-first (auto-open dashboard)" : "interactive menu"}`,
+);
 console.log();
 
 // Start Vite dev server (backgrounded) — port + strictPort via env vars in vite.config.ts
@@ -63,14 +69,21 @@ const cliExtraArgs = dashboardMode ? ["-d"] : [];
 let cli;
 let restarting = false;
 let shuttingDown = false;
+let hasOpenedBrowser = false;
 
 function startCli() {
   // Use node_modules/.bin/tsx directly instead of npx to avoid an extra
   // wrapper process that swallows signals (making Ctrl+C unreliable).
+  const cliEnvForRun = {
+    ...cliEnv,
+    // Open browser only once per dev launcher process to avoid tab spam on restarts.
+    VIBE_REPLAY_NO_AUTO_OPEN: hasOpenedBrowser ? "1" : "0",
+  };
   cli = spawn("node_modules/.bin/tsx", [cliScript, ...cliExtraArgs], {
     stdio: "inherit",
-    env: cliEnv,
+    env: cliEnvForRun,
   });
+  hasOpenedBrowser = true;
 
   cli.on("exit", (code, signal) => {
     if (restarting) return; // will be respawned by the watcher
