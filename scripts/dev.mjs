@@ -97,6 +97,8 @@ function restartCli() {
 startCli();
 
 // Watch CLI source + shared types for changes
+// Note: fs.watch({ recursive: true }) works on macOS/Windows natively.
+// On Linux it requires Node 22+; older Node only watches the top-level dir.
 let debounce;
 for (const dir of ["packages/cli/src", "packages/types/src"]) {
   watch(dir, { recursive: true }, (_event, filename) => {

@@ -14,9 +14,6 @@ interface TurnInfo {
   sceneIndex: number;
   toolCount: number;
   errorCount: number;
-  reads: number;
-  writes: number;
-  bashes: number;
 }
 
 interface FileInfo {
@@ -89,9 +86,6 @@ export default function SummaryView({ session }: Props) {
     const turns: TurnInfo[] = [];
     let curToolCount = 0;
     let curErrors = 0;
-    let curReads = 0;
-    let curWrites = 0;
-    let curBashes = 0;
 
     // --- Per-file tracking ---
     const fileMap = new Map<string, FileInfo>();
@@ -124,9 +118,6 @@ export default function SummaryView({ session }: Props) {
         const t = turns[turns.length - 1];
         t.toolCount = curToolCount;
         t.errorCount = curErrors;
-        t.reads = curReads;
-        t.writes = curWrites;
-        t.bashes = curBashes;
       }
     };
 
@@ -138,9 +129,6 @@ export default function SummaryView({ session }: Props) {
           closeTurn();
           curToolCount = 0;
           curErrors = 0;
-          curReads = 0;
-          curWrites = 0;
-          curBashes = 0;
           promptChars += scene.content.length;
           const firstLine = scene.content.split("\n").find((l) => l.trim()) || "";
           turns.push({
@@ -149,9 +137,6 @@ export default function SummaryView({ session }: Props) {
             sceneIndex: i,
             toolCount: 0,
             errorCount: 0,
-            reads: 0,
-            writes: 0,
-            bashes: 0,
           });
           break;
         }
@@ -166,14 +151,10 @@ export default function SummaryView({ session }: Props) {
           const tn = scene.toolName;
           toolCounts.set(tn, (toolCounts.get(tn) || 0) + 1);
 
-          if (tn === "Read" || tn === "Grep" || tn === "Glob") {
-            curReads++;
-          }
           if (tn === "Read") {
             const fp = scene.input?.file_path as string | undefined;
             if (fp) getFile(fp).readCount++;
           } else if (tn === "Edit" || tn === "Write") {
-            curWrites++;
             if (scene.diff) {
               const f = getFile(scene.diff.filePath);
               f.editCount++;
@@ -185,7 +166,6 @@ export default function SummaryView({ session }: Props) {
               f.linesRemoved += Math.max(0, oldL - newL);
             }
           } else if (tn === "Bash") {
-            curBashes++;
             if (scene.bashOutput) {
               const cat = classifyBash(scene.bashOutput.command);
               bashCategories.set(cat, (bashCategories.get(cat) || 0) + 1);
@@ -820,9 +800,7 @@ function ContextWindowChart({
         <ChartTooltip visible={hovered !== null} x={hoveredX}>
           {hovered !== null && (
             <>
-              <div className="text-terminal-cyan" style={{ color: "var(--cyan)" }}>
-                Turn {hovered + 1}
-              </div>
+              <div className="text-terminal-cyan">Turn {hovered + 1}</div>
               {turnLabels?.[hovered] && (
                 <div className="text-terminal-dim truncate max-w-[200px]">
                   {turnLabels[hovered]}
@@ -1047,15 +1025,34 @@ function FileActivityHeatmap({
   editedFiles: FileInfo[];
   turns: TurnInfo[];
 }) {
-  if (turns.length < 3 || editedFiles.length < 2) return null;
+  if (turns.length < 3 || editedFiles.length < 1) return null;
 
   const topFiles = editedFiles.slice(0, 8);
-  const turnIndices = turns.map((t) => t.index);
+
+  // Cap columns to keep the grid readable
+  const MAX_COLS = 60;
+  const allTurnIndices = turns.map((t) => t.index);
+  const capped = allTurnIndices.length > MAX_COLS;
+  const turnIndices = capped ? allTurnIndices.slice(-MAX_COLS) : allTurnIndices;
+
+  // Find max edits per cell for intensity scaling
+  let maxEditsPerCell = 1;
+  for (const f of topFiles) {
+    for (const ti of turnIndices) {
+      const c = f.turnEdits.get(ti) || 0;
+      if (c > maxEditsPerCell) maxEditsPerCell = c;
+    }
+  }
 
   return (
     <div>
       <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
         File Activity Heatmap
+        {capped && (
+          <span className="normal-case tracking-normal font-normal ml-2">
+            (last {MAX_COLS} of {allTurnIndices.length} turns)
+          </span>
+        )}
       </div>
       <div className="overflow-x-auto">
         <div
@@ -1084,6 +1081,10 @@ function FileActivityHeatmap({
               </div>,
               ...turnIndices.map((ti) => {
                 const count = f.turnEdits.get(ti) || 0;
+                const intensity =
+                  count === 0
+                    ? 0
+                    : Math.round(20 + (Math.log1p(count) / Math.log1p(maxEditsPerCell)) * 60);
                 return (
                   <div
                     key={`${f.path}-${ti}`}
@@ -1092,9 +1093,7 @@ function FileActivityHeatmap({
                       backgroundColor:
                         count === 0
                           ? "transparent"
-                          : count === 1
-                            ? "color-mix(in srgb, var(--orange) 30%, transparent)"
-                            : "color-mix(in srgb, var(--orange) 60%, transparent)",
+                          : `color-mix(in srgb, var(--orange) ${intensity}%, transparent)`,
                       minHeight: 14,
                     }}
                     title={
