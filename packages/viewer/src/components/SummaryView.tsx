@@ -351,6 +351,9 @@ export default function SummaryView({ session }: Props) {
               contextLimit={meta.contextLimit}
               turnLabels={turnLabels}
             />
+            {stats.turns.length >= 2 && (
+              <ToolActivityChart turns={stats.turns} turnLabels={turnLabels} />
+            )}
             {meta.stats.turnStats!.some((t) => t.durationMs) && (
               <TurnDurationChart turnStats={meta.stats.turnStats!} turnLabels={turnLabels} />
             )}
@@ -392,46 +395,12 @@ export default function SummaryView({ session }: Props) {
           <TurnTable turns={stats.turns} turnStats={meta.stats.turnStats} />
         )}
 
+        {/* File Activity Heatmap */}
+        <FileActivityHeatmap editedFiles={stats.editedFiles} turns={stats.turns} />
+
         {/* File Impact Table */}
         {(stats.editedFiles.length > 0 || stats.readOnlyFiles.length > 0) && (
           <FileTable editedFiles={stats.editedFiles} readOnlyFiles={stats.readOnlyFiles} />
-        )}
-
-        {/* Activity Distribution */}
-        {stats.totalTools > 0 && (
-          <div>
-            <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
-              Activity Distribution
-            </div>
-            <div className="space-y-1.5">
-              {(
-                [
-                  ["Read/Search", stats.activityDist.read, "--blue"],
-                  ["Write/Edit", stats.activityDist.write, "--green"],
-                  ["Execute", stats.activityDist.execute, "--purple"],
-                  ["Other", stats.activityDist.other, "--dim"],
-                ] as [string, number, string][]
-              )
-                .filter(([, count]) => count > 0)
-                .map(([label, count, cssVar]) => (
-                  <div key={label} className="flex items-center gap-2 text-xs font-mono">
-                    <span className="text-terminal-text shrink-0 w-24 text-right">{label}</span>
-                    <div className="flex-1 h-2 rounded-full bg-terminal-surface overflow-hidden">
-                      <div
-                        className="h-full rounded-full"
-                        style={{
-                          width: `${(count / stats.totalTools) * 100}%`,
-                          backgroundColor: `var(${cssVar})`,
-                        }}
-                      />
-                    </div>
-                    <span className="text-terminal-dim shrink-0 w-16 text-right tabular-nums">
-                      {count} ({Math.round((count / stats.totalTools) * 100)}%)
-                    </span>
-                  </div>
-                ))}
-            </div>
-          </div>
         )}
 
         {/* Bash Breakdown */}
@@ -467,7 +436,10 @@ export default function SummaryView({ session }: Props) {
             <div className="space-y-1.5">
               {stats.topTools.map(([name, count]) => (
                 <div key={name} className="flex items-center gap-2 text-xs font-mono">
-                  <span className="text-terminal-text shrink-0 w-24 text-right truncate">
+                  <span
+                    className="text-terminal-text shrink-0 w-24 text-right truncate"
+                    title={name}
+                  >
                     {name}
                   </span>
                   <div className="flex-1 h-2 rounded-full bg-terminal-surface overflow-hidden">
@@ -481,6 +453,43 @@ export default function SummaryView({ session }: Props) {
                   </span>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Activity Distribution (heuristic — placed low as reference) */}
+        {stats.totalTools > 0 && (
+          <div>
+            <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
+              Activity Distribution
+            </div>
+            <div className="space-y-1.5">
+              {(
+                [
+                  ["Read/Search", stats.activityDist.read, "--blue"],
+                  ["Write/Edit", stats.activityDist.write, "--green"],
+                  ["Execute", stats.activityDist.execute, "--purple"],
+                  ["Other", stats.activityDist.other, "--dim"],
+                ] as [string, number, string][]
+              )
+                .filter(([, count]) => count > 0)
+                .map(([label, count, cssVar]) => (
+                  <div key={label} className="flex items-center gap-2 text-xs font-mono">
+                    <span className="text-terminal-text shrink-0 w-24 text-right">{label}</span>
+                    <div className="flex-1 h-2 rounded-full bg-terminal-surface overflow-hidden">
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${(count / stats.totalTools) * 100}%`,
+                          backgroundColor: `var(${cssVar})`,
+                        }}
+                      />
+                    </div>
+                    <span className="text-terminal-dim shrink-0 w-16 text-right tabular-nums">
+                      {count} ({Math.round((count / stats.totalTools) * 100)}%)
+                    </span>
+                  </div>
+                ))}
             </div>
           </div>
         )}
@@ -653,7 +662,9 @@ function CacheEfficiencyLine({ turnStats }: { turnStats: TurnStat[] }) {
   return (
     <div className="mt-1">
       <div className="flex items-center gap-2">
-        <span className="text-[10px] font-mono text-terminal-dimmer">Cache Hit Rate</span>
+        <span className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest">
+          Cache Hit Rate
+        </span>
         <span className="text-[10px] font-mono text-terminal-purple">
           avg {Math.round(avgRatio * 100)}%
         </span>
@@ -789,9 +800,7 @@ function ContextWindowChart({
         <ChartTooltip visible={hovered !== null} x={hoveredX}>
           {hovered !== null && (
             <>
-              <div className="text-terminal-cyan" style={{ color: "var(--cyan)" }}>
-                Turn {hovered + 1}
-              </div>
+              <div className="text-terminal-cyan">Turn {hovered + 1}</div>
               {turnLabels?.[hovered] && (
                 <div className="text-terminal-dim truncate max-w-[200px]">
                   {turnLabels[hovered]}
@@ -948,6 +957,156 @@ function ModelBreakdown({
             </span>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function ToolActivityChart({ turns, turnLabels }: { turns: TurnInfo[]; turnLabels?: string[] }) {
+  const counts = turns.map((t) => t.toolCount);
+  const max = Math.max(...counts, 1);
+  const [hovered, setHovered] = useState<number | null>(null);
+
+  if (turns.length < 2) return null;
+
+  return (
+    <div>
+      <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-1">
+        Tool Calls per Turn
+      </div>
+      <div className="relative">
+        <div className="flex items-end gap-px h-16" onMouseLeave={() => setHovered(null)}>
+          {counts.map((c, i) => {
+            const hPct = c > 0 ? Math.max((c / max) * 100, 4) : 0;
+            return (
+              <div
+                key={i}
+                className="flex-1 rounded-t-sm cursor-default"
+                style={{
+                  height: `${hPct}%`,
+                  backgroundColor: c > 0 ? "var(--orange)" : "var(--surface)",
+                  opacity: hovered === i ? 1 : c > 0 ? 0.5 + (c / max) * 0.5 : 0.2,
+                }}
+                onMouseEnter={() => setHovered(i)}
+              />
+            );
+          })}
+        </div>
+        <ChartTooltip
+          visible={hovered !== null}
+          x={hovered !== null ? (counts.length === 1 ? 0.5 : hovered / (counts.length - 1)) : 0}
+        >
+          {hovered !== null && (
+            <>
+              <div className="text-terminal-orange">Turn {hovered + 1}</div>
+              {turnLabels?.[hovered] && (
+                <div className="text-terminal-dim truncate max-w-[200px]">
+                  {turnLabels[hovered]}
+                </div>
+              )}
+              <div>{counts[hovered]} tool calls</div>
+            </>
+          )}
+        </ChartTooltip>
+      </div>
+      <div className="flex justify-between text-[10px] font-mono text-terminal-dimmer mt-0.5">
+        <span>Turn 1</span>
+        <span>max {max}</span>
+        <span>Turn {counts.length}</span>
+      </div>
+    </div>
+  );
+}
+
+function FileActivityHeatmap({
+  editedFiles,
+  turns,
+}: {
+  editedFiles: FileInfo[];
+  turns: TurnInfo[];
+}) {
+  if (turns.length < 3 || editedFiles.length < 1) return null;
+
+  const topFiles = editedFiles.slice(0, 8);
+
+  // Cap columns to keep the grid readable
+  const MAX_COLS = 60;
+  const allTurnIndices = turns.map((t) => t.index);
+  const capped = allTurnIndices.length > MAX_COLS;
+  const turnIndices = capped ? allTurnIndices.slice(-MAX_COLS) : allTurnIndices;
+
+  // Find max edits per cell for intensity scaling
+  let maxEditsPerCell = 1;
+  for (const f of topFiles) {
+    for (const ti of turnIndices) {
+      const c = f.turnEdits.get(ti) || 0;
+      if (c > maxEditsPerCell) maxEditsPerCell = c;
+    }
+  }
+
+  return (
+    <div>
+      <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
+        File Activity Heatmap
+        {capped && (
+          <span className="normal-case tracking-normal font-normal ml-2">
+            (last {MAX_COLS} of {allTurnIndices.length} turns)
+          </span>
+        )}
+      </div>
+      <div className="overflow-x-auto">
+        <div
+          className="grid gap-px text-[10px] font-mono"
+          style={{
+            gridTemplateColumns: `minmax(80px, 120px) repeat(${turnIndices.length}, minmax(16px, 1fr))`,
+          }}
+        >
+          {/* Header row */}
+          <div className="text-terminal-dimmer px-1 py-0.5" />
+          {turnIndices.map((ti) => (
+            <div key={ti} className="text-terminal-dimmer text-center py-0.5 text-[9px]">
+              {ti}
+            </div>
+          ))}
+          {/* File rows */}
+          {topFiles.map((f) => {
+            const basename = f.path.split("/").pop() || f.path;
+            return [
+              <div
+                key={`label-${f.path}`}
+                className="text-terminal-dim truncate px-1 py-0.5"
+                title={f.path}
+              >
+                {basename}
+              </div>,
+              ...turnIndices.map((ti) => {
+                const count = f.turnEdits.get(ti) || 0;
+                const intensity =
+                  count === 0
+                    ? 0
+                    : Math.round(20 + (Math.log1p(count) / Math.log1p(maxEditsPerCell)) * 60);
+                return (
+                  <div
+                    key={`${f.path}-${ti}`}
+                    className="rounded-sm"
+                    style={{
+                      backgroundColor:
+                        count === 0
+                          ? "transparent"
+                          : `color-mix(in srgb, var(--orange) ${intensity}%, transparent)`,
+                      minHeight: 14,
+                    }}
+                    title={
+                      count > 0
+                        ? `${basename} — Turn ${ti}: ${count} edit${count !== 1 ? "s" : ""}`
+                        : undefined
+                    }
+                  />
+                );
+              }),
+            ];
+          })}
+        </div>
       </div>
     </div>
   );
@@ -1241,6 +1400,14 @@ function FileTable({
                       title={f.path}
                     >
                       {filename}
+                      {f.editCount >= 10 && (
+                        <span
+                          className="text-terminal-red ml-1"
+                          title={`${f.editCount} edits — high churn file`}
+                        >
+                          ⚠
+                        </span>
+                      )}
                       <span className="text-terminal-dimmer ml-1">
                         {f.path.slice(0, f.path.length - filename.length - 1)}
                       </span>

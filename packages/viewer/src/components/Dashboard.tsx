@@ -181,7 +181,10 @@ function SessionMoreMenu({
   return (
     <div className="relative" ref={ref}>
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
         className="h-7 w-7 flex items-center justify-center rounded-md bg-terminal-surface-2 text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors duration-200"
         title="More actions"
       >
@@ -190,7 +193,8 @@ function SessionMoreMenu({
       {open && (
         <div className="absolute right-0 top-full mt-1 z-50 min-w-[140px] rounded-lg bg-terminal-surface-2 border border-terminal-border shadow-layer-md py-1">
           <button
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation();
               onArchive();
               setOpen(false);
             }}
@@ -393,7 +397,8 @@ function ReplayCard({
           {(onDelete || onArchive) && (
             <div className="relative" ref={menuRef}>
               <button
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   setMenuOpen((v) => !v);
                   setConfirmingDelete(false);
                 }}
@@ -410,7 +415,8 @@ function ReplayCard({
                 <div className="absolute right-0 top-full mt-1 z-50 min-w-[140px] rounded-lg bg-terminal-surface-2 border border-terminal-border shadow-layer-md py-1">
                   {onArchive && (
                     <button
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation();
                         onArchive();
                         setMenuOpen(false);
                       }}
