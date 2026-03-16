@@ -324,6 +324,11 @@ async function inferProjectFromComposerData(
   return "";
 }
 
+function hasReplayableRootBlob(data: unknown): boolean {
+  if (!(data instanceof Uint8Array) || data.length === 0) return false;
+  return extractChildBlobIds(data).length > 0;
+}
+
 /**
  * Build reverse map from workspace MD5 hash → decoded project path.
  * Accepts pre-decoded workspace paths from the JSONL discovery phase.
@@ -342,7 +347,7 @@ function buildHashToProjectMap(decodedWorkspacePaths: string[]): Map<string, str
  * Read lightweight metadata from a store.db without full parsing.
  * Returns null if the DB is empty, corrupt, or has no meta table.
  */
-async function readStoreDbMeta(dbPath: string): Promise<ChatMeta | null> {
+async function readStoreDbMeta(dbPath: string): Promise<StoreDbMetaPreview | null> {
   let SQL: any;
   try {
     SQL = await getSqlJs();
@@ -355,7 +360,15 @@ async function readStoreDbMeta(dbPath: string): Promise<ChatMeta | null> {
     const metaRows = db.exec("SELECT value FROM meta WHERE key = '0'");
     if (!metaRows.length || !metaRows[0].values.length) return null;
     const metaHex = metaRows[0].values[0][0] as string;
-    return JSON.parse(Buffer.from(metaHex, "hex").toString("utf-8"));
+    const meta = JSON.parse(Buffer.from(metaHex, "hex").toString("utf-8")) as ChatMeta;
+    const rootId = meta.latestRootBlobId;
+    if (!rootId) return { meta, hasReplayableRoot: false };
+    const rootRows = db.exec("SELECT data FROM blobs WHERE id = ?", [rootId]);
+    if (!rootRows.length || !rootRows[0].values.length) {
+      return { meta, hasReplayableRoot: false };
+    }
+    const rootData = rootRows[0].values[0][0] as unknown;
+    return { meta, hasReplayableRoot: hasReplayableRootBlob(rootData) };
   } catch {
     return null;
   } finally {
@@ -401,8 +414,9 @@ export async function discoverSqliteOnlySessions(
       const dbStat = await stat(dbPath).catch(() => null);
       if (!dbStat?.isFile() || dbStat.size < MIN_STORE_DB_SIZE) continue;
 
-      const meta = await readStoreDbMeta(dbPath);
-      if (!meta) continue;
+      const metaPreview = await readStoreDbMeta(dbPath);
+      if (!metaPreview?.hasReplayableRoot) continue;
+      const meta = metaPreview.meta;
 
       const project = hashToProject.get(wsHash) || "";
       const firstPrompt = meta.name || "(sqlite-only session)";
@@ -572,6 +586,11 @@ interface ChatMeta {
   mode?: string;
   createdAt?: number;
   lastUsedModel?: string;
+}
+
+interface StoreDbMetaPreview {
+  meta: ChatMeta;
+  hasReplayableRoot: boolean;
 }
 
 interface CursorBlock {
@@ -1192,18 +1211,24 @@ function messagesToTurns(messages: CursorMessage[]): {
 
 const SYSTEM_CONTEXT_RE = /^<(?:user_info|system_reminder|agent_transcripts|rules|git_status)>/;
 
+function isSystemContextText(text: string): boolean {
+  return SYSTEM_CONTEXT_RE.test(text.trim());
+}
+
 function parseUserContent(content: string | CursorBlock[] | undefined): ContentBlock[] {
   if (!content) return [];
   if (typeof content === "string") {
-    if (SYSTEM_CONTEXT_RE.test(content.trim())) return [];
+    if (isSystemContextText(content)) return [];
     const cleaned = content.replace(/<\/?user_query>/g, "").trim();
+    if (isSystemContextText(cleaned)) return [];
     return cleaned ? [{ type: "text", text: cleaned }] : [];
   }
   const blocks: ContentBlock[] = [];
   for (const b of content) {
     if (b.type === "text" && b.text) {
-      if (SYSTEM_CONTEXT_RE.test(b.text.trim())) continue;
+      if (isSystemContextText(b.text)) continue;
       const cleaned = b.text.replace(/<\/?user_query>/g, "").trim();
+      if (isSystemContextText(cleaned)) continue;
       if (cleaned) blocks.push({ type: "text", text: cleaned });
     }
   }
@@ -1394,4 +1419,6 @@ export const __testables = {
   buildStoreTurnStats,
   createRetryableInit,
   estimateTokenIncrement,
+  hasReplayableRootBlob,
+  parseUserContent,
 };

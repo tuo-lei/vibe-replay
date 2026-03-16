@@ -145,4 +145,36 @@ describe("cursor sqlite metrics helpers", () => {
     expect(turnStats[1]).toMatchObject({ turnIndex: 1 });
     expect(turnStats[1].durationMs).toBeUndefined();
   });
+
+  it("treats empty store roots as non-replayable", () => {
+    expect(__testables.hasReplayableRootBlob(new Uint8Array())).toBe(false);
+    expect(__testables.hasReplayableRootBlob(new Uint8Array([0x00, 0x01, 0x02]))).toBe(false);
+  });
+
+  it("detects replayable store roots with linked child blob ids", () => {
+    const replayableRoot = new Uint8Array([
+      0xff,
+      0x0a,
+      0x20,
+      ...Array.from({ length: 32 }, (_, i) => i + 1),
+      0xee,
+    ]);
+    expect(__testables.hasReplayableRootBlob(replayableRoot)).toBe(true);
+  });
+
+  it("drops system context wrapped in user_query from sqlite user content", () => {
+    const blocks = __testables.parseUserContent(
+      "<user_query>\n<system_reminder>\ninternal only\n</system_reminder>\n</user_query>",
+    );
+    expect(blocks).toEqual([]);
+  });
+
+  it("keeps normal user_query content from sqlite user content", () => {
+    const blocks = __testables.parseUserContent(
+      "<user_query>\nShip this fix\n</user_query>",
+    ) as any[];
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("text");
+    expect(blocks[0].text).toBe("Ship this fix");
+  });
 });

@@ -98,6 +98,13 @@ interface ParseJsonlOptions {
   inferToolPaths: boolean;
 }
 
+const JSONL_SYSTEM_CONTEXT_RE =
+  /^<(?:user_info|system_reminder|agent_transcripts|rules|git_status)>/;
+
+function isSystemContextText(text: string): boolean {
+  return JSONL_SYSTEM_CONTEXT_RE.test(text.trim());
+}
+
 function defaultDataSourceInfo(
   dataSource?: ProviderParseResult["dataSource"],
 ): DataSourceInfo | undefined {
@@ -157,8 +164,10 @@ async function parseCursorJsonl(
       for (const block of contentBlocks) {
         if (block.type === "text" && block.text) {
           let text = stripUserQueryWrapper(block.text);
+          if (role === "user" && isSystemContextText(text)) continue;
           const extracted = extractImageFilePathsFromText(text);
           text = normalizeImagePlaceholderLines(extracted.cleanedText);
+          if (role === "user" && isSystemContextText(text)) continue;
           for (const imagePath of extracted.paths) imageFilePaths.add(imagePath);
           if (text) textParts.push(text);
         } else if (block.type === "image") {

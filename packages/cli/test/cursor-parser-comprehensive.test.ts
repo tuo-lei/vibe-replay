@@ -160,6 +160,30 @@ describe("Cursor parser — inline JSONL fixtures", () => {
     expect(text).toBe("Describe what you see");
   });
 
+  it("drops system context wrapped in user_query for JSONL user messages", async () => {
+    const path = await writeJsonl(tempDir, "wrapped-system-context.jsonl", [
+      {
+        role: "user",
+        message: {
+          content: [
+            {
+              type: "text",
+              text: "<user_query>\n<agent_transcripts>\ninternal block\n</agent_transcripts>\n</user_query>",
+            },
+          ],
+        },
+      },
+      {
+        role: "assistant",
+        message: { content: [{ type: "text", text: "Ignored context." }] },
+      },
+    ]);
+
+    const result = await parseCursorSession(path);
+    const userTurns = result.turns.filter((turn) => turn.role === "user");
+    expect(userTurns).toHaveLength(0);
+  });
+
   it("extracts title from first user prompt limited to 80 chars", async () => {
     const longPrompt = "A".repeat(120);
     const path = await writeJsonl(tempDir, "long-title.jsonl", [
