@@ -5,6 +5,9 @@ import type { ViewerMode } from "../hooks/useSessionLoader";
 import type { ReplaySession } from "../types";
 import { sanitizeHtml, sanitizeSvg } from "../utils/sanitize";
 
+// Sync with MAX_EXPORT_TURNS in packages/cli/src/formatters/github.ts
+const MAX_EXPORT_TURNS = 8;
+
 interface Props {
   actions: AnnotationActions;
   viewerMode: ViewerMode;
@@ -483,7 +486,8 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                           Animated SVG
                         </div>
                         <p className="text-[10px] font-mono text-terminal-dim mt-0.5">
-                          Embed in READMEs, PRs, or anywhere that renders SVG. Shows up to 8 turns.
+                          Embed in READMEs, PRs, or anywhere that renders SVG. Shows up to{" "}
+                          {MAX_EXPORT_TURNS} turns.
                         </p>
                       </div>
                       <div className="flex items-center gap-2">

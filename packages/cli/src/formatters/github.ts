@@ -478,6 +478,9 @@ const C = {
   dotGreen: "#3fb950",
 };
 
+/** Max conversation turns shown in GIF/SVG export. Sync with ExportView.tsx UI strings. */
+export const MAX_EXPORT_TURNS = 8;
+
 const SVG_W = 960;
 const SVG_H = 540;
 const HEADER_H = 40;
@@ -535,7 +538,7 @@ export function buildSvgFrames(
 
   // ── Conversation turn frames (compact-view style) ──
   // Start directly with conversation turns — no abstract overview
-  const selected = selectKeyPhases(phases, 8);
+  const selected = selectKeyPhases(phases, MAX_EXPORT_TURNS);
   for (const phase of selected) {
     const phaseIdx = phases.indexOf(phase) + 1;
     const phaseStats = computeToolStats(phase.scenes);
