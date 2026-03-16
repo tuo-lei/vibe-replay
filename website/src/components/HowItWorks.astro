@@ -373,7 +373,14 @@
           checkIcon.classList.add("hidden");
         }, 2000);
       }
-    }).catch(() => {});
+    }).catch(() => {
+      const input = document.createElement("input");
+      input.value = "npx vibe-replay";
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand("copy");
+      document.body.removeChild(input);
+    });
   });
 </script>
   </div>

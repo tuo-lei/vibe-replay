@@ -72,8 +72,8 @@ export function getModelPricing(model: string): ModelPricing {
   if (lower.includes("sonnet-4-6") || lower.includes("sonnet-4-5"))
     return MODEL_PRICING["sonnet-4-new"];
   if (lower.includes("sonnet")) return MODEL_PRICING.sonnet;
-  // Haiku: 4.5+ → new pricing, 3.5 and earlier → legacy
-  if (lower.includes("haiku-4-5") || lower.includes("haiku-4")) return MODEL_PRICING["haiku-4-5"];
+  // Haiku: 4.5/4.6 → new pricing, 3.5 and earlier → legacy
+  if (lower.includes("haiku-4-5") || lower.includes("haiku-4-6")) return MODEL_PRICING["haiku-4-5"];
   if (lower.includes("haiku")) return MODEL_PRICING.haiku;
   return DEFAULT_PRICING;
 }

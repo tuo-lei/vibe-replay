@@ -433,7 +433,7 @@ describe("transform — cost estimation", () => {
 
   it("applies Haiku pricing for haiku model", () => {
     const replay = transformToReplay(
-      buildParsed({ model: "claude-haiku-4-20250514", tokenUsage: baseUsage }),
+      buildParsed({ model: "claude-haiku-4-5-20250514", tokenUsage: baseUsage }),
       "claude-code",
       "~/test",
     );
