@@ -56,6 +56,13 @@
       input.select();
       document.execCommand("copy");
       document.body.removeChild(input);
+      const copyIcon = document.getElementById("cta-copy-icon");
+      const checkIcon = document.getElementById("cta-check-icon");
+      if (copyIcon && checkIcon) {
+        copyIcon.classList.add("hidden");
+        checkIcon.classList.remove("hidden");
+        setTimeout(() => { copyIcon.classList.remove("hidden"); checkIcon.classList.add("hidden"); }, 2000);
+      }
     });
   });
 </script>

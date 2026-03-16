@@ -41,7 +41,7 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
     cacheCreateRate: 3.75,
     cacheReadRate: 0.3,
   },
-  // Haiku 4.5
+  // Haiku 4.5/4.6
   "haiku-4-5": {
     inputRate: 1,
     outputRate: 5,
