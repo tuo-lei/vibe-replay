@@ -183,7 +183,11 @@ export default function LandingHero({ session, onStart, onViewInsights }: Props)
 
         {/* First turn preview — reuses actual replay card styles */}
         {firstTurn && (
-          <div onClick={() => onStart()} className="cursor-pointer space-y-3 text-left">
+          <button
+            type="button"
+            onClick={() => onStart()}
+            className="w-full text-left appearance-none bg-transparent border-none p-0 cursor-pointer space-y-3"
+          >
             {/* User prompt card */}
             <div className="rounded-2xl px-5 py-4 ml-4 md:ml-12 bg-terminal-green-subtle border border-terminal-green/30 shadow-layer-sm hover:bg-terminal-green-emphasis transition-all duration-200 ease-material">
               <div className="flex items-center gap-2 mb-2.5">
@@ -248,7 +252,7 @@ export default function LandingHero({ session, onStart, onViewInsights }: Props)
                 </span>
               </div>
             )}
-          </div>
+          </button>
         )}
 
         {/* Stats grid */}
@@ -289,6 +293,7 @@ export default function LandingHero({ session, onStart, onViewInsights }: Props)
               className="group inline-flex items-center gap-2 px-6 py-4 rounded-xl bg-terminal-surface hover:bg-terminal-surface-hover transition-all duration-200 ease-material shadow-layer-sm hover:shadow-layer-md border border-terminal-border/40 hover:border-terminal-border"
             >
               <svg
+                aria-hidden="true"
                 className="w-4 h-4 text-terminal-blue group-hover:scale-110 transition-transform duration-200"
                 viewBox="0 0 24 24"
                 fill="none"
@@ -319,6 +324,7 @@ export default function LandingHero({ session, onStart, onViewInsights }: Props)
           or scroll down
         </span>
         <svg
+          aria-hidden="true"
           className="w-6 h-6 text-terminal-green animate-bounce group-hover:scale-110 transition-transform"
           viewBox="0 0 24 24"
           fill="none"

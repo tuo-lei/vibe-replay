@@ -169,6 +169,8 @@ export default function Player({
     [play, seekTo, initialSeekIndex],
   );
 
+  const handleViewInsights = useCallback(() => setActiveView("summary"), [setActiveView]);
+
   // Auto-land when user changes display mode from the header while on landing page
   const prevModeRef = useRef(viewPrefs.displayMode);
   useEffect(() => {
@@ -483,7 +485,7 @@ export default function Player({
       <LandingHero
         session={effectiveSession}
         onStart={handleStart}
-        onViewInsights={() => setActiveView("summary")}
+        onViewInsights={handleViewInsights}
       />
     );
   }
