@@ -13,6 +13,7 @@
     "build:website": "pnpm --filter @vibe-replay/viewer build && mkdir -p website/public/view && cp packages/viewer/dist/index.html website/public/view/index.html && pnpm --filter @vibe-replay/website build",
     "start": "pnpm build && node packages/cli/dist/index.js",
     "dev": "node scripts/dev.mjs",
+    "dev:menu": "node scripts/dev.mjs --menu",
     "dev:dashboard": "node scripts/dev.mjs -d",
     "dev:website": "node scripts/dev-website.mjs",
     "test": "pnpm --filter vibe-replay test && pnpm --filter @vibe-replay/viewer test",
