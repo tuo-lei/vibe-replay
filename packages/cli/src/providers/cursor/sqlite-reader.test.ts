@@ -177,4 +177,15 @@ describe("cursor sqlite metrics helpers", () => {
     expect(blocks[0].type).toBe("text");
     expect(blocks[0].text).toBe("Ship this fix");
   });
+
+  it("normalizes turn text and drops wrapped system context", () => {
+    expect(
+      __testables.normalizeTurnText(
+        "<user_query>\n<agent_transcripts>\ninternal block\n</agent_transcripts>\n</user_query>",
+      ),
+    ).toBe("");
+    expect(__testables.normalizeTurnText("<user_query>\nFix auth bug\n</user_query>")).toBe(
+      "Fix auth bug",
+    );
+  });
 });

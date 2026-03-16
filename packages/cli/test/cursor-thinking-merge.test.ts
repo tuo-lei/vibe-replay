@@ -9,6 +9,7 @@ const { mockParseCursorSqlite } = vi.hoisted(() => ({
 }));
 
 vi.mock("../src/providers/cursor/sqlite-reader.js", () => ({
+  CURSOR_SYSTEM_CONTEXT_RE: /^<(?:user_info|system_reminder|agent_transcripts|rules|git_status)>/,
   parseCursorSqlite: mockParseCursorSqlite,
 }));
 

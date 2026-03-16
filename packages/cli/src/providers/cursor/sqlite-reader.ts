@@ -354,7 +354,8 @@ async function readStoreDbMeta(dbPath: string): Promise<StoreDbMetaPreview | nul
   } catch {
     return null;
   }
-  const dbBuffer = await readFile(dbPath);
+  const dbBuffer = await readFile(dbPath).catch(() => null);
+  if (!dbBuffer) return null;
   const db = new SQL.Database(dbBuffer);
   try {
     const metaRows = db.exec("SELECT value FROM meta WHERE key = '0'");
@@ -743,7 +744,7 @@ function parseThinking(value: unknown): string {
 function normalizeTurnText(raw: unknown): string {
   if (typeof raw !== "string") return "";
   const cleaned = raw.replace(/<\/?user_query>/g, "").trim();
-  if (!cleaned || SYSTEM_CONTEXT_RE.test(cleaned)) return "";
+  if (!cleaned || CURSOR_SYSTEM_CONTEXT_RE.test(cleaned)) return "";
   return cleaned;
 }
 
@@ -1209,10 +1210,11 @@ function messagesToTurns(messages: CursorMessage[]): {
   return { turns, turnStats, totalDurationMs };
 }
 
-const SYSTEM_CONTEXT_RE = /^<(?:user_info|system_reminder|agent_transcripts|rules|git_status)>/;
+export const CURSOR_SYSTEM_CONTEXT_RE =
+  /^<(?:user_info|system_reminder|agent_transcripts|rules|git_status)>/;
 
 function isSystemContextText(text: string): boolean {
-  return SYSTEM_CONTEXT_RE.test(text.trim());
+  return CURSOR_SYSTEM_CONTEXT_RE.test(text.trim());
 }
 
 function parseUserContent(content: string | CursorBlock[] | undefined): ContentBlock[] {
@@ -1420,5 +1422,6 @@ export const __testables = {
   createRetryableInit,
   estimateTokenIncrement,
   hasReplayableRootBlob,
+  normalizeTurnText,
   parseUserContent,
 };
