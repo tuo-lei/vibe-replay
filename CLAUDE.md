@@ -84,5 +84,9 @@ If tag/release is updated but `packages/cli/package.json` is not, CLI will still
 | Playback hook | `packages/viewer/src/hooks/usePlayback.ts` |
 | Session loading | `packages/viewer/src/hooks/useSessionLoader.ts` |
 | View preferences | `packages/viewer/src/hooks/useViewPrefs.ts` |
+| E2E test helpers | `e2e/helpers.ts` |
+| E2E: generated HTML | `e2e/generated-html.test.ts` |
+| E2E: editor server | `e2e/editor-server.test.ts` |
+| E2E: CLI smoke | `e2e/cli-smoke.test.ts` |
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for full architecture details.
