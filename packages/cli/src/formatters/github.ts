@@ -478,6 +478,9 @@ const C = {
   dotGreen: "#3fb950",
 };
 
+/** Max conversation turns shown in GIF/SVG export. Sync with ExportView.tsx UI strings. */
+export const MAX_EXPORT_TURNS = 8;
+
 const SVG_W = 960;
 const SVG_H = 540;
 const HEADER_H = 40;
@@ -535,7 +538,7 @@ export function buildSvgFrames(
 
   // ── Conversation turn frames (compact-view style) ──
   // Start directly with conversation turns — no abstract overview
-  const selected = selectKeyPhases(phases, 4);
+  const selected = selectKeyPhases(phases, MAX_EXPORT_TURNS);
   for (const phase of selected) {
     const phaseIdx = phases.indexOf(phase) + 1;
     const phaseStats = computeToolStats(phase.scenes);
@@ -572,6 +575,14 @@ export function buildSvgFrames(
   summaryLines.push({ text: statParts.join("  ·  "), color: C.green });
   if (toolParts.length > 0) summaryLines.push({ text: toolParts.join("  ·  "), color: C.dim });
   if (breakdown) summaryLines.push({ text: condenseLine(breakdown, 80), color: C.orange });
+  const hiddenTurns = phases.length - selected.length;
+  if (hiddenTurns > 0) {
+    summaryLines.push({ text: "", color: C.dim });
+    summaryLines.push({
+      text: `+ ${hiddenTurns} more turn${hiddenTurns === 1 ? "" : "s"} not shown`,
+      color: C.dim,
+    });
+  }
   summaryLines.push({ text: "", color: C.dim });
   if (opts.replayUrl) {
     summaryLines.push({ text: "View full replay  →", color: C.blue, bold: true });
@@ -616,29 +627,8 @@ function stripMarkdown(s: string): string {
 }
 
 function selectKeyPhases(phases: Phase[], max: number): Phase[] {
-  if (phases.length <= max) return [...phases];
-
-  // Always include first phase
-  const selected: Phase[] = [phases[0]];
-
-  // Score remaining phases
-  const scored = phases.slice(1).map((p, i) => {
-    let score = p.actions.length;
-    for (const a of p.actions) {
-      if (a.kind === "run" && a.passed === false) score += 5;
-      if (a.kind === "run" && a.passed === true) score += 3;
-      if (a.kind === "create") score += 2;
-    }
-    return { phase: p, score, origIdx: i + 1 };
-  });
-
-  scored.sort((a, b) => b.score - a.score);
-  for (const { phase } of scored.slice(0, max - 1)) {
-    selected.push(phase);
-  }
-
-  // Maintain original order
-  return selected.sort((a, b) => phases.indexOf(a) - phases.indexOf(b));
+  // Take the first N phases in order for narrative continuity
+  return phases.slice(0, max);
 }
 
 function renderSvg(
