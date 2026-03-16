@@ -14,6 +14,10 @@ interface TurnInfo {
   sceneIndex: number;
   toolCount: number;
   errorCount: number;
+  reads: number;
+  writes: number;
+  bashes: number;
+  phase: "explore" | "implement" | "build-test" | "debug" | "mixed" | "idle";
 }
 
 interface FileInfo {
@@ -34,6 +38,21 @@ function classifyBash(command: string): string {
   if (cmd.trimStart().startsWith("git ")) return "git";
   if (/\b(lint|biome|eslint|prettier|format)\b/.test(cmd)) return "lint";
   return "other";
+}
+
+function detectPhase(
+  reads: number,
+  writes: number,
+  bashes: number,
+  errors: number,
+  total: number,
+): TurnInfo["phase"] {
+  if (total === 0) return "idle";
+  if (reads > writes + bashes && reads > total * 0.4) return "explore";
+  if (writes > reads && writes >= bashes) return "implement";
+  if (bashes > writes && errors > 0) return "debug";
+  if (bashes > writes) return "build-test";
+  return "mixed";
 }
 
 /** Hook for chart hover: tracks which turn index the mouse is over */
@@ -86,6 +105,9 @@ export default function SummaryView({ session }: Props) {
     const turns: TurnInfo[] = [];
     let curToolCount = 0;
     let curErrors = 0;
+    let curReads = 0;
+    let curWrites = 0;
+    let curBashes = 0;
 
     // --- Per-file tracking ---
     const fileMap = new Map<string, FileInfo>();
@@ -118,6 +140,10 @@ export default function SummaryView({ session }: Props) {
         const t = turns[turns.length - 1];
         t.toolCount = curToolCount;
         t.errorCount = curErrors;
+        t.reads = curReads;
+        t.writes = curWrites;
+        t.bashes = curBashes;
+        t.phase = detectPhase(curReads, curWrites, curBashes, curErrors, curToolCount);
       }
     };
 
@@ -129,6 +155,9 @@ export default function SummaryView({ session }: Props) {
           closeTurn();
           curToolCount = 0;
           curErrors = 0;
+          curReads = 0;
+          curWrites = 0;
+          curBashes = 0;
           promptChars += scene.content.length;
           const firstLine = scene.content.split("\n").find((l) => l.trim()) || "";
           turns.push({
@@ -137,6 +166,10 @@ export default function SummaryView({ session }: Props) {
             sceneIndex: i,
             toolCount: 0,
             errorCount: 0,
+            reads: 0,
+            writes: 0,
+            bashes: 0,
+            phase: "idle",
           });
           break;
         }
@@ -151,10 +184,14 @@ export default function SummaryView({ session }: Props) {
           const tn = scene.toolName;
           toolCounts.set(tn, (toolCounts.get(tn) || 0) + 1);
 
+          if (tn === "Read" || tn === "Grep" || tn === "Glob") {
+            curReads++;
+          }
           if (tn === "Read") {
             const fp = scene.input?.file_path as string | undefined;
             if (fp) getFile(fp).readCount++;
           } else if (tn === "Edit" || tn === "Write") {
+            curWrites++;
             if (scene.diff) {
               const f = getFile(scene.diff.filePath);
               f.editCount++;
@@ -166,6 +203,7 @@ export default function SummaryView({ session }: Props) {
               f.linesRemoved += Math.max(0, oldL - newL);
             }
           } else if (tn === "Bash") {
+            curBashes++;
             if (scene.bashOutput) {
               const cat = classifyBash(scene.bashOutput.command);
               bashCategories.set(cat, (bashCategories.get(cat) || 0) + 1);
@@ -284,6 +322,18 @@ export default function SummaryView({ session }: Props) {
             />
             <StatCard label="Scenes" value={stats.totalScenes} color="text-terminal-text" />
           </div>
+          {/* Activity Sparkline */}
+          {stats.turns.length >= 2 && (
+            <div className="mt-3">
+              <ActivitySparkline turns={stats.turns} />
+            </div>
+          )}
+          {/* Phase Bar */}
+          {stats.turns.length >= 2 && (
+            <div className="mt-2">
+              <PhaseBar turns={stats.turns} />
+            </div>
+          )}
           {/* Duration / Cost / Model — inline below cards */}
           <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-xs font-mono text-terminal-dim">
             {meta.model && (
@@ -391,6 +441,9 @@ export default function SummaryView({ session }: Props) {
         {stats.turns.length > 0 && (
           <TurnTable turns={stats.turns} turnStats={meta.stats.turnStats} />
         )}
+
+        {/* File Activity Heatmap */}
+        <FileActivityHeatmap editedFiles={stats.editedFiles} turns={stats.turns} />
 
         {/* File Impact Table */}
         {(stats.editedFiles.length > 0 || stats.readOnlyFiles.length > 0) && (
@@ -953,6 +1006,218 @@ function ModelBreakdown({
   );
 }
 
+function ActivitySparkline({ turns }: { turns: TurnInfo[] }) {
+  const n = turns.length;
+  const { hovered, ref, onMouseMove, onMouseLeave } = useChartHover(n);
+
+  if (n < 2) return null;
+
+  const max = Math.max(...turns.map((t) => t.toolCount), 1);
+  const h = 48;
+  const w = 100;
+
+  const points = turns.map((t, i) => {
+    const x = n === 1 ? w / 2 : (i / (n - 1)) * w;
+    const y = h - (t.toolCount / max) * (h - 6) - 3;
+    return `${x},${y}`;
+  });
+
+  const hoveredX = hovered !== null ? (n === 1 ? 0.5 : hovered / (n - 1)) : 0;
+
+  return (
+    <div className="relative">
+      <svg
+        ref={ref}
+        viewBox={`0 0 ${w} ${h}`}
+        preserveAspectRatio="none"
+        className="w-full"
+        style={{ height: 48 }}
+        onMouseMove={onMouseMove}
+        onMouseLeave={onMouseLeave}
+      >
+        <defs>
+          <linearGradient id="sparkline-fill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--orange)" stopOpacity="0.3" />
+            <stop offset="100%" stopColor="var(--orange)" stopOpacity="0.05" />
+          </linearGradient>
+        </defs>
+        <polygon points={`0,${h} ${points.join(" ")} ${w},${h}`} fill="url(#sparkline-fill)" />
+        <polyline
+          points={points.join(" ")}
+          fill="none"
+          style={{ stroke: "var(--orange)" }}
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+        />
+        {hovered !== null && (
+          <line
+            x1={hoveredX * w}
+            y1="0"
+            x2={hoveredX * w}
+            y2={h}
+            stroke="var(--dim)"
+            strokeWidth="0.5"
+            vectorEffect="non-scaling-stroke"
+            opacity="0.5"
+          />
+        )}
+      </svg>
+      <ChartTooltip visible={hovered !== null} x={hoveredX}>
+        {hovered !== null && (
+          <>
+            <div className="text-terminal-orange">Turn {hovered + 1}</div>
+            <div>{turns[hovered].toolCount} tool calls</div>
+          </>
+        )}
+      </ChartTooltip>
+    </div>
+  );
+}
+
+const PHASE_COLORS: Record<TurnInfo["phase"], string> = {
+  explore: "#79b8ff",
+  implement: "#3fb950",
+  "build-test": "#b392f0",
+  debug: "#f85149",
+  mixed: "#d29922",
+  idle: "transparent",
+};
+
+const PHASE_LABELS: Record<TurnInfo["phase"], string> = {
+  explore: "Explore",
+  implement: "Implement",
+  "build-test": "Build/Test",
+  debug: "Debug",
+  mixed: "Mixed",
+  idle: "Idle",
+};
+
+function PhaseBar({ turns }: { turns: TurnInfo[] }) {
+  const [hovered, setHovered] = useState<number | null>(null);
+
+  if (turns.length < 2) return null;
+
+  const totalWeight = turns.reduce((a, t) => a + Math.max(t.toolCount, 1), 0);
+
+  // Collect unique phases for legend (in order of appearance)
+  const seenPhases = new Set<TurnInfo["phase"]>();
+  for (const t of turns) seenPhases.add(t.phase);
+  const phases = [...seenPhases].filter((p) => p !== "idle");
+
+  return (
+    <div>
+      <div className="flex h-4 rounded overflow-hidden" onMouseLeave={() => setHovered(null)}>
+        {turns.map((t, i) => (
+          <div
+            key={i}
+            style={{
+              width: `${(Math.max(t.toolCount, 1) / totalWeight) * 100}%`,
+              backgroundColor: PHASE_COLORS[t.phase],
+              opacity: hovered === i ? 1 : 0.7,
+            }}
+            title={`Turn ${t.index}: ${PHASE_LABELS[t.phase]}`}
+            onMouseEnter={() => setHovered(i)}
+          />
+        ))}
+      </div>
+      {hovered !== null && (
+        <div className="text-[10px] font-mono text-terminal-dim mt-0.5">
+          Turn {turns[hovered].index}: {PHASE_LABELS[turns[hovered].phase]}
+        </div>
+      )}
+      <div className="flex flex-wrap gap-3 mt-1">
+        {phases.map((p) => (
+          <div
+            key={p}
+            className="flex items-center gap-1 text-[10px] font-mono text-terminal-dimmer"
+          >
+            <div
+              className="w-2 h-2 rounded-sm"
+              style={{ backgroundColor: PHASE_COLORS[p], opacity: 0.7 }}
+            />
+            <span>{PHASE_LABELS[p]}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FileActivityHeatmap({
+  editedFiles,
+  turns,
+}: {
+  editedFiles: FileInfo[];
+  turns: TurnInfo[];
+}) {
+  if (turns.length < 3 || editedFiles.length < 2) return null;
+
+  const topFiles = editedFiles.slice(0, 8);
+  const turnIndices = turns.map((t) => t.index);
+
+  return (
+    <div>
+      <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
+        File Activity Heatmap
+      </div>
+      <div className="overflow-x-auto">
+        <div
+          className="grid gap-px text-[10px] font-mono"
+          style={{
+            gridTemplateColumns: `minmax(80px, 120px) repeat(${turnIndices.length}, minmax(16px, 1fr))`,
+          }}
+        >
+          {/* Header row */}
+          <div className="text-terminal-dimmer px-1 py-0.5" />
+          {turnIndices.map((ti) => (
+            <div key={ti} className="text-terminal-dimmer text-center py-0.5 text-[9px]">
+              {ti}
+            </div>
+          ))}
+          {/* File rows */}
+          {topFiles.map((f) => {
+            const basename = f.path.split("/").pop() || f.path;
+            return [
+              <div
+                key={`label-${f.path}`}
+                className="text-terminal-dim truncate px-1 py-0.5"
+                title={f.path}
+              >
+                {basename}
+              </div>,
+              ...turnIndices.map((ti) => {
+                const count = f.turnEdits.get(ti) || 0;
+                return (
+                  <div
+                    key={`${f.path}-${ti}`}
+                    className="rounded-sm"
+                    style={{
+                      backgroundColor:
+                        count === 0
+                          ? "transparent"
+                          : count === 1
+                            ? "color-mix(in srgb, var(--orange) 30%, transparent)"
+                            : "color-mix(in srgb, var(--orange) 60%, transparent)",
+                      minHeight: 14,
+                    }}
+                    title={
+                      count > 0
+                        ? `${basename} — Turn ${ti}: ${count} edit${count !== 1 ? "s" : ""}`
+                        : undefined
+                    }
+                  />
+                );
+              }),
+            ];
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const TURN_TABLE_COLLAPSE = 20;
 
 function TurnTable({ turns, turnStats }: { turns: TurnInfo[]; turnStats?: TurnStat[] }) {
@@ -1241,6 +1506,14 @@ function FileTable({
                       title={f.path}
                     >
                       {filename}
+                      {f.editCount >= 10 && (
+                        <span
+                          className="text-terminal-red ml-1"
+                          title={`${f.editCount} edits — high churn file`}
+                        >
+                          ⚠
+                        </span>
+                      )}
                       <span className="text-terminal-dimmer ml-1">
                         {f.path.slice(0, f.path.length - filename.length - 1)}
                       </span>
