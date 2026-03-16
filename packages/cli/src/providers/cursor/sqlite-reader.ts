@@ -1213,7 +1213,7 @@ function messagesToTurns(messages: CursorMessage[]): {
 export const CURSOR_SYSTEM_CONTEXT_RE =
   /^<(?:user_info|system_reminder|agent_transcripts|rules|git_status)>/;
 
-function isSystemContextText(text: string): boolean {
+export function isSystemContextText(text: string): boolean {
   return CURSOR_SYSTEM_CONTEXT_RE.test(text.trim());
 }
 
