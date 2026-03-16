@@ -161,27 +161,23 @@ export default function LandingHero({ session, onStart, onViewInsights }: Props)
       <div className="flex-1 min-h-0" />
 
       <div className="max-w-2xl w-full px-6 md:px-8 text-center space-y-5 md:space-y-7 z-10 shrink-0">
-        {/* Brand + context — tells you WHAT this page is */}
+        {/* Title + context subtitle */}
         <div className="space-y-3">
-          <a
-            href="https://vibe-replay.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-block text-sm font-sans font-semibold uppercase tracking-widest hover:opacity-80 transition-opacity bg-gradient-to-r from-[#3fb950] to-[#79b8ff] bg-clip-text text-transparent"
-          >
-            vibe-replay
-          </a>
           <h2 className="text-3xl sm:text-4xl md:text-5xl font-sans font-bold text-terminal-text leading-[1.15] tracking-tight">
             {title}
           </h2>
           <p className="text-sm font-sans text-terminal-dim">
-            A {providerLabel} session replay
-            {meta.model && (
-              <span className="text-terminal-dimmer">
-                {" \u00B7 "}
-                {meta.model}
-              </span>
-            )}
+            {"A "}
+            {providerLabel}
+            {" session replay by "}
+            <a
+              href="https://vibe-replay.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-bold bg-gradient-to-r from-terminal-green to-terminal-blue bg-clip-text text-transparent hover:opacity-80 transition-opacity"
+            >
+              vibe-replay
+            </a>
           </p>
         </div>
 
@@ -311,26 +307,6 @@ export default function LandingHero({ session, onStart, onViewInsights }: Props)
             </button>
           )}
         </div>
-
-        {/* PR links */}
-        {meta.prLinks && meta.prLinks.length > 0 && (
-          <div className="flex items-center justify-center gap-4 flex-wrap">
-            {meta.prLinks.map((pr) => (
-              <a
-                key={pr.prUrl}
-                href={pr.prUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs font-mono text-terminal-dim hover:text-terminal-green transition-colors"
-              >
-                <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354Z" />
-                </svg>
-                {pr.prRepository}#{pr.prNumber}
-              </a>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* Scroll indicator — prominent, clickable */}
