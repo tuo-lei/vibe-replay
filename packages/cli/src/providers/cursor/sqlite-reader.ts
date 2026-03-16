@@ -649,17 +649,20 @@ async function parseCursorStoreDb(sessionId: string): Promise<ProviderParseResul
     const messages: CursorMessage[] = [];
     const stmt = db.prepare("SELECT data FROM blobs WHERE id = ?");
     for (const cid of childIds) {
-      stmt.bind([cid]);
-      if (stmt.step()) {
-        const blobData = stmt.get()[0] as Uint8Array;
-        try {
-          const text = new TextDecoder().decode(blobData);
-          messages.push(JSON.parse(text));
-        } catch {
-          // binary or corrupted blob, skip
+      try {
+        stmt.bind([cid]);
+        if (stmt.step()) {
+          const blobData = stmt.get()[0] as Uint8Array;
+          try {
+            const text = new TextDecoder().decode(blobData);
+            messages.push(JSON.parse(text));
+          } catch {
+            // binary or corrupted blob, skip
+          }
         }
+      } finally {
+        stmt.reset();
       }
-      stmt.reset();
     }
     stmt.free();
 

@@ -594,6 +594,12 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
     viewer.style.opacity = "1";
     viewer.style.transform = "translateY(0)";
 
+    // Release fixed height after crossfade so container responds to resize
+    await delay(600);
+    if (signal.aborted) return;
+    container.style.height = "";
+    container.style.transition = "";
+
   }
 
   // Copy button
@@ -611,7 +617,22 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
           checkIcon.classList.add("hidden");
         }, 2000);
       }
-    }).catch(() => {});
+    }).catch(() => {
+      // Fallback for non-HTTPS or denied clipboard permission
+      const input = document.createElement("input");
+      input.value = "npx vibe-replay";
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand("copy");
+      document.body.removeChild(input);
+      const copyIcon = document.getElementById("copy-icon");
+      const checkIcon = document.getElementById("check-icon");
+      if (copyIcon && checkIcon) {
+        copyIcon.classList.add("hidden");
+        checkIcon.classList.remove("hidden");
+        setTimeout(() => { copyIcon.classList.remove("hidden"); checkIcon.classList.add("hidden"); }, 2000);
+      }
+    });
   });
 
   // Replay button
