@@ -17,7 +17,6 @@ interface TurnInfo {
   reads: number;
   writes: number;
   bashes: number;
-  phase: "explore" | "implement" | "build-test" | "debug" | "mixed" | "idle";
 }
 
 interface FileInfo {
@@ -38,21 +37,6 @@ function classifyBash(command: string): string {
   if (cmd.trimStart().startsWith("git ")) return "git";
   if (/\b(lint|biome|eslint|prettier|format)\b/.test(cmd)) return "lint";
   return "other";
-}
-
-function detectPhase(
-  reads: number,
-  writes: number,
-  bashes: number,
-  errors: number,
-  total: number,
-): TurnInfo["phase"] {
-  if (total === 0) return "idle";
-  if (reads > writes + bashes && reads > total * 0.4) return "explore";
-  if (writes > reads && writes >= bashes) return "implement";
-  if (bashes > writes && errors > 0) return "debug";
-  if (bashes > writes) return "build-test";
-  return "mixed";
 }
 
 /** Hook for chart hover: tracks which turn index the mouse is over */
@@ -143,7 +127,6 @@ export default function SummaryView({ session }: Props) {
         t.reads = curReads;
         t.writes = curWrites;
         t.bashes = curBashes;
-        t.phase = detectPhase(curReads, curWrites, curBashes, curErrors, curToolCount);
       }
     };
 
@@ -169,7 +152,6 @@ export default function SummaryView({ session }: Props) {
             reads: 0,
             writes: 0,
             bashes: 0,
-            phase: "idle",
           });
           break;
         }
@@ -322,18 +304,6 @@ export default function SummaryView({ session }: Props) {
             />
             <StatCard label="Scenes" value={stats.totalScenes} color="text-terminal-text" />
           </div>
-          {/* Activity Sparkline */}
-          {stats.turns.length >= 2 && (
-            <div className="mt-3">
-              <ActivitySparkline turns={stats.turns} />
-            </div>
-          )}
-          {/* Phase Bar */}
-          {stats.turns.length >= 2 && (
-            <div className="mt-2">
-              <PhaseBar turns={stats.turns} />
-            </div>
-          )}
           {/* Duration / Cost / Model — inline below cards */}
           <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-xs font-mono text-terminal-dim">
             {meta.model && (
@@ -401,6 +371,9 @@ export default function SummaryView({ session }: Props) {
               contextLimit={meta.contextLimit}
               turnLabels={turnLabels}
             />
+            {stats.turns.length >= 2 && (
+              <ToolActivityChart turns={stats.turns} turnLabels={turnLabels} />
+            )}
             {meta.stats.turnStats!.some((t) => t.durationMs) && (
               <TurnDurationChart turnStats={meta.stats.turnStats!} turnLabels={turnLabels} />
             )}
@@ -450,43 +423,6 @@ export default function SummaryView({ session }: Props) {
           <FileTable editedFiles={stats.editedFiles} readOnlyFiles={stats.readOnlyFiles} />
         )}
 
-        {/* Activity Distribution */}
-        {stats.totalTools > 0 && (
-          <div>
-            <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
-              Activity Distribution
-            </div>
-            <div className="space-y-1.5">
-              {(
-                [
-                  ["Read/Search", stats.activityDist.read, "--blue"],
-                  ["Write/Edit", stats.activityDist.write, "--green"],
-                  ["Execute", stats.activityDist.execute, "--purple"],
-                  ["Other", stats.activityDist.other, "--dim"],
-                ] as [string, number, string][]
-              )
-                .filter(([, count]) => count > 0)
-                .map(([label, count, cssVar]) => (
-                  <div key={label} className="flex items-center gap-2 text-xs font-mono">
-                    <span className="text-terminal-text shrink-0 w-24 text-right">{label}</span>
-                    <div className="flex-1 h-2 rounded-full bg-terminal-surface overflow-hidden">
-                      <div
-                        className="h-full rounded-full"
-                        style={{
-                          width: `${(count / stats.totalTools) * 100}%`,
-                          backgroundColor: `var(${cssVar})`,
-                        }}
-                      />
-                    </div>
-                    <span className="text-terminal-dim shrink-0 w-16 text-right tabular-nums">
-                      {count} ({Math.round((count / stats.totalTools) * 100)}%)
-                    </span>
-                  </div>
-                ))}
-            </div>
-          </div>
-        )}
-
         {/* Bash Breakdown */}
         {stats.bashCats.length > 1 && (
           <div>
@@ -520,7 +456,10 @@ export default function SummaryView({ session }: Props) {
             <div className="space-y-1.5">
               {stats.topTools.map(([name, count]) => (
                 <div key={name} className="flex items-center gap-2 text-xs font-mono">
-                  <span className="text-terminal-text shrink-0 w-24 text-right truncate">
+                  <span
+                    className="text-terminal-text shrink-0 w-24 text-right truncate"
+                    title={name}
+                  >
                     {name}
                   </span>
                   <div className="flex-1 h-2 rounded-full bg-terminal-surface overflow-hidden">
@@ -534,6 +473,43 @@ export default function SummaryView({ session }: Props) {
                   </span>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Activity Distribution (heuristic — placed low as reference) */}
+        {stats.totalTools > 0 && (
+          <div>
+            <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
+              Activity Distribution
+            </div>
+            <div className="space-y-1.5">
+              {(
+                [
+                  ["Read/Search", stats.activityDist.read, "--blue"],
+                  ["Write/Edit", stats.activityDist.write, "--green"],
+                  ["Execute", stats.activityDist.execute, "--purple"],
+                  ["Other", stats.activityDist.other, "--dim"],
+                ] as [string, number, string][]
+              )
+                .filter(([, count]) => count > 0)
+                .map(([label, count, cssVar]) => (
+                  <div key={label} className="flex items-center gap-2 text-xs font-mono">
+                    <span className="text-terminal-text shrink-0 w-24 text-right">{label}</span>
+                    <div className="flex-1 h-2 rounded-full bg-terminal-surface overflow-hidden">
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${(count / stats.totalTools) * 100}%`,
+                          backgroundColor: `var(${cssVar})`,
+                        }}
+                      />
+                    </div>
+                    <span className="text-terminal-dim shrink-0 w-16 text-right tabular-nums">
+                      {count} ({Math.round((count / stats.totalTools) * 100)}%)
+                    </span>
+                  </div>
+                ))}
             </div>
           </div>
         )}
@@ -706,7 +682,9 @@ function CacheEfficiencyLine({ turnStats }: { turnStats: TurnStat[] }) {
   return (
     <div className="mt-1">
       <div className="flex items-center gap-2">
-        <span className="text-[10px] font-mono text-terminal-dimmer">Cache Hit Rate</span>
+        <span className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest">
+          Cache Hit Rate
+        </span>
         <span className="text-[10px] font-mono text-terminal-purple">
           avg {Math.round(avgRatio * 100)}%
         </span>
@@ -1006,140 +984,57 @@ function ModelBreakdown({
   );
 }
 
-function ActivitySparkline({ turns }: { turns: TurnInfo[] }) {
-  const n = turns.length;
-  const { hovered, ref, onMouseMove, onMouseLeave } = useChartHover(n);
-
-  if (n < 2) return null;
-
-  const max = Math.max(...turns.map((t) => t.toolCount), 1);
-  const h = 48;
-  const w = 100;
-
-  const points = turns.map((t, i) => {
-    const x = n === 1 ? w / 2 : (i / (n - 1)) * w;
-    const y = h - (t.toolCount / max) * (h - 6) - 3;
-    return `${x},${y}`;
-  });
-
-  const hoveredX = hovered !== null ? (n === 1 ? 0.5 : hovered / (n - 1)) : 0;
-
-  return (
-    <div className="relative">
-      <svg
-        ref={ref}
-        viewBox={`0 0 ${w} ${h}`}
-        preserveAspectRatio="none"
-        className="w-full"
-        style={{ height: 48 }}
-        onMouseMove={onMouseMove}
-        onMouseLeave={onMouseLeave}
-      >
-        <defs>
-          <linearGradient id="sparkline-fill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="var(--orange)" stopOpacity="0.3" />
-            <stop offset="100%" stopColor="var(--orange)" stopOpacity="0.05" />
-          </linearGradient>
-        </defs>
-        <polygon points={`0,${h} ${points.join(" ")} ${w},${h}`} fill="url(#sparkline-fill)" />
-        <polyline
-          points={points.join(" ")}
-          fill="none"
-          style={{ stroke: "var(--orange)" }}
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          vectorEffect="non-scaling-stroke"
-        />
-        {hovered !== null && (
-          <line
-            x1={hoveredX * w}
-            y1="0"
-            x2={hoveredX * w}
-            y2={h}
-            stroke="var(--dim)"
-            strokeWidth="0.5"
-            vectorEffect="non-scaling-stroke"
-            opacity="0.5"
-          />
-        )}
-      </svg>
-      <ChartTooltip visible={hovered !== null} x={hoveredX}>
-        {hovered !== null && (
-          <>
-            <div className="text-terminal-orange">Turn {hovered + 1}</div>
-            <div>{turns[hovered].toolCount} tool calls</div>
-          </>
-        )}
-      </ChartTooltip>
-    </div>
-  );
-}
-
-const PHASE_COLORS: Record<TurnInfo["phase"], string> = {
-  explore: "#79b8ff",
-  implement: "#3fb950",
-  "build-test": "#b392f0",
-  debug: "#f85149",
-  mixed: "#d29922",
-  idle: "transparent",
-};
-
-const PHASE_LABELS: Record<TurnInfo["phase"], string> = {
-  explore: "Explore",
-  implement: "Implement",
-  "build-test": "Build/Test",
-  debug: "Debug",
-  mixed: "Mixed",
-  idle: "Idle",
-};
-
-function PhaseBar({ turns }: { turns: TurnInfo[] }) {
+function ToolActivityChart({ turns, turnLabels }: { turns: TurnInfo[]; turnLabels?: string[] }) {
+  const counts = turns.map((t) => t.toolCount);
+  const max = Math.max(...counts, 1);
   const [hovered, setHovered] = useState<number | null>(null);
 
   if (turns.length < 2) return null;
 
-  const totalWeight = turns.reduce((a, t) => a + Math.max(t.toolCount, 1), 0);
-
-  // Collect unique phases for legend (in order of appearance)
-  const seenPhases = new Set<TurnInfo["phase"]>();
-  for (const t of turns) seenPhases.add(t.phase);
-  const phases = [...seenPhases].filter((p) => p !== "idle");
-
   return (
     <div>
-      <div className="flex h-4 rounded overflow-hidden" onMouseLeave={() => setHovered(null)}>
-        {turns.map((t, i) => (
-          <div
-            key={i}
-            style={{
-              width: `${(Math.max(t.toolCount, 1) / totalWeight) * 100}%`,
-              backgroundColor: PHASE_COLORS[t.phase],
-              opacity: hovered === i ? 1 : 0.7,
-            }}
-            title={`Turn ${t.index}: ${PHASE_LABELS[t.phase]}`}
-            onMouseEnter={() => setHovered(i)}
-          />
-        ))}
+      <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-1">
+        Tool Calls per Turn
       </div>
-      {hovered !== null && (
-        <div className="text-[10px] font-mono text-terminal-dim mt-0.5">
-          Turn {turns[hovered].index}: {PHASE_LABELS[turns[hovered].phase]}
+      <div className="relative">
+        <div className="flex items-end gap-px h-16" onMouseLeave={() => setHovered(null)}>
+          {counts.map((c, i) => {
+            const hPct = c > 0 ? Math.max((c / max) * 100, 4) : 0;
+            return (
+              <div
+                key={i}
+                className="flex-1 rounded-t-sm cursor-default"
+                style={{
+                  height: `${hPct}%`,
+                  backgroundColor: c > 0 ? "var(--orange)" : "var(--surface)",
+                  opacity: hovered === i ? 1 : c > 0 ? 0.5 + (c / max) * 0.5 : 0.2,
+                }}
+                onMouseEnter={() => setHovered(i)}
+              />
+            );
+          })}
         </div>
-      )}
-      <div className="flex flex-wrap gap-3 mt-1">
-        {phases.map((p) => (
-          <div
-            key={p}
-            className="flex items-center gap-1 text-[10px] font-mono text-terminal-dimmer"
-          >
-            <div
-              className="w-2 h-2 rounded-sm"
-              style={{ backgroundColor: PHASE_COLORS[p], opacity: 0.7 }}
-            />
-            <span>{PHASE_LABELS[p]}</span>
-          </div>
-        ))}
+        <ChartTooltip
+          visible={hovered !== null}
+          x={hovered !== null ? (counts.length === 1 ? 0.5 : hovered / (counts.length - 1)) : 0}
+        >
+          {hovered !== null && (
+            <>
+              <div className="text-terminal-orange">Turn {hovered + 1}</div>
+              {turnLabels?.[hovered] && (
+                <div className="text-terminal-dim truncate max-w-[200px]">
+                  {turnLabels[hovered]}
+                </div>
+              )}
+              <div>{counts[hovered]} tool calls</div>
+            </>
+          )}
+        </ChartTooltip>
+      </div>
+      <div className="flex justify-between text-[10px] font-mono text-terminal-dimmer mt-0.5">
+        <span>Turn 1</span>
+        <span>max {max}</span>
+        <span>Turn {counts.length}</span>
       </div>
     </div>
   );
