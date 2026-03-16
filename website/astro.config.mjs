@@ -2,8 +2,8 @@ import sitemap from "@astrojs/sitemap";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "astro/config";
 
-// When VITE_VIEWER_URL is set (e.g. http://localhost:5173), proxy /view/ to Vite dev server for HMR
-const viewerDevUrl = process.env.VITE_VIEWER_URL;
+// When DEV_VIEWER_URL is set (e.g. http://localhost:5173), proxy /view/ to Vite dev server for HMR
+const viewerDevUrl = process.env.DEV_VIEWER_URL;
 
 export default defineConfig({
   site: "https://vibe-replay.com",

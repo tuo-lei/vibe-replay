@@ -769,7 +769,7 @@ export async function startServer(
       // In dev mode, redirect to Vite dev server which has HMR
       const viteUrl = new URL(opts!.externalViewerUrl!);
       // Preserve query params (e.g. ?session=xxx, ?view=dashboard)
-      const incoming = new URL(c.req.url);
+      const incoming = new URL(c.req.url, "http://localhost");
       viteUrl.search = incoming.search;
       return c.redirect(viteUrl.toString(), 302);
     }

@@ -9,35 +9,10 @@
  *   node scripts/dev-website.mjs
  */
 import { spawn } from "node:child_process";
-import { createServer } from "node:net";
+import { findFreePort } from "./dev-utils.mjs";
 
 const VITE_PREFERRED = 5173;
 const ASTRO_PREFERRED = 4321;
-
-function isPortFree(port) {
-  return new Promise((resolve) => {
-    const s4 = createServer();
-    s4.unref();
-    s4.on("error", () => resolve(false));
-    s4.listen(port, "127.0.0.1", () => {
-      s4.close(() => {
-        const s6 = createServer();
-        s6.unref();
-        s6.on("error", () => resolve(false));
-        s6.listen(port, "::1", () => {
-          s6.close(() => resolve(true));
-        });
-      });
-    });
-  });
-}
-
-async function findFreePort(preferred) {
-  for (let port = preferred; port < preferred + 100; port++) {
-    if (await isPortFree(port)) return port;
-  }
-  throw new Error(`No free port found in range ${preferred}-${preferred + 99}`);
-}
 
 const vitePort = await findFreePort(VITE_PREFERRED);
 const astroPort = await findFreePort(ASTRO_PREFERRED);
@@ -67,12 +42,21 @@ vite.stdout.pipe(logStream);
 vite.stderr.pipe(logStream);
 console.log(`[vibe-replay] Viewer logs:  ${logPath}`);
 
+// If Vite crashes, tear down Astro too
+vite.on("exit", (code) => {
+  if (code !== 0 && code !== null) {
+    console.error(`[vibe-replay] Viewer process exited with code ${code}. Check ${logPath}`);
+  }
+  astro.kill("SIGTERM");
+  process.exit(code ?? 0);
+});
+
 // Start Astro website dev (foreground, inherits stdio)
 const astro = spawn("pnpm", ["--filter", "@vibe-replay/website", "dev", "--port", String(astroPort)], {
   stdio: "inherit",
   env: {
     ...process.env,
-    VITE_VIEWER_URL: `http://localhost:${vitePort}`,
+    DEV_VIEWER_URL: `http://localhost:${vitePort}`,
   },
 });
 
