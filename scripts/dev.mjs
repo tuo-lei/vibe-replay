@@ -69,14 +69,21 @@ const cliExtraArgs = dashboardMode ? ["-d"] : [];
 let cli;
 let restarting = false;
 let shuttingDown = false;
+let hasOpenedBrowser = false;
 
 function startCli() {
   // Use node_modules/.bin/tsx directly instead of npx to avoid an extra
   // wrapper process that swallows signals (making Ctrl+C unreliable).
+  const cliEnvForRun = {
+    ...cliEnv,
+    // Open browser only once per dev launcher process to avoid tab spam on restarts.
+    VIBE_REPLAY_NO_AUTO_OPEN: hasOpenedBrowser ? "1" : "0",
+  };
   cli = spawn("node_modules/.bin/tsx", [cliScript, ...cliExtraArgs], {
     stdio: "inherit",
-    env: cliEnv,
+    env: cliEnvForRun,
   });
+  hasOpenedBrowser = true;
 
   cli.on("exit", (code, signal) => {
     if (restarting) return; // will be respawned by the watcher

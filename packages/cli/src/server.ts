@@ -1671,7 +1671,9 @@ export async function startServer(
             chalk.dim("\n  Press Ctrl+C to stop\n"),
         );
       }
-      open(browseUrl);
+      if (process.env.VIBE_REPLAY_NO_AUTO_OPEN !== "1") {
+        open(browseUrl);
+      }
     },
   );
 

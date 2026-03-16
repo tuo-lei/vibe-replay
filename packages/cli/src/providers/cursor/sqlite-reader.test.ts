@@ -188,4 +188,122 @@ describe("cursor sqlite metrics helpers", () => {
       "Fix auth bug",
     );
   });
+
+  it("maps ApplyPatch into Edit with diff-like args", () => {
+    expect(__testables.mapCursorToolName("ApplyPatch")).toBe("Edit");
+    const mapped = __testables.mapToolArgs(
+      "ApplyPatch",
+      "*** Begin Patch\n*** Update File: /tmp/demo.ts\n@@\n-old line\n+new line\n*** End Patch",
+    ) as any;
+    expect(mapped.file_path).toBe("/tmp/demo.ts");
+    expect(mapped.old_string).toContain("old line");
+    expect(mapped.new_string).toContain("new line");
+  });
+
+  it("maps apply_patch object args with relativeWorkspacePath", () => {
+    const mapped = __testables.mapToolArgs(
+      "apply_patch",
+      { relativeWorkspacePath: "src/c.ts" },
+      JSON.stringify({
+        diff: {
+          chunks: [{ diffString: "@@\n-old c\n+new c" }],
+        },
+      }),
+    ) as any;
+    expect(mapped.file_path).toBe("src/c.ts");
+    expect(mapped.old_string).toContain("old c");
+    expect(mapped.new_string).toContain("new c");
+  });
+
+  it("maps global-state Cursor tool aliases to canonical names", () => {
+    expect(__testables.mapCursorToolName("run_terminal_cmd")).toBe("Bash");
+    expect(__testables.mapCursorToolName("read_file")).toBe("Read");
+    expect(__testables.mapCursorToolName("search_replace")).toBe("Edit");
+    expect(__testables.mapCursorToolName("edit_file")).toBe("Edit");
+    expect(__testables.mapCursorToolName("write")).toBe("Write");
+    expect(__testables.mapCursorToolName("list_dir")).toBe("Glob");
+    expect(__testables.mapCursorToolName("rg")).toBe("Grep");
+    expect(__testables.mapCursorToolName("grep_search")).toBe("Grep");
+    expect(__testables.mapCursorToolName("ripgrep")).toBe("Grep");
+    expect(__testables.mapCursorToolName("file_search")).toBe("Glob");
+    expect(__testables.mapCursorToolName("codebase_search")).toBe("SemanticSearch");
+  });
+
+  it("maps run_terminal_cmd and read_file args into normalized shape", () => {
+    const run = __testables.mapToolArgs("run_terminal_cmd", {
+      command: "git status",
+      requireUserApproval: true,
+    }) as any;
+    expect(run).toMatchObject({ command: "git status", requireUserApproval: true });
+
+    const read = __testables.mapToolArgs("read_file", {
+      targetFile: "/tmp/a.ts",
+    }) as any;
+    expect(read).toEqual({ file_path: "/tmp/a.ts" });
+  });
+
+  it("maps search_replace args and infers old/new snippets from result payload", () => {
+    const mapped = __testables.mapToolArgs(
+      "search_replace",
+      { relativeWorkspacePath: "/tmp/a.ts" },
+      JSON.stringify({
+        diff: {
+          chunks: [{ diffString: "@@\n-const a = 1;\n+const a = 2;" }],
+        },
+      }),
+    ) as any;
+    expect(mapped.file_path).toBe("/tmp/a.ts");
+    expect(mapped.old_string).toContain("const a = 1;");
+    expect(mapped.new_string).toContain("const a = 2;");
+  });
+
+  it("maps canonical Edit args when Cursor stores relativeWorkspacePath", () => {
+    const mapped = __testables.mapToolArgs(
+      "Edit",
+      { relativeWorkspacePath: "src/a.ts" },
+      JSON.stringify({
+        diff: {
+          chunks: [{ diffString: "@@\n-old value\n+new value" }],
+        },
+      }),
+    ) as any;
+    expect(mapped.file_path).toBe("src/a.ts");
+    expect(mapped.old_string).toContain("old value");
+    expect(mapped.new_string).toContain("new value");
+  });
+
+  it("maps EditFile args with relativeWorkspacePath", () => {
+    const mapped = __testables.mapToolArgs("EditFile", {
+      relativeWorkspacePath: "src/b.ts",
+      oldStr: "a",
+      newStr: "b",
+    }) as any;
+    expect(mapped).toEqual({ file_path: "src/b.ts", old_string: "a", new_string: "b" });
+  });
+
+  it("maps lowercase write and list_dir variants", () => {
+    const write = __testables.mapToolArgs("write", {
+      relativeWorkspacePath: "/tmp/doc.md",
+      code: { code: "# title" },
+    }) as any;
+    expect(write).toEqual({ file_path: "/tmp/doc.md", content: "# title" });
+
+    const ls = __testables.mapToolArgs("list_dir", {
+      targetDirectory: "/tmp",
+    }) as any;
+    expect(ls).toEqual({ path: "/tmp" });
+  });
+
+  it("maps canonical Write args when Cursor stores relativeWorkspacePath + code object", () => {
+    const mapped = __testables.mapToolArgs("Write", {
+      relativeWorkspacePath: "docs/readme.md",
+      code: { code: "hello" },
+    }) as any;
+    expect(mapped).toEqual({ file_path: "docs/readme.md", content: "hello" });
+  });
+
+  it("keeps string tool args as raw text for unknown tools", () => {
+    const mapped = __testables.mapToolArgs("CustomTool", "plain text payload") as any;
+    expect(mapped).toEqual({ raw: "plain text payload" });
+  });
 });
