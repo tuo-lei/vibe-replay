@@ -25,3 +25,7 @@ export function toolCall(
     ...(opts.bashOutput ? { bashOutput: { command: "ls", stdout: "files" } } : {}),
   };
 }
+
+export function compactionSummary(content = "summary"): Scene {
+  return { type: "compaction-summary", content };
+}
