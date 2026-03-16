@@ -272,7 +272,7 @@ function ReplayCard({
       <div className="flex items-center justify-between gap-3">
         <div className="flex-1 flex items-center gap-2 min-w-0">
           {onTitleSave ? (
-            <div onClick={(e) => e.stopPropagation()}>
+            <div className="flex-1 min-w-0" onClick={(e) => e.stopPropagation()}>
               <EditableTitle
                 slug={s.slug}
                 title={s.title}
