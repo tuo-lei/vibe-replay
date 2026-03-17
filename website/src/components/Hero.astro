@@ -17,6 +17,14 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
       <a href="https://www.npmjs.com/package/vibe-replay" target="_blank" rel="noopener" class="text-text-muted hover:text-text-primary transition-colors" title="npm">
         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M0 7.334v8h6.666v1.332H12v-1.332h12v-8H0zm6.666 6.664H5.334v-4H3.999v4H1.335V8.667h5.331v5.331zm4 0v1.336H8.001V8.667h5.334v5.332h-2.669v-.001zm12.001 0h-1.33v-4h-1.336v4h-1.335v-4h-1.33v4h-2.671V8.667h8.002v5.331zM10.665 10H12v2.667h-1.335V10z"/></svg>
       </a>
+      <!-- Auth: login button or user avatar -->
+      <div id="auth-container" class="hidden">
+        <button id="auth-login" class="hidden text-sm text-text-secondary hover:text-accent transition-colors font-mono">Login</button>
+        <div id="auth-user" class="hidden flex items-center gap-2">
+          <img id="auth-avatar" class="w-6 h-6 rounded-full" alt="" />
+          <button id="auth-logout" class="text-xs text-text-muted hover:text-text-secondary transition-colors">Logout</button>
+        </div>
+      </div>
     </div>
 
     <!-- Mobile hamburger -->
@@ -713,4 +721,47 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
     navOpenIcon?.classList.toggle("hidden", open);
     navCloseIcon?.classList.toggle("hidden", !open);
   });
+
+  // --- Auth UI ---
+  (async () => {
+    const container = document.getElementById("auth-container");
+    const loginBtn = document.getElementById("auth-login");
+    const userDiv = document.getElementById("auth-user");
+    const avatar = document.getElementById("auth-avatar") as HTMLImageElement | null;
+    const logoutBtn = document.getElementById("auth-logout");
+    if (!container || !loginBtn || !userDiv || !avatar || !logoutBtn) return;
+
+    try {
+      const res = await fetch("/api/auth/get-session", { credentials: "include" });
+      const data = await res.json();
+      container.classList.remove("hidden");
+
+      if (data?.session && data?.user) {
+        avatar.src = data.user.image || "";
+        avatar.alt = data.user.name || "";
+        userDiv.classList.remove("hidden");
+      } else {
+        loginBtn.classList.remove("hidden");
+      }
+    } catch {
+      container.classList.remove("hidden");
+      loginBtn.classList.remove("hidden");
+    }
+
+    loginBtn.addEventListener("click", async () => {
+      const res = await fetch("/api/auth/sign-in/social", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ provider: "github", callbackURL: window.location.pathname }),
+      });
+      const data = await res.json();
+      if (data?.url) window.location.href = data.url;
+    });
+
+    logoutBtn.addEventListener("click", async () => {
+      await fetch("/api/auth/sign-out", { method: "POST", credentials: "include" });
+      window.location.reload();
+    });
+  })();
 </script>
