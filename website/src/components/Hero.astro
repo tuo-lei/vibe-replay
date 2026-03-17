@@ -722,8 +722,13 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
     navCloseIcon?.classList.toggle("hidden", !open);
   });
 
-  // --- Auth UI ---
+  // --- Auth UI (feature-flagged: localhost or ?auth=1) ---
   (async () => {
+    const isAuthEnabled = window.location.hostname === "localhost"
+      || window.location.hostname === "127.0.0.1"
+      || new URLSearchParams(window.location.search).has("auth");
+    if (!isAuthEnabled) return;
+
     const container = document.getElementById("auth-container");
     const loginBtn = document.getElementById("auth-login");
     const userDiv = document.getElementById("auth-user");

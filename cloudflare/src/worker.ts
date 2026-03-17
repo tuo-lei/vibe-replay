@@ -49,6 +49,60 @@ app.on(["GET", "POST"], "/api/auth/*", (c) => {
 });
 
 // ---------------------------------------------------------------------------
+// CLI Login flow — browser-mediated OAuth for CLI tools
+// ---------------------------------------------------------------------------
+
+/** Step 1: CLI opens browser here. Auto-initiates GitHub OAuth. */
+app.get("/auth/cli-login", (c) => {
+  const port = c.req.query("port");
+  if (!port) return c.text("Missing port parameter", 400);
+  return c.html(`<!DOCTYPE html>
+<html><head><title>vibe-replay login</title></head>
+<body style="background:#0a0a0f;color:#e6edf3;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
+<p>Redirecting to GitHub...</p>
+<script>
+fetch('/api/auth/sign-in/social',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
+body:JSON.stringify({provider:'github',callbackURL:'/auth/cli-complete?port=${encodeURIComponent(port)}'})
+}).then(r=>r.json()).then(d=>{if(d.url)window.location.href=d.url;else document.body.textContent='Error: '+JSON.stringify(d);});
+</script></body></html>`);
+});
+
+/** Step 2: After OAuth callback, send session to CLI's localhost server. */
+app.get("/auth/cli-complete", async (c) => {
+  const port = c.req.query("port");
+  if (!port) return c.text("Missing port parameter", 400);
+  const auth = createAuth(c.env);
+  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  if (!session) {
+    return c.html(`<!DOCTYPE html>
+<html><head><title>vibe-replay login</title></head>
+<body style="background:#0a0a0f;color:#ff5f57;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
+<p>Authentication failed. Please try again.</p></body></html>`);
+  }
+  const payload = {
+    user: {
+      id: session.user.id,
+      name: session.user.name,
+      email: session.user.email,
+      image: session.user.image,
+    },
+    token: session.session.token,
+  };
+  const payloadJson = JSON.stringify(payload);
+  // Escape for embedding in <script> — browsers close <script> on </
+  const safePayload = payloadJson.replace(/</g, "\\u003c");
+  return c.html(`<!DOCTYPE html>
+<html><head><title>vibe-replay login</title></head>
+<body style="background:#0a0a0f;color:#e6edf3;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
+<p id="msg">Completing login...</p>
+<script>
+fetch('http://127.0.0.1:${encodeURIComponent(port)}/callback',{method:'POST',headers:{'Content-Type':'application/json'},body:'${safePayload}'})
+.then(()=>{document.getElementById('msg').textContent='Logged in! You can close this window.';document.getElementById('msg').style.color='#00e5a0';})
+.catch(()=>{document.getElementById('msg').textContent='Failed to connect to CLI. Please try again.';document.getElementById('msg').style.color='#ff5f57';});
+</script></body></html>`);
+});
+
+// ---------------------------------------------------------------------------
 // Replay API — existing endpoints
 // ---------------------------------------------------------------------------
 

@@ -571,6 +571,97 @@ program
     console.log();
   });
 
+// ---------------------------------------------------------------------------
+// Login command (hidden — feature-flagged, not shown in --help)
+// ---------------------------------------------------------------------------
+
+program
+  .command("login", { hidden: true })
+  .description("Log in to vibe-replay with GitHub")
+  .option("--api-url <url>", "API base URL", "https://vibe-replay.com")
+  .action(async (opts) => {
+    const http = await import("node:http");
+    const fs = await import("node:fs");
+    const nodePath = await import("node:path");
+    const os = await import("node:os");
+
+    const apiUrl = opts.apiUrl.replace(/\/$/, "");
+
+    // Start a localhost callback server on a random port
+    const server = http.createServer((req, res) => {
+      if (req.method === "OPTIONS") {
+        res.writeHead(200, {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "POST",
+          "Access-Control-Allow-Headers": "Content-Type",
+        });
+        res.end();
+        return;
+      }
+      if (req.method === "POST" && req.url === "/callback") {
+        let body = "";
+        req.on("data", (chunk: string) => {
+          body += chunk;
+        });
+        req.on("end", () => {
+          res.writeHead(200, {
+            "Content-Type": "text/plain",
+            "Access-Control-Allow-Origin": "*",
+          });
+          res.end("OK");
+
+          try {
+            const data = JSON.parse(body);
+            const configDir = nodePath.join(os.homedir(), ".config", "vibe-replay");
+            fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
+            const authPath = nodePath.join(configDir, "auth.json");
+            fs.writeFileSync(authPath, JSON.stringify(data, null, 2), {
+              mode: 0o600,
+            });
+            console.log(
+              chalk.bold.green("\n  ✓ Logged in as ") +
+                chalk.white(data.user?.name || data.user?.email),
+            );
+            console.log(chalk.dim(`  Token saved to ${authPath}\n`));
+          } catch (err) {
+            console.error(chalk.red("\n  ✗ Failed to save auth token"));
+            console.error(chalk.dim(`  Body received: ${body.slice(0, 200)}`));
+            console.error(chalk.dim(`  Error: ${err}\n`));
+          }
+          server.close();
+        });
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address() as { port: number };
+      const loginUrl = `${apiUrl}/auth/cli-login?port=${addr.port}`;
+      console.log(chalk.bold.cyan("\n  vibe-replay login\n"));
+      console.log(chalk.dim("  Opening browser to authenticate with GitHub..."));
+      console.log(chalk.dim(`  If it doesn't open, visit: ${loginUrl}\n`));
+
+      // Open browser
+      import("open")
+        .then((m) => m.default(loginUrl))
+        .catch(() => {
+          // open package not available, user can manually open
+        });
+    });
+
+    // Timeout after 5 minutes
+    setTimeout(
+      () => {
+        console.error(chalk.red("\n  ✗ Login timed out after 5 minutes\n"));
+        server.close();
+        process.exit(1);
+      },
+      5 * 60 * 1000,
+    );
+  });
+
 program.parse();
 
 function formatSessionChoices(sessions: SessionInfo[]) {
