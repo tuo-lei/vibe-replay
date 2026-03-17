@@ -71,6 +71,14 @@ export default function App() {
 
   // Mobile menu + custom mode dropdown
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMobileMenuOpen(false);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [mobileMenuOpen]);
   const [customOpen, setCustomOpen] = useState(false);
   const customRef = useRef<HTMLDivElement>(null);
   useEffect(() => {

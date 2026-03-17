@@ -687,11 +687,20 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
 
   // Mobile copy button
   document.getElementById("copy-btn-mobile")?.addEventListener("click", () => {
-    navigator.clipboard.writeText("npx vibe-replay").then(() => {
+    const showCheck = () => {
       const ci = document.getElementById("copy-icon-mobile");
       const ch = document.getElementById("check-icon-mobile");
       if (ci && ch) { ci.classList.add("hidden"); ch.classList.remove("hidden"); setTimeout(() => { ci.classList.remove("hidden"); ch.classList.add("hidden"); }, 2000); }
-    }).catch(() => {});
+    };
+    navigator.clipboard.writeText("npx vibe-replay").then(showCheck).catch(() => {
+      const input = document.createElement("input");
+      input.value = "npx vibe-replay";
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand("copy");
+      document.body.removeChild(input);
+      showCheck();
+    });
   });
 
   // Mobile nav toggle
