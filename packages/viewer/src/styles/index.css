@@ -169,7 +169,7 @@ button,
 /* Safe area insets for notched phones */
 @supports (padding: env(safe-area-inset-top)) {
   .safe-top {
-    padding-top: env(safe-area-inset-top);
+    padding-top: max(env(safe-area-inset-top), 1.25rem);
   }
   .safe-bottom {
     padding-bottom: env(safe-area-inset-bottom);

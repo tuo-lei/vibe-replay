@@ -158,9 +158,9 @@ export default function LandingHero({ session, onStart, onViewInsights }: Props)
         <div className="absolute inset-0 bg-dot-grid" />
       </div>
 
-      <div className="flex-1 min-h-0" />
+      <div className="flex-1 min-h-4 md:min-h-0" />
 
-      <div className="max-w-2xl w-full px-6 md:px-8 text-center space-y-5 md:space-y-7 z-10 shrink-0">
+      <div className="max-w-2xl w-full px-6 md:px-8 pt-4 md:pt-0 text-center space-y-5 md:space-y-7 z-10 shrink-0">
         {/* Title + context subtitle */}
         <div className="space-y-3">
           <h2 className="text-3xl sm:text-4xl md:text-5xl font-sans font-bold text-terminal-text leading-[1.15] tracking-tight">
@@ -255,25 +255,27 @@ export default function LandingHero({ session, onStart, onViewInsights }: Props)
           </button>
         )}
 
-        {/* Stats grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-lg mx-auto">
+        {/* Stats grid — compact on mobile, spacious on desktop */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 max-w-lg mx-auto">
           {statCards.map((card) => (
             <div
               key={card.label}
-              className="bg-terminal-surface rounded-xl px-3 py-3 shadow-layer-sm"
+              className="bg-terminal-surface rounded-lg sm:rounded-xl px-2.5 py-2 sm:px-3 sm:py-3 shadow-layer-sm"
             >
-              <div className={`text-xl font-bold font-mono tabular-nums ${card.color}`}>
+              <div
+                className={`text-base sm:text-xl font-bold font-mono tabular-nums ${card.color}`}
+              >
                 {card.value}
               </div>
-              <div className="text-[10px] font-sans text-terminal-dimmer uppercase tracking-widest font-medium mt-0.5">
+              <div className="text-[9px] sm:text-[10px] font-sans text-terminal-dimmer uppercase tracking-widest font-medium">
                 {card.label}
               </div>
             </div>
           ))}
         </div>
 
-        {/* CTA row */}
-        <div className="flex items-center justify-center gap-3 flex-wrap">
+        {/* CTA row — desktop only (mobile uses sticky bar below) */}
+        <div className="hidden md:flex items-center justify-center gap-3 flex-wrap">
           <button
             type="button"
             onClick={() => onStart()}
@@ -312,13 +314,16 @@ export default function LandingHero({ session, onStart, onViewInsights }: Props)
             </button>
           )}
         </div>
+
+        {/* Bottom spacer for mobile sticky bar */}
+        <div className="h-24 md:hidden" />
       </div>
 
-      {/* Scroll indicator — prominent, clickable */}
+      {/* Scroll indicator — desktop only */}
       <button
         type="button"
         onClick={() => onStart(false)}
-        className="mt-8 md:mt-10 mb-6 z-10 shrink-0 flex flex-col items-center gap-2 group cursor-pointer"
+        className="hidden md:flex mt-8 md:mt-10 mb-6 z-10 shrink-0 flex-col items-center gap-2 group cursor-pointer"
       >
         <span className="text-xs font-sans font-medium text-terminal-dim group-hover:text-terminal-text transition-colors">
           or scroll down
@@ -338,6 +343,43 @@ export default function LandingHero({ session, onStart, onViewInsights }: Props)
       </button>
 
       <div className="flex-1 min-h-0" />
+
+      {/* Mobile sticky CTA bar */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-terminal-bg border-t border-terminal-border-subtle safe-bottom">
+        <div className="flex items-center gap-3 mx-6 my-4">
+          <button
+            type="button"
+            onClick={() => onStart()}
+            className="flex-[2] inline-flex items-center justify-center gap-2.5 py-3.5 rounded-xl bg-terminal-green text-terminal-bg font-semibold shadow-lg shadow-terminal-green/20 transition-all"
+          >
+            <span className="text-base">{"\u25B6"}</span>
+            <span className="text-sm font-sans">Watch Replay</span>
+          </button>
+          {onViewInsights && (
+            <button
+              type="button"
+              onClick={onViewInsights}
+              className="flex-1 inline-flex items-center justify-center gap-2 py-3.5 rounded-xl bg-terminal-surface border border-terminal-border-subtle hover:border-terminal-border transition-all"
+            >
+              <svg
+                aria-hidden="true"
+                className="w-3.5 h-3.5 text-terminal-blue"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="18" x2="18" y1="20" y2="10" />
+                <line x1="12" x2="12" y1="20" y2="4" />
+                <line x1="6" x2="6" y1="20" y2="14" />
+              </svg>
+              <span className="text-sm font-sans font-medium text-terminal-dim">Insights</span>
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

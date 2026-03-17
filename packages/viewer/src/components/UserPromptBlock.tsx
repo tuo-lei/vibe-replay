@@ -6,11 +6,17 @@ interface Props {
   isActive: boolean;
 }
 
-const COLLAPSE_LINES = 8;
-const COLLAPSE_CHARS = 900;
+const COLLAPSE_DESKTOP = { lines: 8, chars: 900 };
+const COLLAPSE_MOBILE = { lines: 4, chars: 280 };
+
+function getCollapseConfig() {
+  if (typeof window !== "undefined" && window.innerWidth < 768) return COLLAPSE_MOBILE;
+  return COLLAPSE_DESKTOP;
+}
 
 export default memo(function UserPromptBlock({ content, images, isActive }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const [collapse] = useState(getCollapseConfig);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -24,12 +30,14 @@ export default memo(function UserPromptBlock({ content, images, isActive }: Prop
   }, [isActive]);
 
   const lines = useMemo(() => content.split("\n"), [content]);
-  const isLong = lines.length > COLLAPSE_LINES || content.length > COLLAPSE_CHARS;
+  const isLong = lines.length > collapse.lines || content.length > collapse.chars;
 
   const preview = useMemo(() => {
     if (!isLong || expanded) return content;
-    return lines.slice(0, COLLAPSE_LINES).join("\n");
-  }, [content, expanded, isLong, lines]);
+    const byLines = lines.slice(0, collapse.lines).join("\n");
+    if (byLines.length > collapse.chars) return byLines.slice(0, collapse.chars);
+    return byLines;
+  }, [content, expanded, isLong, lines, collapse]);
 
   return (
     <div>
