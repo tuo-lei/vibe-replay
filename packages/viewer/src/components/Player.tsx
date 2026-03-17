@@ -6,6 +6,7 @@ import type { ViewerMode } from "../hooks/useSessionLoader";
 import { getEffectivePrefs, type ViewPrefs } from "../hooks/useViewPrefs";
 import type { ReplaySession } from "../types";
 import AiStudioDrawer from "./AiStudioDrawer";
+import AnnotationPanel from "./AnnotationPanel";
 import CommentDrawer from "./CommentDrawer";
 import Controls from "./Controls";
 import ConversationView from "./ConversationView";
@@ -97,7 +98,7 @@ export default function Player({
   } = usePlayback(session.scenes, effectivePrefs, landed);
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [mobileDrawerTab, setMobileDrawerTab] = useState<"outline" | "stats">("outline");
+  const [mobileDrawerTab, setMobileDrawerTab] = useState<"outline" | "comments">("outline");
   const [searchOpen, setSearchOpen] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [_scrollHintDismissed, setScrollHintDismissed] = useState(false);
@@ -504,20 +505,18 @@ export default function Player({
           rightContent={
             activeView === "replay" ? (
               <div className="flex items-center gap-3">
-                {/* Global overlay toggle — iOS pill style */}
+                {/* Global overlay toggle — desktop only */}
                 {overlayActions.overlayCount > 0 && (
                   <button
                     onClick={() => overlayActions.toggleAllOriginals()}
-                    className="flex items-center gap-2 text-xs font-mono text-terminal-dim"
+                    className="hidden md:flex items-center gap-2 text-xs font-mono text-terminal-dim"
                     title={
                       overlayActions.showAllOriginals
                         ? "Showing originals — click to show modified"
                         : "Showing modified — click to show originals"
                     }
                   >
-                    <span className="hidden sm:inline">
-                      {overlayActions.showAllOriginals ? "Original" : "Modified"}
-                    </span>
+                    <span>{overlayActions.showAllOriginals ? "Original" : "Modified"}</span>
                     <span
                       className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-200 ${
                         overlayActions.showAllOriginals
@@ -536,10 +535,10 @@ export default function Player({
                   </button>
                 )}
 
-                {/* Comments */}
+                {/* Comments — desktop: full button, mobile: icon only */}
                 <button
                   onClick={() => setCommentDrawerOpen(true)}
-                  className="flex items-center gap-1.5 text-xs font-mono font-semibold text-terminal-text hover:text-terminal-green transition-colors"
+                  className="hidden md:flex items-center gap-1.5 text-xs font-mono font-semibold text-terminal-text hover:text-terminal-green transition-colors"
                   title="Open comments"
                 >
                   <svg
@@ -556,19 +555,43 @@ export default function Player({
                   >
                     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
                   </svg>
-                  <span className="hidden sm:inline">Comments</span>
+                  <span>Comments</span>
                   {annotationActions.annotations.length > 0 && (
                     <span className="ml-0.5 px-1 py-0.5 rounded bg-terminal-black text-[10px] text-terminal-text border border-terminal-border tabular-nums leading-none">
                       {annotationActions.annotations.length}
                     </span>
                   )}
                 </button>
+                <button
+                  onClick={() => setCommentDrawerOpen(true)}
+                  className="md:hidden flex items-center gap-1 text-terminal-dim hover:text-terminal-text transition-colors"
+                  title="Comments"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                  </svg>
+                  {annotationActions.annotations.length > 0 && (
+                    <span className="px-1 py-0.5 rounded bg-terminal-black text-[10px] text-terminal-text border border-terminal-border tabular-nums leading-none">
+                      {annotationActions.annotations.length}
+                    </span>
+                  )}
+                </button>
 
-                {/* AI Studio button */}
+                {/* AI Studio button — desktop only */}
                 {hasAiStudio && (
                   <button
                     onClick={() => setStudioDrawerOpen(true)}
-                    className="pl-2 pr-3 py-1 text-[10px] sm:text-[11px] font-mono rounded bg-[rgba(168,85,247,0.1)] hover:bg-[rgba(168,85,247,0.2)] border border-[rgba(168,85,247,0.3)] hover:border-[rgba(168,85,247,0.5)] text-terminal-purple transition-all flex items-center gap-1.5 relative overflow-hidden group shadow-sm"
+                    className="hidden md:flex pl-2 pr-3 py-1 text-[11px] font-mono rounded bg-[rgba(168,85,247,0.1)] hover:bg-[rgba(168,85,247,0.2)] border border-[rgba(168,85,247,0.3)] hover:border-[rgba(168,85,247,0.5)] text-terminal-purple transition-all items-center gap-1.5 relative overflow-hidden group shadow-sm"
                   >
                     <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
                     <svg
@@ -854,14 +877,19 @@ export default function Player({
               Outline
             </button>
             <button
-              onClick={() => setMobileDrawerTab("stats")}
+              onClick={() => setMobileDrawerTab("comments")}
               className={`flex-1 px-3 py-2.5 text-[10px] font-sans font-semibold uppercase tracking-widest transition-colors ${
-                mobileDrawerTab === "stats"
+                mobileDrawerTab === "comments"
                   ? "text-terminal-green border-b-2 border-terminal-green"
                   : "text-terminal-dim hover:text-terminal-text"
               }`}
             >
-              Stats
+              Comments
+              {annotationActions.annotations.length > 0 && (
+                <span className="ml-1.5 text-terminal-dimmer">
+                  ({annotationActions.annotations.length})
+                </span>
+              )}
             </button>
           </div>
           {/* Content */}
@@ -877,7 +905,17 @@ export default function Player({
                 overlayActions={overlayActions}
               />
             ) : (
-              <SummaryView session={effectiveSession} />
+              <AnnotationPanel
+                actions={annotationActions}
+                scenes={effectiveSession.scenes}
+                currentIndex={currentIndex}
+                onSeek={(i) => {
+                  seekFromNavigation(i);
+                }}
+                addingForScene={commentTargetScene}
+                onClearAddingTarget={() => setCommentTargetScene(null)}
+                readOnly={isReadOnly}
+              />
             )}
           </div>
         </div>

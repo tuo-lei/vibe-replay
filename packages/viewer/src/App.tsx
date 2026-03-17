@@ -69,7 +69,16 @@ export default function App() {
     [session],
   );
 
-  // Custom mode dropdown
+  // Mobile menu + custom mode dropdown
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMobileMenuOpen(false);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [mobileMenuOpen]);
   const [customOpen, setCustomOpen] = useState(false);
   const customRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -115,7 +124,7 @@ export default function App() {
   if (loadState.status === "dashboard") {
     return (
       <div className="h-screen bg-terminal-bg flex flex-col overflow-hidden">
-        <header className="border-b border-terminal-border-subtle px-4 md:px-5 py-2.5 md:py-3 flex items-center justify-between shrink-0 glass-effect z-40 safe-top">
+        <header className="border-b border-terminal-border-subtle px-5 pt-5 pb-3 md:py-3 flex items-center justify-between shrink-0 glass-effect z-40 safe-top">
           <div className="flex items-center gap-3">
             <button
               onClick={() => navigateTo({ view: null, session: null })}
@@ -155,7 +164,7 @@ export default function App() {
 
   return (
     <div className="h-screen bg-terminal-bg flex flex-col overflow-hidden">
-      <header className="relative z-40 border-b border-terminal-border-subtle px-4 md:px-5 py-2.5 md:py-3 flex items-center justify-between shrink-0 glass-effect safe-top">
+      <header className="relative z-40 border-b border-terminal-border-subtle px-5 pt-5 pb-3 md:py-3 flex items-center justify-between shrink-0 glass-effect safe-top">
         {/* Left: branding + session info */}
         <div className="flex items-center gap-2 md:gap-3 min-w-0">
           {isEditor ? (
@@ -186,7 +195,7 @@ export default function App() {
             </span>
           )}
           {showDashboardBack && (
-            <>
+            <span className="hidden md:flex items-center gap-0.5">
               <span className="text-terminal-border/40 text-sm select-none">|</span>
               <button
                 onClick={() => navigateTo({ view: "dashboard", session: null })}
@@ -206,11 +215,11 @@ export default function App() {
                 </svg>
                 Dashboard
               </button>
-            </>
+            </span>
           )}
           {meta.title && (
             <>
-              <span className="hidden md:inline text-terminal-border/40 text-sm select-none">
+              <span className="text-terminal-border/40 text-sm select-none hidden md:inline">
                 |
               </span>
               <button
@@ -219,31 +228,27 @@ export default function App() {
                   returnToLandingRef.current?.();
                   handleViewChange("replay");
                 }}
-                className="hidden md:inline text-terminal-text text-xs font-sans font-medium truncate max-w-[300px] hover:text-terminal-green transition-colors"
+                className="text-terminal-text text-xs font-sans font-medium truncate max-w-[180px] md:max-w-[300px] hover:text-terminal-green transition-colors"
                 title="Back to landing page"
               >
                 {meta.title}
               </button>
-              <span className="shrink-0 px-1.5 py-0.5 text-[10px] font-mono rounded bg-terminal-surface text-terminal-dimmer border border-terminal-border-subtle uppercase tracking-tight">
-                {meta.project || "No Project"}
-              </span>
             </>
           )}
-          <div className="hidden sm:flex items-center gap-1.5 text-xs font-mono text-terminal-dim">
-            {gistOwner && (
-              <>
-                <span className="text-terminal-border">&middot;</span>
-                <a
-                  href={`https://github.com/${gistOwner}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-terminal-dim hover:text-terminal-text transition-colors"
-                >
-                  @{gistOwner}
-                </a>
-              </>
-            )}
-          </div>
+          {gistOwner && (
+            <div className="hidden sm:flex items-center gap-1.5 text-xs font-mono text-terminal-dim">
+              <span className="text-terminal-border">&middot;</span>
+              <span className="text-terminal-dimmer">shared by</span>
+              <a
+                href={`https://github.com/${gistOwner}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-terminal-dim hover:text-terminal-text transition-colors"
+              >
+                @{gistOwner}
+              </a>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5 md:gap-2 shrink-0">
@@ -272,108 +277,233 @@ export default function App() {
             </button>
           )}
 
-          {/* Display mode: segmented control + Custom dropdown */}
-          <div ref={customRef} className="relative flex items-center">
-            <div className="flex items-center h-7 rounded-md overflow-hidden bg-terminal-surface">
-              <button
-                onClick={() => updatePref("displayMode", "all")}
-                className={`h-full px-2.5 text-xs font-mono transition-colors ${
-                  prefs.displayMode === "all"
-                    ? "bg-terminal-green-subtle text-terminal-green"
-                    : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
-                }`}
-              >
-                All
-              </button>
-              <button
-                onClick={() => updatePref("displayMode", "compact")}
-                className={`h-full px-2.5 text-xs font-mono transition-colors ${
-                  prefs.displayMode === "compact"
-                    ? "bg-terminal-green-subtle text-terminal-green"
-                    : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
-                }`}
-              >
-                Compact
-              </button>
-              <button
-                onClick={() => {
-                  updatePref("displayMode", "custom");
-                  setCustomOpen((v) => (prefs.displayMode === "custom" ? !v : true));
-                }}
-                className={`h-full px-2.5 text-xs font-mono transition-colors ${
-                  prefs.displayMode === "custom"
-                    ? "bg-terminal-green-subtle text-terminal-green"
-                    : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
-                }`}
-              >
-                Custom
-              </button>
-            </div>
-            {customOpen && prefs.displayMode === "custom" && (
-              <div className="absolute right-0 top-full mt-2 w-40 bg-terminal-surface border border-terminal-border-subtle rounded-xl shadow-layer-xl z-50 py-1.5 backdrop-blur-md">
+          {/* Display mode + Star + Theme — desktop inline */}
+          <div ref={customRef} className="hidden md:flex items-center gap-1.5">
+            {/* Display mode: segmented control + Custom dropdown */}
+            <div className="relative flex items-center">
+              <div className="flex items-center h-7 rounded-md overflow-hidden bg-terminal-surface">
                 <button
-                  onClick={() => togglePref("promptsOnly")}
-                  className="w-full text-left px-3 py-1.5 text-xs font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50 transition-colors flex items-center gap-2"
+                  onClick={() => updatePref("displayMode", "all")}
+                  className={`h-full px-2.5 text-xs font-mono transition-colors ${
+                    prefs.displayMode === "all"
+                      ? "bg-terminal-green-subtle text-terminal-green"
+                      : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
+                  }`}
                 >
-                  <span
-                    className={`w-3.5 h-3.5 rounded flex items-center justify-center text-[10px] ${
-                      prefs.promptsOnly
-                        ? "bg-terminal-green-subtle text-terminal-green"
-                        : "bg-terminal-bg"
-                    }`}
-                  >
-                    {prefs.promptsOnly ? "\u2713" : ""}
-                  </span>
-                  Prompts Only
+                  All
                 </button>
                 <button
-                  onClick={() => togglePref("collapseAllTools")}
-                  className="w-full text-left px-3 py-1.5 text-xs font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50 transition-colors flex items-center gap-2"
+                  onClick={() => updatePref("displayMode", "compact")}
+                  className={`h-full px-2.5 text-xs font-mono transition-colors ${
+                    prefs.displayMode === "compact"
+                      ? "bg-terminal-green-subtle text-terminal-green"
+                      : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
+                  }`}
                 >
-                  <span
-                    className={`w-3.5 h-3.5 rounded flex items-center justify-center text-[10px] ${
-                      prefs.collapseAllTools
-                        ? "bg-terminal-orange-subtle text-terminal-orange"
-                        : "bg-terminal-bg"
-                    }`}
-                  >
-                    {prefs.collapseAllTools ? "\u2713" : ""}
-                  </span>
-                  Tools Collapsed
+                  Compact
                 </button>
-                {hasThinking && (
+                <button
+                  onClick={() => {
+                    updatePref("displayMode", "custom");
+                    setCustomOpen((v) => (prefs.displayMode === "custom" ? !v : true));
+                  }}
+                  className={`h-full px-2.5 text-xs font-mono transition-colors ${
+                    prefs.displayMode === "custom"
+                      ? "bg-terminal-green-subtle text-terminal-green"
+                      : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
+                  }`}
+                >
+                  Custom
+                </button>
+              </div>
+              {customOpen && prefs.displayMode === "custom" && (
+                <div className="absolute right-0 top-full mt-2 w-40 bg-terminal-surface border border-terminal-border-subtle rounded-xl shadow-layer-xl z-50 py-1.5 backdrop-blur-md">
                   <button
-                    onClick={() => togglePref("hideThinking")}
+                    onClick={() => togglePref("promptsOnly")}
                     className="w-full text-left px-3 py-1.5 text-xs font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50 transition-colors flex items-center gap-2"
                   >
                     <span
                       className={`w-3.5 h-3.5 rounded flex items-center justify-center text-[10px] ${
-                        prefs.hideThinking
-                          ? "bg-terminal-purple-subtle text-terminal-purple"
+                        prefs.promptsOnly
+                          ? "bg-terminal-green-subtle text-terminal-green"
                           : "bg-terminal-bg"
                       }`}
                     >
-                      {prefs.hideThinking ? "\u2713" : ""}
+                      {prefs.promptsOnly ? "\u2713" : ""}
                     </span>
-                    Thinking Hidden
+                    Prompts Only
                   </button>
-                )}
-              </div>
-            )}
+                  <button
+                    onClick={() => togglePref("collapseAllTools")}
+                    className="w-full text-left px-3 py-1.5 text-xs font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50 transition-colors flex items-center gap-2"
+                  >
+                    <span
+                      className={`w-3.5 h-3.5 rounded flex items-center justify-center text-[10px] ${
+                        prefs.collapseAllTools
+                          ? "bg-terminal-orange-subtle text-terminal-orange"
+                          : "bg-terminal-bg"
+                      }`}
+                    >
+                      {prefs.collapseAllTools ? "\u2713" : ""}
+                    </span>
+                    Tools Collapsed
+                  </button>
+                  {hasThinking && (
+                    <button
+                      onClick={() => togglePref("hideThinking")}
+                      className="w-full text-left px-3 py-1.5 text-xs font-mono text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface/50 transition-colors flex items-center gap-2"
+                    >
+                      <span
+                        className={`w-3.5 h-3.5 rounded flex items-center justify-center text-[10px] ${
+                          prefs.hideThinking
+                            ? "bg-terminal-purple-subtle text-terminal-purple"
+                            : "bg-terminal-bg"
+                        }`}
+                      >
+                        {prefs.hideThinking ? "\u2713" : ""}
+                      </span>
+                      Thinking Hidden
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <GitHubStarButton />
+
+            {/* Theme toggle */}
+            <button
+              onClick={toggleTheme}
+              className="h-7 w-7 flex items-center justify-center rounded-md bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover text-xs transition-colors"
+              title={theme === "dark" ? "Light mode" : "Dark mode"}
+            >
+              {theme === "dark" ? "\u263E" : "\u2600"}
+            </button>
           </div>
 
-          <GitHubStarButton />
-
-          {/* Theme toggle */}
+          {/* Mobile menu button */}
           <button
-            onClick={toggleTheme}
-            className="h-7 w-7 flex items-center justify-center rounded-md bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover text-xs transition-colors"
-            title={theme === "dark" ? "Light mode" : "Dark mode"}
+            onClick={() => setMobileMenuOpen((v) => !v)}
+            className="md:hidden h-7 w-7 flex items-center justify-center rounded-md bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors"
+            aria-label="Menu"
           >
-            {theme === "dark" ? "\u263E" : "\u2600"}
+            {mobileMenuOpen ? (
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                strokeWidth="2"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            ) : (
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                strokeWidth="2"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"
+                />
+              </svg>
+            )}
           </button>
         </div>
+        {/* Mobile dropdown — overlay, positioned inside header for top-full */}
+        {mobileMenuOpen && (
+          <div className="md:hidden absolute top-full left-0 right-0 z-50 bg-terminal-bg shadow-layer-xl rounded-b-2xl border-b border-terminal-border-subtle">
+            <div className="px-5 py-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-sans font-medium text-terminal-dim">Display</span>
+                <div className="flex items-center h-8 rounded-lg overflow-hidden bg-terminal-surface">
+                  {(["all", "compact", "custom"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      onClick={() => {
+                        updatePref("displayMode", mode);
+                        if (mode !== "custom") setMobileMenuOpen(false);
+                      }}
+                      className={`h-full px-3.5 text-xs font-mono capitalize transition-colors ${
+                        prefs.displayMode === mode
+                          ? "bg-terminal-green-subtle text-terminal-green"
+                          : "text-terminal-dim hover:text-terminal-text"
+                      }`}
+                    >
+                      {mode}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {prefs.displayMode === "custom" && (
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => togglePref("promptsOnly")}
+                    className={`px-3 py-1.5 text-xs font-mono rounded-lg border transition-colors ${
+                      prefs.promptsOnly
+                        ? "bg-terminal-green-subtle text-terminal-green border-terminal-green/30"
+                        : "text-terminal-dim border-terminal-border-subtle"
+                    }`}
+                  >
+                    Prompts Only
+                  </button>
+                  <button
+                    onClick={() => togglePref("collapseAllTools")}
+                    className={`px-3 py-1.5 text-xs font-mono rounded-lg border transition-colors ${
+                      prefs.collapseAllTools
+                        ? "bg-terminal-orange-subtle text-terminal-orange border-terminal-orange/30"
+                        : "text-terminal-dim border-terminal-border-subtle"
+                    }`}
+                  >
+                    Tools Collapsed
+                  </button>
+                  {hasThinking && (
+                    <button
+                      onClick={() => togglePref("hideThinking")}
+                      className={`px-3 py-1.5 text-xs font-mono rounded-lg border transition-colors ${
+                        prefs.hideThinking
+                          ? "bg-terminal-purple-subtle text-terminal-purple border-terminal-purple/30"
+                          : "text-terminal-dim border-terminal-border-subtle"
+                      }`}
+                    >
+                      Thinking Hidden
+                    </button>
+                  )}
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-sans font-medium text-terminal-dim">Theme</span>
+                <button
+                  onClick={() => {
+                    toggleTheme();
+                    setMobileMenuOpen(false);
+                  }}
+                  className="h-8 px-3.5 flex items-center gap-2 rounded-lg bg-terminal-surface text-terminal-dim text-xs font-mono transition-colors"
+                >
+                  {theme === "dark" ? "\u263E" : "\u2600"}
+                  <span>{theme === "dark" ? "Light" : "Dark"}</span>
+                </button>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-sans font-medium text-terminal-dim">GitHub</span>
+                <GitHubStarButton />
+              </div>
+            </div>
+          </div>
+        )}
       </header>
+
+      {/* Mobile menu backdrop */}
+      {mobileMenuOpen && (
+        <div
+          className="md:hidden fixed inset-0 z-30 bg-black/30"
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
       <Player
         session={session!}
         viewPrefs={prefs}
