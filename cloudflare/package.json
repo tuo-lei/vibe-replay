@@ -8,7 +8,9 @@
     "db:migrate": "wrangler d1 execute vibe-replay-db --remote --file=./schema.sql"
   },
   "dependencies": {
-    "drizzle-orm": "^0.44.0"
+    "better-auth": "^1.5.5",
+    "drizzle-orm": "^0.44.0",
+    "hono": "^4.12.5"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260305.1",

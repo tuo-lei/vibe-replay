@@ -30,6 +30,7 @@ plan/
 
 # Cloudflare
 cloudflare/.wrangler/
+cloudflare/.dev.vars
 
 # Environment
 .env
