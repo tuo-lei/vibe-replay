@@ -26,6 +26,9 @@ export function createAuth(env: AuthEnv) {
       },
     },
     emailAndPassword: { enabled: false },
+    account: {
+      encryptOAuthTokens: true,
+    },
     trustedOrigins: [
       "https://vibe-replay.com",
       "http://vibe-replay.com", // Wrangler dev serves Astro with this origin
