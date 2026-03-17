@@ -2,6 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Prevent horizontal scroll on mobile */
+html,
+body {
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
 /* System sans-serif for headings & UI labels (keeps mono for code/content) */
 :root {
   --font-sans:
