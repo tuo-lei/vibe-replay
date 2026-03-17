@@ -748,7 +748,7 @@ export default function Player({
                 )}
                 <div
                   ref={scrollRef}
-                  className="flex-1 overflow-y-auto px-5 py-5 pb-10 overscroll-contain"
+                  className="flex-1 overflow-y-auto overflow-x-hidden px-5 py-5 pb-10 overscroll-contain"
                 >
                   <ConversationView
                     scenes={session.scenes}

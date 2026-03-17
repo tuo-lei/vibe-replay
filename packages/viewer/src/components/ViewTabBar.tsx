@@ -58,7 +58,7 @@ export default function ViewTabBar({
 
   return (
     <div
-      className={`flex items-center justify-between border-b border-terminal-border-subtle bg-terminal-bg shrink-0 ${className}`}
+      className={`flex items-center justify-between border-b border-terminal-border-subtle bg-terminal-bg shrink-0 overflow-x-auto ${className}`}
     >
       <div className="flex bg-terminal-surface/30">
         {TABS.filter((t) => !hiddenTabs?.includes(t.key)).map(({ key, label }) => (
