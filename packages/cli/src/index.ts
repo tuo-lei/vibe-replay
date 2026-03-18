@@ -1,3 +1,7 @@
+import fs from "node:fs";
+import http from "node:http";
+import os from "node:os";
+import nodePath from "node:path";
 import { Separator, select } from "@inquirer/prompts";
 import chalk from "chalk";
 import { program } from "commander";
@@ -572,19 +576,18 @@ program
   });
 
 // ---------------------------------------------------------------------------
-// Login command (hidden — feature-flagged, not shown in --help)
+// Auth command group — login, logout, status
 // ---------------------------------------------------------------------------
 
-program
-  .command("login", { hidden: true })
+const AUTH_PATH = nodePath.join(os.homedir(), ".config", "vibe-replay", "auth.json");
+
+const authCmd = program.command("auth").description("Manage authentication");
+
+authCmd
+  .command("login")
   .description("Log in to vibe-replay with GitHub")
   .option("--api-url <url>", "API base URL", "https://vibe-replay.com")
   .action(async (opts) => {
-    const http = await import("node:http");
-    const fs = await import("node:fs");
-    const nodePath = await import("node:path");
-    const os = await import("node:os");
-
     const crypto = await import("node:crypto");
     const apiUrl = opts.apiUrl.replace(/\/$/, "");
 
@@ -674,7 +677,7 @@ program
     server.listen(0, "127.0.0.1", () => {
       const addr = server.address() as { port: number };
       const loginUrl = `${apiUrl}/auth/cli-login?port=${addr.port}&nonce=${nonce}`;
-      console.log(chalk.bold.cyan("\n  vibe-replay login\n"));
+      console.log(chalk.bold.cyan("\n  vibe-replay auth login\n"));
       console.log(chalk.dim("  Opening browser to authenticate with GitHub..."));
       console.log(chalk.dim(`  If it doesn't open, visit: ${loginUrl}\n`));
 
@@ -695,6 +698,67 @@ program
       },
       5 * 60 * 1000,
     );
+  });
+
+authCmd
+  .command("logout")
+  .description("Log out of vibe-replay")
+  .action(async () => {
+    const authPath = AUTH_PATH;
+
+    if (!fs.existsSync(authPath)) {
+      console.log(chalk.dim("\n  Not logged in.\n"));
+      return;
+    }
+
+    fs.rmSync(authPath);
+    console.log(chalk.bold.green("\n  ✓ Logged out successfully\n"));
+  });
+
+authCmd
+  .command("status")
+  .description("Show current authentication status")
+  .action(async () => {
+    const authPath = AUTH_PATH;
+
+    if (!fs.existsSync(authPath)) {
+      console.log(chalk.dim("\n  Not logged in."));
+      console.log(
+        chalk.dim("  Run ") +
+          chalk.white("vibe-replay auth login") +
+          chalk.dim(" to authenticate.\n"),
+      );
+      return;
+    }
+
+    try {
+      const data = JSON.parse(fs.readFileSync(authPath, "utf-8"));
+      console.log(chalk.bold.cyan("\n  vibe-replay auth status\n"));
+      console.log(
+        chalk.dim("  Logged in as ") +
+          chalk.white(data.user?.name || data.user?.email || "unknown"),
+      );
+      if (data.user?.image) {
+        console.log(chalk.dim("  Avatar:    ") + chalk.white(data.user.image));
+      }
+      console.log(chalk.dim("  Auth file: ") + chalk.white(authPath));
+      console.log();
+    } catch {
+      console.error(chalk.red("\n  ✗ Failed to read auth file"));
+      console.error(chalk.dim(`  Path: ${authPath}\n`));
+    }
+  });
+
+// Keep backwards-compatible hidden alias
+program
+  .command("login", { hidden: true })
+  .description("Log in to vibe-replay (alias for auth login)")
+  .option("--api-url <url>", "API base URL", "https://vibe-replay.com")
+  .action(async () => {
+    // Delegate to auth login
+    await authCmd.commands
+      .find((c) => c.name() === "login")
+      ?.parseAsync(["login", ...process.argv.slice(3)], { from: "user" });
   });
 
 program.parse();

@@ -17,12 +17,17 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
       <a href="https://www.npmjs.com/package/vibe-replay" target="_blank" rel="noopener" class="text-text-muted hover:text-text-primary transition-colors" title="npm">
         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M0 7.334v8h6.666v1.332H12v-1.332h12v-8H0zm6.666 6.664H5.334v-4H3.999v4H1.335V8.667h5.331v5.331zm4 0v1.336H8.001V8.667h5.334v5.332h-2.669v-.001zm12.001 0h-1.33v-4h-1.336v4h-1.335v-4h-1.33v4h-2.671V8.667h8.002v5.331zM10.665 10H12v2.667h-1.335V10z"/></svg>
       </a>
-      <!-- Auth: login button or user avatar -->
+      <!-- Auth: login button or user avatar dropdown -->
       <div id="auth-container" class="hidden">
         <button id="auth-login" class="hidden text-sm text-text-secondary hover:text-accent transition-colors font-mono">Login</button>
-        <div id="auth-user" class="hidden flex items-center gap-2">
-          <img id="auth-avatar" class="w-6 h-6 rounded-full" alt="" />
-          <button id="auth-logout" class="text-xs text-text-muted hover:text-text-secondary transition-colors">Logout</button>
+        <div id="auth-user" class="hidden relative">
+          <button id="auth-avatar-btn" class="flex items-center justify-center w-8 h-8 rounded-full ring-2 ring-text-muted/40 hover:ring-accent/60 transition-all cursor-pointer overflow-hidden">
+            <img id="auth-avatar" class="w-full h-full rounded-full object-cover" alt="" />
+          </button>
+          <div id="auth-dropdown" class="hidden absolute right-0 top-full mt-2 min-w-[140px] bg-surface-1 border border-border rounded-lg shadow-lg py-1 z-50">
+            <div id="auth-username" class="px-3 py-2 text-xs text-text-muted border-b border-border truncate"></div>
+            <button id="auth-logout" class="w-full text-left px-3 py-2 text-sm text-text-secondary hover:text-red-400 hover:bg-surface-2 transition-colors">Logout</button>
+          </div>
         </div>
       </div>
     </div>
@@ -732,9 +737,12 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
     const container = document.getElementById("auth-container");
     const loginBtn = document.getElementById("auth-login");
     const userDiv = document.getElementById("auth-user");
+    const avatarBtn = document.getElementById("auth-avatar-btn");
     const avatar = document.getElementById("auth-avatar") as HTMLImageElement | null;
+    const dropdown = document.getElementById("auth-dropdown");
+    const username = document.getElementById("auth-username");
     const logoutBtn = document.getElementById("auth-logout");
-    if (!container || !loginBtn || !userDiv || !avatar || !logoutBtn) return;
+    if (!container || !loginBtn || !userDiv || !avatarBtn || !avatar || !dropdown || !username || !logoutBtn) return;
 
     try {
       const res = await fetch("/api/auth/get-session", { credentials: "include" });
@@ -744,6 +752,7 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
       if (data?.session && data?.user) {
         avatar.src = data.user.image || "";
         avatar.alt = data.user.name || "";
+        username.textContent = data.user.name || data.user.email || "";
         userDiv.classList.remove("hidden");
       } else {
         loginBtn.classList.remove("hidden");
@@ -752,6 +761,17 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
       container.classList.remove("hidden");
       loginBtn.classList.remove("hidden");
     }
+
+    // Toggle dropdown on avatar click
+    avatarBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      dropdown.classList.toggle("hidden");
+    });
+
+    // Close dropdown on outside click
+    document.addEventListener("click", () => {
+      dropdown.classList.add("hidden");
+    });
 
     loginBtn.addEventListener("click", async () => {
       const res = await fetch("/api/auth/sign-in/social", {
@@ -765,7 +785,16 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
     });
 
     logoutBtn.addEventListener("click", async () => {
-      await fetch("/api/auth/sign-out", { method: "POST", credentials: "include" });
+      try {
+        const res = await fetch("/api/auth/sign-out", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+        });
+        if (!res.ok) console.error("Sign-out failed:", res.status);
+      } catch (err) {
+        console.error("Sign-out error:", err);
+      }
       window.location.reload();
     });
   })();
