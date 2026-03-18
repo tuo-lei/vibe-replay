@@ -1085,7 +1085,7 @@ export async function startServer(
       const server = http.createServer((req, res) => {
         if (req.method === "OPTIONS") {
           res.writeHead(200, {
-            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Origin": apiUrl,
             "Access-Control-Allow-Methods": "POST",
             "Access-Control-Allow-Headers": "Content-Type",
           });
@@ -1112,7 +1112,7 @@ export async function startServer(
               }
               res.writeHead(200, {
                 "Content-Type": "text/plain",
-                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Origin": apiUrl,
               });
               res.end("OK");
 

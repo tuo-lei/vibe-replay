@@ -3,6 +3,13 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "./db/schema";
 
+export const PROD_ORIGINS = ["https://vibe-replay.com"];
+export const DEV_ORIGINS = [
+  "http://localhost:8787",
+  "http://localhost:4321",
+  "http://localhost:5173",
+];
+
 export type AuthEnv = {
   DB: D1Database;
   BETTER_AUTH_SECRET: string;
@@ -18,9 +25,9 @@ export type AuthEnv = {
  */
 export function createAuth(env: AuthEnv) {
   const isDev = env.BETTER_AUTH_URL.startsWith("http://localhost");
-  const trustedOrigins = ["https://vibe-replay.com"];
+  const trustedOrigins = [...PROD_ORIGINS];
   if (isDev) {
-    trustedOrigins.push("http://localhost:8787", "http://localhost:4321", "http://localhost:5173");
+    trustedOrigins.push(...DEV_ORIGINS);
   }
   const db = drizzle(env.DB, { schema });
   return betterAuth({

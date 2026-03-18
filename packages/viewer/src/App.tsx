@@ -114,6 +114,9 @@ function DashboardAuthStatus() {
 function GitHubStarButton() {
   const [count, setCount] = useState<number | null>(null);
   useEffect(() => {
+    // Only fetch star count in editor/dashboard mode — self-contained HTML
+    // must make zero external requests (see CLAUDE.md)
+    if (!window.__VIBE_REPLAY_EDITOR__) return;
     fetch("https://api.github.com/repos/tuo-lei/vibe-replay")
       .then((r) => r.json())
       .then((d) => {

@@ -2,7 +2,7 @@ import { desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { type AuthEnv, createAuth } from "./auth";
+import { type AuthEnv, createAuth, DEV_ORIGINS, PROD_ORIGINS } from "./auth";
 import { replays } from "./db/schema";
 
 // ---------------------------------------------------------------------------
@@ -29,12 +29,9 @@ const app = new Hono<HonoEnv>();
 // CORS
 // ---------------------------------------------------------------------------
 
-const PROD_ORIGINS = ["https://vibe-replay.com"];
-const DEV_ORIGINS = ["http://localhost:8787", "http://localhost:4321", "http://localhost:5173"];
-
 app.use("/api/*", async (c, next) => {
   const isDev = c.env.BETTER_AUTH_URL?.startsWith("http://localhost");
-  const allowed = isDev ? [...PROD_ORIGINS, ...DEV_ORIGINS] : PROD_ORIGINS;
+  const allowed = isDev ? [...PROD_ORIGINS, ...DEV_ORIGINS] : [...PROD_ORIGINS];
   const mw = cors({
     origin: allowed,
     allowMethods: ["GET", "POST", "PUT", "OPTIONS"],
@@ -64,8 +61,9 @@ app.post("/api/auth/sign-out", async (c) => {
     "better-auth.session_data",
     "better-auth.dont_remember",
   ];
+  const isDev = c.env.BETTER_AUTH_URL?.startsWith("http://localhost");
   const setCookies = cookieNames.map(
-    (name) => `${name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`,
+    (name) => `${name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${isDev ? "" : "; Secure"}`,
   );
   return new Response(JSON.stringify({ success: true }), {
     headers: [
@@ -197,10 +195,10 @@ body{background:#0a0a0f;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFo
   };
   const payloadJson = JSON.stringify(payload);
   // Escape for embedding in <script> — browsers close <script> on </
-  const safePayload = payloadJson
-    .replace(/\\/g, "\\\\") // backslashes first (before other escapes add more)
-    .replace(/</g, "\\u003c")
-    .replace(/'/g, "\\u0027");
+  // JSON.stringify already escapes \ to \\. We only need to:
+  // - escape < to prevent </script> closing the tag
+  // - escape ' because the value is in a single-quoted JS string
+  const safePayload = payloadJson.replace(/</g, "\\u003c").replace(/'/g, "\\u0027");
   // Prevent browser from caching a page that contains session token
   c.header("Cache-Control", "no-store");
   return c.html(`<!DOCTYPE html>
