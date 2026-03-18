@@ -1,4 +1,7 @@
 import { betterAuth } from "better-auth";
+import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { drizzle } from "drizzle-orm/d1";
+import * as schema from "./db/schema";
 
 export type AuthEnv = {
   DB: D1Database;
@@ -19,8 +22,12 @@ export function createAuth(env: AuthEnv) {
   if (isDev) {
     trustedOrigins.push("http://localhost:8787", "http://localhost:4321", "http://localhost:5173");
   }
+  const db = drizzle(env.DB, { schema });
   return betterAuth({
-    database: env.DB,
+    database: drizzleAdapter(db, {
+      provider: "sqlite",
+      schema,
+    }),
     baseURL: env.BETTER_AUTH_URL,
     basePath: "/api/auth",
     secret: env.BETTER_AUTH_SECRET,
