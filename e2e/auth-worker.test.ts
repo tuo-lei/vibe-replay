@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 /**
@@ -10,7 +11,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
  * - Better Auth adapter misconfiguration
  * - CORS / routing regressions
  * - Input validation (callbackURL, port, nonce)
+ *
+ * Requires cloudflare/.dev.vars with GitHub OAuth credentials.
+ * Skipped in CI where .dev.vars is not available.
  */
+
+const HAS_DEV_VARS = existsSync("cloudflare/.dev.vars");
+const describeAuth = HAS_DEV_VARS ? describe : describe.skip;
 
 const WORKER_URL = "http://localhost:8787";
 let wranglerProcess: ReturnType<typeof import("node:child_process").spawn>;
@@ -29,7 +36,7 @@ async function waitForWorker(url: string, timeout = 15_000) {
   throw new Error(`Worker not ready after ${timeout}ms`);
 }
 
-describe("Auth Worker E2E", () => {
+describeAuth("Auth Worker E2E", () => {
   beforeAll(async () => {
     // Ensure local D1 has the schema (uses Drizzle-managed migrations)
     execSync("pnpm db:migrate:local", {

@@ -195,10 +195,15 @@ body{background:#0a0a0f;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFo
   };
   const payloadJson = JSON.stringify(payload);
   // Escape for embedding in <script> — browsers close <script> on </
-  // JSON.stringify already escapes \ to \\. We only need to:
-  // - escape < to prevent </script> closing the tag
-  // - escape ' because the value is in a single-quoted JS string
-  const safePayload = payloadJson.replace(/</g, "\\u003c").replace(/'/g, "\\u0027");
+  // Escape for embedding in a single-quoted JS string inside <script>:
+  // 1. \\ → \\\\ : JSON.stringify produces \\, but JS parses \\ back to \ which
+  //    corrupts JSON.parse (e.g. \b becomes backspace). Must double-escape first.
+  // 2. < → \u003c : prevents </script> closing the tag
+  // 3. ' → \u0027 : prevents breaking out of the single-quoted string
+  const safePayload = payloadJson
+    .replace(/\\/g, "\\\\")
+    .replace(/</g, "\\u003c")
+    .replace(/'/g, "\\u0027");
   // Prevent browser from caching a page that contains session token
   c.header("Cache-Control", "no-store");
   return c.html(`<!DOCTYPE html>
