@@ -26,6 +26,7 @@ const ogImage = new URL("/og.png", siteBase).href;
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content={description} />
+    <meta name="theme-color" content="#00e5a0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="canonical" href={canonicalURL} />
     <title>{title}</title>
@@ -36,11 +37,17 @@ const ogImage = new URL("/og.png", siteBase).href;
     <meta property="og:type" content="website" />
     <meta property="og:url" content={canonicalURL} />
     <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:alt" content="vibe-replay — AI coding session replays" />
     <meta property="og:site_name" content="vibe-replay" />
+    <meta property="og:locale" content="en_US" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={ogImage} />
+    <meta name="twitter:image:alt" content="vibe-replay — AI coding session replays" />
 
     <!-- Structured Data -->
     <script type="application/ld+json" set:html={JSON.stringify({
@@ -58,7 +65,8 @@ const ogImage = new URL("/og.png", siteBase).href;
       },
       "creator": {
         "@type": "Organization",
-        "name": "vibe-replay"
+        "name": "vibe-replay",
+        "url": siteBase
       }
     })} />
 
@@ -73,6 +81,8 @@ const ogImage = new URL("/og.png", siteBase).href;
     <script async defer src="https://buttons.github.io/buttons.js"></script>
 
     <!-- Google Analytics -->
+    <link rel="preconnect" href="https://www.googletagmanager.com" />
+    <link rel="dns-prefetch" href="https://www.google-analytics.com" />
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-DPXD4TGWYD"></script>
     <script>
       window.dataLayer = window.dataLayer || [];
