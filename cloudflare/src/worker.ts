@@ -48,7 +48,22 @@ app.use("/api/*", async (c, next) => {
 // Better Auth — handles /api/auth/*
 // ---------------------------------------------------------------------------
 
-app.on(["GET", "POST"], "/api/auth/*", (c) => {
+app.on(["GET", "POST"], "/api/auth/*", async (c) => {
+  // Validate callbackURL on social sign-in to prevent open redirect
+  if (c.req.path === "/api/auth/sign-in/social" && c.req.method === "POST") {
+    const cloned = c.req.raw.clone();
+    try {
+      const body = await cloned.json();
+      if (body.callbackURL && typeof body.callbackURL === "string") {
+        // Only allow relative paths starting with /
+        if (!body.callbackURL.startsWith("/") || body.callbackURL.startsWith("//")) {
+          return c.json({ error: "Invalid callbackURL" }, 400);
+        }
+      }
+    } catch {
+      // Not JSON or parse error — let Better Auth handle it
+    }
+  }
   const auth = createAuth(c.env);
   return auth.handler(c.req.raw);
 });
@@ -112,6 +127,8 @@ app.get("/auth/cli-complete", async (c) => {
   const payloadJson = JSON.stringify(payload);
   // Escape for embedding in <script> — browsers close <script> on </
   const safePayload = payloadJson.replace(/</g, "\\u003c").replace(/'/g, "\\u0027");
+  // Prevent browser from caching a page that contains session token
+  c.header("Cache-Control", "no-store");
   return c.html(`<!DOCTYPE html>
 <html><head><title>vibe-replay login</title></head>
 <body style="background:#0a0a0f;color:#e6edf3;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
