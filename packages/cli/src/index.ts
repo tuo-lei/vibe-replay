@@ -585,7 +585,9 @@ program
     const nodePath = await import("node:path");
     const os = await import("node:os");
 
+    const crypto = await import("node:crypto");
     const apiUrl = opts.apiUrl.replace(/\/$/, "");
+    const nonce = crypto.randomUUID();
 
     // Start a localhost callback server on a random port
     const server = http.createServer((req, res) => {
@@ -610,6 +612,20 @@ program
           }
         });
         req.on("end", () => {
+          try {
+            const data = JSON.parse(body);
+            if (data.nonce !== nonce) {
+              res.writeHead(403, { "Content-Type": "text/plain" });
+              res.end("Forbidden");
+              console.error(chalk.red("\n  ✗ Rejected callback with invalid nonce\n"));
+              return;
+            }
+          } catch {
+            res.writeHead(400, { "Content-Type": "text/plain" });
+            res.end("Bad Request");
+            return;
+          }
+
           res.writeHead(200, {
             "Content-Type": "text/plain",
             "Access-Control-Allow-Origin": "*",
@@ -644,7 +660,7 @@ program
 
     server.listen(0, "127.0.0.1", () => {
       const addr = server.address() as { port: number };
-      const loginUrl = `${apiUrl}/auth/cli-login?port=${addr.port}`;
+      const loginUrl = `${apiUrl}/auth/cli-login?port=${addr.port}&nonce=${nonce}`;
       console.log(chalk.bold.cyan("\n  vibe-replay login\n"));
       console.log(chalk.dim("  Opening browser to authenticate with GitHub..."));
       console.log(chalk.dim(`  If it doesn't open, visit: ${loginUrl}\n`));

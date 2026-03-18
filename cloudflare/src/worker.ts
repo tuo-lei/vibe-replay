@@ -29,20 +29,20 @@ const app = new Hono<HonoEnv>();
 // CORS
 // ---------------------------------------------------------------------------
 
-app.use(
-  "/api/*",
-  cors({
-    origin: [
-      "https://vibe-replay.com",
-      "http://localhost:8787",
-      "http://localhost:4321",
-      "http://localhost:5173",
-    ],
+const PROD_ORIGINS = ["https://vibe-replay.com"];
+const DEV_ORIGINS = ["http://localhost:8787", "http://localhost:4321", "http://localhost:5173"];
+
+app.use("/api/*", async (c, next) => {
+  const isDev = c.env.BETTER_AUTH_URL?.startsWith("http://localhost");
+  const allowed = isDev ? [...PROD_ORIGINS, ...DEV_ORIGINS] : PROD_ORIGINS;
+  const mw = cors({
+    origin: allowed,
     allowMethods: ["GET", "POST", "PUT", "OPTIONS"],
     allowHeaders: ["Content-Type", "Authorization"],
     credentials: true,
-  }),
-);
+  });
+  return mw(c, next);
+});
 
 // ---------------------------------------------------------------------------
 // Better Auth — handles /api/auth/*
@@ -60,17 +60,22 @@ app.on(["GET", "POST"], "/api/auth/*", (c) => {
 /** Step 1: CLI opens browser here. Auto-initiates GitHub OAuth. */
 app.get("/auth/cli-login", (c) => {
   const port = c.req.query("port");
+  const nonce = c.req.query("nonce");
   const portNum = Number(port);
   if (!port || !Number.isInteger(portNum) || portNum < 1024 || portNum > 65535) {
     return c.text("Invalid port parameter", 400);
   }
+  if (!nonce || !/^[0-9a-f-]{36}$/.test(nonce)) {
+    return c.text("Invalid nonce parameter", 400);
+  }
+  const safeNonce = nonce.replace(/'/g, "");
   return c.html(`<!DOCTYPE html>
 <html><head><title>vibe-replay login</title></head>
 <body style="background:#0a0a0f;color:#e6edf3;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
 <p>Redirecting to GitHub...</p>
 <script>
 fetch('/api/auth/sign-in/social',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
-body:JSON.stringify({provider:'github',callbackURL:'/auth/cli-complete?port=${encodeURIComponent(port)}'})
+body:JSON.stringify({provider:'github',callbackURL:'/auth/cli-complete?port=${encodeURIComponent(port)}&nonce=${encodeURIComponent(safeNonce)}'})
 }).then(r=>r.json()).then(d=>{if(d.url)window.location.href=d.url;else document.body.textContent='Error: '+JSON.stringify(d);});
 </script></body></html>`);
 });
@@ -78,9 +83,13 @@ body:JSON.stringify({provider:'github',callbackURL:'/auth/cli-complete?port=${en
 /** Step 2: After OAuth callback, send session to CLI's localhost server. */
 app.get("/auth/cli-complete", async (c) => {
   const port = c.req.query("port");
+  const nonce = c.req.query("nonce");
   const portNum = Number(port);
   if (!port || !Number.isInteger(portNum) || portNum < 1024 || portNum > 65535) {
     return c.text("Invalid port parameter", 400);
+  }
+  if (!nonce || !/^[0-9a-f-]{36}$/.test(nonce)) {
+    return c.text("Invalid nonce parameter", 400);
   }
   const auth = createAuth(c.env);
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
@@ -91,6 +100,7 @@ app.get("/auth/cli-complete", async (c) => {
 <p>Authentication failed. Please try again.</p></body></html>`);
   }
   const payload = {
+    nonce,
     user: {
       id: session.user.id,
       name: session.user.name,

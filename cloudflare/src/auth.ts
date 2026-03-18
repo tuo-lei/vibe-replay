@@ -14,6 +14,11 @@ export type AuthEnv = {
  * so we must instantiate auth on each request.
  */
 export function createAuth(env: AuthEnv) {
+  const isDev = env.BETTER_AUTH_URL.startsWith("http://localhost");
+  const trustedOrigins = ["https://vibe-replay.com"];
+  if (isDev) {
+    trustedOrigins.push("http://localhost:8787", "http://localhost:4321", "http://localhost:5173");
+  }
   return betterAuth({
     database: env.DB,
     baseURL: env.BETTER_AUTH_URL,
@@ -29,11 +34,6 @@ export function createAuth(env: AuthEnv) {
     account: {
       encryptOAuthTokens: true,
     },
-    trustedOrigins: [
-      "https://vibe-replay.com",
-      "http://localhost:8787", // Wrangler dev
-      "http://localhost:4321", // Astro dev
-      "http://localhost:5173", // Vite dev
-    ],
+    trustedOrigins,
   });
 }
