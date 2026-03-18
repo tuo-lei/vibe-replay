@@ -48,6 +48,33 @@ app.use("/api/*", async (c, next) => {
 // Better Auth — handles /api/auth/*
 // ---------------------------------------------------------------------------
 
+// Sign-out: Better Auth's CSRF middleware rejects same-origin POST requests
+// that lack an Origin header (browsers omit it for same-origin fetch).
+// Handle sign-out ourselves using the server-side API.
+app.post("/api/auth/sign-out", async (c) => {
+  const auth = createAuth(c.env);
+  try {
+    await auth.api.signOut({ headers: c.req.raw.headers });
+  } catch {
+    // Session may already be gone — still clear cookies
+  }
+  // Clear all Better Auth cookies
+  const cookieNames = [
+    "better-auth.session_token",
+    "better-auth.session_data",
+    "better-auth.dont_remember",
+  ];
+  const setCookies = cookieNames.map(
+    (name) => `${name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`,
+  );
+  return new Response(JSON.stringify({ success: true }), {
+    headers: [
+      ["Content-Type", "application/json"],
+      ...setCookies.map((v): [string, string] => ["Set-Cookie", v]),
+    ],
+  });
+});
+
 app.on(["GET", "POST"], "/api/auth/*", async (c) => {
   // Validate callbackURL on social sign-in to prevent open redirect
   if (c.req.path === "/api/auth/sign-in/social" && c.req.method === "POST") {

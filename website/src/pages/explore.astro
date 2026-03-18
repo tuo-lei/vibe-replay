@@ -5,17 +5,32 @@ import Layout from "../layouts/Layout.astro";
 
 <Layout title="Explore Replays - vibe-replay" description="Browse public AI coding session replays shared by the community. Watch Claude Code and Cursor sessions as interactive web replays.">
   <div class="min-h-screen flex flex-col">
-    <!-- Header -->
-    <header class="border-b border-border px-6 py-4">
+    <!-- Header (matches main page nav) -->
+    <nav class="border-b border-border/50 px-6 py-3">
       <div class="max-w-6xl mx-auto flex items-center justify-between">
         <div class="flex items-center gap-4">
-          <a href="/" class="font-mono font-bold text-sm hover:opacity-80 transition-opacity bg-gradient-to-r from-[#3fb950] to-[#58a6ff] bg-clip-text text-transparent">vibe-replay</a>
-          <span class="text-text-secondary text-sm select-none">|</span>
-          <span class="font-mono text-sm text-text-secondary">Explore</span>
+          <a href="/" class="font-mono font-bold text-sm hover:opacity-80 transition-opacity bg-gradient-to-r from-accent via-emerald-400 to-cyan-400 bg-clip-text text-transparent">vibe-replay</a>
+          <span class="text-border hidden sm:inline">|</span>
+          <span class="text-text-secondary text-sm hidden sm:inline">Explore</span>
         </div>
-        <a href="/" class="text-text-muted hover:text-text-primary text-sm transition-colors">&larr; Home</a>
+        <div class="flex items-center gap-4">
+          <a class="github-button" href="https://github.com/tuo-lei/vibe-replay" data-color-scheme="dark" data-icon="octicon-star" data-size="large" data-show-count="true" aria-label="Star tuo-lei/vibe-replay on GitHub">Star</a>
+          <!-- Auth: login button or user avatar dropdown -->
+          <div id="auth-container" class="hidden">
+            <button id="auth-login" class="hidden text-sm text-text-secondary hover:text-accent transition-colors font-mono">Login</button>
+            <div id="auth-user" class="hidden relative">
+              <button id="auth-avatar-btn" class="flex items-center justify-center w-8 h-8 rounded-full ring-2 ring-text-muted/40 hover:ring-accent/60 transition-all cursor-pointer overflow-hidden">
+                <img id="auth-avatar" class="w-full h-full rounded-full object-cover" alt="" />
+              </button>
+              <div id="auth-dropdown" class="hidden absolute right-0 top-full mt-2 min-w-[140px] bg-surface-1 border border-border rounded-lg shadow-lg py-1 z-50">
+                <div id="auth-username" class="px-3 py-2 text-xs text-text-muted border-b border-border truncate"></div>
+                <button id="auth-logout" class="w-full text-left px-3 py-2 text-sm text-text-secondary hover:text-red-400 hover:bg-surface-2 transition-colors cursor-pointer">Logout</button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
-    </header>
+    </nav>
 
     <!-- Main content -->
     <main class="flex-1 max-w-6xl mx-auto w-full px-6 py-10">
@@ -205,4 +220,78 @@ import Layout from "../layouts/Layout.astro";
 
   // Initial load
   loadReplays("recent");
+
+  // --- Auth UI (feature-flagged: localhost or ?auth=1) ---
+  (async () => {
+    const isAuthEnabled = window.location.hostname === "localhost"
+      || window.location.hostname === "127.0.0.1"
+      || new URLSearchParams(window.location.search).has("auth");
+    if (!isAuthEnabled) return;
+
+    const container = document.getElementById("auth-container");
+    const loginBtn = document.getElementById("auth-login");
+    const userDiv = document.getElementById("auth-user");
+    const avatarBtn = document.getElementById("auth-avatar-btn");
+    const avatar = document.getElementById("auth-avatar") as HTMLImageElement | null;
+    const dropdown = document.getElementById("auth-dropdown");
+    const username = document.getElementById("auth-username");
+    const logoutBtn = document.getElementById("auth-logout");
+    if (!container || !loginBtn || !userDiv || !avatarBtn || !avatar || !dropdown || !username || !logoutBtn) return;
+
+    try {
+      const res = await fetch("/api/auth/get-session", { credentials: "include" });
+      const data = await res.json();
+      container.classList.remove("hidden");
+
+      if (data?.session && data?.user) {
+        avatar.src = data.user.image || "";
+        avatar.alt = data.user.name || "";
+        username.textContent = data.user.name || data.user.email || "";
+        userDiv.classList.remove("hidden");
+      } else {
+        loginBtn.classList.remove("hidden");
+      }
+    } catch {
+      container.classList.remove("hidden");
+      loginBtn.classList.remove("hidden");
+    }
+
+    avatarBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      dropdown.classList.toggle("hidden");
+    });
+
+    document.addEventListener("click", () => {
+      dropdown.classList.add("hidden");
+    });
+
+    loginBtn.addEventListener("click", async () => {
+      const res = await fetch("/api/auth/sign-in/social", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ provider: "github", callbackURL: window.location.pathname }),
+      });
+      const data = await res.json();
+      if (data?.url) window.location.href = data.url;
+    });
+
+    logoutBtn.addEventListener("click", async () => {
+      try {
+        const res = await fetch("/api/auth/sign-out", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: "{}",
+        });
+        if (!res.ok) console.error("Sign-out failed:", res.status);
+      } catch (err) {
+        console.error("Sign-out error:", err);
+      }
+      window.location.reload();
+    });
+  })();
 </script>
+
+<!-- GitHub buttons -->
+<script is:inline async defer src="https://buttons.github.io/buttons.js"></script>
