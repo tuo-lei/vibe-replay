@@ -1,24 +1,404 @@
 import { desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { Hono } from "hono";
+import { cors } from "hono/cors";
+import { type AuthEnv, createAuth, DEV_ORIGINS, PROD_ORIGINS } from "./auth";
 import { replays } from "./db/schema";
 
-interface Env {
-  DB: D1Database;
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+type Env = AuthEnv & {
   ASSETS: Fetcher;
   /** GitHub App credentials for authenticated API access (5000 req/hr). */
   GITHUB_APP_ID?: string;
   GITHUB_APP_PRIVATE_KEY?: string;
   GITHUB_APP_INSTALLATION_ID?: string;
-}
-
-const corsHeaders: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
 };
+
+type HonoEnv = { Bindings: Env };
+
+// ---------------------------------------------------------------------------
+// App
+// ---------------------------------------------------------------------------
+
+const app = new Hono<HonoEnv>();
+
+// ---------------------------------------------------------------------------
+// CORS
+// ---------------------------------------------------------------------------
+
+app.use("/api/*", async (c, next) => {
+  const isDev = c.env.BETTER_AUTH_URL?.startsWith("http://localhost");
+  const allowed = isDev ? [...PROD_ORIGINS, ...DEV_ORIGINS] : [...PROD_ORIGINS];
+  const mw = cors({
+    origin: allowed,
+    allowMethods: ["GET", "POST", "PUT", "OPTIONS"],
+    allowHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
+  });
+  return mw(c, next);
+});
+
+// ---------------------------------------------------------------------------
+// Better Auth — handles /api/auth/*
+// ---------------------------------------------------------------------------
+
+// Sign-out: Better Auth's CSRF middleware rejects same-origin POST requests
+// that lack an Origin header (browsers omit it for same-origin fetch).
+// Handle sign-out ourselves using the server-side API.
+app.post("/api/auth/sign-out", async (c) => {
+  const auth = createAuth(c.env);
+  try {
+    await auth.api.signOut({ headers: c.req.raw.headers });
+  } catch {
+    // Session may already be gone — still clear cookies
+  }
+  // Clear all Better Auth cookies
+  const cookieNames = [
+    "better-auth.session_token",
+    "better-auth.session_data",
+    "better-auth.dont_remember",
+  ];
+  const isDev = c.env.BETTER_AUTH_URL?.startsWith("http://localhost");
+  const setCookies = cookieNames.map(
+    (name) => `${name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${isDev ? "" : "; Secure"}`,
+  );
+  return new Response(JSON.stringify({ success: true }), {
+    headers: [
+      ["Content-Type", "application/json"],
+      ...setCookies.map((v): [string, string] => ["Set-Cookie", v]),
+    ],
+  });
+});
+
+app.on(["GET", "POST"], "/api/auth/*", async (c) => {
+  // Better Auth's CSRF middleware checks Origin against trusted origins.
+  // Several issues can cause this to fail:
+  // 1. Same-origin POST may omit Origin header entirely
+  // 2. Referer fallback includes path+query which won't match
+  // 3. Wrangler dev may rewrite Origin to the custom domain (http vs https)
+  // Always set Origin to BETTER_AUTH_URL for POST requests.
+  // Safe: CORS middleware already validated the request above.
+  let req = c.req.raw;
+  if (c.req.method === "POST") {
+    const headers = new Headers(req.headers);
+    headers.set("origin", c.env.BETTER_AUTH_URL);
+    req = new Request(req.url, {
+      method: req.method,
+      headers,
+      body: req.body,
+      duplex: "half" as any,
+    });
+  }
+
+  // Validate callbackURL on social sign-in to prevent open redirect
+  if (c.req.path === "/api/auth/sign-in/social" && c.req.method === "POST") {
+    const cloned = req.clone();
+    try {
+      const body = await cloned.json();
+      if (body.callbackURL && typeof body.callbackURL === "string") {
+        if (!body.callbackURL.startsWith("/") || body.callbackURL.startsWith("//")) {
+          return c.json({ error: "Invalid callbackURL" }, 400);
+        }
+      }
+    } catch {
+      // Not JSON or parse error — let Better Auth handle it
+    }
+  }
+
+  const auth = createAuth(c.env);
+  return auth.handler(req);
+});
+
+// ---------------------------------------------------------------------------
+// CLI Login flow — browser-mediated OAuth for CLI tools
+// ---------------------------------------------------------------------------
+
+/** Step 1: CLI opens browser here. Auto-initiates GitHub OAuth. */
+app.get("/auth/cli-login", (c) => {
+  const port = c.req.query("port");
+  const nonce = c.req.query("nonce");
+  const portNum = Number(port);
+  if (!port || !Number.isInteger(portNum) || portNum < 1024 || portNum > 65535) {
+    return c.text("Invalid port parameter", 400);
+  }
+  if (!nonce || !/^[0-9a-f-]{36}$/.test(nonce)) {
+    return c.text("Invalid nonce parameter", 400);
+  }
+  const safeNonce = nonce.replace(/'/g, "");
+  return c.html(`<!DOCTYPE html>
+<html><head><title>vibe-replay - Sign in</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0f;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh}
+.card{text-align:center;padding:3rem 2.5rem;border-radius:1rem;border:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.03);max-width:360px;width:100%}
+.logo{font-weight:700;font-size:1.1rem;background:linear-gradient(to right,#00e5a0,#34d399,#22d3ee);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:1.5rem}
+.spinner{width:24px;height:24px;border:2.5px solid rgba(255,255,255,0.1);border-top-color:#00e5a0;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 1rem}
+@keyframes spin{to{transform:rotate(360deg)}}
+.msg{font-size:.875rem;color:#8b949e}
+</style></head>
+<body><div class="card">
+<div class="logo">vibe-replay</div>
+<div class="spinner"></div>
+<p class="msg">Redirecting to GitHub...</p>
+</div>
+<script>
+fetch('/api/auth/sign-in/social',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
+body:JSON.stringify({provider:'github',callbackURL:'/auth/cli-complete?port=${encodeURIComponent(port)}&nonce=${encodeURIComponent(safeNonce)}'})
+}).then(r=>r.json()).then(d=>{if(d.url)window.location.href=d.url;else document.querySelector('.msg').textContent='Error: '+JSON.stringify(d);});
+</script></body></html>`);
+});
+
+/** Step 2: After OAuth callback, send session to CLI's localhost server. */
+app.get("/auth/cli-complete", async (c) => {
+  const port = c.req.query("port");
+  const nonce = c.req.query("nonce");
+  const portNum = Number(port);
+  if (!port || !Number.isInteger(portNum) || portNum < 1024 || portNum > 65535) {
+    return c.text("Invalid port parameter", 400);
+  }
+  if (!nonce || !/^[0-9a-f-]{36}$/.test(nonce)) {
+    return c.text("Invalid nonce parameter", 400);
+  }
+  const auth = createAuth(c.env);
+  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  if (!session) {
+    return c.html(`<!DOCTYPE html>
+<html><head><title>vibe-replay - Error</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0f;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh}
+.card{text-align:center;padding:3rem 2.5rem;border-radius:1rem;border:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.03);max-width:360px;width:100%}
+.logo{font-weight:700;font-size:1.1rem;background:linear-gradient(to right,#00e5a0,#34d399,#22d3ee);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:1.5rem}
+.icon{font-size:2rem;margin-bottom:.75rem}
+.title{font-size:1rem;font-weight:600;margin-bottom:.5rem;color:#ff5f57}
+.msg{font-size:.875rem;color:#8b949e}
+</style></head>
+<body><div class="card">
+<div class="logo">vibe-replay</div>
+<div class="icon">&#10007;</div>
+<p class="title">Authentication failed</p>
+<p class="msg">Please close this window and try again.</p>
+</div></body></html>`);
+  }
+  const payload = {
+    nonce,
+    user: {
+      id: session.user.id,
+      name: session.user.name,
+      email: session.user.email,
+      image: session.user.image,
+    },
+    token: session.session.token,
+  };
+  const payloadJson = JSON.stringify(payload);
+  // Escape for embedding in <script> — browsers close <script> on </
+  // Escape for embedding in a single-quoted JS string inside <script>:
+  // 1. \\ → \\\\ : JSON.stringify produces \\, but JS parses \\ back to \ which
+  //    corrupts JSON.parse (e.g. \b becomes backspace). Must double-escape first.
+  // 2. < → \u003c : prevents </script> closing the tag
+  // 3. ' → \u0027 : prevents breaking out of the single-quoted string
+  const safePayload = payloadJson
+    .replace(/\\/g, "\\\\")
+    .replace(/</g, "\\u003c")
+    .replace(/'/g, "\\u0027");
+  // Prevent browser from caching a page that contains session token
+  c.header("Cache-Control", "no-store");
+  return c.html(`<!DOCTYPE html>
+<html><head><title>vibe-replay - Sign in</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0f;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh}
+.card{text-align:center;padding:3rem 2.5rem;border-radius:1rem;border:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.03);max-width:360px;width:100%}
+.logo{font-weight:700;font-size:1.1rem;background:linear-gradient(to right,#00e5a0,#34d399,#22d3ee);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:1.5rem}
+.spinner{width:24px;height:24px;border:2.5px solid rgba(255,255,255,0.1);border-top-color:#00e5a0;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto .75rem}
+@keyframes spin{to{transform:rotate(360deg)}}
+.icon{font-size:2rem;margin-bottom:.75rem;display:none}
+.title{font-size:1rem;font-weight:600;margin-bottom:.5rem;display:none}
+.msg{font-size:.875rem;color:#8b949e}
+.countdown{font-size:.75rem;color:#484f58;margin-top:.75rem;display:none}
+</style></head>
+<body><div class="card">
+<div class="logo">vibe-replay</div>
+<div class="spinner" id="spinner"></div>
+<div class="icon" id="icon"></div>
+<p class="title" id="title"></p>
+<p class="msg" id="msg">Completing login...</p>
+<p class="countdown" id="countdown"></p>
+</div>
+<script>
+fetch('http://127.0.0.1:${encodeURIComponent(port)}/callback',{method:'POST',headers:{'Content-Type':'application/json'},body:'${safePayload}'})
+.then(()=>{
+  document.getElementById('spinner').style.display='none';
+  document.getElementById('icon').style.display='block';
+  document.getElementById('icon').textContent='\\u2713';
+  document.getElementById('title').style.display='block';
+  document.getElementById('title').style.color='#00e5a0';
+  document.getElementById('title').textContent='Logged in!';
+  document.getElementById('msg').textContent='This window will close automatically.';
+  var cd=document.getElementById('countdown');cd.style.display='block';
+  var s=5;cd.textContent='Closing in '+s+'s...';
+  var t=setInterval(function(){s--;if(s<=0){clearInterval(t);window.close();}else{cd.textContent='Closing in '+s+'s...';}},1000);
+})
+.catch(()=>{
+  document.getElementById('spinner').style.display='none';
+  document.getElementById('icon').style.display='block';
+  document.getElementById('icon').textContent='\\u2717';
+  document.getElementById('title').style.display='block';
+  document.getElementById('title').style.color='#ff5f57';
+  document.getElementById('title').textContent='Connection failed';
+  document.getElementById('msg').textContent='Could not reach the CLI. Please try again.';
+});
+</script></body></html>`);
+});
+
+// ---------------------------------------------------------------------------
+// Replay API — existing endpoints
+// ---------------------------------------------------------------------------
 
 /** Cache TTL: skip GitHub re-fetch if viewed within this window */
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+app.get("/api/replays", async (c) => {
+  const db = drizzle(c.env.DB);
+  const url = new URL(c.req.url);
+  const sort = url.searchParams.get("sort") || "recent";
+  const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 100);
+
+  const orderCol = sort === "popular" ? desc(replays.viewCount) : desc(replays.createdAt);
+
+  const results = await db
+    .select({
+      gist_id: replays.gistId,
+      title: replays.title,
+      provider: replays.provider,
+      model: replays.model,
+      scene_count: replays.sceneCount,
+      user_prompts: replays.userPrompts,
+      tool_calls: replays.toolCalls,
+      duration_ms: replays.durationMs,
+      cost_estimate: replays.costEstimate,
+      first_message: replays.firstMessage,
+      gist_owner: replays.gistOwner,
+      view_count: replays.viewCount,
+      created_at: replays.createdAt,
+    })
+    .from(replays)
+    .orderBy(orderCol)
+    .limit(limit);
+
+  return c.json(results);
+});
+
+app.post("/api/replays", async (c) => {
+  return handlePostReplay(c);
+});
+
+// Legacy PUT — treat as POST for backwards compatibility
+app.put("/api/replays", async (c) => {
+  return handlePostReplay(c);
+});
+
+// ---------------------------------------------------------------------------
+// Fallback — serve static assets (Astro website)
+// ---------------------------------------------------------------------------
+
+app.all("*", (c) => {
+  if (!c.env.ASSETS) {
+    return c.text("Not Found", 404);
+  }
+  return c.env.ASSETS.fetch(c.req.raw);
+});
+
+// ---------------------------------------------------------------------------
+// Export
+// ---------------------------------------------------------------------------
+
+export default app;
+
+// ---------------------------------------------------------------------------
+// POST /api/replays — register or refresh a replay
+// ---------------------------------------------------------------------------
+
+async function handlePostReplay(c: { env: Env; req: { json: () => Promise<any> } }) {
+  try {
+    const body = await c.req.json();
+
+    if (!body.gist_id || typeof body.gist_id !== "string") {
+      return Response.json({ error: "gist_id required" }, { status: 400 });
+    }
+    if (!/^[a-f0-9]{20,40}$/.test(body.gist_id)) {
+      return Response.json({ error: "invalid gist_id" }, { status: 400 });
+    }
+
+    const db = drizzle(c.env.DB);
+    const gistId = body.gist_id;
+
+    // Check if row exists and whether cache is still fresh
+    const existing = await db
+      .select({ lastViewedAt: replays.lastViewedAt })
+      .from(replays)
+      .where(eq(replays.gistId, gistId))
+      .limit(1);
+
+    if (existing.length > 0) {
+      const lastViewed = existing[0].lastViewedAt;
+      const isFresh =
+        lastViewed && Date.now() - new Date(`${lastViewed}Z`).getTime() < CACHE_TTL_MS;
+
+      if (isFresh) {
+        await db
+          .update(replays)
+          .set({
+            viewCount: sql`${replays.viewCount} + 1`,
+            lastViewedAt: sql`datetime('now')`,
+          })
+          .where(eq(replays.gistId, gistId));
+
+        return Response.json({ ok: true, cached: true });
+      }
+
+      // Stale — re-fetch from GitHub and update
+      const meta = await fetchGistMeta(gistId, await getInstallationToken(c.env));
+      if (!meta) {
+        await db
+          .update(replays)
+          .set({
+            viewCount: sql`${replays.viewCount} + 1`,
+            lastViewedAt: sql`datetime('now')`,
+          })
+          .where(eq(replays.gistId, gistId));
+
+        return Response.json({ ok: true, cached: true });
+      }
+
+      await db
+        .update(replays)
+        .set({
+          ...meta,
+          viewCount: sql`${replays.viewCount} + 1`,
+          lastViewedAt: sql`datetime('now')`,
+        })
+        .where(eq(replays.gistId, gistId));
+
+      return Response.json({ ok: true, updated: true });
+    }
+
+    // New — fetch from GitHub and insert
+    const meta = await fetchGistMeta(gistId, await getInstallationToken(c.env));
+    if (!meta) {
+      return Response.json({ error: "not a valid vibe-replay gist" }, { status: 400 });
+    }
+
+    await db.insert(replays).values({ gistId, ...meta });
+
+    return Response.json({ ok: true, created: true });
+  } catch {
+    return Response.json({ error: "internal error" }, { status: 500 });
+  }
+}
 
 // ---------------------------------------------------------------------------
 // GitHub App authentication — JWT + installation token
@@ -27,7 +407,6 @@ const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 /** Cached installation token (valid for ~1 hour, we refresh at 50 min) */
 let cachedInstallToken: { token: string; expiresAt: number } | null = null;
 
-/** Base64url encode a buffer */
 function base64url(buf: ArrayBuffer | Uint8Array): string {
   const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
   let binary = "";
@@ -35,7 +414,6 @@ function base64url(buf: ArrayBuffer | Uint8Array): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-/** Parse PEM private key → CryptoKey for RS256 signing */
 async function importPrivateKey(pem: string): Promise<CryptoKey> {
   const pemBody = pem
     .replace(/-----BEGIN RSA PRIVATE KEY-----/, "")
@@ -47,7 +425,6 @@ async function importPrivateKey(pem: string): Promise<CryptoKey> {
   const bytes = new Uint8Array(binaryStr.length);
   for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
 
-  // Try PKCS#8 first, fall back to PKCS#1
   try {
     return await crypto.subtle.importKey(
       "pkcs8",
@@ -57,7 +434,6 @@ async function importPrivateKey(pem: string): Promise<CryptoKey> {
       ["sign"],
     );
   } catch {
-    // GitHub App keys are typically PKCS#1 — wrap in PKCS#8
     const pkcs8 = wrapPkcs1InPkcs8(bytes);
     return await crypto.subtle.importKey(
       "pkcs8",
@@ -69,21 +445,14 @@ async function importPrivateKey(pem: string): Promise<CryptoKey> {
   }
 }
 
-/** Wrap a PKCS#1 RSAPrivateKey in a PKCS#8 PrivateKeyInfo envelope */
 function wrapPkcs1InPkcs8(pkcs1: Uint8Array): Uint8Array {
-  // PKCS#8 header for RSA: SEQUENCE { version, AlgorithmIdentifier { rsaEncryption, NULL }, OCTET STRING { pkcs1 } }
   const rsaOid = new Uint8Array([
     0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00,
   ]);
   const version = new Uint8Array([0x02, 0x01, 0x00]);
-
-  // Encode OCTET STRING wrapping pkcs1
   const octetHeader = encodeDerLength(0x04, pkcs1.length);
-
-  // Total inner length
   const innerLen = version.length + rsaOid.length + octetHeader.length + pkcs1.length;
   const seqHeader = encodeDerLength(0x30, innerLen);
-
   const result = new Uint8Array(seqHeader.length + innerLen);
   let offset = 0;
   result.set(seqHeader, offset);
@@ -98,18 +467,12 @@ function wrapPkcs1InPkcs8(pkcs1: Uint8Array): Uint8Array {
   return result;
 }
 
-/** Encode a DER tag + length prefix */
 function encodeDerLength(tag: number, length: number): Uint8Array {
-  if (length < 0x80) {
-    return new Uint8Array([tag, length]);
-  }
-  if (length < 0x100) {
-    return new Uint8Array([tag, 0x81, length]);
-  }
+  if (length < 0x80) return new Uint8Array([tag, length]);
+  if (length < 0x100) return new Uint8Array([tag, 0x81, length]);
   return new Uint8Array([tag, 0x82, (length >> 8) & 0xff, length & 0xff]);
 }
 
-/** Create a signed JWT for GitHub App authentication */
 async function createAppJwt(appId: string, privateKeyPem: string): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   const header = base64url(new TextEncoder().encode(JSON.stringify({ alg: "RS256", typ: "JWT" })));
@@ -126,13 +489,11 @@ async function createAppJwt(appId: string, privateKeyPem: string): Promise<strin
   return `${signingInput}.${base64url(sig)}`;
 }
 
-/** Get an installation access token, with caching */
 async function getInstallationToken(env: Env): Promise<string | null> {
   if (!env.GITHUB_APP_ID || !env.GITHUB_APP_PRIVATE_KEY || !env.GITHUB_APP_INSTALLATION_ID) {
     return null;
   }
 
-  // Return cached token if still valid (refresh 10 min before expiry)
   if (cachedInstallToken && Date.now() < cachedInstallToken.expiresAt - 10 * 60 * 1000) {
     return cachedInstallToken.token;
   }
@@ -169,163 +530,8 @@ async function getInstallationToken(env: Env): Promise<string | null> {
   }
 }
 
-export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
-    const url = new URL(request.url);
-
-    if (url.pathname === "/api/replays") {
-      if (request.method === "OPTIONS") {
-        return new Response(null, { headers: corsHeaders });
-      }
-      if (request.method === "GET") {
-        return handleGetReplays(url, env);
-      }
-      if (request.method === "POST") {
-        return handlePostReplay(request, env);
-      }
-      // Legacy PUT — treat as POST for backwards compatibility
-      if (request.method === "PUT") {
-        return handlePostReplay(request, env);
-      }
-      return Response.json({ error: "method not allowed" }, { status: 405 });
-    }
-
-    return env.ASSETS.fetch(request);
-  },
-} satisfies ExportedHandler<Env>;
-
 // ---------------------------------------------------------------------------
-// GET /api/replays — list public replays
-// ---------------------------------------------------------------------------
-async function handleGetReplays(url: URL, env: Env): Promise<Response> {
-  const db = drizzle(env.DB);
-  const sort = url.searchParams.get("sort") || "recent";
-  const limit = Math.min(Number(url.searchParams.get("limit")) || 50, 100);
-
-  const orderCol = sort === "popular" ? desc(replays.viewCount) : desc(replays.createdAt);
-
-  const results = await db
-    .select({
-      gist_id: replays.gistId,
-      title: replays.title,
-      provider: replays.provider,
-      model: replays.model,
-      scene_count: replays.sceneCount,
-      user_prompts: replays.userPrompts,
-      tool_calls: replays.toolCalls,
-      duration_ms: replays.durationMs,
-      cost_estimate: replays.costEstimate,
-      first_message: replays.firstMessage,
-      gist_owner: replays.gistOwner,
-      view_count: replays.viewCount,
-      created_at: replays.createdAt,
-    })
-    .from(replays)
-    .orderBy(orderCol)
-    .limit(limit);
-
-  return Response.json(results, { headers: corsHeaders });
-}
-
-// ---------------------------------------------------------------------------
-// POST /api/replays — register or refresh a replay
-//
-// Body: { gist_id: string }
-// Nothing else — worker fetches metadata from GitHub gist content.
-//
-// - New gist_id → fetch from GitHub, INSERT
-// - Existing + lastViewedAt within 1h → just bump viewCount (cached)
-// - Existing + stale → re-fetch from GitHub, UPDATE metadata + bump viewCount
-// ---------------------------------------------------------------------------
-async function handlePostReplay(request: Request, env: Env): Promise<Response> {
-  try {
-    const body = (await request.json()) as { gist_id: string };
-
-    if (!body.gist_id || typeof body.gist_id !== "string") {
-      return Response.json({ error: "gist_id required" }, { status: 400 });
-    }
-    if (!/^[a-f0-9]{20,40}$/.test(body.gist_id)) {
-      return Response.json({ error: "invalid gist_id" }, { status: 400 });
-    }
-
-    const db = drizzle(env.DB);
-    const gistId = body.gist_id;
-
-    // Check if row exists and whether cache is still fresh
-    const existing = await db
-      .select({
-        lastViewedAt: replays.lastViewedAt,
-      })
-      .from(replays)
-      .where(eq(replays.gistId, gistId))
-      .limit(1);
-
-    if (existing.length > 0) {
-      const lastViewed = existing[0].lastViewedAt;
-      const isFresh =
-        lastViewed && Date.now() - new Date(`${lastViewed}Z`).getTime() < CACHE_TTL_MS;
-
-      if (isFresh) {
-        // Cache hit — just bump view count, skip GitHub fetch
-        await db
-          .update(replays)
-          .set({
-            viewCount: sql`${replays.viewCount} + 1`,
-            lastViewedAt: sql`datetime('now')`,
-          })
-          .where(eq(replays.gistId, gistId));
-
-        return Response.json({ ok: true, cached: true }, { headers: corsHeaders });
-      }
-
-      // Stale — re-fetch from GitHub and update
-      const meta = await fetchGistMeta(gistId, await getInstallationToken(env));
-      if (!meta) {
-        // Gist gone or not a valid replay — still bump view count
-        await db
-          .update(replays)
-          .set({
-            viewCount: sql`${replays.viewCount} + 1`,
-            lastViewedAt: sql`datetime('now')`,
-          })
-          .where(eq(replays.gistId, gistId));
-
-        return Response.json({ ok: true, cached: true }, { headers: corsHeaders });
-      }
-
-      await db
-        .update(replays)
-        .set({
-          ...meta,
-          viewCount: sql`${replays.viewCount} + 1`,
-          lastViewedAt: sql`datetime('now')`,
-        })
-        .where(eq(replays.gistId, gistId));
-
-      return Response.json({ ok: true, updated: true }, { headers: corsHeaders });
-    }
-
-    // New — fetch from GitHub and insert
-    const meta = await fetchGistMeta(gistId, await getInstallationToken(env));
-    if (!meta) {
-      return Response.json({ error: "not a valid vibe-replay gist" }, { status: 400 });
-    }
-
-    await db.insert(replays).values({
-      gistId,
-      ...meta,
-    });
-
-    return Response.json({ ok: true, created: true }, { headers: corsHeaders });
-  } catch {
-    return Response.json({ error: "internal error" }, { status: 500 });
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Fetch gist from GitHub public API and extract replay metadata.
-// Returns null if gist not found or doesn't contain valid replay JSON.
-// Only parses the "meta" object — does NOT load the full scenes array.
+// Fetch gist metadata from GitHub
 // ---------------------------------------------------------------------------
 
 interface GistMeta {
@@ -345,7 +551,6 @@ async function fetchGistMeta(
   gistId: string,
   installToken?: string | null,
 ): Promise<GistMeta | null> {
-  // 1. Fetch gist metadata from GitHub API
   const headers: Record<string, string> = {
     "User-Agent": "vibe-replay-worker",
     Accept: "application/vnd.github+json",
@@ -354,7 +559,6 @@ async function fetchGistMeta(
     headers.Authorization = `token ${installToken}`;
   }
   let gistResp = await fetch(`https://api.github.com/gists/${gistId}`, { headers });
-  // If authenticated request fails (App may lack Gists permission), retry unauthenticated
   if (!gistResp.ok && installToken && (gistResp.status === 404 || gistResp.status === 403)) {
     delete headers.Authorization;
     gistResp = await fetch(`https://api.github.com/gists/${gistId}`, { headers });
@@ -375,12 +579,9 @@ async function fetchGistMeta(
     >;
   };
 
-  // 2. Find the JSON file
   const jsonFile = Object.values(gistData.files || {}).find((f) => f.filename?.endsWith(".json"));
   if (!jsonFile) return null;
 
-  // 3. Get content — prefer inline content (even if truncated, since we only
-  //    need the first few KB for meta + first message), fall back to raw_url.
   let content: string;
   if (jsonFile.content) {
     content = jsonFile.content;
@@ -394,15 +595,10 @@ async function fetchGistMeta(
     return null;
   }
 
-  // 4. Extract meta without parsing the full JSON.
-  //    replay.json structure: {"meta":{...},"scenes":[...]}
-  //    We find the meta object boundary and parse just that.
   const meta = extractMeta(content);
   if (!meta) return null;
 
-  // 5. Extract first user prompt (scan for first "user-prompt" scene)
   const firstMessage = extractFirstMessage(content);
-
   const stats = meta.stats || {};
   const gistOwner = gistData.owner?.login || null;
 
@@ -423,22 +619,16 @@ async function fetchGistMeta(
   };
 }
 
-/**
- * Extract the "meta" object from replay JSON without parsing the full file.
- * Looks for `"meta":` near the start and tracks brace depth to find its end.
- */
 function extractMeta(json: string): any | null {
   const metaKey = '"meta"';
   const idx = json.indexOf(metaKey);
-  if (idx === -1 || idx > 100) return null; // meta should be near the top
+  if (idx === -1 || idx > 100) return null;
 
-  // Find the opening brace after "meta":
   const colonIdx = json.indexOf(":", idx + metaKey.length);
   if (colonIdx === -1) return null;
   const braceStart = json.indexOf("{", colonIdx);
   if (braceStart === -1) return null;
 
-  // Track brace depth to find the matching close
   let depth = 0;
   let inString = false;
   let escape = false;
@@ -472,20 +662,14 @@ function extractMeta(json: string): any | null {
   return null;
 }
 
-/**
- * Extract the first user-prompt content from replay JSON without full parse.
- * Scans for `"type":"user-prompt"` and extracts the nearby "content" field.
- */
 function extractFirstMessage(json: string): string | null {
   const marker = '"user-prompt"';
   const idx = json.indexOf(marker);
   if (idx === -1) return null;
 
-  // Look backwards for the opening brace of this scene object
   const objStart = json.lastIndexOf("{", idx);
   if (objStart === -1) return null;
 
-  // Find the matching closing brace
   let depth = 0;
   let inString = false;
   let escape = false;

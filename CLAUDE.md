@@ -26,6 +26,24 @@ When to use which:
 - `pnpm dev` — daily iteration with full HMR: viewer auto-reloads via Vite, CLI auto-restarts via `tsx watch`
 - `pnpm dev:website` — website + viewer iteration: Astro HMR + `/view/` redirects to Vite viewer
 
+## Database (D1 + Drizzle)
+
+Schema is managed by **Drizzle ORM** — single source of truth in `cloudflare/src/db/schema.ts`.
+
+**When you change the schema:**
+```bash
+cd cloudflare
+pnpm db:generate          # Drizzle reads schema.ts, generates SQL migration in drizzle/
+pnpm db:migrate:local     # Apply to local D1
+pnpm db:migrate:remote    # Apply to production D1 (requires auth)
+```
+
+- All tables (replays + Better Auth auth tables) are defined in `cloudflare/src/db/schema.ts`
+- Migration files live in `cloudflare/drizzle/` — commit them to git
+- **Never hand-edit migration files** — always use `drizzle-kit generate`
+- `schema.sql` is kept as a reference but migrations are the source of truth
+- Better Auth uses `drizzleAdapter` — it reads/writes auth tables through the same Drizzle instance
+
 ## Gotchas
 
 - **`</` escaping**: JSON in `<script>` tags MUST escape `</` as `<\/` — browsers close the tag otherwise (see `generator.ts`)
@@ -84,9 +102,15 @@ If tag/release is updated but `packages/cli/package.json` is not, CLI will still
 | Playback hook | `packages/viewer/src/hooks/usePlayback.ts` |
 | Session loading | `packages/viewer/src/hooks/useSessionLoader.ts` |
 | View preferences | `packages/viewer/src/hooks/useViewPrefs.ts` |
+| DB schema (all tables) | `cloudflare/src/db/schema.ts` |
+| Auth config | `cloudflare/src/auth.ts` |
+| Worker (Hono routes) | `cloudflare/src/worker.ts` |
+| Drizzle config | `cloudflare/drizzle.config.ts` |
+| Drizzle migrations | `cloudflare/drizzle/` |
 | E2E test helpers | `e2e/helpers.ts` |
 | E2E: generated HTML | `e2e/generated-html.test.ts` |
 | E2E: editor server | `e2e/editor-server.test.ts` |
 | E2E: CLI smoke | `e2e/cli-smoke.test.ts` |
+| E2E: auth worker | `e2e/auth-worker.test.ts` |
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for full architecture details.

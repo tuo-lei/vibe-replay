@@ -1,3 +1,7 @@
+import fs from "node:fs";
+import http from "node:http";
+import os from "node:os";
+import nodePath from "node:path";
 import { Separator, select } from "@inquirer/prompts";
 import chalk from "chalk";
 import { program } from "commander";
@@ -569,6 +573,193 @@ program
     console.log(chalk.bold.green("  ✓ Done!"));
     console.log(chalk.dim("  File: ") + chalk.white(outputPath));
     console.log();
+  });
+
+// ---------------------------------------------------------------------------
+// Auth command group — login, logout, status
+// ---------------------------------------------------------------------------
+
+const AUTH_PATH = nodePath.join(os.homedir(), ".config", "vibe-replay", "auth.json");
+
+const authCmd = program.command("auth").description("Manage authentication");
+
+authCmd
+  .command("login")
+  .description("Log in to vibe-replay with GitHub")
+  .option("--api-url <url>", "API base URL", "https://vibe-replay.com")
+  .action(async (opts) => {
+    const crypto = await import("node:crypto");
+    const apiUrl = opts.apiUrl.replace(/\/$/, "");
+
+    // Only allow official domain or localhost to prevent phishing via crafted --api-url
+    const parsed = new URL(apiUrl);
+    if (
+      parsed.hostname !== "vibe-replay.com" &&
+      parsed.hostname !== "localhost" &&
+      parsed.hostname !== "127.0.0.1"
+    ) {
+      console.error(chalk.red(`\n  ✗ Untrusted API URL: ${apiUrl}`));
+      console.error(chalk.dim("  Only https://vibe-replay.com and localhost are allowed.\n"));
+      process.exit(1);
+    }
+
+    const nonce = crypto.randomUUID();
+
+    // Start a localhost callback server on a random port
+    const server = http.createServer((req, res) => {
+      if (req.method === "OPTIONS") {
+        res.writeHead(200, {
+          "Access-Control-Allow-Origin": apiUrl,
+          "Access-Control-Allow-Methods": "POST",
+          "Access-Control-Allow-Headers": "Content-Type",
+        });
+        res.end();
+        return;
+      }
+      if (req.method === "POST" && req.url === "/callback") {
+        let body = "";
+        req.on("data", (chunk: string) => {
+          body += chunk;
+          if (body.length > 1_000_000) {
+            res.writeHead(413);
+            res.end();
+            req.destroy();
+            return;
+          }
+        });
+        req.on("end", () => {
+          try {
+            const data = JSON.parse(body);
+            if (data.nonce !== nonce) {
+              res.writeHead(403, { "Content-Type": "text/plain" });
+              res.end("Forbidden");
+              console.error(chalk.red("\n  ✗ Rejected callback with invalid nonce\n"));
+              return;
+            }
+          } catch {
+            res.writeHead(400, { "Content-Type": "text/plain" });
+            res.end("Bad Request");
+            return;
+          }
+
+          res.writeHead(200, {
+            "Content-Type": "text/plain",
+            "Access-Control-Allow-Origin": apiUrl,
+          });
+          res.end("OK");
+
+          try {
+            const data = JSON.parse(body);
+            const configDir = nodePath.join(os.homedir(), ".config", "vibe-replay");
+            fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
+            const authPath = nodePath.join(configDir, "auth.json");
+            fs.writeFileSync(authPath, JSON.stringify(data, null, 2), {
+              mode: 0o600,
+            });
+            console.log(
+              chalk.bold.green("\n  ✓ Logged in as ") +
+                chalk.white(data.user?.name || data.user?.email),
+            );
+            console.log(chalk.dim(`  Token saved to ${authPath}\n`));
+          } catch (err) {
+            console.error(chalk.red("\n  ✗ Failed to save auth token"));
+            console.error(chalk.dim(`  Body received: ${body.slice(0, 200)}`));
+            console.error(chalk.dim(`  Error: ${err}\n`));
+          }
+          server.close();
+          process.exit(0);
+        });
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address() as { port: number };
+      const loginUrl = `${apiUrl}/auth/cli-login?port=${addr.port}&nonce=${nonce}`;
+      console.log(chalk.bold.cyan("\n  vibe-replay auth login\n"));
+      console.log(chalk.dim("  Opening browser to authenticate with GitHub..."));
+      console.log(chalk.dim(`  If it doesn't open, visit: ${loginUrl}\n`));
+
+      // Open browser
+      import("open")
+        .then((m) => m.default(loginUrl))
+        .catch(() => {
+          // open package not available, user can manually open
+        });
+    });
+
+    // Timeout after 5 minutes
+    setTimeout(
+      () => {
+        console.error(chalk.red("\n  ✗ Login timed out after 5 minutes\n"));
+        server.close();
+        process.exit(1);
+      },
+      5 * 60 * 1000,
+    );
+  });
+
+authCmd
+  .command("logout")
+  .description("Log out of vibe-replay")
+  .action(async () => {
+    const authPath = AUTH_PATH;
+
+    if (!fs.existsSync(authPath)) {
+      console.log(chalk.dim("\n  Not logged in.\n"));
+      return;
+    }
+
+    fs.rmSync(authPath);
+    console.log(chalk.bold.green("\n  ✓ Logged out successfully\n"));
+  });
+
+authCmd
+  .command("status")
+  .description("Show current authentication status")
+  .action(async () => {
+    const authPath = AUTH_PATH;
+
+    if (!fs.existsSync(authPath)) {
+      console.log(chalk.dim("\n  Not logged in."));
+      console.log(
+        chalk.dim("  Run ") +
+          chalk.white("vibe-replay auth login") +
+          chalk.dim(" to authenticate.\n"),
+      );
+      return;
+    }
+
+    try {
+      const data = JSON.parse(fs.readFileSync(authPath, "utf-8"));
+      console.log(chalk.bold.cyan("\n  vibe-replay auth status\n"));
+      console.log(
+        chalk.dim("  Logged in as ") +
+          chalk.white(data.user?.name || data.user?.email || "unknown"),
+      );
+      if (data.user?.image) {
+        console.log(chalk.dim("  Avatar:    ") + chalk.white(data.user.image));
+      }
+      console.log(chalk.dim("  Auth file: ") + chalk.white(authPath));
+      console.log();
+    } catch {
+      console.error(chalk.red("\n  ✗ Failed to read auth file"));
+      console.error(chalk.dim(`  Path: ${authPath}\n`));
+    }
+  });
+
+// Keep backwards-compatible hidden alias
+program
+  .command("login", { hidden: true })
+  .description("Log in to vibe-replay (alias for auth login)")
+  .option("--api-url <url>", "API base URL", "https://vibe-replay.com")
+  .action(async () => {
+    // Delegate to auth login
+    await authCmd.commands
+      .find((c) => c.name() === "login")
+      ?.parseAsync(["login", ...process.argv.slice(3)], { from: "user" });
   });
 
 program.parse();

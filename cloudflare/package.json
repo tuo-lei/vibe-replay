@@ -5,10 +5,14 @@
   "private": true,
   "scripts": {
     "deploy": "wrangler deploy",
-    "db:migrate": "wrangler d1 execute vibe-replay-db --remote --file=./schema.sql"
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply vibe-replay-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply vibe-replay-db --remote"
   },
   "dependencies": {
-    "drizzle-orm": "^0.44.0"
+    "better-auth": "^1.5.5",
+    "drizzle-orm": "^0.44.0",
+    "hono": "^4.12.5"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260305.1",

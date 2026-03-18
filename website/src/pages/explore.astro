@@ -1,21 +1,40 @@
 ---
 import Footer from "../components/Footer.astro";
+import GitHubStar from "../components/GitHubStar.astro";
 import Layout from "../layouts/Layout.astro";
 ---
 
 <Layout title="Explore Replays - vibe-replay" description="Browse public AI coding session replays shared by the community. Watch Claude Code and Cursor sessions as interactive web replays.">
   <div class="min-h-screen flex flex-col">
-    <!-- Header -->
-    <header class="border-b border-border px-6 py-4">
+    <!-- Header (matches main page nav) -->
+    <nav class="border-b border-border/50 px-6 py-3">
       <div class="max-w-6xl mx-auto flex items-center justify-between">
         <div class="flex items-center gap-4">
-          <a href="/" class="font-mono font-bold text-sm hover:opacity-80 transition-opacity bg-gradient-to-r from-[#3fb950] to-[#58a6ff] bg-clip-text text-transparent">vibe-replay</a>
-          <span class="text-text-secondary text-sm select-none">|</span>
-          <span class="font-mono text-sm text-text-secondary">Explore</span>
+          <a href="/" class="font-mono font-bold text-sm hover:opacity-80 transition-opacity bg-gradient-to-r from-accent via-emerald-400 to-cyan-400 bg-clip-text text-transparent">vibe-replay</a>
+          <span class="text-border hidden sm:inline">|</span>
+          <span class="text-text-secondary text-sm hidden sm:inline">Explore</span>
         </div>
-        <a href="/" class="text-text-muted hover:text-text-primary text-sm transition-colors">&larr; Home</a>
+        <div class="flex items-center gap-3">
+          <GitHubStar />
+          <!-- Auth -->
+          <div id="auth-container" style="display:none">
+            <button id="auth-login" style="display:none" class="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-[#24292f] hover:bg-[#32383f] text-white text-xs font-medium transition-colors cursor-pointer border border-white/10">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              Sign in
+            </button>
+            <div id="auth-user" style="display:none" class="relative">
+              <button id="auth-avatar-btn" class="flex items-center justify-center w-8 h-8 rounded-full border border-border/60 hover:border-accent/70 transition-all cursor-pointer overflow-hidden">
+                <img id="auth-avatar" class="w-full h-full rounded-full object-cover" alt="" />
+              </button>
+              <div id="auth-dropdown" class="hidden absolute right-0 top-full mt-2 min-w-[160px] bg-surface-1 border border-border rounded-lg shadow-lg py-1 z-50">
+                <div id="auth-username" class="px-3 py-2 text-xs text-text-muted border-b border-border truncate"></div>
+                <button id="auth-logout" class="w-full text-left px-3 py-2 text-sm text-text-secondary hover:text-red-400 hover:bg-surface-2 transition-colors cursor-pointer">Logout</button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
-    </header>
+    </nav>
 
     <!-- Main content -->
     <main class="flex-1 max-w-6xl mx-auto w-full px-6 py-10">
@@ -205,4 +224,74 @@ import Layout from "../layouts/Layout.astro";
 
   // Initial load
   loadReplays("recent");
+
+  // --- Auth UI ---
+  (async () => {
+
+    const container = document.getElementById("auth-container");
+    const loginBtn = document.getElementById("auth-login");
+    const userDiv = document.getElementById("auth-user");
+    const avatarBtn = document.getElementById("auth-avatar-btn");
+    const avatar = document.getElementById("auth-avatar") as HTMLImageElement | null;
+    const dropdown = document.getElementById("auth-dropdown");
+    const username = document.getElementById("auth-username");
+    const logoutBtn = document.getElementById("auth-logout");
+    if (!container || !loginBtn || !userDiv || !avatarBtn || !avatar || !dropdown || !username || !logoutBtn) return;
+
+    const show = (el: HTMLElement) => { el.style.display = ""; };
+
+    try {
+      const res = await fetch("/api/auth/get-session", { credentials: "include" });
+      const data = await res.json();
+      show(container);
+
+      if (data?.session && data?.user) {
+        avatar.src = data.user.image || "";
+        avatar.alt = data.user.name || "";
+        username.textContent = data.user.name || data.user.email || "";
+        show(userDiv);
+      } else {
+        show(loginBtn);
+      }
+    } catch {
+      show(container);
+      show(loginBtn);
+    }
+
+    avatarBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      dropdown.classList.toggle("hidden");
+    });
+
+    document.addEventListener("click", () => {
+      dropdown.classList.add("hidden");
+    });
+
+    loginBtn.addEventListener("click", async () => {
+      const res = await fetch("/api/auth/sign-in/social", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ provider: "github", callbackURL: window.location.pathname }),
+      });
+      const data = await res.json();
+      if (data?.url) window.location.href = data.url;
+    });
+
+    logoutBtn.addEventListener("click", async () => {
+      try {
+        const res = await fetch("/api/auth/sign-out", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: "{}",
+        });
+        if (!res.ok) console.error("Sign-out failed:", res.status);
+      } catch (err) {
+        console.error("Sign-out error:", err);
+      }
+      window.location.reload();
+    });
+  })();
 </script>
+
