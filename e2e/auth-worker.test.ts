@@ -31,8 +31,8 @@ async function waitForWorker(url: string, timeout = 15_000) {
 
 describe("Auth Worker E2E", () => {
   beforeAll(async () => {
-    // Ensure local D1 has the schema
-    execSync("pnpm wrangler d1 execute vibe-replay-db --local --file=./schema.sql", {
+    // Ensure local D1 has the schema (uses Drizzle-managed migrations)
+    execSync("pnpm db:migrate:local", {
       cwd: "cloudflare",
       stdio: "pipe",
     });

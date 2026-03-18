@@ -5,7 +5,9 @@
   "private": true,
   "scripts": {
     "deploy": "wrangler deploy",
-    "db:migrate": "wrangler d1 execute vibe-replay-db --remote --file=./schema.sql"
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply vibe-replay-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply vibe-replay-db --remote"
   },
   "dependencies": {
     "better-auth": "^1.5.5",
