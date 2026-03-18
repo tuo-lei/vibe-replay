@@ -76,13 +76,15 @@ app.post("/api/auth/sign-out", async (c) => {
 });
 
 app.on(["GET", "POST"], "/api/auth/*", async (c) => {
-  // Same-origin POST requests omit the Origin header, which causes
-  // Better Auth's CSRF middleware to reject them (checks Origin or Referer
-  // against trusted origins, but Referer includes path+query which fails).
-  // Inject the base URL as Origin when missing.
+  // Better Auth's CSRF middleware checks Origin against trusted origins.
+  // Several issues can cause this to fail:
+  // 1. Same-origin POST may omit Origin header entirely
+  // 2. Referer fallback includes path+query which won't match
+  // 3. Wrangler dev may rewrite Origin to the custom domain (http vs https)
+  // Always set Origin to BETTER_AUTH_URL for POST requests.
   // Safe: CORS middleware already validated the request above.
   let req = c.req.raw;
-  if (c.req.method === "POST" && !req.headers.get("origin")) {
+  if (c.req.method === "POST") {
     const headers = new Headers(req.headers);
     headers.set("origin", c.env.BETTER_AUTH_URL);
     req = new Request(req.url, {
@@ -129,13 +131,25 @@ app.get("/auth/cli-login", (c) => {
   }
   const safeNonce = nonce.replace(/'/g, "");
   return c.html(`<!DOCTYPE html>
-<html><head><title>vibe-replay login</title></head>
-<body style="background:#0a0a0f;color:#e6edf3;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
-<p>Redirecting to GitHub...</p>
+<html><head><title>vibe-replay - Sign in</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0f;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh}
+.card{text-align:center;padding:3rem 2.5rem;border-radius:1rem;border:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.03);max-width:360px;width:100%}
+.logo{font-weight:700;font-size:1.1rem;background:linear-gradient(to right,#00e5a0,#34d399,#22d3ee);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:1.5rem}
+.spinner{width:24px;height:24px;border:2.5px solid rgba(255,255,255,0.1);border-top-color:#00e5a0;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 1rem}
+@keyframes spin{to{transform:rotate(360deg)}}
+.msg{font-size:.875rem;color:#8b949e}
+</style></head>
+<body><div class="card">
+<div class="logo">vibe-replay</div>
+<div class="spinner"></div>
+<p class="msg">Redirecting to GitHub...</p>
+</div>
 <script>
 fetch('/api/auth/sign-in/social',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'include',
 body:JSON.stringify({provider:'github',callbackURL:'/auth/cli-complete?port=${encodeURIComponent(port)}&nonce=${encodeURIComponent(safeNonce)}'})
-}).then(r=>r.json()).then(d=>{if(d.url)window.location.href=d.url;else document.body.textContent='Error: '+JSON.stringify(d);});
+}).then(r=>r.json()).then(d=>{if(d.url)window.location.href=d.url;else document.querySelector('.msg').textContent='Error: '+JSON.stringify(d);});
 </script></body></html>`);
 });
 
@@ -154,9 +168,22 @@ app.get("/auth/cli-complete", async (c) => {
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   if (!session) {
     return c.html(`<!DOCTYPE html>
-<html><head><title>vibe-replay login</title></head>
-<body style="background:#0a0a0f;color:#ff5f57;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
-<p>Authentication failed. Please try again.</p></body></html>`);
+<html><head><title>vibe-replay - Error</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0f;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh}
+.card{text-align:center;padding:3rem 2.5rem;border-radius:1rem;border:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.03);max-width:360px;width:100%}
+.logo{font-weight:700;font-size:1.1rem;background:linear-gradient(to right,#00e5a0,#34d399,#22d3ee);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:1.5rem}
+.icon{font-size:2rem;margin-bottom:.75rem}
+.title{font-size:1rem;font-weight:600;margin-bottom:.5rem;color:#ff5f57}
+.msg{font-size:.875rem;color:#8b949e}
+</style></head>
+<body><div class="card">
+<div class="logo">vibe-replay</div>
+<div class="icon">&#10007;</div>
+<p class="title">Authentication failed</p>
+<p class="msg">Please close this window and try again.</p>
+</div></body></html>`);
   }
   const payload = {
     nonce,
@@ -174,13 +201,50 @@ app.get("/auth/cli-complete", async (c) => {
   // Prevent browser from caching a page that contains session token
   c.header("Cache-Control", "no-store");
   return c.html(`<!DOCTYPE html>
-<html><head><title>vibe-replay login</title></head>
-<body style="background:#0a0a0f;color:#e6edf3;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
-<p id="msg">Completing login...</p>
+<html><head><title>vibe-replay - Sign in</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0f;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh}
+.card{text-align:center;padding:3rem 2.5rem;border-radius:1rem;border:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.03);max-width:360px;width:100%}
+.logo{font-weight:700;font-size:1.1rem;background:linear-gradient(to right,#00e5a0,#34d399,#22d3ee);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:1.5rem}
+.spinner{width:24px;height:24px;border:2.5px solid rgba(255,255,255,0.1);border-top-color:#00e5a0;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto .75rem}
+@keyframes spin{to{transform:rotate(360deg)}}
+.icon{font-size:2rem;margin-bottom:.75rem;display:none}
+.title{font-size:1rem;font-weight:600;margin-bottom:.5rem;display:none}
+.msg{font-size:.875rem;color:#8b949e}
+.countdown{font-size:.75rem;color:#484f58;margin-top:.75rem;display:none}
+</style></head>
+<body><div class="card">
+<div class="logo">vibe-replay</div>
+<div class="spinner" id="spinner"></div>
+<div class="icon" id="icon"></div>
+<p class="title" id="title"></p>
+<p class="msg" id="msg">Completing login...</p>
+<p class="countdown" id="countdown"></p>
+</div>
 <script>
 fetch('http://127.0.0.1:${encodeURIComponent(port)}/callback',{method:'POST',headers:{'Content-Type':'application/json'},body:'${safePayload}'})
-.then(()=>{document.getElementById('msg').textContent='Logged in! You can close this window.';document.getElementById('msg').style.color='#00e5a0';})
-.catch(()=>{document.getElementById('msg').textContent='Failed to connect to CLI. Please try again.';document.getElementById('msg').style.color='#ff5f57';});
+.then(()=>{
+  document.getElementById('spinner').style.display='none';
+  document.getElementById('icon').style.display='block';
+  document.getElementById('icon').textContent='\\u2713';
+  document.getElementById('title').style.display='block';
+  document.getElementById('title').style.color='#00e5a0';
+  document.getElementById('title').textContent='Logged in!';
+  document.getElementById('msg').textContent='This window will close automatically.';
+  var cd=document.getElementById('countdown');cd.style.display='block';
+  var s=5;cd.textContent='Closing in '+s+'s...';
+  var t=setInterval(function(){s--;if(s<=0){clearInterval(t);window.close();}else{cd.textContent='Closing in '+s+'s...';}},1000);
+})
+.catch(()=>{
+  document.getElementById('spinner').style.display='none';
+  document.getElementById('icon').style.display='block';
+  document.getElementById('icon').textContent='\\u2717';
+  document.getElementById('title').style.display='block';
+  document.getElementById('title').style.color='#ff5f57';
+  document.getElementById('title').textContent='Connection failed';
+  document.getElementById('msg').textContent='Could not reach the CLI. Please try again.';
+});
 </script></body></html>`);
 });
 
