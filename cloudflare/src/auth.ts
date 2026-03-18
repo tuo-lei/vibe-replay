@@ -31,7 +31,6 @@ export function createAuth(env: AuthEnv) {
     },
     trustedOrigins: [
       "https://vibe-replay.com",
-      "http://vibe-replay.com", // Wrangler dev serves Astro with this origin
       "http://localhost:8787", // Wrangler dev
       "http://localhost:4321", // Astro dev
       "http://localhost:5173", // Vite dev

@@ -602,6 +602,12 @@ program
         let body = "";
         req.on("data", (chunk: string) => {
           body += chunk;
+          if (body.length > 1_000_000) {
+            res.writeHead(413);
+            res.end();
+            req.destroy();
+            return;
+          }
         });
         req.on("end", () => {
           res.writeHead(200, {

@@ -32,7 +32,12 @@ const app = new Hono<HonoEnv>();
 app.use(
   "/api/*",
   cors({
-    origin: "*",
+    origin: [
+      "https://vibe-replay.com",
+      "http://localhost:8787",
+      "http://localhost:4321",
+      "http://localhost:5173",
+    ],
     allowMethods: ["GET", "POST", "PUT", "OPTIONS"],
     allowHeaders: ["Content-Type", "Authorization"],
     credentials: true,
@@ -55,7 +60,10 @@ app.on(["GET", "POST"], "/api/auth/*", (c) => {
 /** Step 1: CLI opens browser here. Auto-initiates GitHub OAuth. */
 app.get("/auth/cli-login", (c) => {
   const port = c.req.query("port");
-  if (!port) return c.text("Missing port parameter", 400);
+  const portNum = Number(port);
+  if (!port || !Number.isInteger(portNum) || portNum < 1024 || portNum > 65535) {
+    return c.text("Invalid port parameter", 400);
+  }
   return c.html(`<!DOCTYPE html>
 <html><head><title>vibe-replay login</title></head>
 <body style="background:#0a0a0f;color:#e6edf3;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
@@ -70,7 +78,10 @@ body:JSON.stringify({provider:'github',callbackURL:'/auth/cli-complete?port=${en
 /** Step 2: After OAuth callback, send session to CLI's localhost server. */
 app.get("/auth/cli-complete", async (c) => {
   const port = c.req.query("port");
-  if (!port) return c.text("Missing port parameter", 400);
+  const portNum = Number(port);
+  if (!port || !Number.isInteger(portNum) || portNum < 1024 || portNum > 65535) {
+    return c.text("Invalid port parameter", 400);
+  }
   const auth = createAuth(c.env);
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   if (!session) {
@@ -90,7 +101,7 @@ app.get("/auth/cli-complete", async (c) => {
   };
   const payloadJson = JSON.stringify(payload);
   // Escape for embedding in <script> — browsers close <script> on </
-  const safePayload = payloadJson.replace(/</g, "\\u003c");
+  const safePayload = payloadJson.replace(/</g, "\\u003c").replace(/'/g, "\\u0027");
   return c.html(`<!DOCTYPE html>
 <html><head><title>vibe-replay login</title></head>
 <body style="background:#0a0a0f;color:#e6edf3;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
