@@ -129,7 +129,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
   const [ghError, setGhError] = useState<string | null>(null);
   const [mdViewMode, setMdViewMode] = useState<"preview" | "source">("preview");
 
-  // Fetch gh CLI status, gist info, and existing export files
+  // Fetch publish status, gist info, and existing export files
   useEffect(() => {
     if (!isEditor) return;
     if (publishGist) {
@@ -348,21 +348,14 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                 <div className="mt-4 flex items-center gap-3">
                   {ghUnavailable ? (
                     <div className="flex-1 text-xs font-mono text-terminal-orange px-3 py-2 rounded-lg bg-terminal-orange-subtle/50 border border-terminal-orange/10">
-                      Requires{" "}
-                      <a
-                        href="https://cli.github.com/"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="underline"
-                      >
-                        gh CLI
-                      </a>{" "}
-                      — install then run{" "}
-                      <span className="text-terminal-text font-semibold">gh auth login</span>
+                      Login required — run{" "}
+                      <span className="text-terminal-text font-semibold">
+                        vibe-replay auth login
+                      </span>
                     </div>
                   ) : ghAvailable === null ? (
                     <div className="text-[11px] font-mono text-terminal-dimmer animate-pulse">
-                      Checking gh CLI...
+                      Checking login status...
                     </div>
                   ) : (
                     <>

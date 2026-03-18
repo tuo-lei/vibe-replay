@@ -1,35 +1,9 @@
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { promisify } from "node:util";
+import { getApiUrl, loadAuthToken } from "./cloud.js";
 
-const exec = promisify(execFile);
-
-const VIEWER_BASE_URL = "https://vibe-replay.com/view";
 const GIST_META_FILE = ".vibe-replay-gist.json";
-
-export type GhStatus =
-  | { available: true }
-  | { available: false; reason: "not-installed" | "not-authenticated" };
-
-/**
- * Pre-check whether `gh` CLI is installed and authenticated.
- * Use this to show hints in the menu before the user selects gist.
- */
-export async function checkGhStatus(): Promise<GhStatus> {
-  try {
-    await exec("which", ["gh"]);
-  } catch {
-    return { available: false, reason: "not-installed" };
-  }
-  try {
-    await exec("gh", ["auth", "status"]);
-  } catch {
-    return { available: false, reason: "not-authenticated" };
-  }
-  return { available: true };
-}
 
 export interface GistResult {
   gistId: string;
@@ -52,72 +26,83 @@ export interface PublishGistOptions {
   overwrite?: SavedGistInfo;
 }
 
+/** Check if gist publish is available (user is logged in) */
+export function checkPublishStatus(): { available: true } | { available: false; reason: string } {
+  const auth = loadAuthToken();
+  if (auth) return { available: true };
+  return { available: false, reason: "Run `vibe-replay auth login` to publish" };
+}
+
 export async function publishGist(
   outputDir: string,
   title: string,
   opts?: PublishGistOptions,
 ): Promise<GistResult> {
-  // Check if gh CLI is available
-  try {
-    await exec("gh", ["auth", "status"]);
-  } catch {
-    throw new Error(
-      "GitHub CLI (gh) is not installed or not authenticated.\n" +
-        "Install: https://cli.github.com/\n" +
-        "Auth: gh auth login",
-    );
+  const auth = loadAuthToken();
+  if (!auth) {
+    throw new Error("Not logged in. Run `vibe-replay auth login` first.");
   }
 
   const jsonPath = join(outputDir, "replay.json");
+  const content = await readFile(jsonPath, "utf-8");
   const overwrite = opts?.overwrite;
-  const requestedFilename = `${sanitizeFilename(title)}.json`;
-  let filename = overwrite?.filename || requestedFilename;
-  const desc = `vibe-replay: ${title}`;
-  let gistId = "";
-  let gistUrl = "";
-  let mode: GistResult["mode"] = "created";
+  const filename = overwrite?.filename || `${sanitizeFilename(title)}.json`;
+  const description = `vibe-replay: ${title}`;
+  const apiUrl = getApiUrl();
+
+  let gistId: string;
+  let gistUrl: string;
+  let viewerUrl: string;
+  let mode: GistResult["mode"];
 
   if (overwrite) {
-    // Saved metadata can drift (manual gist edits/renames). Resolve a valid
-    // current gist filename before calling `gh gist edit`.
-    filename = await resolveEditableFilename(
-      overwrite.gistId,
-      overwrite.filename || requestedFilename,
-    );
-    await exec("gh", [
-      "gist",
-      "edit",
-      overwrite.gistId,
-      jsonPath,
-      "--filename",
-      filename,
-      "--desc",
-      desc,
-    ]);
-    gistId = overwrite.gistId;
-    gistUrl = overwrite.gistUrl || `https://gist.github.com/${gistId}`;
+    // Update existing gist
+    const resp = await fetch(`${apiUrl}/api/gists/${overwrite.gistId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `better-auth.session_token=${auth.token}`,
+      },
+      body: JSON.stringify({ filename, content, description }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: resp.statusText }));
+      throw new Error(
+        `Gist update failed: ${(err as { error?: string }).error || resp.statusText}`,
+      );
+    }
+    const data = (await resp.json()) as { gistId: string; gistUrl: string; viewerUrl: string };
+    gistId = data.gistId;
+    gistUrl = data.gistUrl;
+    viewerUrl = data.viewerUrl;
     mode = "updated";
   } else {
-    // Upload replay.json to gist
-    const { stdout } = await exec("gh", [
-      "gist",
-      "create",
-      "--public",
-      "--desc",
-      desc,
-      "--filename",
-      filename,
-      jsonPath,
-    ]);
-    gistUrl = stdout.trim();
-    gistId = extractGistId(stdout.trim());
+    // Create new gist
+    const resp = await fetch(`${apiUrl}/api/gists`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `better-auth.session_token=${auth.token}`,
+      },
+      body: JSON.stringify({ filename, content, description, public: true }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: resp.statusText }));
+      if ((resp.status as number) === 401) {
+        throw new Error("Session expired. Run `vibe-replay auth login` to re-authenticate.");
+      }
+      throw new Error(
+        `Gist publish failed: ${(err as { error?: string }).error || resp.statusText}`,
+      );
+    }
+    const data = (await resp.json()) as { gistId: string; gistUrl: string; viewerUrl: string };
+    gistId = data.gistId;
+    gistUrl = data.gistUrl;
+    viewerUrl = data.viewerUrl;
+    mode = "created";
   }
 
-  // Construct viewer URL — clean gist ID link
-  const viewerUrl = `${VIEWER_BASE_URL}/?gist=${gistId}`;
-  if (!gistUrl) gistUrl = `https://gist.github.com/${gistId}`;
-  const replayContent = await readFile(jsonPath, "utf-8");
-  const contentHash = createHash("sha256").update(replayContent).digest("hex").slice(0, 16);
+  const contentHash = createHash("sha256").update(content).digest("hex").slice(0, 16);
   await saveGistInfo(outputDir, {
     gistId,
     filename,
@@ -127,32 +112,7 @@ export async function publishGist(
     contentHash,
   });
 
-  // Register/refresh metadata on vibe-replay.com (worker fetches from gist)
-  try {
-    await registerReplayMetadata(gistId);
-  } catch {
-    /* non-critical */
-  }
-
   return { gistId, filename, gistUrl, viewerUrl, mode };
-}
-
-async function resolveEditableFilename(gistId: string, preferred: string): Promise<string> {
-  try {
-    const { stdout } = await exec("gh", ["api", `gists/${gistId}`]);
-    const payload = JSON.parse(stdout) as {
-      files?: Record<string, { filename?: string }>;
-    };
-    const names = Object.values(payload.files || {})
-      .map((f) => f.filename)
-      .filter((v): v is string => typeof v === "string" && v.length > 0);
-    if (names.length === 0) return preferred;
-    if (names.includes(preferred)) return preferred;
-    const jsonName = names.find((n) => n.endsWith(".json"));
-    return jsonName || names[0];
-  } catch {
-    return preferred;
-  }
 }
 
 export async function loadSavedGistInfo(outputDir: string): Promise<SavedGistInfo | undefined> {
@@ -170,25 +130,9 @@ async function saveGistInfo(outputDir: string, info: SavedGistInfo): Promise<voi
   await writeFile(join(outputDir, GIST_META_FILE), JSON.stringify(info, null, 2), "utf-8");
 }
 
-function extractGistId(gistUrlOrId: string): string {
-  const trimmed = gistUrlOrId.trim();
-  const urlMatch = trimmed.match(/([a-f0-9]{20,40})$/i);
-  if (urlMatch) return urlMatch[1].toLowerCase();
-  throw new Error(`Unexpected gist output: ${gistUrlOrId}`);
-}
-
 function sanitizeFilename(s: string): string {
   return s
     .replace(/[^a-zA-Z0-9_-]/g, "-")
     .replace(/-+/g, "-")
     .slice(0, 60);
-}
-
-/** Register/refresh replay metadata on vibe-replay.com. Worker fetches from gist. */
-async function registerReplayMetadata(gistId: string): Promise<void> {
-  await fetch("https://vibe-replay.com/api/replays", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ gist_id: gistId }),
-  });
 }

@@ -240,10 +240,9 @@ export default function App() {
             </button>
             <span className="instant-tooltip inline-flex items-center gap-1.5 text-[10px] font-sans font-bold px-2.5 py-1 rounded-full bg-terminal-green/10 text-terminal-green uppercase tracking-wider border border-terminal-green/20">
               <span className="w-1.5 h-1.5 rounded-full bg-terminal-green animate-pulse" />
-              Live
+              Local
               <span className="instant-tooltip-text">
-                Viewer {window.location.host}
-                {import.meta.env.VITE_API_PORT && ` · API :${import.meta.env.VITE_API_PORT}`}
+                {`Viewer ${window.location.host}${import.meta.env.VITE_API_PORT ? `\nCLI :${import.meta.env.VITE_API_PORT}` : ""}${import.meta.env.VITE_CLOUD_API_URL ? `\nCloud ${import.meta.env.VITE_CLOUD_API_URL}` : ""}`}
               </span>
             </span>
             <span className="text-terminal-border/40 text-sm select-none">|</span>
@@ -294,10 +293,9 @@ export default function App() {
           {isEditor && (
             <span className="instant-tooltip inline-flex items-center gap-1.5 text-[10px] font-sans font-bold px-2.5 py-1 rounded-full bg-terminal-green/10 text-terminal-green uppercase tracking-wider border border-terminal-green/20">
               <span className="w-1.5 h-1.5 rounded-full bg-terminal-green animate-pulse" />
-              Live
+              Local
               <span className="instant-tooltip-text">
-                Viewer {window.location.host}
-                {import.meta.env.VITE_API_PORT && ` · API :${import.meta.env.VITE_API_PORT}`}
+                {`Viewer ${window.location.host}${import.meta.env.VITE_API_PORT ? `\nCLI :${import.meta.env.VITE_API_PORT}` : ""}${import.meta.env.VITE_CLOUD_API_URL ? `\nCloud ${import.meta.env.VITE_CLOUD_API_URL}` : ""}`}
               </span>
             </span>
           )}

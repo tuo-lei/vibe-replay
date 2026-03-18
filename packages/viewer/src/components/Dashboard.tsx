@@ -225,10 +225,13 @@ function ReplayCard({
   onTitleSave,
   onDelete,
   onPublishGist,
+  onPublishCloud,
   onRegenerate,
   onArchive,
   ghAvailable,
+  authAvailable,
   isPublishing,
+  isPublishingCloud,
   isDeleting: _isDeleting,
   isRegenerating,
   isArchived,
@@ -238,10 +241,13 @@ function ReplayCard({
   onTitleSave?: (slug: string, title: string) => Promise<void>;
   onDelete?: () => void;
   onPublishGist?: () => void;
+  onPublishCloud?: () => void;
   onRegenerate?: () => void;
   onArchive?: () => void;
   ghAvailable?: boolean;
+  authAvailable?: boolean;
   isPublishing?: boolean;
+  isPublishingCloud?: boolean;
   isDeleting?: boolean;
   isRegenerating?: boolean;
   isArchived?: boolean;
@@ -351,6 +357,41 @@ function ReplayCard({
                 </svg>
               )}
               Upload
+            </button>
+          )}
+          {s.cloud && (
+            <a
+              href={s.cloud.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-cyan-subtle text-terminal-cyan hover:bg-terminal-cyan-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0"
+              title={`Shared — expires ${new Date(`${s.cloud.expiresAt}Z`).toLocaleDateString()}`}
+            >
+              <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M4.5 12A3.5 3.5 0 0 1 3 5.4 4 4 0 0 1 11 4a3 3 0 0 1 1.5 5.6.5.5 0 0 1-.5-.8A2 2 0 0 0 11 5a3 3 0 0 0-6-.3A2.5 2.5 0 0 0 4.5 11h.5a.5.5 0 0 1 0 1h-.5z" />
+              </svg>
+              Shared
+            </a>
+          )}
+          {authAvailable && onPublishCloud && !s.cloud && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onPublishCloud();
+              }}
+              disabled={isPublishingCloud}
+              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-cyan-subtle text-terminal-cyan hover:bg-terminal-cyan-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50"
+              title="Share via cloud (7-day link)"
+            >
+              {isPublishingCloud ? (
+                <span className="animate-pulse">...</span>
+              ) : (
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M4.5 12A3.5 3.5 0 0 1 3 5.4 4 4 0 0 1 11 4a3 3 0 0 1 1.5 5.6.5.5 0 0 1-.5-.8A2 2 0 0 0 11 5a3 3 0 0 0-6-.3A2.5 2.5 0 0 0 4.5 11h.5a.5.5 0 0 1 0 1h-.5zM8 8v4M6 10l2-2 2 2" />
+                </svg>
+              )}
+              Share
             </button>
           )}
           {onRegenerate && (
@@ -657,7 +698,10 @@ function SessionsPanel() {
   const wasEnrichingRef = useRef(false);
   const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());
   const [ghAvailable, setGhAvailable] = useState<boolean | null>(null);
+  const [authAvailable, setAuthAvailable] = useState<boolean>(false);
   const [publishingSlug, setPublishingSlug] = useState<string | null>(null);
+  const [publishingCloudSlug, setPublishingCloudSlug] = useState<string | null>(null);
+  const [cloudError, setCloudError] = useState<string | null>(null);
   const [enrichmentStatus, setEnrichmentStatus] = useState<SourcesEnrichmentStatus | null>(null);
   const hasCursorSources = sources.some((source) => source.provider === "cursor");
 
@@ -739,6 +783,10 @@ function SessionsPanel() {
       .then((r) => r.json())
       .then((data: { available: boolean }) => setGhAvailable(data.available))
       .catch(() => setGhAvailable(false));
+    fetch("/api/auth/status")
+      .then((r) => r.json())
+      .then((data: { authenticated: boolean }) => setAuthAvailable(data.authenticated))
+      .catch(() => setAuthAvailable(false));
   }, [loadSources]);
 
   useEffect(() => {
@@ -876,6 +924,45 @@ function SessionsPanel() {
       console.error("Gist publish error:", getErrorMessage(err));
     } finally {
       setPublishingSlug(null);
+    }
+  };
+
+  const handlePublishCloud = async (slug: string) => {
+    setPublishingCloudSlug(slug);
+    setCloudError(null);
+    try {
+      const resp = await fetch(`/api/publish/cloud?slug=${encodeURIComponent(slug)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ visibility: "unlisted" }),
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data.error || "Cloud share failed");
+      }
+      const result = await resp.json();
+      setSources((prev) =>
+        prev.map((s) =>
+          s.slug === slug && s.replay
+            ? {
+                ...s,
+                replay: {
+                  ...s.replay,
+                  cloud: {
+                    id: result.id,
+                    url: result.url,
+                    expiresAt: result.expiresAt,
+                    updatedAt: new Date().toISOString(),
+                  },
+                },
+              }
+            : s,
+        ),
+      );
+    } catch (err) {
+      setCloudError(getErrorMessage(err));
+    } finally {
+      setPublishingCloudSlug(null);
     }
   };
 
@@ -1227,6 +1314,17 @@ function SessionsPanel() {
             </button>
           </div>
         )}
+        {cloudError && (
+          <div className="mx-4 mb-2 flex items-center gap-2 bg-terminal-red-subtle rounded-lg px-3 py-2.5 text-xs font-mono text-terminal-red shrink-0 shadow-layer-sm">
+            <span>Cloud share: {cloudError}</span>
+            <button
+              onClick={() => setCloudError(null)}
+              className="ml-auto text-terminal-red/60 hover:text-terminal-red transition-colors"
+            >
+              &times;
+            </button>
+          </div>
+        )}
 
         {/* Title input */}
         {titleInput && (
@@ -1295,9 +1393,12 @@ function SessionsPanel() {
                       isRegenerating={generatingSlug === s.slug}
                       onDelete={() => handleDeleteReplay(s.slug)}
                       onPublishGist={() => handlePublishGist(s.slug)}
+                      onPublishCloud={() => handlePublishCloud(s.slug)}
                       onArchive={() => toggleArchive(s.slug)}
                       ghAvailable={ghAvailable === true}
+                      authAvailable={authAvailable}
                       isPublishing={publishingSlug === s.slug}
+                      isPublishingCloud={publishingCloudSlug === s.slug}
                       isArchived={isArchived}
                     />
                   );
@@ -1447,9 +1548,12 @@ function ReplaysPanel() {
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const [refreshClockMs, setRefreshClockMs] = useState(() => Date.now());
   const [ghAvailable, setGhAvailable] = useState<boolean | null>(null);
+  const [authAvailable, setAuthAvailable] = useState<boolean>(false);
   const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [publishingSlug, setPublishingSlug] = useState<string | null>(null);
+  const [publishingCloudSlug, setPublishingCloudSlug] = useState<string | null>(null);
+  const [cloudError, setCloudError] = useState<string | null>(null);
   const [regeneratingSlug, setRegeneratingSlug] = useState<string | null>(null);
 
   const [filter, setFilter] = useState(getFilterFromUrl());
@@ -1550,6 +1654,10 @@ function ReplaysPanel() {
       .then((r) => r.json())
       .then((data: { available: boolean }) => setGhAvailable(data.available))
       .catch(() => setGhAvailable(false));
+    fetch("/api/auth/status")
+      .then((r) => r.json())
+      .then((data: { authenticated: boolean }) => setAuthAvailable(data.authenticated))
+      .catch(() => setAuthAvailable(false));
 
     return () => {
       mounted = false;
@@ -1644,6 +1752,42 @@ function ReplaysPanel() {
       console.error("Gist publish error:", getErrorMessage(err));
     } finally {
       setPublishingSlug(null);
+    }
+  };
+
+  const handlePublishCloud = async (slug: string) => {
+    setPublishingCloudSlug(slug);
+    setCloudError(null);
+    try {
+      const resp = await fetch(`/api/publish/cloud?slug=${encodeURIComponent(slug)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ visibility: "unlisted" }),
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data.error || "Cloud share failed");
+      }
+      const result = await resp.json();
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.slug === slug
+            ? {
+                ...s,
+                cloud: {
+                  id: result.id,
+                  url: result.url,
+                  expiresAt: result.expiresAt,
+                  updatedAt: new Date().toISOString(),
+                },
+              }
+            : s,
+        ),
+      );
+    } catch (err) {
+      setCloudError(getErrorMessage(err));
+    } finally {
+      setPublishingCloudSlug(null);
     }
   };
 
@@ -1980,6 +2124,17 @@ function ReplaysPanel() {
             </button>
           </div>
         )}
+        {cloudError && (
+          <div className="mx-4 mb-2 flex items-center gap-2 bg-terminal-red-subtle rounded-lg px-3 py-2.5 text-xs font-mono text-terminal-red shrink-0 shadow-layer-sm">
+            <span>Cloud share: {cloudError}</span>
+            <button
+              onClick={() => setCloudError(null)}
+              className="ml-auto text-terminal-red/60 hover:text-terminal-red transition-colors"
+            >
+              &times;
+            </button>
+          </div>
+        )}
 
         {/* Replay list */}
         <div className="flex-1 overflow-y-auto">
@@ -2003,10 +2158,13 @@ function ReplaysPanel() {
                     onTitleSave={handleTitleSave}
                     onDelete={() => confirmDelete(s.slug)}
                     onPublishGist={() => handlePublishGist(s.slug)}
+                    onPublishCloud={() => handlePublishCloud(s.slug)}
                     onRegenerate={() => handleRegenerate(s)}
                     onArchive={() => toggleArchive(s.slug)}
                     ghAvailable={ghAvailable === true}
+                    authAvailable={authAvailable}
                     isPublishing={publishingSlug === s.slug}
+                    isPublishingCloud={publishingCloudSlug === s.slug}
                     isRegenerating={regeneratingSlug === s.slug}
                     isArchived={isArchived}
                   />

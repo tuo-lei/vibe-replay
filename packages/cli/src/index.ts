@@ -12,7 +12,7 @@ import { generateGitHubGif } from "./formatters/gif.js";
 import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.js";
 import { generateOutput } from "./generator.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
-import { checkGhStatus, loadSavedGistInfo, publishGist } from "./publishers/gist.js";
+import { checkPublishStatus, loadSavedGistInfo, publishGist } from "./publishers/gist.js";
 import { publishLocal } from "./publishers/local.js";
 import { scanForSecrets } from "./scan.js";
 import { startDashboard, startServer } from "./server.js";
@@ -407,13 +407,11 @@ program
       console.log(chalk.dim("  Continuing — user confirmed findings are safe.\n"));
     }
 
-    // Check gh availability for gist option
-    const ghStatus = await checkGhStatus();
-    const gistLabel = ghStatus.available
+    // Check publish availability (requires vibe-replay auth login)
+    const publishStatus = checkPublishStatus();
+    const gistLabel = publishStatus.available
       ? `${chalk.blue("↑")} Publish to Gist now ${chalk.dim("(skip editor, publish directly)")}`
-      : ghStatus.reason === "not-installed"
-        ? `${chalk.dim("↑ Publish to Gist now")} ${chalk.red("(gh CLI not installed)")}`
-        : `${chalk.dim("↑ Publish to Gist now")} ${chalk.red("(gh not logged in)")}`;
+      : `${chalk.dim("↑ Publish to Gist now")} ${chalk.red("(login required)")}`;
 
     // Publish target
     console.log();
@@ -453,17 +451,10 @@ program
       });
       return; // startServer blocks until Ctrl+C
     } else if (target === "gist") {
-      if (!ghStatus.available) {
-        if (ghStatus.reason === "not-installed") {
-          console.log();
-          console.log(chalk.yellow("  GitHub CLI (gh) is required to publish gists."));
-          console.log(chalk.dim("  Install → ") + chalk.white("https://cli.github.com/"));
-          console.log(chalk.dim("  Then run → ") + chalk.white("gh auth login"));
-        } else {
-          console.log();
-          console.log(chalk.yellow("  GitHub CLI is installed but not logged in."));
-          console.log(chalk.dim("  Run → ") + chalk.white("gh auth login"));
-        }
+      if (!publishStatus.available) {
+        console.log();
+        console.log(chalk.yellow("  Login required to publish gists."));
+        console.log(chalk.dim("  Run → ") + chalk.white("vibe-replay auth login"));
       } else {
         const { confirm } = await import("@inquirer/prompts");
         const ok = await confirm({

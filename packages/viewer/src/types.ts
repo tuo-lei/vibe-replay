@@ -38,6 +38,12 @@ export interface SessionSummary {
     updatedAt: string;
     outdated?: boolean;
   };
+  cloud?: {
+    id: string;
+    url: string;
+    expiresAt: string;
+    updatedAt: string;
+  };
 }
 
 export interface SourceSession {
