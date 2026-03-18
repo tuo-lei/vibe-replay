@@ -76,13 +76,29 @@ app.post("/api/auth/sign-out", async (c) => {
 });
 
 app.on(["GET", "POST"], "/api/auth/*", async (c) => {
+  // Same-origin POST requests omit the Origin header, which causes
+  // Better Auth's CSRF middleware to reject them (checks Origin or Referer
+  // against trusted origins, but Referer includes path+query which fails).
+  // Inject the base URL as Origin when missing.
+  // Safe: CORS middleware already validated the request above.
+  let req = c.req.raw;
+  if (c.req.method === "POST" && !req.headers.get("origin")) {
+    const headers = new Headers(req.headers);
+    headers.set("origin", c.env.BETTER_AUTH_URL);
+    req = new Request(req.url, {
+      method: req.method,
+      headers,
+      body: req.body,
+      duplex: "half" as any,
+    });
+  }
+
   // Validate callbackURL on social sign-in to prevent open redirect
   if (c.req.path === "/api/auth/sign-in/social" && c.req.method === "POST") {
-    const cloned = c.req.raw.clone();
+    const cloned = req.clone();
     try {
       const body = await cloned.json();
       if (body.callbackURL && typeof body.callbackURL === "string") {
-        // Only allow relative paths starting with /
         if (!body.callbackURL.startsWith("/") || body.callbackURL.startsWith("//")) {
           return c.json({ error: "Invalid callbackURL" }, 400);
         }
@@ -91,8 +107,9 @@ app.on(["GET", "POST"], "/api/auth/*", async (c) => {
       // Not JSON or parse error — let Better Auth handle it
     }
   }
+
   const auth = createAuth(c.env);
-  return auth.handler(c.req.raw);
+  return auth.handler(req);
 });
 
 // ---------------------------------------------------------------------------
