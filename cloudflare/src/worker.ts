@@ -197,7 +197,10 @@ body{background:#0a0a0f;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFo
   };
   const payloadJson = JSON.stringify(payload);
   // Escape for embedding in <script> — browsers close <script> on </
-  const safePayload = payloadJson.replace(/</g, "\\u003c").replace(/'/g, "\\u0027");
+  const safePayload = payloadJson
+    .replace(/\\/g, "\\\\") // backslashes first (before other escapes add more)
+    .replace(/</g, "\\u003c")
+    .replace(/'/g, "\\u0027");
   // Prevent browser from caching a page that contains session token
   c.header("Cache-Control", "no-store");
   return c.html(`<!DOCTYPE html>
