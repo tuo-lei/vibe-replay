@@ -327,16 +327,6 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
             >
               Export
             </button>
-            <button
-              onClick={() =>
-                document
-                  .getElementById("download")
-                  ?.scrollIntoView({ behavior: "smooth", block: "start" })
-              }
-              className="text-[11px] font-sans font-medium text-terminal-dim hover:text-terminal-blue transition-colors px-2.5 py-1.5 rounded-lg hover:bg-terminal-blue/5 text-left"
-            >
-              Files
-            </button>
           </nav>
         )}
         <div className="flex-1 min-w-0">
@@ -429,17 +419,42 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                           <span className="text-terminal-green">&#10003;</span> Up to 2MB per replay
                         </span>
                       </div>
-                      <a
-                        href={`${cloudApiUrl}/?auth`}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const res = await fetch(`${cloudApiUrl}/api/auth/sign-in/social`, {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              credentials: "include",
+                              body: JSON.stringify({ provider: "github", callbackURL: "/" }),
+                            });
+                            const data = await res.json();
+                            if (data.url) {
+                              window.open(data.url, "_blank");
+                              const poll = setInterval(async () => {
+                                try {
+                                  const r = await fetch(`${cloudApiUrl}/api/auth/get-session`, {
+                                    credentials: "include",
+                                  });
+                                  const s = await r.json();
+                                  if (s?.session) {
+                                    clearInterval(poll);
+                                    setGhAvailable(true);
+                                  }
+                                } catch {}
+                              }, 2000);
+                              setTimeout(() => clearInterval(poll), 5 * 60 * 1000);
+                            }
+                          } catch {}
+                        }}
                         className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis text-xs font-sans font-semibold transition-colors border border-terminal-purple/20"
                       >
                         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                           <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
                         </svg>
                         Sign in with GitHub
-                      </a>
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -905,10 +920,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
 
               {/* HTML */}
               {isEditor && exportHtml && (
-                <div
-                  id="download"
-                  className="bg-terminal-surface rounded-2xl border border-terminal-border-subtle shadow-layer-sm p-5"
-                >
+                <div className="bg-terminal-surface rounded-2xl border border-terminal-border-subtle shadow-layer-sm p-5">
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0">
                       <div className="text-sm font-mono font-semibold text-terminal-green mb-1">
