@@ -98,6 +98,9 @@ async function loadSession(): Promise<LoadResult | "dashboard"> {
     }
     const { rawUrl, owner } = await resolveGistUrl(gistId);
     const session = await fetchJson(rawUrl);
+    // Track view count in cloud_replays (fire-and-forget)
+    const api = import.meta.env.VITE_CLOUD_API_URL || "";
+    fetch(`${api}/api/cloud-replays/view-gist/${gistId}`, { method: "POST" }).catch(() => {});
     return { session, mode: "readonly", gistOwner: owner };
   }
 

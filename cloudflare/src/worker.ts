@@ -848,6 +848,20 @@ app.get("/api/replays", async (c) => {
   return c.json(deduped.slice(0, limit));
 });
 
+/** Increment view count for a gist-backed cloud replay (by gist ID, no auth required) */
+app.post("/api/cloud-replays/view-gist/:gistId", async (c) => {
+  const gistId = c.req.param("gistId");
+  if (!/^[a-f0-9]{20,40}$/.test(gistId)) {
+    return c.json({ ok: false }, 400);
+  }
+  const db = drizzle(c.env.DB);
+  await db
+    .update(cloudReplays)
+    .set({ viewCount: sql`${cloudReplays.viewCount} + 1` })
+    .where(eq(cloudReplays.gistId, gistId));
+  return c.json({ ok: true });
+});
+
 /** @deprecated Legacy endpoint — kept for backward compat with old viewer builds.
  * New gist publishes go through POST /api/gists (authenticated). */
 app.post("/api/replays", async (c) => {
