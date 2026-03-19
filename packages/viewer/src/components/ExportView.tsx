@@ -353,30 +353,18 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                 </div>
               </div>
 
-              {/* Login prompt for unauthenticated users */}
-              {ghAvailable === false && (
-                <div className="mb-4 bg-terminal-surface rounded-2xl border border-terminal-border-subtle shadow-layer-sm overflow-hidden p-5">
-                  <div className="mb-1">
-                    <span className="text-sm font-mono font-semibold text-terminal-purple">
-                      Sign in to share replays
-                    </span>
-                  </div>
+              {ghAvailable === false ? (
+                /* ─── Not logged in: single card with sign-in CTA ─── */
+                <div className="bg-terminal-surface rounded-2xl border border-terminal-border-subtle shadow-layer-sm overflow-hidden p-5">
                   <p className="text-[11px] font-mono text-terminal-dim leading-relaxed mb-4">
-                    Connect your GitHub account to unlock cloud sharing and gist publishing.
+                    Sign in to share this replay via cloud link or GitHub Gist.
                   </p>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mb-5 text-[11px] font-mono text-terminal-dimmer">
+                  <div className="flex items-center gap-6 mb-5 text-[11px] font-mono text-terminal-dimmer">
                     <span className="flex items-center gap-1.5">
-                      <span className="text-terminal-green">&#10003;</span> Cloud share (7-day
-                      links)
+                      <span className="text-terminal-purple">&#9729;</span> Cloud share (7-day link)
                     </span>
                     <span className="flex items-center gap-1.5">
-                      <span className="text-terminal-green">&#10003;</span> Publish to GitHub Gist
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="text-terminal-green">&#10003;</span> Private & unlisted
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="text-terminal-green">&#10003;</span> Up to 2MB per replay
+                      <span className="text-terminal-purple">&#9733;</span> GitHub Gist
                     </span>
                   </div>
                   <button
@@ -419,12 +407,11 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                     Sign in with GitHub
                   </button>
                 </div>
-              )}
-
-              <div className="space-y-4">
-                {/* ─── Cloud Share (primary) ─── */}
-                <div className="bg-terminal-surface rounded-2xl border border-terminal-border-subtle shadow-layer-sm overflow-hidden">
-                  <div className="p-5">
+              ) : ghAvailable === true ? (
+                /* ─── Logged in: Cloud Share + Gist cards ─── */
+                <div className="space-y-4">
+                  {/* Cloud Share */}
+                  <div className="bg-terminal-surface rounded-2xl border border-terminal-border-subtle shadow-layer-sm overflow-hidden p-5">
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-sm font-mono font-semibold text-terminal-purple">
                         Cloud Share
@@ -434,7 +421,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                       </span>
                     </div>
                     <p className="text-[11px] font-mono text-terminal-dim leading-relaxed">
-                      Upload to vibe-replay.com. Get a shareable link that expires after 7 days.
+                      Upload to vibe-replay.com. Shareable link expires after 7 days.
                     </p>
                     {cloudTooBig && (
                       <p className="text-[11px] font-mono text-terminal-orange mt-1.5 flex items-center gap-1">
@@ -444,7 +431,6 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                         Replay is {formatBytes(replaySize)} — exceeds 2MB cloud limit
                       </p>
                     )}
-
                     {cloudInfo && (
                       <div className="mt-4 space-y-2">
                         <div className="flex items-center gap-2">
@@ -469,65 +455,50 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                         </div>
                       </div>
                     )}
-
                     <div className="mt-4 flex items-center gap-3">
-                      {ghAvailable === true ? (
-                        <>
-                          <button
-                            onClick={handleCloudShare}
-                            disabled={cloudSharing || cloudTooBig}
-                            className={`${btnBase} ${
-                              cloudTooBig
-                                ? "bg-terminal-surface-2 text-terminal-dimmer border border-terminal-border cursor-not-allowed"
-                                : cloudInfo
-                                  ? "bg-terminal-surface-hover text-terminal-purple hover:bg-terminal-purple-subtle border border-terminal-border"
-                                  : "bg-terminal-purple-subtle text-terminal-purple hover:bg-[rgba(168,85,247,0.25)] border border-[rgba(168,85,247,0.2)]"
-                            }`}
-                          >
-                            {cloudSharing
-                              ? "Uploading..."
-                              : cloudTooBig
-                                ? "Too large"
-                                : cloudInfo
-                                  ? "Re-upload"
-                                  : "Share to Cloud"}
-                          </button>
-                          {cloudStatus && (
-                            <span
-                              className={`text-[11px] font-mono ${cloudStatus.type === "success" ? "text-terminal-green" : "text-terminal-red"}`}
-                            >
-                              {cloudStatus.text}
-                            </span>
-                          )}
-                        </>
-                      ) : ghAvailable === false ? (
-                        <span className="text-[11px] font-mono text-terminal-dimmer">
-                          Sign in above to share
-                        </span>
-                      ) : (
-                        <span className="text-[11px] font-mono text-terminal-dimmer animate-pulse">
-                          Checking...
+                      <button
+                        onClick={handleCloudShare}
+                        disabled={cloudSharing || cloudTooBig}
+                        className={`${btnBase} ${
+                          cloudTooBig
+                            ? "bg-terminal-surface-2 text-terminal-dimmer border border-terminal-border cursor-not-allowed"
+                            : cloudInfo
+                              ? "bg-terminal-surface-hover text-terminal-purple hover:bg-terminal-purple-subtle border border-terminal-border"
+                              : "bg-terminal-purple-subtle text-terminal-purple hover:bg-[rgba(168,85,247,0.25)] border border-[rgba(168,85,247,0.2)]"
+                        }`}
+                      >
+                        {cloudSharing
+                          ? "Uploading..."
+                          : cloudTooBig
+                            ? "Too large"
+                            : cloudInfo
+                              ? "Re-upload"
+                              : "Share to Cloud"}
+                      </button>
+                      {cloudStatus && (
+                        <span
+                          className={`text-[11px] font-mono ${cloudStatus.type === "success" ? "text-terminal-green" : "text-terminal-red"}`}
+                        >
+                          {cloudStatus.text}
                         </span>
                       )}
                     </div>
                   </div>
-                </div>
 
-                {/* ─── GitHub Gist ─── */}
-                {publishGist && (
-                  <div className="bg-terminal-surface rounded-2xl border border-terminal-border-subtle shadow-layer-sm overflow-hidden">
-                    <div className="p-5">
+                  {/* GitHub Gist */}
+                  {publishGist && (
+                    <div className="bg-terminal-surface rounded-2xl border border-terminal-border-subtle shadow-layer-sm overflow-hidden p-5">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-sm font-mono font-semibold text-terminal-dim">
                           GitHub Gist
                         </span>
-                        <span className="inline-flex items-center gap-1 text-[10px] font-mono text-terminal-dimmer px-1.5 py-0.5 rounded-full bg-terminal-surface-hover border border-terminal-border-subtle">
+                        <span className="text-[10px] font-mono text-terminal-dimmer px-1.5 py-0.5 rounded-full bg-terminal-surface-hover border border-terminal-border-subtle">
                           Public
                         </span>
                       </div>
                       <p className="text-[11px] font-mono text-terminal-dim leading-relaxed">
-                        Publish as a public GitHub Gist. Anyone with the link can view the
-                        interactive replay on vibe-replay.com.
+                        Publish as a public GitHub Gist. Anyone with the link can view the replay on
+                        vibe-replay.com.
                       </p>
                       {gistTooBig && (
                         <p className="text-[11px] font-mono text-terminal-red mt-1.5 flex items-center gap-1">
@@ -537,7 +508,6 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                           Replay is {formatBytes(replaySize)} — exceeds 10MB gist limit
                         </p>
                       )}
-
                       {gistInfo && (
                         <div className="mt-4 space-y-2">
                           <div className="flex items-center gap-2">
@@ -562,51 +532,45 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                           </div>
                         </div>
                       )}
-
                       {gistInfoLoading && !gistInfo && (
                         <div className="mt-4 text-[11px] font-mono text-terminal-dimmer animate-pulse">
-                          Checking publish status...
+                          Checking...
                         </div>
                       )}
-
-                      {ghAvailable === true ? (
-                        <div className="mt-4 flex items-center gap-3">
-                          <button
-                            onClick={handlePublishGist}
-                            disabled={gistPublishing || gistTooBig}
-                            className={`${btnBase} ${
-                              gistTooBig
-                                ? "bg-terminal-surface-2 text-terminal-dimmer border border-terminal-border cursor-not-allowed"
-                                : gistInfo
-                                  ? "bg-terminal-surface-hover text-terminal-dim hover:bg-terminal-surface-2 border border-terminal-border"
-                                  : "bg-terminal-surface-hover text-terminal-dim hover:bg-terminal-surface-2 border border-terminal-border"
-                            }`}
+                      <div className="mt-4 flex items-center gap-3">
+                        <button
+                          onClick={handlePublishGist}
+                          disabled={gistPublishing || gistTooBig}
+                          className={`${btnBase} ${
+                            gistTooBig
+                              ? "bg-terminal-surface-2 text-terminal-dimmer border border-terminal-border cursor-not-allowed"
+                              : "bg-terminal-surface-hover text-terminal-dim hover:bg-terminal-surface-2 border border-terminal-border"
+                          }`}
+                        >
+                          {gistPublishing
+                            ? "Publishing..."
+                            : gistTooBig
+                              ? "Too large"
+                              : gistInfo
+                                ? "Update Gist"
+                                : "Publish to Gist"}
+                        </button>
+                        {gistStatus && (
+                          <span
+                            className={`text-[11px] font-mono ${gistStatus.type === "success" ? "text-terminal-green" : "text-terminal-red"}`}
                           >
-                            {gistPublishing
-                              ? "Publishing..."
-                              : gistTooBig
-                                ? "Too large"
-                                : gistInfo
-                                  ? "Update Gist"
-                                  : "Publish to Gist"}
-                          </button>
-                          {gistStatus && (
-                            <span
-                              className={`text-[11px] font-mono ${gistStatus.type === "success" ? "text-terminal-green" : "text-terminal-red"}`}
-                            >
-                              {gistStatus.text}
-                            </span>
-                          )}
-                        </div>
-                      ) : ghAvailable === false ? (
-                        <div className="mt-4 text-[11px] font-mono text-terminal-dimmer">
-                          Sign in above to publish
-                        </div>
-                      ) : null}
+                            {gistStatus.text}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-[11px] font-mono text-terminal-dimmer animate-pulse p-2">
+                  Checking login status...
+                </div>
+              )}
             </div>
           )}
 
