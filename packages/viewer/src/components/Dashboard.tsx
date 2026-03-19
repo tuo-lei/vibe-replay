@@ -308,7 +308,7 @@ function ReplayCard({
                 e.stopPropagation();
                 onShare();
               }}
-              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-cyan-subtle text-terminal-cyan hover:bg-terminal-cyan-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0"
+              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0"
               title="Share & Export"
             >
               <svg
