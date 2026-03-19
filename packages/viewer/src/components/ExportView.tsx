@@ -143,7 +143,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
     () => (session ? new TextEncoder().encode(JSON.stringify(session)).byteLength : 0),
     [session],
   );
-  const CLOUD_MAX = 2 * 1024 * 1024;
+  const CLOUD_MAX = 10 * 1024 * 1024;
   const GIST_MAX = 10 * 1024 * 1024;
   const cloudTooBig = replaySize > CLOUD_MAX;
   const gistTooBig = replaySize > GIST_MAX;
@@ -364,22 +364,36 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                       Sign in with GitHub to get a shareable link or publish as a public gist.
                     </p>
 
-                    <div className="grid grid-cols-2 gap-4 mb-6">
-                      <div className="rounded-lg bg-terminal-bg border border-terminal-border-subtle p-3.5">
-                        <div className="text-[10px] font-sans font-bold uppercase tracking-widest text-terminal-purple mb-1.5">
+                    <div className="grid grid-cols-2 gap-3 mb-6">
+                      <div className="rounded-lg bg-terminal-bg border border-terminal-border-subtle p-4">
+                        <div className="text-[10px] font-sans font-bold uppercase tracking-widest text-terminal-purple mb-2">
                           Cloud Share
                         </div>
-                        <p className="text-[11px] font-sans text-terminal-dimmer leading-relaxed">
-                          Private link that expires after 7 days. Up to 2MB.
-                        </p>
+                        <ul className="space-y-1.5 text-[11px] font-sans text-terminal-dimmer leading-relaxed">
+                          <li className="flex items-start gap-1.5">
+                            <span className="text-terminal-green mt-0.5 shrink-0">&#10003;</span>
+                            <span>You control who sees it — private, unlisted, or public</span>
+                          </li>
+                          <li className="flex items-start gap-1.5">
+                            <span className="text-terminal-green mt-0.5 shrink-0">&#10003;</span>
+                            <span>7-day shareable link, stored on vibe-replay.com</span>
+                          </li>
+                        </ul>
                       </div>
-                      <div className="rounded-lg bg-terminal-bg border border-terminal-border-subtle p-3.5">
-                        <div className="text-[10px] font-sans font-bold uppercase tracking-widest text-terminal-dim mb-1.5">
+                      <div className="rounded-lg bg-terminal-bg border border-terminal-border-subtle p-4">
+                        <div className="text-[10px] font-sans font-bold uppercase tracking-widest text-terminal-dim mb-2">
                           GitHub Gist
                         </div>
-                        <p className="text-[11px] font-sans text-terminal-dimmer leading-relaxed">
-                          Public gist viewable on vibe-replay.com. Up to 10MB.
-                        </p>
+                        <ul className="space-y-1.5 text-[11px] font-sans text-terminal-dimmer leading-relaxed">
+                          <li className="flex items-start gap-1.5">
+                            <span className="text-terminal-green mt-0.5 shrink-0">&#10003;</span>
+                            <span>No storage limit — hosted on GitHub forever</span>
+                          </li>
+                          <li className="flex items-start gap-1.5">
+                            <span className="text-terminal-green mt-0.5 shrink-0">&#10003;</span>
+                            <span>Public — anyone with the link can view the replay</span>
+                          </li>
+                        </ul>
                       </div>
                     </div>
 
@@ -434,7 +448,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                 /* ─── Logged in: Cloud Share + Gist cards ─── */
                 <div className="space-y-4">
                   {/* Cloud Share */}
-                  <div className="bg-terminal-surface rounded-2xl border border-terminal-border-subtle shadow-layer-sm overflow-hidden p-5">
+                  <div className="bg-terminal-surface rounded-xl border border-terminal-border shadow-layer-sm overflow-hidden p-5">
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-sm font-mono font-semibold text-terminal-purple">
                         Cloud Share
@@ -444,14 +458,15 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                       </span>
                     </div>
                     <p className="text-[11px] font-mono text-terminal-dim leading-relaxed">
-                      Upload to vibe-replay.com. Shareable link expires after 7 days.
+                      Private by default. You control visibility — only you, anyone with the link,
+                      or public. Stored on vibe-replay.com for 7 days.
                     </p>
                     {cloudTooBig && (
                       <p className="text-[11px] font-mono text-terminal-orange mt-1.5 flex items-center gap-1">
                         <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
                           <path d="M8 1a1 1 0 0 1 1 1v5.5a1 1 0 0 1-2 0V2a1 1 0 0 1 1-1zM8 11a1.25 1.25 0 1 1 0 2.5A1.25 1.25 0 0 1 8 11z" />
                         </svg>
-                        Replay is {formatBytes(replaySize)} — exceeds 2MB cloud limit
+                        Replay is {formatBytes(replaySize)} — exceeds 10MB limit
                       </p>
                     )}
                     {cloudInfo && (
@@ -520,8 +535,8 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                         </span>
                       </div>
                       <p className="text-[11px] font-mono text-terminal-dim leading-relaxed">
-                        Publish as a public GitHub Gist. Anyone with the link can view the replay on
-                        vibe-replay.com.
+                        Public gist hosted on GitHub — no storage limit, viewable forever on
+                        vibe-replay.com. Anyone with the link can see it.
                       </p>
                       {gistTooBig && (
                         <p className="text-[11px] font-mono text-terminal-red mt-1.5 flex items-center gap-1">

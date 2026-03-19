@@ -55,10 +55,10 @@ export async function publishCloud(
   const replay = JSON.parse(content);
 
   const sizeBytes = Buffer.byteLength(content, "utf-8");
-  const MAX_SIZE = 2 * 1024 * 1024;
+  const MAX_SIZE = 10 * 1024 * 1024;
   if (sizeBytes > MAX_SIZE) {
     throw new Error(
-      `Replay too large (${(sizeBytes / 1024 / 1024).toFixed(1)}MB). Max 2MB for cloud sharing.`,
+      `Replay too large (${(sizeBytes / 1024 / 1024).toFixed(1)}MB). Max 10MB for cloud sharing.`,
     );
   }
 

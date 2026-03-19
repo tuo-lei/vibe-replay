@@ -308,7 +308,7 @@ async function requireAuth(
 // Cloud Replays API — R2-backed replay storage
 // ---------------------------------------------------------------------------
 
-const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2 MB
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 const MAX_TOTAL_STORAGE = 20 * 1024 * 1024; // 20 MB
 const RETENTION_DAYS = 7;
 
@@ -335,7 +335,7 @@ app.post("/api/cloud-replays", async (c) => {
   const replayJson = JSON.stringify(body.replay);
   const sizeBytes = new TextEncoder().encode(replayJson).byteLength;
   if (sizeBytes > MAX_FILE_SIZE) {
-    return c.json({ error: "File too large (max 2MB)" }, 413);
+    return c.json({ error: "File too large (max 10MB)" }, 413);
   }
 
   const db = drizzle(c.env.DB);
