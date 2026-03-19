@@ -32,11 +32,18 @@ export interface SessionSummary {
   annotationCount: number;
   firstMessage?: string;
   messages?: string[];
+  replaySize?: number;
   gist?: {
     gistId: string;
     viewerUrl: string;
     updatedAt: string;
     outdated?: boolean;
+  };
+  cloud?: {
+    id: string;
+    url: string;
+    expiresAt: string;
+    updatedAt: string;
   };
 }
 

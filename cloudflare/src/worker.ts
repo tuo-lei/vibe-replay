@@ -1,9 +1,11 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { Context } from "hono";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { nanoid } from "nanoid";
 import { type AuthEnv, createAuth, DEV_ORIGINS, PROD_ORIGINS } from "./auth";
-import { replays } from "./db/schema";
+import { cloudReplays, replays } from "./db/schema";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -11,6 +13,7 @@ import { replays } from "./db/schema";
 
 type Env = AuthEnv & {
   ASSETS: Fetcher;
+  REPLAY_BUCKET: R2Bucket;
   /** GitHub App credentials for authenticated API access (5000 req/hr). */
   GITHUB_APP_ID?: string;
   GITHUB_APP_PRIVATE_KEY?: string;
@@ -34,7 +37,7 @@ app.use("/api/*", async (c, next) => {
   const allowed = isDev ? [...PROD_ORIGINS, ...DEV_ORIGINS] : [...PROD_ORIGINS];
   const mw = cors({
     origin: allowed,
-    allowMethods: ["GET", "POST", "PUT", "OPTIONS"],
+    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowHeaders: ["Content-Type", "Authorization"],
     credentials: true,
   });
@@ -110,6 +113,38 @@ app.on(["GET", "POST"], "/api/auth/*", async (c) => {
 
   const auth = createAuth(c.env);
   return auth.handler(req);
+});
+
+// ---------------------------------------------------------------------------
+// Login success page — shown after OAuth callback, auto-closes tab
+// ---------------------------------------------------------------------------
+
+app.get("/auth/success", (c) => {
+  return c.html(`<!DOCTYPE html>
+<html><head><title>vibe-replay - Logged in</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0f;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh}
+.card{text-align:center;padding:3rem 2.5rem;border-radius:1rem;border:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.03);max-width:360px;width:100%}
+.logo{font-weight:700;font-size:1.1rem;background:linear-gradient(to right,#00e5a0,#34d399,#22d3ee);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:1.5rem}
+.icon{font-size:2rem;margin-bottom:.75rem;color:#00e5a0}
+.title{font-size:1rem;font-weight:600;margin-bottom:.5rem;color:#00e5a0}
+.msg{font-size:.875rem;color:#8b949e}
+.countdown{font-size:.75rem;color:#484f58;margin-top:.75rem}
+</style></head>
+<body><div class="card">
+<div class="logo">vibe-replay</div>
+<div class="icon">&#10003;</div>
+<p class="title">Logged in!</p>
+<p class="msg">You can close this tab and return to the editor.</p>
+<p class="countdown" id="cd"></p>
+</div>
+<script>
+var s=5;
+var cd=document.getElementById('cd');
+cd.textContent='Auto-closing in '+s+'s...';
+var t=setInterval(function(){s--;if(s<=0){clearInterval(t);window.close();}else{cd.textContent='Auto-closing in '+s+'s...';}},1000);
+</script></body></html>`);
 });
 
 // ---------------------------------------------------------------------------
@@ -255,7 +290,528 @@ fetch('http://127.0.0.1:${encodeURIComponent(port)}/callback',{method:'POST',hea
 });
 
 // ---------------------------------------------------------------------------
-// Replay API — existing endpoints
+// Auth helper — require authenticated session
+// ---------------------------------------------------------------------------
+
+async function requireAuth(
+  c: Context<HonoEnv>,
+): Promise<{ userId: string; user: { id: string; name: string; email: string } } | Response> {
+  const auth = createAuth(c.env);
+  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  if (!session) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  return { userId: session.user.id, user: session.user };
+}
+
+// ---------------------------------------------------------------------------
+// Cloud Replays API — R2-backed replay storage
+// ---------------------------------------------------------------------------
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+const MAX_TOTAL_STORAGE = 20 * 1024 * 1024; // 20 MB
+const RETENTION_DAYS = 7;
+
+/** Upload a replay to R2 */
+app.post("/api/cloud-replays", async (c) => {
+  const authResult = await requireAuth(c);
+  if (authResult instanceof Response) return authResult;
+  const { userId } = authResult;
+
+  const body = await c.req.json();
+  if (!body.replay || typeof body.replay !== "object") {
+    return c.json({ error: "replay object required" }, 400);
+  }
+  const replayError = validateReplaySchema(body.replay);
+  if (replayError) {
+    return c.json({ error: replayError }, 400);
+  }
+
+  const visibility = body.visibility || "unlisted";
+  if (!["public", "unlisted", "private"].includes(visibility)) {
+    return c.json({ error: "Invalid visibility" }, 400);
+  }
+
+  const replayJson = JSON.stringify(body.replay);
+  const sizeBytes = new TextEncoder().encode(replayJson).byteLength;
+  if (sizeBytes > MAX_FILE_SIZE) {
+    return c.json({ error: "File too large (max 10MB)" }, 413);
+  }
+
+  const db = drizzle(c.env.DB);
+  // Only count R2 storage (gist entries have sizeBytes=0 but shouldn't pollute accounting)
+  const userStorage = await db
+    .select({ total: sql<number>`coalesce(sum(${cloudReplays.sizeBytes}), 0)` })
+    .from(cloudReplays)
+    .where(and(eq(cloudReplays.userId, userId), eq(cloudReplays.storageType, "r2")));
+  if ((userStorage[0]?.total || 0) + sizeBytes > MAX_TOTAL_STORAGE) {
+    return c.json({ error: "Storage quota exceeded (max 20MB)" }, 413);
+  }
+
+  const id = nanoid(12);
+  const r2Key = `replays/${id}.json`;
+  await c.env.REPLAY_BUCKET.put(r2Key, replayJson, {
+    httpMetadata: { contentType: "application/json" },
+    customMetadata: { userId },
+  });
+
+  const meta = body.replay.meta || {};
+  const stats = meta.stats || {};
+  const expiresAt = new Date(Date.now() + RETENTION_DAYS * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .replace("T", " ")
+    .slice(0, 19);
+
+  try {
+    await db.insert(cloudReplays).values({
+      id,
+      userId,
+      storageType: "r2",
+      title: String(meta.title || meta.slug || "Untitled").slice(0, 200),
+      provider: String(meta.provider || "unknown").slice(0, 50),
+      model: meta.model ? String(meta.model).slice(0, 100) : null,
+      sceneCount: clamp(stats.sceneCount, 0, 100_000),
+      userPrompts: clamp(stats.userPrompts, 0, 10_000),
+      toolCalls: clamp(stats.toolCalls, 0, 100_000),
+      durationMs: clamp(stats.durationMs, 0, 86_400_000),
+      costEstimate:
+        stats.costEstimate != null
+          ? String(Math.max(0, Math.min(Number(stats.costEstimate) || 0, 100_000)))
+          : null,
+      firstMessage: extractFirstUserPrompt(body.replay),
+      sizeBytes,
+      visibility,
+      expiresAt,
+    });
+  } catch (e) {
+    // D1 insert failed — clean up R2 object to prevent orphaning
+    await c.env.REPLAY_BUCKET.delete(r2Key).catch(() => {});
+    throw e;
+  }
+
+  const baseUrl = getBaseUrl(c);
+  return c.json({ id, url: `${baseUrl}/r/${id}`, expiresAt });
+});
+
+/** Download a cloud replay */
+app.get("/api/cloud-replays/:id", async (c) => {
+  const id = c.req.param("id");
+  if (!/^[a-zA-Z0-9_-]{10,16}$/.test(id)) {
+    return c.json({ error: "Invalid ID" }, 400);
+  }
+
+  const db = drizzle(c.env.DB);
+  const [record] = await db.select().from(cloudReplays).where(eq(cloudReplays.id, id)).limit(1);
+  if (!record) return c.json({ error: "Not found" }, 404);
+
+  // expiresAt is stored as UTC without Z suffix (e.g. "2026-03-26 08:00:00")
+  // Append Z to parse as UTC consistently with SQLite's datetime('now')
+  if (
+    record.expiresAt &&
+    new Date(record.expiresAt.endsWith("Z") ? record.expiresAt : `${record.expiresAt}Z`) <
+      new Date()
+  ) {
+    return c.json({ error: "Expired" }, 410);
+  }
+
+  if (record.visibility === "private") {
+    const authResult = await requireAuth(c);
+    if (authResult instanceof Response) return authResult;
+    if (authResult.userId !== record.userId) {
+      return c.json({ error: "Not found" }, 404);
+    }
+  }
+
+  // Gist-backed replays: redirect to gist viewer
+  if (record.storageType === "gist" && record.gistId) {
+    await db
+      .update(cloudReplays)
+      .set({ viewCount: sql`${cloudReplays.viewCount} + 1` })
+      .where(eq(cloudReplays.id, id));
+    return c.json({
+      redirect: true,
+      gistId: record.gistId,
+      viewerUrl: `/view/?gist=${record.gistId}`,
+    });
+  }
+
+  const obj = await c.env.REPLAY_BUCKET.get(`replays/${id}.json`);
+  if (!obj) return c.json({ error: "Not found" }, 404);
+
+  await db
+    .update(cloudReplays)
+    .set({ viewCount: sql`${cloudReplays.viewCount} + 1` })
+    .where(eq(cloudReplays.id, id));
+
+  return new Response(obj.body, {
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control":
+        record.visibility === "private" ? "private, no-store" : "public, max-age=300",
+    },
+  });
+});
+
+/** List current user's cloud replays */
+app.get("/api/cloud-replays", async (c) => {
+  const authResult = await requireAuth(c);
+  if (authResult instanceof Response) return authResult;
+  const { userId } = authResult;
+
+  const db = drizzle(c.env.DB);
+  const results = await db
+    .select({
+      id: cloudReplays.id,
+      storageType: cloudReplays.storageType,
+      gistId: cloudReplays.gistId,
+      gistUrl: cloudReplays.gistUrl,
+      title: cloudReplays.title,
+      provider: cloudReplays.provider,
+      model: cloudReplays.model,
+      sceneCount: cloudReplays.sceneCount,
+      userPrompts: cloudReplays.userPrompts,
+      toolCalls: cloudReplays.toolCalls,
+      durationMs: cloudReplays.durationMs,
+      sizeBytes: cloudReplays.sizeBytes,
+      visibility: cloudReplays.visibility,
+      viewCount: cloudReplays.viewCount,
+      createdAt: cloudReplays.createdAt,
+      expiresAt: cloudReplays.expiresAt,
+    })
+    .from(cloudReplays)
+    .where(eq(cloudReplays.userId, userId))
+    .orderBy(desc(cloudReplays.createdAt))
+    .limit(100);
+
+  const storage = await db
+    .select({ total: sql<number>`coalesce(sum(${cloudReplays.sizeBytes}), 0)` })
+    .from(cloudReplays)
+    .where(and(eq(cloudReplays.userId, userId), eq(cloudReplays.storageType, "r2")));
+
+  return c.json({
+    replays: results,
+    storage: { used: storage[0]?.total || 0, limit: MAX_TOTAL_STORAGE },
+  });
+});
+
+/** Update cloud replay visibility */
+app.patch("/api/cloud-replays/:id", async (c) => {
+  const authResult = await requireAuth(c);
+  if (authResult instanceof Response) return authResult;
+  const { userId } = authResult;
+
+  const id = c.req.param("id");
+  if (!/^[a-zA-Z0-9_-]{10,16}$/.test(id)) {
+    return c.json({ error: "Invalid ID" }, 400);
+  }
+
+  const body = await c.req.json();
+  const { visibility } = body;
+  if (!visibility || !["public", "unlisted", "private"].includes(visibility)) {
+    return c.json({ error: "Invalid visibility (must be public, unlisted, or private)" }, 400);
+  }
+
+  const db = drizzle(c.env.DB);
+  const [record] = await db
+    .select({ userId: cloudReplays.userId })
+    .from(cloudReplays)
+    .where(eq(cloudReplays.id, id))
+    .limit(1);
+  if (!record || record.userId !== userId) {
+    return c.json({ error: "Not found" }, 404);
+  }
+
+  await db.update(cloudReplays).set({ visibility }).where(eq(cloudReplays.id, id));
+
+  return c.json({ ok: true, visibility });
+});
+
+/** Delete a cloud replay */
+app.delete("/api/cloud-replays/:id", async (c) => {
+  const authResult = await requireAuth(c);
+  if (authResult instanceof Response) return authResult;
+  const { userId } = authResult;
+
+  const id = c.req.param("id");
+  if (!/^[a-zA-Z0-9_-]{10,16}$/.test(id)) {
+    return c.json({ error: "Invalid ID" }, 400);
+  }
+
+  const db = drizzle(c.env.DB);
+  const [record] = await db
+    .select({ userId: cloudReplays.userId, storageType: cloudReplays.storageType })
+    .from(cloudReplays)
+    .where(eq(cloudReplays.id, id))
+    .limit(1);
+  if (!record || record.userId !== userId) {
+    return c.json({ error: "Not found" }, 404);
+  }
+
+  const deletes: Promise<unknown>[] = [db.delete(cloudReplays).where(eq(cloudReplays.id, id))];
+  if (record.storageType === "r2") {
+    deletes.push(c.env.REPLAY_BUCKET.delete(`replays/${id}.json`));
+  }
+  await Promise.all(deletes);
+
+  return c.json({ ok: true });
+});
+
+// ---------------------------------------------------------------------------
+// Gist API — create/update gists using user's GitHub OAuth token
+// ---------------------------------------------------------------------------
+
+const MAX_GIST_CONTENT = 10 * 1024 * 1024; // 10 MB (GitHub allows up to 100MB per file)
+
+/** Create a gist via GitHub API + register in cloud_replays */
+app.post("/api/gists", async (c) => {
+  const authResult = await requireAuth(c);
+  if (authResult instanceof Response) return authResult;
+  const { userId } = authResult;
+
+  const body = await c.req.json();
+  if (!body.filename || typeof body.filename !== "string" || body.filename.length > 255) {
+    return c.json({ error: "filename required (max 255 chars)" }, 400);
+  }
+  if (/[/\\]/.test(body.filename)) {
+    return c.json({ error: "Invalid filename" }, 400);
+  }
+  if (!body.content || typeof body.content !== "string") {
+    return c.json({ error: "content required" }, 400);
+  }
+  if (new TextEncoder().encode(body.content).byteLength > MAX_GIST_CONTENT) {
+    return c.json({ error: "Content too large" }, 413);
+  }
+
+  // Get GitHub access token via Better Auth
+  const auth = createAuth(c.env);
+  let accessToken: string;
+  try {
+    const result = await auth.api.getAccessToken({
+      headers: c.req.raw.headers,
+      body: { providerId: "github" },
+    });
+    if (!result?.accessToken) {
+      return c.json({ error: "GitHub account not linked" }, 400);
+    }
+    accessToken = result.accessToken;
+  } catch {
+    return c.json({ error: "Failed to retrieve GitHub token" }, 500);
+  }
+
+  // Create gist via GitHub API
+  const isPublic = body.public !== false;
+  const gistResp = await fetch("https://api.github.com/gists", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/vnd.github+json",
+      "User-Agent": "vibe-replay",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      description: body.description || `vibe-replay: ${body.filename}`,
+      public: isPublic,
+      files: { [body.filename]: { content: body.content } },
+    }),
+  });
+
+  if (!gistResp.ok) {
+    const err = await gistResp.text();
+    console.error(`GitHub Gist API error (create): ${gistResp.status} ${err}`);
+    const status = gistResp.status as number;
+    const msg =
+      status === 403
+        ? "GitHub rejected the request (check OAuth permissions)"
+        : status === 422
+          ? "GitHub rejected the request (content too large?)"
+          : `GitHub API error (${status})`;
+    return c.json({ error: msg }, status as any);
+  }
+
+  const gistData = (await gistResp.json()) as {
+    id: string;
+    html_url: string;
+    owner?: { login?: string };
+  };
+  const gistId = gistData.id;
+  const gistUrl = gistData.html_url;
+  const gistOwner = gistData.owner?.login || null;
+  const viewerUrl = `${getBaseUrl(c)}/view/?gist=${gistId}`;
+
+  // Extract replay metadata from content and write to cloud_replays
+  const db = drizzle(c.env.DB);
+  const replayMeta = extractMetaFromJson(body.content);
+  // Migrate viewCount from legacy replays table if this gist was previously visited
+  const [legacyRow] = await db
+    .select({ viewCount: replays.viewCount })
+    .from(replays)
+    .where(eq(replays.gistId, gistId))
+    .limit(1);
+  const id = nanoid(12);
+
+  await db.insert(cloudReplays).values({
+    id,
+    userId,
+    storageType: "gist",
+    gistId,
+    gistUrl,
+    gistOwner,
+    title: replayMeta.title,
+    provider: replayMeta.provider,
+    model: replayMeta.model,
+    sceneCount: replayMeta.sceneCount,
+    userPrompts: replayMeta.userPrompts,
+    toolCalls: replayMeta.toolCalls,
+    durationMs: replayMeta.durationMs,
+    costEstimate: replayMeta.costEstimate,
+    firstMessage: replayMeta.firstMessage,
+    sizeBytes: 0,
+    visibility: isPublic ? "public" : "unlisted",
+    viewCount: legacyRow?.viewCount || 0,
+  });
+
+  return c.json({ gistId, gistUrl, viewerUrl });
+});
+
+/** Update an existing gist */
+app.patch("/api/gists/:gistId", async (c) => {
+  const authResult = await requireAuth(c);
+  if (authResult instanceof Response) return authResult;
+  const { userId } = authResult;
+
+  const gistId = c.req.param("gistId");
+  if (!/^[a-f0-9]{20,40}$/.test(gistId)) {
+    return c.json({ error: "Invalid gist ID" }, 400);
+  }
+
+  const body = await c.req.json();
+  if (!body.filename || !body.content) {
+    return c.json({ error: "filename and content required" }, 400);
+  }
+
+  const auth = createAuth(c.env);
+  let accessToken: string;
+  try {
+    const result = await auth.api.getAccessToken({
+      headers: c.req.raw.headers,
+      body: { providerId: "github" },
+    });
+    if (!result?.accessToken) {
+      return c.json({ error: "GitHub account not linked" }, 400);
+    }
+    accessToken = result.accessToken;
+  } catch {
+    return c.json({ error: "Failed to retrieve GitHub token" }, 500);
+  }
+
+  // Verify ownership — check cloud_replays record
+  const db = drizzle(c.env.DB);
+  const [existing] = await db
+    .select({ userId: cloudReplays.userId })
+    .from(cloudReplays)
+    .where(eq(cloudReplays.gistId, gistId))
+    .limit(1);
+
+  if (existing && existing.userId !== userId) {
+    return c.json({ error: "Not found" }, 404);
+  }
+
+  // Update gist on GitHub first (confirms ownership before any D1 writes)
+  const gistResp = await fetch(`https://api.github.com/gists/${gistId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/vnd.github+json",
+      "User-Agent": "vibe-replay",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      description: body.description,
+      files: { [body.filename]: { content: body.content } },
+    }),
+  });
+
+  if (!gistResp.ok) {
+    const err = await gistResp.text();
+    console.error(`GitHub Gist API error: ${gistResp.status} ${err}`);
+    const status = gistResp.status as number;
+    const msg =
+      status === 403
+        ? "You don't have permission to edit this gist"
+        : status === 404
+          ? "Gist not found on GitHub"
+          : status === 422
+            ? "GitHub rejected the update (content too large?)"
+            : `GitHub API error (${status})`;
+    return c.json({ error: msg }, status as any);
+  }
+
+  const gistData = (await gistResp.json()) as {
+    id: string;
+    html_url: string;
+    owner?: { login?: string };
+  };
+
+  // Backfill D1 record for legacy gists (only after GitHub confirms ownership via PATCH success)
+  if (!existing) {
+    const replayMeta = extractMetaFromJson(body.content);
+    // Migrate viewCount from legacy replays table if available
+    const [legacyRow] = await db
+      .select({ viewCount: replays.viewCount })
+      .from(replays)
+      .where(eq(replays.gistId, gistId))
+      .limit(1);
+    const id = nanoid(12);
+    await db.insert(cloudReplays).values({
+      id,
+      userId,
+      storageType: "gist",
+      gistId,
+      gistUrl: gistData.html_url,
+      gistOwner: gistData.owner?.login || null,
+      title: replayMeta.title || "Untitled",
+      provider: replayMeta.provider || "unknown",
+      model: replayMeta.model || null,
+      sceneCount: replayMeta.sceneCount || 0,
+      userPrompts: replayMeta.userPrompts || 0,
+      toolCalls: replayMeta.toolCalls || 0,
+      durationMs: replayMeta.durationMs || 0,
+      costEstimate: replayMeta.costEstimate || null,
+      firstMessage: replayMeta.firstMessage || null,
+      sizeBytes: 0,
+      visibility: "public",
+      viewCount: legacyRow?.viewCount || 0,
+    });
+  }
+
+  // Update metadata only for pre-existing records (backfill already sets all fields)
+  if (existing) {
+    const replayMeta = extractMetaFromJson(body.content);
+    await db
+      .update(cloudReplays)
+      .set({
+        title: replayMeta.title,
+        provider: replayMeta.provider,
+        model: replayMeta.model,
+        sceneCount: replayMeta.sceneCount,
+        userPrompts: replayMeta.userPrompts,
+        toolCalls: replayMeta.toolCalls,
+        durationMs: replayMeta.durationMs,
+        costEstimate: replayMeta.costEstimate,
+        firstMessage: replayMeta.firstMessage,
+      })
+      .where(and(eq(cloudReplays.gistId, gistId), eq(cloudReplays.userId, userId)));
+  }
+
+  return c.json({
+    gistId: gistData.id,
+    gistUrl: gistData.html_url,
+    viewerUrl: `${getBaseUrl(c)}/view/?gist=${gistData.id}`,
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Replay API — existing endpoints (kept for backward compat)
 // ---------------------------------------------------------------------------
 
 /** Cache TTL: skip GitHub re-fetch if viewed within this window */
@@ -269,7 +825,8 @@ app.get("/api/replays", async (c) => {
 
   const orderCol = sort === "popular" ? desc(replays.viewCount) : desc(replays.createdAt);
 
-  const results = await db
+  // Legacy gist replays
+  const gistResults = await db
     .select({
       gist_id: replays.gistId,
       title: replays.title,
@@ -289,16 +846,114 @@ app.get("/api/replays", async (c) => {
     .orderBy(orderCol)
     .limit(limit);
 
-  return c.json(results);
+  // Public cloud replays (not expired)
+  const cloudOrderCol =
+    sort === "popular" ? desc(cloudReplays.viewCount) : desc(cloudReplays.createdAt);
+  const cloudResults = await db
+    .select({
+      id: cloudReplays.id,
+      storageType: cloudReplays.storageType,
+      gistId: cloudReplays.gistId,
+      gistOwner: cloudReplays.gistOwner,
+      title: cloudReplays.title,
+      provider: cloudReplays.provider,
+      model: cloudReplays.model,
+      scene_count: cloudReplays.sceneCount,
+      user_prompts: cloudReplays.userPrompts,
+      tool_calls: cloudReplays.toolCalls,
+      duration_ms: cloudReplays.durationMs,
+      cost_estimate: cloudReplays.costEstimate,
+      first_message: cloudReplays.firstMessage,
+      view_count: cloudReplays.viewCount,
+      created_at: cloudReplays.createdAt,
+    })
+    .from(cloudReplays)
+    .where(
+      and(
+        eq(cloudReplays.visibility, "public"),
+        sql`(${cloudReplays.expiresAt} IS NULL OR ${cloudReplays.expiresAt} > datetime('now'))`,
+      ),
+    )
+    .orderBy(cloudOrderCol)
+    .limit(limit);
+
+  // Merge and sort
+  const merged = [
+    ...gistResults.map((r) => ({ ...r, type: "gist" as const })),
+    ...cloudResults.map((r) => ({
+      gist_id: r.gistId || null,
+      title: r.title,
+      provider: r.provider,
+      model: r.model,
+      scene_count: r.scene_count,
+      user_prompts: r.user_prompts,
+      tool_calls: r.tool_calls,
+      duration_ms: r.duration_ms,
+      cost_estimate: r.cost_estimate,
+      first_message: r.first_message,
+      gist_owner: r.gistOwner || null,
+      view_count: r.view_count,
+      created_at: r.created_at,
+      type: (r.storageType === "gist" ? "gist" : "cloud") as "gist" | "cloud",
+      cloud_id: r.storageType === "r2" ? r.id : undefined,
+    })),
+  ];
+
+  // Deduplicate: if a gist exists in cloud_replays, skip the legacy replays entry
+  const cloudGistIds = new Set(cloudResults.filter((r) => r.gistId).map((r) => r.gistId));
+  const deduped = merged.filter((r, i) => {
+    // Keep all cloud_replays entries (they come after gistResults in the array)
+    if (i >= gistResults.length) return true;
+    // For legacy gist entries, skip if already in cloud_replays
+    return !r.gist_id || !cloudGistIds.has(r.gist_id);
+  });
+
+  // Sort
+  deduped.sort((a, b) => {
+    if (sort === "popular") return (b.view_count || 0) - (a.view_count || 0);
+    return (b.created_at || "").localeCompare(a.created_at || "");
+  });
+
+  return c.json(deduped.slice(0, limit));
 });
 
+/** Increment view count for a gist-backed cloud replay (by gist ID, no auth required) */
+app.post("/api/cloud-replays/view-gist/:gistId", async (c) => {
+  const gistId = c.req.param("gistId");
+  if (!/^[a-f0-9]{20,40}$/.test(gistId)) {
+    return c.json({ ok: false }, 400);
+  }
+  const db = drizzle(c.env.DB);
+  await db
+    .update(cloudReplays)
+    .set({ viewCount: sql`${cloudReplays.viewCount} + 1` })
+    .where(eq(cloudReplays.gistId, gistId));
+  return c.json({ ok: true });
+});
+
+/** @deprecated Legacy endpoint — kept for backward compat with old viewer builds.
+ * New gist publishes go through POST /api/gists (authenticated). */
 app.post("/api/replays", async (c) => {
   return handlePostReplay(c);
 });
 
-// Legacy PUT — treat as POST for backwards compatibility
+/** @deprecated Legacy PUT — treat as POST for backwards compatibility */
 app.put("/api/replays", async (c) => {
   return handlePostReplay(c);
+});
+
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Short URL for cloud replays — redirect to viewer
+// ---------------------------------------------------------------------------
+
+app.get("/r/:id", (c) => {
+  const id = c.req.param("id");
+  if (!/^[a-zA-Z0-9_-]{10,16}$/.test(id)) {
+    return c.text("Not Found", 404);
+  }
+  const baseUrl = getBaseUrl(c);
+  return c.redirect(`${baseUrl}/view/?cloud=${id}`);
 });
 
 // ---------------------------------------------------------------------------
@@ -313,10 +968,135 @@ app.all("*", (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// Export
+// Fallback helpers
 // ---------------------------------------------------------------------------
 
-export default app;
+function getBaseUrl(c: Context<HonoEnv>): string {
+  const url = new URL(c.req.url);
+  return `${url.protocol}//${url.host}`;
+}
+
+/**
+ * Validate that an uploaded replay has the minimum required structure.
+ * Returns an error message string or null if valid.
+ * Intentionally loose — only checks fields the viewer needs to render.
+ */
+function validateReplaySchema(replay: any): string | null {
+  if (!replay.meta || typeof replay.meta !== "object") {
+    return "Missing meta object";
+  }
+  if (!replay.meta.sessionId || typeof replay.meta.sessionId !== "string") {
+    return "Missing meta.sessionId";
+  }
+  if (!replay.meta.provider || typeof replay.meta.provider !== "string") {
+    return "Missing meta.provider";
+  }
+  if (!Array.isArray(replay.scenes)) {
+    return "Missing scenes array";
+  }
+  // Validate scenes have a type field (don't enforce specific types — future-proof)
+  for (let i = 0; i < Math.min(replay.scenes.length, 5); i++) {
+    const scene = replay.scenes[i];
+    if (!scene || typeof scene.type !== "string") {
+      return `Invalid scene at index ${i}: missing type`;
+    }
+  }
+  return null;
+}
+
+function extractFirstUserPrompt(replay: any): string | null {
+  const scenes = replay?.scenes;
+  if (!Array.isArray(scenes)) return null;
+  const first = scenes.find((s: any) => s.type === "user-prompt");
+  return first?.content ? String(first.content).slice(0, 300) : null;
+}
+
+interface ReplayMetaSummary {
+  title: string;
+  provider: string;
+  model: string | null;
+  sceneCount: number;
+  userPrompts: number;
+  toolCalls: number;
+  durationMs: number;
+  costEstimate: string | null;
+  firstMessage: string | null;
+}
+
+/** Extract replay metadata from raw JSON string (used by gist endpoints) */
+function extractMetaFromJson(json: string): ReplayMetaSummary {
+  const meta = extractMeta(json);
+  const firstMessage = extractFirstMessage(json);
+  if (!meta) {
+    return {
+      title: "Untitled",
+      provider: "claude-code",
+      model: null,
+      sceneCount: 0,
+      userPrompts: 0,
+      toolCalls: 0,
+      durationMs: 0,
+      costEstimate: null,
+      firstMessage,
+    };
+  }
+  const stats = meta.stats || {};
+  return {
+    title: String(meta.title || meta.project || "Untitled").slice(0, 200),
+    provider: String(meta.provider || "unknown").slice(0, 50),
+    model: meta.model ? String(meta.model).slice(0, 100) : null,
+    sceneCount: clamp(stats.sceneCount, 0, 100_000),
+    userPrompts: clamp(stats.userPrompts, 0, 10_000),
+    toolCalls: clamp(stats.toolCalls, 0, 100_000),
+    durationMs: clamp(stats.durationMs, 0, 86_400_000),
+    costEstimate:
+      stats.costEstimate != null
+        ? String(Math.max(0, Math.min(Number(stats.costEstimate) || 0, 100_000)))
+        : null,
+    firstMessage,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Export — fetch + scheduled (cron for expired replay cleanup)
+// ---------------------------------------------------------------------------
+
+export default {
+  fetch: app.fetch,
+
+  async scheduled(_event: ScheduledEvent, env: Env) {
+    const db = drizzle(env.DB);
+    const BATCH = 50;
+    // R2 grace period: keep data 7 days after expiry for potential recovery.
+    // GET already returns 410 once expiresAt passes (soft delete).
+    // Cron deletes R2 objects after grace period, zeros sizeBytes to free quota.
+    // D1 rows are kept permanently for history/analytics.
+    const GRACE_DAYS = 7;
+    for (;;) {
+      const expired = await db
+        .select({ id: cloudReplays.id })
+        .from(cloudReplays)
+        .where(
+          sql`${cloudReplays.expiresAt} IS NOT NULL AND ${cloudReplays.expiresAt} < datetime('now', '-${GRACE_DAYS} days') AND ${cloudReplays.sizeBytes} > 0`,
+        )
+        .limit(BATCH);
+
+      if (expired.length === 0) break;
+
+      const expiredIds = expired.map(({ id }) => id);
+      for (const id of expiredIds) {
+        await env.REPLAY_BUCKET.delete(`replays/${id}.json`);
+      }
+      // Zero out sizeBytes in bulk (frees quota, marks as cleaned)
+      await db
+        .update(cloudReplays)
+        .set({ sizeBytes: 0 })
+        .where(inArray(cloudReplays.id, expiredIds));
+
+      if (expired.length < BATCH) break;
+    }
+  },
+};
 
 // ---------------------------------------------------------------------------
 // POST /api/replays — register or refresh a replay
@@ -604,7 +1384,7 @@ async function fetchGistMeta(
 
   return {
     title: String(meta.title || meta.project || "Untitled").slice(0, 200),
-    provider: String(meta.provider || "claude-code").slice(0, 50),
+    provider: String(meta.provider || "unknown").slice(0, 50),
     model: meta.model ? String(meta.model).slice(0, 100) : null,
     sceneCount: clamp(stats.sceneCount, 0, 100_000),
     userPrompts: clamp(stats.userPrompts, 0, 10_000),

@@ -739,7 +739,6 @@ interface TC {
 }
 
 const SYSTEM_TOOLS: Array<Pick<TC, "name" | "label" | "purpose">> = [
-  { name: "gh", label: "GitHub CLI", purpose: "Publish replays as GitHub Gists" },
   { name: "claude", label: "Claude Code", purpose: "AI feedback via headless mode" },
   { name: "cursor", label: "Cursor CLI", purpose: "AI feedback via AI Studio" },
   { name: "opencode", label: "OpenCode", purpose: "AI feedback via headless mode" },

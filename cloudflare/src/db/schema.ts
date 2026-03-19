@@ -114,3 +114,43 @@ export const verification = sqliteTable(
   },
   (table) => [index("verification_identifier_idx").on(table.identifier)],
 );
+
+// ---------------------------------------------------------------------------
+// Cloud Replays — unified table for R2 and gist-backed replays
+// ---------------------------------------------------------------------------
+
+export const cloudReplays = sqliteTable(
+  "cloud_replays",
+  {
+    id: text("id").primaryKey(), // nanoid, 12 chars
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    storageType: text("storage_type").default("r2").notNull(), // "r2" | "gist"
+    // Gist fields (nullable — only set when storageType="gist")
+    gistId: text("gist_id").unique(),
+    gistUrl: text("gist_url"),
+    gistOwner: text("gist_owner"),
+    // Metadata
+    title: text("title").notNull(),
+    provider: text("provider").default("claude-code"),
+    model: text("model"),
+    sceneCount: integer("scene_count").default(0),
+    userPrompts: integer("user_prompts").default(0),
+    toolCalls: integer("tool_calls").default(0),
+    durationMs: integer("duration_ms").default(0),
+    costEstimate: text("cost_estimate"),
+    firstMessage: text("first_message"),
+    sizeBytes: integer("size_bytes").default(0).notNull(), // 0 for gist entries
+    visibility: text("visibility").default("unlisted").notNull(), // "public" | "unlisted" | "private"
+    viewCount: integer("view_count").default(0),
+    createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
+    expiresAt: text("expires_at"), // nullable — gists don't expire
+  },
+  (table) => [
+    index("idx_cloud_replays_user").on(table.userId),
+    index("idx_cloud_replays_expires").on(table.expiresAt),
+    index("idx_cloud_replays_gist").on(table.gistId),
+    index("idx_cloud_replays_public").on(table.visibility, table.createdAt),
+  ],
+);

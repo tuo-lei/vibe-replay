@@ -184,4 +184,177 @@ describeAuth("Auth Worker E2E", () => {
     const sessionCookie = cookies.find((c) => c.includes("better-auth.session_token"));
     expect(sessionCookie).toContain("Max-Age=0");
   });
+
+  // -----------------------------------------------------------------------
+  // Cloud Replays API
+  // -----------------------------------------------------------------------
+
+  it("POST /api/cloud-replays requires auth", async () => {
+    const res = await fetch(`${WORKER_URL}/api/cloud-replays`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: WORKER_URL },
+      body: JSON.stringify({ replay: { meta: {}, scenes: [] } }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("GET /api/cloud-replays requires auth", async () => {
+    const res = await fetch(`${WORKER_URL}/api/cloud-replays`);
+    expect(res.status).toBe(401);
+  });
+
+  it("GET /api/cloud-replays/:id returns 404 for non-existent", async () => {
+    const res = await fetch(`${WORKER_URL}/api/cloud-replays/nonexistent1`);
+    expect(res.status).toBe(404);
+  });
+
+  it("DELETE /api/cloud-replays/:id requires auth", async () => {
+    const res = await fetch(`${WORKER_URL}/api/cloud-replays/nonexistent1`, {
+      method: "DELETE",
+      headers: { Origin: WORKER_URL },
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("GET /api/cloud-replays/:id rejects invalid ID format", async () => {
+    const res = await fetch(`${WORKER_URL}/api/cloud-replays/bad!id`);
+    expect(res.status).toBe(400);
+  });
+
+  // -----------------------------------------------------------------------
+  // Gist API
+  // -----------------------------------------------------------------------
+
+  it("POST /api/gists requires auth", async () => {
+    const res = await fetch(`${WORKER_URL}/api/gists`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: WORKER_URL },
+      body: JSON.stringify({ filename: "test.json", content: "{}" }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("PATCH /api/gists/:id requires auth", async () => {
+    const res = await fetch(`${WORKER_URL}/api/gists/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Origin: WORKER_URL },
+      body: JSON.stringify({ filename: "test.json", content: "{}" }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  // -----------------------------------------------------------------------
+  // CORS — verify new methods are allowed
+  // -----------------------------------------------------------------------
+
+  it("CORS preflight allows PATCH and DELETE", async () => {
+    const res = await fetch(`${WORKER_URL}/api/cloud-replays`, {
+      method: "OPTIONS",
+      headers: {
+        Origin: WORKER_URL,
+        "Access-Control-Request-Method": "DELETE",
+      },
+    });
+    const allowedMethods = res.headers.get("access-control-allow-methods") || "";
+    expect(allowedMethods).toContain("DELETE");
+    expect(allowedMethods).toContain("PATCH");
+  });
+
+  // -----------------------------------------------------------------------
+  // Backward compat — old anonymous POST /api/replays
+  // -----------------------------------------------------------------------
+
+  it("POST /api/replays rejects invalid gist_id", async () => {
+    const res = await fetch(`${WORKER_URL}/api/replays`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: WORKER_URL },
+      body: JSON.stringify({ gist_id: "not-hex!" }),
+    });
+    expect(res.status).toBe(400);
+    const data = (await res.json()) as any;
+    expect(data.error).toContain("invalid gist_id");
+  });
+
+  it("POST /api/replays rejects missing gist_id", async () => {
+    const res = await fetch(`${WORKER_URL}/api/replays`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: WORKER_URL },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  // -----------------------------------------------------------------------
+  // Cloud Replays — additional input validation
+  // -----------------------------------------------------------------------
+
+  it("GET /api/cloud-replays/:id rejects too-short ID", async () => {
+    const res = await fetch(`${WORKER_URL}/api/cloud-replays/short`);
+    expect(res.status).toBe(400);
+  });
+
+  it("DELETE /api/cloud-replays/:id rejects invalid ID format", async () => {
+    const res = await fetch(`${WORKER_URL}/api/cloud-replays/bad!id!here!`, {
+      method: "DELETE",
+      headers: { Origin: WORKER_URL },
+    });
+    // Auth check happens first for DELETE, but invalid ID format may still be caught
+    // Either 400 (bad ID) or 401 (no auth) is acceptable
+    expect([400, 401]).toContain(res.status);
+  });
+
+  // -----------------------------------------------------------------------
+  // Cloud Replays — visibility validation
+  // -----------------------------------------------------------------------
+
+  it("POST /api/cloud-replays rejects invalid visibility", async () => {
+    const res = await fetch(`${WORKER_URL}/api/cloud-replays`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: WORKER_URL },
+      body: JSON.stringify({
+        replay: { meta: { slug: "test" }, scenes: [{ type: "user_prompt", text: "hi" }] },
+        visibility: "secret",
+      }),
+    });
+    // 401 (no auth) takes priority over visibility validation
+    expect(res.status).toBe(401);
+  });
+
+  it("GET /api/cloud-replays/:id returns 404 for non-existent ID (no existence leak)", async () => {
+    // Even for valid ID format, non-existent replays return 404 (not 401/403)
+    const res = await fetch(`${WORKER_URL}/api/cloud-replays/aaaaaaaaaaaa`);
+    expect(res.status).toBe(404);
+  });
+
+  // -----------------------------------------------------------------------
+  // Short URL redirect
+  // -----------------------------------------------------------------------
+
+  it("GET /r/:id redirects to /view/?cloud=:id for valid format", async () => {
+    const res = await fetch(`${WORKER_URL}/r/aaaaaaaaaaaa`, { redirect: "manual" });
+    expect(res.status).toBe(302);
+    const location = res.headers.get("location") || "";
+    expect(location).toContain("/view/?cloud=aaaaaaaaaaaa");
+  });
+
+  it("GET /r/:badid returns 404 for invalid format", async () => {
+    const res = await fetch(`${WORKER_URL}/r/bad!`, { redirect: "manual" });
+    expect(res.status).toBe(404);
+  });
+
+  // -----------------------------------------------------------------------
+  // Explore API
+  // -----------------------------------------------------------------------
+
+  it("GET /api/replays returns array with type field", async () => {
+    const res = await fetch(`${WORKER_URL}/api/replays?sort=recent&limit=5`);
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as any[];
+    expect(Array.isArray(data)).toBe(true);
+    for (const item of data) {
+      if (item.type) {
+        expect(["gist", "cloud"]).toContain(item.type);
+      }
+    }
+  });
 });

@@ -1,0 +1,1 @@
+CREATE INDEX `idx_cloud_replays_public` ON `cloud_replays` (`visibility`,`created_at`);

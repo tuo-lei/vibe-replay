@@ -222,26 +222,22 @@ function SessionMoreMenu({
 function ReplayCard({
   summary: s,
   onOpen,
+  onShare,
   onTitleSave,
   onDelete,
-  onPublishGist,
   onRegenerate,
   onArchive,
-  ghAvailable,
-  isPublishing,
   isDeleting: _isDeleting,
   isRegenerating,
   isArchived,
 }: {
   summary: SessionSummary;
   onOpen: () => void;
+  onShare?: () => void;
   onTitleSave?: (slug: string, title: string) => Promise<void>;
   onDelete?: () => void;
-  onPublishGist?: () => void;
   onRegenerate?: () => void;
   onArchive?: () => void;
-  ghAvailable?: boolean;
-  isPublishing?: boolean;
   isDeleting?: boolean;
   isRegenerating?: boolean;
   isArchived?: boolean;
@@ -292,52 +288,46 @@ function ReplayCard({
           )}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          {s.gist && !s.gist.outdated && (
-            <a
-              href={s.gist.viewerUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0"
-              title={`View on vibe-replay.com`}
-            >
-              <svg
-                width="10"
-                height="10"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <path d="M6 3H3v10h10v-3M9 2h5v5M14 2L7 9" />
-              </svg>
-              Synced
-            </a>
-          )}
-          {s.gist?.outdated && onPublishGist && (
+          {s.gist?.outdated && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                onPublishGist();
+                onShare?.();
               }}
-              disabled={isPublishing}
-              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-orange-subtle text-terminal-orange hover:bg-terminal-orange-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50"
+              className="h-7 w-7 flex items-center justify-center rounded-md bg-terminal-orange-subtle text-terminal-orange hover:bg-terminal-orange-emphasis transition-all duration-200 ease-material shrink-0"
+              title="Gist out of sync — click to update"
             >
-              {isPublishing ? "Syncing..." : "Out of sync"}
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M8 1a1 1 0 0 1 1 1v5.5a1 1 0 0 1-2 0V2a1 1 0 0 1 1-1zM8 11a1.25 1.25 0 1 1 0 2.5A1.25 1.25 0 0 1 8 11z" />
+              </svg>
             </button>
           )}
-          {ghAvailable && onPublishGist && !s.gist?.gistId && (
+          {onShare && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                onPublishGist();
+                onShare();
               }}
-              disabled={isPublishing}
-              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50"
-              title="Publish to Gist"
+              className={`h-7 px-2.5 text-xs font-sans font-semibold rounded-md transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0 ${
+                s.cloud || s.gist
+                  ? "bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis"
+                  : "bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis"
+              }`}
+              title={s.cloud || s.gist ? "Already shared — view or update" : "Share & Export"}
             >
-              {isPublishing ? (
-                <span className="animate-pulse">...</span>
+              {s.cloud || s.gist ? (
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
+                </svg>
               ) : (
                 <svg
                   width="12"
@@ -350,7 +340,7 @@ function ReplayCard({
                   <path d="M8 2v8M5 5l3-3 3 3M3 11v2h10v-2" />
                 </svg>
               )}
-              Upload
+              {s.cloud || s.gist ? "Shared" : "Share"}
             </button>
           )}
           {onRegenerate && (
@@ -517,6 +507,18 @@ function ReplayCard({
             {s.annotationCount} annotation{s.annotationCount !== 1 ? "s" : ""}
           </span>
         )}
+        {s.replaySize != null && s.replaySize > 0 && (
+          <span
+            className={`inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md ${
+              s.replaySize > 10 * 1024 * 1024
+                ? "bg-terminal-red-subtle text-terminal-red"
+                : "bg-terminal-surface-2 text-terminal-dimmer"
+            }`}
+            title={s.replaySize > 10 * 1024 * 1024 ? "Exceeds share limit (10MB)" : undefined}
+          >
+            {formatSize(s.replaySize)}
+          </span>
+        )}
       </div>
       {/* Row 4: identity */}
       <div className="flex items-center gap-2 text-xs font-mono text-terminal-dimmer flex-wrap">
@@ -656,8 +658,6 @@ function SessionsPanel() {
   const titleInputRef = useRef<HTMLInputElement>(null);
   const wasEnrichingRef = useRef(false);
   const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());
-  const [ghAvailable, setGhAvailable] = useState<boolean | null>(null);
-  const [publishingSlug, setPublishingSlug] = useState<string | null>(null);
   const [enrichmentStatus, setEnrichmentStatus] = useState<SourcesEnrichmentStatus | null>(null);
   const hasCursorSources = sources.some((source) => source.provider === "cursor");
 
@@ -735,10 +735,6 @@ function SessionsPanel() {
 
   useEffect(() => {
     void loadSources();
-    fetch("/api/gh-status")
-      .then((r) => r.json())
-      .then((data: { available: boolean }) => setGhAvailable(data.available))
-      .catch(() => setGhAvailable(false));
   }, [loadSources]);
 
   useEffect(() => {
@@ -840,42 +836,6 @@ function SessionsPanel() {
       setGenerateError(getErrorMessage(err));
     } finally {
       setGeneratingSlug(null);
-    }
-  };
-
-  const handlePublishGist = async (slug: string) => {
-    setPublishingSlug(slug);
-    try {
-      const resp = await fetch(`/api/publish/gist?slug=${encodeURIComponent(slug)}`, {
-        method: "POST",
-      });
-      if (!resp.ok) {
-        const data = await resp.json().catch(() => ({}));
-        throw new Error(data.error || "Publish failed");
-      }
-      const result = await resp.json();
-      setSources((prev) =>
-        prev.map((s) =>
-          s.slug === slug && s.replay
-            ? {
-                ...s,
-                replay: {
-                  ...s.replay,
-                  gist: {
-                    gistId: result.gistId,
-                    viewerUrl: result.viewerUrl,
-                    updatedAt: new Date().toISOString(),
-                    outdated: false,
-                  },
-                },
-              }
-            : s,
-        ),
-      );
-    } catch (err) {
-      console.error("Gist publish error:", getErrorMessage(err));
-    } finally {
-      setPublishingSlug(null);
     }
   };
 
@@ -1227,7 +1187,6 @@ function SessionsPanel() {
             </button>
           </div>
         )}
-
         {/* Title input */}
         {titleInput && (
           <div className="mx-4 mb-2 bg-terminal-surface rounded-lg px-4 py-3.5 space-y-3 shrink-0 shadow-layer-md">
@@ -1290,14 +1249,14 @@ function SessionsPanel() {
                       key={`${s.provider}-${s.slug}`}
                       summary={s.replay}
                       onOpen={() => navigateTo({ view: null, session: s.existingReplay! })}
+                      onShare={() =>
+                        navigateTo({ view: null, session: s.existingReplay!, v: "export" })
+                      }
                       onTitleSave={handleTitleSave}
                       onRegenerate={() => handleGenerate(s)}
                       isRegenerating={generatingSlug === s.slug}
                       onDelete={() => handleDeleteReplay(s.slug)}
-                      onPublishGist={() => handlePublishGist(s.slug)}
                       onArchive={() => toggleArchive(s.slug)}
-                      ghAvailable={ghAvailable === true}
-                      isPublishing={publishingSlug === s.slug}
                       isArchived={isArchived}
                     />
                   );
@@ -1446,10 +1405,8 @@ function ReplaysPanel() {
   const [staleCachedAt, setStaleCachedAt] = useState<string | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const [refreshClockMs, setRefreshClockMs] = useState(() => Date.now());
-  const [ghAvailable, setGhAvailable] = useState<boolean | null>(null);
   const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [publishingSlug, setPublishingSlug] = useState<string | null>(null);
   const [regeneratingSlug, setRegeneratingSlug] = useState<string | null>(null);
 
   const [filter, setFilter] = useState(getFilterFromUrl());
@@ -1546,11 +1503,6 @@ function ReplaysPanel() {
 
     void loadReplays();
 
-    fetch("/api/gh-status")
-      .then((r) => r.json())
-      .then((data: { available: boolean }) => setGhAvailable(data.available))
-      .catch(() => setGhAvailable(false));
-
     return () => {
       mounted = false;
     };
@@ -1611,39 +1563,6 @@ function ReplaysPanel() {
       setSessions((prev) => prev.filter((s) => s.slug !== slug));
     } catch {
       setDeleteError("Failed to delete session");
-    }
-  };
-
-  const handlePublishGist = async (slug: string) => {
-    setPublishingSlug(slug);
-    try {
-      const resp = await fetch(`/api/publish/gist?slug=${encodeURIComponent(slug)}`, {
-        method: "POST",
-      });
-      if (!resp.ok) {
-        const data = await resp.json().catch(() => ({}));
-        throw new Error(data.error || "Publish failed");
-      }
-      const result = await resp.json();
-      setSessions((prev) =>
-        prev.map((s) =>
-          s.slug === slug
-            ? {
-                ...s,
-                gist: {
-                  gistId: result.gistId,
-                  viewerUrl: result.viewerUrl,
-                  updatedAt: new Date().toISOString(),
-                  outdated: false,
-                },
-              }
-            : s,
-        ),
-      );
-    } catch (err) {
-      console.error("Gist publish error:", getErrorMessage(err));
-    } finally {
-      setPublishingSlug(null);
     }
   };
 
@@ -2000,13 +1919,11 @@ function ReplaysPanel() {
                     key={s.slug}
                     summary={s}
                     onOpen={() => handleOpen(s.slug)}
+                    onShare={() => navigateTo({ view: null, session: s.slug, v: "export" })}
                     onTitleSave={handleTitleSave}
                     onDelete={() => confirmDelete(s.slug)}
-                    onPublishGist={() => handlePublishGist(s.slug)}
                     onRegenerate={() => handleRegenerate(s)}
                     onArchive={() => toggleArchive(s.slug)}
-                    ghAvailable={ghAvailable === true}
-                    isPublishing={publishingSlug === s.slug}
                     isRegenerating={regeneratingSlug === s.slug}
                     isArchived={isArchived}
                   />

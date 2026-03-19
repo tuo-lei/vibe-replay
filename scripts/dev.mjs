@@ -38,9 +38,10 @@ console.log(
 console.log();
 
 // Start Vite dev server (backgrounded) — port + strictPort via env vars in vite.config.ts
+const cloudApiUrl = process.env.VIBE_REPLAY_API_URL || "http://localhost:8787";
 const vite = spawn("pnpm", ["--filter", "@vibe-replay/viewer", "dev"], {
   stdio: ["ignore", "pipe", "pipe"],
-  env: { ...process.env, VITE_PORT: String(vitePort), VITE_API_PORT: String(apiPort) },
+  env: { ...process.env, VITE_PORT: String(vitePort), VITE_API_PORT: String(apiPort), VITE_CLOUD_API_URL: cloudApiUrl },
 });
 
 // Pipe Vite output to a log file
@@ -59,6 +60,7 @@ console.log(`[vibe-replay] Viewer logs: ${logPath}`);
 const cliEnv = {
   ...process.env,
   VIBE_REPLAY_DEV_MENU: "1",
+  VIBE_REPLAY_API_URL: cloudApiUrl,
   VIBE_API_PORT: String(apiPort),
   VIBE_VIEWER_PORT: String(vitePort),
 };

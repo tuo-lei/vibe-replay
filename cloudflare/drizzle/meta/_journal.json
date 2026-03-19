@@ -15,6 +15,20 @@
       "when": 1773816524324,
       "tag": "0001_yummy_lila_cheney",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1773822279492,
+      "tag": "0002_solid_blade",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1773912285580,
+      "tag": "0003_fancy_iron_monger",
+      "breakpoints": true
     }
   ]
 }

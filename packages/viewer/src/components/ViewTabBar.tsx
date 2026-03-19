@@ -13,7 +13,7 @@ interface Props {
 const TABS: { key: ActiveView; label: string }[] = [
   { key: "replay", label: "Replay" },
   { key: "summary", label: "Insights" },
-  { key: "export", label: "Export" },
+  { key: "export", label: "Share & Export" },
 ];
 
 const INSIGHTS_SEEN_KEY = "vr-insights-seen";

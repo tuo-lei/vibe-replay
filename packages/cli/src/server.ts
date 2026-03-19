@@ -22,8 +22,9 @@ import { generateGitHubGif } from "./formatters/gif.js";
 import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.js";
 import { generateOutput } from "./generator.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
+import { loadSavedCloudInfo, publishCloud } from "./publishers/cloud.js";
 import {
-  checkGhStatus,
+  checkPublishStatus,
   loadSavedGistInfo,
   publishGist,
   type SavedGistInfo,
@@ -231,6 +232,8 @@ async function scanSessionsFromDir(baseDir: string): Promise<any[]> {
         /* no gist info */
       }
 
+      const cloudInfo = await loadSavedCloudInfo(join(baseDir, entry));
+
       const userPrompts = (session.scenes || [])
         .filter((sc) => sc.type === "user-prompt")
         .map((sc) => cleanPromptText(sc.content).slice(0, 200))
@@ -249,6 +252,7 @@ async function scanSessionsFromDir(baseDir: string): Promise<any[]> {
         startTime: session.meta.startTime,
         endTime: session.meta.endTime,
         stats: session.meta.stats,
+        replaySize: Buffer.byteLength(raw, "utf-8"),
         hasAnnotations: annotationCount > 0,
         annotationCount,
         firstMessage,
@@ -275,6 +279,14 @@ async function scanSessionsFromDir(baseDir: string): Promise<any[]> {
                 outdated,
               };
             })()
+          : undefined,
+        cloud: cloudInfo
+          ? {
+              id: cloudInfo.id,
+              url: cloudInfo.url,
+              expiresAt: cloudInfo.expiresAt,
+              updatedAt: cloudInfo.updatedAt,
+            }
           : undefined,
       });
     } catch {}
@@ -535,7 +547,9 @@ async function buildSourcesResult(
             annotationCount: replay.annotationCount,
             firstMessage: replay.firstMessage,
             messages: replay.messages,
+            replaySize: replay.replaySize,
             gist: replay.gist,
+            cloud: replay.cloud,
           }
         : undefined,
     };
@@ -1043,9 +1057,8 @@ export async function startServer(
   });
 
   // GitHub CLI status
-  app.get("/api/gh-status", async (c) => {
-    const status = await checkGhStatus();
-    return c.json(status);
+  app.get("/api/gh-status", (c) => {
+    return c.json(checkPublishStatus());
   });
 
   // Auth — read local auth.json
@@ -1232,19 +1245,6 @@ export async function startServer(
     }
 
     const toolChecks: Record<string, () => Promise<ToolCheck>> = {
-      gh: () =>
-        checkCli(
-          "gh",
-          "GitHub CLI",
-          "Publish replays as GitHub Gists",
-          "gh",
-          ["--version"],
-          async (run) => {
-            const auth = await run("gh", ["auth", "status"]);
-            if (auth.timedOut) return CHECK_TIMEOUT_MARKER;
-            return auth.ok ? "authenticated" : "not authenticated";
-          },
-        ),
       claude: () =>
         checkCli(
           "claude",
@@ -1315,6 +1315,59 @@ export async function startServer(
     return c.json({ gist });
   });
 
+  // Delete stale gist info (gist deleted on GitHub)
+  app.delete("/api/gist-info", async (c) => {
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+    const metaPath = join(baseDir, result.slug, ".vibe-replay-gist.json");
+    await unlink(metaPath).catch(() => {});
+    return c.json({ ok: true });
+  });
+
+  // Cloud info for a session (requires slug)
+  app.get("/api/cloud-info", async (c) => {
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetDir = join(baseDir, result.slug);
+    const cloud = await loadSavedCloudInfo(targetDir);
+    if (!cloud) return c.json({ cloud: null });
+    return c.json({ cloud });
+  });
+
+  // Save cloud info locally (after browser-side upload)
+  app.post("/api/cloud-info", async (c) => {
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetDir = join(baseDir, result.slug);
+    const body = await c.req.json();
+    if (!body.id || !body.url) return c.json({ error: "Missing id/url" }, 400);
+    const metaPath = join(targetDir, ".vibe-replay-cloud.json");
+    await writeFile(
+      metaPath,
+      JSON.stringify(
+        {
+          id: body.id,
+          url: body.url,
+          expiresAt: body.expiresAt,
+          updatedAt: new Date().toISOString(),
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+    return c.json({ ok: true });
+  });
+
+  // Delete cloud info locally
+  app.delete("/api/cloud-info", async (c) => {
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+    const metaPath = join(baseDir, result.slug, ".vibe-replay-cloud.json");
+    await unlink(metaPath).catch(() => {});
+    return c.json({ ok: true });
+  });
+
   // Publish to Gist (requires slug)
   app.post("/api/publish/gist", async (c) => {
     const result = requireSlug(c.req.query("slug"));
@@ -1340,6 +1393,36 @@ export async function startServer(
         return c.json(gistResult);
       } finally {
         // Always restore original replay.json
+        await writeFile(replayPath, originalContent, "utf-8");
+      }
+    } catch (err) {
+      return c.json({ error: getErrorMessage(err) }, 500);
+    }
+  });
+
+  // Publish to cloud (R2)
+  app.post("/api/publish/cloud", async (c) => {
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetDir = join(baseDir, result.slug);
+
+    try {
+      const rawSession = await loadSessionFromDisk(baseDir, result.slug);
+      const overlaysData = await loadOverlays(baseDir, result.slug);
+      const targetSession = sessionWithEffectiveContent(rawSession, overlaysData);
+
+      // Write effective content for upload, then restore the original replay.json
+      const replayPath = join(targetDir, "replay.json");
+      const originalContent = await readFile(replayPath, "utf-8");
+      await writeFile(replayPath, JSON.stringify(targetSession), "utf-8");
+
+      try {
+        const body = await c.req.json().catch(() => ({}));
+        const cloudResult = await publishCloud(targetDir, {
+          visibility: body.visibility || "unlisted",
+        });
+        return c.json(cloudResult);
+      } finally {
         await writeFile(replayPath, originalContent, "utf-8");
       }
     } catch (err) {

@@ -14,6 +14,8 @@ function getActiveViewFromUrl(): ActiveView {
   return "replay";
 }
 
+const CLOUD_API = import.meta.env.VITE_CLOUD_API_URL || "";
+
 function DashboardAuthStatus() {
   const [auth, setAuth] = useState<{
     authenticated: boolean;
@@ -23,10 +25,22 @@ function DashboardAuthStatus() {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch("/api/auth/status")
-      .then((r) => r.json())
-      .then(setAuth)
-      .catch(() => {});
+    const check = () => {
+      fetch(`${CLOUD_API}/api/auth/get-session`, { credentials: "include" })
+        .then((r) => r.json())
+        .then((data: any) => {
+          if (data?.session) {
+            setAuth({ authenticated: true, user: data.user || null });
+          } else {
+            setAuth({ authenticated: false, user: null });
+          }
+        })
+        .catch(() => setAuth({ authenticated: false, user: null }));
+    };
+    check();
+    // Re-check when user returns to tab (e.g. after OAuth in another tab)
+    window.addEventListener("focus", check);
+    return () => window.removeEventListener("focus", check);
   }, []);
 
   // Close dropdown on outside click
@@ -49,18 +63,27 @@ function DashboardAuthStatus() {
         type="button"
         onClick={async () => {
           try {
-            const res = await fetch("/api/auth/login", { method: "POST" });
+            const res = await fetch(`${CLOUD_API}/api/auth/sign-in/social`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify({ provider: "github", callbackURL: "/auth/success" }),
+            });
             const data = await res.json();
             if (data.url) {
               window.open(data.url, "_blank");
               // Poll for login completion
               const poll = setInterval(async () => {
-                const r = await fetch("/api/auth/status");
-                const s = await r.json();
-                if (s.authenticated) {
-                  clearInterval(poll);
-                  setAuth(s);
-                }
+                try {
+                  const r = await fetch(`${CLOUD_API}/api/auth/get-session`, {
+                    credentials: "include",
+                  });
+                  const s = await r.json();
+                  if (s?.session) {
+                    clearInterval(poll);
+                    setAuth({ authenticated: true, user: s.user || null });
+                  }
+                } catch {}
               }, 2000);
               setTimeout(() => clearInterval(poll), 5 * 60 * 1000);
             }
@@ -97,9 +120,13 @@ function DashboardAuthStatus() {
           <button
             type="button"
             onClick={async () => {
-              await fetch("/api/auth/logout", { method: "POST" });
-              setAuth({ authenticated: false, user: null });
-              setDropdownOpen(false);
+              await fetch(`${CLOUD_API}/api/auth/sign-out`, {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: "{}",
+              });
+              window.location.reload();
             }}
             className="w-full text-left px-3 py-2 text-xs text-terminal-dim hover:text-red-400 hover:bg-terminal-surface-hover transition-colors cursor-pointer font-mono"
           >
@@ -240,10 +267,9 @@ export default function App() {
             </button>
             <span className="instant-tooltip inline-flex items-center gap-1.5 text-[10px] font-sans font-bold px-2.5 py-1 rounded-full bg-terminal-green/10 text-terminal-green uppercase tracking-wider border border-terminal-green/20">
               <span className="w-1.5 h-1.5 rounded-full bg-terminal-green animate-pulse" />
-              Live
+              Local
               <span className="instant-tooltip-text">
-                Viewer {window.location.host}
-                {import.meta.env.VITE_API_PORT && ` · API :${import.meta.env.VITE_API_PORT}`}
+                {`Viewer ${window.location.host}${import.meta.env.VITE_API_PORT ? `\nCLI :${import.meta.env.VITE_API_PORT}` : ""}${import.meta.env.VITE_CLOUD_API_URL ? `\nCloud ${import.meta.env.VITE_CLOUD_API_URL}` : ""}`}
               </span>
             </span>
             <span className="text-terminal-border/40 text-sm select-none">|</span>
@@ -294,10 +320,9 @@ export default function App() {
           {isEditor && (
             <span className="instant-tooltip inline-flex items-center gap-1.5 text-[10px] font-sans font-bold px-2.5 py-1 rounded-full bg-terminal-green/10 text-terminal-green uppercase tracking-wider border border-terminal-green/20">
               <span className="w-1.5 h-1.5 rounded-full bg-terminal-green animate-pulse" />
-              Live
+              Local
               <span className="instant-tooltip-text">
-                Viewer {window.location.host}
-                {import.meta.env.VITE_API_PORT && ` · API :${import.meta.env.VITE_API_PORT}`}
+                {`Viewer ${window.location.host}${import.meta.env.VITE_API_PORT ? `\nCLI :${import.meta.env.VITE_API_PORT}` : ""}${import.meta.env.VITE_CLOUD_API_URL ? `\nCloud ${import.meta.env.VITE_CLOUD_API_URL}` : ""}`}
               </span>
             </span>
           )}
@@ -486,6 +511,8 @@ export default function App() {
             >
               {theme === "dark" ? "\u263E" : "\u2600"}
             </button>
+
+            {isEditor && <DashboardAuthStatus />}
           </div>
 
           {/* Mobile menu button */}

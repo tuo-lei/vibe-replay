@@ -13,3 +13,10 @@ binding = "DB"
 database_name = "vibe-replay-db"
 database_id = "c117f92e-921c-44b3-888d-547a860ad1d5"
 migrations_dir = "drizzle"
+
+[[r2_buckets]]
+binding = "REPLAY_BUCKET"
+bucket_name = "vibe-replay-storage"
+
+[triggers]
+crons = ["0 */6 * * *"]
