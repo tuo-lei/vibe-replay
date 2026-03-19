@@ -14,7 +14,7 @@ function getActiveViewFromUrl(): ActiveView {
   return "replay";
 }
 
-const CLOUD_API = import.meta.env.VITE_CLOUD_API_URL || "";
+const CLOUD_API = __CLOUD_API_URL__;
 
 function DashboardAuthStatus() {
   const [auth, setAuth] = useState<{
@@ -61,33 +61,22 @@ function DashboardAuthStatus() {
     return (
       <button
         type="button"
-        onClick={async () => {
-          try {
-            const res = await fetch(`${CLOUD_API}/api/auth/sign-in/social`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              credentials: "include",
-              body: JSON.stringify({ provider: "github", callbackURL: "/auth/success" }),
-            });
-            const data = await res.json();
-            if (data.url) {
-              window.open(data.url, "_blank");
-              // Poll for login completion
-              const poll = setInterval(async () => {
-                try {
-                  const r = await fetch(`${CLOUD_API}/api/auth/get-session`, {
-                    credentials: "include",
-                  });
-                  const s = await r.json();
-                  if (s?.session) {
-                    clearInterval(poll);
-                    setAuth({ authenticated: true, user: s.user || null });
-                  }
-                } catch {}
-              }, 2000);
-              setTimeout(() => clearInterval(poll), 5 * 60 * 1000);
-            }
-          } catch {}
+        onClick={() => {
+          window.open(`${CLOUD_API}/auth/login?callback=/auth/success`, "_blank");
+          // Poll for login completion
+          const poll = setInterval(async () => {
+            try {
+              const r = await fetch(`${CLOUD_API}/api/auth/get-session`, {
+                credentials: "include",
+              });
+              const s = await r.json();
+              if (s?.session) {
+                clearInterval(poll);
+                setAuth({ authenticated: true, user: s.user || null });
+              }
+            } catch {}
+          }, 2000);
+          setTimeout(() => clearInterval(poll), 5 * 60 * 1000);
         }}
         className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-[#24292f] hover:bg-[#32383f] text-white text-xs font-medium transition-colors cursor-pointer border border-white/10"
       >
@@ -269,7 +258,7 @@ export default function App() {
               <span className="w-1.5 h-1.5 rounded-full bg-terminal-green animate-pulse" />
               Local
               <span className="instant-tooltip-text">
-                {`Viewer ${window.location.host}${import.meta.env.VITE_API_PORT ? `\nCLI :${import.meta.env.VITE_API_PORT}` : ""}${import.meta.env.VITE_CLOUD_API_URL ? `\nCloud ${import.meta.env.VITE_CLOUD_API_URL}` : ""}`}
+                {`Viewer ${window.location.host}${import.meta.env.VITE_API_PORT ? `\nCLI :${import.meta.env.VITE_API_PORT}` : ""}${__CLOUD_API_URL__ ? `\nCloud ${__CLOUD_API_URL__}` : ""}`}
               </span>
             </span>
             <span className="text-terminal-border/40 text-sm select-none">|</span>
@@ -322,7 +311,7 @@ export default function App() {
               <span className="w-1.5 h-1.5 rounded-full bg-terminal-green animate-pulse" />
               Local
               <span className="instant-tooltip-text">
-                {`Viewer ${window.location.host}${import.meta.env.VITE_API_PORT ? `\nCLI :${import.meta.env.VITE_API_PORT}` : ""}${import.meta.env.VITE_CLOUD_API_URL ? `\nCloud ${import.meta.env.VITE_CLOUD_API_URL}` : ""}`}
+                {`Viewer ${window.location.host}${import.meta.env.VITE_API_PORT ? `\nCLI :${import.meta.env.VITE_API_PORT}` : ""}${__CLOUD_API_URL__ ? `\nCloud ${__CLOUD_API_URL__}` : ""}`}
               </span>
             </span>
           )}

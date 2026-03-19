@@ -16,6 +16,11 @@ function editorFlagPlugin(): Plugin {
 
 export default defineConfig({
   plugins: [react(), viteSingleFile(), editorFlagPlugin()],
+  define: {
+    // Bake cloud API URL at build time. Vite's import.meta.env.VITE_* replacement
+    // runs before define, so we use a custom global instead.
+    __CLOUD_API_URL__: JSON.stringify(process.env.VITE_CLOUD_API_URL || "https://vibe-replay.com"),
+  },
   build: {
     outDir: "dist",
     target: "es2022",

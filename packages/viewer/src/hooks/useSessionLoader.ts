@@ -72,7 +72,7 @@ async function loadSession(): Promise<LoadResult | "dashboard"> {
     if (!/^[a-zA-Z0-9_-]{10,16}$/.test(cloudId)) {
       throw new Error("Invalid cloud replay ID");
     }
-    const cloudApiUrl = import.meta.env.VITE_CLOUD_API_URL || "";
+    const cloudApiUrl = __CLOUD_API_URL__;
     const resp = await fetch(`${cloudApiUrl}/api/cloud-replays/${cloudId}`, {
       credentials: "include",
     });
@@ -99,7 +99,7 @@ async function loadSession(): Promise<LoadResult | "dashboard"> {
     const { rawUrl, owner } = await resolveGistUrl(gistId);
     const session = await fetchJson(rawUrl);
     // Track view count in cloud_replays (fire-and-forget)
-    const api = import.meta.env.VITE_CLOUD_API_URL || "";
+    const api = __CLOUD_API_URL__;
     fetch(`${api}/api/cloud-replays/view-gist/${gistId}`, { method: "POST" }).catch(() => {});
     return { session, mode: "readonly", gistOwner: owner };
   }
