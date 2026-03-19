@@ -1888,17 +1888,6 @@ function ReplaysPanel() {
             </button>
           </div>
         )}
-        {cloudError && (
-          <div className="mx-4 mb-2 flex items-center gap-2 bg-terminal-red-subtle rounded-lg px-3 py-2.5 text-xs font-mono text-terminal-red shrink-0 shadow-layer-sm">
-            <span>Cloud share: {cloudError}</span>
-            <button
-              onClick={() => setCloudError(null)}
-              className="ml-auto text-terminal-red/60 hover:text-terminal-red transition-colors"
-            >
-              &times;
-            </button>
-          </div>
-        )}
 
         {/* Replay list */}
         <div className="flex-1 overflow-y-auto">
