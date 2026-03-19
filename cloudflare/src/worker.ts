@@ -290,6 +290,10 @@ app.post("/api/cloud-replays", async (c) => {
   if (!body.replay || typeof body.replay !== "object") {
     return c.json({ error: "replay object required" }, 400);
   }
+  const replayError = validateReplaySchema(body.replay);
+  if (replayError) {
+    return c.json({ error: replayError }, 400);
+  }
 
   const visibility = body.visibility || "unlisted";
   if (!["public", "unlisted", "private"].includes(visibility)) {
@@ -717,6 +721,34 @@ app.all("*", (c) => {
 function getBaseUrl(c: Context<HonoEnv>): string {
   const url = new URL(c.req.url);
   return `${url.protocol}//${url.host}`;
+}
+
+/**
+ * Validate that an uploaded replay has the minimum required structure.
+ * Returns an error message string or null if valid.
+ * Intentionally loose — only checks fields the viewer needs to render.
+ */
+function validateReplaySchema(replay: any): string | null {
+  if (!replay.meta || typeof replay.meta !== "object") {
+    return "Missing meta object";
+  }
+  if (!replay.meta.sessionId || typeof replay.meta.sessionId !== "string") {
+    return "Missing meta.sessionId";
+  }
+  if (!replay.meta.provider || typeof replay.meta.provider !== "string") {
+    return "Missing meta.provider";
+  }
+  if (!Array.isArray(replay.scenes)) {
+    return "Missing scenes array";
+  }
+  // Validate scenes have a type field (don't enforce specific types — future-proof)
+  for (let i = 0; i < Math.min(replay.scenes.length, 5); i++) {
+    const scene = replay.scenes[i];
+    if (!scene || typeof scene.type !== "string") {
+      return `Invalid scene at index ${i}: missing type`;
+    }
+  }
+  return null;
 }
 
 function extractFirstUserPrompt(replay: any): string | null {
