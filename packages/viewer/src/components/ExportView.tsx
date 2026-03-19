@@ -357,31 +357,38 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                 /* ─── Not logged in: sign-in CTA ─── */
                 <div className="bg-terminal-surface rounded-xl border border-terminal-border shadow-layer-sm overflow-hidden">
                   <div className="p-6">
-                    <h3 className="text-lg font-sans font-semibold text-terminal-text mb-6">
+                    <h3 className="text-lg font-sans font-semibold text-terminal-text mb-1.5">
                       Share your session — free
                     </h3>
+                    <p className="text-sm font-sans text-terminal-dim mb-6">
+                      Sign in to get 20 MB of free cloud storage.
+                    </p>
 
                     <div className="grid grid-cols-2 gap-4 mb-6">
                       <div className="rounded-xl bg-terminal-bg border border-terminal-border-subtle p-5">
-                        <div className="text-xs font-sans font-bold text-terminal-purple mb-3">
-                          Cloud Share
+                        <div className="flex items-center gap-2 mb-3">
+                          <span className="text-xs font-sans font-bold text-terminal-purple">
+                            Cloud Share
+                          </span>
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-terminal-purple/10 text-terminal-purple border border-terminal-purple/20">
+                            Private
+                          </span>
                         </div>
-                        <div className="text-sm font-sans text-terminal-text leading-relaxed mb-1">
-                          Private by default
-                        </div>
-                        <div className="text-xs font-sans text-terminal-dim">
-                          You choose who sees it
+                        <div className="text-sm font-sans text-terminal-text leading-relaxed">
+                          Only you can see it. Share when you're ready.
                         </div>
                       </div>
                       <div className="rounded-xl bg-terminal-bg border border-terminal-border-subtle p-5">
-                        <div className="text-xs font-sans font-bold text-terminal-dim mb-3">
-                          GitHub Gist
+                        <div className="flex items-center gap-2 mb-3">
+                          <span className="text-xs font-sans font-bold text-terminal-dim">
+                            GitHub Gist
+                          </span>
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-terminal-surface-2 text-terminal-dimmer border border-terminal-border-subtle">
+                            Public
+                          </span>
                         </div>
-                        <div className="text-sm font-sans text-terminal-text leading-relaxed mb-1">
-                          Permanent link
-                        </div>
-                        <div className="text-xs font-sans text-terminal-dim">
-                          Hosted on GitHub forever
+                        <div className="text-sm font-sans text-terminal-text leading-relaxed">
+                          Permanent link on GitHub. Great for portfolios.
                         </div>
                       </div>
                     </div>
