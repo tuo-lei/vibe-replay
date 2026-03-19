@@ -32,6 +32,7 @@ export interface SessionSummary {
   annotationCount: number;
   firstMessage?: string;
   messages?: string[];
+  replaySize?: number;
   gist?: {
     gistId: string;
     viewerUrl: string;

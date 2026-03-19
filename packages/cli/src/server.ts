@@ -252,6 +252,7 @@ async function scanSessionsFromDir(baseDir: string): Promise<any[]> {
         startTime: session.meta.startTime,
         endTime: session.meta.endTime,
         stats: session.meta.stats,
+        replaySize: Buffer.byteLength(raw, "utf-8"),
         hasAnnotations: annotationCount > 0,
         annotationCount,
         firstMessage,
@@ -546,7 +547,9 @@ async function buildSourcesResult(
             annotationCount: replay.annotationCount,
             firstMessage: replay.firstMessage,
             messages: replay.messages,
+            replaySize: replay.replaySize,
             gist: replay.gist,
+            cloud: replay.cloud,
           }
         : undefined,
     };

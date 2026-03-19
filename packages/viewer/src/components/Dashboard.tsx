@@ -561,6 +561,26 @@ function ReplayCard({
             {s.annotationCount} annotation{s.annotationCount !== 1 ? "s" : ""}
           </span>
         )}
+        {s.replaySize != null && s.replaySize > 0 && (
+          <span
+            className={`inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md ${
+              s.replaySize > 10 * 1024 * 1024
+                ? "bg-terminal-red-subtle text-terminal-red"
+                : s.replaySize > 2 * 1024 * 1024
+                  ? "bg-terminal-orange-subtle text-terminal-orange"
+                  : "bg-terminal-surface-2 text-terminal-dimmer"
+            }`}
+            title={
+              s.replaySize > 10 * 1024 * 1024
+                ? "Exceeds gist limit (10MB)"
+                : s.replaySize > 2 * 1024 * 1024
+                  ? "Exceeds cloud share limit (2MB)"
+                  : undefined
+            }
+          >
+            {formatSize(s.replaySize)}
+          </span>
+        )}
       </div>
       {/* Row 4: identity */}
       <div className="flex items-center gap-2 text-xs font-mono text-terminal-dimmer flex-wrap">
