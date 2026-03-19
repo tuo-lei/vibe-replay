@@ -1,0 +1,6 @@
+{"type": "system", "subtype": "init", "sessionId": "title-early-session-1", "slug": "title-early", "cwd": "/Users/test/project", "version": "2.1.66", "gitBranch": "main", "timestamp": "2025-06-01T10:00:00Z"}
+{"type": "file-history-snapshot", "snapshot": {"timestamp": "2025-06-01T10:00:00Z"}}
+{"type": "custom-title", "customTitle": "Early title in session"}
+{"type": "user", "message": {"role": "user", "content": "Help me refactor the authentication module to use JWT tokens"}, "sessionId": "title-early-session-1", "timestamp": "2025-06-01T10:00:05Z"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "I'll refactor the auth module."}]}, "timestamp": "2025-06-01T10:00:06Z"}
+{"type": "system", "subtype": "turn_duration", "durationMs": 10000, "timestamp": "2025-06-01T10:00:12Z"}
