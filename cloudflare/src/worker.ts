@@ -663,17 +663,6 @@ app.patch("/api/gists/:gistId", async (c) => {
     return c.json({ error: "Invalid gist ID" }, 400);
   }
 
-  // Verify ownership — user must own this gist record
-  const db0 = drizzle(c.env.DB);
-  const [existing] = await db0
-    .select({ userId: cloudReplays.userId })
-    .from(cloudReplays)
-    .where(eq(cloudReplays.gistId, gistId))
-    .limit(1);
-  if (!existing || existing.userId !== userId) {
-    return c.json({ error: "Not found" }, 404);
-  }
-
   const body = await c.req.json();
   if (!body.filename || !body.content) {
     return c.json({ error: "filename and content required" }, 400);
@@ -694,6 +683,62 @@ app.patch("/api/gists/:gistId", async (c) => {
     return c.json({ error: "Failed to retrieve GitHub token" }, 500);
   }
 
+  // Verify ownership — check cloud_replays record
+  const db = drizzle(c.env.DB);
+  const [existing] = await db
+    .select({ userId: cloudReplays.userId })
+    .from(cloudReplays)
+    .where(eq(cloudReplays.gistId, gistId))
+    .limit(1);
+
+  if (existing && existing.userId !== userId) {
+    return c.json({ error: "Not found" }, 404);
+  }
+
+  // If no record exists, backfill from GitHub API (legacy gist published before cloud_replays)
+  if (!existing) {
+    const checkResp = await fetch(`https://api.github.com/gists/${gistId}`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "vibe-replay",
+      },
+    });
+    if (!checkResp.ok) {
+      return c.json({ error: "Gist not found on GitHub" }, 404);
+    }
+    const checkData = (await checkResp.json()) as {
+      id: string;
+      html_url: string;
+      owner?: { login?: string };
+      files: Record<string, { content?: string; filename: string }>;
+    };
+    // Find JSON content to extract metadata
+    const jsonFile = Object.values(checkData.files).find((f) => f.filename.endsWith(".json"));
+    const meta = jsonFile?.content ? extractMetaFromJson(jsonFile.content) : null;
+    const id = nanoid(12);
+    await db.insert(cloudReplays).values({
+      id,
+      userId,
+      storageType: "gist",
+      gistId,
+      gistUrl: checkData.html_url,
+      gistOwner: checkData.owner?.login || null,
+      title: meta?.title || "Untitled",
+      provider: meta?.provider || "claude-code",
+      model: meta?.model || null,
+      sceneCount: meta?.sceneCount || 0,
+      userPrompts: meta?.userPrompts || 0,
+      toolCalls: meta?.toolCalls || 0,
+      durationMs: meta?.durationMs || 0,
+      costEstimate: meta?.costEstimate || null,
+      firstMessage: meta?.firstMessage || null,
+      sizeBytes: 0,
+      visibility: "public",
+    });
+  }
+
+  // Update gist on GitHub
   const gistResp = await fetch(`https://api.github.com/gists/${gistId}`, {
     method: "PATCH",
     headers: {
@@ -716,8 +761,7 @@ app.patch("/api/gists/:gistId", async (c) => {
 
   const gistData = (await gistResp.json()) as { id: string; html_url: string };
 
-  // Update metadata in cloud_replays (only user's own record)
-  const db = drizzle(c.env.DB);
+  // Update metadata in cloud_replays
   const replayMeta = extractMetaFromJson(body.content);
   await db
     .update(cloudReplays)
