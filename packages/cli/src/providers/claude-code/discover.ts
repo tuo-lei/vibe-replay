@@ -98,8 +98,8 @@ export async function extractSessionInfo(
           if (!version && obj.version) version = obj.version;
           if (!gitBranch && obj.gitBranch) gitBranch = obj.gitBranch;
 
-          if (obj.type === "custom-title" && obj.title) {
-            title = obj.title;
+          if (obj.type === "custom-title" && (obj.customTitle || obj.title)) {
+            title = obj.customTitle || obj.title;
           }
 
           if (obj.type === "file-history-snapshot" && obj.snapshot?.timestamp && !timestamp) {
@@ -137,6 +137,23 @@ export async function extractSessionInfo(
     }
 
     if (!sessionId || prompts.length === 0) return null;
+
+    // Fallback title: custom-title is often written at session end, beyond scanLimit.
+    // Do a cheap reverse scan of the last ~50 lines.
+    if (!title) {
+      const tailStart = Math.max(0, lines.length - 50);
+      for (let i = lines.length - 1; i >= tailStart; i--) {
+        const line = lines[i];
+        if (!line.includes("custom-title")) continue;
+        try {
+          const obj = JSON.parse(line);
+          if (obj.type === "custom-title" && (obj.customTitle || obj.title)) {
+            title = obj.customTitle || obj.title;
+            break;
+          }
+        } catch {}
+      }
+    }
 
     // Fallback timestamp: scan last lines for system/turn_duration with timestamp
     if (!timestamp) {
