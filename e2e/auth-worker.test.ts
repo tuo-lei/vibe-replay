@@ -19,7 +19,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const HAS_DEV_VARS = existsSync("cloudflare/.dev.vars");
 const describeAuth = HAS_DEV_VARS ? describe : describe.skip;
 
-const WORKER_URL = "http://localhost:8787";
+const WORKER_PORT = 8799;
+const WORKER_URL = `http://localhost:${WORKER_PORT}`;
 let wranglerProcess: ReturnType<typeof import("node:child_process").spawn>;
 
 async function waitForWorker(url: string, timeout = 15_000) {
@@ -46,7 +47,7 @@ describeAuth("Auth Worker E2E", () => {
 
     // Start wrangler dev in background
     const { spawn } = await import("node:child_process");
-    wranglerProcess = spawn("pnpm", ["wrangler", "dev", "--port", "8787"], {
+    wranglerProcess = spawn("pnpm", ["wrangler", "dev", "--port", String(WORKER_PORT)], {
       cwd: "cloudflare",
       stdio: "pipe",
       detached: false,
@@ -324,5 +325,37 @@ describeAuth("Auth Worker E2E", () => {
     // Even for valid ID format, non-existent replays return 404 (not 401/403)
     const res = await fetch(`${WORKER_URL}/api/cloud-replays/aaaaaaaaaaaa`);
     expect(res.status).toBe(404);
+  });
+
+  // -----------------------------------------------------------------------
+  // Short URL redirect
+  // -----------------------------------------------------------------------
+
+  it("GET /r/:id redirects to /view/?cloud=:id for valid format", async () => {
+    const res = await fetch(`${WORKER_URL}/r/aaaaaaaaaaaa`, { redirect: "manual" });
+    expect(res.status).toBe(302);
+    const location = res.headers.get("location") || "";
+    expect(location).toContain("/view/?cloud=aaaaaaaaaaaa");
+  });
+
+  it("GET /r/:badid returns 404 for invalid format", async () => {
+    const res = await fetch(`${WORKER_URL}/r/bad!`, { redirect: "manual" });
+    expect(res.status).toBe(404);
+  });
+
+  // -----------------------------------------------------------------------
+  // Explore API
+  // -----------------------------------------------------------------------
+
+  it("GET /api/replays returns array with type field", async () => {
+    const res = await fetch(`${WORKER_URL}/api/replays?sort=recent&limit=5`);
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as any[];
+    expect(Array.isArray(data)).toBe(true);
+    for (const item of data) {
+      if (item.type) {
+        expect(["gist", "cloud"]).toContain(item.type);
+      }
+    }
   });
 });

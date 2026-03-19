@@ -165,13 +165,36 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
         .then((data: any) => {
           const loggedIn = !!data?.session;
           setGhAvailable(loggedIn);
-          // Fetch storage usage if logged in
+          // Fetch storage usage + cloud replays list (source of truth for visibility)
           if (loggedIn) {
             fetch(`${cloudApiUrl}/api/cloud-replays`, { credentials: "include" })
               .then((r2) => r2.json())
               .then((d: any) => {
                 setStorageUsed(d.storage?.used ?? null);
                 setStorageLimit(d.storage?.limit ?? null);
+                // Find existing cloud share for this session (by title match)
+                if (session) {
+                  const title = session.meta.title || session.meta.slug;
+                  const match = (d.replays || []).find(
+                    (r: any) => r.storageType === "r2" && r.title === title,
+                  );
+                  if (match) {
+                    const info = {
+                      id: match.id,
+                      url: `${cloudApiUrl}/r/${match.id}`,
+                      expiresAt: match.expiresAt || "",
+                      visibility: match.visibility,
+                    };
+                    setCloudInfo(info);
+                    if (match.visibility) setCloudVisibility(match.visibility);
+                    // Sync back to local
+                    fetch(apiUrl("/api/cloud-info"), {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify(info),
+                    }).catch(() => {});
+                  }
+                }
               })
               .catch(() => {});
           }
@@ -186,45 +209,6 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
         })
         .catch(() => {})
         .finally(() => setGistInfoLoading(false));
-
-      // Load existing cloud share info — try local file first, then check Worker
-      fetch(apiUrl("/api/cloud-info"))
-        .then((r) => r.json())
-        .then((data) => {
-          if (data.cloud) {
-            setCloudInfo(data.cloud);
-            if (data.cloud.visibility) setCloudVisibility(data.cloud.visibility);
-          } else if (session) {
-            // No local file — check Worker for existing uploads matching this session title
-            fetch(`${cloudApiUrl}/api/cloud-replays`, { credentials: "include" })
-              .then((r2) => r2.json())
-              .then((d: any) => {
-                const title = session.meta.title || session.meta.slug;
-                const match = (d.replays || []).find(
-                  (r: any) => r.storageType === "r2" && r.title === title,
-                );
-                if (match) {
-                  const baseUrl = window.location.origin;
-                  const info = {
-                    id: match.id,
-                    url: `${baseUrl}/r/${match.id}`,
-                    expiresAt: match.expiresAt || "",
-                    visibility: match.visibility,
-                  };
-                  setCloudInfo(info);
-                  if (match.visibility) setCloudVisibility(match.visibility);
-                  // Sync back to local
-                  fetch(apiUrl("/api/cloud-info"), {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(info),
-                  }).catch(() => {});
-                }
-              })
-              .catch(() => {});
-          }
-        })
-        .catch(() => {});
     }
 
     // Load existing SVG/MD/GIF if previously exported
@@ -318,8 +302,9 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
       }
       const result = (await resp.json()) as { id: string; url: string; expiresAt: string };
       // Delete old one after successful upload
+      // Delete old replay first (await to ensure storage is accurate after)
       if (oldCloudId && oldCloudId !== result.id) {
-        fetch(`${cloudApiUrl}/api/cloud-replays/${oldCloudId}`, {
+        await fetch(`${cloudApiUrl}/api/cloud-replays/${oldCloudId}`, {
           method: "DELETE",
           credentials: "include",
         }).catch(() => {});
@@ -332,14 +317,17 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...result, visibility: cloudVisibility }),
       }).catch(() => {});
-      // Refresh storage usage
-      fetch(`${cloudApiUrl}/api/cloud-replays`, { credentials: "include" })
-        .then((r) => r.json())
-        .then((d: any) => {
-          setStorageUsed(d.storage?.used ?? null);
-          setStorageLimit(d.storage?.limit ?? null);
-        })
-        .catch(() => {});
+      // Refresh storage usage (after delete completed)
+      const storageResp = await fetch(`${cloudApiUrl}/api/cloud-replays`, {
+        credentials: "include",
+      }).catch(() => null);
+      if (storageResp) {
+        const storageData = (await storageResp.json().catch(() => null)) as any;
+        if (storageData?.storage) {
+          setStorageUsed(storageData.storage.used ?? null);
+          setStorageLimit(storageData.storage.limit ?? null);
+        }
+      }
     } catch (e: any) {
       setCloudStatus({ type: "error", text: e.message });
     } finally {
@@ -753,14 +741,14 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                         </div>
                         <div className="flex items-center gap-2 bg-terminal-bg rounded-lg px-3 py-2 border border-terminal-border-subtle">
                           <a
-                            href={cloudInfo.url}
+                            href={`${cloudApiUrl}/r/${cloudInfo.id}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="flex-1 text-xs font-mono text-terminal-purple hover:text-terminal-text transition-colors truncate"
                           >
-                            {cloudInfo.url}
+                            {`${cloudApiUrl}/r/${cloudInfo.id}`}
                           </a>
-                          <CopyButton text={cloudInfo.url} />
+                          <CopyButton text={`${cloudApiUrl}/r/${cloudInfo.id}`} />
                         </div>
                       </div>
                     )}
