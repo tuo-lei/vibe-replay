@@ -357,16 +357,13 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                 /* ─── Not logged in: sign-in CTA ─── */
                 <div className="bg-terminal-surface rounded-xl border border-terminal-border shadow-layer-sm overflow-hidden">
                   <div className="p-6">
-                    <h3 className="text-lg font-sans font-semibold text-terminal-text mb-1.5">
+                    <h3 className="text-lg font-sans font-semibold text-terminal-text mb-5">
                       Share your session — free
                     </h3>
-                    <p className="text-sm font-sans text-terminal-dim mb-6">
-                      Sign in to get 20 MB of free cloud storage.
-                    </p>
 
                     <div className="grid grid-cols-2 gap-4 mb-6">
                       <div className="rounded-xl bg-terminal-bg border border-terminal-border-subtle p-5">
-                        <div className="flex items-center gap-2 mb-3">
+                        <div className="flex items-center gap-2 mb-4">
                           <span className="text-xs font-sans font-bold text-terminal-purple">
                             Cloud Share
                           </span>
@@ -374,12 +371,23 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                             Private
                           </span>
                         </div>
-                        <div className="text-sm font-sans text-terminal-text leading-relaxed">
-                          Only you can see it. Share when you're ready.
-                        </div>
+                        <ul className="space-y-2.5 text-sm font-sans text-terminal-dim">
+                          <li className="flex items-center gap-2">
+                            <span className="text-terminal-green shrink-0">&#10003;</span>
+                            You control visibility
+                          </li>
+                          <li className="flex items-center gap-2">
+                            <span className="text-terminal-green shrink-0">&#10003;</span>
+                            20 MB free storage
+                          </li>
+                          <li className="flex items-center gap-2">
+                            <span className="text-terminal-green shrink-0">&#10003;</span>
+                            7-day shareable link
+                          </li>
+                        </ul>
                       </div>
                       <div className="rounded-xl bg-terminal-bg border border-terminal-border-subtle p-5">
-                        <div className="flex items-center gap-2 mb-3">
+                        <div className="flex items-center gap-2 mb-4">
                           <span className="text-xs font-sans font-bold text-terminal-dim">
                             GitHub Gist
                           </span>
@@ -387,9 +395,20 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                             Public
                           </span>
                         </div>
-                        <div className="text-sm font-sans text-terminal-text leading-relaxed">
-                          Permanent link on GitHub. Great for portfolios.
-                        </div>
+                        <ul className="space-y-2.5 text-sm font-sans text-terminal-dim">
+                          <li className="flex items-center gap-2">
+                            <span className="text-terminal-green shrink-0">&#10003;</span>
+                            No storage limit
+                          </li>
+                          <li className="flex items-center gap-2">
+                            <span className="text-terminal-green shrink-0">&#10003;</span>
+                            Permanent — never expires
+                          </li>
+                          <li className="flex items-center gap-2">
+                            <span className="text-terminal-green shrink-0">&#10003;</span>
+                            Great for portfolios
+                          </li>
+                        </ul>
                       </div>
                     </div>
 
