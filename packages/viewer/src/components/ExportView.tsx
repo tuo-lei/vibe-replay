@@ -133,8 +133,20 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
   const [cloudInfo, setCloudInfo] = useState<{ id: string; url: string; expiresAt: string } | null>(
     null,
   );
+  const [storageUsed, setStorageUsed] = useState<number | null>(null);
+  const [storageLimit, setStorageLimit] = useState<number | null>(null);
 
   const cloudApiUrl = import.meta.env.VITE_CLOUD_API_URL || "";
+
+  // Compute replay JSON size
+  const replaySize = useMemo(
+    () => (session ? new TextEncoder().encode(JSON.stringify(session)).byteLength : 0),
+    [session],
+  );
+  const CLOUD_MAX = 2 * 1024 * 1024;
+  const GIST_MAX = 10 * 1024 * 1024;
+  const cloudTooBig = replaySize > CLOUD_MAX;
+  const gistTooBig = replaySize > GIST_MAX;
 
   // Fetch publish status, gist info, and existing export files
   useEffect(() => {
@@ -143,7 +155,20 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
       // Check auth against Worker directly (browser cookie)
       fetch(`${cloudApiUrl}/api/auth/get-session`, { credentials: "include" })
         .then((r) => r.json())
-        .then((data: any) => setGhAvailable(!!data?.session))
+        .then((data: any) => {
+          const loggedIn = !!data?.session;
+          setGhAvailable(loggedIn);
+          // Fetch storage usage if logged in
+          if (loggedIn) {
+            fetch(`${cloudApiUrl}/api/cloud-replays`, { credentials: "include" })
+              .then((r2) => r2.json())
+              .then((d: any) => {
+                setStorageUsed(d.storage?.used ?? null);
+                setStorageLimit(d.storage?.limit ?? null);
+              })
+              .catch(() => {});
+          }
+        })
         .catch(() => setGhAvailable(false));
 
       setGistInfoLoading(true);
@@ -281,25 +306,37 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
       <div className="p-6 max-w-4xl mx-auto flex gap-6">
         {/* Section nav sidebar */}
         {isEditor && (
-          <nav className="hidden lg:flex flex-col gap-1 pt-12 sticky top-6 self-start shrink-0 w-28">
-            <a
-              href="#share"
-              className="text-[11px] font-mono text-terminal-dim hover:text-terminal-purple transition-colors px-2 py-1 rounded hover:bg-terminal-surface"
+          <nav className="hidden lg:flex flex-col gap-0.5 pt-12 sticky top-6 self-start shrink-0 w-28">
+            <button
+              onClick={() =>
+                document
+                  .getElementById("share")
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" })
+              }
+              className="text-[11px] font-sans font-medium text-terminal-dim hover:text-terminal-purple transition-colors px-2.5 py-1.5 rounded-lg hover:bg-terminal-purple/5 text-left"
             >
               Share
-            </a>
-            <a
-              href="#export"
-              className="text-[11px] font-mono text-terminal-dim hover:text-terminal-green transition-colors px-2 py-1 rounded hover:bg-terminal-surface"
+            </button>
+            <button
+              onClick={() =>
+                document
+                  .getElementById("export")
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" })
+              }
+              className="text-[11px] font-sans font-medium text-terminal-dim hover:text-terminal-green transition-colors px-2.5 py-1.5 rounded-lg hover:bg-terminal-green/5 text-left"
             >
               Export
-            </a>
-            <a
-              href="#download"
-              className="text-[11px] font-mono text-terminal-dim hover:text-terminal-blue transition-colors px-2 py-1 rounded hover:bg-terminal-surface"
+            </button>
+            <button
+              onClick={() =>
+                document
+                  .getElementById("download")
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" })
+              }
+              className="text-[11px] font-sans font-medium text-terminal-dim hover:text-terminal-blue transition-colors px-2.5 py-1.5 rounded-lg hover:bg-terminal-blue/5 text-left"
             >
-              Download
-            </a>
+              Files
+            </button>
           </nav>
         )}
         <div className="flex-1 min-w-0">
@@ -325,7 +362,31 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
           {/* ─── SHARE ──────────────────────────────────────────── */}
           {isEditor && (
             <div id="share" className="mb-12">
-              <SectionHeader title="Share" color="text-terminal-purple" />
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <SectionHeader title="Share" color="text-terminal-purple" />
+                </div>
+                <div className="flex items-center gap-3">
+                  {replaySize > 0 && (
+                    <span
+                      className={`text-[11px] font-mono px-2 py-0.5 rounded-md ${
+                        replaySize > GIST_MAX
+                          ? "bg-terminal-red-subtle text-terminal-red"
+                          : replaySize > CLOUD_MAX
+                            ? "bg-terminal-orange-subtle text-terminal-orange"
+                            : "bg-terminal-surface-2 text-terminal-dimmer"
+                      }`}
+                    >
+                      {formatBytes(replaySize)} replay
+                    </span>
+                  )}
+                  {ghAvailable === true && storageUsed != null && storageLimit != null && (
+                    <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dimmer">
+                      {formatBytes(storageUsed)} / {formatBytes(storageLimit)} used
+                    </span>
+                  )}
+                </div>
+              </div>
 
               {/* Login prompt for unauthenticated users */}
               {ghAvailable === false && (
@@ -397,9 +458,16 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                       </span>
                     </div>
                     <p className="text-[11px] font-mono text-terminal-dim leading-relaxed">
-                      Upload to vibe-replay.com. Get a shareable link that expires after 7 days. Max
-                      2MB.
+                      Upload to vibe-replay.com. Get a shareable link that expires after 7 days.
                     </p>
+                    {cloudTooBig && (
+                      <p className="text-[11px] font-mono text-terminal-orange mt-1.5 flex items-center gap-1">
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                          <path d="M8 1a1 1 0 0 1 1 1v5.5a1 1 0 0 1-2 0V2a1 1 0 0 1 1-1zM8 11a1.25 1.25 0 1 1 0 2.5A1.25 1.25 0 0 1 8 11z" />
+                        </svg>
+                        Replay is {formatBytes(replaySize)} — exceeds 2MB cloud limit
+                      </p>
+                    )}
 
                     {cloudInfo && (
                       <div className="mt-4 space-y-2">
@@ -431,18 +499,22 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                         <>
                           <button
                             onClick={handleCloudShare}
-                            disabled={cloudSharing}
+                            disabled={cloudSharing || cloudTooBig}
                             className={`${btnBase} ${
-                              cloudInfo
-                                ? "bg-terminal-surface-hover text-terminal-purple hover:bg-terminal-purple-subtle border border-terminal-border"
-                                : "bg-terminal-purple-subtle text-terminal-purple hover:bg-[rgba(168,85,247,0.25)] border border-[rgba(168,85,247,0.2)]"
+                              cloudTooBig
+                                ? "bg-terminal-surface-2 text-terminal-dimmer border border-terminal-border cursor-not-allowed"
+                                : cloudInfo
+                                  ? "bg-terminal-surface-hover text-terminal-purple hover:bg-terminal-purple-subtle border border-terminal-border"
+                                  : "bg-terminal-purple-subtle text-terminal-purple hover:bg-[rgba(168,85,247,0.25)] border border-[rgba(168,85,247,0.2)]"
                             }`}
                           >
                             {cloudSharing
                               ? "Uploading..."
-                              : cloudInfo
-                                ? "Re-upload"
-                                : "Share to Cloud"}
+                              : cloudTooBig
+                                ? "Too large"
+                                : cloudInfo
+                                  ? "Re-upload"
+                                  : "Share to Cloud"}
                           </button>
                           {cloudStatus && (
                             <span
@@ -481,6 +553,14 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                         Publish as a public GitHub Gist. Anyone with the link can view the
                         interactive replay on vibe-replay.com.
                       </p>
+                      {gistTooBig && (
+                        <p className="text-[11px] font-mono text-terminal-red mt-1.5 flex items-center gap-1">
+                          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                            <path d="M8 1a1 1 0 0 1 1 1v5.5a1 1 0 0 1-2 0V2a1 1 0 0 1 1-1zM8 11a1.25 1.25 0 1 1 0 2.5A1.25 1.25 0 0 1 8 11z" />
+                          </svg>
+                          Replay is {formatBytes(replaySize)} — exceeds 10MB gist limit
+                        </p>
+                      )}
 
                       {gistInfo && (
                         <div className="mt-4 space-y-2">
@@ -517,18 +597,22 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                         <div className="mt-4 flex items-center gap-3">
                           <button
                             onClick={handlePublishGist}
-                            disabled={gistPublishing}
+                            disabled={gistPublishing || gistTooBig}
                             className={`${btnBase} ${
-                              gistInfo
-                                ? "bg-terminal-surface-hover text-terminal-dim hover:bg-terminal-surface-2 border border-terminal-border"
-                                : "bg-terminal-surface-hover text-terminal-dim hover:bg-terminal-surface-2 border border-terminal-border"
+                              gistTooBig
+                                ? "bg-terminal-surface-2 text-terminal-dimmer border border-terminal-border cursor-not-allowed"
+                                : gistInfo
+                                  ? "bg-terminal-surface-hover text-terminal-dim hover:bg-terminal-surface-2 border border-terminal-border"
+                                  : "bg-terminal-surface-hover text-terminal-dim hover:bg-terminal-surface-2 border border-terminal-border"
                             }`}
                           >
                             {gistPublishing
                               ? "Publishing..."
-                              : gistInfo
-                                ? "Update Gist"
-                                : "Publish to Gist"}
+                              : gistTooBig
+                                ? "Too large"
+                                : gistInfo
+                                  ? "Update Gist"
+                                  : "Publish to Gist"}
                           </button>
                           {gistStatus && (
                             <span
@@ -821,7 +905,10 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
 
               {/* HTML */}
               {isEditor && exportHtml && (
-                <div className="bg-terminal-surface rounded-2xl border border-terminal-border-subtle shadow-layer-sm p-5">
+                <div
+                  id="download"
+                  className="bg-terminal-surface rounded-2xl border border-terminal-border-subtle shadow-layer-sm p-5"
+                >
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0">
                       <div className="text-sm font-mono font-semibold text-terminal-green mb-1">
@@ -892,10 +979,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
               <div className="bg-terminal-surface rounded-2xl border border-terminal-border-subtle shadow-layer-sm p-5">
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
-                    <div
-                      id="download"
-                      className="text-sm font-mono font-semibold text-terminal-blue mb-1"
-                    >
+                    <div className="text-sm font-mono font-semibold text-terminal-blue mb-1">
                       JSON Data
                     </div>
                     <p className="text-[11px] font-mono text-terminal-dim leading-relaxed">
