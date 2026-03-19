@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
 import { Hono } from "hono";
@@ -1077,22 +1077,21 @@ export default {
         .select({ id: cloudReplays.id })
         .from(cloudReplays)
         .where(
-          sql`${cloudReplays.expiresAt} IS NOT NULL AND ${cloudReplays.expiresAt} < datetime('now', '-${GRACE_DAYS} days')`,
+          sql`${cloudReplays.expiresAt} IS NOT NULL AND ${cloudReplays.expiresAt} < datetime('now', '-${GRACE_DAYS} days') AND ${cloudReplays.sizeBytes} > 0`,
         )
         .limit(BATCH);
 
       if (expired.length === 0) break;
 
       const expiredIds = expired.map(({ id }) => id);
-      // Delete R2 objects
       for (const id of expiredIds) {
         await env.REPLAY_BUCKET.delete(`replays/${id}.json`);
       }
-      // Zero out sizeBytes so expired replays don't count against quota
-      // (D1 rows kept for history/analytics)
-      for (const id of expiredIds) {
-        await db.update(cloudReplays).set({ sizeBytes: 0 }).where(eq(cloudReplays.id, id));
-      }
+      // Zero out sizeBytes in bulk (frees quota, marks as cleaned)
+      await db
+        .update(cloudReplays)
+        .set({ sizeBytes: 0 })
+        .where(inArray(cloudReplays.id, expiredIds));
 
       if (expired.length < BATCH) break;
     }
