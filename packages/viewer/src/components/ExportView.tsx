@@ -303,33 +303,8 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="p-6 max-w-4xl mx-auto flex gap-6">
-        {/* Section nav sidebar */}
-        {isEditor && (
-          <nav className="hidden lg:flex flex-col gap-0.5 pt-12 sticky top-6 self-start shrink-0 w-28">
-            <button
-              onClick={() =>
-                document
-                  .getElementById("share")
-                  ?.scrollIntoView({ behavior: "smooth", block: "start" })
-              }
-              className="text-[11px] font-sans font-medium text-terminal-dim hover:text-terminal-purple transition-colors px-2.5 py-1.5 rounded-lg hover:bg-terminal-purple/5 text-left"
-            >
-              Share
-            </button>
-            <button
-              onClick={() =>
-                document
-                  .getElementById("export")
-                  ?.scrollIntoView({ behavior: "smooth", block: "start" })
-              }
-              className="text-[11px] font-sans font-medium text-terminal-dim hover:text-terminal-green transition-colors px-2.5 py-1.5 rounded-lg hover:bg-terminal-green/5 text-left"
-            >
-              Export
-            </button>
-          </nav>
-        )}
-        <div className="flex-1 min-w-0">
+      <div className="p-6 max-w-3xl mx-auto">
+        <div>
           {/* Session context */}
           {session && (
             <div className="flex items-center gap-2.5 mb-5">
@@ -380,86 +355,69 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
 
               {/* Login prompt for unauthenticated users */}
               {ghAvailable === false && (
-                <div className="mb-5 bg-gradient-to-br from-terminal-purple-subtle/50 to-terminal-surface rounded-2xl border border-terminal-purple/20 shadow-layer-sm overflow-hidden p-6">
-                  <div className="flex items-start gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-terminal-purple/10 border border-terminal-purple/20 flex items-center justify-center shrink-0">
-                      <svg
-                        width="20"
-                        height="20"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        className="text-terminal-purple"
-                      >
-                        <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M13 12H3" />
-                      </svg>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-sm font-sans font-semibold text-terminal-text mb-1">
-                        Sign in to share replays
-                      </h3>
-                      <p className="text-xs font-sans text-terminal-dim leading-relaxed mb-4">
-                        Connect your GitHub account to unlock sharing features.
-                      </p>
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mb-5 text-[11px] font-mono text-terminal-dim">
-                        <span className="flex items-center gap-1.5">
-                          <span className="text-terminal-green">&#10003;</span> Cloud share with
-                          7-day links
-                        </span>
-                        <span className="flex items-center gap-1.5">
-                          <span className="text-terminal-green">&#10003;</span> Publish to GitHub
-                          Gist
-                        </span>
-                        <span className="flex items-center gap-1.5">
-                          <span className="text-terminal-green">&#10003;</span> Private & unlisted
-                          options
-                        </span>
-                        <span className="flex items-center gap-1.5">
-                          <span className="text-terminal-green">&#10003;</span> Up to 2MB per replay
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          try {
-                            const res = await fetch(`${cloudApiUrl}/api/auth/sign-in/social`, {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              credentials: "include",
-                              body: JSON.stringify({
-                                provider: "github",
-                                callbackURL: "/auth/success",
-                              }),
-                            });
-                            const data = await res.json();
-                            if (data.url) {
-                              window.open(data.url, "_blank");
-                              const poll = setInterval(async () => {
-                                try {
-                                  const r = await fetch(`${cloudApiUrl}/api/auth/get-session`, {
-                                    credentials: "include",
-                                  });
-                                  const s = await r.json();
-                                  if (s?.session) {
-                                    clearInterval(poll);
-                                    setGhAvailable(true);
-                                  }
-                                } catch {}
-                              }, 2000);
-                              setTimeout(() => clearInterval(poll), 5 * 60 * 1000);
-                            }
-                          } catch {}
-                        }}
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis text-xs font-sans font-semibold transition-colors border border-terminal-purple/20"
-                      >
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
-                        </svg>
-                        Sign in with GitHub
-                      </button>
-                    </div>
+                <div className="mb-4 bg-terminal-surface rounded-2xl border border-terminal-border-subtle shadow-layer-sm overflow-hidden p-5">
+                  <div className="mb-1">
+                    <span className="text-sm font-mono font-semibold text-terminal-purple">
+                      Sign in to share replays
+                    </span>
                   </div>
+                  <p className="text-[11px] font-mono text-terminal-dim leading-relaxed mb-4">
+                    Connect your GitHub account to unlock cloud sharing and gist publishing.
+                  </p>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mb-5 text-[11px] font-mono text-terminal-dimmer">
+                    <span className="flex items-center gap-1.5">
+                      <span className="text-terminal-green">&#10003;</span> Cloud share (7-day
+                      links)
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="text-terminal-green">&#10003;</span> Publish to GitHub Gist
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="text-terminal-green">&#10003;</span> Private & unlisted
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="text-terminal-green">&#10003;</span> Up to 2MB per replay
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const res = await fetch(`${cloudApiUrl}/api/auth/sign-in/social`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          credentials: "include",
+                          body: JSON.stringify({
+                            provider: "github",
+                            callbackURL: "/auth/success",
+                          }),
+                        });
+                        const data = await res.json();
+                        if (data.url) {
+                          window.open(data.url, "_blank");
+                          const poll = setInterval(async () => {
+                            try {
+                              const r = await fetch(`${cloudApiUrl}/api/auth/get-session`, {
+                                credentials: "include",
+                              });
+                              const s = await r.json();
+                              if (s?.session) {
+                                clearInterval(poll);
+                                setGhAvailable(true);
+                              }
+                            } catch {}
+                          }, 2000);
+                          setTimeout(() => clearInterval(poll), 5 * 60 * 1000);
+                        }
+                      } catch {}
+                    }}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#24292f] hover:bg-[#32383f] text-white text-xs font-mono font-medium transition-colors border border-white/10"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+                    </svg>
+                    Sign in with GitHub
+                  </button>
                 </div>
               )}
 
