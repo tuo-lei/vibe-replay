@@ -1,5 +1,5 @@
 import { marked } from "marked";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AnnotationActions } from "../hooks/useAnnotations";
 import type { ViewerMode } from "../hooks/useSessionLoader";
 import type { ReplaySession } from "../types";
@@ -141,6 +141,10 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
   } | null>(null);
   const [storageUsed, setStorageUsed] = useState<number | null>(null);
   const [storageLimit, setStorageLimit] = useState<number | null>(null);
+  const authPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const authPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const authMessageTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const authMessageListenerRef = useRef<((e: MessageEvent) => void) | null>(null);
 
   const cloudApiUrl = __CLOUD_API_URL__;
   const cloudApiBase = isEditor ? "" : cloudApiUrl;
@@ -163,6 +167,27 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
     },
     [cloudApiBase, isEditor],
   );
+
+  useEffect(() => {
+    return () => {
+      if (authPollIntervalRef.current) {
+        clearInterval(authPollIntervalRef.current);
+        authPollIntervalRef.current = null;
+      }
+      if (authPollTimeoutRef.current) {
+        clearTimeout(authPollTimeoutRef.current);
+        authPollTimeoutRef.current = null;
+      }
+      if (authMessageTimeoutRef.current) {
+        clearTimeout(authMessageTimeoutRef.current);
+        authMessageTimeoutRef.current = null;
+      }
+      if (authMessageListenerRef.current) {
+        window.removeEventListener("message", authMessageListenerRef.current);
+        authMessageListenerRef.current = null;
+      }
+    };
+  }, []);
 
   // Compute replay JSON size
   const replaySize = useMemo(
@@ -560,6 +585,23 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                     <button
                       type="button"
                       onClick={async () => {
+                        if (authPollIntervalRef.current) {
+                          clearInterval(authPollIntervalRef.current);
+                          authPollIntervalRef.current = null;
+                        }
+                        if (authPollTimeoutRef.current) {
+                          clearTimeout(authPollTimeoutRef.current);
+                          authPollTimeoutRef.current = null;
+                        }
+                        if (authMessageTimeoutRef.current) {
+                          clearTimeout(authMessageTimeoutRef.current);
+                          authMessageTimeoutRef.current = null;
+                        }
+                        if (authMessageListenerRef.current) {
+                          window.removeEventListener("message", authMessageListenerRef.current);
+                          authMessageListenerRef.current = null;
+                        }
+
                         if (isEditor) {
                           try {
                             const res = await fetch("/api/auth/login", { method: "POST" });
@@ -570,17 +612,33 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                           } catch {
                             // Keep CTA silent; polling below handles eventual consistency.
                           }
-                          const poll = setInterval(async () => {
+                          authPollIntervalRef.current = setInterval(async () => {
                             try {
                               const r = await fetch("/api/auth/get-session");
                               const s = await r.json();
                               if (s?.session) {
-                                clearInterval(poll);
+                                if (authPollIntervalRef.current) {
+                                  clearInterval(authPollIntervalRef.current);
+                                  authPollIntervalRef.current = null;
+                                }
+                                if (authPollTimeoutRef.current) {
+                                  clearTimeout(authPollTimeoutRef.current);
+                                  authPollTimeoutRef.current = null;
+                                }
                                 setGhAvailable(true);
                               }
                             } catch {}
                           }, 2000);
-                          setTimeout(() => clearInterval(poll), 5 * 60 * 1000);
+                          authPollTimeoutRef.current = setTimeout(
+                            () => {
+                              if (authPollIntervalRef.current) {
+                                clearInterval(authPollIntervalRef.current);
+                                authPollIntervalRef.current = null;
+                              }
+                              authPollTimeoutRef.current = null;
+                            },
+                            5 * 60 * 1000,
+                          );
                           return;
                         }
 
@@ -593,12 +651,24 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                             e.data.user
                           ) {
                             window.removeEventListener("message", onMsg);
+                            authMessageListenerRef.current = null;
+                            if (authMessageTimeoutRef.current) {
+                              clearTimeout(authMessageTimeoutRef.current);
+                              authMessageTimeoutRef.current = null;
+                            }
                             setGhAvailable(true);
                           }
                         };
+                        authMessageListenerRef.current = onMsg;
                         window.addEventListener("message", onMsg);
-                        setTimeout(
-                          () => window.removeEventListener("message", onMsg),
+                        authMessageTimeoutRef.current = setTimeout(
+                          () => {
+                            window.removeEventListener("message", onMsg);
+                            authMessageTimeoutRef.current = null;
+                            if (authMessageListenerRef.current === onMsg) {
+                              authMessageListenerRef.current = null;
+                            }
+                          },
                           5 * 60 * 1000,
                         );
                       }}

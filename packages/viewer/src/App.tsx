@@ -23,10 +23,19 @@ function DashboardAuthStatus({ isEditor }: { isEditor: boolean }) {
   } | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const authPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const authPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const sessionUrl = isEditor ? "/api/auth/get-session" : `${CLOUD_API}/api/auth/get-session`;
-    const signInOrigin = !isEditor ? new URL(CLOUD_API).origin : "";
+    let signInOrigin = "";
+    if (!isEditor) {
+      try {
+        signInOrigin = new URL(CLOUD_API).origin;
+      } catch {
+        signInOrigin = "";
+      }
+    }
     const authFetchInit = isEditor ? {} : { credentials: "include" as const };
     const check = () => {
       fetch(sessionUrl, authFetchInit)
@@ -55,6 +64,14 @@ function DashboardAuthStatus({ isEditor }: { isEditor: boolean }) {
     window.addEventListener("message", onMessage);
     window.addEventListener("focus", check);
     return () => {
+      if (authPollIntervalRef.current) {
+        clearInterval(authPollIntervalRef.current);
+        authPollIntervalRef.current = null;
+      }
+      if (authPollTimeoutRef.current) {
+        clearTimeout(authPollTimeoutRef.current);
+        authPollTimeoutRef.current = null;
+      }
       window.removeEventListener("message", onMessage);
       window.removeEventListener("focus", check);
     };
@@ -93,21 +110,46 @@ function DashboardAuthStatus({ isEditor }: { isEditor: boolean }) {
             window.open(`${CLOUD_API}/auth/login?callback=/auth/success`, "_blank");
           }
 
+          if (authPollIntervalRef.current) {
+            clearInterval(authPollIntervalRef.current);
+            authPollIntervalRef.current = null;
+          }
+          if (authPollTimeoutRef.current) {
+            clearTimeout(authPollTimeoutRef.current);
+            authPollTimeoutRef.current = null;
+          }
+
           const sessionUrl = isEditor
             ? "/api/auth/get-session"
             : `${CLOUD_API}/api/auth/get-session`;
           const authFetchInit = isEditor ? {} : { credentials: "include" as const };
-          const poll = setInterval(async () => {
+          authPollIntervalRef.current = setInterval(async () => {
             try {
               const r = await fetch(sessionUrl, authFetchInit);
               const s = await r.json();
               if (s?.session) {
-                clearInterval(poll);
+                if (authPollIntervalRef.current) {
+                  clearInterval(authPollIntervalRef.current);
+                  authPollIntervalRef.current = null;
+                }
+                if (authPollTimeoutRef.current) {
+                  clearTimeout(authPollTimeoutRef.current);
+                  authPollTimeoutRef.current = null;
+                }
                 setAuth({ authenticated: true, user: s.user || null });
               }
             } catch {}
           }, 2000);
-          setTimeout(() => clearInterval(poll), 5 * 60 * 1000);
+          authPollTimeoutRef.current = setTimeout(
+            () => {
+              if (authPollIntervalRef.current) {
+                clearInterval(authPollIntervalRef.current);
+                authPollIntervalRef.current = null;
+              }
+              authPollTimeoutRef.current = null;
+            },
+            5 * 60 * 1000,
+          );
         }}
         className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-[#24292f] hover:bg-[#32383f] text-white text-xs font-medium transition-colors cursor-pointer border border-white/10"
       >
