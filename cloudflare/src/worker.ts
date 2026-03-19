@@ -133,12 +133,24 @@ app.get("/auth/login", async (c) => {
     return c.text("Invalid callback URL", 400);
   }
   const auth = createAuth(c.env);
+  // asResponse gives us the Set-Cookie headers (OAuth state cookie)
   const res = await auth.api.signInSocial({
     headers: c.req.raw.headers,
     body: { provider: "github", callbackURL },
+    asResponse: true,
   });
-  if (res?.url) return c.redirect(res.url);
-  return c.text("Failed to initiate login", 500);
+  // Better Auth returns 200 + Location + Set-Cookie. Browser needs a real 302.
+  const location = res.headers.get("location");
+  const setCookie = res.headers.get("set-cookie");
+  if (!location) return c.text("Failed to initiate login", 500);
+  const redirect = new Response(null, {
+    status: 302,
+    headers: {
+      Location: location,
+      ...(setCookie ? { "Set-Cookie": setCookie } : {}),
+    },
+  });
+  return redirect;
 });
 
 // ---------------------------------------------------------------------------
