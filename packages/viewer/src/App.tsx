@@ -120,8 +120,7 @@ function DashboardAuthStatus() {
                 headers: { "Content-Type": "application/json" },
                 body: "{}",
               });
-              setAuth({ authenticated: false, user: null });
-              setDropdownOpen(false);
+              window.location.reload();
             }}
             className="w-full text-left px-3 py-2 text-xs text-terminal-dim hover:text-red-400 hover:bg-terminal-surface-hover transition-colors cursor-pointer font-mono"
           >
