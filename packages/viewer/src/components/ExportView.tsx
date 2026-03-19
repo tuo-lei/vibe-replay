@@ -128,6 +128,9 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
   const [ghExporting, setGhExporting] = useState(false);
   const [ghError, setGhError] = useState<string | null>(null);
   const [mdViewMode, setMdViewMode] = useState<"preview" | "source">("preview");
+  const [cloudVisibility, setCloudVisibility] = useState<"private" | "unlisted" | "public">(
+    "unlisted",
+  );
   const [cloudSharing, setCloudSharing] = useState(false);
   const [cloudStatus, setCloudStatus] = useState<Status>(null);
   const [cloudInfo, setCloudInfo] = useState<{ id: string; url: string; expiresAt: string } | null>(
@@ -231,7 +234,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ replay: session, visibility: "unlisted" }),
+        body: JSON.stringify({ replay: session, visibility: cloudVisibility }),
       });
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}));
@@ -245,7 +248,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
     } finally {
       setCloudSharing(false);
     }
-  }, [session]);
+  }, [session, cloudVisibility]);
 
   const handleExportGithub = useCallback(async () => {
     if (!exportGithub) return;
@@ -472,16 +475,28 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                         Private
                       </span>
                     </div>
-                    <ul className="space-y-1.5 text-xs font-sans text-terminal-dim mb-1">
-                      <li className="flex items-center gap-2">
-                        <span className="text-terminal-green shrink-0">&#10003;</span>
-                        You control visibility
-                      </li>
-                      <li className="flex items-center gap-2">
-                        <span className="text-terminal-green shrink-0">&#10003;</span>
-                        7-day shareable link
-                      </li>
-                    </ul>
+                    <div className="flex items-center gap-1.5 mb-3">
+                      {(["private", "unlisted", "public"] as const).map((v) => (
+                        <button
+                          key={v}
+                          onClick={() => setCloudVisibility(v)}
+                          className={`text-[11px] font-mono px-2.5 py-1 rounded-md transition-colors ${
+                            cloudVisibility === v
+                              ? "bg-terminal-purple-subtle text-terminal-purple font-semibold"
+                              : "bg-terminal-surface-2 text-terminal-dimmer hover:text-terminal-dim"
+                          }`}
+                        >
+                          {v}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-xs font-sans text-terminal-dim mb-1">
+                      {cloudVisibility === "private"
+                        ? "Only you can view this replay."
+                        : cloudVisibility === "unlisted"
+                          ? "Anyone with the link can view."
+                          : "Visible on explore page."}
+                    </p>
                     {cloudTooBig && (
                       <p className="text-[11px] font-mono text-terminal-orange mt-1.5 flex items-center gap-1">
                         <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
@@ -558,11 +573,11 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                       <ul className="space-y-1.5 text-xs font-sans text-terminal-dim mb-1">
                         <li className="flex items-center gap-2">
                           <span className="text-terminal-green shrink-0">&#10003;</span>
-                          No storage limit
+                          Hosted on GitHub — no expiration
                         </li>
                         <li className="flex items-center gap-2">
                           <span className="text-terminal-green shrink-0">&#10003;</span>
-                          Permanent — never expires
+                          Doesn&apos;t count toward your storage
                         </li>
                       </ul>
                       {gistTooBig && (

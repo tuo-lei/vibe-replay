@@ -25,16 +25,22 @@ function DashboardAuthStatus() {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch(`${CLOUD_API}/api/auth/get-session`, { credentials: "include" })
-      .then((r) => r.json())
-      .then((data: any) => {
-        if (data?.session) {
-          setAuth({ authenticated: true, user: data.user || null });
-        } else {
-          setAuth({ authenticated: false, user: null });
-        }
-      })
-      .catch(() => setAuth({ authenticated: false, user: null }));
+    const check = () => {
+      fetch(`${CLOUD_API}/api/auth/get-session`, { credentials: "include" })
+        .then((r) => r.json())
+        .then((data: any) => {
+          if (data?.session) {
+            setAuth({ authenticated: true, user: data.user || null });
+          } else {
+            setAuth({ authenticated: false, user: null });
+          }
+        })
+        .catch(() => setAuth({ authenticated: false, user: null }));
+    };
+    check();
+    // Re-check when user returns to tab (e.g. after OAuth in another tab)
+    window.addEventListener("focus", check);
+    return () => window.removeEventListener("focus", check);
   }, []);
 
   // Close dropdown on outside click
