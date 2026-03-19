@@ -27,6 +27,9 @@ import { formatDuration } from "./StatsPanel";
 
 type Tab = "home" | "sessions" | "replays";
 
+/** Cloud Worker API URL — same origin in production, localhost:8787 in dev */
+const CLOUD_API_URL = import.meta.env.VITE_CLOUD_API_URL || "";
+
 // ─── URL state parsers (module-level for stable references) ─────────
 function getProjectFromUrl(): string {
   const params = new URLSearchParams(window.location.search);
@@ -779,14 +782,18 @@ function SessionsPanel() {
 
   useEffect(() => {
     void loadSources();
-    fetch("/api/gh-status")
+    // Single auth check against Worker — covers both gist and cloud features
+    fetch(`${CLOUD_API_URL}/api/auth/get-session`, { credentials: "include" })
       .then((r) => r.json())
-      .then((data: { available: boolean }) => setGhAvailable(data.available))
-      .catch(() => setGhAvailable(false));
-    fetch("/api/auth/status")
-      .then((r) => r.json())
-      .then((data: { authenticated: boolean }) => setAuthAvailable(data.authenticated))
-      .catch(() => setAuthAvailable(false));
+      .then((data: any) => {
+        const loggedIn = !!data?.session;
+        setGhAvailable(loggedIn);
+        setAuthAvailable(loggedIn);
+      })
+      .catch(() => {
+        setGhAvailable(false);
+        setAuthAvailable(false);
+      });
   }, [loadSources]);
 
   useEffect(() => {
@@ -894,8 +901,22 @@ function SessionsPanel() {
   const handlePublishGist = async (slug: string) => {
     setPublishingSlug(slug);
     try {
-      const resp = await fetch(`/api/publish/gist?slug=${encodeURIComponent(slug)}`, {
+      // Fetch session data from CLI server, then create gist via Worker
+      const sessionResp = await fetch(`/api/session?slug=${encodeURIComponent(slug)}`);
+      if (!sessionResp.ok) throw new Error("Failed to load session");
+      const session = await sessionResp.json();
+      const title = session.meta?.title || slug;
+
+      const resp = await fetch(`${CLOUD_API_URL}/api/gists`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          filename: `${slug}.json`,
+          content: JSON.stringify(session),
+          description: `vibe-replay: ${title}`,
+          public: true,
+        }),
       });
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}));
@@ -931,10 +952,16 @@ function SessionsPanel() {
     setPublishingCloudSlug(slug);
     setCloudError(null);
     try {
-      const resp = await fetch(`/api/publish/cloud?slug=${encodeURIComponent(slug)}`, {
+      // Fetch session data from CLI server, then upload to Worker directly
+      const sessionResp = await fetch(`/api/session?slug=${encodeURIComponent(slug)}`);
+      if (!sessionResp.ok) throw new Error("Failed to load session");
+      const session = await sessionResp.json();
+
+      const resp = await fetch(`${CLOUD_API_URL}/api/cloud-replays`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ visibility: "unlisted" }),
+        credentials: "include",
+        body: JSON.stringify({ replay: session, visibility: "unlisted" }),
       });
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}));
@@ -1650,14 +1677,18 @@ function ReplaysPanel() {
 
     void loadReplays();
 
-    fetch("/api/gh-status")
+    // Auth check against Worker directly (browser cookie)
+    fetch(`${CLOUD_API_URL}/api/auth/get-session`, { credentials: "include" })
       .then((r) => r.json())
-      .then((data: { available: boolean }) => setGhAvailable(data.available))
-      .catch(() => setGhAvailable(false));
-    fetch("/api/auth/status")
-      .then((r) => r.json())
-      .then((data: { authenticated: boolean }) => setAuthAvailable(data.authenticated))
-      .catch(() => setAuthAvailable(false));
+      .then((data: any) => {
+        const loggedIn = !!data?.session;
+        setGhAvailable(loggedIn);
+        setAuthAvailable(loggedIn);
+      })
+      .catch(() => {
+        setGhAvailable(false);
+        setAuthAvailable(false);
+      });
 
     return () => {
       mounted = false;
@@ -1725,8 +1756,21 @@ function ReplaysPanel() {
   const handlePublishGist = async (slug: string) => {
     setPublishingSlug(slug);
     try {
-      const resp = await fetch(`/api/publish/gist?slug=${encodeURIComponent(slug)}`, {
+      const sessionResp = await fetch(`/api/session?slug=${encodeURIComponent(slug)}`);
+      if (!sessionResp.ok) throw new Error("Failed to load session");
+      const session = await sessionResp.json();
+      const title = session.meta?.title || slug;
+
+      const resp = await fetch(`${CLOUD_API_URL}/api/gists`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          filename: `${slug}.json`,
+          content: JSON.stringify(session),
+          description: `vibe-replay: ${title}`,
+          public: true,
+        }),
       });
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}));
@@ -1759,10 +1803,15 @@ function ReplaysPanel() {
     setPublishingCloudSlug(slug);
     setCloudError(null);
     try {
-      const resp = await fetch(`/api/publish/cloud?slug=${encodeURIComponent(slug)}`, {
+      const sessionResp = await fetch(`/api/session?slug=${encodeURIComponent(slug)}`);
+      if (!sessionResp.ok) throw new Error("Failed to load session");
+      const session = await sessionResp.json();
+
+      const resp = await fetch(`${CLOUD_API_URL}/api/cloud-replays`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ visibility: "unlisted" }),
+        credentials: "include",
+        body: JSON.stringify({ replay: session, visibility: "unlisted" }),
       });
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}));
