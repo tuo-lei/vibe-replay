@@ -61,7 +61,7 @@ function DashboardAuthStatus() {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               credentials: "include",
-              body: JSON.stringify({ provider: "github", callbackURL: "/" }),
+              body: JSON.stringify({ provider: "github", callbackURL: "/auth/success" }),
             });
             const data = await res.json();
             if (data.url) {

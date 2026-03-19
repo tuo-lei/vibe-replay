@@ -116,6 +116,38 @@ app.on(["GET", "POST"], "/api/auth/*", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
+// Login success page — shown after OAuth callback, auto-closes tab
+// ---------------------------------------------------------------------------
+
+app.get("/auth/success", (c) => {
+  return c.html(`<!DOCTYPE html>
+<html><head><title>vibe-replay - Logged in</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0f;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh}
+.card{text-align:center;padding:3rem 2.5rem;border-radius:1rem;border:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.03);max-width:360px;width:100%}
+.logo{font-weight:700;font-size:1.1rem;background:linear-gradient(to right,#00e5a0,#34d399,#22d3ee);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:1.5rem}
+.icon{font-size:2rem;margin-bottom:.75rem;color:#00e5a0}
+.title{font-size:1rem;font-weight:600;margin-bottom:.5rem;color:#00e5a0}
+.msg{font-size:.875rem;color:#8b949e}
+.countdown{font-size:.75rem;color:#484f58;margin-top:.75rem}
+</style></head>
+<body><div class="card">
+<div class="logo">vibe-replay</div>
+<div class="icon">&#10003;</div>
+<p class="title">Logged in!</p>
+<p class="msg">You can close this tab and return to the editor.</p>
+<p class="countdown" id="cd"></p>
+</div>
+<script>
+var s=5;
+var cd=document.getElementById('cd');
+cd.textContent='Auto-closing in '+s+'s...';
+var t=setInterval(function(){s--;if(s<=0){clearInterval(t);window.close();}else{cd.textContent='Auto-closing in '+s+'s...';}},1000);
+</script></body></html>`);
+});
+
+// ---------------------------------------------------------------------------
 // CLI Login flow — browser-mediated OAuth for CLI tools
 // ---------------------------------------------------------------------------
 
