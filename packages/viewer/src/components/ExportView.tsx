@@ -357,41 +357,71 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                 /* ─── Not logged in: sign-in CTA ─── */
                 <div className="bg-terminal-surface rounded-xl border border-terminal-border shadow-layer-sm overflow-hidden">
                   <div className="p-6 pb-5">
-                    <h3 className="text-base font-sans font-semibold text-terminal-text mb-2">
-                      Share this replay
+                    <h3 className="text-base font-sans font-semibold text-terminal-text mb-1">
+                      Share your session — it&apos;s free
                     </h3>
-                    <p className="text-sm font-sans text-terminal-dim leading-relaxed mb-5">
-                      Sign in with GitHub to get a shareable link or publish as a public gist.
+                    <p className="text-xs font-sans text-terminal-dimmer mb-5">
+                      One-click GitHub auth. No credit card, no spam.
                     </p>
 
                     <div className="grid grid-cols-2 gap-3 mb-6">
                       <div className="rounded-lg bg-terminal-bg border border-terminal-border-subtle p-4">
-                        <div className="text-[10px] font-sans font-bold uppercase tracking-widest text-terminal-purple mb-2">
-                          Cloud Share
+                        <div className="flex items-center gap-1.5 mb-2.5">
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 16 16"
+                            fill="currentColor"
+                            className="text-terminal-purple shrink-0"
+                          >
+                            <path d="M4.5 13A3.5 3.5 0 0 1 3 6.4 4 4 0 0 1 11 5a3 3 0 0 1 1.5 5.6H4.5z" />
+                          </svg>
+                          <span className="text-[10px] font-sans font-bold uppercase tracking-widest text-terminal-purple">
+                            Cloud Share
+                          </span>
                         </div>
-                        <ul className="space-y-1.5 text-[11px] font-sans text-terminal-dimmer leading-relaxed">
+                        <ul className="space-y-2 text-[11px] font-sans text-terminal-dim leading-relaxed">
                           <li className="flex items-start gap-1.5">
-                            <span className="text-terminal-green mt-0.5 shrink-0">&#10003;</span>
-                            <span>You control who sees it — private, unlisted, or public</span>
+                            <span className="text-terminal-green mt-px shrink-0">&#10003;</span>
+                            <span>
+                              <span className="text-terminal-text font-medium">
+                                Privacy you control
+                              </span>{" "}
+                              — private, unlisted, or public
+                            </span>
                           </li>
                           <li className="flex items-start gap-1.5">
-                            <span className="text-terminal-green mt-0.5 shrink-0">&#10003;</span>
-                            <span>7-day shareable link, stored on vibe-replay.com</span>
+                            <span className="text-terminal-green mt-px shrink-0">&#10003;</span>
+                            <span>Shareable link, hosted on vibe-replay.com</span>
                           </li>
                         </ul>
                       </div>
                       <div className="rounded-lg bg-terminal-bg border border-terminal-border-subtle p-4">
-                        <div className="text-[10px] font-sans font-bold uppercase tracking-widest text-terminal-dim mb-2">
-                          GitHub Gist
+                        <div className="flex items-center gap-1.5 mb-2.5">
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 16 16"
+                            fill="currentColor"
+                            className="text-terminal-dim shrink-0"
+                          >
+                            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+                          </svg>
+                          <span className="text-[10px] font-sans font-bold uppercase tracking-widest text-terminal-dim">
+                            GitHub Gist
+                          </span>
                         </div>
-                        <ul className="space-y-1.5 text-[11px] font-sans text-terminal-dimmer leading-relaxed">
+                        <ul className="space-y-2 text-[11px] font-sans text-terminal-dim leading-relaxed">
                           <li className="flex items-start gap-1.5">
-                            <span className="text-terminal-green mt-0.5 shrink-0">&#10003;</span>
-                            <span>No storage limit — hosted on GitHub forever</span>
+                            <span className="text-terminal-green mt-px shrink-0">&#10003;</span>
+                            <span>
+                              <span className="text-terminal-text font-medium">Permanent</span> —
+                              hosted on GitHub, no expiration
+                            </span>
                           </li>
                           <li className="flex items-start gap-1.5">
-                            <span className="text-terminal-green mt-0.5 shrink-0">&#10003;</span>
-                            <span>Public — anyone with the link can view the replay</span>
+                            <span className="text-terminal-green mt-px shrink-0">&#10003;</span>
+                            <span>Public — great for docs and portfolios</span>
                           </li>
                         </ul>
                       </div>
