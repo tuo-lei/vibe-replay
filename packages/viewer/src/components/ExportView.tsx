@@ -464,18 +464,24 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                 <div className="space-y-4">
                   {/* Cloud Share */}
                   <div className="bg-terminal-surface rounded-xl border border-terminal-border shadow-layer-sm overflow-hidden p-5">
-                    <div className="flex items-center gap-2 mb-1">
+                    <div className="flex items-center gap-2 mb-3">
                       <span className="text-sm font-mono font-semibold text-terminal-purple">
                         Cloud Share
                       </span>
                       <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md bg-terminal-purple-subtle text-terminal-purple">
-                        Recommended
+                        Private
                       </span>
                     </div>
-                    <p className="text-[11px] font-mono text-terminal-dim leading-relaxed">
-                      Private by default. You control visibility — only you, anyone with the link,
-                      or public. Stored on vibe-replay.com for 7 days.
-                    </p>
+                    <ul className="space-y-1.5 text-xs font-sans text-terminal-dim mb-1">
+                      <li className="flex items-center gap-2">
+                        <span className="text-terminal-green shrink-0">&#10003;</span>
+                        You control visibility
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <span className="text-terminal-green shrink-0">&#10003;</span>
+                        7-day shareable link
+                      </li>
+                    </ul>
                     {cloudTooBig && (
                       <p className="text-[11px] font-mono text-terminal-orange mt-1.5 flex items-center gap-1">
                         <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
@@ -540,19 +546,25 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
 
                   {/* GitHub Gist */}
                   {publishGist && (
-                    <div className="bg-terminal-surface rounded-2xl border border-terminal-border-subtle shadow-layer-sm overflow-hidden p-5">
-                      <div className="flex items-center gap-2 mb-1">
+                    <div className="bg-terminal-surface rounded-xl border border-terminal-border shadow-layer-sm overflow-hidden p-5">
+                      <div className="flex items-center gap-2 mb-3">
                         <span className="text-sm font-mono font-semibold text-terminal-dim">
                           GitHub Gist
                         </span>
-                        <span className="text-[10px] font-mono text-terminal-dimmer px-1.5 py-0.5 rounded-full bg-terminal-surface-hover border border-terminal-border-subtle">
+                        <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dimmer">
                           Public
                         </span>
                       </div>
-                      <p className="text-[11px] font-mono text-terminal-dim leading-relaxed">
-                        Public gist hosted on GitHub — no storage limit, viewable forever on
-                        vibe-replay.com. Anyone with the link can see it.
-                      </p>
+                      <ul className="space-y-1.5 text-xs font-sans text-terminal-dim mb-1">
+                        <li className="flex items-center gap-2">
+                          <span className="text-terminal-green shrink-0">&#10003;</span>
+                          No storage limit
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <span className="text-terminal-green shrink-0">&#10003;</span>
+                          Permanent — never expires
+                        </li>
+                      </ul>
                       {gistTooBig && (
                         <p className="text-[11px] font-mono text-terminal-red mt-1.5 flex items-center gap-1">
                           <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
