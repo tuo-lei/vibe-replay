@@ -404,7 +404,13 @@ app.get("/api/cloud-replays/:id", async (c) => {
   const [record] = await db.select().from(cloudReplays).where(eq(cloudReplays.id, id)).limit(1);
   if (!record) return c.json({ error: "Not found" }, 404);
 
-  if (record.expiresAt && new Date(`${record.expiresAt}Z`) < new Date()) {
+  // expiresAt is stored as UTC without Z suffix (e.g. "2026-03-26 08:00:00")
+  // Append Z to parse as UTC consistently with SQLite's datetime('now')
+  if (
+    record.expiresAt &&
+    new Date(record.expiresAt.endsWith("Z") ? record.expiresAt : `${record.expiresAt}Z`) <
+      new Date()
+  ) {
     return c.json({ error: "Expired" }, 410);
   }
 
@@ -480,7 +486,7 @@ app.get("/api/cloud-replays", async (c) => {
   const storage = await db
     .select({ total: sql<number>`coalesce(sum(${cloudReplays.sizeBytes}), 0)` })
     .from(cloudReplays)
-    .where(eq(cloudReplays.userId, userId));
+    .where(and(eq(cloudReplays.userId, userId), eq(cloudReplays.storageType, "r2")));
 
   return c.json({
     replays: results,

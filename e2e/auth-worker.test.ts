@@ -19,8 +19,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const HAS_DEV_VARS = existsSync("cloudflare/.dev.vars");
 const describeAuth = HAS_DEV_VARS ? describe : describe.skip;
 
-const WORKER_PORT = 8799;
-const WORKER_URL = `http://localhost:${WORKER_PORT}`;
+const WORKER_URL = "http://localhost:8787";
 let wranglerProcess: ReturnType<typeof import("node:child_process").spawn>;
 
 async function waitForWorker(url: string, timeout = 15_000) {
@@ -47,7 +46,7 @@ describeAuth("Auth Worker E2E", () => {
 
     // Start wrangler dev in background
     const { spawn } = await import("node:child_process");
-    wranglerProcess = spawn("pnpm", ["wrangler", "dev", "--port", String(WORKER_PORT)], {
+    wranglerProcess = spawn("pnpm", ["wrangler", "dev", "--port", "8787"], {
       cwd: "cloudflare",
       stdio: "pipe",
       detached: false,

@@ -151,5 +151,6 @@ export const cloudReplays = sqliteTable(
     index("idx_cloud_replays_user").on(table.userId),
     index("idx_cloud_replays_expires").on(table.expiresAt),
     index("idx_cloud_replays_gist").on(table.gistId),
+    index("idx_cloud_replays_public").on(table.visibility, table.createdAt),
   ],
 );
