@@ -236,12 +236,17 @@ export function navigateTo(
     if (value === null) url.searchParams.delete(key);
     else url.searchParams.set(key, value);
   }
+  const changed = url.toString() !== window.location.href;
   if (options.replace) {
     window.history.replaceState({}, "", url.toString());
   } else {
     window.history.pushState({}, "", url.toString());
   }
-  window.dispatchEvent(new PopStateEvent("popstate"));
+  // Only dispatch popstate for actual navigation (not filter typing).
+  // replace + no view/session change = filter update, skip popstate to avoid re-mount.
+  if (!options.replace && changed) {
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }
 }
 
 // ─── Shared UI components ────────────────────────────────────────────
