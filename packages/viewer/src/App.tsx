@@ -16,17 +16,29 @@ function getActiveViewFromUrl(): ActiveView {
 
 const CLOUD_API = __CLOUD_API_URL__;
 
-function DashboardAuthStatus() {
+function DashboardAuthStatus({ isEditor }: { isEditor: boolean }) {
   const [auth, setAuth] = useState<{
     authenticated: boolean;
     user: { name?: string; image?: string } | null;
   } | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const authPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const authPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    const sessionUrl = isEditor ? "/api/auth/get-session" : `${CLOUD_API}/api/auth/get-session`;
+    let signInOrigin = "";
+    if (!isEditor) {
+      try {
+        signInOrigin = new URL(CLOUD_API).origin;
+      } catch {
+        signInOrigin = "";
+      }
+    }
+    const authFetchInit = isEditor ? {} : { credentials: "include" as const };
     const check = () => {
-      fetch(`${CLOUD_API}/api/auth/get-session`, { credentials: "include" })
+      fetch(sessionUrl, authFetchInit)
         .then((r) => r.json())
         .then((data: any) => {
           if (data?.session) {
@@ -38,19 +50,32 @@ function DashboardAuthStatus() {
         .catch(() => setAuth({ authenticated: false, user: null }));
     };
     check();
-    // Listen for postMessage from OAuth success page (cross-origin safe)
+    // Listen for postMessage from OAuth success page (cloud auth flow only)
     const onMessage = (e: MessageEvent) => {
-      if (e.data?.type === "vibe-replay-auth" && e.data.user) {
+      if (
+        !isEditor &&
+        e.origin === signInOrigin &&
+        e.data?.type === "vibe-replay-auth" &&
+        e.data.user
+      ) {
         setAuth({ authenticated: true, user: e.data.user });
       }
     };
     window.addEventListener("message", onMessage);
     window.addEventListener("focus", check);
     return () => {
+      if (authPollIntervalRef.current) {
+        clearInterval(authPollIntervalRef.current);
+        authPollIntervalRef.current = null;
+      }
+      if (authPollTimeoutRef.current) {
+        clearTimeout(authPollTimeoutRef.current);
+        authPollTimeoutRef.current = null;
+      }
       window.removeEventListener("message", onMessage);
       window.removeEventListener("focus", check);
     };
-  }, []);
+  }, [isEditor]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -70,21 +95,61 @@ function DashboardAuthStatus() {
     return (
       <button
         type="button"
-        onClick={() => {
-          window.open(`${CLOUD_API}/auth/login?callback=/auth/success`, "_blank");
-          const poll = setInterval(async () => {
+        onClick={async () => {
+          if (isEditor) {
             try {
-              const r = await fetch(`${CLOUD_API}/api/auth/get-session`, {
-                credentials: "include",
-              });
+              const res = await fetch("/api/auth/login", { method: "POST" });
+              const data = await res.json().catch(() => null);
+              if (res.ok && data?.url) {
+                window.open(data.url, "_blank");
+              }
+            } catch {
+              // Keep UI unchanged; poll below may still recover.
+            }
+          } else {
+            window.open(`${CLOUD_API}/auth/login?callback=/auth/success`, "_blank");
+          }
+
+          if (authPollIntervalRef.current) {
+            clearInterval(authPollIntervalRef.current);
+            authPollIntervalRef.current = null;
+          }
+          if (authPollTimeoutRef.current) {
+            clearTimeout(authPollTimeoutRef.current);
+            authPollTimeoutRef.current = null;
+          }
+
+          const sessionUrl = isEditor
+            ? "/api/auth/get-session"
+            : `${CLOUD_API}/api/auth/get-session`;
+          const authFetchInit = isEditor ? {} : { credentials: "include" as const };
+          authPollIntervalRef.current = setInterval(async () => {
+            try {
+              const r = await fetch(sessionUrl, authFetchInit);
               const s = await r.json();
               if (s?.session) {
-                clearInterval(poll);
+                if (authPollIntervalRef.current) {
+                  clearInterval(authPollIntervalRef.current);
+                  authPollIntervalRef.current = null;
+                }
+                if (authPollTimeoutRef.current) {
+                  clearTimeout(authPollTimeoutRef.current);
+                  authPollTimeoutRef.current = null;
+                }
                 setAuth({ authenticated: true, user: s.user || null });
               }
             } catch {}
           }, 2000);
-          setTimeout(() => clearInterval(poll), 5 * 60 * 1000);
+          authPollTimeoutRef.current = setTimeout(
+            () => {
+              if (authPollIntervalRef.current) {
+                clearInterval(authPollIntervalRef.current);
+                authPollIntervalRef.current = null;
+              }
+              authPollTimeoutRef.current = null;
+            },
+            5 * 60 * 1000,
+          );
         }}
         className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-[#24292f] hover:bg-[#32383f] text-white text-xs font-medium transition-colors cursor-pointer border border-white/10"
       >
@@ -117,11 +182,10 @@ function DashboardAuthStatus() {
           <button
             type="button"
             onClick={async () => {
-              await fetch(`${CLOUD_API}/api/auth/sign-out`, {
+              const signOutUrl = isEditor ? "/api/auth/sign-out" : `${CLOUD_API}/api/auth/sign-out`;
+              await fetch(signOutUrl, {
                 method: "POST",
-                credentials: "include",
-                headers: { "Content-Type": "application/json" },
-                body: "{}",
+                ...(isEditor ? {} : { credentials: "include" }),
               });
               window.location.reload();
             }}
@@ -280,7 +344,7 @@ export default function App() {
             >
               {theme === "dark" ? "\u263E" : "\u2600"}
             </button>
-            <DashboardAuthStatus />
+            <DashboardAuthStatus isEditor={true} />
           </div>
         </header>
         <Dashboard />
@@ -509,7 +573,7 @@ export default function App() {
               {theme === "dark" ? "\u263E" : "\u2600"}
             </button>
 
-            {isEditor && <DashboardAuthStatus />}
+            {isEditor && <DashboardAuthStatus isEditor={isEditor} />}
           </div>
 
           {/* Mobile menu button */}
