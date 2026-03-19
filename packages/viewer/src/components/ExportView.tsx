@@ -143,6 +143,26 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
   const [storageLimit, setStorageLimit] = useState<number | null>(null);
 
   const cloudApiUrl = __CLOUD_API_URL__;
+  const cloudApiBase = isEditor ? "" : cloudApiUrl;
+  const cloudAuthFetchInit = isEditor ? {} : { credentials: "include" as const };
+  const cloudAuthOrigin = useMemo(() => {
+    if (isEditor) return "";
+    try {
+      return new URL(cloudApiUrl).origin;
+    } catch {
+      return "";
+    }
+  }, [isEditor]);
+  const cloudFetch = useCallback(
+    (path: string, init: RequestInit = {}) => {
+      const url = `${cloudApiBase}${path}`;
+      return fetch(url, {
+        ...init,
+        ...(isEditor ? {} : { credentials: "include" }),
+      });
+    },
+    [cloudApiBase, isEditor],
+  );
 
   // Compute replay JSON size
   const replaySize = useMemo(
@@ -159,15 +179,15 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
   useEffect(() => {
     if (!isEditor) return;
     if (publishGist) {
-      // Check auth against Worker directly (browser cookie)
-      fetch(`${cloudApiUrl}/api/auth/get-session`, { credentials: "include" })
+      // Editor mode uses local BFF auth for parity with pnpm start / npx.
+      cloudFetch("/api/auth/get-session", cloudAuthFetchInit)
         .then((r) => r.json())
         .then((data: any) => {
           const loggedIn = !!data?.session;
           setGhAvailable(loggedIn);
           // Fetch storage usage + cloud replays list (source of truth for visibility)
           if (loggedIn) {
-            fetch(`${cloudApiUrl}/api/cloud-replays`, { credentials: "include" })
+            cloudFetch("/api/cloud-replays", cloudAuthFetchInit)
               .then((r2) => r2.json())
               .then((d: any) => {
                 setStorageUsed(d.storage?.used ?? null);
@@ -247,7 +267,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
         })
         .catch(() => {});
     }
-  }, [isEditor, publishGist, exportGithub]);
+  }, [isEditor, publishGist, exportGithub, cloudFetch]);
 
   const handlePublishGist = useCallback(async () => {
     if (!session) return;
@@ -260,13 +280,10 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
         .replace(/[^a-zA-Z0-9_-]/g, "-")
         .replace(/-+/g, "-")
         .slice(0, 60)}.json`;
-      const endpoint = gistInfo
-        ? `${cloudApiUrl}/api/gists/${gistInfo.gistId}`
-        : `${cloudApiUrl}/api/gists`;
-      const resp = await fetch(endpoint, {
+      const endpoint = gistInfo ? `/api/gists/${gistInfo.gistId}` : "/api/gists";
+      const resp = await cloudFetch(endpoint, {
         method: gistInfo ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include",
         body: JSON.stringify({
           filename,
           content,
@@ -307,7 +324,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
     } finally {
       setGistPublishingLocal(false);
     }
-  }, [session, gistInfo]);
+  }, [session, gistInfo, cloudFetch]);
 
   const handleCloudShare = useCallback(async () => {
     if (!session) return;
@@ -316,10 +333,9 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
     try {
       // Upload new replay first, then delete old one on success
       const oldCloudId = cloudInfo?.id;
-      const resp = await fetch(`${cloudApiUrl}/api/cloud-replays`, {
+      const resp = await cloudFetch("/api/cloud-replays", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include",
         body: JSON.stringify({ replay: session, visibility: cloudVisibility }),
       });
       if (!resp.ok) {
@@ -330,9 +346,8 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
       // Delete old one after successful upload
       // Delete old replay first (await to ensure storage is accurate after)
       if (oldCloudId && oldCloudId !== result.id) {
-        await fetch(`${cloudApiUrl}/api/cloud-replays/${oldCloudId}`, {
+        await cloudFetch(`/api/cloud-replays/${oldCloudId}`, {
           method: "DELETE",
-          credentials: "include",
         }).catch(() => {});
       }
       setCloudInfo(result);
@@ -344,9 +359,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
         body: JSON.stringify({ ...result, visibility: cloudVisibility }),
       }).catch(() => {});
       // Refresh storage usage (after delete completed)
-      const storageResp = await fetch(`${cloudApiUrl}/api/cloud-replays`, {
-        credentials: "include",
-      }).catch(() => null);
+      const storageResp = await cloudFetch("/api/cloud-replays").catch(() => null);
       if (storageResp) {
         const storageData = (await storageResp.json().catch(() => null)) as any;
         if (storageData?.storage) {
@@ -359,16 +372,15 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
     } finally {
       setCloudSharing(false);
     }
-  }, [session, cloudVisibility, cloudInfo]);
+  }, [session, cloudVisibility, cloudInfo, cloudFetch]);
 
   const handleCloudDelete = useCallback(async () => {
     if (!cloudInfo?.id) return;
     setCloudSharing(true);
     setCloudStatus(null);
     try {
-      const resp = await fetch(`${cloudApiUrl}/api/cloud-replays/${cloudInfo.id}`, {
+      const resp = await cloudFetch(`/api/cloud-replays/${cloudInfo.id}`, {
         method: "DELETE",
-        credentials: "include",
       });
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}));
@@ -381,7 +393,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
         method: "DELETE",
       }).catch(() => {});
       // Refresh storage
-      fetch(`${cloudApiUrl}/api/cloud-replays`, { credentials: "include" })
+      cloudFetch("/api/cloud-replays")
         .then((r) => r.json())
         .then((d: any) => {
           setStorageUsed(d.storage?.used ?? null);
@@ -393,7 +405,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
     } finally {
       setCloudSharing(false);
     }
-  }, [cloudInfo]);
+  }, [cloudInfo, cloudFetch]);
 
   const handleExportGithub = useCallback(async () => {
     if (!exportGithub) return;
@@ -547,11 +559,39 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
 
                     <button
                       type="button"
-                      onClick={() => {
+                      onClick={async () => {
+                        if (isEditor) {
+                          try {
+                            const res = await fetch("/api/auth/login", { method: "POST" });
+                            const data = await res.json().catch(() => null);
+                            if (res.ok && data?.url) {
+                              window.open(data.url, "_blank");
+                            }
+                          } catch {
+                            // Keep CTA silent; polling below handles eventual consistency.
+                          }
+                          const poll = setInterval(async () => {
+                            try {
+                              const r = await fetch("/api/auth/get-session");
+                              const s = await r.json();
+                              if (s?.session) {
+                                clearInterval(poll);
+                                setGhAvailable(true);
+                              }
+                            } catch {}
+                          }, 2000);
+                          setTimeout(() => clearInterval(poll), 5 * 60 * 1000);
+                          return;
+                        }
+
                         window.open(`${cloudApiUrl}/auth/login?callback=/auth/success`, "_blank");
                         // Listen for postMessage from success page
                         const onMsg = (e: MessageEvent) => {
-                          if (e.data?.type === "vibe-replay-auth" && e.data.user) {
+                          if (
+                            e.origin === cloudAuthOrigin &&
+                            e.data?.type === "vibe-replay-auth" &&
+                            e.data.user
+                          ) {
                             window.removeEventListener("message", onMsg);
                             setGhAvailable(true);
                           }
