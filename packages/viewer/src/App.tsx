@@ -14,7 +14,7 @@ function getActiveViewFromUrl(): ActiveView {
   return "replay";
 }
 
-const CLOUD_API = import.meta.env.VITE_CLOUD_API_URL || "";
+const CLOUD_API = __CLOUD_API_URL__;
 
 function DashboardAuthStatus() {
   const [auth, setAuth] = useState<{
@@ -269,7 +269,7 @@ export default function App() {
               <span className="w-1.5 h-1.5 rounded-full bg-terminal-green animate-pulse" />
               Local
               <span className="instant-tooltip-text">
-                {`Viewer ${window.location.host}${import.meta.env.VITE_API_PORT ? `\nCLI :${import.meta.env.VITE_API_PORT}` : ""}${import.meta.env.VITE_CLOUD_API_URL ? `\nCloud ${import.meta.env.VITE_CLOUD_API_URL}` : ""}`}
+                {`Viewer ${window.location.host}${import.meta.env.VITE_API_PORT ? `\nCLI :${import.meta.env.VITE_API_PORT}` : ""}${__CLOUD_API_URL__ ? `\nCloud ${__CLOUD_API_URL__}` : ""}`}
               </span>
             </span>
             <span className="text-terminal-border/40 text-sm select-none">|</span>
@@ -322,7 +322,7 @@ export default function App() {
               <span className="w-1.5 h-1.5 rounded-full bg-terminal-green animate-pulse" />
               Local
               <span className="instant-tooltip-text">
-                {`Viewer ${window.location.host}${import.meta.env.VITE_API_PORT ? `\nCLI :${import.meta.env.VITE_API_PORT}` : ""}${import.meta.env.VITE_CLOUD_API_URL ? `\nCloud ${import.meta.env.VITE_CLOUD_API_URL}` : ""}`}
+                {`Viewer ${window.location.host}${import.meta.env.VITE_API_PORT ? `\nCLI :${import.meta.env.VITE_API_PORT}` : ""}${__CLOUD_API_URL__ ? `\nCloud ${__CLOUD_API_URL__}` : ""}`}
               </span>
             </span>
           )}
