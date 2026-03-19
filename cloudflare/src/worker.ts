@@ -1,4 +1,4 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
 import { Hono } from "hono";
@@ -648,10 +648,22 @@ app.post("/api/gists", async (c) => {
 app.patch("/api/gists/:gistId", async (c) => {
   const authResult = await requireAuth(c);
   if (authResult instanceof Response) return authResult;
+  const { userId } = authResult;
 
   const gistId = c.req.param("gistId");
   if (!/^[a-f0-9]{20,40}$/.test(gistId)) {
     return c.json({ error: "Invalid gist ID" }, 400);
+  }
+
+  // Verify ownership — user must own this gist record
+  const db0 = drizzle(c.env.DB);
+  const [existing] = await db0
+    .select({ userId: cloudReplays.userId })
+    .from(cloudReplays)
+    .where(eq(cloudReplays.gistId, gistId))
+    .limit(1);
+  if (existing && existing.userId !== userId) {
+    return c.json({ error: "Not found" }, 404);
   }
 
   const body = await c.req.json();
@@ -696,7 +708,7 @@ app.patch("/api/gists/:gistId", async (c) => {
 
   const gistData = (await gistResp.json()) as { id: string; html_url: string };
 
-  // Update metadata in cloud_replays if entry exists
+  // Update metadata in cloud_replays (only user's own record)
   const db = drizzle(c.env.DB);
   const replayMeta = extractMetaFromJson(body.content);
   await db
@@ -712,7 +724,7 @@ app.patch("/api/gists/:gistId", async (c) => {
       costEstimate: replayMeta.costEstimate,
       firstMessage: replayMeta.firstMessage,
     })
-    .where(eq(cloudReplays.gistId, gistId));
+    .where(and(eq(cloudReplays.gistId, gistId), eq(cloudReplays.userId, userId)));
 
   return c.json({
     gistId: gistData.id,
