@@ -617,16 +617,14 @@ app.post("/api/gists", async (c) => {
 
   if (!gistResp.ok) {
     const err = await gistResp.text();
-    console.error(`GitHub Gist API error: ${gistResp.status} ${err}`);
+    console.error(`GitHub Gist API error (create): ${gistResp.status} ${err}`);
     const status = gistResp.status as number;
     const msg =
       status === 403
-        ? "You don't have permission to edit this gist"
-        : status === 404
-          ? "Gist not found on GitHub"
-          : status === 422
-            ? "GitHub rejected the update (content too large?)"
-            : `GitHub API error (${status})`;
+        ? "GitHub rejected the request (check OAuth permissions)"
+        : status === 422
+          ? "GitHub rejected the request (content too large?)"
+          : `GitHub API error (${status})`;
     return c.json({ error: msg }, status as any);
   }
 
@@ -786,22 +784,24 @@ app.patch("/api/gists/:gistId", async (c) => {
     });
   }
 
-  // Update metadata in cloud_replays
-  const replayMeta = extractMetaFromJson(body.content);
-  await db
-    .update(cloudReplays)
-    .set({
-      title: replayMeta.title,
-      provider: replayMeta.provider,
-      model: replayMeta.model,
-      sceneCount: replayMeta.sceneCount,
-      userPrompts: replayMeta.userPrompts,
-      toolCalls: replayMeta.toolCalls,
-      durationMs: replayMeta.durationMs,
-      costEstimate: replayMeta.costEstimate,
-      firstMessage: replayMeta.firstMessage,
-    })
-    .where(and(eq(cloudReplays.gistId, gistId), eq(cloudReplays.userId, userId)));
+  // Update metadata only for pre-existing records (backfill already sets all fields)
+  if (existing) {
+    const replayMeta = extractMetaFromJson(body.content);
+    await db
+      .update(cloudReplays)
+      .set({
+        title: replayMeta.title,
+        provider: replayMeta.provider,
+        model: replayMeta.model,
+        sceneCount: replayMeta.sceneCount,
+        userPrompts: replayMeta.userPrompts,
+        toolCalls: replayMeta.toolCalls,
+        durationMs: replayMeta.durationMs,
+        costEstimate: replayMeta.costEstimate,
+        firstMessage: replayMeta.firstMessage,
+      })
+      .where(and(eq(cloudReplays.gistId, gistId), eq(cloudReplays.userId, userId)));
+  }
 
   return c.json({
     gistId: gistData.id,
