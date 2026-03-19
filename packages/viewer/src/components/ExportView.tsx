@@ -142,7 +142,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
   const [storageUsed, setStorageUsed] = useState<number | null>(null);
   const [storageLimit, setStorageLimit] = useState<number | null>(null);
 
-  const cloudApiUrl = import.meta.env.VITE_CLOUD_API_URL || "";
+  const cloudApiUrl = __CLOUD_API_URL__;
 
   // Compute replay JSON size
   const replaySize = useMemo(
