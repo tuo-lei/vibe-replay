@@ -150,7 +150,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
     [session],
   );
   const CLOUD_MAX = 10 * 1024 * 1024;
-  const GIST_MAX = 5 * 1024 * 1024;
+  const GIST_MAX = 10 * 1024 * 1024;
   const cloudTooBig = replaySize > CLOUD_MAX;
   const gistTooBig = replaySize > GIST_MAX;
 
@@ -849,7 +849,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                           <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
                             <path d="M8 1a1 1 0 0 1 1 1v5.5a1 1 0 0 1-2 0V2a1 1 0 0 1 1-1zM8 11a1.25 1.25 0 1 1 0 2.5A1.25 1.25 0 0 1 8 11z" />
                           </svg>
-                          Replay is {formatBytes(replaySize)} — exceeds 5MB gist limit
+                          Replay is {formatBytes(replaySize)} — exceeds 10MB limit
                         </p>
                       )}
                       {gistInfo && (

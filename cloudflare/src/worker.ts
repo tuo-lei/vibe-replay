@@ -560,7 +560,7 @@ app.delete("/api/cloud-replays/:id", async (c) => {
 // Gist API — create/update gists using user's GitHub OAuth token
 // ---------------------------------------------------------------------------
 
-const MAX_GIST_CONTENT = 5 * 1024 * 1024; // 5 MB
+const MAX_GIST_CONTENT = 10 * 1024 * 1024; // 10 MB (GitHub allows up to 100MB per file)
 
 /** Create a gist via GitHub API + register in cloud_replays */
 app.post("/api/gists", async (c) => {
