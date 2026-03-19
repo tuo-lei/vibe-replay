@@ -368,7 +368,7 @@ app.post("/api/cloud-replays", async (c) => {
       userId,
       storageType: "r2",
       title: String(meta.title || meta.slug || "Untitled").slice(0, 200),
-      provider: String(meta.provider || "claude-code").slice(0, 50),
+      provider: String(meta.provider || "unknown").slice(0, 50),
       model: meta.model ? String(meta.model).slice(0, 100) : null,
       sceneCount: clamp(stats.sceneCount, 0, 100_000),
       userPrompts: clamp(stats.userPrompts, 0, 10_000),
@@ -725,7 +725,7 @@ app.patch("/api/gists/:gistId", async (c) => {
       gistUrl: checkData.html_url,
       gistOwner: checkData.owner?.login || null,
       title: meta?.title || "Untitled",
-      provider: meta?.provider || "claude-code",
+      provider: meta?.provider || "unknown",
       model: meta?.model || null,
       sceneCount: meta?.sceneCount || 0,
       userPrompts: meta?.userPrompts || 0,
@@ -1018,7 +1018,7 @@ function extractMetaFromJson(json: string): ReplayMetaSummary {
   const stats = meta.stats || {};
   return {
     title: String(meta.title || meta.project || "Untitled").slice(0, 200),
-    provider: String(meta.provider || "claude-code").slice(0, 50),
+    provider: String(meta.provider || "unknown").slice(0, 50),
     model: meta.model ? String(meta.model).slice(0, 100) : null,
     sceneCount: clamp(stats.sceneCount, 0, 100_000),
     userPrompts: clamp(stats.userPrompts, 0, 10_000),
@@ -1350,7 +1350,7 @@ async function fetchGistMeta(
 
   return {
     title: String(meta.title || meta.project || "Untitled").slice(0, 200),
-    provider: String(meta.provider || "claude-code").slice(0, 50),
+    provider: String(meta.provider || "unknown").slice(0, 50),
     model: meta.model ? String(meta.model).slice(0, 100) : null,
     sceneCount: clamp(stats.sceneCount, 0, 100_000),
     userPrompts: clamp(stats.userPrompts, 0, 10_000),
