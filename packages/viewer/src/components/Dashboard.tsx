@@ -27,9 +27,6 @@ import { formatDuration } from "./StatsPanel";
 
 type Tab = "home" | "sessions" | "replays";
 
-/** Cloud Worker API URL — same origin in production, localhost:8787 in dev */
-const CLOUD_API_URL = import.meta.env.VITE_CLOUD_API_URL || "";
-
 // ─── URL state parsers (module-level for stable references) ─────────
 function getProjectFromUrl(): string {
   const params = new URLSearchParams(window.location.search);
@@ -225,32 +222,22 @@ function SessionMoreMenu({
 function ReplayCard({
   summary: s,
   onOpen,
+  onShare,
   onTitleSave,
   onDelete,
-  onPublishGist,
-  onPublishCloud,
   onRegenerate,
   onArchive,
-  ghAvailable,
-  authAvailable,
-  isPublishing,
-  isPublishingCloud,
   isDeleting: _isDeleting,
   isRegenerating,
   isArchived,
 }: {
   summary: SessionSummary;
   onOpen: () => void;
+  onShare?: () => void;
   onTitleSave?: (slug: string, title: string) => Promise<void>;
   onDelete?: () => void;
-  onPublishGist?: () => void;
-  onPublishCloud?: () => void;
   onRegenerate?: () => void;
   onArchive?: () => void;
-  ghAvailable?: boolean;
-  authAvailable?: boolean;
-  isPublishing?: boolean;
-  isPublishingCloud?: boolean;
   isDeleting?: boolean;
   isRegenerating?: boolean;
   isArchived?: boolean;
@@ -301,99 +288,39 @@ function ReplayCard({
           )}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          {s.gist && !s.gist.outdated && (
-            <a
-              href={s.gist.viewerUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0"
-              title={`View on vibe-replay.com`}
+          {s.gist?.outdated && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onShare?.();
+              }}
+              className="h-7 w-7 flex items-center justify-center rounded-md bg-terminal-orange-subtle text-terminal-orange hover:bg-terminal-orange-emphasis transition-all duration-200 ease-material shrink-0"
+              title="Gist out of sync — click to update"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M8 1a1 1 0 0 1 1 1v5.5a1 1 0 0 1-2 0V2a1 1 0 0 1 1-1zM8 11a1.25 1.25 0 1 1 0 2.5A1.25 1.25 0 0 1 8 11z" />
+              </svg>
+            </button>
+          )}
+          {onShare && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onShare();
+              }}
+              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-cyan-subtle text-terminal-cyan hover:bg-terminal-cyan-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0"
+              title="Share & Export"
             >
               <svg
-                width="10"
-                height="10"
+                width="12"
+                height="12"
                 viewBox="0 0 16 16"
                 fill="none"
                 stroke="currentColor"
-                strokeWidth="2"
+                strokeWidth="1.5"
               >
-                <path d="M6 3H3v10h10v-3M9 2h5v5M14 2L7 9" />
+                <path d="M8 2v8M5 5l3-3 3 3M3 11v2h10v-2" />
               </svg>
-              Synced
-            </a>
-          )}
-          {s.gist?.outdated && onPublishGist && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onPublishGist();
-              }}
-              disabled={isPublishing}
-              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-orange-subtle text-terminal-orange hover:bg-terminal-orange-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50"
-            >
-              {isPublishing ? "Syncing..." : "Out of sync"}
-            </button>
-          )}
-          {ghAvailable && onPublishGist && !s.gist?.gistId && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onPublishGist();
-              }}
-              disabled={isPublishing}
-              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50"
-              title="Publish to Gist"
-            >
-              {isPublishing ? (
-                <span className="animate-pulse">...</span>
-              ) : (
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                >
-                  <path d="M8 2v8M5 5l3-3 3 3M3 11v2h10v-2" />
-                </svg>
-              )}
-              Upload
-            </button>
-          )}
-          {s.cloud && (
-            <a
-              href={s.cloud.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-cyan-subtle text-terminal-cyan hover:bg-terminal-cyan-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0"
-              title={`Shared — expires ${new Date(`${s.cloud.expiresAt}Z`).toLocaleDateString()}`}
-            >
-              <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M4.5 12A3.5 3.5 0 0 1 3 5.4 4 4 0 0 1 11 4a3 3 0 0 1 1.5 5.6.5.5 0 0 1-.5-.8A2 2 0 0 0 11 5a3 3 0 0 0-6-.3A2.5 2.5 0 0 0 4.5 11h.5a.5.5 0 0 1 0 1h-.5z" />
-              </svg>
-              Shared
-            </a>
-          )}
-          {authAvailable && onPublishCloud && !s.cloud && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onPublishCloud();
-              }}
-              disabled={isPublishingCloud}
-              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-cyan-subtle text-terminal-cyan hover:bg-terminal-cyan-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50"
-              title="Share via cloud (7-day link)"
-            >
-              {isPublishingCloud ? (
-                <span className="animate-pulse">...</span>
-              ) : (
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M4.5 12A3.5 3.5 0 0 1 3 5.4 4 4 0 0 1 11 4a3 3 0 0 1 1.5 5.6.5.5 0 0 1-.5-.8A2 2 0 0 0 11 5a3 3 0 0 0-6-.3A2.5 2.5 0 0 0 4.5 11h.5a.5.5 0 0 1 0 1h-.5zM8 8v4M6 10l2-2 2 2" />
-                </svg>
-              )}
               Share
             </button>
           )}
@@ -720,11 +647,6 @@ function SessionsPanel() {
   const titleInputRef = useRef<HTMLInputElement>(null);
   const wasEnrichingRef = useRef(false);
   const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());
-  const [ghAvailable, setGhAvailable] = useState<boolean | null>(null);
-  const [authAvailable, setAuthAvailable] = useState<boolean>(false);
-  const [publishingSlug, setPublishingSlug] = useState<string | null>(null);
-  const [publishingCloudSlug, setPublishingCloudSlug] = useState<string | null>(null);
-  const [cloudError, setCloudError] = useState<string | null>(null);
   const [enrichmentStatus, setEnrichmentStatus] = useState<SourcesEnrichmentStatus | null>(null);
   const hasCursorSources = sources.some((source) => source.provider === "cursor");
 
@@ -802,18 +724,6 @@ function SessionsPanel() {
 
   useEffect(() => {
     void loadSources();
-    // Single auth check against Worker — covers both gist and cloud features
-    fetch(`${CLOUD_API_URL}/api/auth/get-session`, { credentials: "include" })
-      .then((r) => r.json())
-      .then((data: any) => {
-        const loggedIn = !!data?.session;
-        setGhAvailable(loggedIn);
-        setAuthAvailable(loggedIn);
-      })
-      .catch(() => {
-        setGhAvailable(false);
-        setAuthAvailable(false);
-      });
   }, [loadSources]);
 
   useEffect(() => {
@@ -915,101 +825,6 @@ function SessionsPanel() {
       setGenerateError(getErrorMessage(err));
     } finally {
       setGeneratingSlug(null);
-    }
-  };
-
-  const handlePublishGist = async (slug: string) => {
-    setPublishingSlug(slug);
-    try {
-      // Fetch session data from CLI server, then create gist via Worker
-      const sessionResp = await fetch(`/api/session?slug=${encodeURIComponent(slug)}`);
-      if (!sessionResp.ok) throw new Error("Failed to load session");
-      const session = await sessionResp.json();
-      const title = session.meta?.title || slug;
-
-      const resp = await fetch(`${CLOUD_API_URL}/api/gists`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          filename: `${slug}.json`,
-          content: JSON.stringify(session),
-          description: `vibe-replay: ${title}`,
-          public: true,
-        }),
-      });
-      if (!resp.ok) {
-        const data = await resp.json().catch(() => ({}));
-        throw new Error(data.error || "Publish failed");
-      }
-      const result = await resp.json();
-      setSources((prev) =>
-        prev.map((s) =>
-          s.slug === slug && s.replay
-            ? {
-                ...s,
-                replay: {
-                  ...s.replay,
-                  gist: {
-                    gistId: result.gistId,
-                    viewerUrl: result.viewerUrl,
-                    updatedAt: new Date().toISOString(),
-                    outdated: false,
-                  },
-                },
-              }
-            : s,
-        ),
-      );
-    } catch (err) {
-      console.error("Gist publish error:", getErrorMessage(err));
-    } finally {
-      setPublishingSlug(null);
-    }
-  };
-
-  const handlePublishCloud = async (slug: string) => {
-    setPublishingCloudSlug(slug);
-    setCloudError(null);
-    try {
-      // Fetch session data from CLI server, then upload to Worker directly
-      const sessionResp = await fetch(`/api/session?slug=${encodeURIComponent(slug)}`);
-      if (!sessionResp.ok) throw new Error("Failed to load session");
-      const session = await sessionResp.json();
-
-      const resp = await fetch(`${CLOUD_API_URL}/api/cloud-replays`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ replay: session, visibility: "unlisted" }),
-      });
-      if (!resp.ok) {
-        const data = await resp.json().catch(() => ({}));
-        throw new Error(data.error || "Cloud share failed");
-      }
-      const result = await resp.json();
-      setSources((prev) =>
-        prev.map((s) =>
-          s.slug === slug && s.replay
-            ? {
-                ...s,
-                replay: {
-                  ...s.replay,
-                  cloud: {
-                    id: result.id,
-                    url: result.url,
-                    expiresAt: result.expiresAt,
-                    updatedAt: new Date().toISOString(),
-                  },
-                },
-              }
-            : s,
-        ),
-      );
-    } catch (err) {
-      setCloudError(getErrorMessage(err));
-    } finally {
-      setPublishingCloudSlug(null);
     }
   };
 
@@ -1361,18 +1176,6 @@ function SessionsPanel() {
             </button>
           </div>
         )}
-        {cloudError && (
-          <div className="mx-4 mb-2 flex items-center gap-2 bg-terminal-red-subtle rounded-lg px-3 py-2.5 text-xs font-mono text-terminal-red shrink-0 shadow-layer-sm">
-            <span>Cloud share: {cloudError}</span>
-            <button
-              onClick={() => setCloudError(null)}
-              className="ml-auto text-terminal-red/60 hover:text-terminal-red transition-colors"
-            >
-              &times;
-            </button>
-          </div>
-        )}
-
         {/* Title input */}
         {titleInput && (
           <div className="mx-4 mb-2 bg-terminal-surface rounded-lg px-4 py-3.5 space-y-3 shrink-0 shadow-layer-md">
@@ -1435,17 +1238,14 @@ function SessionsPanel() {
                       key={`${s.provider}-${s.slug}`}
                       summary={s.replay}
                       onOpen={() => navigateTo({ view: null, session: s.existingReplay! })}
+                      onShare={() =>
+                        navigateTo({ view: null, session: s.existingReplay!, v: "export" })
+                      }
                       onTitleSave={handleTitleSave}
                       onRegenerate={() => handleGenerate(s)}
                       isRegenerating={generatingSlug === s.slug}
                       onDelete={() => handleDeleteReplay(s.slug)}
-                      onPublishGist={() => handlePublishGist(s.slug)}
-                      onPublishCloud={() => handlePublishCloud(s.slug)}
                       onArchive={() => toggleArchive(s.slug)}
-                      ghAvailable={ghAvailable === true}
-                      authAvailable={authAvailable}
-                      isPublishing={publishingSlug === s.slug}
-                      isPublishingCloud={publishingCloudSlug === s.slug}
                       isArchived={isArchived}
                     />
                   );
@@ -1594,13 +1394,8 @@ function ReplaysPanel() {
   const [staleCachedAt, setStaleCachedAt] = useState<string | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const [refreshClockMs, setRefreshClockMs] = useState(() => Date.now());
-  const [ghAvailable, setGhAvailable] = useState<boolean | null>(null);
-  const [authAvailable, setAuthAvailable] = useState<boolean>(false);
   const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [publishingSlug, setPublishingSlug] = useState<string | null>(null);
-  const [publishingCloudSlug, setPublishingCloudSlug] = useState<string | null>(null);
-  const [cloudError, setCloudError] = useState<string | null>(null);
   const [regeneratingSlug, setRegeneratingSlug] = useState<string | null>(null);
 
   const [filter, setFilter] = useState(getFilterFromUrl());
@@ -1697,19 +1492,6 @@ function ReplaysPanel() {
 
     void loadReplays();
 
-    // Auth check against Worker directly (browser cookie)
-    fetch(`${CLOUD_API_URL}/api/auth/get-session`, { credentials: "include" })
-      .then((r) => r.json())
-      .then((data: any) => {
-        const loggedIn = !!data?.session;
-        setGhAvailable(loggedIn);
-        setAuthAvailable(loggedIn);
-      })
-      .catch(() => {
-        setGhAvailable(false);
-        setAuthAvailable(false);
-      });
-
     return () => {
       mounted = false;
     };
@@ -1770,93 +1552,6 @@ function ReplaysPanel() {
       setSessions((prev) => prev.filter((s) => s.slug !== slug));
     } catch {
       setDeleteError("Failed to delete session");
-    }
-  };
-
-  const handlePublishGist = async (slug: string) => {
-    setPublishingSlug(slug);
-    try {
-      const sessionResp = await fetch(`/api/session?slug=${encodeURIComponent(slug)}`);
-      if (!sessionResp.ok) throw new Error("Failed to load session");
-      const session = await sessionResp.json();
-      const title = session.meta?.title || slug;
-
-      const resp = await fetch(`${CLOUD_API_URL}/api/gists`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
-          filename: `${slug}.json`,
-          content: JSON.stringify(session),
-          description: `vibe-replay: ${title}`,
-          public: true,
-        }),
-      });
-      if (!resp.ok) {
-        const data = await resp.json().catch(() => ({}));
-        throw new Error(data.error || "Publish failed");
-      }
-      const result = await resp.json();
-      setSessions((prev) =>
-        prev.map((s) =>
-          s.slug === slug
-            ? {
-                ...s,
-                gist: {
-                  gistId: result.gistId,
-                  viewerUrl: result.viewerUrl,
-                  updatedAt: new Date().toISOString(),
-                  outdated: false,
-                },
-              }
-            : s,
-        ),
-      );
-    } catch (err) {
-      console.error("Gist publish error:", getErrorMessage(err));
-    } finally {
-      setPublishingSlug(null);
-    }
-  };
-
-  const handlePublishCloud = async (slug: string) => {
-    setPublishingCloudSlug(slug);
-    setCloudError(null);
-    try {
-      const sessionResp = await fetch(`/api/session?slug=${encodeURIComponent(slug)}`);
-      if (!sessionResp.ok) throw new Error("Failed to load session");
-      const session = await sessionResp.json();
-
-      const resp = await fetch(`${CLOUD_API_URL}/api/cloud-replays`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ replay: session, visibility: "unlisted" }),
-      });
-      if (!resp.ok) {
-        const data = await resp.json().catch(() => ({}));
-        throw new Error(data.error || "Cloud share failed");
-      }
-      const result = await resp.json();
-      setSessions((prev) =>
-        prev.map((s) =>
-          s.slug === slug
-            ? {
-                ...s,
-                cloud: {
-                  id: result.id,
-                  url: result.url,
-                  expiresAt: result.expiresAt,
-                  updatedAt: new Date().toISOString(),
-                },
-              }
-            : s,
-        ),
-      );
-    } catch (err) {
-      setCloudError(getErrorMessage(err));
-    } finally {
-      setPublishingCloudSlug(null);
     }
   };
 
@@ -2224,16 +1919,11 @@ function ReplaysPanel() {
                     key={s.slug}
                     summary={s}
                     onOpen={() => handleOpen(s.slug)}
+                    onShare={() => navigateTo({ view: null, session: s.slug, v: "export" })}
                     onTitleSave={handleTitleSave}
                     onDelete={() => confirmDelete(s.slug)}
-                    onPublishGist={() => handlePublishGist(s.slug)}
-                    onPublishCloud={() => handlePublishCloud(s.slug)}
                     onRegenerate={() => handleRegenerate(s)}
                     onArchive={() => toggleArchive(s.slug)}
-                    ghAvailable={ghAvailable === true}
-                    authAvailable={authAvailable}
-                    isPublishing={publishingSlug === s.slug}
-                    isPublishingCloud={publishingCloudSlug === s.slug}
                     isRegenerating={regeneratingSlug === s.slug}
                     isArchived={isArchived}
                   />
