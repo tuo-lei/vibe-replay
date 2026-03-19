@@ -124,6 +124,24 @@ app.on(["GET", "POST"], "/api/auth/*", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
+// Browser login — same-origin redirect to avoid third-party cookie issues
+// ---------------------------------------------------------------------------
+
+app.get("/auth/login", async (c) => {
+  const callbackURL = c.req.query("callback") || "/auth/success";
+  if (callbackURL.startsWith("//") || /^https?:/.test(callbackURL)) {
+    return c.text("Invalid callback URL", 400);
+  }
+  const auth = createAuth(c.env);
+  const res = await auth.api.signInSocial({
+    headers: c.req.raw.headers,
+    body: { provider: "github", callbackURL },
+  });
+  if (res?.url) return c.redirect(res.url);
+  return c.text("Failed to initiate login", 500);
+});
+
+// ---------------------------------------------------------------------------
 // Login success page — shown after OAuth callback, auto-closes tab
 // ---------------------------------------------------------------------------
 

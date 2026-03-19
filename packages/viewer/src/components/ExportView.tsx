@@ -547,35 +547,21 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
 
                     <button
                       type="button"
-                      onClick={async () => {
-                        try {
-                          const res = await fetch(`${cloudApiUrl}/api/auth/sign-in/social`, {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            credentials: "include",
-                            body: JSON.stringify({
-                              provider: "github",
-                              callbackURL: "/auth/success",
-                            }),
-                          });
-                          const data = await res.json();
-                          if (data.url) {
-                            window.open(data.url, "_blank");
-                            const poll = setInterval(async () => {
-                              try {
-                                const r = await fetch(`${cloudApiUrl}/api/auth/get-session`, {
-                                  credentials: "include",
-                                });
-                                const s = await r.json();
-                                if (s?.session) {
-                                  clearInterval(poll);
-                                  setGhAvailable(true);
-                                }
-                              } catch {}
-                            }, 2000);
-                            setTimeout(() => clearInterval(poll), 5 * 60 * 1000);
-                          }
-                        } catch {}
+                      onClick={() => {
+                        window.open(`${cloudApiUrl}/auth/login?callback=/auth/success`, "_blank");
+                        const poll = setInterval(async () => {
+                          try {
+                            const r = await fetch(`${cloudApiUrl}/api/auth/get-session`, {
+                              credentials: "include",
+                            });
+                            const s = await r.json();
+                            if (s?.session) {
+                              clearInterval(poll);
+                              setGhAvailable(true);
+                            }
+                          } catch {}
+                        }, 2000);
+                        setTimeout(() => clearInterval(poll), 5 * 60 * 1000);
                       }}
                       className="group inline-flex items-center gap-2.5 px-6 py-3 rounded-xl bg-terminal-green-subtle hover:bg-terminal-green-emphasis text-terminal-green text-sm font-sans font-semibold transition-all duration-200 ease-material shadow-layer-sm hover:shadow-layer-md hover:-translate-y-0.5"
                     >
