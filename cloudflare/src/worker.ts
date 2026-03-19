@@ -34,9 +34,17 @@ const app = new Hono<HonoEnv>();
 
 app.use("/api/*", async (c, next) => {
   const isDev = c.env.BETTER_AUTH_URL?.startsWith("http://localhost");
-  const allowed = isDev ? [...PROD_ORIGINS, ...DEV_ORIGINS] : [...PROD_ORIGINS];
   const mw = cors({
-    origin: allowed,
+    origin: (origin) => {
+      if (!origin) return PROD_ORIGINS[0];
+      // Allow production origins
+      if (PROD_ORIGINS.includes(origin)) return origin;
+      // Allow any localhost origin (CLI dashboard uses random ports)
+      if (origin.match(/^http:\/\/localhost(:\d+)?$/)) return origin;
+      // In dev mode, allow additional dev origins
+      if (isDev && DEV_ORIGINS.includes(origin)) return origin;
+      return null;
+    },
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowHeaders: ["Content-Type", "Authorization"],
     credentials: true,

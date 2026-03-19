@@ -25,7 +25,11 @@ export type AuthEnv = {
  */
 export function createAuth(env: AuthEnv) {
   const isDev = env.BETTER_AUTH_URL.startsWith("http://localhost");
+  // Trust production origins. In production, also trust localhost for CLI dashboard
+  // (CLI uses random ports, CORS middleware handles the actual origin validation)
   const trustedOrigins = [...PROD_ORIGINS];
+  // Always trust localhost — CLI dashboard runs on random ports
+  trustedOrigins.push("http://localhost");
   if (isDev) {
     trustedOrigins.push(...DEV_ORIGINS);
   }
