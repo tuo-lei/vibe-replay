@@ -618,7 +618,16 @@ app.post("/api/gists", async (c) => {
   if (!gistResp.ok) {
     const err = await gistResp.text();
     console.error(`GitHub Gist API error: ${gistResp.status} ${err}`);
-    return c.json({ error: "GitHub API error" }, gistResp.status as any);
+    const status = gistResp.status as number;
+    const msg =
+      status === 403
+        ? "You don't have permission to edit this gist"
+        : status === 404
+          ? "Gist not found on GitHub"
+          : status === 422
+            ? "GitHub rejected the update (content too large?)"
+            : `GitHub API error (${status})`;
+    return c.json({ error: msg }, status as any);
   }
 
   const gistData = (await gistResp.json()) as {
@@ -720,7 +729,16 @@ app.patch("/api/gists/:gistId", async (c) => {
   if (!gistResp.ok) {
     const err = await gistResp.text();
     console.error(`GitHub Gist API error: ${gistResp.status} ${err}`);
-    return c.json({ error: "GitHub API error" }, gistResp.status as any);
+    const status = gistResp.status as number;
+    const msg =
+      status === 403
+        ? "You don't have permission to edit this gist"
+        : status === 404
+          ? "Gist not found on GitHub"
+          : status === 422
+            ? "GitHub rejected the update (content too large?)"
+            : `GitHub API error (${status})`;
+    return c.json({ error: msg }, status as any);
   }
 
   const gistData = (await gistResp.json()) as {
@@ -1037,7 +1055,8 @@ export default {
     const BATCH = 50;
     // R2 grace period: keep data 7 days after expiry for potential recovery.
     // GET already returns 410 once expiresAt passes (soft delete).
-    // Cron only hard-deletes R2 + D1 after the grace period.
+    // Cron deletes R2 objects after grace period, zeros sizeBytes to free quota.
+    // D1 rows are kept permanently for history/analytics.
     const GRACE_DAYS = 7;
     for (;;) {
       const expired = await db
@@ -1050,8 +1069,15 @@ export default {
 
       if (expired.length === 0) break;
 
-      for (const { id } of expired) {
+      const expiredIds = expired.map(({ id }) => id);
+      // Delete R2 objects
+      for (const id of expiredIds) {
         await env.REPLAY_BUCKET.delete(`replays/${id}.json`);
+      }
+      // Zero out sizeBytes so expired replays don't count against quota
+      // (D1 rows kept for history/analytics)
+      for (const id of expiredIds) {
+        await db.update(cloudReplays).set({ sizeBytes: 0 }).where(eq(cloudReplays.id, id));
       }
 
       if (expired.length < BATCH) break;

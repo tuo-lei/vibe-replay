@@ -1315,6 +1315,15 @@ export async function startServer(
     return c.json({ gist });
   });
 
+  // Delete stale gist info (gist deleted on GitHub)
+  app.delete("/api/gist-info", async (c) => {
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+    const metaPath = join(baseDir, result.slug, ".vibe-replay-gist.json");
+    await unlink(metaPath).catch(() => {});
+    return c.json({ ok: true });
+  });
+
   // Cloud info for a session (requires slug)
   app.get("/api/cloud-info", async (c) => {
     const result = requireSlug(c.req.query("slug"));

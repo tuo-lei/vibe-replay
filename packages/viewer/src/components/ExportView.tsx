@@ -276,7 +276,19 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
       });
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}));
-        throw new Error((data as any).error || "Gist publish failed");
+        const errMsg = (data as any).error || "Gist publish failed";
+        // If gist was deleted on GitHub, clear stale local info + state
+        if (gistInfo && (resp.status === 404 || errMsg.includes("not found"))) {
+          setGistInfo(null);
+          // Delete local .vibe-replay-gist.json so it doesn't come back on refresh
+          fetch(apiUrl("/api/gist-info"), { method: "DELETE" }).catch(() => {});
+          setGistStatus({
+            type: "error",
+            text: "Gist was deleted on GitHub. Click again to create a new one.",
+          });
+          return;
+        }
+        throw new Error(errMsg);
       }
       const result = (await resp.json()) as {
         gistId: string;
@@ -837,7 +849,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                           <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
                             <path d="M8 1a1 1 0 0 1 1 1v5.5a1 1 0 0 1-2 0V2a1 1 0 0 1 1-1zM8 11a1.25 1.25 0 1 1 0 2.5A1.25 1.25 0 0 1 8 11z" />
                           </svg>
-                          Replay is {formatBytes(replaySize)} — exceeds 10MB gist limit
+                          Replay is {formatBytes(replaySize)} — exceeds 5MB gist limit
                         </p>
                       )}
                       {gistInfo && (
