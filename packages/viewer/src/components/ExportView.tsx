@@ -370,7 +370,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                           <span className="text-xs font-sans font-bold text-terminal-purple">
                             Cloud Share
                           </span>
-                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-terminal-purple/10 text-terminal-purple border border-terminal-purple/20">
+                          <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md bg-terminal-purple-subtle text-terminal-purple">
                             Private
                           </span>
                         </div>
@@ -383,7 +383,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                           <span className="text-xs font-sans font-bold text-terminal-dim">
                             GitHub Gist
                           </span>
-                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-terminal-surface-2 text-terminal-dimmer border border-terminal-border-subtle">
+                          <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dimmer">
                             Public
                           </span>
                         </div>
@@ -449,7 +449,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                       <span className="text-sm font-mono font-semibold text-terminal-purple">
                         Cloud Share
                       </span>
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-terminal-purple/10 text-terminal-purple border border-terminal-purple/20">
+                      <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md bg-terminal-purple-subtle text-terminal-purple">
                         Recommended
                       </span>
                     </div>
