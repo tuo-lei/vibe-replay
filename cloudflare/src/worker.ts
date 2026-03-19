@@ -157,7 +157,18 @@ app.get("/auth/login", async (c) => {
 // Login success page — shown after OAuth callback, auto-closes tab
 // ---------------------------------------------------------------------------
 
-app.get("/auth/success", (c) => {
+app.get("/auth/success", async (c) => {
+  // Fetch session info (same-origin, cookies work here)
+  const auth = createAuth(c.env);
+  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  const userJson = session?.user
+    ? JSON.stringify({ name: session.user.name, image: (session.user as any).image })
+    : "null";
+  // Get session token from cookie to pass back to opener
+  const cookies = c.req.raw.headers.get("cookie") || "";
+  const tokenMatch = cookies.match(/(?:__Secure-)?better-auth\.session_token=([^;]+)/);
+  const token = tokenMatch ? tokenMatch[1] : "";
+
   return c.html(`<!DOCTYPE html>
 <html><head><title>vibe-replay - Logged in</title>
 <style>
@@ -178,7 +189,9 @@ body{background:#0a0a0f;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFo
 <p class="countdown" id="cd"></p>
 </div>
 <script>
-var s=5;
+// Post auth result to opener (CLI dashboard on localhost)
+if(window.opener){try{window.opener.postMessage({type:'vibe-replay-auth',user:${userJson},token:'${token}'},'*');}catch(e){}}
+var s=3;
 var cd=document.getElementById('cd');
 cd.textContent='Auto-closing in '+s+'s...';
 var t=setInterval(function(){s--;if(s<=0){clearInterval(t);window.close();}else{cd.textContent='Auto-closing in '+s+'s...';}},1000);
