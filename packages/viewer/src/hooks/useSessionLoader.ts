@@ -88,7 +88,31 @@ async function loadSession(): Promise<LoadResult | "dashboard"> {
 
   const params = new URLSearchParams(window.location.search);
 
-  // 3. Gist parameter — resolve gist ID to raw JSON URL via GitHub API
+  // 3a. Cloud replay parameter — fetch from cloud API
+  const cloudId = params.get("cloud");
+  if (cloudId) {
+    if (!/^[a-zA-Z0-9_-]{10,16}$/.test(cloudId)) {
+      throw new Error("Invalid cloud replay ID");
+    }
+    const cloudApiUrl = import.meta.env.VITE_CLOUD_API_URL || "https://vibe-replay.com";
+    const resp = await fetch(`${cloudApiUrl}/api/cloud-replays/${cloudId}`, {
+      credentials: "include",
+    });
+    if (!resp.ok) {
+      if (resp.status === 404) throw new Error("Replay not found");
+      if (resp.status === 410) throw new Error("This replay has expired");
+      throw new Error(`Failed to load replay: ${resp.status}`);
+    }
+    const data = await resp.json();
+    // Handle gist-backed cloud replays (redirect response)
+    if ((data as any).redirect && (data as any).gistId) {
+      const { rawUrl } = await resolveGistUrl((data as any).gistId);
+      return { session: await fetchJson(rawUrl), mode: "readonly" };
+    }
+    return { session: data as ReplaySession, mode: "readonly" };
+  }
+
+  // 3b. Gist parameter — resolve gist ID to raw JSON URL via GitHub API
   const gistId = params.get("gist");
   if (gistId) {
     if (!/^[a-f0-9]{20,40}$/.test(gistId)) {

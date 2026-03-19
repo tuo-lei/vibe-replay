@@ -301,7 +301,7 @@ button,
     monospace;
   text-transform: none;
   letter-spacing: normal;
-  white-space: nowrap;
+  white-space: pre-line;
   pointer-events: none;
   z-index: 50;
   transition: opacity 0.08s ease;

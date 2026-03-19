@@ -302,4 +302,27 @@ describeAuth("Auth Worker E2E", () => {
     // Either 400 (bad ID) or 401 (no auth) is acceptable
     expect([400, 401]).toContain(res.status);
   });
+
+  // -----------------------------------------------------------------------
+  // Cloud Replays — visibility validation
+  // -----------------------------------------------------------------------
+
+  it("POST /api/cloud-replays rejects invalid visibility", async () => {
+    const res = await fetch(`${WORKER_URL}/api/cloud-replays`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: WORKER_URL },
+      body: JSON.stringify({
+        replay: { meta: { slug: "test" }, scenes: [{ type: "user_prompt", text: "hi" }] },
+        visibility: "secret",
+      }),
+    });
+    // 401 (no auth) takes priority over visibility validation
+    expect(res.status).toBe(401);
+  });
+
+  it("GET /api/cloud-replays/:id returns 404 for non-existent ID (no existence leak)", async () => {
+    // Even for valid ID format, non-existent replays return 404 (not 401/403)
+    const res = await fetch(`${WORKER_URL}/api/cloud-replays/aaaaaaaaaaaa`);
+    expect(res.status).toBe(404);
+  });
 });

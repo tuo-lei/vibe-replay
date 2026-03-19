@@ -432,7 +432,8 @@ app.get("/api/cloud-replays/:id", async (c) => {
   return new Response(obj.body, {
     headers: {
       "Content-Type": "application/json",
-      "Cache-Control": "public, max-age=300",
+      "Cache-Control":
+        record.visibility === "private" ? "private, no-store" : "public, max-age=300",
     },
   });
 });
@@ -477,6 +478,38 @@ app.get("/api/cloud-replays", async (c) => {
     replays: results,
     storage: { used: storage[0]?.total || 0, limit: MAX_TOTAL_STORAGE },
   });
+});
+
+/** Update cloud replay visibility */
+app.patch("/api/cloud-replays/:id", async (c) => {
+  const authResult = await requireAuth(c);
+  if (authResult instanceof Response) return authResult;
+  const { userId } = authResult;
+
+  const id = c.req.param("id");
+  if (!/^[a-zA-Z0-9_-]{10,16}$/.test(id)) {
+    return c.json({ error: "Invalid ID" }, 400);
+  }
+
+  const body = await c.req.json();
+  const { visibility } = body;
+  if (!visibility || !["public", "unlisted", "private"].includes(visibility)) {
+    return c.json({ error: "Invalid visibility (must be public, unlisted, or private)" }, 400);
+  }
+
+  const db = drizzle(c.env.DB);
+  const [record] = await db
+    .select({ userId: cloudReplays.userId })
+    .from(cloudReplays)
+    .where(eq(cloudReplays.id, id))
+    .limit(1);
+  if (!record || record.userId !== userId) {
+    return c.json({ error: "Not found" }, 404);
+  }
+
+  await db.update(cloudReplays).set({ visibility }).where(eq(cloudReplays.id, id));
+
+  return c.json({ ok: true, visibility });
 });
 
 /** Delete a cloud replay */
@@ -733,6 +766,20 @@ app.post("/api/replays", async (c) => {
 // Legacy PUT — treat as POST for backwards compatibility
 app.put("/api/replays", async (c) => {
   return handlePostReplay(c);
+});
+
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Short URL for cloud replays — redirect to viewer
+// ---------------------------------------------------------------------------
+
+app.get("/r/:id", (c) => {
+  const id = c.req.param("id");
+  if (!/^[a-zA-Z0-9_-]{10,16}$/.test(id)) {
+    return c.text("Not Found", 404);
+  }
+  const baseUrl = getBaseUrl(c);
+  return c.redirect(`${baseUrl}/view/?cloud=${id}`);
 });
 
 // ---------------------------------------------------------------------------

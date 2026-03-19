@@ -1315,6 +1315,50 @@ export async function startServer(
     return c.json({ gist });
   });
 
+  // Cloud info for a session (requires slug)
+  app.get("/api/cloud-info", async (c) => {
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetDir = join(baseDir, result.slug);
+    const cloud = await loadSavedCloudInfo(targetDir);
+    if (!cloud) return c.json({ cloud: null });
+    return c.json({ cloud });
+  });
+
+  // Save cloud info locally (after browser-side upload)
+  app.post("/api/cloud-info", async (c) => {
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetDir = join(baseDir, result.slug);
+    const body = await c.req.json();
+    if (!body.id || !body.url) return c.json({ error: "Missing id/url" }, 400);
+    const metaPath = join(targetDir, ".vibe-replay-cloud.json");
+    await writeFile(
+      metaPath,
+      JSON.stringify(
+        {
+          id: body.id,
+          url: body.url,
+          expiresAt: body.expiresAt,
+          updatedAt: new Date().toISOString(),
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+    return c.json({ ok: true });
+  });
+
+  // Delete cloud info locally
+  app.delete("/api/cloud-info", async (c) => {
+    const result = requireSlug(c.req.query("slug"));
+    if ("error" in result) return c.json({ error: result.error }, 400);
+    const metaPath = join(baseDir, result.slug, ".vibe-replay-cloud.json");
+    await unlink(metaPath).catch(() => {});
+    return c.json({ ok: true });
+  });
+
   // Publish to Gist (requires slug)
   app.post("/api/publish/gist", async (c) => {
     const result = requireSlug(c.req.query("slug"));

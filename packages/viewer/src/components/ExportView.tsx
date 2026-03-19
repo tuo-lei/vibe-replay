@@ -113,7 +113,6 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
     publishGist,
     exportHtml,
     exportGithub,
-    gistPublishing,
     htmlExporting,
     githubExporting,
   } = actions;
@@ -131,11 +130,15 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
   const [cloudVisibility, setCloudVisibility] = useState<"private" | "unlisted" | "public">(
     "unlisted",
   );
+  const [gistPublishingLocal, setGistPublishingLocal] = useState(false);
   const [cloudSharing, setCloudSharing] = useState(false);
   const [cloudStatus, setCloudStatus] = useState<Status>(null);
-  const [cloudInfo, setCloudInfo] = useState<{ id: string; url: string; expiresAt: string } | null>(
-    null,
-  );
+  const [cloudInfo, setCloudInfo] = useState<{
+    id: string;
+    url: string;
+    expiresAt: string;
+    visibility?: string;
+  } | null>(null);
   const [storageUsed, setStorageUsed] = useState<number | null>(null);
   const [storageLimit, setStorageLimit] = useState<number | null>(null);
 
@@ -182,6 +185,17 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
         })
         .catch(() => {})
         .finally(() => setGistInfoLoading(false));
+
+      // Load existing cloud share info
+      fetch(apiUrl("/api/cloud-info"))
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.cloud) {
+            setCloudInfo(data.cloud);
+            if (data.cloud.visibility) setCloudVisibility(data.cloud.visibility);
+          }
+        })
+        .catch(() => {});
     }
 
     // Load existing SVG/MD/GIF if previously exported
@@ -209,27 +223,65 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
   }, [isEditor, publishGist, exportGithub]);
 
   const handlePublishGist = useCallback(async () => {
-    if (!publishGist) return;
+    if (!session) return;
+    setGistPublishingLocal(true);
     setGistStatus(null);
     try {
-      const result = await publishGist();
+      const content = JSON.stringify(session);
+      const title = session.meta.title || session.meta.slug;
+      const filename = `${title
+        .replace(/[^a-zA-Z0-9_-]/g, "-")
+        .replace(/-+/g, "-")
+        .slice(0, 60)}.json`;
+      const endpoint = gistInfo
+        ? `${cloudApiUrl}/api/gists/${gistInfo.gistId}`
+        : `${cloudApiUrl}/api/gists`;
+      const resp = await fetch(endpoint, {
+        method: gistInfo ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          filename,
+          content,
+          description: `vibe-replay: ${title}`,
+          public: true,
+        }),
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error((data as any).error || "Gist publish failed");
+      }
+      const result = (await resp.json()) as {
+        gistId: string;
+        gistUrl: string;
+        viewerUrl: string;
+      };
       setGistInfo({
         gistId: result.gistId,
         gistUrl: result.gistUrl,
         viewerUrl: result.viewerUrl,
         updatedAt: new Date().toISOString(),
       });
-      setGistStatus({ type: "success", text: "Published successfully!" });
+      setGistStatus({ type: "success", text: "Published!" });
     } catch (e: any) {
       setGistStatus({ type: "error", text: e.message });
+    } finally {
+      setGistPublishingLocal(false);
     }
-  }, [publishGist]);
+  }, [session, gistInfo]);
 
   const handleCloudShare = useCallback(async () => {
     if (!session) return;
     setCloudSharing(true);
     setCloudStatus(null);
     try {
+      // If already shared, delete old one first to avoid duplicates
+      if (cloudInfo?.id) {
+        await fetch(`${cloudApiUrl}/api/cloud-replays/${cloudInfo.id}`, {
+          method: "DELETE",
+          credentials: "include",
+        }).catch(() => {});
+      }
       const resp = await fetch(`${cloudApiUrl}/api/cloud-replays`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -240,15 +292,63 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
         const data = await resp.json().catch(() => ({}));
         throw new Error((data as any).error || "Upload failed");
       }
-      const result = await resp.json();
-      setCloudInfo(result as any);
-      setCloudStatus({ type: "success", text: "Shared!" });
+      const result = (await resp.json()) as { id: string; url: string; expiresAt: string };
+      setCloudInfo(result);
+      setCloudStatus({ type: "success", text: cloudInfo ? "Updated!" : "Shared!" });
+      // Sync cloud info back to CLI server for local persistence
+      fetch(apiUrl("/api/cloud-info"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...result, visibility: cloudVisibility }),
+      }).catch(() => {});
+      // Refresh storage usage
+      fetch(`${cloudApiUrl}/api/cloud-replays`, { credentials: "include" })
+        .then((r) => r.json())
+        .then((d: any) => {
+          setStorageUsed(d.storage?.used ?? null);
+          setStorageLimit(d.storage?.limit ?? null);
+        })
+        .catch(() => {});
     } catch (e: any) {
       setCloudStatus({ type: "error", text: e.message });
     } finally {
       setCloudSharing(false);
     }
-  }, [session, cloudVisibility]);
+  }, [session, cloudVisibility, cloudInfo]);
+
+  const handleCloudDelete = useCallback(async () => {
+    if (!cloudInfo?.id) return;
+    setCloudSharing(true);
+    setCloudStatus(null);
+    try {
+      const resp = await fetch(`${cloudApiUrl}/api/cloud-replays/${cloudInfo.id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error((data as any).error || "Delete failed");
+      }
+      setCloudInfo(null);
+      setCloudStatus({ type: "success", text: "Removed from cloud" });
+      // Clear local cloud info
+      fetch(apiUrl("/api/cloud-info"), {
+        method: "DELETE",
+      }).catch(() => {});
+      // Refresh storage
+      fetch(`${cloudApiUrl}/api/cloud-replays`, { credentials: "include" })
+        .then((r) => r.json())
+        .then((d: any) => {
+          setStorageUsed(d.storage?.used ?? null);
+          setStorageLimit(d.storage?.limit ?? null);
+        })
+        .catch(() => {});
+    } catch (e: any) {
+      setCloudStatus({ type: "error", text: e.message });
+    } finally {
+      setCloudSharing(false);
+    }
+  }, [cloudInfo]);
 
   const handleExportGithub = useCallback(async () => {
     if (!exportGithub) return;
@@ -331,29 +431,18 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
           {isEditor && (
             <div id="share" className="mb-12">
               <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <SectionHeader title="Share" color="text-terminal-purple" />
-                </div>
-                <div className="flex items-center gap-3">
-                  {replaySize > 0 && (
-                    <span
-                      className={`text-[11px] font-mono px-2 py-0.5 rounded-md ${
-                        replaySize > GIST_MAX
-                          ? "bg-terminal-red-subtle text-terminal-red"
-                          : replaySize > CLOUD_MAX
-                            ? "bg-terminal-orange-subtle text-terminal-orange"
-                            : "bg-terminal-surface-2 text-terminal-dimmer"
-                      }`}
-                    >
-                      {formatBytes(replaySize)} replay
-                    </span>
-                  )}
-                  {ghAvailable === true && storageUsed != null && storageLimit != null && (
-                    <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dimmer">
-                      {formatBytes(storageUsed)} / {formatBytes(storageLimit)} used
-                    </span>
-                  )}
-                </div>
+                <SectionHeader title="Share" color="text-terminal-purple" />
+                {replaySize > 0 && (
+                  <span
+                    className={`text-[11px] font-mono px-2 py-0.5 rounded-md ${
+                      replaySize > GIST_MAX
+                        ? "bg-terminal-red-subtle text-terminal-red"
+                        : "bg-terminal-surface-2 text-terminal-dimmer"
+                    }`}
+                  >
+                    {formatBytes(replaySize)} replay
+                  </span>
+                )}
               </div>
 
               {ghAvailable === false ? (
@@ -375,10 +464,6 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                           </span>
                         </div>
                         <ul className="space-y-2.5 text-sm font-sans text-terminal-dim">
-                          <li className="flex items-center gap-2">
-                            <span className="text-terminal-green shrink-0">&#10003;</span>
-                            You control visibility
-                          </li>
                           <li className="flex items-center gap-2">
                             <span className="text-terminal-green shrink-0">&#10003;</span>
                             20 MB free storage
@@ -463,39 +548,158 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                   </div>
                 </div>
               ) : ghAvailable === true ? (
-                /* ─── Logged in: Cloud Share + Gist cards ─── */
-                <div className="space-y-4">
+                /* ─── Logged in: Cloud Share + Gist side by side ─── */
+                <div className="grid grid-cols-2 gap-4">
                   {/* Cloud Share */}
-                  <div className="bg-terminal-surface rounded-xl border border-terminal-border shadow-layer-sm overflow-hidden p-5">
+                  <div className="bg-terminal-surface rounded-xl border border-terminal-border shadow-layer-sm overflow-hidden p-5 flex flex-col">
                     <div className="flex items-center gap-2 mb-3">
                       <span className="text-sm font-mono font-semibold text-terminal-purple">
                         Cloud Share
                       </span>
-                      <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md bg-terminal-purple-subtle text-terminal-purple">
-                        Private
-                      </span>
                     </div>
-                    <div className="flex items-center gap-1.5 mb-3">
-                      {(["private", "unlisted", "public"] as const).map((v) => (
+
+                    {/* Visibility selector */}
+                    <div className="flex items-center h-7 rounded-md overflow-hidden bg-terminal-bg mb-3">
+                      {[
+                        {
+                          value: "private" as const,
+                          label: "Private",
+                          icon: (
+                            <svg
+                              width="12"
+                              height="12"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                            </svg>
+                          ),
+                        },
+                        {
+                          value: "unlisted" as const,
+                          label: "Link only",
+                          icon: (
+                            <svg
+                              width="12"
+                              height="12"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                            </svg>
+                          ),
+                        },
+                        {
+                          value: "public" as const,
+                          label: "Public",
+                          icon: (
+                            <svg
+                              width="12"
+                              height="12"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <circle cx="12" cy="12" r="10" />
+                              <line x1="2" y1="12" x2="22" y2="12" />
+                              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                            </svg>
+                          ),
+                        },
+                      ].map(({ value, label, icon }) => (
                         <button
-                          key={v}
-                          onClick={() => setCloudVisibility(v)}
-                          className={`text-[11px] font-mono px-2.5 py-1 rounded-md transition-colors ${
-                            cloudVisibility === v
-                              ? "bg-terminal-purple-subtle text-terminal-purple font-semibold"
-                              : "bg-terminal-surface-2 text-terminal-dimmer hover:text-terminal-dim"
+                          key={value}
+                          onClick={() => setCloudVisibility(value)}
+                          className={`h-full flex-1 px-2.5 text-[11px] font-mono transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap ${
+                            cloudVisibility === value
+                              ? "bg-terminal-purple-subtle text-terminal-purple"
+                              : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
                           }`}
                         >
-                          {v}
+                          {icon}
+                          {label}
                         </button>
                       ))}
                     </div>
-                    <p className="text-xs font-sans text-terminal-dim mb-1">
-                      {cloudVisibility === "private"
-                        ? "Only you can view this replay."
-                        : cloudVisibility === "unlisted"
-                          ? "Anyone with the link can view."
-                          : "Visible on explore page."}
+
+                    {storageUsed != null && storageLimit != null && (
+                      <div className="mb-3">
+                        <div className="flex items-center justify-between text-[10px] font-mono text-terminal-dimmer mb-1.5">
+                          <span>{formatBytes(storageUsed)} used</span>
+                          <span>{formatBytes(storageLimit)} total</span>
+                        </div>
+                        {(() => {
+                          const usedPct = (storageUsed / storageLimit) * 100;
+                          const uploadPct = (replaySize / storageLimit) * 100;
+                          const wouldExceed = storageUsed + replaySize > storageLimit;
+                          return (
+                            <>
+                              <div className="h-2 rounded-full bg-terminal-surface-hover overflow-hidden">
+                                <div className="h-full flex">
+                                  {storageUsed > 0 && (
+                                    <div
+                                      className="h-full bg-terminal-purple transition-all"
+                                      style={{ width: `${Math.max(usedPct, 1)}%` }}
+                                    />
+                                  )}
+                                  {replaySize > 0 && (
+                                    <div
+                                      className={`h-full transition-all ${wouldExceed ? "bg-terminal-orange" : "bg-terminal-green"}`}
+                                      style={{
+                                        width: `${Math.max(Math.min(uploadPct, 100 - usedPct), 1)}%`,
+                                      }}
+                                    />
+                                  )}
+                                </div>
+                              </div>
+                              {replaySize > 0 && (
+                                <div className="flex items-center gap-3 mt-1.5 text-[10px] font-mono text-terminal-dimmer">
+                                  <span className="flex items-center gap-1">
+                                    <span className="w-1.5 h-1.5 rounded-sm bg-terminal-purple" />
+                                    {formatBytes(storageUsed)} used
+                                  </span>
+                                  <span className="flex items-center gap-1">
+                                    <span
+                                      className={`w-1.5 h-1.5 rounded-sm ${wouldExceed ? "bg-terminal-orange" : "bg-terminal-green"}`}
+                                    />
+                                    +{formatBytes(replaySize)} this upload
+                                  </span>
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </div>
+                    )}
+                    <p className="text-[10px] font-mono text-terminal-dimmer flex items-center gap-1.5 mb-1">
+                      <svg
+                        width="11"
+                        height="11"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="shrink-0 text-terminal-orange"
+                      >
+                        <circle cx="12" cy="12" r="10" />
+                        <polyline points="12 6 12 12 16 14" />
+                      </svg>
+                      Free tier links expire after 7 days
                     </p>
                     {cloudTooBig && (
                       <p className="text-[11px] font-mono text-terminal-orange mt-1.5 flex items-center gap-1">
@@ -546,9 +750,18 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                           : cloudTooBig
                             ? "Too large"
                             : cloudInfo
-                              ? "Re-upload"
+                              ? "Update"
                               : "Share to Cloud"}
                       </button>
+                      {cloudInfo && (
+                        <button
+                          onClick={handleCloudDelete}
+                          disabled={cloudSharing}
+                          className={`${btnBase} bg-terminal-surface-hover text-terminal-red hover:bg-terminal-red-subtle border border-terminal-border`}
+                        >
+                          Delete
+                        </button>
+                      )}
                       {cloudStatus && (
                         <span
                           className={`text-[11px] font-mono ${cloudStatus.type === "success" ? "text-terminal-green" : "text-terminal-red"}`}
@@ -560,8 +773,8 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                   </div>
 
                   {/* GitHub Gist */}
-                  {publishGist && (
-                    <div className="bg-terminal-surface rounded-xl border border-terminal-border shadow-layer-sm overflow-hidden p-5">
+                  {isEditor && (
+                    <div className="bg-terminal-surface rounded-xl border border-terminal-border shadow-layer-sm overflow-hidden p-5 flex flex-col">
                       <div className="flex items-center gap-2 mb-3">
                         <span className="text-sm font-mono font-semibold text-terminal-dim">
                           GitHub Gist
@@ -570,14 +783,18 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                           Public
                         </span>
                       </div>
-                      <ul className="space-y-1.5 text-xs font-sans text-terminal-dim mb-1">
+                      <ul className="space-y-1.5 text-xs font-sans text-terminal-dim mb-auto">
                         <li className="flex items-center gap-2">
                           <span className="text-terminal-green shrink-0">&#10003;</span>
-                          Hosted on GitHub — no expiration
+                          Hosted on GitHub forever
                         </li>
                         <li className="flex items-center gap-2">
                           <span className="text-terminal-green shrink-0">&#10003;</span>
-                          Doesn&apos;t count toward your storage
+                          Doesn&apos;t use your storage
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <span className="text-terminal-orange shrink-0">!</span>
+                          Visible to everyone on the internet
                         </li>
                       </ul>
                       {gistTooBig && (
@@ -620,14 +837,14 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                       <div className="mt-4 flex items-center gap-3">
                         <button
                           onClick={handlePublishGist}
-                          disabled={gistPublishing || gistTooBig}
+                          disabled={gistPublishingLocal || gistTooBig}
                           className={`${btnBase} ${
                             gistTooBig
                               ? "bg-terminal-surface-2 text-terminal-dimmer border border-terminal-border cursor-not-allowed"
                               : "bg-terminal-surface-hover text-terminal-dim hover:bg-terminal-surface-2 border border-terminal-border"
                           }`}
                         >
-                          {gistPublishing
+                          {gistPublishingLocal
                             ? "Publishing..."
                             : gistTooBig
                               ? "Too large"
@@ -641,6 +858,16 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                           >
                             {gistStatus.text}
                           </span>
+                        )}
+                        {gistInfo && (
+                          <a
+                            href={gistInfo.gistUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[11px] font-mono text-terminal-blue hover:text-terminal-text transition-colors"
+                          >
+                            Open on GitHub
+                          </a>
                         )}
                       </div>
                     </div>

@@ -308,20 +308,39 @@ function ReplayCard({
                 e.stopPropagation();
                 onShare();
               }}
-              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0"
-              title="Share & Export"
+              className={`h-7 px-2.5 text-xs font-sans font-semibold rounded-md transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0 ${
+                s.cloud || s.gist
+                  ? "bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis"
+                  : "bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis"
+              }`}
+              title={s.cloud || s.gist ? "Already shared — view or update" : "Share & Export"}
             >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              >
-                <path d="M8 2v8M5 5l3-3 3 3M3 11v2h10v-2" />
-              </svg>
-              Share
+              {s.cloud || s.gist ? (
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
+                </svg>
+              ) : (
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                >
+                  <path d="M8 2v8M5 5l3-3 3 3M3 11v2h10v-2" />
+                </svg>
+              )}
+              {s.cloud || s.gist ? "Shared" : "Share"}
             </button>
           )}
           {onRegenerate && (
