@@ -533,7 +533,7 @@ app.delete("/api/cloud-replays/:id", async (c) => {
 
   const db = drizzle(c.env.DB);
   const [record] = await db
-    .select({ userId: cloudReplays.userId })
+    .select({ userId: cloudReplays.userId, storageType: cloudReplays.storageType })
     .from(cloudReplays)
     .where(eq(cloudReplays.id, id))
     .limit(1);
@@ -541,10 +541,11 @@ app.delete("/api/cloud-replays/:id", async (c) => {
     return c.json({ error: "Not found" }, 404);
   }
 
-  await Promise.all([
-    c.env.REPLAY_BUCKET.delete(`replays/${id}.json`),
-    db.delete(cloudReplays).where(eq(cloudReplays.id, id)),
-  ]);
+  const deletes: Promise<unknown>[] = [db.delete(cloudReplays).where(eq(cloudReplays.id, id))];
+  if (record.storageType === "r2") {
+    deletes.push(c.env.REPLAY_BUCKET.delete(`replays/${id}.json`));
+  }
+  await Promise.all(deletes);
 
   return c.json({ ok: true });
 });
@@ -571,7 +572,7 @@ app.post("/api/gists", async (c) => {
   if (!body.content || typeof body.content !== "string") {
     return c.json({ error: "content required" }, 400);
   }
-  if (body.content.length > MAX_GIST_CONTENT) {
+  if (new TextEncoder().encode(body.content).byteLength > MAX_GIST_CONTENT) {
     return c.json({ error: "Content too large" }, 413);
   }
 
@@ -695,50 +696,7 @@ app.patch("/api/gists/:gistId", async (c) => {
     return c.json({ error: "Not found" }, 404);
   }
 
-  // If no record exists, backfill from GitHub API (legacy gist published before cloud_replays)
-  if (!existing) {
-    const checkResp = await fetch(`https://api.github.com/gists/${gistId}`, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: "application/vnd.github+json",
-        "User-Agent": "vibe-replay",
-      },
-    });
-    if (!checkResp.ok) {
-      return c.json({ error: "Gist not found on GitHub" }, 404);
-    }
-    const checkData = (await checkResp.json()) as {
-      id: string;
-      html_url: string;
-      owner?: { login?: string };
-      files: Record<string, { content?: string; filename: string }>;
-    };
-    // Find JSON content to extract metadata
-    const jsonFile = Object.values(checkData.files).find((f) => f.filename.endsWith(".json"));
-    const meta = jsonFile?.content ? extractMetaFromJson(jsonFile.content) : null;
-    const id = nanoid(12);
-    await db.insert(cloudReplays).values({
-      id,
-      userId,
-      storageType: "gist",
-      gistId,
-      gistUrl: checkData.html_url,
-      gistOwner: checkData.owner?.login || null,
-      title: meta?.title || "Untitled",
-      provider: meta?.provider || "unknown",
-      model: meta?.model || null,
-      sceneCount: meta?.sceneCount || 0,
-      userPrompts: meta?.userPrompts || 0,
-      toolCalls: meta?.toolCalls || 0,
-      durationMs: meta?.durationMs || 0,
-      costEstimate: meta?.costEstimate || null,
-      firstMessage: meta?.firstMessage || null,
-      sizeBytes: 0,
-      visibility: "public",
-    });
-  }
-
-  // Update gist on GitHub
+  // Update gist on GitHub first (confirms ownership before any D1 writes)
   const gistResp = await fetch(`https://api.github.com/gists/${gistId}`, {
     method: "PATCH",
     headers: {
@@ -759,7 +717,36 @@ app.patch("/api/gists/:gistId", async (c) => {
     return c.json({ error: "GitHub API error" }, gistResp.status as any);
   }
 
-  const gistData = (await gistResp.json()) as { id: string; html_url: string };
+  const gistData = (await gistResp.json()) as {
+    id: string;
+    html_url: string;
+    owner?: { login?: string };
+  };
+
+  // Backfill D1 record for legacy gists (only after GitHub confirms ownership via PATCH success)
+  if (!existing) {
+    const replayMeta = extractMetaFromJson(body.content);
+    const id = nanoid(12);
+    await db.insert(cloudReplays).values({
+      id,
+      userId,
+      storageType: "gist",
+      gistId,
+      gistUrl: gistData.html_url,
+      gistOwner: gistData.owner?.login || null,
+      title: replayMeta.title || "Untitled",
+      provider: replayMeta.provider || "unknown",
+      model: replayMeta.model || null,
+      sceneCount: replayMeta.sceneCount || 0,
+      userPrompts: replayMeta.userPrompts || 0,
+      toolCalls: replayMeta.toolCalls || 0,
+      durationMs: replayMeta.durationMs || 0,
+      costEstimate: replayMeta.costEstimate || null,
+      firstMessage: replayMeta.firstMessage || null,
+      sizeBytes: 0,
+      visibility: "public",
+    });
+  }
 
   // Update metadata in cloud_replays
   const replayMeta = extractMetaFromJson(body.content);
@@ -1041,25 +1028,27 @@ export default {
 
   async scheduled(_event: ScheduledEvent, env: Env) {
     const db = drizzle(env.DB);
-    // Only clean R2 replays (gists don't expire)
-    const expired = await db
-      .select({ id: cloudReplays.id })
-      .from(cloudReplays)
-      .where(
-        sql`${cloudReplays.expiresAt} IS NOT NULL AND ${cloudReplays.expiresAt} < datetime('now')`,
-      )
-      .limit(100);
+    const BATCH = 50;
+    // R2 grace period: keep data 7 days after expiry for potential recovery.
+    // GET already returns 410 once expiresAt passes (soft delete).
+    // Cron only hard-deletes R2 + D1 after the grace period.
+    const GRACE_DAYS = 7;
+    for (;;) {
+      const expired = await db
+        .select({ id: cloudReplays.id })
+        .from(cloudReplays)
+        .where(
+          sql`${cloudReplays.expiresAt} IS NOT NULL AND ${cloudReplays.expiresAt} < datetime('now', '-${GRACE_DAYS} days')`,
+        )
+        .limit(BATCH);
 
-    if (expired.length > 0) {
-      const expiredIds = expired.map((r) => r.id);
-      // Delete R2 objects
-      for (const id of expiredIds) {
+      if (expired.length === 0) break;
+
+      for (const { id } of expired) {
         await env.REPLAY_BUCKET.delete(`replays/${id}.json`);
       }
-      // Delete only the same rows from D1 (not unbounded)
-      for (const id of expiredIds) {
-        await db.delete(cloudReplays).where(eq(cloudReplays.id, id));
-      }
+
+      if (expired.length < BATCH) break;
     }
   },
 };

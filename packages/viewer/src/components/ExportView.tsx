@@ -172,28 +172,42 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
               .then((d: any) => {
                 setStorageUsed(d.storage?.used ?? null);
                 setStorageLimit(d.storage?.limit ?? null);
-                // Find existing cloud share for this session (by title match)
+                // Find existing cloud share for this session
                 if (session) {
-                  const title = session.meta.title || session.meta.slug;
-                  const match = (d.replays || []).find(
-                    (r: any) => r.storageType === "r2" && r.title === title,
-                  );
-                  if (match) {
-                    const info = {
-                      id: match.id,
-                      url: `${cloudApiUrl}/r/${match.id}`,
-                      expiresAt: match.expiresAt || "",
-                      visibility: match.visibility,
-                    };
-                    setCloudInfo(info);
-                    if (match.visibility) setCloudVisibility(match.visibility);
-                    // Sync back to local
-                    fetch(apiUrl("/api/cloud-info"), {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify(info),
-                    }).catch(() => {});
-                  }
+                  // Try local cloud-info first (has exact ID), then fall back to title match
+                  fetch(apiUrl("/api/cloud-info"))
+                    .then((lr) => lr.json())
+                    .then((ld: any) => {
+                      const localId = ld?.cloud?.id;
+                      const verify = localId
+                        ? (d.replays || []).find((r: any) => r.id === localId)
+                        : null;
+                      const match =
+                        verify ||
+                        (d.replays || []).find(
+                          (r: any) =>
+                            r.storageType === "r2" &&
+                            r.title === (session.meta.title || session.meta.slug),
+                        );
+                      if (match) {
+                        const info = {
+                          id: match.id,
+                          url: `${cloudApiUrl}/r/${match.id}`,
+                          expiresAt: match.expiresAt || "",
+                          visibility: match.visibility,
+                        };
+                        setCloudInfo(info);
+                        if (match.visibility) setCloudVisibility(match.visibility);
+                        if (!verify) {
+                          fetch(apiUrl("/api/cloud-info"), {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify(info),
+                          }).catch(() => {});
+                        }
+                      }
+                    })
+                    .catch(() => {});
                 }
               })
               .catch(() => {});
