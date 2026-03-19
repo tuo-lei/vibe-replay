@@ -426,32 +426,42 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                       </div>
                     )}
 
-                    {ghAvailable && (
-                      <div className="mt-4 flex items-center gap-3">
-                        <button
-                          onClick={handleCloudShare}
-                          disabled={cloudSharing}
-                          className={`${btnBase} ${
-                            cloudInfo
-                              ? "bg-terminal-surface-hover text-terminal-purple hover:bg-terminal-purple-subtle border border-terminal-border"
-                              : "bg-terminal-purple-subtle text-terminal-purple hover:bg-[rgba(168,85,247,0.25)] border border-[rgba(168,85,247,0.2)]"
-                          }`}
-                        >
-                          {cloudSharing
-                            ? "Uploading..."
-                            : cloudInfo
-                              ? "Re-upload"
-                              : "Share to Cloud"}
-                        </button>
-                        {cloudStatus && (
-                          <span
-                            className={`text-[11px] font-mono ${cloudStatus.type === "success" ? "text-terminal-green" : "text-terminal-red"}`}
+                    <div className="mt-4 flex items-center gap-3">
+                      {ghAvailable === true ? (
+                        <>
+                          <button
+                            onClick={handleCloudShare}
+                            disabled={cloudSharing}
+                            className={`${btnBase} ${
+                              cloudInfo
+                                ? "bg-terminal-surface-hover text-terminal-purple hover:bg-terminal-purple-subtle border border-terminal-border"
+                                : "bg-terminal-purple-subtle text-terminal-purple hover:bg-[rgba(168,85,247,0.25)] border border-[rgba(168,85,247,0.2)]"
+                            }`}
                           >
-                            {cloudStatus.text}
-                          </span>
-                        )}
-                      </div>
-                    )}
+                            {cloudSharing
+                              ? "Uploading..."
+                              : cloudInfo
+                                ? "Re-upload"
+                                : "Share to Cloud"}
+                          </button>
+                          {cloudStatus && (
+                            <span
+                              className={`text-[11px] font-mono ${cloudStatus.type === "success" ? "text-terminal-green" : "text-terminal-red"}`}
+                            >
+                              {cloudStatus.text}
+                            </span>
+                          )}
+                        </>
+                      ) : ghAvailable === false ? (
+                        <span className="text-[11px] font-mono text-terminal-dimmer">
+                          Sign in above to share
+                        </span>
+                      ) : (
+                        <span className="text-[11px] font-mono text-terminal-dimmer animate-pulse">
+                          Checking...
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -503,7 +513,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                         </div>
                       )}
 
-                      {ghAvailable && (
+                      {ghAvailable === true ? (
                         <div className="mt-4 flex items-center gap-3">
                           <button
                             onClick={handlePublishGist}
@@ -528,7 +538,11 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                             </span>
                           )}
                         </div>
-                      )}
+                      ) : ghAvailable === false ? (
+                        <div className="mt-4 text-[11px] font-mono text-terminal-dimmer">
+                          Sign in above to publish
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 )}

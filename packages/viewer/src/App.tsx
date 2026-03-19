@@ -484,6 +484,8 @@ export default function App() {
             >
               {theme === "dark" ? "\u263E" : "\u2600"}
             </button>
+
+            {isEditor && <DashboardAuthStatus />}
           </div>
 
           {/* Mobile menu button */}
