@@ -98,7 +98,6 @@ async function loadSession(): Promise<LoadResult | "dashboard"> {
     }
     const { rawUrl, owner } = await resolveGistUrl(gistId);
     const session = await fetchJson(rawUrl);
-    registerReplay(gistId).catch(() => {});
     return { session, mode: "readonly", gistOwner: owner };
   }
 
@@ -148,15 +147,6 @@ async function fetchJson(url: string): Promise<ReplaySession> {
     return JSON.parse(text) as ReplaySession;
   }
   throw new Error("URL must point to a vibe-replay JSON replay file");
-}
-
-/** Register view with vibe-replay.com. Worker fetches metadata from gist directly. */
-async function registerReplay(gistId: string): Promise<void> {
-  await fetch("https://vibe-replay.com/api/replays", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ gist_id: gistId }),
-  });
 }
 
 async function resolveGistUrl(gistId: string): Promise<{ rawUrl: string; owner?: string }> {

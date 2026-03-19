@@ -783,6 +783,9 @@ app.get("/api/replays", async (c) => {
   const cloudResults = await db
     .select({
       id: cloudReplays.id,
+      storageType: cloudReplays.storageType,
+      gistId: cloudReplays.gistId,
+      gistOwner: cloudReplays.gistOwner,
       title: cloudReplays.title,
       provider: cloudReplays.provider,
       model: cloudReplays.model,
@@ -799,7 +802,6 @@ app.get("/api/replays", async (c) => {
     .where(
       and(
         eq(cloudReplays.visibility, "public"),
-        eq(cloudReplays.storageType, "r2"),
         sql`(${cloudReplays.expiresAt} IS NULL OR ${cloudReplays.expiresAt} > datetime('now'))`,
       ),
     )
@@ -810,7 +812,7 @@ app.get("/api/replays", async (c) => {
   const merged = [
     ...gistResults.map((r) => ({ ...r, type: "gist" as const })),
     ...cloudResults.map((r) => ({
-      gist_id: null,
+      gist_id: r.gistId || null,
       title: r.title,
       provider: r.provider,
       model: r.model,
@@ -820,28 +822,39 @@ app.get("/api/replays", async (c) => {
       duration_ms: r.duration_ms,
       cost_estimate: r.cost_estimate,
       first_message: r.first_message,
-      gist_owner: null,
+      gist_owner: r.gistOwner || null,
       view_count: r.view_count,
       created_at: r.created_at,
-      type: "cloud" as const,
-      cloud_id: r.id,
+      type: (r.storageType === "gist" ? "gist" : "cloud") as "gist" | "cloud",
+      cloud_id: r.storageType === "r2" ? r.id : undefined,
     })),
   ];
 
-  // Sort merged results
-  merged.sort((a, b) => {
+  // Deduplicate: if a gist exists in cloud_replays, skip the legacy replays entry
+  const cloudGistIds = new Set(cloudResults.filter((r) => r.gistId).map((r) => r.gistId));
+  const deduped = merged.filter((r, i) => {
+    // Keep all cloud_replays entries (they come after gistResults in the array)
+    if (i >= gistResults.length) return true;
+    // For legacy gist entries, skip if already in cloud_replays
+    return !r.gist_id || !cloudGistIds.has(r.gist_id);
+  });
+
+  // Sort
+  deduped.sort((a, b) => {
     if (sort === "popular") return (b.view_count || 0) - (a.view_count || 0);
     return (b.created_at || "").localeCompare(a.created_at || "");
   });
 
-  return c.json(merged.slice(0, limit));
+  return c.json(deduped.slice(0, limit));
 });
 
+/** @deprecated Legacy endpoint — kept for backward compat with old viewer builds.
+ * New gist publishes go through POST /api/gists (authenticated). */
 app.post("/api/replays", async (c) => {
   return handlePostReplay(c);
 });
 
-// Legacy PUT — treat as POST for backwards compatibility
+/** @deprecated Legacy PUT — treat as POST for backwards compatibility */
 app.put("/api/replays", async (c) => {
   return handlePostReplay(c);
 });

@@ -662,8 +662,10 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                         </div>
                         {(() => {
                           const usedPct = (storageUsed / storageLimit) * 100;
-                          const uploadPct = (replaySize / storageLimit) * 100;
-                          const wouldExceed = storageUsed + replaySize > storageLimit;
+                          // Don't show "+upload" when already shared (update replaces, no extra space)
+                          const showUpload = !cloudInfo && replaySize > 0;
+                          const uploadPct = showUpload ? (replaySize / storageLimit) * 100 : 0;
+                          const wouldExceed = showUpload && storageUsed + replaySize > storageLimit;
                           return (
                             <>
                               <div className="h-2 rounded-full bg-terminal-surface-hover overflow-hidden">
@@ -674,7 +676,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                                       style={{ width: `${Math.max(usedPct, 1)}%` }}
                                     />
                                   )}
-                                  {replaySize > 0 && (
+                                  {showUpload && (
                                     <div
                                       className={`h-full transition-all ${wouldExceed ? "bg-terminal-orange" : "bg-terminal-green"}`}
                                       style={{
@@ -684,7 +686,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                                   )}
                                 </div>
                               </div>
-                              {replaySize > 0 && (
+                              {showUpload && (
                                 <div className="flex items-center gap-3 mt-1.5 text-[10px] font-mono text-terminal-dimmer">
                                   <span className="flex items-center gap-1">
                                     <span className="w-1.5 h-1.5 rounded-sm bg-terminal-purple" />
