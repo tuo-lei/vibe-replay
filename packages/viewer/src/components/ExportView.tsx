@@ -354,58 +354,81 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
               </div>
 
               {ghAvailable === false ? (
-                /* ─── Not logged in: single card with sign-in CTA ─── */
-                <div className="bg-terminal-surface rounded-2xl border border-terminal-border-subtle shadow-layer-sm overflow-hidden p-5">
-                  <p className="text-[11px] font-mono text-terminal-dim leading-relaxed mb-4">
-                    Sign in to share this replay via cloud link or GitHub Gist.
-                  </p>
-                  <div className="flex items-center gap-6 mb-5 text-[11px] font-mono text-terminal-dimmer">
-                    <span className="flex items-center gap-1.5">
-                      <span className="text-terminal-purple">&#9729;</span> Cloud share (7-day link)
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="text-terminal-purple">&#9733;</span> GitHub Gist
-                    </span>
+                /* ─── Not logged in: sign-in CTA ─── */
+                <div className="bg-terminal-surface rounded-xl border border-terminal-border shadow-layer-sm overflow-hidden">
+                  <div className="p-6 pb-5">
+                    <h3 className="text-base font-sans font-semibold text-terminal-text mb-2">
+                      Share this replay
+                    </h3>
+                    <p className="text-sm font-sans text-terminal-dim leading-relaxed mb-5">
+                      Sign in with GitHub to get a shareable link or publish as a public gist.
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-4 mb-6">
+                      <div className="rounded-lg bg-terminal-bg border border-terminal-border-subtle p-3.5">
+                        <div className="text-[10px] font-sans font-bold uppercase tracking-widest text-terminal-purple mb-1.5">
+                          Cloud Share
+                        </div>
+                        <p className="text-[11px] font-sans text-terminal-dimmer leading-relaxed">
+                          Private link that expires after 7 days. Up to 2MB.
+                        </p>
+                      </div>
+                      <div className="rounded-lg bg-terminal-bg border border-terminal-border-subtle p-3.5">
+                        <div className="text-[10px] font-sans font-bold uppercase tracking-widest text-terminal-dim mb-1.5">
+                          GitHub Gist
+                        </div>
+                        <p className="text-[11px] font-sans text-terminal-dimmer leading-relaxed">
+                          Public gist viewable on vibe-replay.com. Up to 10MB.
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const res = await fetch(`${cloudApiUrl}/api/auth/sign-in/social`, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            credentials: "include",
+                            body: JSON.stringify({
+                              provider: "github",
+                              callbackURL: "/auth/success",
+                            }),
+                          });
+                          const data = await res.json();
+                          if (data.url) {
+                            window.open(data.url, "_blank");
+                            const poll = setInterval(async () => {
+                              try {
+                                const r = await fetch(`${cloudApiUrl}/api/auth/get-session`, {
+                                  credentials: "include",
+                                });
+                                const s = await r.json();
+                                if (s?.session) {
+                                  clearInterval(poll);
+                                  setGhAvailable(true);
+                                }
+                              } catch {}
+                            }, 2000);
+                            setTimeout(() => clearInterval(poll), 5 * 60 * 1000);
+                          }
+                        } catch {}
+                      }}
+                      className="group inline-flex items-center gap-2.5 px-6 py-3 rounded-xl bg-terminal-green-subtle hover:bg-terminal-green-emphasis text-terminal-green text-sm font-sans font-semibold transition-all duration-200 ease-material shadow-layer-sm hover:shadow-layer-md hover:-translate-y-0.5"
+                    >
+                      <svg
+                        width="18"
+                        height="18"
+                        viewBox="0 0 16 16"
+                        fill="currentColor"
+                        className="transition-transform group-hover:scale-110"
+                      >
+                        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+                      </svg>
+                      Sign in with GitHub
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      try {
-                        const res = await fetch(`${cloudApiUrl}/api/auth/sign-in/social`, {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          credentials: "include",
-                          body: JSON.stringify({
-                            provider: "github",
-                            callbackURL: "/auth/success",
-                          }),
-                        });
-                        const data = await res.json();
-                        if (data.url) {
-                          window.open(data.url, "_blank");
-                          const poll = setInterval(async () => {
-                            try {
-                              const r = await fetch(`${cloudApiUrl}/api/auth/get-session`, {
-                                credentials: "include",
-                              });
-                              const s = await r.json();
-                              if (s?.session) {
-                                clearInterval(poll);
-                                setGhAvailable(true);
-                              }
-                            } catch {}
-                          }, 2000);
-                          setTimeout(() => clearInterval(poll), 5 * 60 * 1000);
-                        }
-                      } catch {}
-                    }}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#24292f] hover:bg-[#32383f] text-white text-xs font-mono font-medium transition-colors border border-white/10"
-                  >
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
-                    </svg>
-                    Sign in with GitHub
-                  </button>
                 </div>
               ) : ghAvailable === true ? (
                 /* ─── Logged in: Cloud Share + Gist cards ─── */
