@@ -339,16 +339,18 @@ app.post("/api/cloud-replays", async (c) => {
   }
 
   const db = drizzle(c.env.DB);
+  // Only count R2 storage (gist entries have sizeBytes=0 but shouldn't pollute accounting)
   const userStorage = await db
     .select({ total: sql<number>`coalesce(sum(${cloudReplays.sizeBytes}), 0)` })
     .from(cloudReplays)
-    .where(eq(cloudReplays.userId, userId));
+    .where(and(eq(cloudReplays.userId, userId), eq(cloudReplays.storageType, "r2")));
   if ((userStorage[0]?.total || 0) + sizeBytes > MAX_TOTAL_STORAGE) {
     return c.json({ error: "Storage quota exceeded (max 20MB)" }, 413);
   }
 
   const id = nanoid(12);
-  await c.env.REPLAY_BUCKET.put(`replays/${id}.json`, replayJson, {
+  const r2Key = `replays/${id}.json`;
+  await c.env.REPLAY_BUCKET.put(r2Key, replayJson, {
     httpMetadata: { contentType: "application/json" },
     customMetadata: { userId },
   });
@@ -360,26 +362,32 @@ app.post("/api/cloud-replays", async (c) => {
     .replace("T", " ")
     .slice(0, 19);
 
-  await db.insert(cloudReplays).values({
-    id,
-    userId,
-    storageType: "r2",
-    title: String(meta.title || meta.slug || "Untitled").slice(0, 200),
-    provider: String(meta.provider || "claude-code").slice(0, 50),
-    model: meta.model ? String(meta.model).slice(0, 100) : null,
-    sceneCount: clamp(stats.sceneCount, 0, 100_000),
-    userPrompts: clamp(stats.userPrompts, 0, 10_000),
-    toolCalls: clamp(stats.toolCalls, 0, 100_000),
-    durationMs: clamp(stats.durationMs, 0, 86_400_000),
-    costEstimate:
-      stats.costEstimate != null
-        ? String(Math.max(0, Math.min(Number(stats.costEstimate) || 0, 100_000)))
-        : null,
-    firstMessage: extractFirstUserPrompt(body.replay),
-    sizeBytes,
-    visibility,
-    expiresAt,
-  });
+  try {
+    await db.insert(cloudReplays).values({
+      id,
+      userId,
+      storageType: "r2",
+      title: String(meta.title || meta.slug || "Untitled").slice(0, 200),
+      provider: String(meta.provider || "claude-code").slice(0, 50),
+      model: meta.model ? String(meta.model).slice(0, 100) : null,
+      sceneCount: clamp(stats.sceneCount, 0, 100_000),
+      userPrompts: clamp(stats.userPrompts, 0, 10_000),
+      toolCalls: clamp(stats.toolCalls, 0, 100_000),
+      durationMs: clamp(stats.durationMs, 0, 86_400_000),
+      costEstimate:
+        stats.costEstimate != null
+          ? String(Math.max(0, Math.min(Number(stats.costEstimate) || 0, 100_000)))
+          : null,
+      firstMessage: extractFirstUserPrompt(body.replay),
+      sizeBytes,
+      visibility,
+      expiresAt,
+    });
+  } catch (e) {
+    // D1 insert failed — clean up R2 object to prevent orphaning
+    await c.env.REPLAY_BUCKET.delete(r2Key).catch(() => {});
+    throw e;
+  }
 
   const baseUrl = getBaseUrl(c);
   return c.json({ id, url: `${baseUrl}/r/${id}`, expiresAt });
@@ -662,7 +670,7 @@ app.patch("/api/gists/:gistId", async (c) => {
     .from(cloudReplays)
     .where(eq(cloudReplays.gistId, gistId))
     .limit(1);
-  if (existing && existing.userId !== userId) {
+  if (!existing || existing.userId !== userId) {
     return c.json({ error: "Not found" }, 404);
   }
 
@@ -971,15 +979,16 @@ export default {
       )
       .limit(100);
 
-    for (const { id } of expired) {
-      await env.REPLAY_BUCKET.delete(`replays/${id}.json`);
-    }
     if (expired.length > 0) {
-      await db
-        .delete(cloudReplays)
-        .where(
-          sql`${cloudReplays.expiresAt} IS NOT NULL AND ${cloudReplays.expiresAt} < datetime('now')`,
-        );
+      const expiredIds = expired.map((r) => r.id);
+      // Delete R2 objects
+      for (const id of expiredIds) {
+        await env.REPLAY_BUCKET.delete(`replays/${id}.json`);
+      }
+      // Delete only the same rows from D1 (not unbounded)
+      for (const id of expiredIds) {
+        await db.delete(cloudReplays).where(eq(cloudReplays.id, id));
+      }
     }
   },
 };

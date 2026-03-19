@@ -150,11 +150,12 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
     [session],
   );
   const CLOUD_MAX = 10 * 1024 * 1024;
-  const GIST_MAX = 10 * 1024 * 1024;
+  const GIST_MAX = 5 * 1024 * 1024;
   const cloudTooBig = replaySize > CLOUD_MAX;
   const gistTooBig = replaySize > GIST_MAX;
 
   // Fetch publish status, gist info, and existing export files
+  // biome-ignore lint/correctness/useExhaustiveDependencies: session is stable after initial load; including it would cause infinite re-fetches
   useEffect(() => {
     if (!isEditor) return;
     if (publishGist) {
@@ -186,13 +187,41 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
         .catch(() => {})
         .finally(() => setGistInfoLoading(false));
 
-      // Load existing cloud share info
+      // Load existing cloud share info — try local file first, then check Worker
       fetch(apiUrl("/api/cloud-info"))
         .then((r) => r.json())
         .then((data) => {
           if (data.cloud) {
             setCloudInfo(data.cloud);
             if (data.cloud.visibility) setCloudVisibility(data.cloud.visibility);
+          } else if (session) {
+            // No local file — check Worker for existing uploads matching this session title
+            fetch(`${cloudApiUrl}/api/cloud-replays`, { credentials: "include" })
+              .then((r2) => r2.json())
+              .then((d: any) => {
+                const title = session.meta.title || session.meta.slug;
+                const match = (d.replays || []).find(
+                  (r: any) => r.storageType === "r2" && r.title === title,
+                );
+                if (match) {
+                  const baseUrl = window.location.origin;
+                  const info = {
+                    id: match.id,
+                    url: `${baseUrl}/r/${match.id}`,
+                    expiresAt: match.expiresAt || "",
+                    visibility: match.visibility,
+                  };
+                  setCloudInfo(info);
+                  if (match.visibility) setCloudVisibility(match.visibility);
+                  // Sync back to local
+                  fetch(apiUrl("/api/cloud-info"), {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(info),
+                  }).catch(() => {});
+                }
+              })
+              .catch(() => {});
           }
         })
         .catch(() => {});
@@ -275,13 +304,8 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
     setCloudSharing(true);
     setCloudStatus(null);
     try {
-      // If already shared, delete old one first to avoid duplicates
-      if (cloudInfo?.id) {
-        await fetch(`${cloudApiUrl}/api/cloud-replays/${cloudInfo.id}`, {
-          method: "DELETE",
-          credentials: "include",
-        }).catch(() => {});
-      }
+      // Upload new replay first, then delete old one on success
+      const oldCloudId = cloudInfo?.id;
       const resp = await fetch(`${cloudApiUrl}/api/cloud-replays`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -293,8 +317,15 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
         throw new Error((data as any).error || "Upload failed");
       }
       const result = (await resp.json()) as { id: string; url: string; expiresAt: string };
+      // Delete old one after successful upload
+      if (oldCloudId && oldCloudId !== result.id) {
+        fetch(`${cloudApiUrl}/api/cloud-replays/${oldCloudId}`, {
+          method: "DELETE",
+          credentials: "include",
+        }).catch(() => {});
+      }
       setCloudInfo(result);
-      setCloudStatus({ type: "success", text: cloudInfo ? "Updated!" : "Shared!" });
+      setCloudStatus({ type: "success", text: oldCloudId ? "Updated!" : "Shared!" });
       // Sync cloud info back to CLI server for local persistence
       fetch(apiUrl("/api/cloud-info"), {
         method: "POST",
