@@ -643,6 +643,12 @@ app.post("/api/gists", async (c) => {
   // Extract replay metadata from content and write to cloud_replays
   const db = drizzle(c.env.DB);
   const replayMeta = extractMetaFromJson(body.content);
+  // Migrate viewCount from legacy replays table if this gist was previously visited
+  const [legacyRow] = await db
+    .select({ viewCount: replays.viewCount })
+    .from(replays)
+    .where(eq(replays.gistId, gistId))
+    .limit(1);
   const id = nanoid(12);
 
   await db.insert(cloudReplays).values({
@@ -663,6 +669,7 @@ app.post("/api/gists", async (c) => {
     firstMessage: replayMeta.firstMessage,
     sizeBytes: 0,
     visibility: isPublic ? "public" : "unlisted",
+    viewCount: legacyRow?.viewCount || 0,
   });
 
   return c.json({ gistId, gistUrl, viewerUrl });
@@ -750,6 +757,12 @@ app.patch("/api/gists/:gistId", async (c) => {
   // Backfill D1 record for legacy gists (only after GitHub confirms ownership via PATCH success)
   if (!existing) {
     const replayMeta = extractMetaFromJson(body.content);
+    // Migrate viewCount from legacy replays table if available
+    const [legacyRow] = await db
+      .select({ viewCount: replays.viewCount })
+      .from(replays)
+      .where(eq(replays.gistId, gistId))
+      .limit(1);
     const id = nanoid(12);
     await db.insert(cloudReplays).values({
       id,
@@ -769,6 +782,7 @@ app.patch("/api/gists/:gistId", async (c) => {
       firstMessage: replayMeta.firstMessage || null,
       sizeBytes: 0,
       visibility: "public",
+      viewCount: legacyRow?.viewCount || 0,
     });
   }
 
