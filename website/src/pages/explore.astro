@@ -27,7 +27,7 @@ import Layout from "../layouts/Layout.astro";
                 <img id="auth-avatar" class="w-full h-full rounded-full object-cover" alt="" />
               </button>
               <div id="auth-dropdown" class="hidden absolute right-0 top-full mt-2 min-w-[160px] bg-surface-1 border border-border rounded-lg shadow-lg py-1 z-50">
-                <div id="auth-username" class="px-3 py-2 text-xs text-text-muted border-b border-border truncate"></div>
+                <a id="auth-username" href="/profile" class="block px-3 py-2 text-xs text-text-secondary border-b border-border truncate hover:text-accent transition-colors"></a>
                 <button id="auth-logout" class="w-full text-left px-3 py-2 text-sm text-text-secondary hover:text-red-400 hover:bg-surface-2 transition-colors cursor-pointer">Logout</button>
               </div>
             </div>
@@ -92,7 +92,9 @@ import Layout from "../layouts/Layout.astro";
   const API_BASE = "/api/replays";
 
   interface Replay {
-    gist_id: string;
+    gist_id: string | null;
+    cloud_id?: string;
+    type?: "gist" | "cloud";
     title: string;
     provider: string;
     model: string | null;
@@ -134,16 +136,20 @@ import Layout from "../layouts/Layout.astro";
   function createCard(r: Replay): string {
     const duration = formatDuration(r.duration_ms);
     const date = formatDate(r.created_at);
-    // Sanitize gist_id for href — only allow hex chars
-    const safeGistId = r.gist_id.replace(/[^a-f0-9]/g, "");
-    // Force numbers to int to prevent injection via numeric fields
+    const isCloud = r.type === "cloud" && r.cloud_id;
+    const href = isCloud
+      ? `/r/${r.cloud_id!.replace(/[^a-zA-Z0-9_-]/g, "")}`
+      : `/view/?gist=${(r.gist_id || "").replace(/[^a-f0-9]/g, "")}`;
     const prompts = parseInt(String(r.user_prompts)) || 0;
     const tools = parseInt(String(r.tool_calls)) || 0;
     const views = parseInt(String(r.view_count)) || 0;
     const cost = r.cost_estimate ? `$${parseFloat(r.cost_estimate).toFixed(2)}` : "";
     const firstMsg = r.first_message ? escapeHtml(r.first_message.slice(0, 120)) : "";
+    const sourceBadge = isCloud
+      ? `<span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">Cloud</span>`
+      : "";
     return `
-      <a href="/view/?gist=${safeGistId}" class="group block rounded-xl border border-border bg-surface-1 hover:border-accent/30 hover:bg-surface-2/50 transition-all p-5">
+      <a href="${href}" class="group block rounded-xl border border-border bg-surface-1 hover:border-accent/30 hover:bg-surface-2/50 transition-all p-5">
         <div class="flex items-start justify-between mb-1">
           <h3 class="font-mono text-sm font-semibold text-text-primary group-hover:text-accent transition-colors truncate pr-2">${escapeHtml(r.title)}</h3>
           <span class="text-[10px] text-text-muted shrink-0">${escapeHtml(date)}</span>
@@ -151,6 +157,7 @@ import Layout from "../layouts/Layout.astro";
         ${r.gist_owner ? `<div class="text-[11px] font-mono text-text-muted mb-1"><span class="text-accent/70">@${escapeHtml(r.gist_owner)}</span></div>` : ""}
         ${firstMsg ? `<p class="text-xs text-text-muted truncate mb-3">${firstMsg}</p>` : `<div class="mb-3"></div>`}
         <div class="flex items-center gap-2 mb-3">
+          ${sourceBadge}
           ${r.model ? `<span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-2 text-text-secondary border border-border">${escapeHtml(r.model)}</span>` : ""}
           ${r.provider ? `<span class="text-[10px] font-mono text-text-muted">${escapeHtml(r.provider)}</span>` : ""}
         </div>

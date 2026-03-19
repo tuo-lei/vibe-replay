@@ -27,7 +27,7 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
             <img id="auth-avatar" class="w-full h-full rounded-full object-cover" alt="" />
           </button>
           <div id="auth-dropdown" class="hidden absolute right-0 top-full mt-2 min-w-[160px] bg-surface-1 border border-border rounded-lg shadow-lg py-1 z-50">
-            <div id="auth-username" class="px-3 py-2 text-xs text-text-muted border-b border-border truncate"></div>
+            <a id="auth-username" href="/profile" class="block px-3 py-2 text-xs text-text-secondary border-b border-border truncate hover:text-accent transition-colors"></a>
             <button id="auth-logout" class="w-full text-left px-3 py-2 text-sm text-text-secondary hover:text-red-400 hover:bg-surface-2 transition-colors cursor-pointer">Logout</button>
           </div>
         </div>

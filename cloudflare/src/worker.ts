@@ -748,7 +748,8 @@ app.get("/api/replays", async (c) => {
 
   const orderCol = sort === "popular" ? desc(replays.viewCount) : desc(replays.createdAt);
 
-  const results = await db
+  // Legacy gist replays
+  const gistResults = await db
     .select({
       gist_id: replays.gistId,
       title: replays.title,
@@ -768,7 +769,64 @@ app.get("/api/replays", async (c) => {
     .orderBy(orderCol)
     .limit(limit);
 
-  return c.json(results);
+  // Public cloud replays (not expired)
+  const cloudOrderCol =
+    sort === "popular" ? desc(cloudReplays.viewCount) : desc(cloudReplays.createdAt);
+  const cloudResults = await db
+    .select({
+      id: cloudReplays.id,
+      title: cloudReplays.title,
+      provider: cloudReplays.provider,
+      model: cloudReplays.model,
+      scene_count: cloudReplays.sceneCount,
+      user_prompts: cloudReplays.userPrompts,
+      tool_calls: cloudReplays.toolCalls,
+      duration_ms: cloudReplays.durationMs,
+      cost_estimate: cloudReplays.costEstimate,
+      first_message: cloudReplays.firstMessage,
+      view_count: cloudReplays.viewCount,
+      created_at: cloudReplays.createdAt,
+    })
+    .from(cloudReplays)
+    .where(
+      and(
+        eq(cloudReplays.visibility, "public"),
+        eq(cloudReplays.storageType, "r2"),
+        sql`(${cloudReplays.expiresAt} IS NULL OR ${cloudReplays.expiresAt} > datetime('now'))`,
+      ),
+    )
+    .orderBy(cloudOrderCol)
+    .limit(limit);
+
+  // Merge and sort
+  const merged = [
+    ...gistResults.map((r) => ({ ...r, type: "gist" as const })),
+    ...cloudResults.map((r) => ({
+      gist_id: null,
+      title: r.title,
+      provider: r.provider,
+      model: r.model,
+      scene_count: r.scene_count,
+      user_prompts: r.user_prompts,
+      tool_calls: r.tool_calls,
+      duration_ms: r.duration_ms,
+      cost_estimate: r.cost_estimate,
+      first_message: r.first_message,
+      gist_owner: null,
+      view_count: r.view_count,
+      created_at: r.created_at,
+      type: "cloud" as const,
+      cloud_id: r.id,
+    })),
+  ];
+
+  // Sort merged results
+  merged.sort((a, b) => {
+    if (sort === "popular") return (b.view_count || 0) - (a.view_count || 0);
+    return (b.created_at || "").localeCompare(a.created_at || "");
+  });
+
+  return c.json(merged.slice(0, limit));
 });
 
 app.post("/api/replays", async (c) => {
