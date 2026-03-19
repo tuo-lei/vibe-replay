@@ -128,14 +128,22 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
   const [ghExporting, setGhExporting] = useState(false);
   const [ghError, setGhError] = useState<string | null>(null);
   const [mdViewMode, setMdViewMode] = useState<"preview" | "source">("preview");
+  const [cloudSharing, setCloudSharing] = useState(false);
+  const [cloudStatus, setCloudStatus] = useState<Status>(null);
+  const [cloudInfo, setCloudInfo] = useState<{ id: string; url: string; expiresAt: string } | null>(
+    null,
+  );
+
+  const cloudApiUrl = import.meta.env.VITE_CLOUD_API_URL || "";
 
   // Fetch publish status, gist info, and existing export files
   useEffect(() => {
     if (!isEditor) return;
     if (publishGist) {
-      fetch(apiUrl("/api/gh-status"))
+      // Check auth against Worker directly (browser cookie)
+      fetch(`${cloudApiUrl}/api/auth/get-session`, { credentials: "include" })
         .then((r) => r.json())
-        .then((data) => setGhAvailable(data.available ?? false))
+        .then((data: any) => setGhAvailable(!!data?.session))
         .catch(() => setGhAvailable(false));
 
       setGistInfoLoading(true);
@@ -188,6 +196,31 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
       setGistStatus({ type: "error", text: e.message });
     }
   }, [publishGist]);
+
+  const handleCloudShare = useCallback(async () => {
+    if (!session) return;
+    setCloudSharing(true);
+    setCloudStatus(null);
+    try {
+      const resp = await fetch(`${cloudApiUrl}/api/cloud-replays`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ replay: session, visibility: "unlisted" }),
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error((data as any).error || "Upload failed");
+      }
+      const result = await resp.json();
+      setCloudInfo(result as any);
+      setCloudStatus({ type: "success", text: "Shared!" });
+    } catch (e: any) {
+      setCloudStatus({ type: "error", text: e.message });
+    } finally {
+      setCloudSharing(false);
+    }
+  }, [session]);
 
   const handleExportGithub = useCallback(async () => {
     if (!exportGithub) return;
@@ -385,6 +418,83 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                   )}
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ─── Cloud Share ─── */}
+        {isEditor && (
+          <div className="bg-terminal-surface rounded-2xl border border-terminal-border-subtle shadow-layer-sm overflow-hidden">
+            <div className="px-5 py-4 space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-mono font-semibold text-terminal-cyan">
+                  Cloud Share
+                </span>
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-terminal-surface-2 text-terminal-dimmer border border-terminal-border-subtle">
+                  7-day link
+                </span>
+              </div>
+              <p className="text-[11px] font-mono text-terminal-dim leading-relaxed">
+                Upload to vibe-replay.com. Shareable link expires after 7 days. Max 2MB.
+              </p>
+            </div>
+
+            {cloudInfo && (
+              <div className="px-5 pb-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1 text-[10px] font-mono font-semibold text-terminal-green px-2 py-0.5 rounded-full bg-terminal-green-subtle">
+                    <span className="w-1.5 h-1.5 rounded-full bg-terminal-green" />
+                    Shared
+                  </span>
+                  <span className="text-[10px] font-mono text-terminal-dimmer">
+                    expires {new Date(`${cloudInfo.expiresAt}Z`).toLocaleDateString()}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 bg-terminal-bg rounded-lg px-3 py-2 border border-terminal-border-subtle">
+                  <a
+                    href={cloudInfo.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 text-xs font-mono text-terminal-cyan hover:text-terminal-text transition-colors truncate"
+                  >
+                    {cloudInfo.url}
+                  </a>
+                  <CopyButton text={cloudInfo.url} />
+                </div>
+              </div>
+            )}
+
+            <div className="px-5 pb-4 flex items-center gap-3">
+              {ghAvailable === false ? (
+                <div className="flex-1 text-xs font-mono text-terminal-orange px-3 py-2 rounded-lg bg-terminal-orange-subtle/50 border border-terminal-orange/10">
+                  Login required — log in on the website to share
+                </div>
+              ) : ghAvailable === null ? (
+                <div className="text-[11px] font-mono text-terminal-dimmer animate-pulse">
+                  Checking login status...
+                </div>
+              ) : (
+                <>
+                  <button
+                    onClick={handleCloudShare}
+                    disabled={cloudSharing}
+                    className={`${btnBase} ${
+                      cloudInfo
+                        ? "bg-terminal-surface-hover text-terminal-cyan hover:bg-terminal-cyan-subtle border border-terminal-border"
+                        : "bg-terminal-cyan-subtle text-terminal-cyan hover:bg-[rgba(34,211,238,0.25)] border border-[rgba(34,211,238,0.2)]"
+                    }`}
+                  >
+                    {cloudSharing ? "Uploading..." : cloudInfo ? "Re-upload" : "Share to Cloud"}
+                  </button>
+                  {cloudStatus && (
+                    <span
+                      className={`text-[11px] font-mono ${cloudStatus.type === "success" ? "text-terminal-green" : "text-terminal-red"}`}
+                    >
+                      {cloudStatus.text}
+                    </span>
+                  )}
+                </>
+              )}
             </div>
           </div>
         )}
