@@ -16,6 +16,13 @@ function editorFlagPlugin(): Plugin {
 
 export default defineConfig({
   plugins: [react(), viteSingleFile(), editorFlagPlugin()],
+  define: {
+    // In production builds (pnpm build / npx vibe-replay), default to production API.
+    // In dev (pnpm dev), scripts/dev.mjs sets VITE_CLOUD_API_URL to localhost:8787.
+    "import.meta.env.VITE_CLOUD_API_URL": JSON.stringify(
+      process.env.VITE_CLOUD_API_URL || "https://vibe-replay.com",
+    ),
+  },
   build: {
     outDir: "dist",
     target: "es2022",
