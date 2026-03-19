@@ -549,19 +549,18 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                       type="button"
                       onClick={() => {
                         window.open(`${cloudApiUrl}/auth/login?callback=/auth/success`, "_blank");
-                        const poll = setInterval(async () => {
-                          try {
-                            const r = await fetch(`${cloudApiUrl}/api/auth/get-session`, {
-                              credentials: "include",
-                            });
-                            const s = await r.json();
-                            if (s?.session) {
-                              clearInterval(poll);
-                              setGhAvailable(true);
-                            }
-                          } catch {}
-                        }, 2000);
-                        setTimeout(() => clearInterval(poll), 5 * 60 * 1000);
+                        // Listen for postMessage from success page
+                        const onMsg = (e: MessageEvent) => {
+                          if (e.data?.type === "vibe-replay-auth" && e.data.user) {
+                            window.removeEventListener("message", onMsg);
+                            setGhAvailable(true);
+                          }
+                        };
+                        window.addEventListener("message", onMsg);
+                        setTimeout(
+                          () => window.removeEventListener("message", onMsg),
+                          5 * 60 * 1000,
+                        );
                       }}
                       className="group inline-flex items-center gap-2.5 px-6 py-3 rounded-xl bg-terminal-green-subtle hover:bg-terminal-green-emphasis text-terminal-green text-sm font-sans font-semibold transition-all duration-200 ease-material shadow-layer-sm hover:shadow-layer-md hover:-translate-y-0.5"
                     >

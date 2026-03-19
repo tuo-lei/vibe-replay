@@ -38,9 +38,18 @@ function DashboardAuthStatus() {
         .catch(() => setAuth({ authenticated: false, user: null }));
     };
     check();
-    // Re-check when user returns to tab (e.g. after OAuth in another tab)
+    // Listen for postMessage from OAuth success page (cross-origin safe)
+    const onMessage = (e: MessageEvent) => {
+      if (e.data?.type === "vibe-replay-auth" && e.data.user) {
+        setAuth({ authenticated: true, user: e.data.user });
+      }
+    };
+    window.addEventListener("message", onMessage);
     window.addEventListener("focus", check);
-    return () => window.removeEventListener("focus", check);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      window.removeEventListener("focus", check);
+    };
   }, []);
 
   // Close dropdown on outside click
