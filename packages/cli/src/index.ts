@@ -1,7 +1,4 @@
-import fs from "node:fs";
 import http from "node:http";
-import os from "node:os";
-import nodePath from "node:path";
 import { Separator, select } from "@inquirer/prompts";
 import chalk from "chalk";
 import { program } from "commander";
@@ -12,6 +9,12 @@ import { generateGitHubGif } from "./formatters/gif.js";
 import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.js";
 import { generateOutput } from "./generator.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
+import {
+  getAuthFilePath,
+  loadAuthToken,
+  removeAuthTokenSync,
+  saveAuthTokenSync,
+} from "./publishers/cloud.js";
 import { checkPublishStatus, loadSavedGistInfo, publishGist } from "./publishers/gist.js";
 import { publishLocal } from "./publishers/local.js";
 import { scanForSecrets } from "./scan.js";
@@ -570,8 +573,6 @@ program
 // Auth command group — login, logout, status
 // ---------------------------------------------------------------------------
 
-const AUTH_PATH = nodePath.join(os.homedir(), ".config", "vibe-replay", "auth.json");
-
 const authCmd = program.command("auth").description("Manage authentication");
 
 authCmd
@@ -641,17 +642,12 @@ authCmd
 
           try {
             const data = JSON.parse(body);
-            const configDir = nodePath.join(os.homedir(), ".config", "vibe-replay");
-            fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
-            const authPath = nodePath.join(configDir, "auth.json");
-            fs.writeFileSync(authPath, JSON.stringify(data, null, 2), {
-              mode: 0o600,
-            });
+            saveAuthTokenSync({ token: data.token, user: data.user }, apiUrl);
             console.log(
               chalk.bold.green("\n  ✓ Logged in as ") +
                 chalk.white(data.user?.name || data.user?.email),
             );
-            console.log(chalk.dim(`  Token saved to ${authPath}\n`));
+            console.log(chalk.dim(`  Token saved to ${getAuthFilePath()} [${apiUrl}]\n`));
           } catch (err) {
             console.error(chalk.red("\n  ✗ Failed to save auth token"));
             console.error(chalk.dim(`  Body received: ${body.slice(0, 200)}`));
@@ -695,25 +691,28 @@ authCmd
 authCmd
   .command("logout")
   .description("Log out of vibe-replay")
-  .action(async () => {
-    const authPath = AUTH_PATH;
-
-    if (!fs.existsSync(authPath)) {
+  .option("--api-url <url>", "API base URL", "https://vibe-replay.com")
+  .action(async (opts) => {
+    const apiUrl = opts.apiUrl.replace(/\/$/, "");
+    const auth = loadAuthToken(apiUrl);
+    if (!auth) {
       console.log(chalk.dim("\n  Not logged in.\n"));
       return;
     }
 
-    fs.rmSync(authPath);
+    removeAuthTokenSync(apiUrl);
     console.log(chalk.bold.green("\n  ✓ Logged out successfully\n"));
   });
 
 authCmd
   .command("status")
   .description("Show current authentication status")
-  .action(async () => {
-    const authPath = AUTH_PATH;
+  .option("--api-url <url>", "API base URL", "https://vibe-replay.com")
+  .action(async (opts) => {
+    const apiUrl = opts.apiUrl.replace(/\/$/, "");
+    const auth = loadAuthToken(apiUrl);
 
-    if (!fs.existsSync(authPath)) {
+    if (!auth) {
       console.log(chalk.dim("\n  Not logged in."));
       console.log(
         chalk.dim("  Run ") +
@@ -723,22 +722,16 @@ authCmd
       return;
     }
 
-    try {
-      const data = JSON.parse(fs.readFileSync(authPath, "utf-8"));
-      console.log(chalk.bold.cyan("\n  vibe-replay auth status\n"));
-      console.log(
-        chalk.dim("  Logged in as ") +
-          chalk.white(data.user?.name || data.user?.email || "unknown"),
-      );
-      if (data.user?.image) {
-        console.log(chalk.dim("  Avatar:    ") + chalk.white(data.user.image));
-      }
-      console.log(chalk.dim("  Auth file: ") + chalk.white(authPath));
-      console.log();
-    } catch {
-      console.error(chalk.red("\n  ✗ Failed to read auth file"));
-      console.error(chalk.dim(`  Path: ${authPath}\n`));
+    console.log(chalk.bold.cyan("\n  vibe-replay auth status\n"));
+    console.log(
+      chalk.dim("  Logged in as ") + chalk.white(auth.user?.name || auth.user?.email || "unknown"),
+    );
+    if (auth.user?.image) {
+      console.log(chalk.dim("  Avatar:    ") + chalk.white(auth.user.image));
     }
+    console.log(chalk.dim("  API:       ") + chalk.white(apiUrl));
+    console.log(chalk.dim("  Auth file: ") + chalk.white(getAuthFilePath()));
+    console.log();
   });
 
 // Keep backwards-compatible hidden alias

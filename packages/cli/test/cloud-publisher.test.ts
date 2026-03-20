@@ -22,19 +22,80 @@ describe("cloud publisher", () => {
   });
 
   describe("loadAuthToken", () => {
-    it("returns auth data when valid auth.json exists", () => {
+    it("returns auth data when valid auth.json exists (new format)", () => {
       const authPath = join(mockAuthDir, ".config", "vibe-replay", "auth.json");
       writeFileSync(
         authPath,
         JSON.stringify({
-          token: "session-token-123",
-          user: { id: "u1", name: "Test User", email: "test@example.com" },
+          accounts: {
+            "https://vibe-replay.com": {
+              token: "session-token-123",
+              user: { id: "u1", name: "Test User", email: "test@example.com" },
+            },
+          },
         }),
       );
-      const auth = loadAuthToken();
+      const auth = loadAuthToken("https://vibe-replay.com");
       expect(auth).toBeDefined();
       expect(auth?.token).toBe("session-token-123");
       expect(auth?.user.name).toBe("Test User");
+    });
+
+    it("migrates legacy flat format under default production origin", () => {
+      const authPath = join(mockAuthDir, ".config", "vibe-replay", "auth.json");
+      writeFileSync(
+        authPath,
+        JSON.stringify({
+          token: "legacy-token",
+          user: { id: "u1", name: "Legacy User", email: "legacy@example.com" },
+        }),
+      );
+      // Legacy format should be accessible under the default production URL
+      const auth = loadAuthToken("https://vibe-replay.com");
+      expect(auth).toBeDefined();
+      expect(auth?.token).toBe("legacy-token");
+      expect(auth?.user.name).toBe("Legacy User");
+    });
+
+    it("returns null for non-matching environment", () => {
+      const authPath = join(mockAuthDir, ".config", "vibe-replay", "auth.json");
+      writeFileSync(
+        authPath,
+        JSON.stringify({
+          accounts: {
+            "https://vibe-replay.com": {
+              token: "prod-token",
+              user: { id: "u1", name: "Prod User" },
+            },
+          },
+        }),
+      );
+      // Requesting local dev token should return null
+      const auth = loadAuthToken("http://localhost:8787");
+      expect(auth).toBeNull();
+    });
+
+    it("supports multiple environments", () => {
+      const authPath = join(mockAuthDir, ".config", "vibe-replay", "auth.json");
+      writeFileSync(
+        authPath,
+        JSON.stringify({
+          accounts: {
+            "https://vibe-replay.com": {
+              token: "prod-token",
+              user: { id: "u1", name: "Prod User" },
+            },
+            "http://localhost:8787": {
+              token: "dev-token",
+              user: { id: "u2", name: "Dev User" },
+            },
+          },
+        }),
+      );
+      const prod = loadAuthToken("https://vibe-replay.com");
+      expect(prod?.token).toBe("prod-token");
+      const dev = loadAuthToken("http://localhost:8787");
+      expect(dev?.token).toBe("dev-token");
     });
 
     it("returns null when auth.json is missing", () => {
@@ -42,17 +103,27 @@ describe("cloud publisher", () => {
       expect(auth).toBeNull();
     });
 
-    it("returns null when auth.json has no token", () => {
+    it("returns null when account has no token", () => {
       const authPath = join(mockAuthDir, ".config", "vibe-replay", "auth.json");
-      writeFileSync(authPath, JSON.stringify({ user: { id: "u1" } }));
-      const auth = loadAuthToken();
+      writeFileSync(
+        authPath,
+        JSON.stringify({
+          accounts: { "https://vibe-replay.com": { user: { id: "u1" } } },
+        }),
+      );
+      const auth = loadAuthToken("https://vibe-replay.com");
       expect(auth).toBeNull();
     });
 
-    it("returns null when auth.json has no user", () => {
+    it("returns null when account has no user", () => {
       const authPath = join(mockAuthDir, ".config", "vibe-replay", "auth.json");
-      writeFileSync(authPath, JSON.stringify({ token: "abc" }));
-      const auth = loadAuthToken();
+      writeFileSync(
+        authPath,
+        JSON.stringify({
+          accounts: { "https://vibe-replay.com": { token: "abc" } },
+        }),
+      );
+      const auth = loadAuthToken("https://vibe-replay.com");
       expect(auth).toBeNull();
     });
   });

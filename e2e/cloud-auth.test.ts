@@ -13,17 +13,27 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const AUTH_PATH = join(homedir(), ".config", "vibe-replay", "auth.json");
 
+// Determine cloud API URL (same logic as CLI)
+const CLOUD_API = process.env.VIBE_REPLAY_API_URL || "https://vibe-replay.com";
+
 function loadAuth(): { token: string; user: { name: string } } | null {
   try {
     if (!existsSync(AUTH_PATH)) return null;
-    return JSON.parse(readFileSync(AUTH_PATH, "utf-8"));
+    const data = JSON.parse(readFileSync(AUTH_PATH, "utf-8"));
+    // New per-environment format: { accounts: { origin: { token, user } } }
+    if (data.accounts && typeof data.accounts === "object") {
+      const origin = new URL(CLOUD_API).origin;
+      const entry = data.accounts[origin];
+      if (entry?.token && entry?.user) return entry;
+      return null;
+    }
+    // Legacy flat format
+    if (data.token && data.user) return data;
+    return null;
   } catch {
     return null;
   }
 }
-
-// Determine cloud API URL (same logic as CLI)
-const CLOUD_API = process.env.VIBE_REPLAY_API_URL || "https://vibe-replay.com";
 const isSecure = CLOUD_API.startsWith("https://");
 const cookieName = isSecure ? "__Secure-better-auth.session_token" : "better-auth.session_token";
 

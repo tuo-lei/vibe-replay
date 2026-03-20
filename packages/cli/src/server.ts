@@ -25,9 +25,12 @@ import { getAllProviders, getProvider } from "./providers/index.js";
 import {
   getApiUrl,
   getSessionCookieName,
+  loadAnyAuthToken,
   loadAuthToken,
   loadSavedCloudInfo,
   publishCloud,
+  removeAuthToken,
+  saveAuthToken,
 } from "./publishers/cloud.js";
 import {
   checkPublishStatus,
@@ -1067,39 +1070,78 @@ export async function startServer(
     return c.json(checkPublishStatus());
   });
 
-  // Auth — read local auth.json
-  const authFilePath = join(homedir(), ".config", "vibe-replay", "auth.json");
+  // Auth — read local auth.json (per-environment, keyed by API origin)
+  // The BFF proxy follows the TOKEN, not the env var: if no token for the
+  // current VIBE_REPLAY_API_URL, it uses whatever token is available and
+  // proxies to that token's origin (e.g. production) instead.
   const cloudApiBaseUrl = getApiUrl().replace(/\/$/, "");
 
   function readLocalAuthSession(): {
     token: string;
     user: { id: string; name: string; email?: string; image?: string };
+    /** The actual API origin this token authenticates against */
+    targetApi: string;
   } | null {
-    const auth = loadAuthToken();
-    if (!auth) return null;
-    return {
-      token: auth.token,
-      user: auth.user as { id: string; name: string; email?: string; image?: string },
-    };
+    // 1. Try exact match for current environment
+    const exact = loadAuthToken(cloudApiBaseUrl);
+    if (exact) {
+      return {
+        token: exact.token,
+        user: exact.user as { id: string; name: string; email?: string; image?: string },
+        targetApi: cloudApiBaseUrl,
+      };
+    }
+    // 2. Fallback: use any available token and proxy to its origin
+    const fallback = loadAnyAuthToken();
+    if (fallback) {
+      return {
+        token: fallback.token,
+        user: fallback.user as { id: string; name: string; email?: string; image?: string },
+        targetApi: fallback.origin.replace(/\/$/, ""),
+      };
+    }
+    return null;
   }
 
   async function clearLocalAuthSession() {
-    try {
-      await unlink(authFilePath);
-    } catch {
-      // Already gone
+    // Remove ALL tokens — user expects a full logout, not per-env
+    const candidates = getAuthCandidates();
+    for (const c of candidates) {
+      await removeAuthToken(c.apiUrl);
     }
+    // Also remove for current env in case it wasn't in candidates
+    await removeAuthToken(cloudApiBaseUrl);
   }
 
-  const sessionCookieName = getSessionCookieName(cloudApiBaseUrl);
+  /** Build an ordered list of (token, apiUrl) pairs to try.
+   *  Exact match for current env first, then any other available token. */
+  function getAuthCandidates(): { token: string; apiUrl: string }[] {
+    const candidates: { token: string; apiUrl: string }[] = [];
+    const exact = loadAuthToken(cloudApiBaseUrl);
+    if (exact) candidates.push({ token: exact.token, apiUrl: cloudApiBaseUrl });
+    const fallback = loadAnyAuthToken();
+    if (fallback) {
+      const fallbackApi = fallback.origin.replace(/\/$/, "");
+      if (fallbackApi !== cloudApiBaseUrl) {
+        candidates.push({ token: fallback.token, apiUrl: fallbackApi });
+      }
+    }
+    return candidates;
+  }
 
   async function fetchCloudApiWithLocalAuth(path: string, init: RequestInit = {}) {
-    const auth = readLocalAuthSession();
-    if (!auth) return { unauthorized: true as const };
-    const headers = new Headers(init.headers);
-    headers.set("Cookie", `${sessionCookieName}=${auth.token}`);
-    const response = await fetch(`${cloudApiBaseUrl}${path}`, { ...init, headers });
-    return { unauthorized: false as const, response };
+    const candidates = getAuthCandidates();
+    if (candidates.length === 0) return { unauthorized: true as const };
+
+    // Try each candidate; on 401, cascade to the next one
+    for (const candidate of candidates) {
+      const headers = new Headers(init.headers);
+      const cookieName = getSessionCookieName(candidate.apiUrl);
+      headers.set("Cookie", `${cookieName}=${candidate.token}`);
+      const response = await fetch(`${candidate.apiUrl}${path}`, { ...init, headers });
+      if (response.status !== 401) return { unauthorized: false as const, response };
+    }
+    return { unauthorized: true as const };
   }
 
   app.get("/api/auth/status", async (c) => {
@@ -1175,12 +1217,8 @@ export async function startServer(
               });
               res.end("OK");
 
-              // Save auth
-              const configDir = join(homedir(), ".config", "vibe-replay");
-              await mkdir(configDir, { recursive: true, mode: 0o700 });
-              await writeFile(authFilePath, JSON.stringify(data, null, 2), {
-                mode: 0o600,
-              });
+              // Save auth keyed by current API environment
+              await saveAuthToken({ token: data.token, user: data.user }, cloudApiBaseUrl);
             } catch {
               res.writeHead(400);
               res.end("Bad Request");
