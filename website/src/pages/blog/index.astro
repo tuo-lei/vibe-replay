@@ -27,7 +27,7 @@ const posts = (await getCollection("blog", ({ data }) => data.draft !== true)).s
       <!-- Post list -->
       <div class="flex flex-col gap-8">
         {posts.map((post, i) => (
-          <a href={`/blog/${post.id}/`} class="group block">
+          <a href={`/blog/${post.id}/`} class="group block cursor-pointer">
             <article class="rounded-2xl border border-border bg-surface-1/40 hover:border-accent/40 hover:bg-surface-1 transition-all duration-300 overflow-hidden">
               {/* Cover image — constrained height */}
               {post.data.cover && (
