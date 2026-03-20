@@ -44,9 +44,9 @@ const posts = (await getCollection("blog", ({ data }) => data.draft !== true)).s
               {/* Content */}
               <div class="p-6 md:p-8">
                 <div class="flex items-center gap-3 text-sm text-text-muted mb-3">
-                  <a href={post.data.authorUrl} target="_blank" rel="noopener" class="text-text-secondary hover:text-accent transition-colors" onclick="event.stopPropagation()">
+                  <span class="text-text-secondary">
                     {post.data.author}
-                  </a>
+                  </span>
                   <span class="w-1 h-1 rounded-full bg-text-muted" />
                   <time datetime={post.data.date.toISOString().split("T")[0]}>
                     {formatDate(post.data.date)}
