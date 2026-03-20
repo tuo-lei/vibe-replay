@@ -1,10 +1,12 @@
-import { existsSync, readFileSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 const CLOUD_META_FILE = ".vibe-replay-cloud.json";
 const DEFAULT_API_URL = "https://vibe-replay.com";
+const AUTH_DIR = join(homedir(), ".config", "vibe-replay");
+const AUTH_FILE = join(AUTH_DIR, "auth.json");
 
 export interface CloudResult {
   id: string;
@@ -19,26 +21,140 @@ export interface SavedCloudInfo {
   updatedAt: string;
 }
 
-interface AuthData {
+export interface AuthData {
   token: string;
-  user: { id: string; name: string; email?: string };
+  user: { id: string; name: string; email?: string; image?: string };
 }
 
-export function loadAuthToken(): AuthData | null {
+/** Normalize URL to origin (protocol + host) for use as auth store key */
+function authOrigin(url: string): string {
   try {
-    const authPath = join(homedir(), ".config", "vibe-replay", "auth.json");
-    if (!existsSync(authPath)) return null;
-    const raw = readFileSync(authPath, "utf-8");
-    const data = JSON.parse(raw);
-    if (data.token && data.user) return data;
-    return null;
+    return new URL(url).origin;
   } catch {
-    return null;
+    return url;
   }
+}
+
+interface AuthStore {
+  accounts: Record<string, AuthData>;
+}
+
+/** Read the auth store, migrating from legacy flat format if needed */
+function readAuthStore(): AuthStore {
+  try {
+    if (!existsSync(AUTH_FILE)) return { accounts: {} };
+    const raw = readFileSync(AUTH_FILE, "utf-8");
+    const data = JSON.parse(raw);
+    // Legacy flat format: { token, user } → migrate under default production origin
+    if (data.token && data.user && !data.accounts) {
+      return {
+        accounts: { [authOrigin(DEFAULT_API_URL)]: { token: data.token, user: data.user } },
+      };
+    }
+    if (data.accounts && typeof data.accounts === "object") return data as AuthStore;
+    return { accounts: {} };
+  } catch {
+    return { accounts: {} };
+  }
+}
+
+function writeAuthStoreSync(store: AuthStore): void {
+  mkdirSync(AUTH_DIR, { recursive: true, mode: 0o700 });
+  writeFileSync(AUTH_FILE, JSON.stringify(store, null, 2), { mode: 0o600 });
+}
+
+async function writeAuthStoreAsync(store: AuthStore): Promise<void> {
+  await mkdir(AUTH_DIR, { recursive: true, mode: 0o700 });
+  await writeFile(AUTH_FILE, JSON.stringify(store, null, 2), { mode: 0o600 });
+}
+
+/** Load auth token for the given API URL (defaults to current VIBE_REPLAY_API_URL) */
+export function loadAuthToken(apiUrl?: string): AuthData | null {
+  const store = readAuthStore();
+  const origin = authOrigin(apiUrl || getApiUrl());
+  const entry = store.accounts[origin];
+  if (!entry?.token || !entry?.user) return null;
+  return entry;
+}
+
+/** Load any available auth token, returning which origin it belongs to.
+ *  Used by BFF proxy: if no token for the current env, use whatever we have
+ *  and proxy to THAT origin instead. */
+export function loadAnyAuthToken(): (AuthData & { origin: string }) | null {
+  const store = readAuthStore();
+  for (const [origin, entry] of Object.entries(store.accounts)) {
+    if (entry?.token && entry?.user) {
+      return { ...entry, origin };
+    }
+  }
+  return null;
+}
+
+/** Load all stored auth tokens with their origins. Used by logout to clear everything. */
+export function loadAllAuthTokens(): { origin: string }[] {
+  const store = readAuthStore();
+  return Object.keys(store.accounts).map((origin) => ({ origin }));
+}
+
+/** Save auth token keyed by API URL origin (sync, for CLI callback handlers) */
+export function saveAuthTokenSync(data: AuthData, apiUrl?: string): void {
+  const store = readAuthStore();
+  store.accounts[authOrigin(apiUrl || getApiUrl())] = data;
+  writeAuthStoreSync(store);
+}
+
+/** Save auth token keyed by API URL origin (async) */
+export async function saveAuthToken(data: AuthData, apiUrl?: string): Promise<void> {
+  const store = readAuthStore();
+  store.accounts[authOrigin(apiUrl || getApiUrl())] = data;
+  await writeAuthStoreAsync(store);
+}
+
+/** Remove auth token for the given API URL origin. Deletes file if no accounts remain. */
+export async function removeAuthToken(apiUrl?: string): Promise<void> {
+  const store = readAuthStore();
+  delete store.accounts[authOrigin(apiUrl || getApiUrl())];
+  if (Object.keys(store.accounts).length === 0) {
+    try {
+      await unlink(AUTH_FILE);
+    } catch {
+      // Already gone
+    }
+  } else {
+    await writeAuthStoreAsync(store);
+  }
+}
+
+/** Remove auth token (sync). Deletes file if no accounts remain. */
+export function removeAuthTokenSync(apiUrl?: string): void {
+  const store = readAuthStore();
+  delete store.accounts[authOrigin(apiUrl || getApiUrl())];
+  if (Object.keys(store.accounts).length === 0) {
+    try {
+      rmSync(AUTH_FILE);
+    } catch {
+      // Already gone
+    }
+  } else {
+    writeAuthStoreSync(store);
+  }
+}
+
+/** Get the auth file path (for display purposes) */
+export function getAuthFilePath(): string {
+  return AUTH_FILE;
 }
 
 export function getApiUrl(): string {
   return process.env.VIBE_REPLAY_API_URL || DEFAULT_API_URL;
+}
+
+/** HTTPS targets use __Secure- prefixed cookie names (Better Auth convention) */
+export function getSessionCookieName(apiUrl?: string): string {
+  const url = apiUrl || getApiUrl();
+  return url.startsWith("https://")
+    ? "__Secure-better-auth.session_token"
+    : "better-auth.session_token";
 }
 
 export async function publishCloud(
@@ -67,7 +183,7 @@ export async function publishCloud(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Cookie: `better-auth.session_token=${auth.token}`,
+      Cookie: `${getSessionCookieName(apiUrl)}=${auth.token}`,
     },
     body: JSON.stringify({
       replay,

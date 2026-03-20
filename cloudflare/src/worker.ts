@@ -66,13 +66,16 @@ app.post("/api/auth/sign-out", async (c) => {
   } catch {
     // Session may already be gone — still clear cookies
   }
-  // Clear all Better Auth cookies
-  const cookieNames = [
+  // Clear all Better Auth cookies (both prefixed and non-prefixed variants)
+  const baseCookieNames = [
     "better-auth.session_token",
     "better-auth.session_data",
     "better-auth.dont_remember",
   ];
   const isDev = c.env.BETTER_AUTH_URL?.startsWith("http://localhost");
+  const cookieNames = isDev
+    ? baseCookieNames
+    : [...baseCookieNames, ...baseCookieNames.map((n) => `__Secure-${n}`)];
   const setCookies = cookieNames.map(
     (name) => `${name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${isDev ? "" : "; Secure"}`,
   );
@@ -269,6 +272,17 @@ body{background:#0a0a0f;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFo
 <p class="msg">Please close this window and try again.</p>
 </div></body></html>`);
   }
+  // Read the signed session cookie — Better Auth cookies are in `token.signature`
+  // format. The session API returns only the raw token, but the BFF must send the
+  // full signed cookie for auth to work.
+  const isDev = c.env.BETTER_AUTH_URL.startsWith("http://localhost");
+  const cookieName = isDev ? "better-auth.session_token" : "__Secure-better-auth.session_token";
+  const cookies = (c.req.raw.headers.get("cookie") || "").split(";").map((s) => s.trim());
+  const sessionCookie = cookies.find((ck) => ck.startsWith(`${cookieName}=`));
+  const signedToken = sessionCookie
+    ? decodeURIComponent(sessionCookie.slice(cookieName.length + 1))
+    : session.session.token;
+
   const payload = {
     nonce,
     user: {
@@ -277,7 +291,7 @@ body{background:#0a0a0f;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFo
       email: session.user.email,
       image: session.user.image,
     },
-    token: session.session.token,
+    token: signedToken,
   };
   const payloadJson = JSON.stringify(payload);
   // Escape for embedding in <script> — browsers close <script> on </

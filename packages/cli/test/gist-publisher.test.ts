@@ -27,6 +27,23 @@ describe("gist publisher", () => {
       writeFileSync(
         authPath,
         JSON.stringify({
+          accounts: {
+            "https://vibe-replay.com": {
+              token: "test-token",
+              user: { id: "u1", name: "Test" },
+            },
+          },
+        }),
+      );
+      const status = checkPublishStatus();
+      expect(status.available).toBe(true);
+    });
+
+    it("returns available with legacy flat format (backward compat)", () => {
+      const authPath = join(mockAuthDir, ".config", "vibe-replay", "auth.json");
+      writeFileSync(
+        authPath,
+        JSON.stringify({
           token: "test-token",
           user: { id: "u1", name: "Test" },
         }),
@@ -43,7 +60,12 @@ describe("gist publisher", () => {
 
     it("returns unavailable when auth.json has no token", () => {
       const authPath = join(mockAuthDir, ".config", "vibe-replay", "auth.json");
-      writeFileSync(authPath, JSON.stringify({ user: { id: "u1" } }));
+      writeFileSync(
+        authPath,
+        JSON.stringify({
+          accounts: { "https://vibe-replay.com": { user: { id: "u1" } } },
+        }),
+      );
       const status = checkPublishStatus();
       expect(status.available).toBe(false);
     });

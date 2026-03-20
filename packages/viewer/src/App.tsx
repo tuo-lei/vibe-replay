@@ -59,6 +59,7 @@ function DashboardAuthStatus({ isEditor }: { isEditor: boolean }) {
         e.data.user
       ) {
         setAuth({ authenticated: true, user: e.data.user });
+        window.dispatchEvent(new Event("vibe-auth-change"));
       }
     };
     window.addEventListener("message", onMessage);
@@ -137,6 +138,7 @@ function DashboardAuthStatus({ isEditor }: { isEditor: boolean }) {
                   authPollTimeoutRef.current = null;
                 }
                 setAuth({ authenticated: true, user: s.user || null });
+                window.dispatchEvent(new Event("vibe-auth-change"));
               }
             } catch {}
           }, 2000);
