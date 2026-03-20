@@ -41,6 +41,14 @@ export function getApiUrl(): string {
   return process.env.VIBE_REPLAY_API_URL || DEFAULT_API_URL;
 }
 
+/** HTTPS targets use __Secure- prefixed cookie names (Better Auth convention) */
+export function getSessionCookieName(apiUrl?: string): string {
+  const url = apiUrl || getApiUrl();
+  return url.startsWith("https://")
+    ? "__Secure-better-auth.session_token"
+    : "better-auth.session_token";
+}
+
 export async function publishCloud(
   outputDir: string,
   opts?: { visibility?: "public" | "unlisted" | "private" },
@@ -67,7 +75,7 @@ export async function publishCloud(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Cookie: `better-auth.session_token=${auth.token}`,
+      Cookie: `${getSessionCookieName(apiUrl)}=${auth.token}`,
     },
     body: JSON.stringify({
       replay,

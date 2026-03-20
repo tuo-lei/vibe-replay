@@ -148,7 +148,6 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
 
   const cloudApiUrl = __CLOUD_API_URL__;
   const cloudApiBase = isEditor ? "" : cloudApiUrl;
-  const cloudAuthFetchInit = isEditor ? {} : { credentials: "include" as const };
   const cloudAuthOrigin = useMemo(() => {
     if (isEditor) return "";
     try {
@@ -199,66 +198,69 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
   const cloudTooBig = replaySize > CLOUD_MAX;
   const gistTooBig = replaySize > GIST_MAX;
 
+  // Auth + cloud data check — extracted so it can re-run on login events
+  // biome-ignore lint/correctness/useExhaustiveDependencies: session is stable after initial load; including it would cause infinite re-fetches
+  const refreshAuthAndCloudData = useCallback(() => {
+    if (!isEditor) return;
+    cloudFetch("/api/auth/get-session")
+      .then((r) => r.json())
+      .then((data: any) => {
+        const loggedIn = !!data?.session;
+        setGhAvailable(loggedIn);
+        if (loggedIn) {
+          cloudFetch("/api/cloud-replays")
+            .then((r2) => r2.json())
+            .then((d: any) => {
+              setStorageUsed(d.storage?.used ?? null);
+              setStorageLimit(d.storage?.limit ?? null);
+              if (session) {
+                fetch(apiUrl("/api/cloud-info"))
+                  .then((lr) => lr.json())
+                  .then((ld: any) => {
+                    const localId = ld?.cloud?.id;
+                    const verify = localId
+                      ? (d.replays || []).find((r: any) => r.id === localId)
+                      : null;
+                    const match =
+                      verify ||
+                      (d.replays || []).find(
+                        (r: any) =>
+                          r.storageType === "r2" &&
+                          r.title === (session.meta.title || session.meta.slug),
+                      );
+                    if (match) {
+                      const info = {
+                        id: match.id,
+                        url: `${cloudApiUrl}/r/${match.id}`,
+                        expiresAt: match.expiresAt || "",
+                        visibility: match.visibility,
+                      };
+                      setCloudInfo(info);
+                      if (match.visibility) setCloudVisibility(match.visibility);
+                      if (!verify) {
+                        fetch(apiUrl("/api/cloud-info"), {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify(info),
+                        }).catch(() => {});
+                      }
+                    }
+                  })
+                  .catch(() => {});
+              }
+            })
+            .catch(() => {});
+        }
+      })
+      .catch(() => setGhAvailable(false));
+  }, [isEditor, cloudFetch]);
+
   // Fetch publish status, gist info, and existing export files
   // biome-ignore lint/correctness/useExhaustiveDependencies: session is stable after initial load; including it would cause infinite re-fetches
   useEffect(() => {
     if (!isEditor) return;
     if (publishGist) {
-      // Editor mode uses local BFF auth for parity with pnpm start / npx.
-      cloudFetch("/api/auth/get-session", cloudAuthFetchInit)
-        .then((r) => r.json())
-        .then((data: any) => {
-          const loggedIn = !!data?.session;
-          setGhAvailable(loggedIn);
-          // Fetch storage usage + cloud replays list (source of truth for visibility)
-          if (loggedIn) {
-            cloudFetch("/api/cloud-replays", cloudAuthFetchInit)
-              .then((r2) => r2.json())
-              .then((d: any) => {
-                setStorageUsed(d.storage?.used ?? null);
-                setStorageLimit(d.storage?.limit ?? null);
-                // Find existing cloud share for this session
-                if (session) {
-                  // Try local cloud-info first (has exact ID), then fall back to title match
-                  fetch(apiUrl("/api/cloud-info"))
-                    .then((lr) => lr.json())
-                    .then((ld: any) => {
-                      const localId = ld?.cloud?.id;
-                      const verify = localId
-                        ? (d.replays || []).find((r: any) => r.id === localId)
-                        : null;
-                      const match =
-                        verify ||
-                        (d.replays || []).find(
-                          (r: any) =>
-                            r.storageType === "r2" &&
-                            r.title === (session.meta.title || session.meta.slug),
-                        );
-                      if (match) {
-                        const info = {
-                          id: match.id,
-                          url: `${cloudApiUrl}/r/${match.id}`,
-                          expiresAt: match.expiresAt || "",
-                          visibility: match.visibility,
-                        };
-                        setCloudInfo(info);
-                        if (match.visibility) setCloudVisibility(match.visibility);
-                        if (!verify) {
-                          fetch(apiUrl("/api/cloud-info"), {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify(info),
-                          }).catch(() => {});
-                        }
-                      }
-                    })
-                    .catch(() => {});
-                }
-              })
-              .catch(() => {});
-          }
-        })
-        .catch(() => setGhAvailable(false));
+      refreshAuthAndCloudData();
 
       setGistInfoLoading(true);
       fetch(apiUrl("/api/gist-info"))
@@ -292,7 +294,15 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
         })
         .catch(() => {});
     }
-  }, [isEditor, publishGist, exportGithub, cloudFetch]);
+  }, [isEditor, publishGist, exportGithub, cloudFetch, refreshAuthAndCloudData]);
+
+  // Re-check auth when login happens elsewhere (e.g. DashboardAuthStatus header)
+  useEffect(() => {
+    if (!isEditor) return;
+    const onAuthChange = () => refreshAuthAndCloudData();
+    window.addEventListener("vibe-auth-change", onAuthChange);
+    return () => window.removeEventListener("vibe-auth-change", onAuthChange);
+  }, [isEditor, refreshAuthAndCloudData]);
 
   const handlePublishGist = useCallback(async () => {
     if (!session) return;
@@ -319,6 +329,10 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}));
         const errMsg = (data as any).error || "Gist publish failed";
+        if (resp.status === 401) {
+          setGhAvailable(false);
+          throw new Error(errMsg);
+        }
         // If gist was deleted on GitHub, clear stale local info + state
         if (gistInfo && (resp.status === 404 || errMsg.includes("not found"))) {
           setGistInfo(null);
@@ -365,6 +379,9 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
       });
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}));
+        if (resp.status === 401) {
+          setGhAvailable(false);
+        }
         throw new Error((data as any).error || "Upload failed");
       }
       const result = (await resp.json()) as { id: string; url: string; expiresAt: string };
@@ -626,6 +643,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                                   authPollTimeoutRef.current = null;
                                 }
                                 setGhAvailable(true);
+                                window.dispatchEvent(new Event("vibe-auth-change"));
                               }
                             } catch {}
                           }, 2000);
@@ -657,6 +675,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                               authMessageTimeoutRef.current = null;
                             }
                             setGhAvailable(true);
+                            window.dispatchEvent(new Event("vibe-auth-change"));
                           }
                         };
                         authMessageListenerRef.current = onMsg;

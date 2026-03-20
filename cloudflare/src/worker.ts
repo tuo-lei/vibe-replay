@@ -66,13 +66,16 @@ app.post("/api/auth/sign-out", async (c) => {
   } catch {
     // Session may already be gone — still clear cookies
   }
-  // Clear all Better Auth cookies
-  const cookieNames = [
+  // Clear all Better Auth cookies (both prefixed and non-prefixed variants)
+  const baseCookieNames = [
     "better-auth.session_token",
     "better-auth.session_data",
     "better-auth.dont_remember",
   ];
   const isDev = c.env.BETTER_AUTH_URL?.startsWith("http://localhost");
+  const cookieNames = isDev
+    ? baseCookieNames
+    : [...baseCookieNames, ...baseCookieNames.map((n) => `__Secure-${n}`)];
   const setCookies = cookieNames.map(
     (name) => `${name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${isDev ? "" : "; Secure"}`,
   );

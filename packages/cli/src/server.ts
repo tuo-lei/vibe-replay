@@ -22,7 +22,13 @@ import { generateGitHubGif } from "./formatters/gif.js";
 import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.js";
 import { generateOutput } from "./generator.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
-import { getApiUrl, loadAuthToken, loadSavedCloudInfo, publishCloud } from "./publishers/cloud.js";
+import {
+  getApiUrl,
+  getSessionCookieName,
+  loadAuthToken,
+  loadSavedCloudInfo,
+  publishCloud,
+} from "./publishers/cloud.js";
 import {
   checkPublishStatus,
   loadSavedGistInfo,
@@ -1085,11 +1091,13 @@ export async function startServer(
     }
   }
 
+  const sessionCookieName = getSessionCookieName(cloudApiBaseUrl);
+
   async function fetchCloudApiWithLocalAuth(path: string, init: RequestInit = {}) {
     const auth = readLocalAuthSession();
     if (!auth) return { unauthorized: true as const };
     const headers = new Headers(init.headers);
-    headers.set("Cookie", `better-auth.session_token=${auth.token}`);
+    headers.set("Cookie", `${sessionCookieName}=${auth.token}`);
     const response = await fetch(`${cloudApiBaseUrl}${path}`, { ...init, headers });
     return { unauthorized: false as const, response };
   }
@@ -1100,7 +1108,9 @@ export async function startServer(
     return c.json({ authenticated: true, user: auth.user || null });
   });
 
-  // Better Auth-shaped local session endpoint for editor mode parity
+  // Better Auth-shaped local session endpoint for editor mode parity.
+  // Trusts local auth.json — actual token validation happens lazily when
+  // BFF-proxied cloud calls return 401 (which clears stale auth).
   app.get("/api/auth/get-session", async (c) => {
     const auth = readLocalAuthSession();
     if (!auth) return c.json({ session: null, user: null });

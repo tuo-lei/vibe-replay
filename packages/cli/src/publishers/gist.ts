@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { getApiUrl, loadAuthToken } from "./cloud.js";
+import { getApiUrl, getSessionCookieName, loadAuthToken } from "./cloud.js";
 
 const GIST_META_FILE = ".vibe-replay-gist.json";
 
@@ -61,7 +61,7 @@ export async function publishGist(
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        Cookie: `better-auth.session_token=${auth.token}`,
+        Cookie: `${getSessionCookieName(apiUrl)}=${auth.token}`,
       },
       body: JSON.stringify({ filename, content, description }),
     });
@@ -82,7 +82,7 @@ export async function publishGist(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Cookie: `better-auth.session_token=${auth.token}`,
+        Cookie: `${getSessionCookieName(apiUrl)}=${auth.token}`,
       },
       body: JSON.stringify({ filename, content, description, public: true }),
     });

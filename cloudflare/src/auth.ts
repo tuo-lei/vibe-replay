@@ -49,6 +49,10 @@ export function createAuth(env: AuthEnv) {
         scope: ["read:user", "user:email", "gist"],
       },
     },
+    session: {
+      expiresIn: 60 * 60 * 24 * 30, // 30 days
+      updateAge: 60 * 60 * 24, // refresh if accessed after 1 day
+    },
     emailAndPassword: { enabled: false },
     account: {
       encryptOAuthTokens: true,
