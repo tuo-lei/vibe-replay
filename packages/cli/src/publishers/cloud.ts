@@ -90,6 +90,12 @@ export function loadAnyAuthToken(): (AuthData & { origin: string }) | null {
   return null;
 }
 
+/** Load all stored auth tokens with their origins. Used by logout to clear everything. */
+export function loadAllAuthTokens(): { origin: string }[] {
+  const store = readAuthStore();
+  return Object.keys(store.accounts).map((origin) => ({ origin }));
+}
+
 /** Save auth token keyed by API URL origin (sync, for CLI callback handlers) */
 export function saveAuthTokenSync(data: AuthData, apiUrl?: string): void {
   const store = readAuthStore();

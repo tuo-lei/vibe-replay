@@ -213,14 +213,18 @@ describe("viewer auth consistency", () => {
       waitUntil: "networkidle",
     });
 
-    // Wait for auth checks
-    await page.waitForTimeout(3000);
+    // Wait for auth check to complete (avatar or sign-in button appears)
+    await page
+      .locator("header img[alt], header button:has-text('Sign in')")
+      .first()
+      .waitFor({ timeout: 10000 })
+      .catch(() => {});
 
     // Click SHARE & EXPORT tab if visible
     const shareTab = page.locator("button", { hasText: /share/i }).first();
     if (await shareTab.isVisible().catch(() => false)) {
       await shareTab.click();
-      await page.waitForTimeout(2000);
+      await page.waitForLoadState("networkidle").catch(() => {});
     }
 
     // Header should NOT show "Sign in" button (user is logged in)

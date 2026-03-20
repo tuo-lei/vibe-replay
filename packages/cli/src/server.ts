@@ -25,6 +25,7 @@ import { getAllProviders, getProvider } from "./providers/index.js";
 import {
   getApiUrl,
   getSessionCookieName,
+  loadAllAuthTokens,
   loadAnyAuthToken,
   loadAuthToken,
   loadSavedCloudInfo,
@@ -1105,12 +1106,9 @@ export async function startServer(
 
   async function clearLocalAuthSession() {
     // Remove ALL tokens — user expects a full logout, not per-env
-    const candidates = getAuthCandidates();
-    for (const c of candidates) {
-      await removeAuthToken(c.apiUrl);
+    for (const entry of loadAllAuthTokens()) {
+      await removeAuthToken(entry.origin);
     }
-    // Also remove for current env in case it wasn't in candidates
-    await removeAuthToken(cloudApiBaseUrl);
   }
 
   /** Build an ordered list of (token, apiUrl) pairs to try.
