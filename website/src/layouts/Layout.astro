@@ -5,19 +5,32 @@ interface Props {
   title: string;
   description?: string;
   canonicalPath?: string;
+  ogImage?: string;
+  ogType?: "website" | "article";
+  article?: {
+    publishedTime: string;
+    author: string;
+  };
+  jsonLd?: Record<string, unknown>;
 }
 
 const {
   title,
   description = "vibe-replay turns your Claude Code and Cursor sessions into interactive, shareable web replays as single self-contained HTML files.",
   canonicalPath,
+  ogImage: ogImageProp,
+  ogType = "website",
+  article,
+  jsonLd: jsonLdProp,
 } = Astro.props;
 
 const siteBase = import.meta.env.SITE;
 const canonicalURL = canonicalPath
   ? new URL(canonicalPath, siteBase).href
   : new URL(Astro.url.pathname, siteBase).href;
-const ogImage = new URL("/og.png", siteBase).href;
+const ogImage = ogImageProp
+  ? new URL(ogImageProp, siteBase).href
+  : new URL("/og.png", siteBase).href;
 ---
 
 <!doctype html>
@@ -29,12 +42,13 @@ const ogImage = new URL("/og.png", siteBase).href;
     <meta name="theme-color" content="#00e5a0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="canonical" href={canonicalURL} />
+    <link rel="alternate" type="application/rss+xml" title="vibe-replay blog" href="/rss.xml" />
     <title>{title}</title>
 
     <!-- Open Graph -->
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
-    <meta property="og:type" content="website" />
+    <meta property="og:type" content={ogType} />
     <meta property="og:url" content={canonicalURL} />
     <meta property="og:image" content={ogImage} />
     <meta property="og:image:width" content="1200" />
@@ -43,6 +57,8 @@ const ogImage = new URL("/og.png", siteBase).href;
     <meta property="og:image:alt" content="vibe-replay — AI coding session replays" />
     <meta property="og:site_name" content="vibe-replay" />
     <meta property="og:locale" content="en_US" />
+    {article && <meta property="article:published_time" content={article.publishedTime} />}
+    {article && <meta property="article:author" content={article.author} />}
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
@@ -50,7 +66,7 @@ const ogImage = new URL("/og.png", siteBase).href;
     <meta name="twitter:image:alt" content="vibe-replay — AI coding session replays" />
 
     <!-- Structured Data -->
-    <script type="application/ld+json" set:html={JSON.stringify({
+    <script type="application/ld+json" set:html={JSON.stringify(jsonLdProp ?? {
       "@context": "https://schema.org",
       "@type": "WebApplication",
       "name": "vibe-replay",
