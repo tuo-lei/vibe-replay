@@ -3,19 +3,11 @@ import { getCollection } from "astro:content";
 import Footer from "../../components/Footer.astro";
 import Nav from "../../components/Nav.astro";
 import Layout from "../../layouts/Layout.astro";
+import { formatDate } from "../../utils/date";
 
 const posts = (await getCollection("blog", ({ data }) => data.draft !== true)).sort(
   (a, b) => b.data.date.getTime() - a.data.date.getTime(),
 );
-
-// Format date in UTC to avoid timezone shift (YAML dates are midnight UTC)
-const formatDate = (date: Date) =>
-  date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  });
 ---
 
 <Layout title="Blog — vibe-replay" description="Updates, guides, and stories from the vibe-replay project.">

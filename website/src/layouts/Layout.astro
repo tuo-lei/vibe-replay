@@ -5,19 +5,23 @@ interface Props {
   title: string;
   description?: string;
   canonicalPath?: string;
+  ogImage?: string;
 }
 
 const {
   title,
   description = "vibe-replay turns your Claude Code and Cursor sessions into interactive, shareable web replays as single self-contained HTML files.",
   canonicalPath,
+  ogImage: ogImageProp,
 } = Astro.props;
 
 const siteBase = import.meta.env.SITE;
 const canonicalURL = canonicalPath
   ? new URL(canonicalPath, siteBase).href
   : new URL(Astro.url.pathname, siteBase).href;
-const ogImage = new URL("/og.png", siteBase).href;
+const ogImage = ogImageProp
+  ? new URL(ogImageProp, siteBase).href
+  : new URL("/og.png", siteBase).href;
 ---
 
 <!doctype html>
