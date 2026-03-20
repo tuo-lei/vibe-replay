@@ -19,9 +19,36 @@ interface Props {
 
 const { post } = Astro.props;
 const { Content } = await render(post);
+
+const siteBase = import.meta.env.SITE;
+const blogPostJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  headline: post.data.title,
+  description: post.data.excerpt,
+  datePublished: post.data.date.toISOString(),
+  author: {
+    "@type": "Person",
+    name: post.data.author,
+    url: post.data.authorUrl,
+  },
+  ...(post.data.cover ? { image: new URL(post.data.cover, siteBase).href } : {}),
+  publisher: {
+    "@type": "Organization",
+    name: "vibe-replay",
+    url: siteBase,
+  },
+};
 ---
 
-<Layout title={`${post.data.title} — vibe-replay`} description={post.data.excerpt} ogImage={post.data.cover}>
+<Layout
+  title={`${post.data.title} — vibe-replay`}
+  description={post.data.excerpt}
+  ogImage={post.data.cover}
+  ogType="article"
+  article={{ publishedTime: post.data.date.toISOString(), author: post.data.author }}
+  jsonLd={blogPostJsonLd}
+>
   <Nav active="blog" />
 
   <main class="min-h-screen pt-16 pb-20 px-6">
