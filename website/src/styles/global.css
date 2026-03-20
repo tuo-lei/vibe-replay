@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 /* Custom theme */
 @theme {
@@ -10,8 +11,8 @@
   --color-surface-3: #24243a;
   --color-border: #2a2a3e;
   --color-text-primary: #e8e8f0;
-  --color-text-secondary: #8888a0;
-  --color-text-muted: #555568;
+  --color-text-secondary: #a8a8be;
+  --color-text-muted: #72728c;
 
   --font-sans: "Inter", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", "SF Mono", Consolas, monospace;

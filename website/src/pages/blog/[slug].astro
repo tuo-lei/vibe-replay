@@ -1,0 +1,88 @@
+---
+import { type CollectionEntry, getCollection, render } from "astro:content";
+import Footer from "../../components/Footer.astro";
+import Nav from "../../components/Nav.astro";
+import Layout from "../../layouts/Layout.astro";
+
+export async function getStaticPaths() {
+  const posts = await getCollection("blog", ({ data }) => data.draft !== true);
+  return posts.map((post) => ({
+    params: { slug: post.id },
+    props: { post },
+  }));
+}
+
+interface Props {
+  post: CollectionEntry<"blog">;
+}
+
+const { post } = Astro.props;
+const { Content } = await render(post);
+
+const formatDate = (date: Date) =>
+  date.toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+---
+
+<Layout title={`${post.data.title} — vibe-replay`} description={post.data.excerpt}>
+  <Nav active="blog" />
+
+  <main class="min-h-screen pt-16 pb-20 px-6">
+    <article class="max-w-4xl mx-auto">
+      <!-- Header -->
+      <header class="mb-12 animate-slide-up">
+        <div class="flex items-center gap-3 text-sm text-text-muted mb-4">
+          <a href={post.data.authorUrl} target="_blank" rel="noopener" class="text-text-secondary hover:text-accent transition-colors">
+            {post.data.author}
+          </a>
+          <span>&middot;</span>
+          <time datetime={post.data.date.toISOString().split("T")[0]}>
+            {formatDate(post.data.date)}
+          </time>
+          <span>&middot;</span>
+          <span>{post.data.readTime}</span>
+        </div>
+
+        <h1 class="text-3xl md:text-4xl font-bold leading-tight mb-4">
+          {post.data.title}
+        </h1>
+
+        <p class="text-lg text-text-secondary leading-relaxed">
+          {post.data.excerpt}
+        </p>
+      </header>
+
+      <!-- Content -->
+      <div class="prose prose-invert prose-lg max-w-none
+                  prose-headings:text-text-primary prose-headings:font-semibold
+                  prose-p:text-text-secondary prose-p:leading-relaxed
+                  prose-a:text-accent prose-a:no-underline hover:prose-a:underline
+                  prose-strong:text-text-primary prose-strong:font-semibold
+                  prose-code:text-accent prose-code:bg-surface-2 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-sm prose-code:before:content-[''] prose-code:after:content-['']
+                  prose-pre:bg-surface-1 prose-pre:border prose-pre:border-border
+                  [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-inherit
+                  prose-ul:text-text-secondary prose-li:text-text-secondary
+                  prose-ol:text-text-secondary
+                  prose-blockquote:border-l-accent prose-blockquote:text-text-secondary prose-blockquote:italic
+                  prose-h2:mt-12 prose-h2:mb-4
+                  prose-h3:mt-8 prose-h3:mb-3
+                  prose-hr:border-border">
+        <Content />
+      </div>
+
+      <!-- Back link -->
+      <div class="mt-16 pt-8 border-t border-border">
+        <a href="/blog/" class="inline-flex items-center gap-2 text-accent hover:text-accent-dim font-medium transition-colors group">
+          <span class="group-hover:-translate-x-1 transition-transform">&larr;</span>
+          All posts
+        </a>
+      </div>
+    </article>
+  </main>
+
+  <Footer />
+</Layout>
