@@ -327,8 +327,8 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
         }),
       });
       if (!resp.ok) {
-        const data = await resp.json().catch(() => ({}));
-        const errMsg = (data as any).error || "Gist publish failed";
+        const data = (await resp.json().catch(() => ({}))) as { error?: string };
+        const errMsg = data.error || "Gist publish failed";
         if (resp.status === 401) {
           setGhAvailable(false);
           throw new Error(errMsg);
@@ -358,8 +358,8 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
         updatedAt: new Date().toISOString(),
       });
       setGistStatus({ type: "success", text: "Published!" });
-    } catch (e: any) {
-      setGistStatus({ type: "error", text: e.message });
+    } catch (e) {
+      setGistStatus({ type: "error", text: e instanceof Error ? e.message : String(e) });
     } finally {
       setGistPublishingLocal(false);
     }
@@ -378,11 +378,11 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
         body: JSON.stringify({ replay: session, visibility: cloudVisibility }),
       });
       if (!resp.ok) {
-        const data = await resp.json().catch(() => ({}));
+        const data = (await resp.json().catch(() => ({}))) as { error?: string };
         if (resp.status === 401) {
           setGhAvailable(false);
         }
-        throw new Error((data as any).error || "Upload failed");
+        throw new Error(data.error || "Upload failed");
       }
       const result = (await resp.json()) as { id: string; url: string; expiresAt: string };
       // Delete old one after successful upload
@@ -403,14 +403,16 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
       // Refresh storage usage (after delete completed)
       const storageResp = await cloudFetch("/api/cloud-replays").catch(() => null);
       if (storageResp) {
-        const storageData = (await storageResp.json().catch(() => null)) as any;
+        const storageData = (await storageResp.json().catch(() => null)) as {
+          storage?: { used?: number; limit?: number };
+        } | null;
         if (storageData?.storage) {
           setStorageUsed(storageData.storage.used ?? null);
           setStorageLimit(storageData.storage.limit ?? null);
         }
       }
-    } catch (e: any) {
-      setCloudStatus({ type: "error", text: e.message });
+    } catch (e) {
+      setCloudStatus({ type: "error", text: e instanceof Error ? e.message : String(e) });
     } finally {
       setCloudSharing(false);
     }
@@ -425,8 +427,8 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
         method: "DELETE",
       });
       if (!resp.ok) {
-        const data = await resp.json().catch(() => ({}));
-        throw new Error((data as any).error || "Delete failed");
+        const data = (await resp.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error || "Delete failed");
       }
       setCloudInfo(null);
       setCloudStatus({ type: "success", text: "Removed from cloud" });
@@ -442,8 +444,8 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
           setStorageLimit(d.storage?.limit ?? null);
         })
         .catch(() => {});
-    } catch (e: any) {
-      setCloudStatus({ type: "error", text: e.message });
+    } catch (e) {
+      setCloudStatus({ type: "error", text: e instanceof Error ? e.message : String(e) });
     } finally {
       setCloudSharing(false);
     }
@@ -469,8 +471,8 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
         replayUrl: result.replayUrl,
         warnings: result.warnings,
       });
-    } catch (e: any) {
-      setGhError(e.message);
+    } catch (e) {
+      setGhError(e instanceof Error ? e.message : String(e));
     } finally {
       setGhExporting(false);
     }
@@ -1331,8 +1333,11 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                         try {
                           const path = await exportHtml();
                           setHtmlStatus({ type: "success", text: path });
-                        } catch (e: any) {
-                          setHtmlStatus({ type: "error", text: e.message });
+                        } catch (e) {
+                          setHtmlStatus({
+                            type: "error",
+                            text: e instanceof Error ? e.message : String(e),
+                          });
                         }
                       }}
                       disabled={htmlExporting}

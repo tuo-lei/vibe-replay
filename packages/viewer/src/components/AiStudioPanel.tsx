@@ -195,9 +195,9 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
         type: "success",
         text: `Score ${result.score}/10 \u2014 ${result.itemCount} comment(s)`,
       });
-    } catch (e: any) {
-      if (e?.name === "AbortError") return;
-      setCoachStatus({ type: "error", text: e?.message || "AI Coach failed" });
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
+      setCoachStatus({ type: "error", text: e instanceof Error ? e.message : "AI Coach failed" });
     }
   }, [runAiCoach]);
 
@@ -211,9 +211,12 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
         type: "success",
         text: `${result.translated} message(s) translated, ${result.skipped} unchanged`,
       });
-    } catch (e: any) {
-      if (e?.name === "AbortError") return;
-      setTranslateStatus({ type: "error", text: e?.message || "Translation failed" });
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
+      setTranslateStatus({
+        type: "error",
+        text: e instanceof Error ? e.message : "Translation failed",
+      });
     }
   }, [runTranslate, targetLang]);
 
@@ -227,9 +230,12 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
         type: "success",
         text: `${result.adjusted} prompt(s) adjusted, ${result.skipped} unchanged`,
       });
-    } catch (e: any) {
-      if (e?.name === "AbortError") return;
-      setToneStatus({ type: "error", text: e?.message || "Tone adjustment failed" });
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
+      setToneStatus({
+        type: "error",
+        text: e instanceof Error ? e.message : "Tone adjustment failed",
+      });
     }
   }, [runTone, toneStyle]);
 

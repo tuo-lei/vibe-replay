@@ -165,7 +165,7 @@ app.get("/auth/success", async (c) => {
   const auth = createAuth(c.env);
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   const userJson = session?.user
-    ? JSON.stringify({ name: session.user.name, image: (session.user as any).image })
+    ? JSON.stringify({ name: session.user.name, image: session.user.image })
     : "null";
   // Get session token from cookie to pass back to opener
   const cookies = c.req.raw.headers.get("cookie") || "";
@@ -683,14 +683,14 @@ app.post("/api/gists", async (c) => {
   if (!gistResp.ok) {
     const err = await gistResp.text();
     console.error(`GitHub Gist API error (create): ${gistResp.status} ${err}`);
-    const status = gistResp.status as number;
+    const status = gistResp.status;
     const msg =
       status === 403
         ? "GitHub rejected the request (check OAuth permissions)"
         : status === 422
           ? "GitHub rejected the request (content too large?)"
           : `GitHub API error (${status})`;
-    return c.json({ error: msg }, status as any);
+    return c.json({ error: msg }, { status });
   }
 
   const gistData = (await gistResp.json()) as {
@@ -799,7 +799,7 @@ app.patch("/api/gists/:gistId", async (c) => {
   if (!gistResp.ok) {
     const err = await gistResp.text();
     console.error(`GitHub Gist API error: ${gistResp.status} ${err}`);
-    const status = gistResp.status as number;
+    const status = gistResp.status;
     const msg =
       status === 403
         ? "You don't have permission to edit this gist"
@@ -808,7 +808,7 @@ app.patch("/api/gists/:gistId", async (c) => {
           : status === 422
             ? "GitHub rejected the update (content too large?)"
             : `GitHub API error (${status})`;
-    return c.json({ error: msg }, status as any);
+    return c.json({ error: msg }, { status });
   }
 
   const gistData = (await gistResp.json()) as {
@@ -1240,7 +1240,8 @@ async function handlePostReplay(c: { env: Env; req: { json: () => Promise<any> }
     await db.insert(replays).values({ gistId, ...meta });
 
     return Response.json({ ok: true, created: true });
-  } catch {
+  } catch (e) {
+    console.error("ensureGistInDb failed:", e);
     return Response.json({ error: "internal error" }, { status: 500 });
   }
 }
