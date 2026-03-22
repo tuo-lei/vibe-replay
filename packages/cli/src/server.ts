@@ -40,6 +40,17 @@ import {
   type SavedGistInfo,
 } from "./publishers/gist.js";
 import { scanForSecrets } from "./scan.js";
+import {
+  aggregateProjectInsights,
+  aggregateUserInsights,
+  type BackgroundScanState,
+  type ProjectInsights,
+  readProjectMemory,
+  runBackgroundScan,
+  type ScanInput,
+  type SessionScanResult,
+  type UserInsights,
+} from "./scanner.js";
 import { transformToReplay } from "./transform.js";
 import type {
   Annotation,
@@ -251,6 +262,9 @@ async function scanSessionsFromDir(baseDir: string): Promise<any[]> {
       const firstMessage = userPrompts[0] || undefined;
       const messages = userPrompts.length > 0 ? userPrompts.slice(0, 2) : undefined;
 
+      const generatorVersion = session.meta.generator?.version;
+      const replayOutdated = generatorVersion ? generatorVersion !== CLI_VERSION : false;
+
       results.push({
         slug: entry,
         baseDir,
@@ -263,6 +277,8 @@ async function scanSessionsFromDir(baseDir: string): Promise<any[]> {
         endTime: session.meta.endTime,
         stats: session.meta.stats,
         replaySize: Buffer.byteLength(raw, "utf-8"),
+        generatorVersion,
+        replayOutdated,
         hasAnnotations: annotationCount > 0,
         annotationCount,
         firstMessage,
@@ -785,6 +801,131 @@ export async function startServer(
     });
   };
 
+  // ─── Background session scanner state ─────────────────────────────
+  let scanState: BackgroundScanState = {
+    running: false,
+    scanned: 0,
+    total: 0,
+    results: [],
+  };
+
+  // Pre-computed insights cache — populated after each scan completes.
+  // Kept across scans (stale-while-refresh): new scan overwrites, never clears.
+  let insightsCache: {
+    userInsights: UserInsights | null;
+    projectInsights: Map<string, ProjectInsights>;
+    computedAt: string | null;
+  } = {
+    userInsights: null,
+    projectInsights: new Map(),
+    computedAt: null,
+  };
+
+  /** Pre-compute all insights from scan results and store in cache. */
+  const precomputeInsightsCache = async (results: SessionScanResult[]): Promise<void> => {
+    // User-level insights
+    const user = aggregateUserInsights(results);
+
+    // Project-level insights for each unique project
+    const projects = new Map<string, ProjectInsights>();
+    const uniqueProjects = new Set(results.map((r) => r.project));
+    for (const project of uniqueProjects) {
+      const memory = await readProjectMemory(project);
+      const pi = aggregateProjectInsights(project, results, memory || undefined);
+      projects.set(project, pi);
+    }
+
+    // Enrich topProjects with memoryFileCount
+    for (const tp of user.topProjects) {
+      const pi = projects.get(tp.project);
+      if (pi?.memory) {
+        tp.memoryFileCount = pi.memory.memoryFiles.length;
+      }
+    }
+
+    insightsCache = {
+      userInsights: user,
+      projectInsights: projects,
+      computedAt: new Date().toISOString(),
+    };
+  };
+
+  /**
+   * Start background session scanning. Discovers all sessions, then scans
+   * each one (newest first) to extract metadata for insights. Uses cache
+   * so unchanged sessions are skipped.
+   */
+  const startBackgroundScan = (): void => {
+    if (scanState.running) return;
+    scanState = {
+      running: true,
+      scanned: 0,
+      total: 0,
+      results: [],
+      startedAt: new Date().toISOString(),
+    };
+
+    void (async () => {
+      try {
+        // Discover all sessions
+        const providers = getAllProviders();
+        const allSessions: SessionInfo[] = [];
+        for (const provider of providers) {
+          const sessions = await provider.discover();
+          allSessions.push(...sessions);
+        }
+        const merged = mergeSameSessions(allSessions);
+
+        // Normalize project paths
+        const home = homedir();
+        for (const s of merged) {
+          if (s.project.startsWith(home)) {
+            s.project = `~${s.project.slice(home.length)}`;
+          }
+        }
+
+        // Build scan inputs (newest first — already sorted by discovery)
+        const scanInputs: ScanInput[] = merged.map((s) => ({
+          sessionId: s.sessionId,
+          provider: s.provider,
+          project: s.project,
+          slug: s.slug,
+          filePaths: s.filePaths,
+          title: s.title,
+          firstPrompt: s.firstPrompt,
+        }));
+
+        scanState.total = scanInputs.length;
+
+        const results = await runBackgroundScan(scanInputs, (progress) => {
+          scanState = {
+            ...scanState,
+            scanned: progress.scanned,
+            total: progress.total,
+          };
+        });
+
+        scanState = {
+          running: false,
+          scanned: results.length,
+          total: scanInputs.length,
+          results,
+          startedAt: scanState.startedAt,
+          finishedAt: new Date().toISOString(),
+        };
+
+        // Pre-compute insights cache in background (non-blocking)
+        precomputeInsightsCache(results).catch(() => {});
+      } catch {
+        scanState = {
+          ...scanState,
+          running: false,
+          finishedAt: new Date().toISOString(),
+        };
+      }
+    })();
+  };
+
   const app = new Hono();
 
   // Serve viewer HTML with editor flag (prod) or redirect to Vite dev server (dev)
@@ -1125,6 +1266,76 @@ export async function startServer(
       regenerated: results.filter((r) => r.status === "regenerated").length,
       results,
     });
+  });
+
+  // --- Session scanner: background metadata extraction for insights ---
+
+  app.post("/api/scan/start", async (c) => {
+    startBackgroundScan();
+    return c.json({ ok: true, message: "Background scan started" });
+  });
+
+  app.get("/api/scan/status", async (c) => {
+    return c.json({
+      running: scanState.running,
+      scanned: scanState.scanned,
+      total: scanState.total,
+      resultCount: scanState.results.length,
+      startedAt: scanState.startedAt,
+      finishedAt: scanState.finishedAt,
+      hasInsights: insightsCache.userInsights !== null,
+    });
+  });
+
+  app.get("/api/scan/results", async (c) => {
+    return c.json({
+      results: scanState.results,
+      running: scanState.running,
+      scanned: scanState.scanned,
+      total: scanState.total,
+    });
+  });
+
+  app.get("/api/insights", async (c) => {
+    const project = c.req.query("project");
+
+    if (project) {
+      // Project-level: cache hit → O(1), miss → compute on demand
+      const cached = insightsCache.projectInsights.get(project);
+      if (cached) return c.json({ type: "project", insights: cached });
+
+      // Fallback: compute on demand
+      const scans = scanState.results;
+      if (!scans.length) {
+        return c.json({ error: "No scan results available. Start a scan first." }, 404);
+      }
+      const memory = await readProjectMemory(project);
+      const insights = aggregateProjectInsights(project, scans, memory || undefined);
+      insightsCache.projectInsights.set(project, insights);
+      return c.json({ type: "project", insights });
+    }
+
+    // User-level: cache hit → O(1)
+    if (insightsCache.userInsights) {
+      return c.json({ type: "user", insights: insightsCache.userInsights });
+    }
+
+    // Fallback: compute on demand
+    const scans = scanState.results;
+    if (!scans.length) {
+      return c.json({ error: "No scan results available. Start a scan first." }, 404);
+    }
+    const insights = aggregateUserInsights(scans);
+    return c.json({ type: "user", insights });
+  });
+
+  app.get("/api/memory", async (c) => {
+    const project = c.req.query("project");
+    if (!project) return c.json({ error: "project parameter required" }, 400);
+
+    const memory = await readProjectMemory(project);
+    if (!memory) return c.json({ memoryFiles: [], claudeMd: null });
+    return c.json(memory);
   });
 
   // --- Annotations (requires slug) ---

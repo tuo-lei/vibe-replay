@@ -1,0 +1,878 @@
+/**
+ * Session Scanner — lightweight metadata extraction from JSONL sessions.
+ *
+ * Unlike the full parser (which builds scenes/turns for replay), the scanner
+ * extracts only aggregate metadata for project/user-level insights. It reads
+ * each JSONL line once and collects counts, timestamps, branches, PRs, etc.
+ *
+ * Results are cached per-session keyed by (fileMtimeMs, fileSize, scannerVersion)
+ * so unchanged sessions are never re-scanned.
+ */
+
+import { readdir, readFile, stat } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { readFileCache, writeFileCache } from "./cache.js";
+import { estimateCost, estimateCostSimple } from "./pricing.js";
+import type { PrLink, TokenUsage } from "./types.js";
+
+// Bump this when we extract new fields — forces re-scan of all sessions.
+const SCANNER_VERSION = 2;
+
+// ─── Types ──────────────────────────────────────────────────────────
+
+export interface SessionScanResult {
+  sessionId: string;
+  provider: string;
+  project: string;
+  slug: string;
+  title?: string;
+  firstPrompt?: string;
+
+  // Time
+  startTime?: string;
+  endTime?: string;
+  durationMs?: number;
+
+  // Git
+  gitBranch?: string;
+  gitBranches?: string[];
+
+  // PRs
+  prLinks?: PrLink[];
+
+  // Model
+  model?: string;
+
+  // Stats
+  promptCount: number;
+  toolCallCount: number;
+  editCount: number;
+  filesModified: Array<{ file: string; count: number }>;
+
+  // Token usage
+  tokenUsage?: TokenUsage;
+  costEstimate?: number;
+
+  // Subagents
+  subAgentCount: number;
+
+  // Errors
+  apiErrorCount: number;
+
+  // Meta
+  entrypoint?: string;
+  permissionMode?: string;
+  compactionCount: number;
+}
+
+export interface ScanCacheEntry {
+  mtimeMs: number;
+  fileSize: number;
+  scannedAt: string;
+  result: SessionScanResult;
+}
+
+export interface ScanCacheData {
+  scannerVersion: number;
+  entries: Record<string, ScanCacheEntry>; // keyed by sessionId
+}
+
+export interface ProjectInsights {
+  project: string;
+  sessionCount: number;
+  totalDurationMs: number;
+  totalCost: number;
+  totalPrompts: number;
+  totalToolCalls: number;
+  totalEdits: number;
+  models: Record<string, number>; // model → session count
+  branches: BranchInfo[];
+  hotFiles: Array<{ file: string; editCount: number; sessionCount: number }>;
+  subAgentTotal: number;
+  apiErrorTotal: number;
+  timeRange: { first: string; last: string };
+  sessionsPerDay: Record<string, number>; // YYYY-MM-DD → count
+  avgSessionDurationMs: number;
+  memory?: ProjectMemory;
+}
+
+export interface BranchInfo {
+  branch: string;
+  sessionIds: string[];
+  prLinks?: PrLink[];
+}
+
+export interface ProjectMemory {
+  memoryFiles: Array<{
+    name: string;
+    description?: string;
+    type?: string;
+    content: string;
+  }>;
+  claudeMd?: string; // project-level CLAUDE.md content
+}
+
+export interface UserInsights {
+  totalSessions: number;
+  totalProjects: number;
+  totalDurationMs: number;
+  totalCost: number;
+  totalPrompts: number;
+  totalToolCalls: number;
+  totalEdits: number;
+  providers: Record<string, number>; // provider → session count
+  topProjects: Array<{
+    project: string;
+    sessions: number;
+    cost: number;
+    prompts: number;
+    durationMs: number;
+    toolCalls: number;
+    edits: number;
+    branchCount: number;
+    prCount: number;
+    memoryFileCount: number;
+    lastActivity: string;
+    sessionsPerDay: Record<string, number>;
+  }>;
+  models: Record<string, number>;
+  timeRange: { first: string; last: string };
+  sessionsPerDay: Record<string, number>;
+  subAgentTotal: number;
+  apiErrorTotal: number;
+  avgSessionDurationMs: number;
+}
+
+// ─── Scanner ────────────────────────────────────────────────────────
+
+interface ScanInput {
+  sessionId: string;
+  provider: string;
+  project: string;
+  slug: string;
+  filePaths: string[];
+  title?: string;
+  firstPrompt?: string;
+}
+
+export interface ScanProgress {
+  scanned: number;
+  total: number;
+  currentSession?: string;
+  done: boolean;
+}
+
+/**
+ * Scan a single session's JSONL files and extract aggregate metadata.
+ * This is much lighter than the full parser — no scene building, no
+ * subagent JSONL reading, no transform step.
+ */
+export async function scanSession(input: ScanInput): Promise<SessionScanResult> {
+  let startTime: string | undefined;
+  let endTime: string | undefined;
+  let model: string | undefined;
+  let title = input.title;
+  let firstPrompt = input.firstPrompt;
+  const gitBranches: string[] = [];
+  let entrypoint: string | undefined;
+  let permissionMode: string | undefined;
+
+  let promptCount = 0;
+  let toolCallCount = 0;
+  let editCount = 0;
+  const fileEditCounts = new Map<string, number>();
+  let compactionCount = 0;
+  let apiErrorCount = 0;
+  let totalDurationMs = 0;
+
+  // Token usage tracking (deduplicate by message ID)
+  const usageByMsgId = new Map<
+    string,
+    {
+      input_tokens: number;
+      output_tokens: number;
+      cache_creation_input_tokens: number;
+      cache_read_input_tokens: number;
+      model?: string;
+    }
+  >();
+
+  const prLinks: PrLink[] = [];
+  const prUrls = new Set<string>();
+
+  for (const filePath of input.filePaths) {
+    let content: string;
+    try {
+      content = await readFile(filePath, "utf-8");
+    } catch {
+      continue;
+    }
+
+    for (const line of content.split("\n")) {
+      if (!line.trim()) continue;
+
+      let obj: any;
+      try {
+        obj = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
+      // Extract metadata from top-level fields
+      if (obj.gitBranch) {
+        const b = obj.gitBranch as string;
+        if (gitBranches.length === 0 || gitBranches[gitBranches.length - 1] !== b) {
+          gitBranches.push(b);
+        }
+      }
+      if (!entrypoint && obj.entrypoint) entrypoint = obj.entrypoint;
+      if (!permissionMode && obj.permissionMode) permissionMode = obj.permissionMode;
+
+      // Timestamps
+      if (obj.timestamp) {
+        if (!startTime || obj.timestamp < startTime) startTime = obj.timestamp;
+        if (!endTime || obj.timestamp > endTime) endTime = obj.timestamp;
+      }
+
+      // Skip non-message types but extract their data first
+      if (obj.type === "file-history-snapshot") {
+        if (!startTime && obj.snapshot?.timestamp) startTime = obj.snapshot.timestamp;
+        continue;
+      }
+
+      if (obj.type === "progress") continue;
+
+      if (obj.type === "custom-title") {
+        title = obj.customTitle || obj.title || title;
+        continue;
+      }
+
+      if (obj.type === "pr-link") {
+        const d = obj.data || obj;
+        if (d.prNumber && d.prUrl && !prUrls.has(d.prUrl)) {
+          prUrls.add(d.prUrl);
+          prLinks.push({
+            prNumber: d.prNumber,
+            prUrl: d.prUrl,
+            prRepository: d.prRepository || "",
+          });
+        }
+        continue;
+      }
+
+      if (obj.type === "system") {
+        if (obj.subtype === "turn_duration" && typeof obj.durationMs === "number") {
+          totalDurationMs += obj.durationMs;
+        }
+        if (obj.subtype === "compact_boundary") compactionCount++;
+        if (obj.subtype === "api_error") apiErrorCount++;
+        continue;
+      }
+
+      if (!obj.message) continue;
+
+      const { role, content: msgContent, id: msgId } = obj.message;
+
+      // Token usage (keep last per message ID)
+      if (obj.message.usage && msgId) {
+        usageByMsgId.set(msgId, {
+          input_tokens: obj.message.usage.input_tokens || 0,
+          output_tokens: obj.message.usage.output_tokens || 0,
+          cache_creation_input_tokens: obj.message.usage.cache_creation_input_tokens || 0,
+          cache_read_input_tokens: obj.message.usage.cache_read_input_tokens || 0,
+          model: obj.message.model,
+        });
+      }
+
+      // Model
+      if (!model && obj.message.model && obj.message.model !== "<synthetic>") {
+        model = obj.message.model;
+      }
+
+      // User prompts
+      if (role === "user") {
+        if (typeof msgContent === "string") {
+          promptCount++;
+          if (!firstPrompt && msgContent.length >= 10) {
+            firstPrompt = msgContent.slice(0, 200);
+          }
+        } else if (Array.isArray(msgContent)) {
+          // Check if it has text (not just tool_result)
+          const hasText = msgContent.some(
+            (b: any) => (b.type === "text" && b.text?.trim()) || b.type === "_user_images",
+          );
+          const isOnlyToolResult = msgContent.every((b: any) => b.type === "tool_result");
+          if (hasText && !isOnlyToolResult) promptCount++;
+        }
+      }
+
+      // Assistant messages: count tool uses and extract file modifications
+      if (role === "assistant" && Array.isArray(msgContent)) {
+        for (const block of msgContent) {
+          if (block.type === "tool_use") {
+            toolCallCount++;
+            // Track file modifications
+            if (block.name === "Edit" || block.name === "Write" || block.name === "NotebookEdit") {
+              const fp = block.input?.file_path || block.input?.filePath;
+              if (fp) {
+                editCount++;
+                const short = shortenPath(fp);
+                fileEditCounts.set(short, (fileEditCounts.get(short) || 0) + 1);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Count subagent files (don't parse them — just count)
+  let subAgentCount = 0;
+  if (input.filePaths.length > 0) {
+    const mainFile = input.filePaths[0];
+    const sessionDir = mainFile.replace(/\.jsonl$/, "");
+    const subagentsDir = join(sessionDir, "subagents");
+    try {
+      const files = await readdir(subagentsDir);
+      subAgentCount = files.filter((f) => f.endsWith(".jsonl")).length;
+    } catch {
+      // No subagents directory
+    }
+  }
+
+  // Aggregate token usage
+  let tokenUsage: TokenUsage | undefined;
+  const usageByModel: Record<string, TokenUsage> = {};
+  if (usageByMsgId.size > 0) {
+    const totals: TokenUsage = {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+    };
+    for (const u of usageByMsgId.values()) {
+      totals.inputTokens += u.input_tokens;
+      totals.outputTokens += u.output_tokens;
+      totals.cacheCreationTokens += u.cache_creation_input_tokens;
+      totals.cacheReadTokens += u.cache_read_input_tokens;
+
+      if (u.model && u.model !== "<synthetic>") {
+        if (!usageByModel[u.model]) {
+          usageByModel[u.model] = {
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+          };
+        }
+        usageByModel[u.model].inputTokens += u.input_tokens;
+        usageByModel[u.model].outputTokens += u.output_tokens;
+        usageByModel[u.model].cacheCreationTokens += u.cache_creation_input_tokens;
+        usageByModel[u.model].cacheReadTokens += u.cache_read_input_tokens;
+      }
+    }
+    tokenUsage = totals;
+  }
+
+  // Estimate cost
+  let costEstimate: number | undefined;
+  if (Object.keys(usageByModel).length > 0) {
+    costEstimate = estimateCost(usageByModel);
+  } else if (tokenUsage && model) {
+    costEstimate = estimateCostSimple(tokenUsage, model);
+  }
+
+  // Derive duration from turn_duration events or timestamp range
+  let durationMs = totalDurationMs || undefined;
+  if (!durationMs && startTime && endTime) {
+    const diff = Date.parse(endTime) - Date.parse(startTime);
+    if (diff > 0) durationMs = diff;
+  }
+
+  const gitBranch = gitBranches.length > 0 ? gitBranches[gitBranches.length - 1] : undefined;
+
+  return {
+    sessionId: input.sessionId,
+    provider: input.provider,
+    project: input.project,
+    slug: input.slug,
+    title,
+    firstPrompt,
+    startTime,
+    endTime,
+    durationMs,
+    gitBranch,
+    gitBranches: gitBranches.length > 1 ? gitBranches : undefined,
+    prLinks: prLinks.length > 0 ? prLinks : undefined,
+    model,
+    promptCount,
+    toolCallCount,
+    editCount,
+    filesModified: [...fileEditCounts.entries()]
+      .map(([file, count]) => ({ file, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 100),
+    tokenUsage,
+    costEstimate,
+    subAgentCount,
+    apiErrorCount,
+    compactionCount,
+    entrypoint,
+    permissionMode,
+  };
+}
+
+// ─── Cache management ───────────────────────────────────────────────
+
+const SCAN_CACHE_KEY = "session-scans-v1";
+
+export async function readScanCache(): Promise<ScanCacheData | null> {
+  const cached = await readFileCache<ScanCacheData>(SCAN_CACHE_KEY);
+  if (!cached) return null;
+  if (cached.data.scannerVersion !== SCANNER_VERSION) return null;
+  return cached.data;
+}
+
+export async function writeScanCache(data: ScanCacheData): Promise<void> {
+  await writeFileCache(SCAN_CACHE_KEY, data);
+}
+
+async function getFileMeta(filePaths: string[]): Promise<{ mtimeMs: number; fileSize: number }> {
+  let totalSize = 0;
+  let maxMtime = 0;
+  for (const fp of filePaths) {
+    try {
+      const s = await stat(fp);
+      totalSize += s.size;
+      if (s.mtimeMs > maxMtime) maxMtime = s.mtimeMs;
+    } catch {
+      // File may have been deleted
+    }
+  }
+  return { mtimeMs: maxMtime, fileSize: totalSize };
+}
+
+/**
+ * Check if a cached scan entry is still valid for the given file(s).
+ * Returns the file meta on cache miss (avoids a second stat() round).
+ */
+async function checkCache(
+  entry: ScanCacheEntry | undefined,
+  filePaths: string[],
+): Promise<{ valid: true } | { valid: false; meta: { mtimeMs: number; fileSize: number } }> {
+  const meta = await getFileMeta(filePaths);
+  if (entry && entry.mtimeMs === meta.mtimeMs && entry.fileSize === meta.fileSize) {
+    return { valid: true };
+  }
+  return { valid: false, meta };
+}
+
+// ─── Background scanner ────────────────────────────────────────────
+
+export interface BackgroundScanState {
+  running: boolean;
+  scanned: number;
+  total: number;
+  results: SessionScanResult[];
+  startedAt?: string;
+  finishedAt?: string;
+}
+
+/**
+ * Run background scan on a list of sessions. Scans newest first.
+ * Uses cache to skip unchanged sessions. Reports progress via callback.
+ */
+export async function runBackgroundScan(
+  sessions: ScanInput[],
+  onProgress?: (progress: ScanProgress) => void,
+): Promise<SessionScanResult[]> {
+  const cache = (await readScanCache()) || { scannerVersion: SCANNER_VERSION, entries: {} };
+  const results: SessionScanResult[] = [];
+
+  for (let i = 0; i < sessions.length; i++) {
+    const session = sessions[i];
+
+    onProgress?.({
+      scanned: i,
+      total: sessions.length,
+      currentSession: session.slug,
+      done: false,
+    });
+
+    // Check cache (single stat() pass — returns meta on miss)
+    const cached = cache.entries[session.sessionId];
+    const cacheCheck = await checkCache(cached, session.filePaths);
+
+    if (cacheCheck.valid && cached) {
+      results.push(cached.result);
+    } else {
+      try {
+        const result = await scanSession(session);
+        results.push(result);
+
+        // Update cache entry (reuse meta from checkCache — no second stat round)
+        const { meta } = cacheCheck as {
+          valid: false;
+          meta: { mtimeMs: number; fileSize: number };
+        };
+        cache.entries[session.sessionId] = {
+          mtimeMs: meta.mtimeMs,
+          fileSize: meta.fileSize,
+          scannedAt: new Date().toISOString(),
+          result,
+        };
+
+        // Write cache every 10 sessions to avoid losing progress
+        if ((i + 1) % 10 === 0) {
+          await writeScanCache(cache);
+        }
+      } catch {
+        // Skip failed sessions silently
+      }
+    }
+  }
+
+  // Final cache write
+  await writeScanCache(cache);
+
+  onProgress?.({
+    scanned: sessions.length,
+    total: sessions.length,
+    done: true,
+  });
+
+  return results;
+}
+
+// ─── Aggregation ────────────────────────────────────────────────────
+
+export function aggregateProjectInsights(
+  project: string,
+  scans: SessionScanResult[],
+  memory?: ProjectMemory,
+): ProjectInsights {
+  const projectScans = scans.filter((s) => s.project === project);
+
+  let totalDurationMs = 0;
+  let totalCost = 0;
+  let totalPrompts = 0;
+  let totalToolCalls = 0;
+  let totalEdits = 0;
+  let subAgentTotal = 0;
+  let apiErrorTotal = 0;
+  const models: Record<string, number> = {};
+  const branchMap = new Map<string, { sessionIds: string[]; prLinks: PrLink[] }>();
+  const fileEditCounts = new Map<string, { edits: number; sessions: Set<string> }>();
+  const sessionsPerDay: Record<string, number> = {};
+  let first = "";
+  let last = "";
+  let sessionsWithDuration = 0;
+
+  for (const s of projectScans) {
+    totalDurationMs += s.durationMs || 0;
+    if (s.durationMs) sessionsWithDuration++;
+    totalCost += s.costEstimate || 0;
+    totalPrompts += s.promptCount;
+    totalToolCalls += s.toolCallCount;
+    totalEdits += s.editCount;
+    subAgentTotal += s.subAgentCount;
+    apiErrorTotal += s.apiErrorCount;
+
+    if (s.model) models[s.model] = (models[s.model] || 0) + 1;
+
+    // Branches
+    const branches = s.gitBranches || (s.gitBranch ? [s.gitBranch] : []);
+    for (const b of branches) {
+      if (!branchMap.has(b)) branchMap.set(b, { sessionIds: [], prLinks: [] });
+      const entry = branchMap.get(b)!;
+      if (!entry.sessionIds.includes(s.sessionId)) entry.sessionIds.push(s.sessionId);
+    }
+    if (s.prLinks) {
+      for (const pr of s.prLinks) {
+        // Attach PRs to the most relevant branch (last one)
+        const branch = s.gitBranch || branches[branches.length - 1];
+        if (branch && branchMap.has(branch)) {
+          const entry = branchMap.get(branch)!;
+          if (!entry.prLinks.some((p) => p.prUrl === pr.prUrl)) {
+            entry.prLinks.push(pr);
+          }
+        }
+      }
+    }
+
+    // File hotspots — use actual per-file edit counts from scanner
+    for (const fm of s.filesModified) {
+      if (!fileEditCounts.has(fm.file))
+        fileEditCounts.set(fm.file, { edits: 0, sessions: new Set() });
+      const entry = fileEditCounts.get(fm.file)!;
+      entry.edits += fm.count;
+      entry.sessions.add(s.sessionId);
+    }
+
+    // Time range
+    const ts = s.startTime || "";
+    if (ts && (!first || ts < first)) first = ts;
+    if (ts && (!last || ts > last)) last = ts;
+
+    // Sessions per day
+    if (ts) {
+      const day = ts.slice(0, 10);
+      sessionsPerDay[day] = (sessionsPerDay[day] || 0) + 1;
+    }
+  }
+
+  const branches: BranchInfo[] = [...branchMap.entries()]
+    .map(([branch, data]) => ({
+      branch,
+      sessionIds: data.sessionIds,
+      prLinks: data.prLinks.length > 0 ? data.prLinks : undefined,
+    }))
+    .sort((a, b) => b.sessionIds.length - a.sessionIds.length);
+
+  const hotFiles = [...fileEditCounts.entries()]
+    .map(([file, data]) => ({
+      file,
+      editCount: data.edits,
+      sessionCount: data.sessions.size,
+    }))
+    .sort((a, b) => b.editCount - a.editCount)
+    .slice(0, 20);
+
+  return {
+    project,
+    sessionCount: projectScans.length,
+    totalDurationMs,
+    totalCost,
+    totalPrompts,
+    totalToolCalls,
+    totalEdits,
+    models,
+    branches,
+    hotFiles,
+    subAgentTotal,
+    apiErrorTotal,
+    timeRange: { first, last },
+    sessionsPerDay,
+    avgSessionDurationMs:
+      sessionsWithDuration > 0 ? Math.round(totalDurationMs / sessionsWithDuration) : 0,
+    memory,
+  };
+}
+
+export function aggregateUserInsights(scans: SessionScanResult[]): UserInsights {
+  let totalDurationMs = 0;
+  let totalCost = 0;
+  let totalPrompts = 0;
+  let totalToolCalls = 0;
+  let totalEdits = 0;
+  let subAgentTotal = 0;
+  let apiErrorTotal = 0;
+  const providers: Record<string, number> = {};
+  const models: Record<string, number> = {};
+  const projectStats = new Map<
+    string,
+    {
+      sessions: number;
+      cost: number;
+      prompts: number;
+      durationMs: number;
+      toolCalls: number;
+      edits: number;
+      branches: Set<string>;
+      prUrls: Set<string>;
+      lastActivity: string;
+      sessionsPerDay: Record<string, number>;
+    }
+  >();
+  const sessionsPerDay: Record<string, number> = {};
+  let first = "";
+  let last = "";
+  let sessionsWithDuration = 0;
+
+  for (const s of scans) {
+    totalDurationMs += s.durationMs || 0;
+    if (s.durationMs) sessionsWithDuration++;
+    totalCost += s.costEstimate || 0;
+    totalPrompts += s.promptCount;
+    totalToolCalls += s.toolCallCount;
+    totalEdits += s.editCount;
+    subAgentTotal += s.subAgentCount;
+    apiErrorTotal += s.apiErrorCount;
+
+    providers[s.provider] = (providers[s.provider] || 0) + 1;
+    if (s.model) models[s.model] = (models[s.model] || 0) + 1;
+
+    if (!projectStats.has(s.project)) {
+      projectStats.set(s.project, {
+        sessions: 0,
+        cost: 0,
+        prompts: 0,
+        durationMs: 0,
+        toolCalls: 0,
+        edits: 0,
+        branches: new Set(),
+        prUrls: new Set(),
+        lastActivity: "",
+        sessionsPerDay: {},
+      });
+    }
+    const ps = projectStats.get(s.project)!;
+    ps.sessions++;
+    ps.cost += s.costEstimate || 0;
+    ps.prompts += s.promptCount;
+    ps.durationMs += s.durationMs || 0;
+    ps.toolCalls += s.toolCallCount;
+    ps.edits += s.editCount;
+    const branches = s.gitBranches || (s.gitBranch ? [s.gitBranch] : []);
+    for (const b of branches) ps.branches.add(b);
+    if (s.prLinks) {
+      for (const pr of s.prLinks) ps.prUrls.add(pr.prUrl);
+    }
+    const ts = s.startTime || "";
+    if (ts && (!ps.lastActivity || ts > ps.lastActivity)) ps.lastActivity = ts;
+    if (ts && (!first || ts < first)) first = ts;
+    if (ts && (!last || ts > last)) last = ts;
+
+    if (ts) {
+      const day = ts.slice(0, 10);
+      ps.sessionsPerDay[day] = (ps.sessionsPerDay[day] || 0) + 1;
+      sessionsPerDay[day] = (sessionsPerDay[day] || 0) + 1;
+    }
+  }
+
+  const topProjects = [...projectStats.entries()]
+    .map(([project, data]) => ({
+      project,
+      sessions: data.sessions,
+      cost: data.cost,
+      prompts: data.prompts,
+      durationMs: data.durationMs,
+      toolCalls: data.toolCalls,
+      edits: data.edits,
+      branchCount: data.branches.size,
+      prCount: data.prUrls.size,
+      memoryFileCount: 0, // populated later via readProjectMemory
+      lastActivity: data.lastActivity,
+      sessionsPerDay: data.sessionsPerDay,
+    }))
+    .sort((a, b) => b.sessions - a.sessions);
+
+  const uniqueProjects = new Set(scans.map((s) => s.project));
+
+  return {
+    totalSessions: scans.length,
+    totalProjects: uniqueProjects.size,
+    totalDurationMs,
+    totalCost,
+    totalPrompts,
+    totalToolCalls,
+    totalEdits,
+    providers,
+    topProjects,
+    models,
+    timeRange: { first, last },
+    sessionsPerDay,
+    subAgentTotal,
+    apiErrorTotal,
+    avgSessionDurationMs:
+      sessionsWithDuration > 0 ? Math.round(totalDurationMs / sessionsWithDuration) : 0,
+  };
+}
+
+// ─── Memory reader ──────────────────────────────────────────────────
+
+const CLAUDE_DIR = join(homedir(), ".claude", "projects");
+
+/**
+ * Encode a project path the way Claude Code does: path separators → hyphens.
+ * e.g. "/Users/tuo/Code/my-project" → "-Users-tuo-Code-my-project"
+ * e.g. "~/Code/my-project" → expand ~ first
+ */
+function encodeProjectDir(project: string): string {
+  let resolved = project;
+  if (resolved.startsWith("~/")) {
+    resolved = join(homedir(), resolved.slice(2));
+  } else if (resolved === "~") {
+    resolved = homedir();
+  }
+  return resolved.replace(/\//g, "-");
+}
+
+export async function readProjectMemory(project: string): Promise<ProjectMemory | null> {
+  const encoded = encodeProjectDir(project);
+  const projectDir = join(CLAUDE_DIR, encoded);
+  const memoryDir = join(projectDir, "memory");
+
+  const memoryFiles: ProjectMemory["memoryFiles"] = [];
+  let claudeMd: string | undefined;
+
+  // Read CLAUDE.md
+  try {
+    const content = await readFile(join(projectDir, "CLAUDE.md"), "utf-8");
+    if (content.trim()) claudeMd = content.slice(0, 5000);
+  } catch {
+    // No CLAUDE.md
+  }
+
+  // Read memory files
+  try {
+    const files = await readdir(memoryDir);
+    for (const file of files) {
+      if (!file.endsWith(".md") || file === "MEMORY.md") continue;
+      try {
+        const content = await readFile(join(memoryDir, file), "utf-8");
+        // Parse frontmatter
+        const fm = parseFrontmatter(content);
+        memoryFiles.push({
+          name: fm.name || file.replace(/\.md$/, ""),
+          description: fm.description,
+          type: fm.type,
+          content: fm.body.slice(0, 2000),
+        });
+      } catch {
+        // Skip unreadable files
+      }
+    }
+  } catch {
+    // No memory directory
+  }
+
+  if (memoryFiles.length === 0 && !claudeMd) return null;
+
+  return { memoryFiles, claudeMd };
+}
+
+function parseFrontmatter(content: string): {
+  name?: string;
+  description?: string;
+  type?: string;
+  body: string;
+} {
+  // Normalize \r\n → \n for Windows-edited files
+  const normalized = content.replace(/\r\n/g, "\n");
+  const fmMatch = normalized.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  if (!fmMatch) return { body: content };
+
+  const yaml = fmMatch[1];
+  const body = fmMatch[2];
+
+  const getName = (s: string) => s.match(/^name:\s*(.+)$/m)?.[1]?.trim();
+  const getDesc = (s: string) => s.match(/^description:\s*(.+)$/m)?.[1]?.trim();
+  const getType = (s: string) => s.match(/^type:\s*(.+)$/m)?.[1]?.trim();
+
+  return {
+    name: getName(yaml),
+    description: getDesc(yaml),
+    type: getType(yaml),
+    body,
+  };
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────
+
+function shortenPath(path: string): string {
+  const home = homedir();
+  if (path.startsWith(home)) return `~${path.slice(home.length)}`;
+  return path;
+}
