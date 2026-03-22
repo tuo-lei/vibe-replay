@@ -730,6 +730,7 @@ export function TitleInsightsHeader({
   variant: "project" | "all";
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
 
   const isProject = variant === "project";
   const accentColor = isProject ? "text-terminal-green" : "text-terminal-purple";
@@ -880,6 +881,53 @@ export function TitleInsightsHeader({
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+          {/* Memory */}
+          {pi.memory && pi.memory.memoryFiles.length > 0 && (
+            <div>
+              <button
+                onClick={() => setMemoryOpen((v) => !v)}
+                className="text-[10px] font-sans text-terminal-dimmer uppercase tracking-widest font-semibold mb-1.5 flex items-center gap-1 hover:text-terminal-dim transition-colors"
+              >
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 12 12"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  className={`transition-transform duration-200 ${memoryOpen ? "rotate-90" : ""}`}
+                >
+                  <path d="M4.5 2l4 4-4 4" />
+                </svg>
+                Memory ({pi.memory.memoryFiles.length} files)
+              </button>
+              {memoryOpen && (
+                <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                  {pi.memory.memoryFiles.map((mf) => (
+                    <div
+                      key={mf.name}
+                      className="bg-terminal-surface-2 rounded-lg px-3 py-2 text-xs"
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-mono text-terminal-text font-medium">{mf.name}</span>
+                        {mf.type && (
+                          <span className="px-1.5 py-0.5 rounded bg-terminal-surface text-terminal-dimmer text-[10px]">
+                            {mf.type}
+                          </span>
+                        )}
+                      </div>
+                      {mf.description && (
+                        <div className="text-terminal-dim text-[11px] mb-1">{mf.description}</div>
+                      )}
+                      <div className="font-mono text-terminal-dimmer whitespace-pre-wrap line-clamp-3 text-[11px] leading-relaxed">
+                        {mf.content}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
