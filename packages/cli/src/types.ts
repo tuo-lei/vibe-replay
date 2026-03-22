@@ -6,6 +6,7 @@ export type {
   PrLink,
   ReplaySession,
   Scene,
+  SubAgent,
   TokenUsage,
   TurnStat,
 } from "@vibe-replay/types";
@@ -63,7 +64,8 @@ export interface RawMessage {
     | "custom-title"
     | "queue-operation"
     | "last-prompt"
-    | "pr-link";
+    | "pr-link"
+    | "agent-name";
   subtype?: string;
   timestamp?: string;
   message?: {

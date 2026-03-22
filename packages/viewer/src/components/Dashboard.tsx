@@ -537,73 +537,46 @@ function ReplayCard({
   );
 }
 
-/** Open a replay by URL or Gist ID */
-function OpenReplayForm() {
-  const [input, setInput] = useState("");
+/** Regenerate all existing replays from source JSONL files */
+function RegenerateAllButton() {
   const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<{ regenerated: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const val = input.trim();
-    if (!val) return;
-
+  const handleRegenerate = async () => {
     setLoading(true);
     setError(null);
-
-    // Detect gist ID (hex, 20-40 chars)
-    if (/^[a-f0-9]{20,40}$/.test(val)) {
-      window.location.search = `?gist=${val}`;
-      return;
-    }
-
-    // Detect gist URL: https://gist.github.com/user/id
-    const gistMatch = val.match(/gist\.github\.com\/[^/]+\/([a-f0-9]{20,40})/);
-    if (gistMatch) {
-      window.location.search = `?gist=${gistMatch[1]}`;
-      return;
-    }
-
-    // Detect vibe-replay.com viewer URL with gist param
-    const viewerMatch = val.match(/[?&]gist=([a-f0-9]{20,40})/);
-    if (viewerMatch) {
-      window.location.search = `?gist=${viewerMatch[1]}`;
-      return;
-    }
-
-    // Treat as JSON URL
+    setResult(null);
     try {
-      new URL(val);
-      window.location.search = `?url=${encodeURIComponent(val)}`;
-    } catch {
-      setError("Enter a valid URL or Gist ID");
+      const res = await fetch("/api/regenerate-all", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed");
+      setResult({ regenerated: data.regenerated, total: data.total });
+      // Reload after short delay to show updated replays
+      setTimeout(() => window.location.reload(), 1500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to regenerate");
+    } finally {
       setLoading(false);
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-2">
-      <div className="flex gap-2">
-        <input
-          value={input}
-          onChange={(e) => {
-            setInput(e.target.value);
-            setError(null);
-          }}
-          placeholder="Paste a Gist ID, Gist URL, or replay JSON URL..."
-          className="flex-1 bg-terminal-surface rounded-lg px-3 py-2.5 text-sm font-mono text-terminal-text placeholder:text-terminal-dimmer outline-none ring-1 ring-transparent focus:ring-terminal-green/40 transition-shadow duration-200 shadow-layer-sm"
-          disabled={loading}
-        />
-        <button
-          type="submit"
-          disabled={loading || !input.trim()}
-          className="px-4 py-2 text-xs font-mono rounded-lg bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-colors duration-200 disabled:opacity-40 font-medium"
-        >
-          {loading ? "Loading..." : "Open"}
-        </button>
-      </div>
-      {error && <div className="text-xs font-mono text-terminal-red">{error}</div>}
-    </form>
+    <div className="flex items-center gap-3">
+      <button
+        onClick={handleRegenerate}
+        disabled={loading}
+        className="px-3 py-1.5 text-xs font-mono rounded-lg bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover border border-terminal-border-subtle transition-colors duration-200 disabled:opacity-40"
+      >
+        {loading ? "Regenerating..." : "Regenerate All"}
+      </button>
+      {result && (
+        <span className="text-xs font-mono text-terminal-green">
+          {result.regenerated}/{result.total} regenerated
+        </span>
+      )}
+      {error && <span className="text-xs font-mono text-terminal-red">{error}</span>}
+    </div>
   );
 }
 
@@ -1631,7 +1604,7 @@ function ReplaysPanel() {
     return (
       <div className="flex-1 overflow-auto">
         <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
-          <OpenReplayForm />
+          <RegenerateAllButton />
           {serverAvailable && sessions.length === 0 && (
             <div className="text-center py-12 space-y-2">
               <div className="text-terminal-dim font-mono text-sm">No replays yet</div>
@@ -1770,7 +1743,7 @@ function ReplaysPanel() {
         {/* Header + search */}
         <div className="px-4 pt-4 pb-2 space-y-3 shrink-0">
           {/* Open by URL/Gist */}
-          <OpenReplayForm />
+          <RegenerateAllButton />
 
           {/* Project title + inline search (desktop) */}
           <div className="hidden md:flex items-center gap-3">

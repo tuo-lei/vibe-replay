@@ -27,6 +27,9 @@ export async function parseClaudeCodeSession(
   let startTime: string | undefined;
   let endTime: string | undefined;
   let totalDurationMs = 0;
+  const gitBranches: string[] = []; // all branches in order of appearance
+  let entrypoint: string | undefined;
+  let permissionMode: string | undefined;
 
   // Token usage: track last usage + model per message ID to avoid double-counting
   // (each message.id appears in multiple JSONL lines with the same cumulative usage)
@@ -50,6 +53,20 @@ export async function parseClaudeCodeSession(
   // PR link events
   const prLinks: PrLink[] = [];
 
+  // Agent tool_use_id → subagent agentId mapping (from progress messages)
+  const agentMapping = new Map<string, string>();
+
+  // API error events
+  const apiErrors: Array<{
+    timestamp: string;
+    statusCode?: number;
+    errorType?: string;
+    retryAttempt?: number;
+  }> = [];
+
+  // Tracked files (from file-history-snapshot messages)
+  const trackedFiles = new Set<string>();
+
   // Group assistant messages by message.id
   const assistantBlocks = new Map<string, ContentBlock[]>();
   const assistantTimestamps = new Map<string, string>();
@@ -60,6 +77,8 @@ export async function parseClaudeCodeSession(
   const toolResults = new Map<string, string>();
   // Collect tool error flags by tool_use_id
   const toolErrors = new Map<string, boolean>();
+  // Collect tool result timestamps by tool_use_id (for duration calculation)
+  const toolResultTimestamps = new Map<string, string>();
   // Collect images from tool results (base64 data URIs) by tool_use_id
   const toolImages = new Map<string, string[]>();
 
@@ -78,6 +97,15 @@ export async function parseClaudeCodeSession(
     if (!sessionId && obj.sessionId) sessionId = obj.sessionId;
     if (!slug && obj.slug) slug = obj.slug;
     if (!cwd && obj.cwd) cwd = obj.cwd;
+    if ((obj as any).gitBranch) {
+      const b = (obj as any).gitBranch as string;
+      if (gitBranches.length === 0 || gitBranches[gitBranches.length - 1] !== b) {
+        gitBranches.push(b);
+      }
+    }
+    if (!entrypoint && (obj as any).entrypoint) entrypoint = (obj as any).entrypoint;
+    if (!permissionMode && (obj as any).permissionMode)
+      permissionMode = (obj as any).permissionMode;
 
     if (obj.type === "custom-title") {
       // Real JSONL uses `customTitle`; support `title` as fallback for compatibility
@@ -88,12 +116,24 @@ export async function parseClaudeCodeSession(
       if (!startTime && (obj as any).snapshot?.timestamp) {
         startTime = (obj as any).snapshot.timestamp;
       }
+      // Extract tracked file paths
+      const backups = (obj as any).snapshot?.trackedFileBackups;
+      if (backups && typeof backups === "object") {
+        for (const fp of Object.keys(backups)) {
+          trackedFiles.add(fp);
+        }
+      }
       continue;
     }
 
-    // Progress lines are subagent streaming fragments.
-    // Full subagent usage is read from subagent JSONL files instead.
-    if (obj.type === "progress") continue;
+    // Progress lines: extract agent mapping before skipping
+    if (obj.type === "progress") {
+      const data = (obj as any).data;
+      if (data?.type === "agent_progress" && data?.agentId && (obj as any).parentToolUseID) {
+        agentMapping.set((obj as any).parentToolUseID as string, data.agentId as string);
+      }
+      continue;
+    }
 
     // PR link events (deduplicate by URL)
     if (obj.type === "pr-link") {
@@ -122,6 +162,15 @@ export async function parseClaudeCodeSession(
           timestamp: obj.timestamp,
           trigger: cm?.trigger || "unknown",
           preTokens: cm?.preTokens,
+        });
+      }
+      if (obj.subtype === "api_error" && obj.timestamp) {
+        const err = (obj as any).error;
+        apiErrors.push({
+          timestamp: obj.timestamp,
+          statusCode: err?.status || (obj as any).statusCode,
+          errorType: err?.error?.error?.type || err?.error?.type,
+          retryAttempt: (obj as any).retryAttempt,
         });
       }
       continue;
@@ -159,6 +208,8 @@ export async function parseClaudeCodeSession(
         if (block.type === "tool_result") {
           const resultText = extractToolResultText(block);
           toolResults.set(block.tool_use_id, resultText);
+          // Capture timestamp for duration calculation
+          if (obj.timestamp) toolResultTimestamps.set(block.tool_use_id, obj.timestamp);
           // Capture is_error flag
           if ((block as any).is_error) {
             toolErrors.set(block.tool_use_id, true);
@@ -232,20 +283,41 @@ export async function parseClaudeCodeSession(
     }
   }
 
+  // Read subagent JSONL files: extract full conversations + token usage.
+  // Must happen before enrichment so subAgentData is available.
+  const subAgentData = await readSubagents(paths[0], usageByMsgId);
+
   // Build assistant turns with enriched blocks
   const assistantTurns: { turn: ParsedTurn; timestamp: string }[] = [];
   for (const msgId of assistantOrder) {
     const blocks = assistantBlocks.get(msgId)!;
+    // Track the previous tool_result timestamp for sequential duration calculation.
+    // For the first tool in a message, use the assistant message timestamp as start.
+    // For subsequent tools, use the previous tool's result timestamp as start.
+    let prevToolEndTs = assistantTimestamps.get(msgId);
     const enrichedBlocks = blocks.map((block) => {
       if (block.type === "tool_use") {
         const result = toolResults.get(block.id) || "";
         const images = toolImages.get(block.id);
         const isError = toolErrors.get(block.id);
+        // Attach subagent data for Agent tool calls
+        const agentId = agentMapping.get(block.id);
+        const subAgent = agentId ? subAgentData.get(agentId) : undefined;
+        // Calculate tool execution duration (start = previous tool end or assistant timestamp)
+        const resultTs = toolResultTimestamps.get(block.id);
+        let toolDurationMs: number | undefined;
+        if (resultTs && prevToolEndTs) {
+          const diff = Date.parse(resultTs) - Date.parse(prevToolEndTs);
+          if (diff > 0 && diff < 3600_000) toolDurationMs = diff;
+        }
+        if (resultTs) prevToolEndTs = resultTs;
         return {
           ...block,
           _result: result,
           _images: images,
           ...(isError ? { _isError: true } : {}),
+          ...(subAgent ? { _subAgent: subAgent } : {}),
+          ...(toolDurationMs ? { _durationMs: toolDurationMs } : {}),
         };
       }
       return block;
@@ -275,11 +347,6 @@ export async function parseClaudeCodeSession(
   entries.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 
   const finalTurns: ParsedTurn[] = entries.map((e) => e.turn);
-
-  // Read subagent JSONL files for token usage (e.g. Haiku subtasks).
-  // Subagent files live at <session-dir>/subagents/agent-*.jsonl
-  // where <session-dir> matches the main file name without .jsonl extension.
-  await readSubagentUsage(paths[0], usageByMsgId);
 
   // Aggregate token usage from deduplicated per-message data
   let tokenUsage: TokenUsage | undefined;
@@ -325,6 +392,22 @@ export async function parseClaudeCodeSession(
   // Build per-user-turn stats: aggregate token usage + model + duration for each user turn
   const turnStats = buildTurnStats(finalTurns, usageByMsgId, turnDurations);
 
+  // Build subagent summary for metadata
+  const subAgentSummary =
+    subAgentData.size > 0
+      ? Array.from(subAgentData.values()).map((sa) => ({
+          agentId: sa.agentId,
+          agentType: sa.agentType,
+          description: sa.description,
+          toolCalls: sa.toolCalls,
+          model: sa.model,
+        }))
+      : undefined;
+
+  // Convert tracked files to sorted array (limit to 200)
+  const trackedFilesArr =
+    trackedFiles.size > 0 ? [...trackedFiles].sort().slice(0, 200) : undefined;
+
   return {
     sessionId,
     slug,
@@ -340,6 +423,13 @@ export async function parseClaudeCodeSession(
     compactions: compactions.length > 0 ? compactions : undefined,
     turnStats: turnStats.length > 0 ? turnStats : undefined,
     prLinks: prLinks.length > 0 ? prLinks : undefined,
+    subAgentSummary,
+    gitBranch: gitBranches.length > 0 ? gitBranches[gitBranches.length - 1] : undefined,
+    gitBranches: gitBranches.length > 1 ? gitBranches : undefined,
+    entrypoint,
+    permissionMode,
+    apiErrors: apiErrors.length > 0 ? apiErrors : undefined,
+    trackedFiles: trackedFilesArr,
   };
 }
 
@@ -397,17 +487,23 @@ function buildTurnStats(
 
   // Group assistant messageIds by user-turn index (0-based)
   // A user turn boundary = where role === "user" and subtype is not compaction-summary
-  const turnGroups: Array<{ msgIds: string[]; endTimestamp: string }> = [];
+  const turnGroups: Array<{ msgIds: string[]; startTimestamp: string; endTimestamp: string }> = [];
   let currentMsgIds: string[] = [];
   let lastTimestamp = "";
+  let turnStartTimestamp = "";
 
   for (const turn of finalTurns) {
     if (turn.role === "user" && turn.subtype !== "compaction-summary") {
       if (turnGroups.length > 0 || currentMsgIds.length > 0) {
         // Close previous turn group
-        turnGroups.push({ msgIds: currentMsgIds, endTimestamp: lastTimestamp });
+        turnGroups.push({
+          msgIds: currentMsgIds,
+          startTimestamp: turnStartTimestamp,
+          endTimestamp: lastTimestamp,
+        });
         currentMsgIds = [];
       }
+      turnStartTimestamp = turn.timestamp || "";
     }
     if (turn.role === "assistant" && turn.messageId) {
       currentMsgIds.push(turn.messageId);
@@ -416,7 +512,11 @@ function buildTurnStats(
   }
   // Close last group (only if it has assistant messages to avoid empty trailing entry)
   if (currentMsgIds.length > 0) {
-    turnGroups.push({ msgIds: currentMsgIds, endTimestamp: lastTimestamp });
+    turnGroups.push({
+      msgIds: currentMsgIds,
+      startTimestamp: turnStartTimestamp,
+      endTimestamp: lastTimestamp,
+    });
   }
 
   // Sort duration events by timestamp for matching
@@ -461,6 +561,10 @@ function buildTurnStats(
     if (durationIdx < sortedDurations.length) {
       durationMs = sortedDurations[durationIdx].durationMs;
       durationIdx++;
+    } else if (group.startTimestamp && group.endTimestamp) {
+      // Fallback: derive from timestamp range (for last turn without turn_duration event)
+      const diff = Date.parse(group.endTimestamp) - Date.parse(group.startTimestamp);
+      if (diff > 0) durationMs = diff;
     }
 
     const stat: TurnStat = { turnIndex: i };
@@ -474,12 +578,37 @@ function buildTurnStats(
   return stats;
 }
 
+interface SubAgentParsed {
+  agentId: string;
+  agentType: string;
+  description?: string;
+  prompt: string;
+  toolCalls: number;
+  thinkingBlocks: number;
+  textResponses: number;
+  tokenUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheCreationTokens: number;
+    cacheReadTokens: number;
+  };
+  model?: string;
+  scenes: Array<{
+    type: string;
+    content?: string;
+    toolName?: string;
+    input?: Record<string, any>;
+    result?: string;
+    isError?: boolean;
+    timestamp?: string;
+  }>;
+}
+
 /**
- * Read subagent JSONL files and merge their token usage into the main usage map.
- * Subagent files are stored at <sessionDir>/subagents/agent-*.jsonl
- * where sessionDir = mainFilePath without the .jsonl extension.
+ * Read subagent JSONL files: merge token usage AND parse full conversations.
+ * Returns Map<agentId, SubAgentParsed> keyed by the agent identifier from the filename.
  */
-async function readSubagentUsage(
+async function readSubagents(
   mainFilePath: string,
   usageByMsgId: Map<
     string,
@@ -491,7 +620,8 @@ async function readSubagentUsage(
       model?: string;
     }
   >,
-): Promise<void> {
+): Promise<Map<string, SubAgentParsed>> {
+  const result = new Map<string, SubAgentParsed>();
   const sessionDir = mainFilePath.replace(/\.jsonl$/, "");
   const subagentsDir = join(sessionDir, "subagents");
 
@@ -499,29 +629,180 @@ async function readSubagentUsage(
   try {
     files = await readdir(subagentsDir);
   } catch {
-    return; // No subagents directory
+    return result; // No subagents directory
   }
 
   for (const file of files) {
     if (!file.endsWith(".jsonl")) continue;
+    // Agent ID derived from filename must match data.agentId in progress messages.
+    // Convention: filename is "agent-<id>.jsonl", progress has data.agentId = "<id>".
+    // If Claude Code changes this convention, subagent data won't be linked (silent miss).
+    const agentId = file.replace(/\.jsonl$/, "").replace(/^agent-/, "");
+
+    // Read meta.json for agent type
+    let agentType = "unknown";
+    let description: string | undefined;
+    try {
+      const metaPath = join(subagentsDir, file.replace(/\.jsonl$/, ".meta.json"));
+      const metaContent = await readFile(metaPath, "utf-8");
+      const meta = JSON.parse(metaContent);
+      agentType = meta.agentType || "unknown";
+      description = meta.description;
+    } catch {}
+
     let content: string;
     try {
       content = await readFile(join(subagentsDir, file), "utf-8");
     } catch {
       continue;
     }
+
+    // Parse subagent JSONL into lightweight scenes
+    let prompt = "";
+    let model: string | undefined;
+    let toolCalls = 0;
+    let thinkingBlocks = 0;
+    let textResponses = 0;
+    const scenes: SubAgentParsed["scenes"] = [];
+    const saUsage = { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 };
+    let hasUsage = false;
+
+    // Track tool results for enrichment
+    const saToolResults = new Map<string, string>();
+    const saToolErrors = new Map<string, boolean>();
+
+    // Collect assistant blocks by message ID (same dedup as main parser)
+    const saAssistantBlocks = new Map<string, ContentBlock[]>();
+    const saAssistantOrder: string[] = [];
+    const saAssistantTimestamps = new Map<string, string>();
+
     for (const line of content.split("\n")) {
       if (!line.trim()) continue;
+      let obj: any;
       try {
-        const obj = JSON.parse(line);
-        const msg = obj?.message;
-        if (msg?.usage && msg?.id) {
-          // Subagent files contain the complete final usage for subagent messages.
-          // Progress lines in the main file are already skipped (line ~85), so
-          // subagent message IDs won't be in usageByMsgId — unconditional set is safe.
-          usageByMsgId.set(msg.id, { ...msg.usage, model: msg.model });
+        obj = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
+      // Merge usage into main map (existing behavior)
+      const msg = obj?.message;
+      if (msg?.usage && msg?.id) {
+        usageByMsgId.set(msg.id, { ...msg.usage, model: msg.model });
+      }
+
+      if (obj.type === "progress") continue;
+      if (!obj.message) continue;
+
+      const { role, content: msgContent, id: msgId } = obj.message;
+
+      // Extract first user prompt
+      if (role === "user" && typeof msgContent === "string" && !prompt) {
+        prompt = msgContent.slice(0, 500);
+      }
+      if (role === "user" && Array.isArray(msgContent)) {
+        // Collect user prompt text and tool results
+        for (const block of msgContent) {
+          if (block.type === "text" && !prompt) {
+            prompt = (block.text || "").slice(0, 500);
+          }
+          if (block.type === "tool_result") {
+            const resultText =
+              typeof block.content === "string"
+                ? block.content
+                : Array.isArray(block.content)
+                  ? block.content.map((c: any) => c.text || "").join("\n")
+                  : "";
+            saToolResults.set(block.tool_use_id, resultText.slice(0, 1000));
+            if (block.is_error) saToolErrors.set(block.tool_use_id, true);
+          }
         }
-      } catch {}
+      }
+
+      // Assistant blocks — dedup by message ID
+      if (role === "assistant" && msgId && Array.isArray(msgContent)) {
+        if (!model && obj.message.model && obj.message.model !== "<synthetic>") {
+          model = obj.message.model;
+        }
+
+        // Accumulate usage
+        const u = obj.message.usage;
+        if (u && msgId) {
+          // Only count final usage per message ID
+          if (!saAssistantBlocks.has(msgId)) {
+            hasUsage = true;
+            saUsage.inputTokens += u.input_tokens || 0;
+            saUsage.outputTokens += u.output_tokens || 0;
+            saUsage.cacheCreationTokens += u.cache_creation_input_tokens || 0;
+            saUsage.cacheReadTokens += u.cache_read_input_tokens || 0;
+          }
+        }
+
+        if (!saAssistantBlocks.has(msgId)) {
+          saAssistantBlocks.set(msgId, []);
+          saAssistantOrder.push(msgId);
+          if (obj.timestamp) saAssistantTimestamps.set(msgId, obj.timestamp);
+        }
+
+        const blocks = saAssistantBlocks.get(msgId)!;
+        for (const block of msgContent) {
+          if (block.type === "thinking" || block.type === "text" || block.type === "tool_use") {
+            blocks.push(block);
+          }
+        }
+      }
     }
+
+    // Build scenes from deduplicated assistant blocks
+    for (const msgId of saAssistantOrder) {
+      const blocks = saAssistantBlocks.get(msgId)!;
+      const ts = saAssistantTimestamps.get(msgId);
+      for (const block of blocks) {
+        if (block.type === "thinking") {
+          const thinking = (block as any).thinking || "";
+          if (thinking.trim()) {
+            scenes.push({ type: "thinking", content: thinking.slice(0, 500), timestamp: ts });
+            thinkingBlocks++;
+          }
+        } else if (block.type === "text") {
+          const text = (block as any).text || "";
+          if (text.trim()) {
+            scenes.push({ type: "text-response", content: text.slice(0, 1000), timestamp: ts });
+            textResponses++;
+          }
+        } else if (block.type === "tool_use") {
+          const toolResult = saToolResults.get(block.id) || "";
+          const isError = saToolErrors.get(block.id);
+          scenes.push({
+            type: "tool-call",
+            toolName: block.name,
+            input: block.input,
+            result: toolResult,
+            isError: isError || false,
+            timestamp: ts,
+          });
+          toolCalls++;
+        }
+      }
+    }
+
+    // Cap scenes to keep HTML size reasonable
+    const maxScenes = 60;
+    const cappedScenes = scenes.length > maxScenes ? scenes.slice(0, maxScenes) : scenes;
+
+    result.set(agentId, {
+      agentId,
+      agentType,
+      description,
+      prompt,
+      toolCalls,
+      thinkingBlocks,
+      textResponses,
+      tokenUsage: hasUsage ? saUsage : undefined,
+      model,
+      scenes: cappedScenes,
+    });
   }
+
+  return result;
 }
