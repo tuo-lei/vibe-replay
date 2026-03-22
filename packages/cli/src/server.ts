@@ -1041,6 +1041,92 @@ export async function startServer(
     }
   });
 
+  // --- Regenerate all existing replays ---
+  app.post("/api/regenerate-all", async (c) => {
+    const replaysDir = baseDir;
+    const { readdir, readFile: readF } = await import("node:fs/promises");
+    const results: Array<{ slug: string; status: string; scenes?: number }> = [];
+
+    // Discover all sessions across all providers
+    const allProviders = getAllProviders();
+    const allSessions: SessionInfo[] = [];
+    for (const provider of allProviders) {
+      try {
+        const sessions = mergeSameSessions(await provider.discover());
+        allSessions.push(...sessions);
+      } catch {}
+    }
+
+    let entries: string[];
+    try {
+      entries = await readdir(replaysDir);
+    } catch {
+      return c.json({ error: "No replays directory" }, 404);
+    }
+
+    for (const slug of entries) {
+      if (slug.startsWith(".") || slug === "cache") continue;
+      try {
+        const replayPath = join(replaysDir, slug, "replay.json");
+        const raw = await readF(replayPath, "utf-8").catch(() => null);
+        if (!raw) continue;
+
+        const oldReplay = JSON.parse(raw);
+        const sessionId = oldReplay.meta?.sessionId;
+        const providerName = oldReplay.meta?.provider || "claude-code";
+        if (!sessionId) {
+          results.push({ slug, status: "skipped: no sessionId" });
+          continue;
+        }
+
+        // Find source session by sessionId
+        const sessionInfo = allSessions.find((s) => s.sessionId === sessionId);
+        if (!sessionInfo || sessionInfo.filePaths.length === 0) {
+          results.push({ slug, status: "skipped: source not found" });
+          continue;
+        }
+
+        const provider = allProviders.find((p) => p.name === providerName);
+        if (!provider) {
+          results.push({ slug, status: `skipped: unknown provider ${providerName}` });
+          continue;
+        }
+
+        // Re-parse and re-generate
+        const paths = [...sessionInfo.filePaths, ...(sessionInfo.toolPaths || [])];
+        const parsed = await provider.parse(paths, sessionInfo);
+        const home = homedir();
+        const project = sessionInfo.project.startsWith(home)
+          ? `~${sessionInfo.project.slice(home.length)}`
+          : sessionInfo.project;
+
+        const replay = transformToReplay(parsed, providerName, project, {
+          generator: {
+            name: "vibe-replay",
+            version: CLI_VERSION,
+            generatedAt: new Date().toISOString(),
+          },
+        });
+
+        // Preserve custom title from old replay
+        if (oldReplay.meta?.title) replay.meta.title = oldReplay.meta.title;
+
+        const outputDir = join(replaysDir, slug);
+        await generateOutput(replay, outputDir);
+        results.push({ slug, status: "regenerated", scenes: replay.scenes.length });
+      } catch (err) {
+        results.push({ slug, status: `error: ${getErrorMessage(err)}` });
+      }
+    }
+
+    await refreshReplaysCache();
+    return c.json({
+      total: results.length,
+      regenerated: results.filter((r) => r.status === "regenerated").length,
+      results,
+    });
+  });
+
   // --- Annotations (requires slug) ---
   app.get("/api/annotations", async (c) => {
     const result = requireSlug(c.req.query("slug"));

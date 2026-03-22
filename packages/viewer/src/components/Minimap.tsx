@@ -1,12 +1,14 @@
 import { useMemo } from "react";
 import type { OverlayActions } from "../hooks/useOverlays";
-import type { Scene } from "../types";
+import type { Scene, TurnStat } from "../types";
+import { formatDuration } from "./StatsPanel";
 
 interface Props {
   scenes: Scene[];
   currentIndex: number;
   onSeek: (index: number) => void;
   overlayActions?: OverlayActions;
+  turnStats?: TurnStat[];
 }
 
 interface TurnOutline {
@@ -18,6 +20,7 @@ interface TurnOutline {
   toolNames: string[];
   thinkingBlocks: number;
   textBlocks: number;
+  subAgentCalls: number;
   endIndex: number;
 }
 
@@ -29,7 +32,13 @@ interface CompactionOutline {
 
 type OutlineItem = TurnOutline | CompactionOutline;
 
-export default function Minimap({ scenes, currentIndex, onSeek, overlayActions }: Props) {
+export default function Minimap({
+  scenes,
+  currentIndex,
+  onSeek,
+  overlayActions,
+  turnStats,
+}: Props) {
   const items = useMemo(() => {
     const result: OutlineItem[] = [];
     let current: TurnOutline | null = null;
@@ -53,6 +62,7 @@ export default function Minimap({ scenes, currentIndex, onSeek, overlayActions }
           toolNames: [],
           thinkingBlocks: 0,
           textBlocks: 0,
+          subAgentCalls: 0,
           endIndex: i,
         };
       } else if (scene.type === "compaction-summary") {
@@ -70,6 +80,7 @@ export default function Minimap({ scenes, currentIndex, onSeek, overlayActions }
         current.endIndex = i;
         if (scene.type === "tool-call") {
           current.toolCalls++;
+          if (scene.toolName === "Agent" && scene.subAgent) current.subAgentCalls++;
           if (!current.toolNames.includes(scene.toolName)) {
             current.toolNames.push(scene.toolName);
           }
@@ -152,6 +163,11 @@ export default function Minimap({ scenes, currentIndex, onSeek, overlayActions }
                   {item.toolCalls} tool{item.toolCalls > 1 ? "s" : ""}
                 </span>
               )}
+              {item.subAgentCalls > 0 && (
+                <span className="text-[10px] font-mono px-1.5 py-px rounded-full bg-green-500/20 text-green-300">
+                  {item.subAgentCalls} agent{item.subAgentCalls > 1 ? "s" : ""}
+                </span>
+              )}
               {item.textBlocks > 0 && (
                 <span className="text-[10px] font-mono px-1.5 py-px rounded-full bg-terminal-blue-subtle text-terminal-blue">
                   {item.textBlocks} resp
@@ -162,6 +178,15 @@ export default function Minimap({ scenes, currentIndex, onSeek, overlayActions }
                   think
                 </span>
               )}
+              {(() => {
+                const ts = turnStats?.[item.turnNumber - 1];
+                if (!ts?.durationMs) return null;
+                return (
+                  <span className="text-[10px] font-mono text-terminal-dimmer">
+                    {formatDuration(ts.durationMs)}
+                  </span>
+                );
+              })()}
             </div>
 
             {/* Tool names (only for active turn) */}

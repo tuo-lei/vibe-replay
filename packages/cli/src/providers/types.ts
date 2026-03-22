@@ -36,4 +36,24 @@ export interface ProviderParseResult {
   turnStats?: TurnStat[];
   /** PR links associated with the session */
   prLinks?: PrLink[];
+  /** Summary of subagents used in this session */
+  subAgentSummary?: Array<{
+    agentId: string;
+    agentType: string;
+    description?: string;
+    toolCalls: number;
+    model?: string;
+  }>;
+  gitBranch?: string;
+  /** All branches seen during session in order (if >1) */
+  gitBranches?: string[];
+  entrypoint?: string;
+  permissionMode?: string;
+  apiErrors?: Array<{
+    timestamp: string;
+    statusCode?: number;
+    errorType?: string;
+    retryAttempt?: number;
+  }>;
+  trackedFiles?: string[];
 }

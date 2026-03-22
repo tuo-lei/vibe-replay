@@ -4,9 +4,20 @@ interface Props {
   command: string;
   stdout: string;
   isActive: boolean;
+  durationMs?: number;
 }
 
-export default memo(function BashBlock({ command, stdout, isActive: _isActive }: Props) {
+function fmtDuration(ms: number): string {
+  if (ms >= 60000) return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+export default memo(function BashBlock({
+  command,
+  stdout,
+  isActive: _isActive,
+  durationMs,
+}: Props) {
   const [expanded, setExpanded] = useState(true);
   const hasOutput = stdout.trim().length > 0;
 
@@ -18,6 +29,14 @@ export default memo(function BashBlock({ command, stdout, isActive: _isActive }:
       >
         <span className="text-xs font-mono font-bold text-terminal-orange">$</span>
         <span className="text-xs font-mono text-terminal-text truncate flex-1">{command}</span>
+        {durationMs && (
+          <span
+            className="text-[10px] text-terminal-dimmer font-mono shrink-0"
+            title={`Execution: ${fmtDuration(durationMs)}`}
+          >
+            {fmtDuration(durationMs)}
+          </span>
+        )}
         {hasOutput && (
           <span
             className={`text-xs text-terminal-dim transition-transform ${expanded ? "rotate-90" : ""}`}

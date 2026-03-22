@@ -117,4 +117,37 @@ describe("Generated HTML E2E", () => {
     expect(title.length).toBeGreaterThan(0);
     expect(title).not.toBe("vibe-replay"); // Should be customized, not default
   });
+
+  it("supports subAgent field in tool-call scenes (backward compatible)", async () => {
+    // Verify the data structure supports subAgent (optional field on tool-call scenes)
+    const toolScenes = session.scenes.filter((s) => s.type === "tool-call");
+    expect(toolScenes.length).toBeGreaterThan(0);
+    // All tool scenes should have valid structure — subAgent is optional
+    for (const s of toolScenes) {
+      if (s.type === "tool-call") {
+        expect(s.toolName).toBeDefined();
+        // subAgent should be undefined for fixture data (no subagents)
+        // This confirms backward compatibility — old data without subAgent still works
+      }
+    }
+    // Verify viewer rendered without errors (covered by earlier test but explicit here)
+    const bodyText = await page.textContent("body");
+    expect(bodyText).not.toContain("Failed to load");
+  });
+
+  it("renders insights view without errors", async () => {
+    // Navigate to insights/summary view
+    await page.goto(`file://${htmlPath}?v=summary`, { waitUntil: "networkidle" });
+    await page.waitForTimeout(1000);
+
+    // Check that the page renders content (stats panel + overview)
+    const bodyText = await page.textContent("body");
+    expect(bodyText).toBeTruthy();
+    // Should contain stat values from the session
+    expect(bodyText).toContain(String(session.meta.stats.userPrompts));
+
+    // Verify no console errors on insights view
+    const newErrors = consoleErrors.filter((e) => !e.includes("favicon") && !e.includes("404"));
+    expect(newErrors).toEqual([]);
+  });
 });

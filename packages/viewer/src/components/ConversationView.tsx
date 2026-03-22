@@ -1,8 +1,9 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { OverlayActions } from "../hooks/useOverlays";
 import type { EffectivePrefs } from "../hooks/useViewPrefs";
-import type { Scene } from "../types";
+import type { Scene, TurnStat } from "../types";
 import CompactionSummaryBlock from "./CompactionSummaryBlock";
+import { formatDuration } from "./StatsPanel";
 import TextResponseBlock from "./TextResponseBlock";
 import ThinkingBlock from "./ThinkingBlock";
 import ToolCallBlock from "./ToolCallBlock";
@@ -19,6 +20,7 @@ interface Props {
   onComment?: (sceneIndex: number) => void;
   state?: string;
   overlayActions?: OverlayActions;
+  turnStats?: TurnStat[];
 }
 
 interface TurnGroup {
@@ -55,6 +57,7 @@ export default function ConversationView({
   onSeek,
   state,
   overlayActions,
+  turnStats,
 }: Props & { onSeek?: (index: number) => void }) {
   // Pre-compute ALL groups once — stable across playback ticks
   const allGroups = useMemo(() => {
@@ -82,6 +85,7 @@ export default function ConversationView({
             type: "assistant",
             timestamp: scene.timestamp,
             scenes: [],
+            turnNumber: turnCount > 0 ? turnCount : undefined,
           };
         }
         current.scenes.push({ scene, index: i });
@@ -111,10 +115,39 @@ export default function ConversationView({
     return displayGroups.length - 1;
   }, [displayGroups, currentIndex]);
 
+  // Compute time gaps between user-prompt groups
+  const timeGaps = useMemo(() => {
+    const gaps = new Map<number, number>(); // group index → gap in ms
+    for (let gi = 1; gi < displayGroups.length; gi++) {
+      const prev = displayGroups[gi - 1];
+      const curr = displayGroups[gi];
+      if (curr.type !== "user") continue;
+      // Find the last timestamp from the previous groups (search backward)
+      let prevTs: string | undefined;
+      for (let j = gi - 1; j >= 0; j--) {
+        const g = displayGroups[j];
+        const lastScene = g.scenes[g.scenes.length - 1];
+        if (lastScene?.scene.timestamp) {
+          prevTs = lastScene.scene.timestamp;
+          break;
+        }
+        if (g.timestamp) {
+          prevTs = g.timestamp;
+          break;
+        }
+      }
+      if (!prevTs || !curr.timestamp) continue;
+      const gap = new Date(curr.timestamp).getTime() - new Date(prevTs).getTime();
+      if (gap > 120_000) gaps.set(gi, gap); // > 2 minutes
+    }
+    return gaps;
+  }, [displayGroups]);
+
   return (
     <div className="max-w-4xl mx-auto space-y-5 pb-6">
       {displayGroups.map((group, gi) => (
         <LazyGroup key={gi} forceRender={gi >= currentGroupIdx - 15 && gi <= currentGroupIdx + 5}>
+          {timeGaps.has(gi) && <TimeGapIndicator gapMs={timeGaps.get(gi)!} />}
           <GroupCard
             group={group}
             currentIndex={currentIndex}
@@ -125,6 +158,7 @@ export default function ConversationView({
             annotationCounts={annotationCounts}
             onComment={onComment}
             overlayActions={overlayActions}
+            turnStats={turnStats}
           />
         </LazyGroup>
       ))}
@@ -221,6 +255,20 @@ export default function ConversationView({
   );
 }
 
+function TimeGapIndicator({ gapMs }: { gapMs: number }) {
+  const label =
+    gapMs >= 3600_000
+      ? `${Math.floor(gapMs / 3600_000)}h ${Math.floor((gapMs % 3600_000) / 60_000)}m later`
+      : `${Math.floor(gapMs / 60_000)}m later`;
+  return (
+    <div className="flex items-center gap-3 py-1 px-4">
+      <div className="flex-1 h-px bg-terminal-border-subtle" />
+      <span className="text-[10px] font-mono text-terminal-dimmer whitespace-nowrap">{label}</span>
+      <div className="flex-1 h-px bg-terminal-border-subtle" />
+    </div>
+  );
+}
+
 /**
  * IntersectionObserver-based lazy renderer.
  * Only mounts children when near the viewport or forceRender is true.
@@ -284,6 +332,7 @@ const GroupCard = memo(function GroupCard({
   annotationCounts,
   onComment,
   overlayActions,
+  turnStats,
 }: {
   group: TurnGroup;
   currentIndex: number;
@@ -294,6 +343,7 @@ const GroupCard = memo(function GroupCard({
   annotationCounts?: Map<number, number>;
   onComment?: (sceneIndex: number) => void;
   overlayActions?: OverlayActions;
+  turnStats?: TurnStat[];
 }) {
   const [hovered, setHovered] = useState(false);
 
@@ -483,6 +533,9 @@ const GroupCard = memo(function GroupCard({
         annotationCounts={annotationCounts}
         onComment={onComment}
         overlayActions={overlayActions}
+        turnDurationMs={
+          group.turnNumber ? turnStats?.[group.turnNumber - 1]?.durationMs : undefined
+        }
       />
     );
   }
@@ -564,6 +617,7 @@ function CompactAssistantGroup({
   annotationCounts,
   onComment,
   overlayActions,
+  turnDurationMs,
 }: {
   /** All scenes in the group — used for stable stats (not affected by playback progress) */
   allScenes: { scene: Scene; index: number }[];
@@ -577,6 +631,7 @@ function CompactAssistantGroup({
   annotationCounts?: Map<number, number>;
   onComment?: (sceneIndex: number) => void;
   overlayActions?: OverlayActions;
+  turnDurationMs?: number;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -598,9 +653,17 @@ function CompactAssistantGroup({
     let responses = 0;
     let thinking = 0;
     let totalTools = 0;
+    let subAgentCalls = 0;
+    const subAgentTypes: string[] = [];
     for (const { scene } of allScenes) {
       if (scene.type === "tool-call") {
         totalTools++;
+        if (scene.toolName === "Agent" && scene.subAgent) {
+          subAgentCalls++;
+          if (!subAgentTypes.includes(scene.subAgent.agentType)) {
+            subAgentTypes.push(scene.subAgent.agentType);
+          }
+        }
         const displayName = shortToolName(scene.toolName);
         toolBreakdown[displayName] = (toolBreakdown[displayName] || 0) + 1;
         if (scene.toolName === "Bash" && scene.input?.command) {
@@ -610,7 +673,25 @@ function CompactAssistantGroup({
       } else if (scene.type === "text-response") responses++;
       else if (scene.type === "thinking") thinking++;
     }
-    return { totalTools, toolBreakdown, responses, thinking, bashCommands: [...bashCommands] };
+    // Compute turn duration from scene timestamps
+    let turnDurationMs: number | undefined;
+    const firstTs = allScenes[0]?.scene.timestamp;
+    const lastTs = allScenes[allScenes.length - 1]?.scene.timestamp;
+    if (firstTs && lastTs) {
+      const diff = Date.parse(lastTs) - Date.parse(firstTs);
+      if (diff > 0) turnDurationMs = diff;
+    }
+
+    return {
+      totalTools,
+      toolBreakdown,
+      responses,
+      thinking,
+      bashCommands: [...bashCommands],
+      subAgentCalls,
+      subAgentTypes,
+      turnDurationMs,
+    };
   }, [allScenes]);
 
   // Find the last text-response from ALL scenes (stable preview)
@@ -694,6 +775,11 @@ function CompactAssistantGroup({
             {formatTime(timestamp)}
           </span>
         )}
+        {turnDurationMs && (
+          <span className="text-[10px] font-mono text-terminal-dimmer">
+            · {formatDuration(turnDurationMs)}
+          </span>
+        )}
         <div className="flex-1" />
         {groupHasFocusedTarget ? (
           <span className="text-[10px] font-sans font-medium uppercase tracking-widest px-2 py-0.5 rounded-full bg-terminal-blue-emphasis text-terminal-blue">
@@ -718,6 +804,14 @@ function CompactAssistantGroup({
         {stats.totalTools > 0 && (
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-terminal-orange-subtle text-terminal-orange">
             {stats.totalTools} tool{stats.totalTools > 1 ? "s" : ""}
+          </span>
+        )}
+        {stats.subAgentCalls > 0 && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-500/20 text-green-300">
+            {stats.subAgentCalls} agent{stats.subAgentCalls > 1 ? "s" : ""}
+            {stats.subAgentTypes.length > 0 && (
+              <span className="opacity-70 text-[10px]">({stats.subAgentTypes.join(", ")})</span>
+            )}
           </span>
         )}
         {stats.thinking > 0 && (

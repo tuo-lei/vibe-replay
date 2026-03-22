@@ -14,6 +14,8 @@ export default function StatsPanel({ session }: Props) {
     let responseChars = 0;
     let promptChars = 0;
     let editCount = 0;
+    let subAgentCount = 0;
+    let delegatedTools = 0;
     const filesModified = new Set<string>();
 
     for (const scene of scenes) {
@@ -33,6 +35,10 @@ export default function StatsPanel({ session }: Props) {
             editCount++;
             filesModified.add(scene.diff.filePath);
           }
+          if (scene.subAgent) {
+            subAgentCount++;
+            delegatedTools += scene.subAgent.toolCalls;
+          }
           break;
         }
       }
@@ -49,6 +55,8 @@ export default function StatsPanel({ session }: Props) {
       promptChars,
       editCount,
       filesModified: filesModified.size,
+      subAgentCount,
+      delegatedTools,
       topTools,
       durationMs: meta.stats.durationMs,
       tokenUsage: meta.stats.tokenUsage,
@@ -78,6 +86,32 @@ export default function StatsPanel({ session }: Props) {
           {meta.model && <span className="text-terminal-dim">{meta.model}</span>}
           {meta.provider && <span>{meta.provider}</span>}
         </div>
+        {meta.gitBranch && (
+          <div className="text-terminal-dim mt-0.5">
+            <span className="text-terminal-purple truncate block" title={meta.gitBranch}>
+              {meta.gitBranch}
+            </span>
+            {meta.gitBranches && meta.gitBranches.length > 1 && (
+              <span className="text-[10px] text-terminal-dimmer">
+                {meta.gitBranches.slice(0, -1).join(" → ")} → {meta.gitBranch}
+              </span>
+            )}
+          </div>
+        )}
+        {(meta.entrypoint || meta.permissionMode) && (
+          <div className="text-terminal-dim mt-0.5 flex items-center gap-1.5 flex-wrap text-[10px]">
+            {meta.entrypoint && (
+              <span className="px-1 py-0.5 rounded bg-terminal-surface text-terminal-dim">
+                {meta.entrypoint}
+              </span>
+            )}
+            {meta.permissionMode === "bypassPermissions" && (
+              <span className="px-1 py-0.5 rounded bg-terminal-orange/20 text-terminal-orange">
+                dangerous
+              </span>
+            )}
+          </div>
+        )}
         {meta.generator?.version && (
           <div className="text-terminal-dim mt-0.5 truncate">
             replay:{" "}
@@ -150,6 +184,72 @@ export default function StatsPanel({ session }: Props) {
               </span>{" "}
               created
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sub-agents summary */}
+      {stats.subAgentCount > 0 && (
+        <div className="text-terminal-dim">
+          Sub-agents: <span className="text-terminal-text">{stats.subAgentCount}</span>
+          {stats.delegatedTools > 0 && (
+            <span className="text-terminal-dimmer"> ({stats.delegatedTools} tools delegated)</span>
+          )}
+        </div>
+      )}
+
+      {/* API Errors */}
+      {meta.apiErrors && meta.apiErrors.length > 0 && (
+        <div className="text-terminal-dim">
+          API errors: <span className="text-terminal-red">{meta.apiErrors.length}</span>
+          {(() => {
+            const types = new Map<string, number>();
+            for (const e of meta.apiErrors) {
+              const key = e.errorType || `${e.statusCode}`;
+              types.set(key, (types.get(key) || 0) + 1);
+            }
+            return (
+              <span className="text-terminal-dimmer text-[10px]">
+                {" "}
+                (
+                {[...types.entries()]
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([t, c]) => `${t} x${c}`)
+                  .join(", ")}
+                )
+              </span>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* Tracked Files */}
+      {meta.trackedFiles && meta.trackedFiles.length > 0 && (
+        <div className="text-terminal-dim">
+          Files tracked: <span className="text-terminal-text">{meta.trackedFiles.length}</span>
+        </div>
+      )}
+
+      {/* PR Links */}
+      {meta.prLinks && meta.prLinks.length > 0 && (
+        <div>
+          <div className="text-terminal-dimmer mb-1 text-[10px] font-sans font-semibold uppercase tracking-widest">
+            Pull Requests
+          </div>
+          <div className="space-y-0.5">
+            {meta.prLinks.map((pr) => (
+              <a
+                key={pr.prUrl}
+                href={pr.prUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block text-terminal-blue hover:underline truncate"
+                title={pr.prUrl}
+              >
+                <span className="text-terminal-green">#{pr.prNumber}</span>{" "}
+                {pr.prRepository && <span className="text-terminal-dimmer">{pr.prRepository}</span>}
+              </a>
+            ))}
           </div>
         </div>
       )}

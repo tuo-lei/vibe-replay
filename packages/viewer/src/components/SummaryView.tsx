@@ -113,6 +113,20 @@ export default function SummaryView({ session }: Props) {
     let promptChars = 0;
     let totalBashErrors = 0;
 
+    // Subagent tracking
+    let totalDelegatedTools = 0;
+    let totalDelegatedTokens = 0;
+    const subAgents: Array<{
+      agentType: string;
+      description?: string;
+      toolCalls: number;
+      thinkingBlocks: number;
+      textResponses: number;
+      totalTokens: number;
+      model?: string;
+      sceneCount: number;
+    }> = [];
+
     const closeTurn = () => {
       if (turns.length > 0) {
         const t = turns[turns.length - 1];
@@ -165,6 +179,24 @@ export default function SummaryView({ session }: Props) {
               f.linesAdded += Math.max(0, newL - oldL);
               f.linesRemoved += Math.max(0, oldL - newL);
             }
+          } else if (tn === "Agent" && scene.subAgent) {
+            const sa = scene.subAgent;
+            const tu = sa.tokenUsage;
+            const tokens = tu
+              ? tu.inputTokens + tu.outputTokens + tu.cacheCreationTokens + tu.cacheReadTokens
+              : 0;
+            totalDelegatedTools += sa.toolCalls;
+            totalDelegatedTokens += tokens;
+            subAgents.push({
+              agentType: sa.agentType,
+              description: sa.description,
+              toolCalls: sa.toolCalls,
+              thinkingBlocks: sa.thinkingBlocks,
+              textResponses: sa.textResponses,
+              totalTokens: tokens,
+              model: sa.model,
+              sceneCount: sa.scenes.length,
+            });
           } else if (tn === "Bash") {
             if (scene.bashOutput) {
               const cat = classifyBash(scene.bashOutput.command);
@@ -229,6 +261,9 @@ export default function SummaryView({ session }: Props) {
       activityDist,
       totalTools,
       totalBashErrors,
+      subAgents,
+      totalDelegatedTools,
+      totalDelegatedTokens,
     };
   }, [scenes, meta]);
 
@@ -250,6 +285,21 @@ export default function SummaryView({ session }: Props) {
           {meta.provider && (
             <span className="shrink-0 text-[10px] font-mono text-terminal-dimmer px-1.5 py-0.5 rounded bg-terminal-surface border border-terminal-border-subtle">
               {meta.provider}
+            </span>
+          )}
+          {meta.gitBranch && (
+            <span
+              className="shrink-0 text-[10px] font-mono text-terminal-purple px-1.5 py-0.5 rounded bg-terminal-purple/10 border border-terminal-purple/20"
+              title={meta.gitBranches ? meta.gitBranches.join(" → ") : undefined}
+            >
+              {meta.gitBranches && meta.gitBranches.length > 1
+                ? `${meta.gitBranches[0]} → ${meta.gitBranch}`
+                : meta.gitBranch}
+            </span>
+          )}
+          {meta.permissionMode === "bypassPermissions" && (
+            <span className="shrink-0 text-[10px] font-mono text-terminal-orange px-1.5 py-0.5 rounded bg-terminal-orange/10 border border-terminal-orange/20">
+              dangerous mode
             </span>
           )}
         </div>
@@ -284,6 +334,24 @@ export default function SummaryView({ session }: Props) {
             />
             <StatCard label="Scenes" value={stats.totalScenes} color="text-terminal-text" />
           </div>
+          {/* Delegated work callout */}
+          {stats.totalDelegatedTools > 0 && (
+            <div className="mt-3 flex items-center gap-2 text-xs font-mono text-terminal-dim bg-green-500/5 border border-green-500/15 rounded-lg px-3 py-2">
+              <span className="text-green-300">+{stats.totalDelegatedTools} tools delegated</span>
+              <span className="text-terminal-dimmer">
+                to {stats.subAgents.length} sub-agent{stats.subAgents.length > 1 ? "s" : ""}
+              </span>
+              {stats.totalDelegatedTokens > 0 && (
+                <span className="text-terminal-dimmer">
+                  (
+                  {stats.totalDelegatedTokens > 1000000
+                    ? `${(stats.totalDelegatedTokens / 1000000).toFixed(1)}M`
+                    : `${(stats.totalDelegatedTokens / 1000).toFixed(0)}K`}{" "}
+                  tokens, context-free)
+                </span>
+              )}
+            </div>
+          )}
           {/* Duration / Cost / Model — inline below cards */}
           <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-xs font-mono text-terminal-dim">
             {meta.model && (
@@ -346,11 +414,7 @@ export default function SummaryView({ session }: Props) {
               costEstimate={meta.stats.costEstimate}
               turnLabels={turnLabels}
             />
-            <ContextWindowChart
-              turnStats={meta.stats.turnStats!}
-              contextLimit={meta.contextLimit}
-              turnLabels={turnLabels}
-            />
+            <ContextWindowChart turnStats={meta.stats.turnStats!} turnLabels={turnLabels} />
             {stats.turns.length >= 2 && (
               <ToolActivityChart turns={stats.turns} turnLabels={turnLabels} />
             )}
@@ -363,6 +427,70 @@ export default function SummaryView({ session }: Props) {
         {/* Per-Model Token Breakdown */}
         {meta.tokenUsageByModel && Object.keys(meta.tokenUsageByModel).length > 1 && (
           <ModelBreakdown tokenUsageByModel={meta.tokenUsageByModel} />
+        )}
+
+        {/* API Errors */}
+        {meta.apiErrors && meta.apiErrors.length > 0 && (
+          <div>
+            <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
+              API Issues
+            </div>
+            <div className="text-xs font-mono text-terminal-dim space-y-1">
+              {(() => {
+                const errs = meta.apiErrors;
+                const maxRetry = Math.max(0, ...errs.map((e) => e.retryAttempt || 0));
+                const hasOverloaded = errs.some(
+                  (e) => e.errorType === "overloaded_error" || e.statusCode === 529,
+                );
+                const hasRateLimit = errs.some(
+                  (e) => e.errorType === "rate_limit_error" || e.statusCode === 429,
+                );
+                const parts: string[] = [];
+                if (hasOverloaded) parts.push("API was overloaded");
+                if (hasRateLimit) parts.push("hit rate limits");
+                if (parts.length === 0) parts.push("API errors occurred");
+                return (
+                  <>
+                    <div className="text-terminal-text">
+                      {parts.join(" and ")}{" "}
+                      <span className="text-terminal-red">{errs.length} times</span> during this
+                      session
+                      {maxRetry > 1 && (
+                        <>
+                          , with up to{" "}
+                          <span className="text-terminal-orange">{maxRetry} retries</span> in a row
+                        </>
+                      )}
+                      .
+                    </div>
+                    <div className="text-terminal-dimmer">
+                      All errors were automatically retried and resolved.
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+        )}
+
+        {/* Tracked Files */}
+        {meta.trackedFiles && meta.trackedFiles.length > 0 && (
+          <div>
+            <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
+              Files Tracked ({meta.trackedFiles.length})
+            </div>
+            <div className="space-y-0.5 max-h-[200px] overflow-y-auto">
+              {meta.trackedFiles.map((f) => (
+                <div
+                  key={f}
+                  className="text-[10px] font-mono text-terminal-dim truncate px-2 py-0.5 rounded hover:bg-terminal-surface-hover"
+                  title={f}
+                >
+                  {f}
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
         {/* PR Links */}
@@ -457,6 +585,9 @@ export default function SummaryView({ session }: Props) {
           </div>
         )}
 
+        {/* Sub-Agent Summary */}
+        {stats.subAgents.length > 0 && <SubAgentSummary subAgents={stats.subAgents} />}
+
         {/* Activity Distribution (heuristic — placed low as reference) */}
         {stats.totalTools > 0 && (
           <div>
@@ -491,6 +622,117 @@ export default function SummaryView({ session }: Props) {
                   </div>
                 ))}
             </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// --- Sub-Agent Summary ---
+
+const AGENT_TYPE_COLORS: Record<string, string> = {
+  Explore: "bg-blue-500/20 text-blue-300 border-blue-500/30",
+  Plan: "bg-purple-500/20 text-purple-300 border-purple-500/30",
+  "general-purpose": "bg-green-500/20 text-green-300 border-green-500/30",
+  "claude-code-guide": "bg-amber-500/20 text-amber-300 border-amber-500/30",
+};
+
+function SubAgentSummary({
+  subAgents,
+}: {
+  subAgents: Array<{
+    agentType: string;
+    description?: string;
+    toolCalls: number;
+    thinkingBlocks: number;
+    textResponses: number;
+    totalTokens: number;
+    model?: string;
+    sceneCount: number;
+  }>;
+}) {
+  // Aggregate by type
+  const byType = new Map<string, { count: number; toolCalls: number; totalTokens: number }>();
+  let totalDelegatedTools = 0;
+  let totalDelegatedTokens = 0;
+  for (const sa of subAgents) {
+    const existing = byType.get(sa.agentType) || { count: 0, toolCalls: 0, totalTokens: 0 };
+    existing.count++;
+    existing.toolCalls += sa.toolCalls;
+    existing.totalTokens += sa.totalTokens;
+    byType.set(sa.agentType, existing);
+    totalDelegatedTools += sa.toolCalls;
+    totalDelegatedTokens += sa.totalTokens;
+  }
+  const types = [...byType.entries()].sort((a, b) => b[1].count - a[1].count);
+
+  return (
+    <div>
+      <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
+        Sub-Agents ({subAgents.length})
+      </div>
+      {/* Type breakdown */}
+      <div className="flex flex-wrap gap-2 mb-3">
+        {types.map(([type, data]) => {
+          const colors =
+            AGENT_TYPE_COLORS[type] || "bg-gray-500/20 text-gray-300 border-gray-500/30";
+          return (
+            <span key={type} className={`text-[11px] px-2 py-1 rounded border font-mono ${colors}`}>
+              {type}{" "}
+              <span className="opacity-70">
+                x{data.count} ({data.toolCalls} tools)
+              </span>
+            </span>
+          );
+        })}
+      </div>
+      {/* Aggregate stats */}
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs font-mono text-terminal-dim">
+        <div>
+          Delegated tools: <span className="text-terminal-text">{totalDelegatedTools}</span>
+        </div>
+        {totalDelegatedTokens > 0 && (
+          <div>
+            Delegated tokens:{" "}
+            <span className="text-terminal-text">
+              {totalDelegatedTokens > 1000000
+                ? `${(totalDelegatedTokens / 1000000).toFixed(1)}M`
+                : totalDelegatedTokens > 1000
+                  ? `${(totalDelegatedTokens / 1000).toFixed(0)}K`
+                  : totalDelegatedTokens}
+            </span>
+            <span className="text-terminal-dimmer"> (context-free)</span>
+          </div>
+        )}
+      </div>
+      {/* Individual agents */}
+      <div className="mt-2 space-y-1">
+        {subAgents.slice(0, 20).map((sa, i) => (
+          <div
+            key={i}
+            className="flex items-center gap-2 text-[10px] font-mono text-terminal-dim px-2 py-1 rounded bg-terminal-surface"
+          >
+            <span
+              className={`px-1 py-0.5 rounded border text-[9px] ${AGENT_TYPE_COLORS[sa.agentType] || "bg-gray-500/20 text-gray-300 border-gray-500/30"}`}
+            >
+              {sa.agentType}
+            </span>
+            <span className="truncate flex-1 text-terminal-text/70">
+              {sa.description || "(no description)"}
+            </span>
+            <span className="shrink-0">{sa.toolCalls} tools</span>
+            {sa.totalTokens > 0 && (
+              <span className="shrink-0 text-terminal-dimmer">
+                {sa.totalTokens > 1000 ? `${(sa.totalTokens / 1000).toFixed(0)}K` : sa.totalTokens}{" "}
+                tok
+              </span>
+            )}
+          </div>
+        ))}
+        {subAgents.length > 20 && (
+          <div className="text-[10px] text-terminal-dimmer font-mono px-2">
+            ... and {subAgents.length - 20} more
           </div>
         )}
       </div>
@@ -686,11 +928,9 @@ function CacheEfficiencyLine({ turnStats }: { turnStats: TurnStat[] }) {
 
 function ContextWindowChart({
   turnStats,
-  contextLimit,
   turnLabels,
 }: {
   turnStats: TurnStat[];
-  contextLimit?: number;
   turnLabels?: string[];
 }) {
   const contextSizes = turnStats.map((t) => t.contextTokens || 0);
@@ -700,7 +940,7 @@ function ContextWindowChart({
   if (!contextSizes.some((c) => c > 0)) return null;
 
   const peak = Math.max(...contextSizes);
-  const max = contextLimit ? Math.max(peak, contextLimit) : peak;
+  const max = peak;
   const h = 60;
   const w = 100;
 
@@ -709,8 +949,6 @@ function ContextWindowChart({
     const y = h - (v / max) * (h - 6) - 3;
     return `${x},${y}`;
   });
-
-  const limitY = contextLimit ? h - (contextLimit / max) * (h - 6) - 3 : undefined;
 
   // Detect compaction points
   const compactionTurns: number[] = [];
@@ -738,20 +976,6 @@ function ContextWindowChart({
           onMouseMove={onMouseMove}
           onMouseLeave={onMouseLeave}
         >
-          {/* Context limit reference line */}
-          {limitY !== undefined && (
-            <line
-              x1="0"
-              y1={limitY}
-              x2={w}
-              y2={limitY}
-              style={{ stroke: "var(--red)" }}
-              strokeWidth="0.5"
-              strokeDasharray="2,2"
-              vectorEffect="non-scaling-stroke"
-              opacity="0.5"
-            />
-          )}
           <polygon
             points={`0,${h} ${points.join(" ")} ${w},${h}`}
             style={{ fill: "var(--cyan-subtle)" }}
@@ -807,21 +1031,13 @@ function ContextWindowChart({
                 </div>
               )}
               <div>{fmtNum(contextSizes[hovered])} tokens</div>
-              {contextLimit && (
-                <div className="text-terminal-dimmer">
-                  {Math.round((contextSizes[hovered] / contextLimit) * 100)}% of limit
-                </div>
-              )}
             </>
           )}
         </ChartTooltip>
       </div>
       <div className="flex justify-between text-[10px] font-mono text-terminal-dimmer mt-0.5">
         <span>Turn 1</span>
-        <span>
-          peak {fmtNum(peak)}
-          {contextLimit ? ` / ${fmtNum(contextLimit)} limit` : ""}
-        </span>
+        <span>peak {fmtNum(peak)}</span>
         <span>Turn {n}</span>
       </div>
       {compactionTurns.length > 0 && (

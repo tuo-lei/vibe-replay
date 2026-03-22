@@ -662,6 +662,7 @@ export default function Player({
                       currentIndex={currentIndex}
                       onSeek={seekFromNavigation}
                       overlayActions={overlayActions}
+                      turnStats={session.meta.stats.turnStats}
                     />
                   </div>
                   {/* Compact Stats (bottom) */}
@@ -761,6 +762,7 @@ export default function Player({
                     onSeek={seekFromNavigation}
                     state={state}
                     overlayActions={overlayActions}
+                    turnStats={session.meta.stats.turnStats}
                     onComment={
                       isReadOnly
                         ? undefined
@@ -903,6 +905,7 @@ export default function Player({
                   setMobileDrawerOpen(false);
                 }}
                 overlayActions={overlayActions}
+                turnStats={session.meta.stats.turnStats}
               />
             ) : (
               <AnnotationPanel

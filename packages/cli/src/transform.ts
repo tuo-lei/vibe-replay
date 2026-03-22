@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { estimateCost, estimateCostSimple, getModelContextLimit } from "./pricing.js";
 import type { ProviderParseResult } from "./providers/types.js";
-import type { ReplaySession, Scene } from "./types.js";
+import type { ReplaySession, Scene, SubAgent } from "./types.js";
 
 const HOME = homedir();
 
@@ -80,6 +80,23 @@ export function transformToReplay(
         );
         (scene as any).timestamp = turn.timestamp;
         (scene as any).isError = !!toolBlock._isError;
+        if (toolBlock._durationMs) (scene as any).durationMs = toolBlock._durationMs;
+        // Attach subagent data for Agent tool calls
+        if (toolBlock.name === "Agent" && toolBlock._subAgent) {
+          const sa = toolBlock._subAgent;
+          (scene as any).subAgent = {
+            agentId: sa.agentId,
+            agentType: sa.agentType,
+            description: sa.description,
+            prompt: redactSecrets(redactPath(sa.prompt || "")),
+            toolCalls: sa.toolCalls,
+            thinkingBlocks: sa.thinkingBlocks,
+            textResponses: sa.textResponses,
+            tokenUsage: sa.tokenUsage,
+            model: sa.model,
+            scenes: (sa.scenes || []).map((s: any) => redactSubAgentScene(s)),
+          } satisfies SubAgent;
+        }
         scenes.push(scene);
         toolCalls++;
       }
@@ -129,6 +146,17 @@ export function transformToReplay(
       ...(parsed.tokenUsageByModel ? { tokenUsageByModel: parsed.tokenUsageByModel } : {}),
       ...(parsed.prLinks && parsed.prLinks.length > 0 ? { prLinks: parsed.prLinks } : {}),
       compactions: parsed.compactions,
+      ...(parsed.subAgentSummary && parsed.subAgentSummary.length > 0
+        ? { subAgentSummary: parsed.subAgentSummary }
+        : {}),
+      ...(parsed.gitBranch ? { gitBranch: parsed.gitBranch } : {}),
+      ...(parsed.gitBranches ? { gitBranches: parsed.gitBranches } : {}),
+      ...(parsed.entrypoint ? { entrypoint: parsed.entrypoint } : {}),
+      ...(parsed.permissionMode ? { permissionMode: parsed.permissionMode } : {}),
+      ...(parsed.apiErrors && parsed.apiErrors.length > 0 ? { apiErrors: parsed.apiErrors } : {}),
+      ...(parsed.trackedFiles && parsed.trackedFiles.length > 0
+        ? { trackedFiles: parsed.trackedFiles.map(redactPath) }
+        : {}),
     },
     scenes,
   };
@@ -259,6 +287,24 @@ const SECRET_PATTERNS = [
   // Email addresses
   /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
 ];
+
+function redactSubAgentScene(s: any): Scene {
+  if (s.type === "tool-call") {
+    return {
+      type: "tool-call",
+      toolName: s.toolName || "",
+      input: s.input ? sanitizeInput(s.input) : {},
+      result: truncate(redactPath(s.result || ""), 1000),
+      timestamp: s.timestamp,
+      isError: s.isError || false,
+    };
+  }
+  return {
+    type: s.type || "text-response",
+    content: truncate(redactSecrets(redactPath(s.content || "")), 1000),
+    timestamp: s.timestamp,
+  } as Scene;
+}
 
 function redactSecrets(s: string): string {
   let result = s;

@@ -22,6 +22,19 @@ export interface PrLink {
   prRepository: string;
 }
 
+export interface SubAgent {
+  agentId: string;
+  agentType: string;
+  description?: string;
+  prompt: string;
+  toolCalls: number;
+  thinkingBlocks: number;
+  textResponses: number;
+  tokenUsage?: TokenUsage;
+  model?: string;
+  scenes: Scene[];
+}
+
 export type Scene =
   | { type: "user-prompt"; content: string; timestamp?: string; images?: string[] }
   | { type: "compaction-summary"; content: string; timestamp?: string }
@@ -37,6 +50,9 @@ export type Scene =
       diff?: { filePath: string; oldContent: string; newContent: string };
       bashOutput?: { command: string; stdout: string };
       images?: string[];
+      subAgent?: SubAgent;
+      /** Tool execution duration in ms (assistant timestamp → tool_result timestamp) */
+      durationMs?: number;
     };
 
 export interface Annotation {
@@ -123,6 +139,30 @@ export interface ReplaySession {
       trigger: string;
       preTokens?: number;
     }>;
+    subAgentSummary?: Array<{
+      agentId: string;
+      agentType: string;
+      description?: string;
+      toolCalls: number;
+      model?: string;
+    }>;
+    /** Git branch (last seen — usually the feature branch) */
+    gitBranch?: string;
+    /** All branches seen during session, in order of appearance (if switched) */
+    gitBranches?: string[];
+    /** How the session was started: "cli" | "sdk-ts" */
+    entrypoint?: string;
+    /** Permission mode: "default" | "bypassPermissions" */
+    permissionMode?: string;
+    /** API errors encountered during the session */
+    apiErrors?: Array<{
+      timestamp: string;
+      statusCode?: number;
+      errorType?: string;
+      retryAttempt?: number;
+    }>;
+    /** Files tracked/backed up during this session */
+    trackedFiles?: string[];
   };
   scenes: Scene[];
   annotations?: Annotation[];

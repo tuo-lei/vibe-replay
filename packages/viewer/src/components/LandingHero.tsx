@@ -179,6 +179,31 @@ export default function LandingHero({ session, onStart, onViewInsights }: Props)
               vibe-replay
             </a>
           </p>
+          {/* Session context badges */}
+          {(meta.gitBranch || meta.model) && (
+            <div className="flex items-center gap-2 flex-wrap mt-2">
+              {meta.gitBranch && (
+                <span
+                  className="text-[11px] font-mono text-terminal-purple px-2 py-0.5 rounded-full bg-terminal-purple/10 border border-terminal-purple/20"
+                  title={meta.gitBranches ? meta.gitBranches.join(" → ") : meta.gitBranch}
+                >
+                  {meta.gitBranches && meta.gitBranches.length > 1
+                    ? `${meta.gitBranches[0]} → ${meta.gitBranch}`
+                    : meta.gitBranch}
+                </span>
+              )}
+              {meta.model && (
+                <span className="text-[11px] font-mono text-terminal-dim px-2 py-0.5 rounded-full bg-terminal-surface border border-terminal-border-subtle">
+                  {meta.model}
+                </span>
+              )}
+              {meta.permissionMode === "bypassPermissions" && (
+                <span className="text-[11px] font-mono text-terminal-orange px-2 py-0.5 rounded-full bg-terminal-orange/10 border border-terminal-orange/20">
+                  dangerous mode
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* First turn preview — reuses actual replay card styles */}
