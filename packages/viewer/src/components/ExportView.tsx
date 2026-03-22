@@ -358,8 +358,8 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
         updatedAt: new Date().toISOString(),
       });
       setGistStatus({ type: "success", text: "Published!" });
-    } catch (e: any) {
-      setGistStatus({ type: "error", text: e.message });
+    } catch (e) {
+      setGistStatus({ type: "error", text: e instanceof Error ? e.message : String(e) });
     } finally {
       setGistPublishingLocal(false);
     }
@@ -411,8 +411,8 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
           setStorageLimit(storageData.storage.limit ?? null);
         }
       }
-    } catch (e: any) {
-      setCloudStatus({ type: "error", text: e.message });
+    } catch (e) {
+      setCloudStatus({ type: "error", text: e instanceof Error ? e.message : String(e) });
     } finally {
       setCloudSharing(false);
     }
@@ -444,8 +444,8 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
           setStorageLimit(d.storage?.limit ?? null);
         })
         .catch(() => {});
-    } catch (e: any) {
-      setCloudStatus({ type: "error", text: e.message });
+    } catch (e) {
+      setCloudStatus({ type: "error", text: e instanceof Error ? e.message : String(e) });
     } finally {
       setCloudSharing(false);
     }
@@ -471,8 +471,8 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
         replayUrl: result.replayUrl,
         warnings: result.warnings,
       });
-    } catch (e: any) {
-      setGhError(e.message);
+    } catch (e) {
+      setGhError(e instanceof Error ? e.message : String(e));
     } finally {
       setGhExporting(false);
     }
@@ -1333,8 +1333,11 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                         try {
                           const path = await exportHtml();
                           setHtmlStatus({ type: "success", text: path });
-                        } catch (e: any) {
-                          setHtmlStatus({ type: "error", text: e.message });
+                        } catch (e) {
+                          setHtmlStatus({
+                            type: "error",
+                            text: e instanceof Error ? e.message : String(e),
+                          });
                         }
                       }}
                       disabled={htmlExporting}
