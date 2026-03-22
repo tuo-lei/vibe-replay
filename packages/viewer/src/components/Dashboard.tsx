@@ -294,6 +294,25 @@ function ReplayCard({
           )}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
+          {s.replayOutdated && (
+            <span
+              className="h-6 px-2 text-[10px] font-mono rounded-md bg-terminal-orange-subtle text-terminal-orange flex items-center gap-1"
+              title={`Generated with v${s.generatorVersion || "?"} — regenerate to update`}
+            >
+              <svg
+                width="10"
+                height="10"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              >
+                <path d="M2.5 8a5.5 5.5 0 019.3-4M13.5 8a5.5 5.5 0 01-9.3 4" />
+                <path d="M12.5 1v3h-3M3.5 15v-3h3" />
+              </svg>
+              outdated
+            </span>
+          )}
           {s.gist?.outdated && (
             <button
               onClick={(e) => {

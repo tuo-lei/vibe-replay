@@ -259,6 +259,9 @@ async function scanSessionsFromDir(baseDir: string): Promise<any[]> {
       const firstMessage = userPrompts[0] || undefined;
       const messages = userPrompts.length > 0 ? userPrompts.slice(0, 2) : undefined;
 
+      const generatorVersion = session.meta.generator?.version;
+      const replayOutdated = generatorVersion ? generatorVersion !== CLI_VERSION : false;
+
       results.push({
         slug: entry,
         baseDir,
@@ -271,6 +274,8 @@ async function scanSessionsFromDir(baseDir: string): Promise<any[]> {
         endTime: session.meta.endTime,
         stats: session.meta.stats,
         replaySize: Buffer.byteLength(raw, "utf-8"),
+        generatorVersion,
+        replayOutdated,
         hasAnnotations: annotationCount > 0,
         annotationCount,
         firstMessage,

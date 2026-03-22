@@ -33,6 +33,10 @@ export interface SessionSummary {
   firstMessage?: string;
   messages?: string[];
   replaySize?: number;
+  /** Version of vibe-replay that generated this replay */
+  generatorVersion?: string;
+  /** True if replay was generated with an older CLI version */
+  replayOutdated?: boolean;
   gist?: {
     gistId: string;
     viewerUrl: string;
