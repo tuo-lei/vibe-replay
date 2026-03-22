@@ -1420,6 +1420,15 @@ function ReplaysPanel() {
   const [selectedProject, setSelectedProject] = useState<string>(getProjectFromUrl());
   const [showArchived, setShowArchived] = useState(getShowArchivedFromUrl());
 
+  // Background scan + insights (shared with Sessions tab)
+  const { scanStatus, projectInsights, userInsights, fetchInsights } = useScanInsights();
+
+  // Fetch insights when selected project changes
+  useEffect(() => {
+    const project = selectedProject === ALL_PROJECTS ? null : selectedProject;
+    fetchInsights(project);
+  }, [selectedProject, fetchInsights]);
+
   useEffect(() => {
     const handler = () => {
       setSelectedProject(getProjectFromUrl());
@@ -1907,8 +1916,27 @@ function ReplaysPanel() {
           </div>
         )}
 
+        {/* Scan progress */}
+        {scanStatus?.running && (
+          <div className="mx-4 mb-2 shrink-0">
+            <ScanProgressBar status={scanStatus} />
+          </div>
+        )}
+
         {/* Replay list */}
         <div className="flex-1 overflow-y-auto">
+          {/* Insights panel at top of list */}
+          {!showInitialLoading && (projectInsights || userInsights) && (
+            <div className="px-4 pt-3 pb-1">
+              {projectInsights && selectedProject !== ALL_PROJECTS && (
+                <ProjectInsightsPanel insights={projectInsights} />
+              )}
+              {userInsights && selectedProject === ALL_PROJECTS && (
+                <UserInsightsPanel insights={userInsights} />
+              )}
+            </div>
+          )}
+
           {showInitialLoading ? (
             <div className="text-center py-12 text-terminal-dim font-mono text-sm">
               Fetching replays...

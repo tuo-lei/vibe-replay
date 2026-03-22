@@ -13,6 +13,7 @@ import {
   sourceSuggestedTitle,
   timeAgo,
 } from "./dashboard-utils";
+import { useScanInsights } from "./InsightsPanel";
 import { formatDuration } from "./StatsPanel";
 
 // ─── Types ───────────────────────────────────────────────────────────
@@ -910,6 +911,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     enrichmentStatus,
   } = useDashboardData();
   const insights = useMemo(() => computeInsights(sources, replays), [sources, replays]);
+  const { scanStatus, userInsights } = useScanInsights();
   const [generatingSlug, setGeneratingSlug] = useState<string | null>(null);
   const [generateErrorSlug, setGenerateErrorSlug] = useState<string | null>(null);
 
@@ -991,6 +993,15 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
             <div className="w-1.5 h-1.5 rounded-full bg-terminal-green animate-pulse" />
             <span className="text-xs font-mono text-terminal-dim">
               Scanning... {scanProgress} sessions
+            </span>
+          </div>
+        )}
+
+        {scanStatus?.running && scanStatus.total > 0 && (
+          <div className="flex items-center gap-2 px-1">
+            <div className="w-1.5 h-1.5 rounded-full bg-terminal-purple animate-pulse" />
+            <span className="text-xs font-mono text-terminal-dim">
+              Analyzing sessions... {scanStatus.scanned}/{scanStatus.total}
             </span>
           </div>
         )}
@@ -1079,9 +1090,82 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
                   </span>
                 </div>
               )}
+              {userInsights && userInsights.totalCost > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-sans text-terminal-dim">Total cost</span>
+                  <span className="text-sm font-mono font-medium text-terminal-orange tabular-nums">
+                    ${userInsights.totalCost.toFixed(2)}
+                  </span>
+                </div>
+              )}
+              {userInsights && userInsights.totalDurationMs > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-sans text-terminal-dim">Total session time</span>
+                  <span className="text-sm font-mono font-medium text-terminal-text tabular-nums">
+                    {formatCompactDuration(userInsights.totalDurationMs)}
+                  </span>
+                </div>
+              )}
+              {userInsights && userInsights.totalEdits > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-sans text-terminal-dim">File edits</span>
+                  <span className="text-sm font-mono font-medium text-terminal-text tabular-nums">
+                    {userInsights.totalEdits.toLocaleString()}
+                  </span>
+                </div>
+              )}
+              {userInsights && userInsights.subAgentTotal > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-sans text-terminal-dim">Sub-agents used</span>
+                  <span className="text-sm font-mono font-medium text-green-300 tabular-nums">
+                    {userInsights.subAgentTotal.toLocaleString()}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         </div>
+
+        {/* Project Breakdown (from scan data) */}
+        {userInsights && userInsights.topProjects.length > 1 && (
+          <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm">
+            <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider mb-3">
+              Projects
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {userInsights.topProjects.map((p) => {
+                const name = p.project.split("/").pop() || p.project;
+                return (
+                  <button
+                    key={p.project}
+                    onClick={() => {
+                      onNavigate("sessions");
+                      // Small delay so tab switch happens first
+                      setTimeout(() => {
+                        navigateTo({ tab: "sessions", project: p.project });
+                      }, 50);
+                    }}
+                    className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg bg-terminal-bg hover:bg-terminal-surface-hover transition-colors text-left group"
+                  >
+                    <div className="min-w-0">
+                      <span className="text-xs font-sans font-medium text-terminal-text truncate block group-hover:text-terminal-green transition-colors">
+                        {name}
+                      </span>
+                      <span className="text-[10px] font-mono text-terminal-dimmer">
+                        {p.sessions} session{p.sessions > 1 ? "s" : ""} · {p.prompts} prompts
+                      </span>
+                    </div>
+                    {p.cost > 0 && (
+                      <span className="text-xs font-mono text-terminal-orange tabular-nums shrink-0">
+                        ${p.cost.toFixed(2)}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm">
