@@ -192,13 +192,23 @@ export function ScanInsightsProvider({ children }: { children: ReactNode }) {
         fetchUserInsights();
       }
 
-      // Re-fetch when scan completes (fresh data)
-      if (!status.running && status.resultCount > 0 && status.finishedAt) {
-        // Mark cache stale so project insights are re-fetched on next access,
-        // but keep old entries until overwritten (stale-while-refresh).
-        staleCacheRef.current = true;
-        fetchUserInsights();
-        forceUpdate((v) => v + 1);
+      // Stop polling when scan completes
+      if (!status.running && status.finishedAt) {
+        if (status.resultCount > 0) {
+          // Mark cache stale so project insights are re-fetched on next access,
+          // but keep old entries until overwritten (stale-while-refresh).
+          // Flag is cleared after forceUpdate triggers re-renders that call
+          // fetchProjectInsights — ensuring all visible tabs get fresh data.
+          staleCacheRef.current = true;
+          fetchUserInsights();
+          forceUpdate((v) => {
+            // Clear stale flag after the re-render cycle so all tabs get one fresh fetch
+            queueMicrotask(() => {
+              staleCacheRef.current = false;
+            });
+            return v + 1;
+          });
+        }
         clearInterval(timer);
       }
     }, 2000);
@@ -213,7 +223,6 @@ export function ScanInsightsProvider({ children }: { children: ReactNode }) {
     (project: string) => {
       // Skip if cached and not stale
       if (projectInsightsCache.has(project) && !staleCacheRef.current) return;
-      if (staleCacheRef.current) staleCacheRef.current = false;
       setLoading(true);
       fetch(`/api/insights?project=${encodeURIComponent(project)}`)
         .then((resp) => (resp.ok ? resp.json() : null))

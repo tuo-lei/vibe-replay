@@ -17,7 +17,7 @@ import { estimateCost, estimateCostSimple } from "./pricing.js";
 import type { PrLink, TokenUsage } from "./types.js";
 
 // Bump this when we extract new fields — forces re-scan of all sessions.
-const SCANNER_VERSION = 1;
+const SCANNER_VERSION = 2;
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -48,7 +48,7 @@ export interface SessionScanResult {
   promptCount: number;
   toolCallCount: number;
   editCount: number;
-  filesModified: string[];
+  filesModified: Array<{ file: string; count: number }>;
 
   // Token usage
   tokenUsage?: TokenUsage;
@@ -181,7 +181,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
   let promptCount = 0;
   let toolCallCount = 0;
   let editCount = 0;
-  const filesModified = new Set<string>();
+  const fileEditCounts = new Map<string, number>();
   let compactionCount = 0;
   let apiErrorCount = 0;
   let totalDurationMs = 0;
@@ -317,7 +317,8 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
               const fp = block.input?.file_path || block.input?.filePath;
               if (fp) {
                 editCount++;
-                filesModified.add(shortenPath(fp));
+                const short = shortenPath(fp);
+                fileEditCounts.set(short, (fileEditCounts.get(short) || 0) + 1);
               }
             }
           }
@@ -408,7 +409,10 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
     promptCount,
     toolCallCount,
     editCount,
-    filesModified: [...filesModified].sort().slice(0, 100),
+    filesModified: [...fileEditCounts.entries()]
+      .map(([file, count]) => ({ file, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 100),
     tokenUsage,
     costEstimate,
     subAgentCount,
@@ -434,29 +438,6 @@ export async function writeScanCache(data: ScanCacheData): Promise<void> {
   await writeFileCache(SCAN_CACHE_KEY, data);
 }
 
-/**
- * Check if a cached scan entry is still valid for the given file(s).
- * Valid when all source files have the same mtime and combined size.
- */
-async function isCacheValid(
-  entry: ScanCacheEntry | undefined,
-  filePaths: string[],
-): Promise<boolean> {
-  if (!entry) return false;
-  try {
-    let totalSize = 0;
-    let maxMtime = 0;
-    for (const fp of filePaths) {
-      const s = await stat(fp);
-      totalSize += s.size;
-      if (s.mtimeMs > maxMtime) maxMtime = s.mtimeMs;
-    }
-    return entry.mtimeMs === maxMtime && entry.fileSize === totalSize;
-  } catch {
-    return false;
-  }
-}
-
 async function getFileMeta(filePaths: string[]): Promise<{ mtimeMs: number; fileSize: number }> {
   let totalSize = 0;
   let maxMtime = 0;
@@ -470,6 +451,21 @@ async function getFileMeta(filePaths: string[]): Promise<{ mtimeMs: number; file
     }
   }
   return { mtimeMs: maxMtime, fileSize: totalSize };
+}
+
+/**
+ * Check if a cached scan entry is still valid for the given file(s).
+ * Returns the file meta on cache miss (avoids a second stat() round).
+ */
+async function checkCache(
+  entry: ScanCacheEntry | undefined,
+  filePaths: string[],
+): Promise<{ valid: true } | { valid: false; meta: { mtimeMs: number; fileSize: number } }> {
+  const meta = await getFileMeta(filePaths);
+  if (entry && entry.mtimeMs === meta.mtimeMs && entry.fileSize === meta.fileSize) {
+    return { valid: true };
+  }
+  return { valid: false, meta };
 }
 
 // ─── Background scanner ────────────────────────────────────────────
@@ -504,19 +500,22 @@ export async function runBackgroundScan(
       done: false,
     });
 
-    // Check cache
+    // Check cache (single stat() pass — returns meta on miss)
     const cached = cache.entries[session.sessionId];
-    const valid = await isCacheValid(cached, session.filePaths);
+    const cacheCheck = await checkCache(cached, session.filePaths);
 
-    if (valid && cached) {
+    if (cacheCheck.valid && cached) {
       results.push(cached.result);
     } else {
       try {
         const result = await scanSession(session);
         results.push(result);
 
-        // Update cache entry
-        const meta = await getFileMeta(session.filePaths);
+        // Update cache entry (reuse meta from checkCache — no second stat round)
+        const { meta } = cacheCheck as {
+          valid: false;
+          meta: { mtimeMs: number; fileSize: number };
+        };
         cache.entries[session.sessionId] = {
           mtimeMs: meta.mtimeMs,
           fileSize: meta.fileSize,
@@ -602,12 +601,12 @@ export function aggregateProjectInsights(
       }
     }
 
-    // File hotspots
-    for (const file of s.filesModified) {
-      if (!fileEditCounts.has(file)) fileEditCounts.set(file, { edits: 0, sessions: new Set() });
-      const entry = fileEditCounts.get(file)!;
-      // Each session scans its own edits, so approximate edit count
-      entry.edits++;
+    // File hotspots — use actual per-file edit counts from scanner
+    for (const fm of s.filesModified) {
+      if (!fileEditCounts.has(fm.file))
+        fileEditCounts.set(fm.file, { edits: 0, sessions: new Set() });
+      const entry = fileEditCounts.get(fm.file)!;
+      entry.edits += fm.count;
       entry.sessions.add(s.sessionId);
     }
 
@@ -850,7 +849,9 @@ function parseFrontmatter(content: string): {
   type?: string;
   body: string;
 } {
-  const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  // Normalize \r\n → \n for Windows-edited files
+  const normalized = content.replace(/\r\n/g, "\n");
+  const fmMatch = normalized.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!fmMatch) return { body: content };
 
   const yaml = fmMatch[1];

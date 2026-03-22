@@ -200,7 +200,10 @@ describe("scanSession", () => {
     expect(result.toolCallCount).toBe(2); // Edit + Read
     expect(result.editCount).toBe(1); // Only Edit
     // The path starts with /Users/test/ which won't match homedir(), so it stays absolute
-    expect(result.filesModified).toContain("/Users/test/Code/my-project/src/auth.ts");
+    expect(result.filesModified).toContainEqual({
+      file: "/Users/test/Code/my-project/src/auth.ts",
+      count: 1,
+    });
   });
 
   it("extracts git branch history", async () => {
@@ -288,7 +291,10 @@ describe("aggregateProjectInsights", () => {
       promptCount: 10,
       toolCallCount: 20,
       editCount: 5,
-      filesModified: ["src/a.ts", "src/b.ts"],
+      filesModified: [
+        { file: "src/a.ts", count: 2 },
+        { file: "src/b.ts", count: 3 },
+      ],
       costEstimate: 1.5,
       subAgentCount: 2,
       apiErrorCount: 1,
@@ -308,7 +314,10 @@ describe("aggregateProjectInsights", () => {
       promptCount: 5,
       toolCallCount: 10,
       editCount: 3,
-      filesModified: ["src/a.ts", "src/c.ts"],
+      filesModified: [
+        { file: "src/a.ts", count: 1 },
+        { file: "src/c.ts", count: 2 },
+      ],
       costEstimate: 0.8,
       subAgentCount: 0,
       apiErrorCount: 0,
@@ -326,7 +335,7 @@ describe("aggregateProjectInsights", () => {
       promptCount: 8,
       toolCallCount: 15,
       editCount: 4,
-      filesModified: ["src/x.ts"],
+      filesModified: [{ file: "src/x.ts", count: 4 }],
       costEstimate: 5.0,
       subAgentCount: 1,
       apiErrorCount: 0,
