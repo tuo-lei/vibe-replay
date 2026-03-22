@@ -119,7 +119,6 @@ export default function ConversationView({
   const timeGaps = useMemo(() => {
     const gaps = new Map<number, number>(); // group index → gap in ms
     for (let gi = 1; gi < displayGroups.length; gi++) {
-      const prev = displayGroups[gi - 1];
       const curr = displayGroups[gi];
       if (curr.type !== "user") continue;
       // Find the last timestamp from the previous groups (search backward)

@@ -23,6 +23,12 @@ import {
   TITLE_MAX_CHARS,
   timeAgo,
 } from "./dashboard-utils";
+import {
+  ProjectInsightsPanel,
+  ScanProgressBar,
+  UserInsightsPanel,
+  useScanInsights,
+} from "./InsightsPanel";
 import { formatDuration } from "./StatsPanel";
 
 type Tab = "home" | "sessions" | "replays";
@@ -624,6 +630,15 @@ function SessionsPanel() {
     navigateTo({ archived: next ? "true" : null });
   };
 
+  // Background scan + insights
+  const { scanStatus, projectInsights, userInsights, fetchInsights } = useScanInsights();
+
+  // Fetch insights when selected project changes
+  useEffect(() => {
+    const project = selectedProject === ALL_PROJECTS ? null : selectedProject;
+    fetchInsights(project);
+  }, [selectedProject, fetchInsights]);
+
   const [generatingSlug, setGeneratingSlug] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [titleInput, setTitleInput] = useState<{ slug: string; defaultTitle: string } | null>(null);
@@ -1135,6 +1150,13 @@ function SessionsPanel() {
           </div>
         )}
 
+        {/* Background scan progress */}
+        {scanStatus?.running && (
+          <div className="mx-4 mb-2 shrink-0">
+            <ScanProgressBar status={scanStatus} />
+          </div>
+        )}
+
         {/* Error toast */}
         {refreshError && (
           <div className="mx-4 mb-2 flex items-center gap-2 bg-terminal-orange-subtle rounded-lg px-3 py-2.5 text-xs font-mono text-terminal-orange shrink-0 shadow-layer-sm">
@@ -1203,6 +1225,18 @@ function SessionsPanel() {
 
         {/* Session list */}
         <div className="flex-1 overflow-y-auto">
+          {/* Insights panel at top of list */}
+          {!showInitialLoading && (projectInsights || userInsights) && (
+            <div className="px-4 pt-3 pb-1">
+              {projectInsights && selectedProject !== ALL_PROJECTS && (
+                <ProjectInsightsPanel insights={projectInsights} />
+              )}
+              {userInsights && selectedProject === ALL_PROJECTS && (
+                <UserInsightsPanel insights={userInsights} />
+              )}
+            </div>
+          )}
+
           {showInitialLoading ? (
             <div className="text-center py-12 text-terminal-dim font-mono text-sm">
               Fetching sessions...
