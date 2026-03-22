@@ -291,6 +291,10 @@ export async function parseClaudeCodeSession(
   const assistantTurns: { turn: ParsedTurn; timestamp: string }[] = [];
   for (const msgId of assistantOrder) {
     const blocks = assistantBlocks.get(msgId)!;
+    // Track the previous tool_result timestamp for sequential duration calculation.
+    // For the first tool in a message, use the assistant message timestamp as start.
+    // For subsequent tools, use the previous tool's result timestamp as start.
+    let prevToolEndTs = assistantTimestamps.get(msgId);
     const enrichedBlocks = blocks.map((block) => {
       if (block.type === "tool_use") {
         const result = toolResults.get(block.id) || "";
@@ -299,14 +303,14 @@ export async function parseClaudeCodeSession(
         // Attach subagent data for Agent tool calls
         const agentId = agentMapping.get(block.id);
         const subAgent = agentId ? subAgentData.get(agentId) : undefined;
-        // Calculate tool execution duration
+        // Calculate tool execution duration (start = previous tool end or assistant timestamp)
         const resultTs = toolResultTimestamps.get(block.id);
-        const assistantTs = assistantTimestamps.get(msgId);
         let toolDurationMs: number | undefined;
-        if (resultTs && assistantTs) {
-          const diff = Date.parse(resultTs) - Date.parse(assistantTs);
-          if (diff > 0 && diff < 3600_000) toolDurationMs = diff; // cap at 1 hour
+        if (resultTs && prevToolEndTs) {
+          const diff = Date.parse(resultTs) - Date.parse(prevToolEndTs);
+          if (diff > 0 && diff < 3600_000) toolDurationMs = diff;
         }
+        if (resultTs) prevToolEndTs = resultTs;
         return {
           ...block,
           _result: result,

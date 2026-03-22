@@ -1,15 +1,11 @@
 import { memo, useState } from "react";
+import { formatDuration } from "./StatsPanel";
 
 interface Props {
   command: string;
   stdout: string;
   isActive: boolean;
   durationMs?: number;
-}
-
-function fmtDuration(ms: number): string {
-  if (ms >= 60000) return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
-  return `${(ms / 1000).toFixed(1)}s`;
 }
 
 export default memo(function BashBlock({
@@ -32,9 +28,9 @@ export default memo(function BashBlock({
         {durationMs && (
           <span
             className="text-[10px] text-terminal-dimmer font-mono shrink-0"
-            title={`Execution: ${fmtDuration(durationMs)}`}
+            title={`Execution: ${formatDuration(durationMs)}`}
           >
-            {fmtDuration(durationMs)}
+            {formatDuration(durationMs)}
           </span>
         )}
         {hasOutput && (

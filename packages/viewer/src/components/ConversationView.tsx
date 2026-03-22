@@ -775,9 +775,9 @@ function CompactAssistantGroup({
             {formatTime(timestamp)}
           </span>
         )}
-        {turnDurationMs && (
+        {(turnDurationMs || stats.turnDurationMs) && (
           <span className="text-[10px] font-mono text-terminal-dimmer">
-            · {formatDuration(turnDurationMs)}
+            · {formatDuration(turnDurationMs ?? stats.turnDurationMs)}
           </span>
         )}
         <div className="flex-1" />
