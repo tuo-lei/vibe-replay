@@ -634,6 +634,9 @@ async function readSubagents(
 
   for (const file of files) {
     if (!file.endsWith(".jsonl")) continue;
+    // Agent ID derived from filename must match data.agentId in progress messages.
+    // Convention: filename is "agent-<id>.jsonl", progress has data.agentId = "<id>".
+    // If Claude Code changes this convention, subagent data won't be linked (silent miss).
     const agentId = file.replace(/\.jsonl$/, "").replace(/^agent-/, "");
 
     // Read meta.json for agent type

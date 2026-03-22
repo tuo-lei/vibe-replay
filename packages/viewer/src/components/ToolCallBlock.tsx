@@ -2,13 +2,12 @@ import { memo, useState } from "react";
 import type { Scene, SubAgent } from "../types";
 import BashBlock from "./BashBlock";
 import CodeDiffBlock from "./CodeDiffBlock";
+import { formatDuration } from "./StatsPanel";
 
 function ToolDuration({ ms }: { ms?: number }) {
   if (!ms) return null;
-  const label =
-    ms >= 60000
-      ? `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`
-      : `${(ms / 1000).toFixed(1)}s`;
+  const label = formatDuration(ms);
+  if (!label) return null;
   return (
     <span
       className="text-[10px] text-terminal-dimmer font-mono shrink-0"
