@@ -40,6 +40,14 @@ import {
   type SavedGistInfo,
 } from "./publishers/gist.js";
 import { scanForSecrets } from "./scan.js";
+import {
+  aggregateProjectInsights,
+  aggregateUserInsights,
+  type BackgroundScanState,
+  readProjectMemory,
+  runBackgroundScan,
+  type ScanInput,
+} from "./scanner.js";
 import { transformToReplay } from "./transform.js";
 import type {
   Annotation,
@@ -785,6 +793,87 @@ export async function startServer(
     });
   };
 
+  // ─── Background session scanner state ─────────────────────────────
+  let scanState: BackgroundScanState = {
+    running: false,
+    scanned: 0,
+    total: 0,
+    results: [],
+  };
+
+  /**
+   * Start background session scanning. Discovers all sessions, then scans
+   * each one (newest first) to extract metadata for insights. Uses cache
+   * so unchanged sessions are skipped.
+   */
+  const startBackgroundScan = (): void => {
+    if (scanState.running) return;
+    scanState = {
+      running: true,
+      scanned: 0,
+      total: 0,
+      results: [],
+      startedAt: new Date().toISOString(),
+    };
+
+    void (async () => {
+      try {
+        // Discover all sessions
+        const providers = getAllProviders();
+        const allSessions: SessionInfo[] = [];
+        for (const provider of providers) {
+          const sessions = await provider.discover();
+          allSessions.push(...sessions);
+        }
+        const merged = mergeSameSessions(allSessions);
+
+        // Normalize project paths
+        const home = homedir();
+        for (const s of merged) {
+          if (s.project.startsWith(home)) {
+            s.project = `~${s.project.slice(home.length)}`;
+          }
+        }
+
+        // Build scan inputs (newest first — already sorted by discovery)
+        const scanInputs: ScanInput[] = merged.map((s) => ({
+          sessionId: s.sessionId,
+          provider: s.provider,
+          project: s.project,
+          slug: s.slug,
+          filePaths: s.filePaths,
+          title: s.title,
+          firstPrompt: s.firstPrompt,
+        }));
+
+        scanState.total = scanInputs.length;
+
+        const results = await runBackgroundScan(scanInputs, (progress) => {
+          scanState = {
+            ...scanState,
+            scanned: progress.scanned,
+            total: progress.total,
+          };
+        });
+
+        scanState = {
+          running: false,
+          scanned: results.length,
+          total: scanInputs.length,
+          results,
+          startedAt: scanState.startedAt,
+          finishedAt: new Date().toISOString(),
+        };
+      } catch {
+        scanState = {
+          ...scanState,
+          running: false,
+          finishedAt: new Date().toISOString(),
+        };
+      }
+    })();
+  };
+
   const app = new Hono();
 
   // Serve viewer HTML with editor flag (prod) or redirect to Vite dev server (dev)
@@ -1125,6 +1214,62 @@ export async function startServer(
       regenerated: results.filter((r) => r.status === "regenerated").length,
       results,
     });
+  });
+
+  // --- Session scanner: background metadata extraction for insights ---
+
+  app.post("/api/scan/start", async (c) => {
+    startBackgroundScan();
+    return c.json({ ok: true, message: "Background scan started" });
+  });
+
+  app.get("/api/scan/status", async (c) => {
+    return c.json({
+      running: scanState.running,
+      scanned: scanState.scanned,
+      total: scanState.total,
+      resultCount: scanState.results.length,
+      startedAt: scanState.startedAt,
+      finishedAt: scanState.finishedAt,
+    });
+  });
+
+  app.get("/api/scan/results", async (c) => {
+    return c.json({
+      results: scanState.results,
+      running: scanState.running,
+      scanned: scanState.scanned,
+      total: scanState.total,
+    });
+  });
+
+  app.get("/api/insights", async (c) => {
+    const project = c.req.query("project");
+    const scans = scanState.results;
+
+    if (!scans.length) {
+      return c.json({ error: "No scan results available. Start a scan first." }, 404);
+    }
+
+    if (project) {
+      // Project-level insights
+      const memory = await readProjectMemory(project);
+      const insights = aggregateProjectInsights(project, scans, memory || undefined);
+      return c.json({ type: "project", insights });
+    }
+
+    // User-level insights (all projects)
+    const insights = aggregateUserInsights(scans);
+    return c.json({ type: "user", insights });
+  });
+
+  app.get("/api/memory", async (c) => {
+    const project = c.req.query("project");
+    if (!project) return c.json({ error: "project parameter required" }, 400);
+
+    const memory = await readProjectMemory(project);
+    if (!memory) return c.json({ memoryFiles: [], claudeMd: null });
+    return c.json(memory);
   });
 
   // --- Annotations (requires slug) ---
