@@ -1,9 +1,22 @@
 /**
  * InsightsPanel — Project-level or user-level aggregated insights header.
  * Shown at the top of the session list in the Dashboard when scan results are available.
+ *
+ * Also provides ScanInsightsProvider — a singleton context that runs one
+ * scan / polling chain for the entire Dashboard, replacing the previous
+ * per-tab useScanInsights() hook.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { formatDuration } from "./StatsPanel";
 
 // ─── Types (mirror the server scanner types) ────────────────────────
@@ -60,7 +73,20 @@ interface UserInsights {
   totalToolCalls: number;
   totalEdits: number;
   providers: Record<string, number>;
-  topProjects: Array<{ project: string; sessions: number; cost: number; prompts: number }>;
+  topProjects: Array<{
+    project: string;
+    sessions: number;
+    cost: number;
+    prompts: number;
+    durationMs: number;
+    toolCalls: number;
+    edits: number;
+    branchCount: number;
+    prCount: number;
+    memoryFileCount: number;
+    lastActivity: string;
+    sessionsPerDay: Record<string, number>;
+  }>;
   models: Record<string, number>;
   timeRange: { first: string; last: string };
   sessionsPerDay: Record<string, number>;
@@ -76,90 +102,145 @@ interface ScanStatus {
   resultCount: number;
   startedAt?: string;
   finishedAt?: string;
+  hasInsights?: boolean;
 }
 
-// ─── Hook: background scan + insights fetching ──────────────────────
+// ─── Singleton Context Provider ──────────────────────────────────────
 
-export function useScanInsights() {
+interface ScanInsightsContextValue {
+  scanStatus: ScanStatus | null;
+  userInsights: UserInsights | null;
+  projectInsightsCache: Map<string, ProjectInsights>;
+  fetchProjectInsights: (project: string) => void;
+  loading: boolean;
+}
+
+const ScanInsightsContext = createContext<ScanInsightsContextValue | null>(null);
+
+export function useScanInsightsContext(): ScanInsightsContextValue {
+  const ctx = useContext(ScanInsightsContext);
+  if (!ctx) throw new Error("useScanInsightsContext must be used within ScanInsightsProvider");
+  return ctx;
+}
+
+/**
+ * Single provider that starts ONE background scan and ONE polling chain.
+ * All tabs read from the same shared state via useScanInsightsContext().
+ */
+export function ScanInsightsProvider({ children }: { children: ReactNode }) {
   const [scanStatus, setScanStatus] = useState<ScanStatus | null>(null);
-  const [projectInsights, setProjectInsights] = useState<ProjectInsights | null>(null);
   const [userInsights, setUserInsights] = useState<UserInsights | null>(null);
-  const [currentProject, setCurrentProject] = useState<string | null>(null);
+  const [projectInsightsCache] = useState(() => new Map<string, ProjectInsights>());
+  const staleCacheRef = useRef(false);
+  const [, forceUpdate] = useState(0);
   const [loading, setLoading] = useState(false);
+  const fetchedUserRef = useRef(false);
 
-  // Start background scan on mount
+  // Start background scan once
   useEffect(() => {
     fetch("/api/scan/start", { method: "POST" }).catch(() => {});
   }, []);
 
-  // Poll scan status
+  // Single polling chain
   useEffect(() => {
+    let stopped = false;
+
     const poll = async () => {
       try {
         const resp = await fetch("/api/scan/status");
-        if (resp.ok) {
-          const status = (await resp.json()) as ScanStatus;
-          setScanStatus(status);
-          return status;
-        }
-      } catch {}
-      return null;
+        if (!resp.ok || stopped) return null;
+        const status = (await resp.json()) as ScanStatus;
+        setScanStatus(status);
+        return status;
+      } catch {
+        return null;
+      }
     };
 
-    poll();
+    const fetchUserInsights = async () => {
+      setLoading(true);
+      try {
+        const resp = await fetch("/api/insights");
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.type === "user" && !stopped) {
+            setUserInsights(data.insights as UserInsights);
+          }
+        }
+      } catch {
+        // ignore
+      } finally {
+        if (!stopped) setLoading(false);
+      }
+    };
+
+    // Initial poll
+    poll().then((status) => {
+      if (status?.hasInsights && !fetchedUserRef.current) {
+        fetchedUserRef.current = true;
+        fetchUserInsights();
+      }
+    });
+
     const timer = setInterval(async () => {
       const status = await poll();
-      if (status && !status.running && status.resultCount > 0) {
+      if (!status || stopped) return;
+
+      // Fetch user insights when available (stale data during scan, fresh after)
+      if (status.hasInsights && !fetchedUserRef.current) {
+        fetchedUserRef.current = true;
+        fetchUserInsights();
+      }
+
+      // Re-fetch when scan completes (fresh data)
+      if (!status.running && status.resultCount > 0 && status.finishedAt) {
+        // Mark cache stale so project insights are re-fetched on next access,
+        // but keep old entries until overwritten (stale-while-refresh).
+        staleCacheRef.current = true;
+        fetchUserInsights();
+        forceUpdate((v) => v + 1);
         clearInterval(timer);
       }
     }, 2000);
 
-    return () => clearInterval(timer);
-  }, []);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const fetchInsights = useCallback(
-    async (project: string | null) => {
-      if (!scanStatus || scanStatus.resultCount === 0) return;
+  const fetchProjectInsights = useCallback(
+    (project: string) => {
+      // Skip if cached and not stale
+      if (projectInsightsCache.has(project) && !staleCacheRef.current) return;
+      if (staleCacheRef.current) staleCacheRef.current = false;
       setLoading(true);
-      try {
-        const url = project
-          ? `/api/insights?project=${encodeURIComponent(project)}`
-          : "/api/insights";
-        const resp = await fetch(url);
-        if (!resp.ok) return;
-        const data = await resp.json();
-        if (data.type === "project") {
-          setProjectInsights(data.insights as ProjectInsights);
-          setUserInsights(null);
-        } else {
-          setUserInsights(data.insights as UserInsights);
-          setProjectInsights(null);
-        }
-        setCurrentProject(project);
-      } catch {
-        // ignore
-      } finally {
-        setLoading(false);
-      }
+      fetch(`/api/insights?project=${encodeURIComponent(project)}`)
+        .then((resp) => (resp.ok ? resp.json() : null))
+        .then((data) => {
+          if (data?.type === "project") {
+            projectInsightsCache.set(project, data.insights as ProjectInsights);
+            forceUpdate((v) => v + 1);
+          }
+        })
+        .catch(() => {})
+        .finally(() => setLoading(false));
     },
-    [scanStatus],
+    [projectInsightsCache],
   );
 
-  // Refetch insights when scan finishes
-  const scanDone = scanStatus && !scanStatus.running && scanStatus.resultCount > 0;
-  useEffect(() => {
-    if (scanDone) {
-      fetchInsights(currentProject);
-    }
-  }, [scanDone, fetchInsights, currentProject]);
+  const value = useMemo<ScanInsightsContextValue>(
+    () => ({
+      scanStatus,
+      userInsights,
+      projectInsightsCache,
+      fetchProjectInsights,
+      loading,
+    }),
+    [scanStatus, userInsights, projectInsightsCache, fetchProjectInsights, loading],
+  );
 
-  return {
-    scanStatus,
-    projectInsights,
-    userInsights,
-    loading,
-    fetchInsights,
-  };
+  return <ScanInsightsContext.Provider value={value}>{children}</ScanInsightsContext.Provider>;
 }
 
 // ─── Scan progress bar ──────────────────────────────────────────────
@@ -590,6 +671,244 @@ export function UserInsightsPanel({ insights }: { insights: UserInsights }) {
           {insights.totalEdits > 0 && (
             <div className="text-xs font-mono text-terminal-dim">
               Total edits: <span className="text-terminal-text">{fmtNum(insights.totalEdits)}</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── TitleInsightsHeader — unified title + insights ─────────────────
+
+export function TitleInsightsHeaderSkeleton() {
+  return (
+    <div className="border-b border-terminal-border-subtle pb-3 animate-pulse">
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <div className="flex items-baseline gap-3 min-w-0">
+          <div className="h-5 w-36 skeleton rounded" />
+          <div className="h-3 w-24 skeleton rounded opacity-40" />
+        </div>
+        <div className="h-3.5 w-24 skeleton rounded opacity-40" />
+      </div>
+      <div className="flex items-center gap-5">
+        {[16, 14, 10, 12].map((w, i) => (
+          <div key={i} className="flex items-center gap-1.5">
+            <div className="h-3.5 skeleton rounded" style={{ width: `${w * 4}px` }} />
+            <div className="h-2.5 w-10 skeleton rounded opacity-40" />
+          </div>
+        ))}
+        <div className="flex-1" />
+        <div className="flex items-end gap-px h-4">
+          {Array.from({ length: 30 }, (_, i) => (
+            <div
+              key={i}
+              className="w-1 rounded-sm skeleton"
+              style={{ height: `${Math.max(2, Math.random() * 16)}px`, opacity: 0.15 }}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function TitleInsightsHeader({
+  insights,
+  variant,
+}: {
+  insights: ProjectInsights | UserInsights;
+  variant: "project" | "all";
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  const isProject = variant === "project";
+  const accentColor = isProject ? "text-terminal-green" : "text-terminal-purple";
+  const accentDot = isProject ? "bg-terminal-green" : "bg-terminal-purple";
+  const pi = isProject ? (insights as ProjectInsights) : null;
+  const ui = !isProject ? (insights as UserInsights) : null;
+
+  const sessionCount = pi?.sessionCount ?? ui?.totalSessions ?? 0;
+  const totalDurationMs = pi?.totalDurationMs ?? ui?.totalDurationMs ?? 0;
+  const totalCost = pi?.totalCost ?? ui?.totalCost ?? 0;
+  const totalPrompts = pi?.totalPrompts ?? ui?.totalPrompts ?? 0;
+  const totalToolCalls = pi?.totalToolCalls ?? ui?.totalToolCalls ?? 0;
+  const avgSessionDurationMs = pi?.avgSessionDurationMs ?? ui?.avgSessionDurationMs ?? 0;
+  const sessionsPerDay = pi?.sessionsPerDay ?? ui?.sessionsPerDay ?? {};
+
+  const title = pi ? pi.project.split("/").pop() || pi.project : "All Projects";
+  const subtitle = pi ? pi.project : `${ui?.totalProjects ?? 0} projects`;
+
+  if (sessionCount === 0) return null;
+
+  return (
+    <div className="border-b border-terminal-border-subtle pb-3">
+      {/* Row 1: title + session count */}
+      <div className="flex items-center justify-between gap-3 mb-1.5">
+        <div className="flex items-baseline gap-2 min-w-0">
+          <span className={`w-1.5 h-1.5 rounded-full ${accentDot} shrink-0 self-center`} />
+          <h2 className="text-base font-sans font-semibold text-terminal-text truncate">{title}</h2>
+          <span className="text-[10px] font-mono text-terminal-dimmer truncate hidden sm:inline">
+            {subtitle}
+          </span>
+        </div>
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className={`flex items-center gap-1.5 text-xs font-mono tabular-nums shrink-0 hover:text-terminal-text transition-colors ${accentColor}`}
+        >
+          {sessionCount} session{sessionCount !== 1 ? "s" : ""}
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 12 12"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            className={`transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}
+          >
+            <path d="M3 4.5l3 3 3-3" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Row 2: inline stats + sparkline */}
+      <div className="flex items-center gap-4 flex-wrap text-xs font-mono">
+        <span className="text-terminal-blue tabular-nums">
+          {formatDuration(totalDurationMs)}
+          <span className="text-terminal-dimmer ml-1 text-[10px]">duration</span>
+        </span>
+        {totalCost > 0 && (
+          <span className="text-terminal-orange tabular-nums">
+            ${totalCost.toFixed(2)}
+            <span className="text-terminal-dimmer ml-1 text-[10px]">cost</span>
+          </span>
+        )}
+        <span className="text-terminal-green tabular-nums">
+          {fmtNum(totalPrompts)}
+          <span className="text-terminal-dimmer ml-1 text-[10px]">prompts</span>
+        </span>
+        <span className="text-terminal-text tabular-nums">
+          {fmtNum(totalToolCalls)}
+          <span className="text-terminal-dimmer ml-1 text-[10px]">tools</span>
+        </span>
+        <span className="text-terminal-dimmer text-[10px] tabular-nums hidden lg:inline">
+          avg {formatDuration(avgSessionDurationMs)}/session
+        </span>
+        {/* Inline sparkline */}
+        <div className="flex-1 flex justify-end">
+          <div className="flex items-end gap-px h-3.5">
+            {(() => {
+              const end = new Date();
+              const start = new Date(end);
+              start.setDate(start.getDate() - 29);
+              const bars: { day: string; count: number }[] = [];
+              const cursor = new Date(start);
+              while (cursor <= end) {
+                const key = cursor.toISOString().slice(0, 10);
+                bars.push({ day: key, count: sessionsPerDay[key] || 0 });
+                cursor.setDate(cursor.getDate() + 1);
+              }
+              const max = Math.max(...bars.map((b) => b.count), 1);
+              return bars.map((b) => (
+                <div
+                  key={b.day}
+                  title={`${b.day}: ${b.count}`}
+                  className={`w-1 rounded-sm ${b.count > 0 ? accentDot : "bg-terminal-surface-2"}`}
+                  style={{
+                    height: b.count > 0 ? `${Math.max(15, (b.count / max) * 100)}%` : "2px",
+                    opacity: b.count > 0 ? 0.35 + (b.count / max) * 0.65 : 0.15,
+                  }}
+                />
+              ));
+            })()}
+          </div>
+        </div>
+      </div>
+
+      {/* Expanded details */}
+      {expanded && pi && (
+        <div className="mt-3 pt-3 border-t border-terminal-border-subtle space-y-3">
+          {pi.branches.length > 0 && (
+            <div>
+              <div className="text-[10px] font-sans text-terminal-dimmer uppercase tracking-widest font-semibold mb-1.5">
+                Branches ({pi.branches.length})
+              </div>
+              <div className="space-y-0.5 max-h-32 overflow-y-auto">
+                {pi.branches.slice(0, 15).map((b) => (
+                  <div key={b.branch} className="flex items-center gap-2 text-xs">
+                    <span className="font-mono text-terminal-purple truncate">{b.branch}</span>
+                    <span className="text-terminal-dimmer tabular-nums shrink-0">
+                      {b.sessionIds.length}x
+                    </span>
+                    {b.prLinks?.map((pr) => (
+                      <a
+                        key={pr.prUrl}
+                        href={pr.prUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-terminal-blue hover:underline shrink-0"
+                      >
+                        #{pr.prNumber}
+                      </a>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {pi.hotFiles.length > 0 && (
+            <div>
+              <div className="text-[10px] font-sans text-terminal-dimmer uppercase tracking-widest font-semibold mb-1.5">
+                Most edited files
+              </div>
+              <div className="space-y-0.5 max-h-28 overflow-y-auto">
+                {pi.hotFiles.slice(0, 10).map((f) => (
+                  <div key={f.file} className="flex items-center gap-2 text-xs">
+                    <span className="font-mono text-terminal-dim truncate flex-1">{f.file}</span>
+                    <span className="text-terminal-dimmer tabular-nums shrink-0">
+                      {f.editCount}x / {f.sessionCount}s
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {expanded && ui && (
+        <div className="mt-3 pt-3 border-t border-terminal-border-subtle space-y-3">
+          {ui.topProjects.length > 0 && (
+            <div>
+              <div className="text-[10px] font-sans text-terminal-dimmer uppercase tracking-widest font-semibold mb-1.5">
+                Top projects
+              </div>
+              <div className="space-y-1">
+                {ui.topProjects.slice(0, 8).map((p) => {
+                  const name = p.project.split("/").pop() || p.project;
+                  return (
+                    <div key={p.project} className="flex items-center gap-2 text-xs">
+                      <span
+                        className="font-mono text-terminal-text truncate flex-1"
+                        title={p.project}
+                      >
+                        {name}
+                      </span>
+                      <span className="text-terminal-dimmer tabular-nums shrink-0">
+                        {p.sessions}s
+                      </span>
+                      <span className="text-terminal-green tabular-nums shrink-0">
+                        {p.prompts}p
+                      </span>
+                      {p.cost > 0 && (
+                        <span className="text-terminal-orange tabular-nums shrink-0">
+                          ${p.cost.toFixed(2)}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>

@@ -122,7 +122,20 @@ export interface UserInsights {
   totalToolCalls: number;
   totalEdits: number;
   providers: Record<string, number>; // provider → session count
-  topProjects: Array<{ project: string; sessions: number; cost: number; prompts: number }>;
+  topProjects: Array<{
+    project: string;
+    sessions: number;
+    cost: number;
+    prompts: number;
+    durationMs: number;
+    toolCalls: number;
+    edits: number;
+    branchCount: number;
+    prCount: number;
+    memoryFileCount: number;
+    lastActivity: string;
+    sessionsPerDay: Record<string, number>;
+  }>;
   models: Record<string, number>;
   timeRange: { first: string; last: string };
   sessionsPerDay: Record<string, number>;
@@ -658,7 +671,21 @@ export function aggregateUserInsights(scans: SessionScanResult[]): UserInsights 
   let apiErrorTotal = 0;
   const providers: Record<string, number> = {};
   const models: Record<string, number> = {};
-  const projectStats = new Map<string, { sessions: number; cost: number; prompts: number }>();
+  const projectStats = new Map<
+    string,
+    {
+      sessions: number;
+      cost: number;
+      prompts: number;
+      durationMs: number;
+      toolCalls: number;
+      edits: number;
+      branches: Set<string>;
+      prUrls: Set<string>;
+      lastActivity: string;
+      sessionsPerDay: Record<string, number>;
+    }
+  >();
   const sessionsPerDay: Record<string, number> = {};
   let first = "";
   let last = "";
@@ -678,27 +705,59 @@ export function aggregateUserInsights(scans: SessionScanResult[]): UserInsights 
     if (s.model) models[s.model] = (models[s.model] || 0) + 1;
 
     if (!projectStats.has(s.project)) {
-      projectStats.set(s.project, { sessions: 0, cost: 0, prompts: 0 });
+      projectStats.set(s.project, {
+        sessions: 0,
+        cost: 0,
+        prompts: 0,
+        durationMs: 0,
+        toolCalls: 0,
+        edits: 0,
+        branches: new Set(),
+        prUrls: new Set(),
+        lastActivity: "",
+        sessionsPerDay: {},
+      });
     }
     const ps = projectStats.get(s.project)!;
     ps.sessions++;
     ps.cost += s.costEstimate || 0;
     ps.prompts += s.promptCount;
-
+    ps.durationMs += s.durationMs || 0;
+    ps.toolCalls += s.toolCallCount;
+    ps.edits += s.editCount;
+    const branches = s.gitBranches || (s.gitBranch ? [s.gitBranch] : []);
+    for (const b of branches) ps.branches.add(b);
+    if (s.prLinks) {
+      for (const pr of s.prLinks) ps.prUrls.add(pr.prUrl);
+    }
     const ts = s.startTime || "";
+    if (ts && (!ps.lastActivity || ts > ps.lastActivity)) ps.lastActivity = ts;
     if (ts && (!first || ts < first)) first = ts;
     if (ts && (!last || ts > last)) last = ts;
 
     if (ts) {
       const day = ts.slice(0, 10);
+      ps.sessionsPerDay[day] = (ps.sessionsPerDay[day] || 0) + 1;
       sessionsPerDay[day] = (sessionsPerDay[day] || 0) + 1;
     }
   }
 
   const topProjects = [...projectStats.entries()]
-    .map(([project, data]) => ({ project, ...data }))
-    .sort((a, b) => b.sessions - a.sessions)
-    .slice(0, 10);
+    .map(([project, data]) => ({
+      project,
+      sessions: data.sessions,
+      cost: data.cost,
+      prompts: data.prompts,
+      durationMs: data.durationMs,
+      toolCalls: data.toolCalls,
+      edits: data.edits,
+      branchCount: data.branches.size,
+      prCount: data.prUrls.size,
+      memoryFileCount: 0, // populated later via readProjectMemory
+      lastActivity: data.lastActivity,
+      sessionsPerDay: data.sessionsPerDay,
+    }))
+    .sort((a, b) => b.sessions - a.sessions);
 
   const uniqueProjects = new Set(scans.map((s) => s.project));
 

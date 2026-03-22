@@ -44,9 +44,12 @@ import {
   aggregateProjectInsights,
   aggregateUserInsights,
   type BackgroundScanState,
+  type ProjectInsights,
   readProjectMemory,
   runBackgroundScan,
   type ScanInput,
+  type SessionScanResult,
+  type UserInsights,
 } from "./scanner.js";
 import { transformToReplay } from "./transform.js";
 import type {
@@ -806,6 +809,47 @@ export async function startServer(
     results: [],
   };
 
+  // Pre-computed insights cache — populated after each scan completes.
+  // Kept across scans (stale-while-refresh): new scan overwrites, never clears.
+  let insightsCache: {
+    userInsights: UserInsights | null;
+    projectInsights: Map<string, ProjectInsights>;
+    computedAt: string | null;
+  } = {
+    userInsights: null,
+    projectInsights: new Map(),
+    computedAt: null,
+  };
+
+  /** Pre-compute all insights from scan results and store in cache. */
+  const precomputeInsightsCache = async (results: SessionScanResult[]): Promise<void> => {
+    // User-level insights
+    const user = aggregateUserInsights(results);
+
+    // Project-level insights for each unique project
+    const projects = new Map<string, ProjectInsights>();
+    const uniqueProjects = new Set(results.map((r) => r.project));
+    for (const project of uniqueProjects) {
+      const memory = await readProjectMemory(project);
+      const pi = aggregateProjectInsights(project, results, memory || undefined);
+      projects.set(project, pi);
+    }
+
+    // Enrich topProjects with memoryFileCount
+    for (const tp of user.topProjects) {
+      const pi = projects.get(tp.project);
+      if (pi?.memory) {
+        tp.memoryFileCount = pi.memory.memoryFiles.length;
+      }
+    }
+
+    insightsCache = {
+      userInsights: user,
+      projectInsights: projects,
+      computedAt: new Date().toISOString(),
+    };
+  };
+
   /**
    * Start background session scanning. Discovers all sessions, then scans
    * each one (newest first) to extract metadata for insights. Uses cache
@@ -869,6 +913,9 @@ export async function startServer(
           startedAt: scanState.startedAt,
           finishedAt: new Date().toISOString(),
         };
+
+        // Pre-compute insights cache in background (non-blocking)
+        precomputeInsightsCache(results).catch(() => {});
       } catch {
         scanState = {
           ...scanState,
@@ -1236,6 +1283,7 @@ export async function startServer(
       resultCount: scanState.results.length,
       startedAt: scanState.startedAt,
       finishedAt: scanState.finishedAt,
+      hasInsights: insightsCache.userInsights !== null,
     });
   });
 
@@ -1250,20 +1298,33 @@ export async function startServer(
 
   app.get("/api/insights", async (c) => {
     const project = c.req.query("project");
-    const scans = scanState.results;
-
-    if (!scans.length) {
-      return c.json({ error: "No scan results available. Start a scan first." }, 404);
-    }
 
     if (project) {
-      // Project-level insights
+      // Project-level: cache hit → O(1), miss → compute on demand
+      const cached = insightsCache.projectInsights.get(project);
+      if (cached) return c.json({ type: "project", insights: cached });
+
+      // Fallback: compute on demand
+      const scans = scanState.results;
+      if (!scans.length) {
+        return c.json({ error: "No scan results available. Start a scan first." }, 404);
+      }
       const memory = await readProjectMemory(project);
       const insights = aggregateProjectInsights(project, scans, memory || undefined);
+      insightsCache.projectInsights.set(project, insights);
       return c.json({ type: "project", insights });
     }
 
-    // User-level insights (all projects)
+    // User-level: cache hit → O(1)
+    if (insightsCache.userInsights) {
+      return c.json({ type: "user", insights: insightsCache.userInsights });
+    }
+
+    // Fallback: compute on demand
+    const scans = scanState.results;
+    if (!scans.length) {
+      return c.json({ error: "No scan results available. Start a scan first." }, 404);
+    }
     const insights = aggregateUserInsights(scans);
     return c.json({ type: "user", insights });
   });

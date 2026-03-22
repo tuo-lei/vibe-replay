@@ -24,14 +24,16 @@ import {
   timeAgo,
 } from "./dashboard-utils";
 import {
-  ProjectInsightsPanel,
+  ScanInsightsProvider,
   ScanProgressBar,
-  UserInsightsPanel,
-  useScanInsights,
+  TitleInsightsHeader,
+  TitleInsightsHeaderSkeleton,
+  useScanInsightsContext,
 } from "./InsightsPanel";
+import ProjectsPanel from "./ProjectsPanel";
 import { formatDuration } from "./StatsPanel";
 
-type Tab = "home" | "sessions" | "replays";
+type Tab = "home" | "sessions" | "replays" | "projects";
 
 // ─── URL state parsers (module-level for stable references) ─────────
 function getProjectFromUrl(): string {
@@ -649,14 +651,19 @@ function SessionsPanel() {
     navigateTo({ archived: next ? "true" : null });
   };
 
-  // Background scan + insights
-  const { scanStatus, projectInsights, userInsights, fetchInsights } = useScanInsights();
+  // Background scan + insights (shared singleton context)
+  const { scanStatus, userInsights, projectInsightsCache, fetchProjectInsights } =
+    useScanInsightsContext();
 
-  // Fetch insights when selected project changes
+  // Fetch project insights when selected project changes
   useEffect(() => {
-    const project = selectedProject === ALL_PROJECTS ? null : selectedProject;
-    fetchInsights(project);
-  }, [selectedProject, fetchInsights]);
+    if (selectedProject !== ALL_PROJECTS) {
+      fetchProjectInsights(selectedProject);
+    }
+  }, [selectedProject, fetchProjectInsights]);
+
+  const projectInsights =
+    selectedProject !== ALL_PROJECTS ? projectInsightsCache.get(selectedProject) : undefined;
 
   const [generatingSlug, setGeneratingSlug] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
@@ -1078,25 +1085,17 @@ function SessionsPanel() {
           </select>
         </div>
 
-        {/* Search + header */}
+        {/* Insights header + search */}
         <div className="px-4 pt-4 pb-2 space-y-3 shrink-0">
-          {/* Project title for desktop */}
-          <div className="hidden md:flex items-center justify-between">
-            <div className="min-w-0">
-              <h2 className="text-base font-sans text-terminal-text truncate font-semibold">
-                {selectedProject === ALL_PROJECTS
-                  ? "All projects"
-                  : projectLabels.get(selectedProject) || projectName(selectedProject)}
-              </h2>
-              {selectedProject !== ALL_PROJECTS && (
-                <span className="text-xs font-mono text-terminal-dimmer truncate block mt-0.5">
-                  {selectedProject}
-                </span>
-              )}
-            </div>
-            <span className="text-xs font-sans text-terminal-dim tabular-nums px-2 py-1 rounded-md bg-terminal-surface">
-              {filtered.length} session{filtered.length !== 1 ? "s" : ""}
-            </span>
+          {/* Insights summary card — replaces old project title */}
+          <div className="hidden md:block">
+            {projectInsights && selectedProject !== ALL_PROJECTS ? (
+              <TitleInsightsHeader insights={projectInsights} variant="project" />
+            ) : userInsights && selectedProject === ALL_PROJECTS ? (
+              <TitleInsightsHeader insights={userInsights} variant="all" />
+            ) : (
+              <TitleInsightsHeaderSkeleton />
+            )}
           </div>
 
           {/* Search + archive toggle */}
@@ -1244,18 +1243,6 @@ function SessionsPanel() {
 
         {/* Session list */}
         <div className="flex-1 overflow-y-auto">
-          {/* Insights panel at top of list */}
-          {!showInitialLoading && (projectInsights || userInsights) && (
-            <div className="px-4 pt-3 pb-1">
-              {projectInsights && selectedProject !== ALL_PROJECTS && (
-                <ProjectInsightsPanel insights={projectInsights} />
-              )}
-              {userInsights && selectedProject === ALL_PROJECTS && (
-                <UserInsightsPanel insights={userInsights} />
-              )}
-            </div>
-          )}
-
           {showInitialLoading ? (
             <div className="text-center py-12 text-terminal-dim font-mono text-sm">
               Fetching sessions...
@@ -1439,14 +1426,19 @@ function ReplaysPanel() {
   const [selectedProject, setSelectedProject] = useState<string>(getProjectFromUrl());
   const [showArchived, setShowArchived] = useState(getShowArchivedFromUrl());
 
-  // Background scan + insights (shared with Sessions tab)
-  const { scanStatus, projectInsights, userInsights, fetchInsights } = useScanInsights();
+  // Background scan + insights (shared singleton context)
+  const { scanStatus, userInsights, projectInsightsCache, fetchProjectInsights } =
+    useScanInsightsContext();
 
-  // Fetch insights when selected project changes
+  // Fetch project insights when selected project changes
   useEffect(() => {
-    const project = selectedProject === ALL_PROJECTS ? null : selectedProject;
-    fetchInsights(project);
-  }, [selectedProject, fetchInsights]);
+    if (selectedProject !== ALL_PROJECTS) {
+      fetchProjectInsights(selectedProject);
+    }
+  }, [selectedProject, fetchProjectInsights]);
+
+  const projectInsights =
+    selectedProject !== ALL_PROJECTS ? projectInsightsCache.get(selectedProject) : undefined;
 
   useEffect(() => {
     const handler = () => {
@@ -1804,61 +1796,53 @@ function ReplaysPanel() {
 
         {/* Header + search */}
         <div className="px-4 pt-4 pb-2 space-y-3 shrink-0">
-          {/* Open by URL/Gist */}
-          <RegenerateAllButton />
+          {/* Insights summary card — replaces old project title (desktop) */}
+          <div className="hidden md:block">
+            {projectInsights && selectedProject !== ALL_PROJECTS ? (
+              <TitleInsightsHeader insights={projectInsights} variant="project" />
+            ) : userInsights && selectedProject === ALL_PROJECTS ? (
+              <TitleInsightsHeader insights={userInsights} variant="all" />
+            ) : (
+              <TitleInsightsHeaderSkeleton />
+            )}
+          </div>
 
-          {/* Project title + inline search (desktop) */}
-          <div className="hidden md:flex items-center gap-3">
-            <div className="min-w-0 shrink-0">
-              <h2 className="text-base font-mono text-terminal-text truncate font-semibold">
-                {selectedProject === ALL_PROJECTS
-                  ? "All replays"
-                  : projectLabels.get(selectedProject) || projectName(selectedProject)}
-              </h2>
-              {selectedProject !== ALL_PROJECTS && (
-                <span className="text-xs font-mono text-terminal-dimmer truncate block mt-0.5">
-                  {selectedProject}
-                </span>
-              )}
+          {/* Search + actions (desktop) */}
+          <div className="hidden md:flex items-center gap-2">
+            <div className="relative flex-1">
+              <svg
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-terminal-dim"
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              >
+                <circle cx="7" cy="7" r="5" />
+                <path d="M11 11l3.5 3.5" />
+              </svg>
+              <input
+                value={filter}
+                onChange={(e) => handleFilterChange(e.target.value)}
+                placeholder="Filter replays..."
+                className="w-full bg-terminal-surface rounded-lg pl-9 pr-3 py-2.5 text-sm font-mono text-terminal-text placeholder:text-terminal-dimmer outline-none ring-1 ring-transparent focus:ring-terminal-green/40 transition-shadow duration-200 shadow-layer-sm"
+              />
             </div>
-            <div className="flex-1 flex items-center gap-2">
-              <div className="relative flex-1">
-                <svg
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-terminal-dim"
-                  width="14"
-                  height="14"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                >
-                  <circle cx="7" cy="7" r="5" />
-                  <path d="M11 11l3.5 3.5" />
-                </svg>
-                <input
-                  value={filter}
-                  onChange={(e) => handleFilterChange(e.target.value)}
-                  placeholder="Filter replays..."
-                  className="w-full bg-terminal-surface rounded-lg pl-9 pr-3 py-2.5 text-sm font-mono text-terminal-text placeholder:text-terminal-dimmer outline-none ring-1 ring-transparent focus:ring-terminal-green/40 transition-shadow duration-200 shadow-layer-sm"
-                />
-              </div>
-              {archivedCount > 0 && (
-                <button
-                  onClick={handleToggleArchived}
-                  className={`shrink-0 px-2.5 py-2 text-xs font-mono rounded-lg transition-colors duration-200 ${
-                    showArchived
-                      ? "bg-terminal-orange-subtle text-terminal-orange"
-                      : "bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
-                  }`}
-                  title={showArchived ? "Hide archived" : `View all (${archivedCount} archived)`}
-                >
-                  {showArchived ? "Active" : "View all"}
-                </button>
-              )}
-            </div>
-            <span className="text-xs font-mono text-terminal-dim tabular-nums px-2 py-1 rounded-md bg-terminal-surface shrink-0">
-              {filtered.length} replay{filtered.length !== 1 ? "s" : ""}
-            </span>
+            {archivedCount > 0 && (
+              <button
+                onClick={handleToggleArchived}
+                className={`shrink-0 px-2.5 py-2 text-xs font-mono rounded-lg transition-colors duration-200 ${
+                  showArchived
+                    ? "bg-terminal-orange-subtle text-terminal-orange"
+                    : "bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
+                }`}
+                title={showArchived ? "Hide archived" : `View all (${archivedCount} archived)`}
+              >
+                {showArchived ? "Active" : "View all"}
+              </button>
+            )}
+            <RegenerateAllButton />
           </div>
 
           {/* Mobile search + archive toggle (kept stacked) */}
@@ -1944,18 +1928,6 @@ function ReplaysPanel() {
 
         {/* Replay list */}
         <div className="flex-1 overflow-y-auto">
-          {/* Insights panel at top of list */}
-          {!showInitialLoading && (projectInsights || userInsights) && (
-            <div className="px-4 pt-3 pb-1">
-              {projectInsights && selectedProject !== ALL_PROJECTS && (
-                <ProjectInsightsPanel insights={projectInsights} />
-              )}
-              {userInsights && selectedProject === ALL_PROJECTS && (
-                <UserInsightsPanel insights={userInsights} />
-              )}
-            </div>
-          )}
-
           {showInitialLoading ? (
             <div className="text-center py-12 text-terminal-dim font-mono text-sm">
               Fetching replays...
@@ -2000,7 +1972,7 @@ export default function Dashboard() {
   const getTabFromUrl = useCallback((): Tab => {
     const params = new URLSearchParams(window.location.search);
     const t = params.get("tab") as Tab;
-    if (t === "home" || t === "sessions" || t === "replays") return t;
+    if (t === "home" || t === "sessions" || t === "replays" || t === "projects") return t;
     return isEditor ? "home" : "replays";
   }, [isEditor]);
 
@@ -2033,26 +2005,31 @@ export default function Dashboard() {
   );
 
   return (
-    <div className="flex-1 flex flex-col min-h-0">
-      {/* Tab bar — only show when running with local server */}
-      {isEditor && (
-        <div className="shrink-0 px-5 py-3 border-b border-terminal-border-subtle bg-terminal-surface/30">
-          <div className="inline-flex items-center rounded-xl bg-terminal-surface p-0.5 shadow-layer-sm">
-            {tabButton("home", "Home")}
-            {tabButton("sessions", "Sessions")}
-            {tabButton("replays", "Replays")}
+    <ScanInsightsProvider>
+      <div className="flex-1 flex flex-col min-h-0">
+        {/* Tab bar — only show when running with local server */}
+        {isEditor && (
+          <div className="shrink-0 px-5 py-3 border-b border-terminal-border-subtle bg-terminal-surface/30">
+            <div className="inline-flex items-center rounded-xl bg-terminal-surface p-0.5 shadow-layer-sm">
+              {tabButton("home", "Home")}
+              {tabButton("sessions", "Sessions")}
+              {tabButton("replays", "Replays")}
+              {tabButton("projects", "Projects")}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Tab content */}
-      {tab === "home" && isEditor ? (
-        <DashboardHome onNavigate={handleTabChange} />
-      ) : tab === "sessions" && isEditor ? (
-        <SessionsPanel />
-      ) : (
-        <ReplaysPanel />
-      )}
-    </div>
+        {/* Tab content */}
+        {tab === "home" && isEditor ? (
+          <DashboardHome onNavigate={handleTabChange} />
+        ) : tab === "projects" && isEditor ? (
+          <ProjectsPanel onNavigate={handleTabChange} />
+        ) : tab === "sessions" && isEditor ? (
+          <SessionsPanel />
+        ) : (
+          <ReplaysPanel />
+        )}
+      </div>
+    </ScanInsightsProvider>
   );
 }
