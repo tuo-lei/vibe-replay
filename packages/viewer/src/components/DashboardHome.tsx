@@ -406,6 +406,32 @@ function MetricCardSkeleton() {
   );
 }
 
+function RecentProjectsSkeleton() {
+  return (
+    <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm animate-pulse">
+      <div className="flex items-center justify-between mb-3">
+        <div className="h-3 w-28 skeleton rounded" />
+        <div className="h-3 w-14 skeleton rounded opacity-40" />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+        {Array.from({ length: 5 }, (_, i) => (
+          <div
+            key={i}
+            className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg bg-terminal-bg"
+          >
+            <div className="min-w-0 flex-1 space-y-2">
+              <div className="h-3.5 w-24 max-w-[70%] skeleton rounded" />
+              <div className="h-3 w-36 max-w-full skeleton rounded opacity-40" />
+            </div>
+            <div className="h-3 w-10 shrink-0 skeleton rounded opacity-30" />
+          </div>
+        ))}
+      </div>
+      <div className="h-9 mt-2 rounded-lg bg-terminal-surface-2 skeleton opacity-20" />
+    </div>
+  );
+}
+
 function ActivityChart({ data }: { data: InsightStats["activityByDay"] }) {
   const maxVal = Math.max(...data.map((d) => d.claude + d.cursor), 1);
   const hasActivity = data.some((d) => d.claude > 0 || d.cursor > 0);
@@ -914,6 +940,8 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   const { scanStatus, userInsights } = useScanInsightsContext();
   const [generatingSlug, setGeneratingSlug] = useState<string | null>(null);
   const [generateErrorSlug, setGenerateErrorSlug] = useState<string | null>(null);
+  const showRecentProjectsSkeleton =
+    !userInsights && (loadingSources || Boolean(scanStatus?.running) || sources.length > 0);
 
   const handleOpenReplay = (slug: string) => {
     navigateTo({ view: null, session: slug });
@@ -1079,7 +1107,9 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
         </div>
 
         {/* Recent Projects (from scan data — top 5 by lastActivity) */}
-        {userInsights && userInsights.topProjects.length > 1 && (
+        {showRecentProjectsSkeleton ? (
+          <RecentProjectsSkeleton />
+        ) : userInsights && userInsights.topProjects.length > 1 ? (
           <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
@@ -1133,7 +1163,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
               </button>
             )}
           </div>
-        )}
+        ) : null}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm">

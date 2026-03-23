@@ -264,14 +264,6 @@ function tokenUsageFromCursorTokenCount(value: unknown): TokenUsage | undefined 
   return hasAnyTokens(usage) ? usage : undefined;
 }
 
-function computeDurationFromIsoRange(start?: string, end?: string): number | undefined {
-  if (!start || !end) return undefined;
-  const startMs = Date.parse(start);
-  const endMs = Date.parse(end);
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return undefined;
-  return Math.round(endMs - startMs);
-}
-
 async function resolveProjectRootFromPath(rawPath: string): Promise<string | null> {
   const candidate = rawPath
     .replaceAll("\\\\", "/")
@@ -1089,8 +1081,6 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
     const endTime = toIsoTimestamp(composer.lastUpdatedAt);
     const sessionTokenUsage = tokenUsageFromCursorTokenCount(composer.tokenCount);
     const metrics = buildGlobalStateMetrics(entries, modelName, sessionTokenUsage);
-    const totalDurationMs =
-      metrics.totalDurationMs ?? computeDurationFromIsoRange(startTime, endTime);
 
     const notes = ["cursorDiskKV keys: composerData:* + bubbleId:*"];
     if (!metrics.tokenUsage) {
@@ -1103,8 +1093,8 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
     }
     if (metrics.totalDurationMs !== undefined) {
       notes.push("Duration is estimated from Cursor thinking and tool execution timing.");
-    } else if (totalDurationMs !== undefined) {
-      notes.push("Duration is estimated from session start/end timestamps.");
+    } else {
+      notes.push("Duration is unavailable for this Cursor global-state session.");
     }
     const hasDetailedTurnStats = Boolean(
       metrics.turnStats?.some(
@@ -1125,7 +1115,9 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
       model: modelName,
       startTime,
       endTime,
-      ...(totalDurationMs !== undefined ? { totalDurationMs } : {}),
+      ...(metrics.totalDurationMs !== undefined
+        ? { totalDurationMs: metrics.totalDurationMs }
+        : {}),
       ...(metrics.tokenUsage ? { tokenUsage: metrics.tokenUsage } : {}),
       ...(metrics.tokenUsageByModel ? { tokenUsageByModel: metrics.tokenUsageByModel } : {}),
       ...(metrics.turnStats ? { turnStats: metrics.turnStats } : {}),
@@ -1331,8 +1323,8 @@ function mapCursorToolName(name: string): string {
     write: "Write",
     Delete: "Delete",
     delete_file: "Delete",
-    Task: "Task",
-    task_v2: "Task",
+    Task: "Agent",
+    task_v2: "Agent",
     todo_write: "TodoWrite",
     ask_question: "AskQuestion",
     semantic_search_full: "SemanticSearch",
@@ -1340,8 +1332,12 @@ function mapCursorToolName(name: string): string {
     web_search: "WebSearch",
     WebFetch: "WebFetch",
     web_fetch: "WebFetch",
+    create_plan: "Plan",
   };
-  return mapping[name] || name;
+  if (mapping[name]) return mapping[name];
+  if (name.startsWith("mcp-cursor-ide-browser-cursor-ide-browser-browser_")) return "Browser";
+  if (name.startsWith("chrome-devtools-")) return "Browser";
+  return name;
 }
 
 function parseDiffStringSnippet(diffString: string): { oldText: string; newText: string } {
@@ -1560,8 +1556,14 @@ function mapToolArgs(toolName: string, args: unknown, resultText = ""): Record<s
       content: argsObj.content ?? argsObj.contents ?? codeValue,
     };
   }
-  if (toolName === "delete_file" && argsObj.relativeWorkspacePath) {
-    return { file_path: argsObj.relativeWorkspacePath };
+  if (
+    (toolName === "Delete" || toolName === "delete_file") &&
+    (argsObj.relativeWorkspacePath || argsObj.path || argsObj.file_path || argsObj.targetFile)
+  ) {
+    return {
+      file_path:
+        argsObj.file_path ?? argsObj.path ?? argsObj.relativeWorkspacePath ?? argsObj.targetFile,
+    };
   }
   if (toolName === "list_dir" || toolName === "list_dir_v2" || toolName === "LS") {
     return {
@@ -1612,7 +1614,7 @@ function mapToolArgs(toolName: string, args: unknown, resultText = ""): Record<s
       ...(argsObj.includePattern ? { includePattern: argsObj.includePattern } : {}),
     };
   }
-  if (toolName === "task_v2") {
+  if (toolName === "task_v2" || toolName === "Task") {
     return {
       ...(argsObj.description ? { description: argsObj.description } : {}),
       ...(argsObj.prompt ? { prompt: argsObj.prompt } : {}),

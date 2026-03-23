@@ -34,6 +34,8 @@ function toolIcon(name: string): string {
       return "\u270F\uFE0F";
     case "Edit":
       return "\u2702\uFE0F";
+    case "Delete":
+      return "\uD83D\uDDD1\uFE0F";
     case "Bash":
       return "$";
     case "Glob":
@@ -50,6 +52,7 @@ function toolIcon(name: string): string {
 const AGENT_TYPE_COLORS: Record<string, string> = {
   Explore: "bg-blue-500/20 text-blue-300 border-blue-500/30",
   Plan: "bg-purple-500/20 text-purple-300 border-purple-500/30",
+  Shell: "bg-cyan-500/20 text-cyan-300 border-cyan-500/30",
   "general-purpose": "bg-green-500/20 text-green-300 border-green-500/30",
   "claude-code-guide": "bg-amber-500/20 text-amber-300 border-amber-500/30",
 };
