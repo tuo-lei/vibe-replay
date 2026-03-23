@@ -221,6 +221,29 @@ describe("transform — tool scene enrichment", () => {
     expect(scene.type === "tool-call" && scene.diff?.newContent).toBe("export const foo = 1;");
   });
 
+  it("enriches Delete tool with a removal diff", () => {
+    const replay = transformToReplay(
+      buildParsed({
+        turns: [
+          assistantToolTurn(
+            "Delete",
+            {
+              file_path: "/tmp/test/old.ts",
+            },
+            "File deleted.",
+          ),
+        ],
+      }),
+      "claude-code",
+      "~/test",
+    );
+    const scene = replay.scenes[0];
+    expect(scene.type).toBe("tool-call");
+    expect(scene.type === "tool-call" && scene.diff?.filePath).toBe("/tmp/test/old.ts");
+    expect(scene.type === "tool-call" && scene.diff?.oldContent).toBe("(file deleted)");
+    expect(scene.type === "tool-call" && scene.diff?.newContent).toBe("");
+  });
+
   it("enriches Bash tool with command + stdout", () => {
     const replay = transformToReplay(
       buildParsed({
@@ -519,6 +542,19 @@ describe("transform — metadata", () => {
       "~/project",
     );
     expect(replay.meta.stats.durationMs).toBe(150000);
+  });
+
+  it("does not derive wall-clock duration for parsed Cursor sessions when provider duration is missing", () => {
+    const replay = transformToReplay(
+      buildParsed({
+        dataSource: "global-state",
+        startTime: "2025-01-01T00:00:00.000Z",
+        endTime: "2025-01-02T00:00:00.000Z",
+      }),
+      "cursor",
+      "~/project",
+    );
+    expect(replay.meta.stats.durationMs).toBeUndefined();
   });
 
   it("prefers provider-reported duration over timestamp-derived fallback", () => {

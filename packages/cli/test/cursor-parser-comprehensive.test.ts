@@ -405,6 +405,96 @@ describe("Cursor → transform — comprehensive", () => {
     expect(replay.meta.stats.toolCalls).toBe(1);
     expect(replay.meta.stats.sceneCount).toBe(replay.scenes.length);
   });
+
+  it("creates minimal sub-agent metadata for Cursor agent tasks", () => {
+    const replay = transformToReplay(
+      {
+        sessionId: "cursor-agent-session",
+        slug: "cursor-a",
+        cwd: "",
+        turns: [
+          {
+            role: "user",
+            blocks: [{ type: "text", text: "Search the repo for auth code" }],
+          },
+          {
+            role: "assistant",
+            blocks: [
+              {
+                type: "tool_use",
+                id: "task-1",
+                name: "Agent",
+                input: {
+                  subagent_type: "Explore",
+                  description: "Search auth patterns",
+                  prompt: "Search auth patterns in the repo",
+                },
+              } as any,
+            ],
+          },
+        ],
+      },
+      "cursor",
+      "~/test",
+    );
+
+    const agentScene = replay.scenes.find(
+      (scene) => scene.type === "tool-call" && scene.toolName === "Agent",
+    );
+    expect(agentScene).toBeDefined();
+    expect(agentScene?.type === "tool-call" && agentScene.subAgent?.agentType).toBe("Explore");
+    expect(agentScene?.type === "tool-call" && agentScene.subAgent?.description).toBe(
+      "Search auth patterns",
+    );
+    expect(replay.meta.subAgentSummary).toEqual([
+      {
+        agentId: "task-1",
+        agentType: "Explore",
+        description: "Search auth patterns",
+        toolCalls: 0,
+        model: undefined,
+      },
+    ]);
+  });
+
+  it("normalizes lowercase Cursor subagent types for viewer parity", () => {
+    const replay = transformToReplay(
+      {
+        sessionId: "cursor-agent-lowercase",
+        slug: "cursor-l",
+        cwd: "",
+        turns: [
+          {
+            role: "user",
+            blocks: [{ type: "text", text: "Investigate infra state" }],
+          },
+          {
+            role: "assistant",
+            blocks: [
+              {
+                type: "tool_use",
+                id: "task-2",
+                name: "Agent",
+                input: {
+                  subagent_type: "shell",
+                  description: "Run infra diagnostics",
+                  prompt: "Run shell checks",
+                },
+              } as any,
+            ],
+          },
+        ],
+      },
+      "cursor",
+      "~/test",
+    );
+
+    const agentScene = replay.scenes.find(
+      (scene) => scene.type === "tool-call" && scene.toolName === "Agent",
+    );
+    expect(agentScene?.type === "tool-call" && agentScene.subAgent?.agentType).toBe("Shell");
+    expect(replay.meta.subAgentSummary?.[0]?.agentType).toBe("Shell");
+  });
 });
 
 // ---------------------------------------------------------------------------

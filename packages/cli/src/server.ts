@@ -891,6 +891,10 @@ export async function startServer(
           project: s.project,
           slug: s.slug,
           filePaths: s.filePaths,
+          toolPaths: s.toolPaths,
+          workspacePath: s.workspacePath,
+          hasSqlite: s.hasSqlite,
+          timestamp: s.timestamp,
           title: s.title,
           firstPrompt: s.firstPrompt,
         }));

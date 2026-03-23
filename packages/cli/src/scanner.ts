@@ -14,10 +14,12 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { readFileCache, writeFileCache } from "./cache.js";
 import { estimateCost, estimateCostSimple } from "./pricing.js";
-import type { PrLink, TokenUsage } from "./types.js";
+import { parseCursorSession } from "./providers/cursor/parser.js";
+import type { ProviderParseResult } from "./providers/types.js";
+import type { DataSource, PrLink, SessionInfo, TokenUsage } from "./types.js";
 
 // Bump this when we extract new fields — forces re-scan of all sessions.
-const SCANNER_VERSION = 2;
+const SCANNER_VERSION = 5;
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -64,6 +66,9 @@ export interface SessionScanResult {
   entrypoint?: string;
   permissionMode?: string;
   compactionCount: number;
+  dataSource?: DataSource;
+  dataQualityNotes?: string[];
+  turnStatCount?: number;
 }
 
 export interface ScanCacheEntry {
@@ -95,6 +100,9 @@ export interface ProjectInsights {
   sessionsPerDay: Record<string, number>; // YYYY-MM-DD → count
   avgSessionDurationMs: number;
   memory?: ProjectMemory;
+  dataQuality?: {
+    notes: string[];
+  };
 }
 
 export interface BranchInfo {
@@ -142,16 +150,23 @@ export interface UserInsights {
   subAgentTotal: number;
   apiErrorTotal: number;
   avgSessionDurationMs: number;
+  dataQuality?: {
+    notes: string[];
+  };
 }
 
 // ─── Scanner ────────────────────────────────────────────────────────
 
-interface ScanInput {
+export interface ScanInput {
   sessionId: string;
   provider: string;
   project: string;
   slug: string;
   filePaths: string[];
+  toolPaths?: string[];
+  workspacePath?: string;
+  hasSqlite?: boolean;
+  timestamp?: string;
   title?: string;
   firstPrompt?: string;
 }
@@ -169,6 +184,15 @@ export interface ScanProgress {
  * subagent JSONL reading, no transform step.
  */
 export async function scanSession(input: ScanInput): Promise<SessionScanResult> {
+  if (input.provider === "cursor") {
+    try {
+      return await scanCursorSession(input);
+    } catch {
+      // Fall back to the legacy lightweight scanner below so Cursor sessions
+      // still show up even if richer parsing fails for one host/schema.
+    }
+  }
+
   let startTime: string | undefined;
   let endTime: string | undefined;
   let model: string | undefined;
@@ -313,7 +337,12 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
           if (block.type === "tool_use") {
             toolCallCount++;
             // Track file modifications
-            if (block.name === "Edit" || block.name === "Write" || block.name === "NotebookEdit") {
+            if (
+              block.name === "Edit" ||
+              block.name === "Write" ||
+              block.name === "NotebookEdit" ||
+              block.name === "Delete"
+            ) {
               const fp = block.input?.file_path || block.input?.filePath;
               if (fp) {
                 editCount++;
@@ -421,6 +450,152 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
     entrypoint,
     permissionMode,
   };
+}
+
+async function scanCursorSession(input: ScanInput): Promise<SessionScanResult> {
+  const sessionInfo: SessionInfo = {
+    provider: "cursor",
+    sessionId: input.sessionId,
+    slug: input.slug,
+    title: input.title,
+    project: input.project,
+    cwd: input.workspacePath || input.project,
+    version: "",
+    timestamp: input.timestamp || new Date().toISOString(),
+    lineCount: 0,
+    fileSize: 0,
+    filePath: input.filePaths[0] || "",
+    filePaths: input.filePaths,
+    ...(input.toolPaths?.length ? { toolPaths: input.toolPaths } : {}),
+    ...(input.workspacePath ? { workspacePath: input.workspacePath } : {}),
+    ...(input.hasSqlite !== undefined ? { hasSqlite: input.hasSqlite } : {}),
+    firstPrompt: input.firstPrompt || input.title || "(cursor session)",
+  };
+
+  const parsed = await parseCursorSession(
+    [...input.filePaths, ...(input.toolPaths || [])],
+    sessionInfo,
+  );
+  return buildScanResultFromParsed(input, parsed);
+}
+
+function buildScanResultFromParsed(
+  input: ScanInput,
+  parsed: ProviderParseResult,
+): SessionScanResult {
+  let promptCount = 0;
+  let toolCallCount = 0;
+  let editCount = 0;
+  let subAgentCount = parsed.subAgentSummary?.length || 0;
+  const fileEditCounts = new Map<string, number>();
+
+  for (const turn of parsed.turns) {
+    if (turn.role === "user" && turn.subtype !== "compaction-summary") {
+      const hasText = turn.blocks.some(
+        (block) =>
+          block.type === "text" && typeof block.text === "string" && block.text.trim().length > 0,
+      );
+      const hasImages = turn.blocks.some(
+        (block) =>
+          typeof block === "object" &&
+          block !== null &&
+          "type" in block &&
+          (block as { type?: unknown }).type === "_user_images" &&
+          "images" in block &&
+          Array.isArray((block as { images?: unknown }).images) &&
+          (block as { images: unknown[] }).images.length > 0,
+      );
+      if (hasText || hasImages) promptCount++;
+    }
+
+    for (const block of turn.blocks as any[]) {
+      if (block?.type !== "tool_use") continue;
+      toolCallCount++;
+
+      if (
+        subAgentCount === 0 &&
+        block.name === "Agent" &&
+        block.input &&
+        typeof block.input.subagent_type === "string"
+      ) {
+        subAgentCount++;
+      }
+
+      if (
+        block.name !== "Edit" &&
+        block.name !== "Write" &&
+        block.name !== "NotebookEdit" &&
+        block.name !== "Delete"
+      ) {
+        continue;
+      }
+
+      const rawPath =
+        block.input?.file_path ??
+        block.input?.filePath ??
+        block.input?.path ??
+        block.input?.relativeWorkspacePath;
+      if (typeof rawPath !== "string" || !rawPath.trim()) continue;
+      editCount++;
+      const short = shortenPath(rawPath);
+      fileEditCounts.set(short, (fileEditCounts.get(short) || 0) + 1);
+    }
+  }
+
+  const costEstimate = estimateParsedCost(parsed);
+  const fallbackStart = parsed.startTime || input.timestamp;
+  const fallbackEnd = parsed.endTime || input.timestamp;
+  const durationMs =
+    input.provider === "cursor"
+      ? parsed.totalDurationMs
+      : parsed.totalDurationMs || deriveDurationFromRange(fallbackStart, fallbackEnd);
+
+  return {
+    sessionId: input.sessionId,
+    provider: input.provider,
+    project: input.project,
+    slug: input.slug,
+    title: parsed.title || input.title,
+    firstPrompt: parsed.title || input.firstPrompt,
+    startTime: fallbackStart,
+    endTime: parsed.endTime,
+    durationMs,
+    gitBranch: parsed.gitBranch,
+    gitBranches: parsed.gitBranches,
+    prLinks: parsed.prLinks,
+    model: parsed.model,
+    promptCount,
+    toolCallCount,
+    editCount,
+    filesModified: [...fileEditCounts.entries()]
+      .map(([file, count]) => ({ file, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 100),
+    tokenUsage: parsed.tokenUsage,
+    costEstimate,
+    subAgentCount,
+    apiErrorCount: parsed.apiErrors?.length || 0,
+    compactionCount: parsed.compactions?.length || 0,
+    entrypoint: parsed.entrypoint,
+    permissionMode: parsed.permissionMode,
+    dataSource: parsed.dataSource,
+    dataQualityNotes: parsed.dataSourceInfo?.notes,
+    turnStatCount: parsed.turnStats?.length,
+  };
+}
+
+function estimateParsedCost(parsed: ProviderParseResult): number | undefined {
+  if (parsed.tokenUsageByModel) return estimateCost(parsed.tokenUsageByModel);
+  if (parsed.tokenUsage && parsed.model) return estimateCostSimple(parsed.tokenUsage, parsed.model);
+  return undefined;
+}
+
+function deriveDurationFromRange(start?: string, end?: string): number | undefined {
+  if (!start || !end) return undefined;
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return undefined;
+  return Math.round(endMs - startMs);
 }
 
 // ─── Cache management ───────────────────────────────────────────────
@@ -657,6 +832,7 @@ export function aggregateProjectInsights(
     avgSessionDurationMs:
       sessionsWithDuration > 0 ? Math.round(totalDurationMs / sessionsWithDuration) : 0,
     memory,
+    dataQuality: buildAggregateDataQuality(projectScans),
   };
 }
 
@@ -777,7 +953,43 @@ export function aggregateUserInsights(scans: SessionScanResult[]): UserInsights 
     apiErrorTotal,
     avgSessionDurationMs:
       sessionsWithDuration > 0 ? Math.round(totalDurationMs / sessionsWithDuration) : 0,
+    dataQuality: buildAggregateDataQuality(scans),
   };
+}
+
+function buildAggregateDataQuality(scans: SessionScanResult[]): { notes: string[] } | undefined {
+  const cursorScans = scans.filter((s) => s.provider === "cursor");
+  if (cursorScans.length === 0) return undefined;
+
+  const total = cursorScans.length;
+  const estimatedDurationCount = cursorScans.filter((s) =>
+    s.dataQualityNotes?.some((note) => /duration.*estimated|estimated.*duration/i.test(note)),
+  ).length;
+  const missingDurationCount = cursorScans.filter((s) => !s.durationMs).length;
+  const missingTokenCount = cursorScans.filter((s) => !s.tokenUsage).length;
+  const missingTurnStatsCount = cursorScans.filter((s) => !s.turnStatCount).length;
+
+  const notes: string[] = [];
+  if (estimatedDurationCount > 0) {
+    notes.push(
+      `${estimatedDurationCount}/${total} Cursor sessions use best-effort duration estimates.`,
+    );
+  }
+  if (missingDurationCount > 0) {
+    notes.push(
+      `${missingDurationCount}/${total} Cursor sessions do not have enough timing data to compute duration.`,
+    );
+  }
+  if (missingTokenCount > 0) {
+    notes.push(
+      `${missingTokenCount}/${total} Cursor sessions do not include token snapshots, so token and cost totals are partial.`,
+    );
+  }
+  if (missingTurnStatsCount > 0) {
+    notes.push(`${missingTurnStatsCount}/${total} Cursor sessions do not include per-turn stats.`);
+  }
+
+  return notes.length > 0 ? { notes } : undefined;
 }
 
 // ─── Memory reader ──────────────────────────────────────────────────

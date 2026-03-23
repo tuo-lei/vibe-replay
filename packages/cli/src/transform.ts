@@ -23,6 +23,7 @@ export function transformToReplay(
   let userPrompts = 0;
   let toolCalls = 0;
   let thinkingBlocks = 0;
+  const syntheticSubAgentSummary: NonNullable<ReplaySession["meta"]["subAgentSummary"]> = [];
 
   for (const turn of parsed.turns) {
     if (turn.role === "user") {
@@ -96,6 +97,18 @@ export function transformToReplay(
             model: sa.model,
             scenes: (sa.scenes || []).map((s: any) => redactSubAgentScene(s)),
           } satisfies SubAgent;
+        } else if (provider === "cursor" && toolBlock.name === "Agent") {
+          const minimal = buildMinimalCursorSubAgent(toolBlock);
+          if (minimal) {
+            (scene as any).subAgent = minimal;
+            syntheticSubAgentSummary.push({
+              agentId: minimal.agentId,
+              agentType: minimal.agentType,
+              description: minimal.description,
+              toolCalls: minimal.toolCalls,
+              model: minimal.model,
+            });
+          }
         }
         scenes.push(scene);
         toolCalls++;
@@ -116,7 +129,9 @@ export function transformToReplay(
   const durationMs =
     parsed.totalDurationMs && parsed.totalDurationMs > 0
       ? parsed.totalDurationMs
-      : derivedDurationMs;
+      : provider === "cursor" && parsed.dataSource
+        ? undefined
+        : derivedDurationMs;
 
   return {
     meta: {
@@ -148,7 +163,9 @@ export function transformToReplay(
       compactions: parsed.compactions,
       ...(parsed.subAgentSummary && parsed.subAgentSummary.length > 0
         ? { subAgentSummary: parsed.subAgentSummary }
-        : {}),
+        : syntheticSubAgentSummary.length > 0
+          ? { subAgentSummary: syntheticSubAgentSummary }
+          : {}),
       ...(parsed.gitBranch ? { gitBranch: parsed.gitBranch } : {}),
       ...(parsed.gitBranches ? { gitBranches: parsed.gitBranches } : {}),
       ...(parsed.entrypoint ? { entrypoint: parsed.entrypoint } : {}),
@@ -196,6 +213,12 @@ function buildToolScene(
       oldContent: "",
       newContent: truncate(input.content || "", 3000),
     };
+  } else if (toolName === "Delete" && input.file_path) {
+    (scene as any).diff = {
+      filePath: redactPath(input.file_path),
+      oldContent: input.old_string ?? "(file deleted)",
+      newContent: "",
+    };
   } else if (toolName === "Bash" && input.command) {
     (scene as any).bashOutput = {
       command: redactSecrets(redactPath(input.command)),
@@ -236,6 +259,42 @@ function truncate(s: string, max: number): string {
   const redacted = redactSecrets(s);
   if (redacted.length <= max) return redacted;
   return `${redacted.slice(0, max)}\n... (truncated, ${redacted.length} chars total)`;
+}
+
+function buildMinimalCursorSubAgent(toolBlock: any): SubAgent | null {
+  const input = toolBlock?.input;
+  if (!input || typeof input !== "object") return null;
+  const rawAgentType =
+    typeof input.subagent_type === "string" && input.subagent_type.trim()
+      ? input.subagent_type.trim()
+      : undefined;
+  if (!rawAgentType) return null;
+  const agentType = normalizeCursorAgentType(rawAgentType);
+  return {
+    agentId:
+      typeof toolBlock.id === "string" && toolBlock.id.trim()
+        ? toolBlock.id
+        : `cursor-agent-${agentType}`,
+    agentType,
+    ...(typeof input.description === "string" && input.description.trim()
+      ? { description: input.description.trim() }
+      : {}),
+    prompt: typeof input.prompt === "string" ? redactSecrets(redactPath(input.prompt)) : "",
+    toolCalls: 0,
+    thinkingBlocks: 0,
+    textResponses: 0,
+    model: typeof toolBlock.model === "string" ? toolBlock.model : undefined,
+    scenes: [],
+  };
+}
+
+function normalizeCursorAgentType(agentType: string): string {
+  const normalized = agentType.trim().toLowerCase();
+  if (normalized === "explore") return "Explore";
+  if (normalized === "plan") return "Plan";
+  if (normalized === "generalpurpose") return "general-purpose";
+  if (normalized === "shell") return "Shell";
+  return agentType;
 }
 
 // Redact common secret patterns from output

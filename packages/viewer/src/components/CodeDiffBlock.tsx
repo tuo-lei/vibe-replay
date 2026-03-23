@@ -79,6 +79,7 @@ export default memo(function CodeDiffBlock({
   const language = guessLanguage(filePath);
   const isDark = useSyncExternalStore(subscribe, getIsDark);
   const isNewFile = !oldContent;
+  const isDeletedFile = toolName === "Delete" && !newContent;
 
   return (
     <div className="bg-terminal-surface rounded-xl overflow-hidden shadow-layer-sm">
@@ -88,6 +89,11 @@ export default memo(function CodeDiffBlock({
         {isNewFile && (
           <span className="text-xs px-1.5 py-0.5 rounded bg-terminal-green/20 text-terminal-green">
             new
+          </span>
+        )}
+        {isDeletedFile && (
+          <span className="text-xs px-1.5 py-0.5 rounded bg-terminal-red/20 text-terminal-red">
+            deleted
           </span>
         )}
       </div>

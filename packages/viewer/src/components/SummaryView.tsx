@@ -1,5 +1,10 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { ReplaySession, TurnStat } from "../types";
+import {
+  DataQualityIndicator,
+  getSessionDataQualityNotes,
+  getSessionMetricQuality,
+} from "./DataQualityIndicator";
 import { fmtNum, formatDuration, StatCard } from "./StatsPanel";
 
 interface Props {
@@ -58,27 +63,12 @@ function useChartHover(turnCount: number) {
   return { hovered, ref, onMouseMove, onMouseLeave };
 }
 
-function getDataQualityNotes(meta: ReplaySession["meta"]): string[] {
-  const notes = [...(meta.dataSourceInfo?.notes || [])];
-
-  if (
-    meta.provider === "cursor" &&
-    (meta.dataSource === "sqlite" || meta.dataSource === "global-state")
-  ) {
-    notes.unshift("Some Cursor metrics are estimates and may be incomplete for this session.");
-  }
-  if (!meta.stats.tokenUsage) {
-    notes.push("Token and cost metrics may be unavailable.");
-  }
-
-  return [...new Set(notes)];
-}
-
 // --- Main component ---
 
 export default function SummaryView({ session }: Props) {
   const { meta, scenes } = session;
-  const dataQualityNotes = useMemo(() => getDataQualityNotes(meta), [meta]);
+  const dataQualityNotes = useMemo(() => getSessionDataQualityNotes(meta), [meta]);
+  const metricQuality = useMemo(() => getSessionMetricQuality(meta), [meta]);
   // File table merges edited + read-only into one component
 
   const stats = useMemo(() => {
@@ -287,6 +277,9 @@ export default function SummaryView({ session }: Props) {
               {meta.provider}
             </span>
           )}
+          {dataQualityNotes.length > 0 && (
+            <DataQualityIndicator title={dataQualityNotes.join("\n")} className="shrink-0" />
+          )}
           {meta.gitBranch && (
             <span
               className="shrink-0 text-[10px] font-mono text-terminal-purple px-1.5 py-0.5 rounded bg-terminal-purple/10 border border-terminal-purple/20"
@@ -359,10 +352,15 @@ export default function SummaryView({ session }: Props) {
                 Model: <span className="text-terminal-text font-semibold">{meta.model}</span>
               </div>
             )}
-            {stats.durationMs && (
+            {(stats.durationMs || metricQuality.duration) && (
               <div>
                 Duration:{" "}
-                <span className="text-terminal-text">{formatDuration(stats.durationMs)}</span>
+                <span className="text-terminal-text">
+                  {stats.durationMs ? formatDuration(stats.durationMs) : "unavailable"}
+                </span>
+                {metricQuality.duration && (
+                  <DataQualityIndicator title={metricQuality.duration} className="ml-1" />
+                )}
               </div>
             )}
             {stats.costEstimate !== undefined && (
@@ -375,9 +373,12 @@ export default function SummaryView({ session }: Props) {
                     : stats.costEstimate.toFixed(2)}
                 </span>
                 <span className="text-terminal-dimmer"> (est.)</span>
+                {metricQuality.tokens && (
+                  <DataQualityIndicator title={metricQuality.tokens} className="ml-1" />
+                )}
               </div>
             )}
-            {stats.tokenUsage && (
+            {stats.tokenUsage ? (
               <>
                 <div>
                   In:{" "}
@@ -399,6 +400,19 @@ export default function SummaryView({ session }: Props) {
                   created
                 </div>
               </>
+            ) : (
+              metricQuality.tokens && (
+                <div>
+                  Tokens: <span className="text-terminal-text">unavailable</span>
+                  <DataQualityIndicator title={metricQuality.tokens} className="ml-1" />
+                </div>
+              )
+            )}
+            {!hasTurnStats && metricQuality.turnStats && (
+              <div>
+                Turn Stats: <span className="text-terminal-text">limited</span>
+                <DataQualityIndicator title={metricQuality.turnStats} className="ml-1" />
+              </div>
             )}
           </div>
         </div>
@@ -634,6 +648,7 @@ export default function SummaryView({ session }: Props) {
 const AGENT_TYPE_COLORS: Record<string, string> = {
   Explore: "bg-blue-500/20 text-blue-300 border-blue-500/30",
   Plan: "bg-purple-500/20 text-purple-300 border-purple-500/30",
+  Shell: "bg-cyan-500/20 text-cyan-300 border-cyan-500/30",
   "general-purpose": "bg-green-500/20 text-green-300 border-green-500/30",
   "claude-code-guide": "bg-amber-500/20 text-amber-300 border-amber-500/30",
 };

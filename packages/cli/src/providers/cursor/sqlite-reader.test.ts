@@ -232,12 +232,32 @@ describe("cursor sqlite metrics helpers", () => {
     expect(__testables.mapCursorToolName("search_replace")).toBe("Edit");
     expect(__testables.mapCursorToolName("edit_file")).toBe("Edit");
     expect(__testables.mapCursorToolName("write")).toBe("Write");
+    expect(__testables.mapCursorToolName("Task")).toBe("Agent");
+    expect(__testables.mapCursorToolName("task_v2")).toBe("Agent");
+    expect(__testables.mapCursorToolName("create_plan")).toBe("Plan");
+    expect(
+      __testables.mapCursorToolName("mcp-cursor-ide-browser-cursor-ide-browser-browser_navigate"),
+    ).toBe("Browser");
+    expect(__testables.mapCursorToolName("chrome-devtools-new_page")).toBe("Browser");
     expect(__testables.mapCursorToolName("list_dir")).toBe("Glob");
     expect(__testables.mapCursorToolName("rg")).toBe("Grep");
     expect(__testables.mapCursorToolName("grep_search")).toBe("Grep");
     expect(__testables.mapCursorToolName("ripgrep")).toBe("Grep");
     expect(__testables.mapCursorToolName("file_search")).toBe("Glob");
     expect(__testables.mapCursorToolName("codebase_search")).toBe("SemanticSearch");
+  });
+
+  it("maps Cursor task args into Agent-style subagent metadata", () => {
+    const mapped = __testables.mapToolArgs("task_v2", {
+      description: "Search auth patterns",
+      prompt: "Search auth patterns in the repo",
+      subagentType: "Explore",
+    }) as any;
+    expect(mapped).toEqual({
+      description: "Search auth patterns",
+      prompt: "Search auth patterns in the repo",
+      subagent_type: "Explore",
+    });
   });
 
   it("maps run_terminal_cmd and read_file args into normalized shape", () => {
@@ -311,6 +331,18 @@ describe("cursor sqlite metrics helpers", () => {
       code: { code: "hello" },
     }) as any;
     expect(mapped).toEqual({ file_path: "docs/readme.md", content: "hello" });
+  });
+
+  it("maps Delete args across Cursor variants", () => {
+    const canonical = __testables.mapToolArgs("Delete", {
+      path: "docs/old.md",
+    }) as any;
+    expect(canonical).toEqual({ file_path: "docs/old.md" });
+
+    const legacy = __testables.mapToolArgs("delete_file", {
+      relativeWorkspacePath: "src/obsolete.ts",
+    }) as any;
+    expect(legacy).toEqual({ file_path: "src/obsolete.ts" });
   });
 
   it("keeps string tool args as raw text for unknown tools", () => {

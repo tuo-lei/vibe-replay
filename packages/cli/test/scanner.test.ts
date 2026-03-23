@@ -17,6 +17,9 @@ function makeLine(obj: Record<string, any>): string {
 
 let tmpDir: string;
 let fixturePath: string;
+const CURSOR_FIXTURE = join(import.meta.dirname, "fixtures/cursor-session.jsonl");
+const CURSOR_TOOL_FIXTURE_1 = join(import.meta.dirname, "fixtures/cursor-tool-1.txt");
+const CURSOR_TOOL_FIXTURE_2 = join(import.meta.dirname, "fixtures/cursor-tool-2.txt");
 
 beforeAll(async () => {
   tmpDir = join(tmpdir(), `scanner-test-${Date.now()}`);
@@ -274,6 +277,66 @@ describe("scanSession", () => {
     expect(result.entrypoint).toBe("cli");
     expect(result.permissionMode).toBe("default");
   });
+
+  it("counts Delete tool calls as modified files", async () => {
+    const deleteFixturePath = join(tmpDir, "delete-session.jsonl");
+    await writeFile(
+      deleteFixturePath,
+      [
+        makeLine({
+          type: "assistant",
+          timestamp: "2025-03-20T10:00:05Z",
+          message: {
+            role: "assistant",
+            id: "msg-a-delete",
+            content: [
+              {
+                type: "tool_use",
+                id: "tu-delete",
+                name: "Delete",
+                input: {
+                  file_path: "/Users/test/Code/my-project/src/obsolete.ts",
+                },
+              },
+            ],
+          },
+        }),
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "delete-session-1",
+      provider: "claude-code",
+      project: "~/Code/my-project",
+      slug: "delete-session",
+      filePaths: [deleteFixturePath],
+    });
+
+    expect(result.toolCallCount).toBe(1);
+    expect(result.editCount).toBe(1);
+    expect(result.filesModified).toContainEqual({
+      file: "/Users/test/Code/my-project/src/obsolete.ts",
+      count: 1,
+    });
+  });
+
+  it("uses the Cursor parser so tool-backed sessions contribute to stats", async () => {
+    const result = await scanSession({
+      sessionId: "cursor-session",
+      provider: "cursor",
+      project: "~/test/project",
+      slug: "cursor-s",
+      filePaths: [CURSOR_FIXTURE],
+      toolPaths: [CURSOR_TOOL_FIXTURE_1, CURSOR_TOOL_FIXTURE_2],
+      timestamp: "2026-03-20T10:00:00.000Z",
+    });
+
+    expect(result.promptCount).toBe(3);
+    expect(result.toolCallCount).toBe(2);
+    expect(result.startTime).toBe("2026-03-20T10:00:00.000Z");
+    expect(result.filesModified).toEqual([]);
+  });
 });
 
 // ─── Aggregation tests ──────────────────────────────────────────────
@@ -449,5 +512,53 @@ describe("aggregateUserInsights", () => {
     const insights = aggregateUserInsights(scans);
 
     expect(insights.avgSessionDurationMs).toBe(45000); // (60000 + 30000) / 2
+  });
+
+  it("marks Cursor aggregates as partial when metrics are missing or estimated", () => {
+    const insights = aggregateUserInsights([
+      {
+        sessionId: "cursor-1",
+        provider: "cursor",
+        project: "~/Code/proj-cursor",
+        slug: "cursor-1",
+        startTime: "2025-03-19T10:00:00Z",
+        durationMs: 30000,
+        promptCount: 5,
+        toolCallCount: 10,
+        editCount: 1,
+        filesModified: [],
+        subAgentCount: 0,
+        apiErrorCount: 0,
+        compactionCount: 0,
+        dataQualityNotes: ["Duration is estimated from session start/end timestamps."],
+      },
+      {
+        sessionId: "cursor-2",
+        provider: "cursor",
+        project: "~/Code/proj-cursor",
+        slug: "cursor-2",
+        startTime: "2025-03-20T10:00:00Z",
+        promptCount: 2,
+        toolCallCount: 3,
+        editCount: 0,
+        filesModified: [],
+        subAgentCount: 0,
+        apiErrorCount: 0,
+        compactionCount: 0,
+      },
+    ]);
+
+    expect(insights.dataQuality?.notes).toContain(
+      "1/2 Cursor sessions use best-effort duration estimates.",
+    );
+    expect(insights.dataQuality?.notes).toContain(
+      "1/2 Cursor sessions do not have enough timing data to compute duration.",
+    );
+    expect(insights.dataQuality?.notes).toContain(
+      "2/2 Cursor sessions do not include token snapshots, so token and cost totals are partial.",
+    );
+    expect(insights.dataQuality?.notes).toContain(
+      "2/2 Cursor sessions do not include per-turn stats.",
+    );
   });
 });

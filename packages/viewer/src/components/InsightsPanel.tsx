@@ -17,6 +17,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { DataQualityIndicator } from "./DataQualityIndicator";
 import { formatDuration } from "./StatsPanel";
 
 // ─── Types (mirror the server scanner types) ────────────────────────
@@ -62,6 +63,9 @@ interface ProjectInsights {
   sessionsPerDay: Record<string, number>;
   avgSessionDurationMs: number;
   memory?: ProjectMemory;
+  dataQuality?: {
+    notes: string[];
+  };
 }
 
 interface UserInsights {
@@ -93,6 +97,9 @@ interface UserInsights {
   subAgentTotal: number;
   apiErrorTotal: number;
   avgSessionDurationMs: number;
+  dataQuality?: {
+    notes: string[];
+  };
 }
 
 interface ScanStatus {
@@ -464,7 +471,7 @@ export function ProjectInsightsPanel({ insights }: { insights: ProjectInsights }
           {insights.hotFiles.length > 0 && (
             <div>
               <div className="text-[10px] font-sans text-terminal-dimmer uppercase tracking-widest font-semibold mb-2">
-                Most edited files
+                Most modified files
               </div>
               <div className="space-y-1 max-h-32 overflow-y-auto">
                 {insights.hotFiles.slice(0, 10).map((f) => (
@@ -745,6 +752,7 @@ export function TitleInsightsHeader({
   const totalToolCalls = pi?.totalToolCalls ?? ui?.totalToolCalls ?? 0;
   const avgSessionDurationMs = pi?.avgSessionDurationMs ?? ui?.avgSessionDurationMs ?? 0;
   const sessionsPerDay = pi?.sessionsPerDay ?? ui?.sessionsPerDay ?? {};
+  const dataQualityNotes = pi?.dataQuality?.notes ?? ui?.dataQuality?.notes ?? [];
 
   const title = pi ? pi.project.split("/").pop() || pi.project : "All Projects";
   const subtitle = pi ? pi.project : `${ui?.totalProjects ?? 0} projects`;
@@ -758,6 +766,9 @@ export function TitleInsightsHeader({
         <div className="flex items-baseline gap-2 min-w-0">
           <span className={`w-1.5 h-1.5 rounded-full ${accentDot} shrink-0 self-center`} />
           <h2 className="text-base font-sans font-semibold text-terminal-text truncate">{title}</h2>
+          {dataQualityNotes.length > 0 && (
+            <DataQualityIndicator title={dataQualityNotes.join("\n")} className="shrink-0" />
+          )}
           <span className="text-[10px] font-mono text-terminal-dimmer truncate hidden sm:inline">
             {subtitle}
           </span>
@@ -869,7 +880,7 @@ export function TitleInsightsHeader({
           {pi.hotFiles.length > 0 && (
             <div>
               <div className="text-[10px] font-sans text-terminal-dimmer uppercase tracking-widest font-semibold mb-1.5">
-                Most edited files
+                Most modified files
               </div>
               <div className="space-y-0.5 max-h-28 overflow-y-auto">
                 {pi.hotFiles.slice(0, 10).map((f) => (

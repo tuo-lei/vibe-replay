@@ -1,5 +1,10 @@
 import { useMemo } from "react";
 import type { ReplaySession } from "../types";
+import {
+  DataQualityIndicator,
+  getSessionDataQualityNotes,
+  getSessionMetricQuality,
+} from "./DataQualityIndicator";
 
 interface Props {
   session: ReplaySession;
@@ -66,6 +71,8 @@ export default function StatsPanel({ session }: Props) {
   }, [session]);
 
   const { meta } = session;
+  const dataQualityNotes = useMemo(() => getSessionDataQualityNotes(meta), [meta]);
+  const metricQuality = useMemo(() => getSessionMetricQuality(meta), [meta]);
 
   return (
     <div className="p-4 space-y-6 text-xs font-mono">
@@ -85,6 +92,9 @@ export default function StatsPanel({ session }: Props) {
         <div className="text-terminal-dim mt-0.5 flex items-center gap-1.5 flex-wrap">
           {meta.model && <span className="text-terminal-dim">{meta.model}</span>}
           {meta.provider && <span>{meta.provider}</span>}
+          {dataQualityNotes.length > 0 && (
+            <DataQualityIndicator title={dataQualityNotes.join("\n")} />
+          )}
         </div>
         {meta.gitBranch && (
           <div className="text-terminal-dim mt-0.5">
@@ -137,12 +147,21 @@ export default function StatsPanel({ session }: Props) {
         <StatCard label="Files Modified" value={stats.filesModified} color="text-terminal-blue" />
       </div>
 
-      {(stats.durationMs || stats.costEstimate !== undefined) && (
+      {(stats.durationMs ||
+        stats.costEstimate !== undefined ||
+        metricQuality.duration ||
+        metricQuality.tokens ||
+        metricQuality.turnStats) && (
         <div className="text-terminal-dim space-y-0.5">
-          {stats.durationMs && (
+          {(stats.durationMs || metricQuality.duration) && (
             <div>
               Duration:{" "}
-              <span className="text-terminal-text">{formatDuration(stats.durationMs)}</span>
+              <span className="text-terminal-text">
+                {stats.durationMs ? formatDuration(stats.durationMs) : "unavailable"}
+              </span>
+              {metricQuality.duration && (
+                <DataQualityIndicator title={metricQuality.duration} className="ml-1" />
+              )}
             </div>
           )}
           {stats.costEstimate !== undefined && (
@@ -155,6 +174,21 @@ export default function StatsPanel({ session }: Props) {
                   : stats.costEstimate.toFixed(2)}
               </span>
               <span className="text-terminal-dimmer"> (estimate)</span>
+              {metricQuality.tokens && (
+                <DataQualityIndicator title={metricQuality.tokens} className="ml-1" />
+              )}
+            </div>
+          )}
+          {!stats.tokenUsage && metricQuality.tokens && (
+            <div>
+              Tokens: <span className="text-terminal-text">unavailable</span>
+              <DataQualityIndicator title={metricQuality.tokens} className="ml-1" />
+            </div>
+          )}
+          {!meta.stats.turnStats?.length && metricQuality.turnStats && (
+            <div>
+              Turn Stats: <span className="text-terminal-text">limited</span>
+              <DataQualityIndicator title={metricQuality.turnStats} className="ml-1" />
             </div>
           )}
         </div>
@@ -162,8 +196,9 @@ export default function StatsPanel({ session }: Props) {
 
       {stats.tokenUsage && (
         <div>
-          <div className="text-terminal-dimmer mb-2 text-[10px] font-sans font-semibold uppercase tracking-widest">
+          <div className="text-terminal-dimmer mb-2 text-[10px] font-sans font-semibold uppercase tracking-widest flex items-center gap-1.5">
             Tokens
+            {metricQuality.tokens && <DataQualityIndicator title={metricQuality.tokens} />}
           </div>
           <div className="text-terminal-dim leading-relaxed space-y-0.5">
             <div>
