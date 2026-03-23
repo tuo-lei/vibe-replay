@@ -43,4 +43,43 @@ describe("scanSession cursor duration", () => {
     expect(result.endTime).toBe("2025-01-02T00:00:00.000Z");
     expect(result.durationMs).toBeUndefined();
   });
+
+  it("does not double-count subagents when parser summary already exists", async () => {
+    mockedParseCursorSession.mockResolvedValueOnce({
+      sessionId: "cursor-session",
+      slug: "cursor-slug",
+      title: "Cursor session",
+      cwd: "/repo",
+      turns: [
+        { role: "user", blocks: [{ type: "text", text: "delegate" }] },
+        {
+          role: "assistant",
+          blocks: [
+            {
+              type: "tool_use",
+              name: "Agent",
+              input: { subagent_type: "explore" },
+            },
+          ],
+        },
+      ],
+      subAgentSummary: [{ agentId: "agent-1", agentType: "Explore", toolCalls: 0 }],
+      dataSource: "global-state",
+      dataSourceInfo: {
+        primary: "global-state",
+        sources: ["cursor/user/globalStorage/state.vscdb"],
+      },
+    });
+
+    const result = await scanSession({
+      sessionId: "cursor-session",
+      provider: "cursor",
+      project: "~/Code/project",
+      slug: "cursor-slug",
+      filePaths: ["/tmp/session.jsonl"],
+      timestamp: "2025-01-01T00:00:00.000Z",
+    });
+
+    expect(result.subAgentCount).toBe(1);
+  });
 });

@@ -19,7 +19,7 @@ import type { ProviderParseResult } from "./providers/types.js";
 import type { DataSource, PrLink, SessionInfo, TokenUsage } from "./types.js";
 
 // Bump this when we extract new fields — forces re-scan of all sessions.
-const SCANNER_VERSION = 5;
+const SCANNER_VERSION = 3;
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -486,7 +486,8 @@ function buildScanResultFromParsed(
   let promptCount = 0;
   let toolCallCount = 0;
   let editCount = 0;
-  let subAgentCount = parsed.subAgentSummary?.length || 0;
+  const parsedSubAgentCount = parsed.subAgentSummary?.length || 0;
+  let derivedSubAgentCount = 0;
   const fileEditCounts = new Map<string, number>();
 
   for (const turn of parsed.turns) {
@@ -496,14 +497,7 @@ function buildScanResultFromParsed(
           block.type === "text" && typeof block.text === "string" && block.text.trim().length > 0,
       );
       const hasImages = turn.blocks.some(
-        (block) =>
-          typeof block === "object" &&
-          block !== null &&
-          "type" in block &&
-          (block as { type?: unknown }).type === "_user_images" &&
-          "images" in block &&
-          Array.isArray((block as { images?: unknown }).images) &&
-          (block as { images: unknown[] }).images.length > 0,
+        (block) => (block as any).type === "_user_images" && (block as any).images?.length > 0,
       );
       if (hasText || hasImages) promptCount++;
     }
@@ -513,12 +507,12 @@ function buildScanResultFromParsed(
       toolCallCount++;
 
       if (
-        subAgentCount === 0 &&
+        parsedSubAgentCount === 0 &&
         block.name === "Agent" &&
         block.input &&
         typeof block.input.subagent_type === "string"
       ) {
-        subAgentCount++;
+        derivedSubAgentCount++;
       }
 
       if (
@@ -544,11 +538,7 @@ function buildScanResultFromParsed(
 
   const costEstimate = estimateParsedCost(parsed);
   const fallbackStart = parsed.startTime || input.timestamp;
-  const fallbackEnd = parsed.endTime || input.timestamp;
-  const durationMs =
-    input.provider === "cursor"
-      ? parsed.totalDurationMs
-      : parsed.totalDurationMs || deriveDurationFromRange(fallbackStart, fallbackEnd);
+  const durationMs = parsed.totalDurationMs;
 
   return {
     sessionId: input.sessionId,
@@ -573,7 +563,7 @@ function buildScanResultFromParsed(
       .slice(0, 100),
     tokenUsage: parsed.tokenUsage,
     costEstimate,
-    subAgentCount,
+    subAgentCount: parsedSubAgentCount || derivedSubAgentCount,
     apiErrorCount: parsed.apiErrors?.length || 0,
     compactionCount: parsed.compactions?.length || 0,
     entrypoint: parsed.entrypoint,
@@ -588,14 +578,6 @@ function estimateParsedCost(parsed: ProviderParseResult): number | undefined {
   if (parsed.tokenUsageByModel) return estimateCost(parsed.tokenUsageByModel);
   if (parsed.tokenUsage && parsed.model) return estimateCostSimple(parsed.tokenUsage, parsed.model);
   return undefined;
-}
-
-function deriveDurationFromRange(start?: string, end?: string): number | undefined {
-  if (!start || !end) return undefined;
-  const startMs = Date.parse(start);
-  const endMs = Date.parse(end);
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return undefined;
-  return Math.round(endMs - startMs);
 }
 
 // ─── Cache management ───────────────────────────────────────────────
