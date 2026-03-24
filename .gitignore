@@ -36,3 +36,6 @@ cloudflare/.dev.vars
 .env
 .env.*
 test-results/
+
+# Design exploration
+design-exploration/
