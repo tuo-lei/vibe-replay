@@ -12,7 +12,7 @@ Run this right now:
 du -sh ~/.claude/
 ```
 
-Mine says **858 MB**. Three weeks of usage. 181 session files, 1,642 prompts, 17,487 tool calls — all stored as plain text on my local machine.
+Mine says **858 MB**. Three weeks of usage. 129 sessions (plus hundreds of sub-agent files), 1,642 prompts, 17,487 tool calls — all stored as plain text on my local machine.
 
 Most [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) users never look inside this directory. I did, because I needed to parse it for [vibe-replay](/blog/introducing-vibe-replay). What I found was more than I expected — a complete record of every AI coding session, with data that reveals things Claude Code's own UI never shows you.
 
@@ -38,8 +38,8 @@ Claude Code has `/cost` to show token usage for the current session, and `/usage
 
 But every response also logs exact token counts to the JSONL — input, output, cache creation, and cache read. Aggregate them across all sessions and you get a picture neither command shows you:
 
-| | |
-|---|---|
+| Metric | Value |
+|--------|-------|
 | Cache read tokens | **3.25 billion** |
 | Cache hit rate | **97.8%** |
 | API-equivalent cost (Opus pricing) | ~$7,900 |
@@ -190,7 +190,7 @@ Across my sessions, that's **36 MB of invisible undo history**. Even if `/rewind
 
 ## How can I visualize all of this?
 
-Claude Code's built-in commands are a good starting point: `/cost` for current session costs, `/context` for context window status, `/stats` for usage history, `/insights` for a text-based report. Use them.
+Claude Code's built-in commands are a good starting point: `/cost` for current session costs, `/context` for context window status, `/stats` for usage history. Use them.
 
 For the full picture — token burn over time, context window growth, tool distribution, sub-agent internals, thinking blocks, every file edit as a navigable timeline:
 
