@@ -1,6 +1,7 @@
 ---
 title: "What Does Claude Code Store on Your Machine? A Deep Dive into ~/.claude/"
-excerpt: "I scanned my ~/.claude/ directory and found 858 MB of data accumulated in just three weeks — a full diary of every prompt, 3.25 billion cached tokens, and invisible file backups I didn't know existed."
+excerpt: "858 MB in three weeks. Every prompt, every tool call, every file edit — all stored as plain text in ~/.claude/. Here's what's inside."
+cover: "/blog/claude-storage/dashboard.png"
 date: 2026-03-24
 readTime: "8 min read"
 ---
@@ -13,7 +14,7 @@ du -sh ~/.claude/
 
 Mine says **858 MB**. Three weeks of usage. 181 session files, 1,642 prompts, 17,487 tool calls — all stored as plain text on my local machine.
 
-Most Claude Code users never look inside this directory. I did, because I needed to parse it. What I found was more than I expected — a complete record of every AI coding session, with data that reveals things Claude Code's own UI never shows you.
+Most [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) users never look inside this directory. I did, because I needed to parse it for [vibe-replay](/blog/introducing-vibe-replay). What I found was more than I expected — a complete record of every AI coding session, with data that reveals things Claude Code's own UI never shows you.
 
 ---
 
