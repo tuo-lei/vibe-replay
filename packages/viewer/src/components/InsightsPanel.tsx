@@ -763,6 +763,40 @@ export function TitleInsightsHeader({
 
   if (sessionCount === 0) return null;
 
+  const modelEntries = Object.entries(models).sort(([, a], [, b]) => b - a);
+  const modelsBlock = modelEntries.length > 0 && (
+    <div>
+      <div className="text-[10px] font-sans text-terminal-dimmer uppercase tracking-widest font-semibold mb-1.5">
+        Models
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        {modelEntries.map(([model, count]) => (
+          <span
+            key={model}
+            className="text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim"
+            title={model}
+          >
+            {shortModelName(model)} <span className="text-terminal-dimmer">{count}x</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+
+  const dateOpts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric" };
+  const timeRangeBlock = timeRange && (
+    <div className="text-xs font-mono text-terminal-dimmer">
+      Active{" "}
+      <span className="text-terminal-dim">
+        {new Date(timeRange.first).toLocaleDateString("en-US", dateOpts)}
+      </span>
+      {" — "}
+      <span className="text-terminal-dim">
+        {new Date(timeRange.last).toLocaleDateString("en-US", dateOpts)}
+      </span>
+    </div>
+  );
+
   return (
     <div className="border-b border-terminal-border-subtle pb-3">
       {/* Row 1: title + session count */}
@@ -904,48 +938,8 @@ export function TitleInsightsHeader({
               </div>
             </div>
           )}
-          {/* Models */}
-          {Object.keys(models).length > 0 && (
-            <div>
-              <div className="text-[10px] font-sans text-terminal-dimmer uppercase tracking-widest font-semibold mb-1.5">
-                Models
-              </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                {Object.entries(models)
-                  .sort(([, a], [, b]) => b - a)
-                  .map(([model, count]) => (
-                    <span
-                      key={model}
-                      className="text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim"
-                      title={model}
-                    >
-                      {shortModelName(model)} <span className="text-terminal-dimmer">{count}x</span>
-                    </span>
-                  ))}
-              </div>
-            </div>
-          )}
-          {/* Time range */}
-          {timeRange && (
-            <div className="text-xs font-mono text-terminal-dimmer">
-              Active{" "}
-              <span className="text-terminal-dim">
-                {new Date(timeRange.first).toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                })}
-              </span>
-              {" — "}
-              <span className="text-terminal-dim">
-                {new Date(timeRange.last).toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                })}
-              </span>
-            </div>
-          )}
+          {modelsBlock}
+          {timeRangeBlock}
           {/* Memory */}
           {pi.memory && pi.memory.memoryFiles.length > 0 && (
             <div>
@@ -1046,48 +1040,8 @@ export function TitleInsightsHeader({
               </div>
             </div>
           )}
-          {/* Models */}
-          {Object.keys(models).length > 0 && (
-            <div>
-              <div className="text-[10px] font-sans text-terminal-dimmer uppercase tracking-widest font-semibold mb-1.5">
-                Models
-              </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                {Object.entries(models)
-                  .sort(([, a], [, b]) => b - a)
-                  .map(([model, count]) => (
-                    <span
-                      key={model}
-                      className="text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim"
-                      title={model}
-                    >
-                      {shortModelName(model)} <span className="text-terminal-dimmer">{count}x</span>
-                    </span>
-                  ))}
-              </div>
-            </div>
-          )}
-          {/* Time range */}
-          {timeRange && (
-            <div className="text-xs font-mono text-terminal-dimmer">
-              Active{" "}
-              <span className="text-terminal-dim">
-                {new Date(timeRange.first).toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                })}
-              </span>
-              {" — "}
-              <span className="text-terminal-dim">
-                {new Date(timeRange.last).toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                })}
-              </span>
-            </div>
-          )}
+          {modelsBlock}
+          {timeRangeBlock}
         </div>
       )}
     </div>

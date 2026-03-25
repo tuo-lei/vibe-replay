@@ -84,13 +84,19 @@ export function formatCost(cost?: number): string {
 /** Shorten a full model ID to a human-friendly label, e.g. "claude-sonnet-4-20250514" → "Sonnet 4" */
 export function shortModelName(model?: string): string {
   if (!model) return "";
-  // claude-{family}-{version}-{date} or claude-{version}-{date}-{family}
+  // claude-3-5-sonnet-20241022, claude-3-7-sonnet-20250219 (old naming)
+  const legacy = model.match(/claude-(\d+)-(\d+)-(opus|sonnet|haiku)(?:-\d{8})?/i);
+  if (legacy) {
+    const family = legacy[3].charAt(0).toUpperCase() + legacy[3].slice(1).toLowerCase();
+    return `${family} ${legacy[1]}.${legacy[2]}`;
+  }
+  // claude-sonnet-4-20250514, claude-opus-4-6 (new naming)
   const m = model.match(
-    /claude-(?:(opus|sonnet|haiku)-)?(\d+(?:\.\d+)?)-(?:\d{8}-)?(opus|sonnet|haiku)?/i,
+    /claude-(?:(opus|sonnet|haiku)-)?(\d+(?:[.-]\d+)?)-(?:\d{8}-)?(opus|sonnet|haiku)?/i,
   );
   if (m) {
     const family = (m[1] || m[3] || "").toLowerCase();
-    const ver = m[2];
+    const ver = m[2].replace("-", ".");
     const label = family.charAt(0).toUpperCase() + family.slice(1);
     return label ? `${label} ${ver}` : `Claude ${ver}`;
   }
