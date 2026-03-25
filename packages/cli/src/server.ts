@@ -481,6 +481,21 @@ function countSessionStats(turns: ParsedTurn[]): {
 /** Shared post-processing for /api/sources and /api/sources/stream:
  *  normalizes project paths, checks directory existence + git status,
  *  looks up existing replays, and maps to the response shape. */
+
+/** Build dual lookup maps for replays — match by slug or sessionId */
+function buildReplayMaps(replays: any[]): {
+  bySlug: Map<string, any>;
+  bySessionId: Map<string, any>;
+} {
+  const bySlug = new Map<string, any>();
+  const bySessionId = new Map<string, any>();
+  for (const r of replays) {
+    bySlug.set(r.slug as string, r);
+    if (r.sessionId) bySessionId.set(r.sessionId, r);
+  }
+  return { bySlug, bySessionId };
+}
+
 async function buildSourcesResult(
   merged: SessionInfo[],
   baseDir: string,
@@ -520,12 +535,7 @@ async function buildSourcesResult(
   // Match by both slug and sessionId — replay directory name may differ from source slug
   // (e.g. source slug "mighty-questing-waffle" vs replay dir "045ef7d9" from sessionId)
   const existingReplays = await scanSessions(baseDir);
-  const replayBySlug = new Map<string, any>();
-  const replayBySessionId = new Map<string, any>();
-  for (const r of existingReplays) {
-    replayBySlug.set(r.slug as string, r);
-    if (r.sessionId) replayBySessionId.set(r.sessionId, r);
-  }
+  const { bySlug: replayBySlug, bySessionId: replayBySessionId } = buildReplayMaps(existingReplays);
 
   const previousBySessionId = new Map<string, SourceSummaryRecord>();
   const previousByKey = new Map<string, SourceSummaryRecord>();
@@ -697,14 +707,15 @@ export async function startServer(
   const cacheKeySuffix = createHash("sha1").update(baseDir).digest("hex").slice(0, 12);
   const sourcesCacheKey = `dashboard-sources-v1-${cacheKeySuffix}`;
   const replaysCacheKey = `dashboard-replays-v1-${cacheKeySuffix}`;
-  const refreshReplaysCache = async (): Promise<any[]> => {
+  const refreshReplaysCache = async (): Promise<any[] | null> => {
     try {
       const sessions = await scanSessions(baseDir);
       await writeFileCache(replaysCacheKey, sessions);
       return sessions;
     } catch {
       // Best-effort cache refresh for dashboard listing.
-      return [];
+      // Return null (not []) so callers can distinguish "scan failed" from "no replays".
+      return null;
     }
   };
 
@@ -714,19 +725,17 @@ export async function startServer(
       const cached = await readFileCache<any[]>(sourcesCacheKey);
       if (!cached?.data?.length) return;
 
-      const replayBySlug = new Map<string, any>();
-      const replayBySessionId = new Map<string, any>();
-      for (const r of replays) {
-        replayBySlug.set(r.slug as string, r);
-        if (r.sessionId) replayBySessionId.set(r.sessionId, r);
-      }
+      const { bySlug, bySessionId } = buildReplayMaps(replays);
 
       let changed = false;
       const updated = cached.data.map((s: any) => {
-        const replay = replayBySlug.get(s.slug) || replayBySessionId.get(s.sessionId);
+        const replay = bySlug.get(s.slug) || bySessionId.get(s.sessionId);
         const hadReplay = !!s.existingReplay;
         const hasReplay = !!replay;
-        if (hadReplay !== hasReplay || (hasReplay && replay.title !== s.replay?.title)) {
+        if (
+          hadReplay !== hasReplay ||
+          (hasReplay && (replay.slug !== s.existingReplay || replay.title !== s.replay?.title))
+        ) {
           changed = true;
         }
         return {
@@ -1058,8 +1067,8 @@ export async function startServer(
       const targetDir = join(baseDir, slug);
       await writeFile(join(targetDir, "replay.json"), JSON.stringify(target), "utf-8");
       await generateOutput(target, targetDir);
-      const _updatedReplays = await refreshReplaysCache();
-      await syncSourcesCacheWithReplays(_updatedReplays);
+      const updatedReplays = await refreshReplaysCache();
+      if (updatedReplays) await syncSourcesCacheWithReplays(updatedReplays);
 
       return c.json({ ok: true, title: target.meta.title });
     } catch (err) {
@@ -1074,8 +1083,8 @@ export async function startServer(
     try {
       const { rm } = await import("node:fs/promises");
       await rm(join(baseDir, slug), { recursive: true });
-      const _updatedReplays = await refreshReplaysCache();
-      await syncSourcesCacheWithReplays(_updatedReplays);
+      const updatedReplays = await refreshReplaysCache();
+      if (updatedReplays) await syncSourcesCacheWithReplays(updatedReplays);
       return c.json({ ok: true });
     } catch (err) {
       return c.json({ error: getErrorMessage(err) }, 500);
@@ -1227,8 +1236,8 @@ export async function startServer(
       const slug = rawSlug.replace(/[^a-zA-Z0-9_-]/g, "-");
       const outputDir = join(baseDir, slug);
       await generateOutput(replay, outputDir);
-      const _updatedReplays = await refreshReplaysCache();
-      await syncSourcesCacheWithReplays(_updatedReplays);
+      const updatedReplays = await refreshReplaysCache();
+      if (updatedReplays) await syncSourcesCacheWithReplays(updatedReplays);
 
       // Secret scanning
       const findings = scanForSecrets(JSON.stringify(replay));
@@ -1328,8 +1337,8 @@ export async function startServer(
       }
     }
 
-    const _updatedReplays = await refreshReplaysCache();
-    await syncSourcesCacheWithReplays(_updatedReplays);
+    const updatedReplays = await refreshReplaysCache();
+    if (updatedReplays) await syncSourcesCacheWithReplays(updatedReplays);
     return c.json({
       total: results.length,
       regenerated: results.filter((r) => r.status === "regenerated").length,
