@@ -9,9 +9,9 @@ Turn Claude Code and Cursor sessions into shareable, interactive replays.
 **PR diffs show _what_ changed. vibe-replay shows _why_** — every prompt, every thought, every tool call, in one shareable file. One command. Zero config. Works offline.
 
 <p align="center">
-  <a href="https://vibe-replay.com/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba">
-    <img src="docs/screenshots/session-landing.png" alt="vibe-replay — session overview with stats, first prompt, and one-click replay" width="800" />
-  </a>
+  <video src="https://github.com/user-attachments/assets/PLACEHOLDER" width="800" autoplay loop muted playsinline>
+    <img src="docs/screenshots/session-landing.png" alt="vibe-replay product demo" width="800" />
+  </video>
 </p>
 
 > **[Watch a live demo &rarr;](https://vibe-replay.com/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba)**
