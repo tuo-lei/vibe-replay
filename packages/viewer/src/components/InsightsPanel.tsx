@@ -18,6 +18,7 @@ import {
   useState,
 } from "react";
 import { DataQualityIndicator } from "./DataQualityIndicator";
+import { shortModelName } from "./dashboard-utils";
 import { formatDuration } from "./StatsPanel";
 
 // ─── Types (mirror the server scanner types) ────────────────────────
@@ -750,14 +751,51 @@ export function TitleInsightsHeader({
   const totalCost = pi?.totalCost ?? ui?.totalCost ?? 0;
   const totalPrompts = pi?.totalPrompts ?? ui?.totalPrompts ?? 0;
   const totalToolCalls = pi?.totalToolCalls ?? ui?.totalToolCalls ?? 0;
+  const totalEdits = pi?.totalEdits ?? ui?.totalEdits ?? 0;
+  const models = pi?.models ?? ui?.models ?? {};
   const avgSessionDurationMs = pi?.avgSessionDurationMs ?? ui?.avgSessionDurationMs ?? 0;
   const sessionsPerDay = pi?.sessionsPerDay ?? ui?.sessionsPerDay ?? {};
   const dataQualityNotes = pi?.dataQuality?.notes ?? ui?.dataQuality?.notes ?? [];
+  const timeRange = pi?.timeRange ?? ui?.timeRange;
 
   const title = pi ? pi.project.split("/").pop() || pi.project : "All Projects";
   const subtitle = pi ? pi.project : `${ui?.totalProjects ?? 0} projects`;
 
   if (sessionCount === 0) return null;
+
+  const modelEntries = Object.entries(models).sort(([, a], [, b]) => b - a);
+  const modelsBlock = modelEntries.length > 0 && (
+    <div>
+      <div className="text-[10px] font-sans text-terminal-dimmer uppercase tracking-widest font-semibold mb-1.5">
+        Models
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        {modelEntries.map(([model, count]) => (
+          <span
+            key={model}
+            className="text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim"
+            title={model}
+          >
+            {shortModelName(model)} <span className="text-terminal-dimmer">{count}x</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+
+  const dateOpts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric" };
+  const timeRangeBlock = timeRange && (
+    <div className="text-xs font-mono text-terminal-dimmer">
+      Active{" "}
+      <span className="text-terminal-dim">
+        {new Date(timeRange.first).toLocaleDateString("en-US", dateOpts)}
+      </span>
+      {" — "}
+      <span className="text-terminal-dim">
+        {new Date(timeRange.last).toLocaleDateString("en-US", dateOpts)}
+      </span>
+    </div>
+  );
 
   return (
     <div className="border-b border-terminal-border-subtle pb-3">
@@ -812,6 +850,12 @@ export function TitleInsightsHeader({
           {fmtNum(totalToolCalls)}
           <span className="text-terminal-dimmer ml-1 text-[10px]">tools</span>
         </span>
+        {totalEdits > 0 && (
+          <span className="text-terminal-purple tabular-nums">
+            {fmtNum(totalEdits)}
+            <span className="text-terminal-dimmer ml-1 text-[10px]">edits</span>
+          </span>
+        )}
         <span className="text-terminal-dimmer text-[10px] tabular-nums hidden lg:inline">
           avg {formatDuration(avgSessionDurationMs)}/session
         </span>
@@ -894,6 +938,8 @@ export function TitleInsightsHeader({
               </div>
             </div>
           )}
+          {modelsBlock}
+          {timeRangeBlock}
           {/* Memory */}
           {pi.memory && pi.memory.memoryFiles.length > 0 && (
             <div>
@@ -965,9 +1011,24 @@ export function TitleInsightsHeader({
                       <span className="text-terminal-dimmer tabular-nums shrink-0">
                         {p.sessions}s
                       </span>
+                      {p.durationMs > 0 && (
+                        <span className="text-terminal-blue tabular-nums shrink-0">
+                          {formatDuration(p.durationMs)}
+                        </span>
+                      )}
                       <span className="text-terminal-green tabular-nums shrink-0">
                         {p.prompts}p
                       </span>
+                      {p.edits > 0 && (
+                        <span className="text-terminal-purple tabular-nums shrink-0">
+                          {p.edits}e
+                        </span>
+                      )}
+                      {p.prCount > 0 && (
+                        <span className="text-terminal-blue tabular-nums shrink-0">
+                          {p.prCount}pr
+                        </span>
+                      )}
                       {p.cost > 0 && (
                         <span className="text-terminal-orange tabular-nums shrink-0">
                           ${p.cost.toFixed(2)}
@@ -979,6 +1040,8 @@ export function TitleInsightsHeader({
               </div>
             </div>
           )}
+          {modelsBlock}
+          {timeRangeBlock}
         </div>
       )}
     </div>

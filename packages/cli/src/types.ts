@@ -34,6 +34,11 @@ export interface SessionInfo {
   prompts?: string[]; // first N meaningful user prompts (cleaned)
   promptCount?: number; // total user prompts (counted via lightweight scan)
   toolCallCount?: number; // total tool_use blocks (counted via lightweight scan)
+  // Lightweight estimates extracted via regex during discovery (no JSON.parse per line)
+  model?: string; // primary model (e.g. "claude-sonnet-4-20250514")
+  durationMsEst?: number; // sum of turn_duration durationMs values
+  editCountEst?: number; // count of file-editing tool_use blocks (Edit/Write/MultiEdit etc.)
+  hasPR?: boolean; // whether a pr-link event exists in the session
 }
 
 export interface ParsedTurn {

@@ -19,6 +19,7 @@ import {
   providerBadgeLabel,
   replaySuggestedTitle,
   type SourcesEnrichmentStatus,
+  shortModelName,
   sourceSuggestedTitle,
   TITLE_MAX_CHARS,
   timeAgo,
@@ -1372,7 +1373,50 @@ function SessionsPanel() {
                         </p>
                       </div>
                     ))}
-                    {/* Row 3: meta */}
+                    {/* Row 3: stats */}
+                    {(s.promptCount ||
+                      s.toolCallCount ||
+                      s.durationMsEst ||
+                      s.editCountEst ||
+                      s.hasPR) && (
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {!!s.promptCount && (
+                          <span className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim">
+                            {s.promptCount} prompts
+                          </span>
+                        )}
+                        {!!s.toolCallCount && (
+                          <span className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-orange-subtle text-terminal-orange">
+                            {s.toolCallCount} tools
+                          </span>
+                        )}
+                        {!!s.durationMsEst && (
+                          <span
+                            className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim"
+                            title="Estimated active duration"
+                          >
+                            ~{formatDuration(s.durationMsEst)}
+                          </span>
+                        )}
+                        {!!s.editCountEst && (
+                          <span
+                            className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim"
+                            title="Estimated file edits"
+                          >
+                            ~{s.editCountEst} edits
+                          </span>
+                        )}
+                        {s.hasPR && (
+                          <span
+                            className="inline-flex items-center gap-1 text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-purple-subtle text-terminal-purple"
+                            title="Session produced a PR"
+                          >
+                            PR
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {/* Row 4: identity */}
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <ProviderBadge provider={s.provider} />
                       {selectedProject === ALL_PROJECTS && (
@@ -1381,6 +1425,11 @@ function SessionsPanel() {
                           title={s.project}
                         >
                           {projectLabels.get(s.project) || projectName(s.project)}
+                        </span>
+                      )}
+                      {s.model && (
+                        <span className="text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dimmer">
+                          {shortModelName(s.model)}
                         </span>
                       )}
                       <span className="text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dimmer">

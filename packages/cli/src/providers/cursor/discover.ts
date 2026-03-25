@@ -153,7 +153,11 @@ async function extractSessionInfo(
     // JSON-parsing every line.
     let promptCount = 0;
     let toolCallCount = 0;
+    let editCountEst = 0;
+    let model: string | undefined;
     const toolUseRe = /"type"\s*:\s*"tool_use"/g;
+    const editToolRe = /"name"\s*:\s*"(edit_file|file_edit|create_file)"/;
+    const modelRe = /"model(?:Id)?"\s*:\s*"([^"]+)"/;
     for (const line of lines) {
       if (
         (line.includes('"role":"user"') || line.includes('"role": "user"')) &&
@@ -162,7 +166,15 @@ async function extractSessionInfo(
         promptCount++;
       }
       const toolMatches = line.match(toolUseRe);
-      if (toolMatches) toolCallCount += toolMatches.length;
+      if (toolMatches) {
+        toolCallCount += toolMatches.length;
+        if (editToolRe.test(line)) editCountEst++;
+      }
+      // Extract model from first assistant message
+      if (!model && line.includes('"assistant"') && line.includes('"model')) {
+        const m = line.match(modelRe);
+        if (m) model = m[1];
+      }
     }
     // Cursor transcript markers can be missing in some flows; tool artifacts are
     // a better lower bound for real tool activity in the same time window.
@@ -187,6 +199,8 @@ async function extractSessionInfo(
       firstPrompt,
       promptCount,
       toolCallCount,
+      model,
+      editCountEst: editCountEst || undefined,
     };
   } catch {
     return null;

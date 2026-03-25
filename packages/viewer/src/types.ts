@@ -71,6 +71,11 @@ export interface SourceSession {
   projectExists?: boolean;
   isGitRepo?: boolean;
   replay?: SessionSummary;
+  // Lightweight estimates from discovery (regex-based, no full parse)
+  model?: string;
+  durationMsEst?: number;
+  editCountEst?: number;
+  hasPR?: boolean;
 }
 
 declare global {
