@@ -517,10 +517,14 @@ async function buildSourcesResult(
   }
 
   // Check which source sessions already have replays
+  // Match by both slug and sessionId — replay directory name may differ from source slug
+  // (e.g. source slug "mighty-questing-waffle" vs replay dir "045ef7d9" from sessionId)
   const existingReplays = await scanSessions(baseDir);
-  const replayMap = new Map<string, any>();
+  const replayBySlug = new Map<string, any>();
+  const replayBySessionId = new Map<string, any>();
   for (const r of existingReplays) {
-    replayMap.set(r.slug as string, r);
+    replayBySlug.set(r.slug as string, r);
+    if (r.sessionId) replayBySessionId.set(r.sessionId, r);
   }
 
   const previousBySessionId = new Map<string, SourceSummaryRecord>();
@@ -535,7 +539,7 @@ async function buildSourcesResult(
 
   return merged.map((s) => {
     const previous = pickSourceRecordForSession(s, previousBySessionId, previousByKey);
-    const replay = replayMap.get(s.slug);
+    const replay = replayBySlug.get(s.slug) || replayBySessionId.get(s.sessionId);
     const promptCount = s.promptCount ?? previous?.promptCount;
     const toolCallCount = s.toolCallCount ?? previous?.toolCallCount;
     return {
@@ -555,7 +559,7 @@ async function buildSourcesResult(
       toolPaths: s.toolPaths,
       hasSqlite: s.hasSqlite,
       gitBranch: s.gitBranch,
-      existingReplay: replay ? s.slug : null,
+      existingReplay: replay ? (replay.slug as string) : null,
       projectExists: projectExistsMap.get(s.project) ?? false,
       isGitRepo: projectIsGitMap.get(s.project) ?? false,
       replay: replay
@@ -693,12 +697,69 @@ export async function startServer(
   const cacheKeySuffix = createHash("sha1").update(baseDir).digest("hex").slice(0, 12);
   const sourcesCacheKey = `dashboard-sources-v1-${cacheKeySuffix}`;
   const replaysCacheKey = `dashboard-replays-v1-${cacheKeySuffix}`;
-  const refreshReplaysCache = async (): Promise<void> => {
+  const refreshReplaysCache = async (): Promise<any[]> => {
     try {
       const sessions = await scanSessions(baseDir);
       await writeFileCache(replaysCacheKey, sessions);
+      return sessions;
     } catch {
       // Best-effort cache refresh for dashboard listing.
+      return [];
+    }
+  };
+
+  /** After replays change, sync the sources cache so existingReplay / replay stay consistent */
+  const syncSourcesCacheWithReplays = async (replays: any[]): Promise<void> => {
+    try {
+      const cached = await readFileCache<any[]>(sourcesCacheKey);
+      if (!cached?.data?.length) return;
+
+      const replayBySlug = new Map<string, any>();
+      const replayBySessionId = new Map<string, any>();
+      for (const r of replays) {
+        replayBySlug.set(r.slug as string, r);
+        if (r.sessionId) replayBySessionId.set(r.sessionId, r);
+      }
+
+      let changed = false;
+      const updated = cached.data.map((s: any) => {
+        const replay = replayBySlug.get(s.slug) || replayBySessionId.get(s.sessionId);
+        const hadReplay = !!s.existingReplay;
+        const hasReplay = !!replay;
+        if (hadReplay !== hasReplay || (hasReplay && replay.title !== s.replay?.title)) {
+          changed = true;
+        }
+        return {
+          ...s,
+          existingReplay: replay ? replay.slug : null,
+          replay: replay
+            ? {
+                slug: replay.slug,
+                sessionId: replay.sessionId,
+                title: replay.title,
+                provider: replay.provider,
+                model: replay.model,
+                project: replay.project,
+                startTime: replay.startTime,
+                endTime: replay.endTime,
+                stats: replay.stats,
+                hasAnnotations: replay.hasAnnotations,
+                annotationCount: replay.annotationCount,
+                firstMessage: replay.firstMessage,
+                messages: replay.messages,
+                replaySize: replay.replaySize,
+                gist: replay.gist,
+                cloud: replay.cloud,
+              }
+            : undefined,
+        };
+      });
+
+      if (changed) {
+        await writeFileCache(sourcesCacheKey, updated);
+      }
+    } catch {
+      // Best-effort — never break core flows
     }
   };
   let sourcesEnrichmentStatus: SourcesEnrichmentStatus = {
@@ -997,7 +1058,8 @@ export async function startServer(
       const targetDir = join(baseDir, slug);
       await writeFile(join(targetDir, "replay.json"), JSON.stringify(target), "utf-8");
       await generateOutput(target, targetDir);
-      await refreshReplaysCache();
+      const _updatedReplays = await refreshReplaysCache();
+      await syncSourcesCacheWithReplays(_updatedReplays);
 
       return c.json({ ok: true, title: target.meta.title });
     } catch (err) {
@@ -1012,7 +1074,8 @@ export async function startServer(
     try {
       const { rm } = await import("node:fs/promises");
       await rm(join(baseDir, slug), { recursive: true });
-      await refreshReplaysCache();
+      const _updatedReplays = await refreshReplaysCache();
+      await syncSourcesCacheWithReplays(_updatedReplays);
       return c.json({ ok: true });
     } catch (err) {
       return c.json({ error: getErrorMessage(err) }, 500);
@@ -1164,7 +1227,8 @@ export async function startServer(
       const slug = rawSlug.replace(/[^a-zA-Z0-9_-]/g, "-");
       const outputDir = join(baseDir, slug);
       await generateOutput(replay, outputDir);
-      await refreshReplaysCache();
+      const _updatedReplays = await refreshReplaysCache();
+      await syncSourcesCacheWithReplays(_updatedReplays);
 
       // Secret scanning
       const findings = scanForSecrets(JSON.stringify(replay));
@@ -1264,7 +1328,8 @@ export async function startServer(
       }
     }
 
-    await refreshReplaysCache();
+    const _updatedReplays = await refreshReplaysCache();
+    await syncSourcesCacheWithReplays(_updatedReplays);
     return c.json({
       total: results.length,
       regenerated: results.filter((r) => r.status === "regenerated").length,
