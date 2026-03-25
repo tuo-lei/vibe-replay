@@ -1,104 +1,252 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="840" height="380" viewBox="0 0 840 380">
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
   <style>
-    text { font-family: 'SF Mono','Cascadia Code','Fira Code',Menlo,Consolas,'Liberation Mono',monospace; }
+    text { font-family: 'SF Mono','Cascadia Code','Fira Code',Menlo,Consolas,'Liberation Mono','PingFang SC','Hiragino Sans GB','Microsoft YaHei','Noto Sans CJK SC',monospace,sans-serif; }
     @keyframes fadeInOut {
       0% { opacity: 0 }
-      2% { opacity: 1 }
-      18% { opacity: 1 }
-      20% { opacity: 0 }
+      1.11% { opacity: 1 }
+      10% { opacity: 1 }
+      11.11% { opacity: 0 }
       100% { opacity: 0 }
     }
     .frame { opacity: 0; }
-    .frame-0 { animation: fadeInOut 25s 0s infinite; animation-fill-mode: backwards; }
-    .frame-1 { animation: fadeInOut 25s 5s infinite; }
-    .frame-2 { animation: fadeInOut 25s 10s infinite; }
-    .frame-3 { animation: fadeInOut 25s 15s infinite; }
-    .frame-4 { animation: fadeInOut 25s 20s infinite; }
+    .frame-0 { animation: fadeInOut 45s 0s infinite; animation-fill-mode: backwards; }
+    .frame-1 { animation: fadeInOut 45s 5s infinite; }
+    .frame-2 { animation: fadeInOut 45s 10s infinite; }
+    .frame-3 { animation: fadeInOut 45s 15s infinite; }
+    .frame-4 { animation: fadeInOut 45s 20s infinite; }
+    .frame-5 { animation: fadeInOut 45s 25s infinite; }
+    .frame-6 { animation: fadeInOut 45s 30s infinite; }
+    .frame-7 { animation: fadeInOut 45s 35s infinite; }
+    .frame-8 { animation: fadeInOut 45s 40s infinite; }
   </style>
 
   <defs>
-    <clipPath id="vr-clip-8f624d28">
-      <rect x="0" y="36" width="840" height="304"/>
+    <clipPath id="vr-clip-0839bdca">
+      <rect x="0" y="40" width="960" height="460"/>
     </clipPath>
   </defs>
 
   <!-- Background -->
-  <rect width="840" height="380" rx="12" fill="#0d1117"/>
+  <rect width="960" height="540" rx="12" fill="#0d1117"/>
 
   <!-- Header bar -->
-  <path d="M0,12 Q0,0 12,0 H828 Q840,0 840,12 V36 H0 Z" fill="#161b22"/>
-  <circle cx="24" cy="18" r="5" fill="#ff7b72" opacity="0.9"/>
-  <circle cx="42" cy="18" r="5" fill="#d29922" opacity="0.9"/>
-  <circle cx="60" cy="18" r="5" fill="#3fb950" opacity="0.9"/>
-  <text x="420" y="23" text-anchor="middle" fill="#7d8590" font-size="12" letter-spacing="0.5">vibe-replay</text>
+  <path d="M0,12 Q0,0 12,0 H948 Q960,0 960,12 V40 H0 Z" fill="#161b22"/>
+  <circle cx="24" cy="20" r="5" fill="#ff7b72" opacity="0.9"/>
+  <circle cx="42" cy="20" r="5" fill="#d29922" opacity="0.9"/>
+  <circle cx="60" cy="20" r="5" fill="#3fb950" opacity="0.9"/>
+  <text x="480" y="25" text-anchor="middle" fill="#7d8590" font-size="12" letter-spacing="0.5">vibe-replay</text>
 
   <!-- Footer bar -->
-  <path d="M0,340 H840 V368 Q840,380 828,380 H12 Q0,380 0,368 Z" fill="#161b22"/>
-  <line x1="0" y1="340" x2="840" y2="340" stroke="#30363d" stroke-width="1"/>
-  <text x="40" y="364" fill="#7d8590" font-size="11">58 min · 244 responses · 408 tools</text>
-  <text x="800" y="364" text-anchor="end" fill="#7d8590" font-size="11">View full replay →</text>
+  <path d="M0,500 H960 V528 Q960,540 948,540 H12 Q0,540 0,528 Z" fill="#161b22"/>
+  <line x1="0" y1="500" x2="960" y2="500" stroke="#30363d" stroke-width="1"/>
+  <text x="40" y="524" fill="#7d8590" font-size="11">1h 7m · 287 responses · 528 tools</text>
+  <text x="920" y="524" text-anchor="end" fill="#7d8590" font-size="11">View full replay →</text>
 
   <!-- Animated content frames (clipped to content area) -->
-  <g clip-path="url(#vr-clip-8f624d28)">
+  <g clip-path="url(#vr-clip-0839bdca)">
   <g class="frame frame-0">
-    <text x="40" y="60" fill="#7d8590" font-size="11" letter-spacing="1.5">TASK</text>
-    <line x1="40" y1="70" x2="800" y2="70" stroke="#30363d" stroke-width="1"/>
-    <text x="40" y="98" fill="#58a6ff" font-size="15" font-weight="600"># Prompt: Add Annotation/Comment Feature to vibe-replay</text>
-    <text x="40" y="122" fill="#58a6ff" font-size="15" font-weight="600">## Context vibe-replay is a CLI tool that turns AI codi…</text>
-    <text x="40" y="158" fill="#bc8cff" font-size="13">claude-opus-4-6</text>
-    <text x="40" y="182" fill="#7d8590" font-size="13">244 responses  ·  408 tools</text>
-    <text x="40" y="206" fill="#d29922" font-size="13">Read 75 · Write 10 · Edit 129 · Bash (pnpm, cd, npx, git, .…</text>
-    <text x="40" y="230" fill="#7d8590" font-size="13">58 min  ·  ~/Code/vibe-replay</text>
+    <rect x="24" y="56" width="912" height="276" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+    <text x="44" y="80" fill="#3fb950" font-size="13" font-weight="700">YOU</text>
+    <text x="916" y="80" text-anchor="end" fill="#7d8590" font-size="13">#01</text>
+    <text x="44" y="102" fill="#3fb950" font-size="16">Let&apos;s discard local changes and go directly to latest main</text>
+    <line x1="44" y1="132" x2="916" y2="132" stroke="#30363d" stroke-width="1"/>
+    <text x="44" y="152" fill="#e6edf3" font-size="13" font-weight="700">ASSISTANT</text>
+    <rect x="44" y="164" width="106" height="20" rx="4" fill="rgba(88,166,255,0.15)"/>
+    <text x="96.9" y="177" text-anchor="middle" fill="#79b8ff" font-size="12">2 responses</text>
+    <rect x="156" y="164" width="75" height="20" rx="4" fill="rgba(210,153,34,0.15)"/>
+    <text x="193.3" y="177" text-anchor="middle" fill="#d29922" font-size="12">2 tools</text>
+    <line x1="241" y1="166" x2="241" y2="182" stroke="#30363d" stroke-width="1"/>
+    <text x="251" y="177" fill="#d29922" font-size="12">Bash (git) 2</text>
+    <text x="44" y="200" fill="#e6edf3" font-size="15">Local main and origin/main have diverged (local has 3 commits, remote has 14). I&apos;ll reset to</text>
+    <text x="44" y="224" fill="#e6edf3" font-size="15">the remote latest: Reset to latest origin/main (3c9a4f8). The untracked test-results/</text>
+    <text x="44" y="248" fill="#e6edf3" font-size="15">directory is still there, everything else matches the remote now.</text>
   </g>
 
   <g class="frame frame-1">
-    <text x="40" y="60" fill="#7d8590" font-size="11" letter-spacing="1.5">STEP 1 OF 14</text>
-    <line x1="40" y1="70" x2="800" y2="70" stroke="#30363d" stroke-width="1"/>
-    <text x="40" y="98" fill="#58a6ff" font-size="15" font-weight="600"># Prompt: Add Annotation/Comment Feature to</text>
-    <text x="40" y="122" fill="#58a6ff" font-size="15" font-weight="600">vibe-replay ## Context vibe-replay is a CLI tool th…</text>
-    <text x="40" y="158" fill="#7d8590" font-size="13">    types.ts, types.ts, generator.ts +6</text>
-    <text x="40" y="182" fill="#7d8590" font-size="13">    index.css, package.json, TextResponseBlock.tsx</text>
-    <text x="40" y="206" fill="#e6edf3" font-size="13">    Edit types.ts</text>
-    <text x="40" y="230" fill="#e6edf3" font-size="13">    Edit types.ts</text>
-    <text x="40" y="254" fill="#3fb950" font-size="13">    + useAnnotations.ts</text>
-    <text x="40" y="278" fill="#7d8590" font-size="13">    ... +44 more</text>
+    <rect x="24" y="56" width="912" height="422" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+    <text x="44" y="80" fill="#3fb950" font-size="13" font-weight="700">YOU</text>
+    <text x="916" y="80" text-anchor="end" fill="#7d8590" font-size="13">#02</text>
+    <text x="44" y="102" fill="#3fb950" font-size="16">Our current AI coach is quite limited, we need a larger space to put more features: 1.</text>
+    <text x="44" y="128" fill="#3fb950" font-size="16">We need a complete explanation that we can use user&apos;s local Claude, Cursor CLI and Open…</text>
+    <line x1="44" y1="158" x2="916" y2="158" stroke="#30363d" stroke-width="1"/>
+    <text x="44" y="178" fill="#e6edf3" font-size="13" font-weight="700">ASSISTANT</text>
+    <rect x="44" y="190" width="106" height="20" rx="4" fill="rgba(88,166,255,0.15)"/>
+    <text x="96.9" y="203" text-anchor="middle" fill="#79b8ff" font-size="12">5 responses</text>
+    <rect x="156" y="190" width="75" height="20" rx="4" fill="rgba(210,153,34,0.15)"/>
+    <text x="193.3" y="203" text-anchor="middle" fill="#d29922" font-size="12">8 tools</text>
+    <line x1="241" y1="192" x2="241" y2="208" stroke="#30363d" stroke-width="1"/>
+    <text x="251" y="203" fill="#d29922" font-size="12">Read 3 · Write 1 · Bash (ls) 2 · Agent 2</text>
+    <text x="44" y="226" fill="#e6edf3" font-size="15">Let me first dive deep into the existing implementation and related plan files. Let me also</text>
+    <text x="44" y="250" fill="#e6edf3" font-size="15">check the plan directory structure and read a few more key files. Now let me look at the</text>
+    <text x="44" y="274" fill="#e6edf3" font-size="15">current Player.tsx header buttons and the panel switching mechanism to understand the current</text>
+    <text x="44" y="298" fill="#e6edf3" font-size="15">UI patterns. Now I have a thorough understanding of the entire system. Let me write the</text>
+    <text x="44" y="322" fill="#e6edf3" font-size="15">comprehensive redesign document. Design document is done. Let me summarize the core design</text>
+    <text x="44" y="346" fill="#e6edf3" font-size="15">approach: AI Studio Redesign From Small Popup → Full Panel Upgrade the AI Coach popover to an</text>
+    <text x="44" y="370" fill="#e6edf3" font-size="15">AI Studio sidebar panel with three independent feature cards: AI Coach — Migrate existing</text>
+    <text x="44" y="394" fill="#e6edf3" font-size="15">functionality, analyze prompting techniques, output annotations Translate — Translate user pr…</text>
+    <text x="44" y="418" fill="#d29922" font-size="13">Show more (1307 chars)</text>
   </g>
 
   <g class="frame frame-2">
-    <text x="40" y="60" fill="#7d8590" font-size="11" letter-spacing="1.5">STEP 9 OF 14</text>
-    <line x1="40" y1="70" x2="800" y2="70" stroke="#30363d" stroke-width="1"/>
-    <text x="40" y="98" fill="#58a6ff" font-size="15" font-weight="600">--- Task: Add an &quot;Open Editor&quot; mode to vibe-replay</text>
-    <text x="40" y="122" fill="#58a6ff" font-size="15" font-weight="600">CLI Context vibe-replay is a CLI tool that turns AI…</text>
-    <text x="40" y="158" fill="#7d8590" font-size="13">    index.ts, package.json, tsup.config.ts +6</text>
-    <text x="40" y="182" fill="#7d8590" font-size="13">    Good, I have full context. Let me implement thi…</text>
-    <text x="40" y="206" fill="#e6edf3" font-size="13">    $ pnpm --filter vibe-replay add hono @hono/node-ser…</text>
-    <text x="40" y="230" fill="#3fb950" font-size="13">    + server.ts</text>
-    <text x="40" y="254" fill="#e6edf3" font-size="13">    Edit index.ts</text>
-    <text x="40" y="278" fill="#7d8590" font-size="13">    ... +61 more</text>
+    <rect x="24" y="56" width="912" height="420" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+    <text x="44" y="80" fill="#3fb950" font-size="13" font-weight="700">YOU</text>
+    <text x="916" y="80" text-anchor="end" fill="#7d8590" font-size="13">#03</text>
+    <text x="44" y="102" fill="#3fb950" font-size="16">OK, you rebase on top of latest main then start implementing</text>
+    <line x1="44" y1="132" x2="916" y2="132" stroke="#30363d" stroke-width="1"/>
+    <text x="44" y="152" fill="#e6edf3" font-size="13" font-weight="700">ASSISTANT</text>
+    <rect x="44" y="164" width="114" height="20" rx="4" fill="rgba(88,166,255,0.15)"/>
+    <text x="100.8" y="177" text-anchor="middle" fill="#79b8ff" font-size="12">37 responses</text>
+    <rect x="164" y="164" width="83" height="20" rx="4" fill="rgba(210,153,34,0.15)"/>
+    <text x="205.2" y="177" text-anchor="middle" fill="#d29922" font-size="12">66 tools</text>
+    <line x1="257" y1="166" x2="257" y2="182" stroke="#30363d" stroke-width="1"/>
+    <text x="267" y="177" fill="#d29922" font-size="12">Read 19 · Write 3 · Edit 19 · Bash (git, pnpm, cp…</text>
+    <text x="44" y="200" fill="#e6edf3" font-size="15">Now let me explore the codebase structure I need to work with. Let me read the key files I</text>
+    <text x="44" y="224" fill="#e6edf3" font-size="15">need to modify directly. Now let me read the CommentDrawer, server.ts (overlay-relevant</text>
+    <text x="44" y="248" fill="#e6edf3" font-size="15">parts), and feedback.ts. Let me also read the rest of feedback.ts for the execution patterns</text>
+    <text x="44" y="272" fill="#e6edf3" font-size="15">and server helper functions. Now let me also check the loadSessionFromDisk and</text>
+    <text x="44" y="296" fill="#e6edf3" font-size="15">saveAnnotations functions in server.ts. Now I have everything I need. Let me start</text>
+    <text x="44" y="320" fill="#e6edf3" font-size="15">implementing Phase 1 systematically. I&apos;ll work in parallel where possible. Step 1: Add types</text>
+    <text x="44" y="344" fill="#e6edf3" font-size="15">to @vibe-replay/types Step 2: Add server-side overlay persistence + AI Studio endpoints Now</text>
+    <text x="44" y="368" fill="#e6edf3" font-size="15">add the overlay load/save helpers and import the new types. Now add overlay load/save helpers</text>
+    <text x="44" y="392" fill="#e6edf3" font-size="15">after saveAnnotations: Now add the overlay API endpoints and studio endpoints. Let me add the…</text>
+    <text x="44" y="416" fill="#d29922" font-size="13">Show more (3680 chars)</text>
   </g>
 
   <g class="frame frame-3">
-    <text x="40" y="60" fill="#7d8590" font-size="11" letter-spacing="1.5">STEP 11 OF 14</text>
-    <line x1="40" y1="70" x2="800" y2="70" stroke="#30363d" stroke-width="1"/>
-    <text x="40" y="98" fill="#58a6ff" font-size="15" font-weight="600">Task: Fix Claude Code parser — filter ToolSearch</text>
-    <text x="40" y="122" fill="#58a6ff" font-size="15" font-weight="600">noise and handle compaction summaries Context vibe-…</text>
-    <text x="40" y="158" fill="#7d8590" font-size="13">    parser.ts, types.ts, transform.ts +2</text>
-    <text x="40" y="182" fill="#7d8590" font-size="13">    SearchOverlay.tsx, Minimap.tsx, StatsPanel.tsx</text>
-    <text x="40" y="206" fill="#7d8590" font-size="13">    Good. Now I have a complete picture. Let me als…</text>
-    <text x="40" y="230" fill="#e6edf3" font-size="13">    $ python3 -c &quot;</text>
-    <text x="40" y="254" fill="#7d8590" font-size="13">    70 ToolSearch responses! Let me check if there …</text>
-    <text x="40" y="278" fill="#7d8590" font-size="13">    ... +61 more</text>
+    <rect x="24" y="56" width="912" height="422" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+    <text x="44" y="80" fill="#3fb950" font-size="13" font-weight="700">YOU</text>
+    <text x="916" y="80" text-anchor="end" fill="#7d8590" font-size="13">#04</text>
+    <text x="44" y="102" fill="#3fb950" font-size="16">Tool claude Runs locally using your own API token. No data sent to vibe-replay servers.</text>
+    <text x="44" y="128" fill="#3fb950" font-size="16">I think we can make this clearer here, to build user trust</text>
+    <line x1="44" y1="158" x2="916" y2="158" stroke="#30363d" stroke-width="1"/>
+    <text x="44" y="178" fill="#e6edf3" font-size="13" font-weight="700">ASSISTANT</text>
+    <rect x="44" y="190" width="106" height="20" rx="4" fill="rgba(88,166,255,0.15)"/>
+    <text x="96.9" y="203" text-anchor="middle" fill="#79b8ff" font-size="12">4 responses</text>
+    <rect x="156" y="190" width="83" height="20" rx="4" fill="rgba(210,153,34,0.15)"/>
+    <text x="197.2" y="203" text-anchor="middle" fill="#d29922" font-size="12">11 tools</text>
+    <line x1="249" y1="192" x2="249" y2="208" stroke="#30363d" stroke-width="1"/>
+    <text x="259" y="203" fill="#d29922" font-size="12">Read 2 · Edit 2 · Bash (pnpm, cp, git) 7</text>
+    <text x="44" y="226" fill="#e6edf3" font-size="15">Let me think about what builds trust here. Users need to understand: How it works</text>
+    <text x="44" y="250" fill="#e6edf3" font-size="15">mechanically — it spawns their local CLI tool in headless mode What &quot;your own token&quot; means —</text>
+    <text x="44" y="274" fill="#e6edf3" font-size="15">uses whatever API key they&apos;ve already configured Privacy guarantee — session data stays on</text>
+    <text x="44" y="298" fill="#e6edf3" font-size="15">their machine, never touches our servers Cost implication — it consumes tokens from their</text>
+    <text x="44" y="322" fill="#e6edf3" font-size="15">account Now update the null state too — same trust-building language: Clean. Let me commit:</text>
+    <text x="44" y="346" fill="#e6edf3" font-size="15">Now the tool status area displays three clear trust signals: Runs claude in headless mode on</text>
+    <text x="44" y="370" fill="#e6edf3" font-size="15">your machine — explicitly says it runs locally, session data doesn&apos;t leave localhost Uses the</text>
+    <text x="44" y="394" fill="#e6edf3" font-size="15">API key already configured in claude — clarifies it uses the user&apos;s own key, costs are charge…</text>
+    <text x="44" y="418" fill="#d29922" font-size="13">Show more (234 chars)</text>
   </g>
 
   <g class="frame frame-4">
-    <text x="40" y="60" fill="#7d8590" font-size="11" letter-spacing="1.5">COMPLETE</text>
-    <line x1="40" y1="70" x2="800" y2="70" stroke="#30363d" stroke-width="1"/>
-    <text x="40" y="98" fill="#58a6ff" font-size="15" font-weight="600">Comment feature in Vibe Replay</text>
-    <text x="40" y="134" fill="#3fb950" font-size="13">22 files changed  ·  14 prompts  ·  58 min</text>
-    <text x="40" y="158" fill="#7d8590" font-size="13">244 responses  ·  408 tools</text>
-    <text x="40" y="182" fill="#d29922" font-size="13">Read 75 · Write 10 · Edit 129 · Bash (pnpm, cd, npx, git, .…</text>
-    <text x="40" y="218" fill="#58a6ff" font-size="13" font-weight="600">View full replay  →</text>
-    <text x="40" y="242" fill="#7d8590" font-size="13">vibe-replay.com</text>
+    <rect x="24" y="56" width="912" height="420" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+    <text x="44" y="80" fill="#3fb950" font-size="13" font-weight="700">YOU</text>
+    <text x="916" y="80" text-anchor="end" fill="#7d8590" font-size="13">#05</text>
+    <text x="44" y="102" fill="#3fb950" font-size="16">Why are the fonts so small, is it really following the design system?</text>
+    <line x1="44" y1="132" x2="916" y2="132" stroke="#30363d" stroke-width="1"/>
+    <text x="44" y="152" fill="#e6edf3" font-size="13" font-weight="700">ASSISTANT</text>
+    <rect x="44" y="164" width="114" height="20" rx="4" fill="rgba(88,166,255,0.15)"/>
+    <text x="100.8" y="177" text-anchor="middle" fill="#79b8ff" font-size="12">17 responses</text>
+    <rect x="164" y="164" width="83" height="20" rx="4" fill="rgba(210,153,34,0.15)"/>
+    <text x="205.2" y="177" text-anchor="middle" fill="#d29922" font-size="12">31 tools</text>
+    <line x1="257" y1="166" x2="257" y2="182" stroke="#30363d" stroke-width="1"/>
+    <text x="267" y="177" fill="#d29922" font-size="12">Read 2 · Edit 14 · Bash (pnpm, cp, pkill, node, .…</text>
+    <text x="44" y="200" fill="#e6edf3" font-size="15">You&apos;re right, let me check the font size standards used by other panels. Now it&apos;s clear.</text>
+    <text x="44" y="224" fill="#e6edf3" font-size="15">Comparing to ExportView&apos;s design system: - Card title: text-sm font-mono font-semibold (14px)</text>
+    <text x="44" y="248" fill="#e6edf3" font-size="15">- Description/body: text-xs font-mono (12px) - Buttons: text-xs font-mono (12px) - Small</text>
+    <text x="44" y="272" fill="#e6edf3" font-size="15">labels: text-[10px] (10px) My AI Studio compressed everything to text-[10px] and text-[11px],</text>
+    <text x="44" y="296" fill="#e6edf3" font-size="15">which is too small. Now fixing: Now I&apos;ll fix the font sizes across the entire file to match</text>
+    <text x="44" y="320" fill="#e6edf3" font-size="15">the design system. Now fix the active state — tool status section trust messaging: Now fix</text>
+    <text x="44" y="344" fill="#e6edf3" font-size="15">the three trust signal lines: Now fix the modifications section — revert all button, overlay</text>
+    <text x="44" y="368" fill="#e6edf3" font-size="15">scene/source text, overlay content lines: Now fix the FeatureCard component: Now fix the</text>
+    <text x="44" y="392" fill="#e6edf3" font-size="15">rerun confirm and status text in FeatureCard: Now fix the config selects inside the Translate…</text>
+    <text x="44" y="416" fill="#d29922" font-size="13">Show more (959 chars)</text>
+  </g>
+
+  <g class="frame frame-5">
+    <rect x="24" y="56" width="912" height="422" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+    <text x="44" y="80" fill="#3fb950" font-size="13" font-weight="700">YOU</text>
+    <text x="916" y="80" text-anchor="end" fill="#7d8590" font-size="13">#06</text>
+    <text x="44" y="102" fill="#3fb950" font-size="16">Base directory for this skill: ~/.claude/skills/playwright-cli # Browser Automation</text>
+    <text x="44" y="128" fill="#3fb950" font-size="16">with playwright-cli ## Quick start ```bash # open new browser playwright-cli open # nav…</text>
+    <line x1="44" y1="158" x2="916" y2="158" stroke="#30363d" stroke-width="1"/>
+    <text x="44" y="178" fill="#e6edf3" font-size="13" font-weight="700">ASSISTANT</text>
+    <rect x="44" y="190" width="106" height="20" rx="4" fill="rgba(88,166,255,0.15)"/>
+    <text x="96.9" y="203" text-anchor="middle" fill="#79b8ff" font-size="12">7 responses</text>
+    <rect x="156" y="190" width="75" height="20" rx="4" fill="rgba(210,153,34,0.15)"/>
+    <text x="193.3" y="203" text-anchor="middle" fill="#d29922" font-size="12">9 tools</text>
+    <line x1="241" y1="192" x2="241" y2="208" stroke="#30363d" stroke-width="1"/>
+    <text x="251" y="203" fill="#d29922" font-size="12">Read 1 · Bash (curl, npx, playwright-cli, pkill, …</text>
+    <text x="44" y="226" fill="#e6edf3" font-size="15">Let me first check if the Astro dev server is running, then use Playwright to verify the UI.</text>
+    <text x="44" y="250" fill="#e6edf3" font-size="15">The Astro dev server isn&apos;t running. Let me start it and use a simple static file approach</text>
+    <text x="44" y="274" fill="#e6edf3" font-size="15">instead — serve the viewer HTML directly. The viewer loaded but it&apos;s in standalone mode</text>
+    <text x="44" y="298" fill="#e6edf3" font-size="15">without editor features. The AI Studio panel only renders in &quot;editor&quot; mode. Let me check what</text>
+    <text x="44" y="322" fill="#e6edf3" font-size="15">the page shows — the null state should still be visible if I can inject the right mode. Let</text>
+    <text x="44" y="346" fill="#e6edf3" font-size="15">me take a snapshot to see the page structure: This is the landing page — no session loaded.</text>
+    <text x="44" y="370" fill="#e6edf3" font-size="15">The AI Studio panel is inside the player which requires an editor mode session. Let me use a</text>
+    <text x="44" y="394" fill="#e6edf3" font-size="15">different approach — I&apos;ll render just the AiStudioPanel component in isolation to verify the …</text>
+    <text x="44" y="418" fill="#d29922" font-size="13">Show more (1412 chars)</text>
+  </g>
+
+  <g class="frame frame-6">
+    <rect x="24" y="56" width="912" height="422" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+    <text x="44" y="80" fill="#3fb950" font-size="13" font-weight="700">YOU</text>
+    <text x="916" y="80" text-anchor="end" fill="#7d8590" font-size="13">#07</text>
+    <text x="44" y="102" fill="#3fb950" font-size="16">Runs claude in headless mode on your machine — your session data never leaves</text>
+    <text x="44" y="128" fill="#3fb950" font-size="16">localhost. Uses the API key you already configured in claude — billed to your own accou…</text>
+    <line x1="44" y1="158" x2="916" y2="158" stroke="#30363d" stroke-width="1"/>
+    <text x="44" y="178" fill="#e6edf3" font-size="13" font-weight="700">ASSISTANT</text>
+    <rect x="44" y="190" width="106" height="20" rx="4" fill="rgba(88,166,255,0.15)"/>
+    <text x="96.9" y="203" text-anchor="middle" fill="#79b8ff" font-size="12">3 responses</text>
+    <rect x="156" y="190" width="75" height="20" rx="4" fill="rgba(210,153,34,0.15)"/>
+    <text x="193.3" y="203" text-anchor="middle" fill="#d29922" font-size="12">8 tools</text>
+    <line x1="241" y1="192" x2="241" y2="208" stroke="#30363d" stroke-width="1"/>
+    <text x="251" y="203" fill="#d29922" font-size="12">Read 2 · Edit 2 · Bash (pnpm, cp) 4</text>
+    <text x="44" y="226" fill="#e6edf3" font-size="15">Replace the three verbose trust items with a single concise line: Now do the same for the</text>
+    <text x="44" y="250" fill="#e6edf3" font-size="15">null state &quot;How it works&quot; section: Clean. Simplified the trust messaging from three verbose</text>
+    <text x="44" y="274" fill="#e6edf3" font-size="15">bullet points down to one concise line: Before (3 items, repetitive): - Runs claude in</text>
+    <text x="44" y="298" fill="#e6edf3" font-size="15">headless mode on your machine — your session data never leaves localhost - Uses the API key</text>
+    <text x="44" y="322" fill="#e6edf3" font-size="15">you already configured in claude — billed to your own account, not ours - Zero data sent to</text>
+    <text x="44" y="346" fill="#e6edf3" font-size="15">vibe-replay servers — all processing is local After (1 line): - Runs claude in headless mode,</text>
+    <text x="44" y="370" fill="#e6edf3" font-size="15">locally on your machine &quot;locally&quot; is highlighted in green for emphasis. No misleading claims</text>
+    <text x="44" y="394" fill="#e6edf3" font-size="15">about API keys or billing.</text>
+  </g>
+
+  <g class="frame frame-7">
+    <rect x="24" y="56" width="912" height="422" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+    <text x="44" y="80" fill="#3fb950" font-size="13" font-weight="700">YOU</text>
+    <text x="916" y="80" text-anchor="end" fill="#7d8590" font-size="13">#08</text>
+    <text x="44" y="102" fill="#3fb950" font-size="16">This layout is unreasonable — when the button on the right gets longer, the text on the</text>
+    <text x="44" y="128" fill="#3fb950" font-size="16">left becomes too narrow. The popover isn&apos;t wide enough either, making it hard to see cl…</text>
+    <line x1="44" y1="158" x2="916" y2="158" stroke="#30363d" stroke-width="1"/>
+    <text x="44" y="178" fill="#e6edf3" font-size="13" font-weight="700">ASSISTANT</text>
+    <rect x="44" y="190" width="114" height="20" rx="4" fill="rgba(88,166,255,0.15)"/>
+    <text x="100.8" y="203" text-anchor="middle" fill="#79b8ff" font-size="12">19 responses</text>
+    <rect x="164" y="190" width="83" height="20" rx="4" fill="rgba(210,153,34,0.15)"/>
+    <text x="205.2" y="203" text-anchor="middle" fill="#d29922" font-size="12">30 tools</text>
+    <line x1="257" y1="192" x2="257" y2="208" stroke="#30363d" stroke-width="1"/>
+    <text x="267" y="203" fill="#d29922" font-size="12">Read 11 · Write 1 · Edit 8 · Bash (pnpm, cp) 4 · …</text>
+    <text x="44" y="226" fill="#e6edf3" font-size="15">Now let me look at the ConversationView props and the SceneBlock component: Now let me check</text>
+    <text x="44" y="250" fill="#e6edf3" font-size="15">where the AI Studio button is in the Player toolbar: Now I have the full picture. Here&apos;s the</text>
+    <text x="44" y="274" fill="#e6edf3" font-size="15">redesign plan: FeatureCard — stack vertically (title/desc → config → full-width button), no</text>
+    <text x="44" y="298" fill="#e6edf3" font-size="15">more side-by-side squeeze Drawer — wider (w-96 → 384px instead of w-80 → 320px) Remove</text>
+    <text x="44" y="322" fill="#e6edf3" font-size="15">modifications list from drawer entirely ConversationView — show overlay indicators on</text>
+    <text x="44" y="346" fill="#e6edf3" font-size="15">modified scenes with per-scene original/modified toggle Pass overlayActions from Player →</text>
+    <text x="44" y="370" fill="#e6edf3" font-size="15">ConversationView → UserPromptBlock Let me implement all of this. Now I have everything I</text>
+    <text x="44" y="394" fill="#e6edf3" font-size="15">need. Let me make all the changes: Rewrite AiStudioPanel — vertical card layout, remove modif…</text>
+    <text x="44" y="418" fill="#d29922" font-size="13">Show more (1958 chars)</text>
+  </g>
+
+  <g class="frame frame-8">
+    <rect x="24" y="56" width="912" height="64" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+    <text x="44" y="76" fill="#79b8ff" font-size="18" font-weight="600">AI Translation &amp; Tone</text>
+    <rect x="24" y="134" width="912" height="244" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+    <text x="44" y="152" fill="#b392f0" font-size="16">claude-opus-4-6</text>
+    <text x="44" y="178" fill="#3fb950" font-size="16">13 files changed · 33 prompts · 1h 7m</text>
+    <text x="44" y="204" fill="#7d8590" font-size="16">287 responses · 528 tools</text>
+    <text x="44" y="230" fill="#d29922" font-size="16">Read 130 · Write 5 · Edit 123 · Bash (git, ls, pnpm, cp, ...) 209 · Glob 3 · Gr…</text>
+    <text x="44" y="270" fill="#7d8590" font-size="16">+ 25 more turns not shown</text>
+    <text x="44" y="310" fill="#79b8ff" font-size="16" font-weight="600">View full replay →</text>
+    <text x="44" y="336" fill="#7d8590" font-size="16">vibe-replay.com</text>
   </g>
   </g>
 </svg>

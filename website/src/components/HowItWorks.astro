@@ -22,317 +22,94 @@
             <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-accent/10 to-cyan-400/5 flex items-center justify-center text-accent font-mono text-sm font-bold">1</span>
             <h3 class="text-xl font-semibold">All your sessions, one place</h3>
           </div>
-          <p class="text-text-secondary leading-relaxed">A local dashboard shows every session across <span class="text-[#D97706] font-medium">Claude Code</span> and <span class="text-[#0096FF] font-medium">Cursor</span> — searchable, filterable, organized by project. Runs entirely on your machine. Nothing leaves.</p>
+          <p class="text-text-secondary leading-relaxed">A local dashboard shows every session across <span class="text-[#D97706] font-medium">Claude Code</span> and <span class="text-[#0096FF] font-medium">Cursor</span> &mdash; with activity heatmaps, project-level analytics, cost totals, and session counts. Runs entirely on your machine.</p>
+          <p class="text-text-muted text-sm mt-3 font-mono">$ npx vibe-replay -d</p>
         </div>
-        <div class="md:w-3/5 rounded-xl border border-[#30363d] bg-[#0d1117] overflow-hidden font-mono text-xs">
-          <!-- Header -->
-          <div class="flex items-center justify-between px-4 py-2.5 border-b border-[#30363d] bg-[#161b22]">
-            <div class="flex items-center gap-2">
-              <span class="text-[#3fb950] font-semibold text-sm">vibe-replay</span>
-              <span class="text-[#30363d]">|</span>
-              <span class="text-[#8b949e]">Sessions</span>
-            </div>
-            <div class="flex items-center gap-1.5">
-              <div class="px-2.5 py-1 rounded-md text-[11px] bg-[#3fb950]/15 text-[#3fb950] font-semibold">Sessions</div>
-              <div class="px-2.5 py-1 rounded-md text-[11px] text-[#8b949e]">Replays</div>
-            </div>
-          </div>
-          <!-- Session cards -->
-          <div class="p-3 space-y-2">
-            <!-- Claude session (active) -->
-            <div class="rounded-xl bg-[#161b22] border border-[#30363d] px-4 py-3 space-y-2">
-              <div class="flex items-center justify-between gap-3">
-                <div class="flex-1 min-w-0">
-                  <div class="text-[#e6edf3] text-sm font-medium truncate">Refactor auth to use JWT tokens</div>
-                  <div class="text-[#8b949e] text-[10px] mt-0.5 truncate">slug: refactor-auth-jwt</div>
-                </div>
-                <button class="h-7 px-3 text-xs font-semibold rounded-md bg-[#3fb950]/15 text-[#3fb950] shrink-0">Open</button>
-              </div>
-              <div class="flex items-center gap-1.5 flex-wrap">
-                <span class="px-1.5 py-0.5 rounded-md bg-[#1a1a24] text-[#8b949e]">9 prompts</span>
-                <span class="px-1.5 py-0.5 rounded-md bg-[#d29922]/15 text-[#d29922]">42 tools</span>
-                <span class="px-1.5 py-0.5 rounded-md bg-[#3fb950]/10 text-[#3fb950]">$0.38</span>
-              </div>
-              <div class="flex items-center gap-2 text-[10px] text-[#8b949e]">
-                <span class="px-1.5 py-0.5 rounded-full bg-[#d29922]/15 text-[#D97706] font-medium uppercase tracking-wide">Claude</span>
-                <span>~/Code/my-app</span>
-                <span class="text-[#30363d]">&middot;</span>
-                <span>Mar 8, 22:15</span>
-              </div>
-            </div>
-            <!-- Cursor session -->
-            <div class="rounded-xl bg-[#161b22] border border-[#30363d] px-4 py-3 space-y-2 opacity-75">
-              <div class="flex items-center justify-between gap-3">
-                <div class="flex-1 min-w-0">
-                  <div class="text-[#e6edf3] text-sm font-medium truncate">Build landing page with Astro</div>
-                  <div class="text-[#8b949e] text-[10px] mt-0.5 truncate">slug: landing-page-astro</div>
-                </div>
-                <button class="h-7 px-3 text-xs rounded-md bg-[#161b22] text-[#8b949e] border border-[#30363d] shrink-0">Open</button>
-              </div>
-              <div class="flex items-center gap-1.5 flex-wrap">
-                <span class="px-1.5 py-0.5 rounded-md bg-[#1a1a24] text-[#8b949e]">6 prompts</span>
-                <span class="px-1.5 py-0.5 rounded-md bg-[#d29922]/15 text-[#d29922]">28 tools</span>
-                <span class="px-1.5 py-0.5 rounded-md bg-[#3fb950]/10 text-[#3fb950]">$0.21</span>
-              </div>
-              <div class="flex items-center gap-2 text-[10px] text-[#8b949e]">
-                <span class="px-1.5 py-0.5 rounded-full bg-[#0096FF]/15 text-[#0096FF] font-medium uppercase tracking-wide">Cursor</span>
-                <span>~/Code/website</span>
-                <span class="text-[#30363d]">&middot;</span>
-                <span>Mar 7, 14:20</span>
-              </div>
-            </div>
+        <div class="md:w-3/5">
+          <div class="rounded-xl border border-border/50 overflow-hidden shadow-lg shadow-accent/5">
+            <img
+              src="/screenshots/dashboard.png"
+              alt="vibe-replay dashboard — activity heatmap, project analytics, session overview"
+              class="w-full block"
+              loading="lazy"
+              width="1372"
+              height="878"
+            />
           </div>
         </div>
       </div>
 
-      <!-- Step 2: Insights + Viewer -->
+      <!-- Step 2: Insights -->
       <div class="flex flex-col md:flex-row-reverse items-center gap-10">
         <div class="md:w-2/5">
           <div class="flex items-center gap-3 mb-4">
             <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-accent/10 to-cyan-400/5 flex items-center justify-center text-accent font-mono text-sm font-bold">2</span>
-            <h3 class="text-xl font-semibold">Understand what actually happened</h3>
+            <h3 class="text-xl font-semibold">Deep insights for every session</h3>
           </div>
-          <p class="text-text-secondary leading-relaxed">Auto-generated insights for every session: prompt timeline, files changed, tool breakdown, token usage and costs. Then step through every thinking block, tool call, and diff — not just the final result.</p>
+          <p class="text-text-secondary leading-relaxed">Auto-generated analytics: token burn &amp; cost per turn, context window usage, cache hit rates, tool call distribution, sub-agent delegation, and file impact tracking. Know exactly what each session costs.</p>
         </div>
-        <div class="md:w-3/5 rounded-xl border border-[#30363d] bg-[#0d1117] overflow-hidden font-mono text-xs">
-          <!-- Tab bar: Replay / Summary -->
-          <div class="flex items-center gap-0 border-b border-[#30363d] bg-[#161b22] text-[11px]">
-            <div class="px-4 py-2.5 text-[#8b949e]">Replay</div>
-            <div class="px-4 py-2.5 border-b-2 border-[#3fb950] text-[#3fb950] font-semibold bg-[#3fb950]/5">Summary</div>
-            <div class="px-4 py-2.5 text-[#8b949e]">Export</div>
-          </div>
-          <!-- Overview cards grid -->
-          <div class="grid grid-cols-4 gap-0 border-b border-[#30363d]">
-            <div class="px-3 py-3 text-center border-r border-[#30363d]">
-              <div class="text-[#3fb950] text-lg font-bold tabular-nums">9</div>
-              <div class="text-[9px] text-[#8b949e] uppercase tracking-wider mt-0.5">Turns</div>
-            </div>
-            <div class="px-3 py-3 text-center border-r border-[#30363d]">
-              <div class="text-[#d29922] text-lg font-bold tabular-nums">408</div>
-              <div class="text-[9px] text-[#8b949e] uppercase tracking-wider mt-0.5">Tool Calls</div>
-            </div>
-            <div class="px-3 py-3 text-center border-r border-[#30363d]">
-              <div class="text-[#58a6ff] text-lg font-bold tabular-nums">18</div>
-              <div class="text-[9px] text-[#8b949e] uppercase tracking-wider mt-0.5">Files Modified</div>
-            </div>
-            <div class="px-3 py-3 text-center">
-              <div class="text-[#e6edf3] text-lg font-bold tabular-nums">512</div>
-              <div class="text-[9px] text-[#8b949e] uppercase tracking-wider mt-0.5">Scenes</div>
-            </div>
-          </div>
-          <!-- Duration + Cost + Model row -->
-          <div class="flex items-center justify-between px-4 py-2.5 border-b border-[#30363d] text-[11px]">
-            <div class="flex items-center gap-4">
-              <div class="flex items-center gap-1.5">
-                <span class="text-[#8b949e]">Duration</span>
-                <span class="text-[#e6edf3] font-semibold">58m 22s</span>
-              </div>
-              <div class="flex items-center gap-1.5">
-                <span class="text-[#8b949e]">Cost</span>
-                <span class="text-[#3fb950] font-semibold">$92.50</span>
-              </div>
-            </div>
-            <div class="text-[#8b949e]">claude-opus-4-6 &middot; claude-code</div>
-          </div>
-          <!-- Token usage -->
-          <div class="px-4 pt-3 pb-2 border-b border-[#30363d]">
-            <div class="text-[10px] font-sans font-semibold text-[#8b949e] uppercase tracking-widest mb-2">Token Usage</div>
-            <div class="grid grid-cols-2 gap-x-6 gap-y-1">
-              <div class="flex justify-between">
-                <span class="text-[#8b949e]">Input</span>
-                <span class="text-[#e6edf3] tabular-nums">1.2M</span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-[#8b949e]">Output</span>
-                <span class="text-[#e6edf3] tabular-nums">186.4K</span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-[#8b949e]">Cache read</span>
-                <span class="text-[#e6edf3] tabular-nums">980.2K</span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-[#8b949e]">Cache write</span>
-                <span class="text-[#e6edf3] tabular-nums">245.8K</span>
-              </div>
-            </div>
-          </div>
-          <!-- Two column: Prompt Timeline + Top Tools -->
-          <div class="grid grid-cols-2 gap-0">
-            <!-- Prompt timeline -->
-            <div class="px-4 pt-3 pb-3 border-r border-[#30363d]">
-              <div class="text-[10px] font-sans font-semibold text-[#8b949e] uppercase tracking-widest mb-2">Prompt Timeline</div>
-              <div class="space-y-0.5">
-                <div class="flex items-center gap-2 py-1 px-1.5 rounded bg-[#161b22]">
-                  <span class="text-[#3fb950] w-5 text-right shrink-0 tabular-nums">01</span>
-                  <span class="text-[#e6edf3] flex-1 truncate">Implement annotations...</span>
-                  <span class="text-[#8b949e] shrink-0">42 tools</span>
-                </div>
-                <div class="flex items-center gap-2 py-1 px-1.5 rounded opacity-70">
-                  <span class="text-[#3fb950] w-5 text-right shrink-0 tabular-nums">02</span>
-                  <span class="text-[#e6edf3] flex-1 truncate">Fix editor mode bug...</span>
-                  <span class="text-[#8b949e] shrink-0">18 tools</span>
-                </div>
-                <div class="flex items-center gap-2 py-1 px-1.5 rounded opacity-50">
-                  <span class="text-[#3fb950] w-5 text-right shrink-0 tabular-nums">03</span>
-                  <span class="text-[#e6edf3] flex-1 truncate">Add token tracking...</span>
-                  <span class="text-[#8b949e] shrink-0">35 tools</span>
-                </div>
-                <div class="flex items-center gap-2 py-1 px-1.5 rounded opacity-40">
-                  <span class="text-[#8b949e] w-5 text-right shrink-0 tabular-nums">&hellip;</span>
-                  <span class="text-[#8b949e] flex-1">6 more prompts</span>
-                </div>
-              </div>
-            </div>
-            <!-- Top tools bar -->
-            <div class="px-4 pt-3 pb-3">
-              <div class="text-[10px] font-sans font-semibold text-[#8b949e] uppercase tracking-widest mb-2">Top Tools</div>
-              <div class="space-y-1.5">
-                <div class="flex items-center gap-2">
-                  <span class="text-[#e6edf3] w-10 text-right shrink-0 truncate">Edit</span>
-                  <div class="flex-1 h-1.5 rounded-full bg-[#161b22] overflow-hidden">
-                    <div class="h-full rounded-full bg-[#d29922]" style="width:100%"></div>
-                  </div>
-                  <span class="text-[#8b949e] w-6 text-right shrink-0">148</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-[#e6edf3] w-10 text-right shrink-0 truncate">Read</span>
-                  <div class="flex-1 h-1.5 rounded-full bg-[#161b22] overflow-hidden">
-                    <div class="h-full rounded-full bg-[#d29922]" style="width:62%"></div>
-                  </div>
-                  <span class="text-[#8b949e] w-6 text-right shrink-0">92</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-[#e6edf3] w-10 text-right shrink-0 truncate">Write</span>
-                  <div class="flex-1 h-1.5 rounded-full bg-[#161b22] overflow-hidden">
-                    <div class="h-full rounded-full bg-[#d29922]" style="width:45%"></div>
-                  </div>
-                  <span class="text-[#8b949e] w-6 text-right shrink-0">67</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-[#e6edf3] w-10 text-right shrink-0 truncate">Bash</span>
-                  <div class="flex-1 h-1.5 rounded-full bg-[#161b22] overflow-hidden">
-                    <div class="h-full rounded-full bg-[#d29922]" style="width:28%"></div>
-                  </div>
-                  <span class="text-[#8b949e] w-6 text-right shrink-0">41</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-[#e6edf3] w-10 text-right shrink-0 truncate">Glob</span>
-                  <div class="flex-1 h-1.5 rounded-full bg-[#161b22] overflow-hidden">
-                    <div class="h-full rounded-full bg-[#d29922]" style="width:20%"></div>
-                  </div>
-                  <span class="text-[#8b949e] w-6 text-right shrink-0">30</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-[#e6edf3] w-10 text-right shrink-0 truncate">Grep</span>
-                  <div class="flex-1 h-1.5 rounded-full bg-[#161b22] overflow-hidden">
-                    <div class="h-full rounded-full bg-[#d29922]" style="width:13%"></div>
-                  </div>
-                  <span class="text-[#8b949e] w-6 text-right shrink-0">20</span>
-                </div>
-              </div>
-            </div>
+        <div class="md:w-3/5">
+          <div class="rounded-xl border border-border/50 overflow-hidden shadow-lg shadow-accent/5">
+            <img
+              src="/screenshots/insights.png"
+              alt="Session insights — token burn charts, cache hit rates, context window usage, tool call breakdown"
+              class="w-full block"
+              loading="lazy"
+              width="1372"
+              height="878"
+            />
           </div>
         </div>
       </div>
 
-      <!-- Step 3: Export -->
+      <!-- Step 3: Interactive replay -->
       <div class="flex flex-col md:flex-row items-center gap-10">
         <div class="md:w-2/5">
           <div class="flex items-center gap-3 mb-4">
             <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-accent/10 to-cyan-400/5 flex items-center justify-center text-accent font-mono text-sm font-bold">3</span>
-            <h3 class="text-xl font-semibold">Export in any format</h3>
+            <h3 class="text-xl font-semibold">Watch the full replay</h3>
           </div>
-          <p class="text-text-secondary leading-relaxed">A self-contained HTML file. An animated SVG to commit to your repo. A structured Markdown summary for PRs and documentation.</p>
+          <p class="text-text-secondary leading-relaxed">Step through every prompt, thinking block, tool call, and code diff. Three view modes &mdash; <strong>All</strong> (full detail), <strong>Compact</strong> (condensed), and <strong>Custom</strong> (your filters). Navigate with the outline sidebar, search, or playback controls.</p>
         </div>
         <div class="md:w-3/5">
-          <img
-            src="/session-preview-demo.svg"
-            alt="Animated SVG preview of a real vibe-replay session"
-            class="w-full rounded-xl border border-border"
-          />
+          <div class="rounded-xl border border-border/50 overflow-hidden shadow-lg shadow-accent/5">
+            <img
+              src="/screenshots/tool-calls.png"
+              alt="Interactive replay — syntax-highlighted diffs, tool calls, thinking blocks with outline navigation"
+              class="w-full block"
+              loading="lazy"
+              width="1372"
+              height="878"
+            />
+          </div>
         </div>
       </div>
 
-      <!-- Step 4: Share to the world -->
+      <!-- Step 4: Export & Share -->
       <div class="flex flex-col md:flex-row-reverse items-center gap-10">
         <div class="md:w-2/5">
           <div class="flex items-center gap-3 mb-4">
             <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-accent/10 to-cyan-400/5 flex items-center justify-center text-accent font-mono text-sm font-bold">4</span>
-            <h3 class="text-xl font-semibold">Share to the world</h3>
+            <h3 class="text-xl font-semibold">Share anywhere</h3>
           </div>
-          <p class="text-text-secondary leading-relaxed">Publish to GitHub Gist with one click. Your replay gets a permanent link on vibe-replay.com &mdash; and shows up on the Explore page for the community.</p>
+          <p class="text-text-secondary leading-relaxed">Export as a self-contained HTML file, animated SVG, GIF, or markdown summary. Publish to GitHub Gist for a shareable link on <a href="/explore" class="text-accent hover:underline">vibe-replay.com</a>, or upload to the cloud. Everything works offline &mdash; zero external requests.</p>
+          <!-- Export format badges -->
+          <div class="flex flex-wrap gap-2 mt-4">
+            <span class="px-2.5 py-1 rounded-md bg-accent/10 text-accent text-xs font-mono font-medium">HTML</span>
+            <span class="px-2.5 py-1 rounded-md bg-[#d29922]/15 text-[#d29922] text-xs font-mono font-medium">SVG</span>
+            <span class="px-2.5 py-1 rounded-md bg-[#58a6ff]/15 text-[#58a6ff] text-xs font-mono font-medium">GIF</span>
+            <span class="px-2.5 py-1 rounded-md bg-[#bc8cff]/15 text-[#bc8cff] text-xs font-mono font-medium">Markdown</span>
+            <span class="px-2.5 py-1 rounded-md bg-[#e6edf3]/10 text-[#e6edf3] text-xs font-mono font-medium">Gist</span>
+            <span class="px-2.5 py-1 rounded-md bg-[#3fb950]/10 text-[#3fb950] text-xs font-mono font-medium">Cloud</span>
+          </div>
         </div>
-        <div class="md:w-3/5 rounded-xl border border-[#30363d] bg-[#0d1117] overflow-hidden font-mono text-xs">
-          <!-- Explore page header -->
-          <div class="flex items-center justify-between px-4 py-2.5 border-b border-[#30363d] bg-[#161b22]">
-            <div class="flex items-center gap-2">
-              <span class="text-[#3fb950] font-semibold text-sm">vibe-replay</span>
-              <span class="text-[#30363d]">|</span>
-              <span class="text-[#e6edf3] text-[11px]">Explore</span>
-            </div>
-            <div class="flex items-center gap-1.5">
-              <svg class="w-3.5 h-3.5 text-[#8b949e]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-              <span class="text-[10px] text-[#8b949e]">Search replays...</span>
-            </div>
-          </div>
-          <!-- Replay cards -->
-          <div class="p-3 space-y-2">
-            <!-- Featured card -->
-            <div class="rounded-xl bg-[#161b22] border border-[#3fb950]/30 px-4 py-3 space-y-2">
-              <div class="flex items-center justify-between">
-                <span class="text-[#e6edf3] text-sm font-medium">Comment feature in Vibe Replay</span>
-                <span class="text-[10px] text-[#3fb950] px-1.5 py-0.5 rounded-full bg-[#3fb950]/10">Live</span>
-              </div>
-              <div class="flex items-center gap-1.5 flex-wrap">
-                <span class="px-1.5 py-0.5 rounded-md bg-[#1a1a24] text-[#8b949e]">14 turns</span>
-                <span class="px-1.5 py-0.5 rounded-md bg-[#d29922]/15 text-[#d29922]">408 tools</span>
-                <span class="px-1.5 py-0.5 rounded-md bg-[#58a6ff]/15 text-[#58a6ff]">18 files</span>
-                <span class="px-1.5 py-0.5 rounded-md bg-[#3fb950]/10 text-[#3fb950]">58m</span>
-              </div>
-              <div class="flex items-center gap-2 text-[10px] text-[#8b949e]">
-                <span class="px-1.5 py-0.5 rounded-full bg-[#d29922]/15 text-[#D97706] font-medium uppercase tracking-wide">Claude</span>
-                <span>@tuo-lei</span>
-                <span class="text-[#30363d]">&middot;</span>
-                <span>Mar 8, 2026</span>
-              </div>
-            </div>
-            <!-- Another card -->
-            <div class="rounded-xl bg-[#161b22] border border-[#30363d] px-4 py-3 space-y-2 opacity-70">
-              <div class="flex items-center justify-between">
-                <span class="text-[#e6edf3] text-sm font-medium">Refactor auth to use JWT tokens</span>
-                <span class="text-[10px] text-[#3fb950] px-1.5 py-0.5 rounded-full bg-[#3fb950]/10">Live</span>
-              </div>
-              <div class="flex items-center gap-1.5 flex-wrap">
-                <span class="px-1.5 py-0.5 rounded-md bg-[#1a1a24] text-[#8b949e]">9 turns</span>
-                <span class="px-1.5 py-0.5 rounded-md bg-[#d29922]/15 text-[#d29922]">42 tools</span>
-                <span class="px-1.5 py-0.5 rounded-md bg-[#58a6ff]/15 text-[#58a6ff]">7 files</span>
-              </div>
-              <div class="flex items-center gap-2 text-[10px] text-[#8b949e]">
-                <span class="px-1.5 py-0.5 rounded-full bg-[#0096FF]/15 text-[#0096FF] font-medium uppercase tracking-wide">Cursor</span>
-                <span>@dev-user</span>
-                <span class="text-[#30363d]">&middot;</span>
-                <span>Mar 7, 2026</span>
-              </div>
-            </div>
-          </div>
-          <!-- Footer benefits -->
-          <div class="flex items-center justify-between px-4 py-2.5 border-t border-[#30363d] bg-[#161b22] text-[10px] text-[#8b949e]">
-            <div class="flex items-center gap-3">
-              <span class="flex items-center gap-1">
-                <svg class="w-3 h-3 text-[#3fb950]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
-                Free hosting
-              </span>
-              <span class="flex items-center gap-1">
-                <svg class="w-3 h-3 text-[#3fb950]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
-                You own it
-              </span>
-              <span class="flex items-center gap-1">
-                <svg class="w-3 h-3 text-[#3fb950]" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
-                Delete anytime
-              </span>
-            </div>
-            <a href="/explore" class="text-[#3fb950] hover:underline">Explore all &rarr;</a>
-          </div>
+        <div class="md:w-3/5">
+          <img
+            src="/session-preview-demo.svg"
+            alt="Animated SVG preview — embeddable session preview for PRs and READMEs"
+            class="w-full rounded-xl border border-border/50"
+            loading="lazy"
+          />
         </div>
       </div>
 
