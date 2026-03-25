@@ -18,12 +18,6 @@ npx vibe-replay
   <img src="docs/screenshots/product-demo.gif" alt="vibe-replay product demo" width="600" />
 </p>
 
-<details>
-<summary>See the CLI in action</summary>
-<p align="center">
-  <img src="docs/screenshots/demo.gif" alt="vibe-replay CLI — session picker to interactive replay" width="800" />
-</p>
-</details>
 
 ## What You Get
 
