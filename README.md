@@ -15,7 +15,7 @@ npx vibe-replay
 > **[Watch a live demo &rarr;](https://vibe-replay.com/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba)**
 
 <p align="center">
-  <img src="docs/screenshots/product-demo.gif" alt="vibe-replay product demo" width="800" />
+  <img src="docs/screenshots/product-demo.gif" alt="vibe-replay product demo" width="600" />
 </p>
 
 <details>
