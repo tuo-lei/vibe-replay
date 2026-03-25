@@ -181,7 +181,14 @@ export async function extractSessionInfo(
     // JSON-parsing every line.
     let promptCount = 0;
     let toolCallCount = 0;
+    let editCountEst = 0;
+    let durationMsEst = 0;
+    let hasPR = false;
+    let model: string | undefined;
     const toolUseRe = /"type"\s*:\s*"tool_use"/g;
+    const modelRe = /"model"\s*:\s*"(claude-[^"]+)"/;
+    const durationRe = /"durationMs"\s*:\s*(\d+)/;
+    const editToolRe = /"name"\s*:\s*"(Edit|Write|MultiEdit|NotebookEdit)"/;
     for (const line of lines) {
       if (
         (line.includes('"type":"user"') || line.includes('"type": "user"')) &&
@@ -190,7 +197,23 @@ export async function extractSessionInfo(
         promptCount++;
       }
       const toolMatches = line.match(toolUseRe);
-      if (toolMatches) toolCallCount += toolMatches.length;
+      if (toolMatches) {
+        toolCallCount += toolMatches.length;
+        // Check if any of the tool_use blocks are file-editing tools
+        if (editToolRe.test(line)) editCountEst++;
+      }
+      // Extract model from first assistant message
+      if (!model && line.includes('"assistant"') && line.includes('"model"')) {
+        const m = line.match(modelRe);
+        if (m && m[1] !== "<synthetic>") model = m[1];
+      }
+      // Sum turn durations
+      if (line.includes('"turn_duration"')) {
+        const d = line.match(durationRe);
+        if (d) durationMsEst += Number(d[1]);
+      }
+      // Detect PR links
+      if (!hasPR && line.includes('"pr-link"')) hasPR = true;
     }
 
     return {
@@ -211,6 +234,10 @@ export async function extractSessionInfo(
       prompts,
       promptCount,
       toolCallCount,
+      model,
+      durationMsEst: durationMsEst || undefined,
+      editCountEst: editCountEst || undefined,
+      hasPR: hasPR || undefined,
     };
   } catch {
     return null;
