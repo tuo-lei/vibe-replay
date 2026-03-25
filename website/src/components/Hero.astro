@@ -282,18 +282,27 @@ const slides = [
   }
 
   // Copy button
+  function showCopySuccess() {
+    const copyIcon = document.getElementById("hero-copy-icon");
+    const checkIcon = document.getElementById("hero-check-icon");
+    if (copyIcon && checkIcon) {
+      copyIcon.classList.add("hidden");
+      checkIcon.classList.remove("hidden");
+      setTimeout(() => {
+        copyIcon.classList.remove("hidden");
+        checkIcon.classList.add("hidden");
+      }, 2000);
+    }
+  }
   document.getElementById("hero-copy-btn")?.addEventListener("click", () => {
-    navigator.clipboard.writeText("npx vibe-replay").then(() => {
-      const copyIcon = document.getElementById("hero-copy-icon");
-      const checkIcon = document.getElementById("hero-check-icon");
-      if (copyIcon && checkIcon) {
-        copyIcon.classList.add("hidden");
-        checkIcon.classList.remove("hidden");
-        setTimeout(() => {
-          copyIcon.classList.remove("hidden");
-          checkIcon.classList.add("hidden");
-        }, 2000);
-      }
+    navigator.clipboard.writeText("npx vibe-replay").then(showCopySuccess).catch(() => {
+      const input = document.createElement("input");
+      input.value = "npx vibe-replay";
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand("copy");
+      document.body.removeChild(input);
+      showCopySuccess();
     });
   });
 </script>
