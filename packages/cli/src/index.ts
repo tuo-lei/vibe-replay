@@ -5,6 +5,12 @@ import { program } from "commander";
 import ora from "ora";
 import { readFileCache, writeFileCache } from "./cache.js";
 import { cleanPromptText } from "./clean-prompt.js";
+import {
+  checkCleanupWarnings,
+  computeDaysUntilCleanup,
+  getClaudeCodeCleanupPeriod,
+  WARNING_THRESHOLD_DAYS,
+} from "./cleanup-warning.js";
 import { generateGitHubGif } from "./formatters/gif.js";
 import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.js";
 import { generateOutput } from "./generator.js";
@@ -249,6 +255,30 @@ program
         process.exit(1);
       }
 
+      // Check for sessions approaching Claude Code's cleanup deadline
+      const cleanupPeriodDays = await getClaudeCodeCleanupPeriod();
+      const cleanupWarning = checkCleanupWarnings(displayedSessions, cleanupPeriodDays);
+      if (cleanupWarning) {
+        const daysText =
+          cleanupWarning.soonestDays === 0
+            ? "today"
+            : cleanupWarning.soonestDays === 1
+              ? "tomorrow"
+              : `within ${cleanupWarning.soonestDays} days`;
+        const countLabel = cleanupWarning.expiringCount === 1 ? "session" : "sessions";
+        console.log();
+        console.log(
+          chalk.yellow(
+            `  ⚠ ${cleanupWarning.expiringCount} ${countLabel} will be cleaned up ${daysText}`,
+          ) + chalk.dim(` (cleanupPeriodDays: ${cleanupWarning.cleanupPeriodDays})`),
+        );
+        console.log(
+          chalk.dim(
+            "    Generate replays to preserve them, or increase cleanupPeriodDays in Claude Code settings",
+          ),
+        );
+      }
+
       let chosen: string;
 
       const { emitKeypressEvents } = await import("node:readline");
@@ -258,7 +288,7 @@ program
 
       // Loop to support r=refresh shortcut
       while (true) {
-        const choices = formatSessionChoices(displayedSessions);
+        const choices = formatSessionChoices(displayedSessions, cleanupPeriodDays);
         const ac = new AbortController();
         let shouldRefresh = false;
 
@@ -748,7 +778,7 @@ program
 
 program.parse();
 
-function formatSessionChoices(sessions: SessionInfo[]) {
+function formatSessionChoices(sessions: SessionInfo[], cleanupPeriodDays?: number) {
   // Merge sessions with the same slug under the same project
   const merged = mergeSameSessions(sessions);
 
@@ -794,10 +824,21 @@ function formatSessionChoices(sessions: SessionInfo[]) {
 
       const fileCount = s.filePaths.length > 1 ? chalk.dim(` [${s.filePaths.length} parts]`) : "";
       const sqliteBadge = s.hasSqlite ? chalk.green(" db") : "";
+
+      // Cleanup expiry badge for Claude Code sessions
+      let expiryBadge = "";
+      if (cleanupPeriodDays && s.provider === "claude-code") {
+        const daysLeft = computeDaysUntilCleanup(s.timestamp, cleanupPeriodDays);
+        if (daysLeft != null && daysLeft <= WARNING_THRESHOLD_DAYS) {
+          const label = daysLeft === 0 ? "today" : `${daysLeft}d`;
+          expiryBadge = daysLeft <= 2 ? chalk.red(` ⚠ ${label}`) : chalk.yellow(` ⚠ ${label}`);
+        }
+      }
+
       const line = [
         providerBadge,
         chalk.dim(`[${timeStr}]`),
-        chalk.cyan(s.slug) + sqliteBadge,
+        chalk.cyan(s.slug) + sqliteBadge + expiryBadge,
         titleStr,
         fileCount,
         chalk.dim("—"),

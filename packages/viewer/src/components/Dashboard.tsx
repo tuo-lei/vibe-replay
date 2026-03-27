@@ -615,6 +615,7 @@ const ALL_PROJECTS = "__all__";
 
 function SessionsPanel() {
   const [sources, setSources] = useState<SourceSession[]>([]);
+  const [cleanupPeriodDays, setCleanupPeriodDays] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -712,8 +713,12 @@ function SessionsPanel() {
     try {
       const freshResp = await fetch("/api/sources");
       if (!freshResp.ok) throw new Error("Failed to load sessions");
-      const fresh = (await freshResp.json()) as { sessions: SourceSession[] };
+      const fresh = (await freshResp.json()) as {
+        sessions: SourceSession[];
+        cleanupPeriodDays?: number;
+      };
       setSources(fresh.sessions);
+      if (fresh.cleanupPeriodDays != null) setCleanupPeriodDays(fresh.cleanupPeriodDays);
       setLastRefreshedAt(new Date().toISOString());
       setStaleCachedAt(null);
     } catch (err) {
@@ -904,6 +909,18 @@ function SessionsPanel() {
   const refreshAge = lastRefreshedAt ? formatCompactAge(lastRefreshedAt, refreshClockMs) : null;
 
   const showInitialLoading = loading && sources.length === 0;
+
+  // Count sessions approaching Claude Code cleanup
+  // Threshold mirrors WARNING_THRESHOLD_DAYS in packages/cli/src/cleanup-warning.ts
+  const EXPIRY_WARN_DAYS = 7;
+  const expiringSessions = sources.filter(
+    (s) =>
+      s.expiresInDays != null && s.expiresInDays <= EXPIRY_WARN_DAYS && !archivedSlugs.has(s.slug),
+  );
+  const soonestExpiry = expiringSessions.reduce(
+    (min, s) => Math.min(min, s.expiresInDays ?? Infinity),
+    Infinity,
+  );
 
   if (error && sources.length === 0) {
     return (
@@ -1201,6 +1218,30 @@ function SessionsPanel() {
             </button>
           </div>
         )}
+        {/* Cleanup expiry alert */}
+        {expiringSessions.length > 0 && (
+          <div className="mx-4 mb-2 flex items-start gap-2.5 bg-terminal-orange-subtle rounded-lg px-4 py-3 shrink-0 shadow-layer-sm">
+            <span className="text-terminal-orange text-base leading-none mt-0.5">&#9888;</span>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-sans font-semibold text-terminal-orange">
+                {expiringSessions.length} session{expiringSessions.length !== 1 ? "s" : ""} expiring
+                {soonestExpiry === 0
+                  ? " today"
+                  : soonestExpiry === 1
+                    ? " tomorrow"
+                    : ` within ${soonestExpiry} days`}
+              </div>
+              <div className="text-[11px] font-mono text-terminal-orange/70 mt-0.5">
+                Claude Code auto-deletes transcripts after{" "}
+                {cleanupPeriodDays != null
+                  ? `${cleanupPeriodDays} days (cleanupPeriodDays)`
+                  : "cleanupPeriodDays"}
+                . Generate replays to preserve them.
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Title input */}
         {titleInput && (
           <div className="mx-4 mb-2 bg-terminal-surface rounded-lg px-4 py-3.5 space-y-3 shrink-0 shadow-layer-md">
@@ -1378,7 +1419,8 @@ function SessionsPanel() {
                       s.toolCallCount ||
                       s.durationMsEst ||
                       s.editCountEst ||
-                      s.hasPR) && (
+                      s.hasPR ||
+                      (s.expiresInDays != null && s.expiresInDays <= EXPIRY_WARN_DAYS)) && (
                       <div className="flex items-center gap-1.5 flex-wrap">
                         {!!s.promptCount && (
                           <span className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim">
@@ -1412,6 +1454,20 @@ function SessionsPanel() {
                             title="Session produced a PR"
                           >
                             PR
+                          </span>
+                        )}
+                        {s.expiresInDays != null && s.expiresInDays <= EXPIRY_WARN_DAYS && (
+                          <span
+                            className={`inline-flex items-center gap-1 text-xs font-mono px-1.5 py-0.5 rounded-md ${
+                              s.expiresInDays <= 2
+                                ? "bg-terminal-red-subtle text-terminal-red"
+                                : "bg-terminal-orange-subtle text-terminal-orange"
+                            }`}
+                            title={`Session transcript will be cleaned up by Claude Code in ${s.expiresInDays === 0 ? "< 1 day" : `${s.expiresInDays} day${s.expiresInDays !== 1 ? "s" : ""}`}. Generate a replay to preserve it.`}
+                          >
+                            {s.expiresInDays === 0
+                              ? "expires today"
+                              : `expires in ${s.expiresInDays}d`}
                           </span>
                         )}
                       </div>
