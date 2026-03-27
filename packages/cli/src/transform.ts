@@ -125,13 +125,10 @@ export function transformToReplay(
     costEstimate = estimateCostSimple(parsed.tokenUsage, parsed.model || "");
   }
 
-  const derivedDurationMs = deriveDurationFromRange(parsed.startTime, parsed.endTime);
+  // Duration: parser now provides totalDurationMs from turn_duration events
+  // or active-duration estimation — no wall-clock fallback needed.
   const durationMs =
-    parsed.totalDurationMs && parsed.totalDurationMs > 0
-      ? parsed.totalDurationMs
-      : provider === "cursor" && parsed.dataSource
-        ? undefined
-        : derivedDurationMs;
+    parsed.totalDurationMs && parsed.totalDurationMs > 0 ? parsed.totalDurationMs : undefined;
 
   return {
     meta: {
@@ -177,14 +174,6 @@ export function transformToReplay(
     },
     scenes,
   };
-}
-
-function deriveDurationFromRange(start?: string, end?: string): number | undefined {
-  if (!start || !end) return undefined;
-  const startMs = Date.parse(start);
-  const endMs = Date.parse(end);
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return undefined;
-  return Math.round(endMs - startMs);
 }
 
 function buildToolScene(
