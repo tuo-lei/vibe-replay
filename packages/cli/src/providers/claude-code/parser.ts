@@ -2,6 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { PrLink, TurnStat } from "@vibe-replay/types";
 import { isSystemGeneratedMessage } from "../../clean-prompt.js";
+import { estimateActiveDuration } from "../../duration.js";
 import type { ContentBlock, ParsedTurn, RawMessage } from "../../types.js";
 import type { Compaction, ProviderParseResult, TokenUsage } from "../types.js";
 
@@ -85,6 +86,9 @@ export async function parseClaudeCodeSession(
   // User prompts in order
   const userTurns: ParsedTurn[] = [];
 
+  // All message timestamps — used to estimate active duration when turn_duration events are missing
+  const allTimestamps: string[] = [];
+
   for (const line of lines) {
     let obj: RawMessage;
     try {
@@ -92,6 +96,9 @@ export async function parseClaudeCodeSession(
     } catch {
       continue;
     }
+
+    // Collect timestamps for active-duration estimation
+    if (obj.timestamp) allTimestamps.push(obj.timestamp);
 
     // Extract metadata
     if (!sessionId && obj.sessionId) sessionId = obj.sessionId;
@@ -416,7 +423,7 @@ export async function parseClaudeCodeSession(
     model,
     startTime,
     endTime,
-    totalDurationMs: totalDurationMs || undefined,
+    totalDurationMs: totalDurationMs || estimateActiveDuration(allTimestamps),
     turns: finalTurns,
     tokenUsage,
     tokenUsageByModel,

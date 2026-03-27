@@ -532,7 +532,7 @@ describe("transform — metadata", () => {
     expect(replay.meta.generator).toEqual(gen);
   });
 
-  it("falls back to start/end timestamps for duration when provider duration is missing", () => {
+  it("returns undefined duration when provider duration is missing (no wall-clock fallback)", () => {
     const replay = transformToReplay(
       buildParsed({
         startTime: "2025-01-01T00:00:00.000Z",
@@ -541,7 +541,8 @@ describe("transform — metadata", () => {
       "cursor",
       "~/project",
     );
-    expect(replay.meta.stats.durationMs).toBe(150000);
+    // Wall-clock fallback removed — duration comes from turn_duration or active estimation only
+    expect(replay.meta.stats.durationMs).toBeUndefined();
   });
 
   it("does not derive wall-clock duration for parsed Cursor sessions when provider duration is missing", () => {

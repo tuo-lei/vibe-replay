@@ -13,13 +13,14 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { readFileCache, writeFileCache } from "./cache.js";
+import { estimateActiveDuration } from "./duration.js";
 import { estimateCost, estimateCostSimple } from "./pricing.js";
 import { parseCursorSession } from "./providers/cursor/parser.js";
 import type { ProviderParseResult } from "./providers/types.js";
 import type { DataSource, PrLink, SessionInfo, TokenUsage } from "./types.js";
 
 // Bump this when we extract new fields — forces re-scan of all sessions.
-const SCANNER_VERSION = 3;
+const SCANNER_VERSION = 4;
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -209,6 +210,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
   let compactionCount = 0;
   let apiErrorCount = 0;
   let totalDurationMs = 0;
+  const allTimestamps: string[] = [];
 
   // Token usage tracking (deduplicate by message ID)
   const usageByMsgId = new Map<
@@ -255,6 +257,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
 
       // Timestamps
       if (obj.timestamp) {
+        allTimestamps.push(obj.timestamp);
         if (!startTime || obj.timestamp < startTime) startTime = obj.timestamp;
         if (!endTime || obj.timestamp > endTime) endTime = obj.timestamp;
       }
@@ -412,11 +415,10 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
     costEstimate = estimateCostSimple(tokenUsage, model);
   }
 
-  // Derive duration from turn_duration events or timestamp range
+  // Derive duration: prefer turn_duration sum (CLI), fall back to active-duration estimate (VS Code)
   let durationMs = totalDurationMs || undefined;
-  if (!durationMs && startTime && endTime) {
-    const diff = Date.parse(endTime) - Date.parse(startTime);
-    if (diff > 0) durationMs = diff;
+  if (!durationMs) {
+    durationMs = estimateActiveDuration(allTimestamps);
   }
 
   const gitBranch = gitBranches.length > 0 ? gitBranches[gitBranches.length - 1] : undefined;
