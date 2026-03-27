@@ -12,6 +12,7 @@ import { streamSSE } from "hono/streaming";
 import open from "open";
 import { readFileCache, writeFileCache } from "./cache.js";
 import { cleanPromptText } from "./clean-prompt.js";
+import { computeDaysUntilCleanup, getClaudeCodeCleanupPeriod } from "./cleanup-warning.js";
 import {
   detectFeedbackTools,
   generateFeedback,
@@ -501,6 +502,7 @@ async function buildSourcesResult(
   baseDir: string,
   home: string,
   previousSources: SourceSummaryRecord[] = [],
+  cleanupPeriodDays = 0,
 ): Promise<SourceSummaryRecord[]> {
   // Normalize project paths: /Users/xxx/... → ~/...
   for (const s of merged) {
@@ -573,6 +575,10 @@ async function buildSourcesResult(
       durationMsEst: s.durationMsEst,
       editCountEst: s.editCountEst,
       hasPR: s.hasPR,
+      expiresInDays:
+        s.provider === "claude-code" && cleanupPeriodDays > 0
+          ? computeDaysUntilCleanup(s.timestamp, cleanupPeriodDays)
+          : undefined,
       existingReplay: replay ? (replay.slug as string) : null,
       projectExists: projectExistsMap.get(s.project) ?? false,
       isGitRepo: projectIsGitMap.get(s.project) ?? false,
@@ -708,6 +714,7 @@ export async function startServer(
   const isDevMode = !!opts?.externalViewerUrl;
   // In dev mode, Vite serves the viewer with HMR — no need to load/cache viewer HTML
   const viewerHtml = isDevMode ? "" : await loadViewerHtml();
+  const cleanupPeriodDays = await getClaudeCodeCleanupPeriod();
   const cacheKeySuffix = createHash("sha1").update(baseDir).digest("hex").slice(0, 12);
   const sourcesCacheKey = `dashboard-sources-v1-${cacheKeySuffix}`;
   const replaysCacheKey = `dashboard-replays-v1-${cacheKeySuffix}`;
@@ -1139,11 +1146,17 @@ export async function startServer(
 
       const merged = mergeSameSessions(allSessions);
       const previous = await readFileCache<SourceSummaryRecord[]>(sourcesCacheKey);
-      const result = await buildSourcesResult(merged, baseDir, homedir(), previous?.data || []);
+      const result = await buildSourcesResult(
+        merged,
+        baseDir,
+        homedir(),
+        previous?.data || [],
+        cleanupPeriodDays,
+      );
 
       await writeFileCache(sourcesCacheKey, result);
       enrichCursorStatsInBackground(merged, result);
-      return c.json({ sessions: result });
+      return c.json({ sessions: result, cleanupPeriodDays });
     } catch (err) {
       return c.json({ error: getErrorMessage(err) }, 500);
     }
@@ -1174,12 +1187,18 @@ export async function startServer(
 
         const merged = mergeSameSessions(allSessions);
         const previous = await readFileCache<SourceSummaryRecord[]>(sourcesCacheKey);
-        const result = await buildSourcesResult(merged, baseDir, homedir(), previous?.data || []);
+        const result = await buildSourcesResult(
+          merged,
+          baseDir,
+          homedir(),
+          previous?.data || [],
+          cleanupPeriodDays,
+        );
 
         await writeFileCache(sourcesCacheKey, result);
         enrichCursorStatsInBackground(merged, result);
         await stream.writeSSE({
-          data: JSON.stringify({ type: "complete", sessions: result }),
+          data: JSON.stringify({ type: "complete", sessions: result, cleanupPeriodDays }),
         });
       } catch (err) {
         await stream.writeSSE({
