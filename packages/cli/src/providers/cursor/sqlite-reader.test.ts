@@ -119,6 +119,92 @@ describe("cursor sqlite metrics helpers", () => {
     expect(metrics.turnStats?.[1]?.tokenUsage).toBeUndefined();
   });
 
+  it("extracts Cursor branch metadata from composer payload", () => {
+    const branchMeta = __testables.extractCursorBranchMetadata({
+      createdOnBranch: "feature/start",
+      branches: [
+        { branchName: "main" },
+        { branchName: "feature/work" },
+        { branchName: "feature/work" },
+      ],
+      committedToBranch: "feature/work",
+      prBranchName: "feature/pr",
+      activeBranch: { branchName: "feature/final" },
+    });
+
+    expect(branchMeta.gitBranch).toBe("feature/final");
+    expect(branchMeta.gitBranches).toEqual([
+      "feature/start",
+      "main",
+      "feature/work",
+      "feature/pr",
+      "feature/final",
+    ]);
+  });
+
+  it("extracts Cursor PR links from bubble payloads and deduplicates by URL", () => {
+    const links = __testables.extractCursorPrLinks([
+      {
+        turn: { role: "assistant", blocks: [{ type: "text", text: "done" }] },
+        bubble: {
+          pullRequests: [
+            {
+              number: 42,
+              url: "https://github.com/acme/vibe-replay/pull/42",
+            },
+            {
+              prNumber: 42,
+              prUrl: "https://github.com/acme/vibe-replay/pull/42",
+            },
+            {
+              prUrl: "https://github.com/acme/another/pull/99",
+              prRepository: "acme/another",
+            },
+          ],
+        },
+      },
+    ] as any);
+
+    expect(links).toEqual([
+      {
+        prNumber: 42,
+        prUrl: "https://github.com/acme/vibe-replay/pull/42",
+        prRepository: "acme/vibe-replay",
+      },
+      {
+        prNumber: 99,
+        prUrl: "https://github.com/acme/another/pull/99",
+        prRepository: "acme/another",
+      },
+    ]);
+  });
+
+  it("extracts Cursor API errors from bubble errorDetails", () => {
+    const apiErrors = __testables.extractCursorApiErrors([
+      {
+        turn: { role: "assistant", timestamp: "2026-03-20T10:00:00.000Z", blocks: [] },
+        bubble: {
+          createdAt: Date.parse("2026-03-20T10:00:00.000Z"),
+          retryAttempt: 2,
+          errorDetails: {
+            generationUUID: "gen-1",
+            message: "Error",
+            error:
+              '{"error":"ERROR_USER_ABORTED_REQUEST","details":{"title":"User aborted request."},"isExpected":true}',
+          },
+        },
+      },
+    ] as any);
+
+    expect(apiErrors).toEqual([
+      {
+        timestamp: "2026-03-20T10:00:00.000Z",
+        errorType: "ERROR_USER_ABORTED_REQUEST",
+        retryAttempt: 2,
+      },
+    ]);
+  });
+
   it("builds dense store turn stats aligned to user turns", () => {
     const turnStats = __testables.buildStoreTurnStats([
       {

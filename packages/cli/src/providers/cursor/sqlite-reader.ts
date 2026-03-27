@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { TokenUsage, TurnStat } from "@vibe-replay/types";
+import type { PrLink, TokenUsage, TurnStat } from "@vibe-replay/types";
 import type { ContentBlock, ParsedTurn, SessionInfo } from "../../types.js";
 import type { ProviderParseResult } from "../types.js";
 
@@ -863,6 +863,179 @@ interface GlobalStateTurnEntry {
   bubble: Record<string, any>;
 }
 
+function branchNameFromCursorValue(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : undefined;
+  }
+  if (!value || typeof value !== "object") return undefined;
+  const obj = value as Record<string, any>;
+  return (
+    branchNameFromCursorValue(obj.branchName) ||
+    branchNameFromCursorValue(obj.name) ||
+    branchNameFromCursorValue(obj.branch) ||
+    branchNameFromCursorValue(obj.ref)
+  );
+}
+
+function addUniqueBranch(branches: string[], seen: Set<string>, value: unknown): void {
+  const branch = branchNameFromCursorValue(value);
+  if (!branch || seen.has(branch)) return;
+  seen.add(branch);
+  branches.push(branch);
+}
+
+function extractCursorBranchMetadata(composer: Record<string, any>): {
+  gitBranch?: string;
+  gitBranches?: string[];
+} {
+  const orderedBranches: string[] = [];
+  const seen = new Set<string>();
+
+  // Keep a stable timeline-ish order: created -> known branches -> committed/PR -> active.
+  addUniqueBranch(orderedBranches, seen, composer.createdOnBranch);
+  if (Array.isArray(composer.branches)) {
+    for (const branch of composer.branches) {
+      addUniqueBranch(orderedBranches, seen, branch);
+    }
+  }
+  addUniqueBranch(orderedBranches, seen, composer.committedToBranch);
+  addUniqueBranch(orderedBranches, seen, composer.prBranchName);
+  addUniqueBranch(orderedBranches, seen, composer.activeBranch);
+
+  const gitBranch =
+    branchNameFromCursorValue(composer.activeBranch) ||
+    branchNameFromCursorValue(composer.committedToBranch) ||
+    orderedBranches[orderedBranches.length - 1];
+
+  if (gitBranch && !seen.has(gitBranch)) {
+    seen.add(gitBranch);
+    orderedBranches.push(gitBranch);
+  }
+
+  return {
+    ...(gitBranch ? { gitBranch } : {}),
+    ...(orderedBranches.length > 1 ? { gitBranches: orderedBranches } : {}),
+  };
+}
+
+function extractRepositoryFromPrUrl(url: string): string {
+  const match = url.match(/github\.com\/([^/]+\/[^/]+)\/pull\/\d+/i);
+  return match ? match[1] : "";
+}
+
+function extractCursorPrLinks(entries: GlobalStateTurnEntry[]): PrLink[] {
+  const links: PrLink[] = [];
+  const seenUrls = new Set<string>();
+
+  for (const entry of entries) {
+    const pullRequests = entry.bubble.pullRequests;
+    if (!Array.isArray(pullRequests)) continue;
+
+    for (const pr of pullRequests) {
+      if (!pr || typeof pr !== "object") continue;
+      const prObj = pr as Record<string, any>;
+      const prUrl =
+        typeof prObj.prUrl === "string"
+          ? prObj.prUrl
+          : typeof prObj.url === "string"
+            ? prObj.url
+            : typeof prObj.htmlUrl === "string"
+              ? prObj.htmlUrl
+              : typeof prObj.html_url === "string"
+                ? prObj.html_url
+                : "";
+      if (!prUrl || seenUrls.has(prUrl)) continue;
+
+      let prNumber = toNonNegativeInt(prObj.prNumber ?? prObj.number);
+      if (prNumber <= 0) {
+        const match = prUrl.match(/\/pull\/(\d+)(?:[/?#]|$)/);
+        if (match) prNumber = Number.parseInt(match[1], 10);
+      }
+      if (!Number.isFinite(prNumber) || prNumber <= 0) continue;
+
+      const prRepository =
+        (typeof prObj.prRepository === "string" && prObj.prRepository) ||
+        (typeof prObj.repository === "string" && prObj.repository) ||
+        (typeof prObj.repoFullName === "string" && prObj.repoFullName) ||
+        extractRepositoryFromPrUrl(prUrl);
+
+      seenUrls.add(prUrl);
+      links.push({
+        prNumber,
+        prUrl,
+        prRepository,
+      });
+    }
+  }
+
+  return links;
+}
+
+function extractCursorApiErrors(
+  entries: GlobalStateTurnEntry[],
+): ProviderParseResult["apiErrors"] | undefined {
+  const apiErrors: NonNullable<ProviderParseResult["apiErrors"]> = [];
+  const seenKeys = new Set<string>();
+
+  for (const entry of entries) {
+    const rawDetails = entry.bubble.errorDetails;
+    if (!rawDetails) continue;
+
+    const details =
+      typeof rawDetails === "string"
+        ? (parseJson<Record<string, any>>(rawDetails) ?? { message: rawDetails })
+        : typeof rawDetails === "object"
+          ? (rawDetails as Record<string, any>)
+          : null;
+    if (!details) continue;
+
+    const nestedError =
+      typeof details.error === "string"
+        ? parseJson<Record<string, any>>(details.error)
+        : typeof details.error === "object"
+          ? (details.error as Record<string, any>)
+          : undefined;
+
+    const statusCode =
+      toNonNegativeInt(details.statusCode) ||
+      toNonNegativeInt(details.status) ||
+      toNonNegativeInt(nestedError?.statusCode) ||
+      toNonNegativeInt(nestedError?.status) ||
+      undefined;
+
+    const errorType =
+      (typeof nestedError?.error === "string" && nestedError.error) ||
+      (typeof nestedError?.type === "string" && nestedError.type) ||
+      (typeof details.type === "string" && details.type) ||
+      undefined;
+
+    const retryAttempt =
+      toNonNegativeInt(details.retryAttempt) ||
+      toNonNegativeInt(entry.bubble.retryAttempt) ||
+      undefined;
+
+    const timestamp =
+      toIsoTimestamp(entry.bubble.createdAt) ||
+      toIsoTimestamp(entry.bubble.lastUpdatedAt) ||
+      entry.turn.timestamp ||
+      new Date().toISOString();
+
+    const dedupeKey = `${details.generationUUID || ""}::${timestamp}::${details.message || ""}`;
+    if (seenKeys.has(dedupeKey)) continue;
+    seenKeys.add(dedupeKey);
+
+    apiErrors.push({
+      timestamp,
+      ...(statusCode ? { statusCode } : {}),
+      ...(errorType ? { errorType } : {}),
+      ...(retryAttempt ? { retryAttempt } : {}),
+    });
+  }
+
+  return apiErrors.length > 0 ? apiErrors : undefined;
+}
+
 function extractBubbleModelName(
   bubble: Record<string, any>,
   fallbackModel: string | undefined,
@@ -1081,6 +1254,9 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
     const endTime = toIsoTimestamp(composer.lastUpdatedAt);
     const sessionTokenUsage = tokenUsageFromCursorTokenCount(composer.tokenCount);
     const metrics = buildGlobalStateMetrics(entries, modelName, sessionTokenUsage);
+    const branchMeta = extractCursorBranchMetadata(composer);
+    const prLinks = extractCursorPrLinks(entries);
+    const apiErrors = extractCursorApiErrors(entries);
 
     const notes = ["cursorDiskKV keys: composerData:* + bubbleId:*"];
     if (!metrics.tokenUsage) {
@@ -1104,6 +1280,9 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
     if (!hasDetailedTurnStats) {
       notes.push("Per-turn metrics are limited for this session.");
     }
+    if (branchMeta.gitBranch) {
+      notes.push("Git branch is inferred from Cursor composer metadata.");
+    }
 
     return {
       sessionId,
@@ -1121,6 +1300,10 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
       ...(metrics.tokenUsage ? { tokenUsage: metrics.tokenUsage } : {}),
       ...(metrics.tokenUsageByModel ? { tokenUsageByModel: metrics.tokenUsageByModel } : {}),
       ...(metrics.turnStats ? { turnStats: metrics.turnStats } : {}),
+      ...(branchMeta.gitBranch ? { gitBranch: branchMeta.gitBranch } : {}),
+      ...(branchMeta.gitBranches ? { gitBranches: branchMeta.gitBranches } : {}),
+      ...(prLinks.length > 0 ? { prLinks } : {}),
+      ...(apiErrors ? { apiErrors } : {}),
       turns,
       dataSource: "global-state",
       dataSourceInfo: {
@@ -1650,6 +1833,9 @@ export const __testables = {
   buildStoreTurnStats,
   createRetryableInit,
   estimateTokenIncrement,
+  extractCursorApiErrors,
+  extractCursorBranchMetadata,
+  extractCursorPrLinks,
   hasReplayableRootBlob,
   mapCursorToolName,
   mapToolArgs,
