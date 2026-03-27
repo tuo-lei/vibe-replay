@@ -911,8 +911,11 @@ function SessionsPanel() {
   const showInitialLoading = loading && sources.length === 0;
 
   // Count sessions approaching Claude Code cleanup
+  // Threshold mirrors WARNING_THRESHOLD_DAYS in packages/cli/src/cleanup-warning.ts
+  const EXPIRY_WARN_DAYS = 7;
   const expiringSessions = sources.filter(
-    (s) => s.expiresInDays != null && s.expiresInDays <= 7 && !archivedSlugs.has(s.slug),
+    (s) =>
+      s.expiresInDays != null && s.expiresInDays <= EXPIRY_WARN_DAYS && !archivedSlugs.has(s.slug),
   );
   const soonestExpiry = expiringSessions.reduce(
     (min, s) => Math.min(min, s.expiresInDays ?? Infinity),
@@ -1229,8 +1232,11 @@ function SessionsPanel() {
                     : ` within ${soonestExpiry} days`}
               </div>
               <div className="text-[11px] font-mono text-terminal-orange/70 mt-0.5">
-                Claude Code auto-deletes transcripts after {cleanupPeriodDays ?? 30} days
-                (cleanupPeriodDays). Generate replays to preserve them.
+                Claude Code auto-deletes transcripts after{" "}
+                {cleanupPeriodDays != null
+                  ? `${cleanupPeriodDays} days (cleanupPeriodDays)`
+                  : "cleanupPeriodDays"}
+                . Generate replays to preserve them.
               </div>
             </div>
           </div>
@@ -1414,7 +1420,7 @@ function SessionsPanel() {
                       s.durationMsEst ||
                       s.editCountEst ||
                       s.hasPR ||
-                      (s.expiresInDays != null && s.expiresInDays <= 7)) && (
+                      (s.expiresInDays != null && s.expiresInDays <= EXPIRY_WARN_DAYS)) && (
                       <div className="flex items-center gap-1.5 flex-wrap">
                         {!!s.promptCount && (
                           <span className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim">
@@ -1450,7 +1456,7 @@ function SessionsPanel() {
                             PR
                           </span>
                         )}
-                        {s.expiresInDays != null && s.expiresInDays <= 7 && (
+                        {s.expiresInDays != null && s.expiresInDays <= EXPIRY_WARN_DAYS && (
                           <span
                             className={`inline-flex items-center gap-1 text-xs font-mono px-1.5 py-0.5 rounded-md ${
                               s.expiresInDays <= 2

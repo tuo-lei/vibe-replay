@@ -714,6 +714,7 @@ export async function startServer(
   const isDevMode = !!opts?.externalViewerUrl;
   // In dev mode, Vite serves the viewer with HMR — no need to load/cache viewer HTML
   const viewerHtml = isDevMode ? "" : await loadViewerHtml();
+  // Read once at startup — changes to ~/.claude/settings.json require server restart
   const cleanupPeriodDays = await getClaudeCodeCleanupPeriod();
   const cacheKeySuffix = createHash("sha1").update(baseDir).digest("hex").slice(0, 12);
   const sourcesCacheKey = `dashboard-sources-v1-${cacheKeySuffix}`;

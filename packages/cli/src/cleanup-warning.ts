@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { SessionInfo } from "./types.js";
 
 const DEFAULT_CLEANUP_PERIOD_DAYS = 30;
-const WARNING_THRESHOLD_DAYS = 7;
+export const WARNING_THRESHOLD_DAYS = 7;
 
 export interface CleanupWarningResult {
   expiringCount: number;
@@ -38,17 +38,18 @@ export async function getClaudeCodeCleanupPeriod(): Promise<number> {
 
 /**
  * Compute days until a session is cleaned up by Claude Code.
- * Returns null if the session is not a claude-code session or cleanup is disabled.
+ * Returns undefined if cleanup is disabled or timestamp is invalid.
+ * Uses Math.floor to show minimum guaranteed remaining days (conservative for warnings).
  */
 export function computeDaysUntilCleanup(
   timestamp: string,
   cleanupPeriodDays: number,
-): number | null {
-  if (cleanupPeriodDays <= 0) return null;
+): number | undefined {
+  if (cleanupPeriodDays <= 0) return undefined;
   const sessionTime = new Date(timestamp).getTime();
-  if (Number.isNaN(sessionTime)) return null;
+  if (Number.isNaN(sessionTime)) return undefined;
   const ageDays = (Date.now() - sessionTime) / (1000 * 60 * 60 * 24);
-  return Math.max(0, Math.ceil(cleanupPeriodDays - ageDays));
+  return Math.max(0, Math.floor(cleanupPeriodDays - ageDays));
 }
 
 /**

@@ -9,6 +9,7 @@ import {
   checkCleanupWarnings,
   computeDaysUntilCleanup,
   getClaudeCodeCleanupPeriod,
+  WARNING_THRESHOLD_DAYS,
 } from "./cleanup-warning.js";
 import { generateGitHubGif } from "./formatters/gif.js";
 import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.js";
@@ -828,7 +829,7 @@ function formatSessionChoices(sessions: SessionInfo[], cleanupPeriodDays?: numbe
       let expiryBadge = "";
       if (cleanupPeriodDays && s.provider === "claude-code") {
         const daysLeft = computeDaysUntilCleanup(s.timestamp, cleanupPeriodDays);
-        if (daysLeft != null && daysLeft <= 7) {
+        if (daysLeft != null && daysLeft <= WARNING_THRESHOLD_DAYS) {
           const label = daysLeft === 0 ? "today" : `${daysLeft}d`;
           expiryBadge = daysLeft <= 2 ? chalk.red(` ⚠ ${label}`) : chalk.yellow(` ⚠ ${label}`);
         }

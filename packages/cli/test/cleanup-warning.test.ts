@@ -21,16 +21,16 @@ function makeSession(overrides: Partial<SessionInfo>): SessionInfo {
 }
 
 describe("computeDaysUntilCleanup", () => {
-  it("returns null when cleanupPeriodDays is 0 (disabled)", () => {
-    expect(computeDaysUntilCleanup(new Date().toISOString(), 0)).toBeNull();
+  it("returns undefined when cleanupPeriodDays is 0 (disabled)", () => {
+    expect(computeDaysUntilCleanup(new Date().toISOString(), 0)).toBeUndefined();
   });
 
-  it("returns null for invalid timestamp", () => {
-    expect(computeDaysUntilCleanup("invalid-date", 30)).toBeNull();
+  it("returns undefined for invalid timestamp", () => {
+    expect(computeDaysUntilCleanup("invalid-date", 30)).toBeUndefined();
   });
 
   it("returns correct days for a recent session", () => {
-    // Session created 5 days ago with 30-day cleanup → ~25 days left
+    // Session created 5 days ago with 30-day cleanup → 25 days left (floor)
     const fiveDaysAgo = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
     const daysLeft = computeDaysUntilCleanup(fiveDaysAgo, 30);
     expect(daysLeft).toBe(25);
@@ -47,6 +47,13 @@ describe("computeDaysUntilCleanup", () => {
     const twentySevenDaysAgo = new Date(Date.now() - 27 * 24 * 60 * 60 * 1000).toISOString();
     const daysLeft = computeDaysUntilCleanup(twentySevenDaysAgo, 30);
     expect(daysLeft).toBe(3);
+  });
+
+  it("uses Math.floor for conservative estimate", () => {
+    // Session 25.9 days old → 30 - 25.9 = 4.1 → floor = 4 (not ceil = 5)
+    const almostTwentySixDays = new Date(Date.now() - 25.9 * 24 * 60 * 60 * 1000).toISOString();
+    const daysLeft = computeDaysUntilCleanup(almostTwentySixDays, 30);
+    expect(daysLeft).toBe(4);
   });
 });
 
