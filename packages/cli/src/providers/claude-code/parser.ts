@@ -86,7 +86,7 @@ export async function parseClaudeCodeSession(
   // User prompts in order
   const userTurns: ParsedTurn[] = [];
 
-  // All message timestamps — used to estimate active duration when turn_duration events are missing
+  // All JSONL entry timestamps — used to estimate active duration when turn_duration events are missing
   const allTimestamps: string[] = [];
 
   for (const line of lines) {
@@ -569,9 +569,9 @@ function buildTurnStats(
       durationMs = sortedDurations[durationIdx].durationMs;
       durationIdx++;
     } else if (group.startTimestamp && group.endTimestamp) {
-      // Fallback: derive from timestamp range (for last turn without turn_duration event)
-      const diff = Date.parse(group.endTimestamp) - Date.parse(group.startTimestamp);
-      if (diff > 0) durationMs = diff;
+      // Fallback: estimate active duration from turn timestamps (avoids wall-clock inflation
+      // for VS Code sessions where turn_duration events are absent)
+      durationMs = estimateActiveDuration([group.startTimestamp, group.endTimestamp]);
     }
 
     const stat: TurnStat = { turnIndex: i };

@@ -4,7 +4,7 @@
  * When `turn_duration` events are missing (e.g. VS Code extension sessions),
  * we approximate active time by summing gaps between consecutive timestamps,
  * capping each gap at `maxGapMs`.  Gaps larger than the threshold represent
- * idle time (lunch, sleep, context-switch) and are clamped.
+ * idle time (lunch, sleep, context-switch) and are capped to `maxGapMs`.
  */
 
 const DEFAULT_MAX_GAP_MS = 5 * 60 * 1000; // 5 minutes
