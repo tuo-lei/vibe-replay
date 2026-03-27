@@ -43,6 +43,13 @@ export default function StatsPanel({ session }: Props) {
           if (scene.subAgent) {
             subAgentCount++;
             delegatedTools += scene.subAgent.toolCalls;
+            // Count file modifications from sub-agent scenes
+            for (const saScene of scene.subAgent.scenes) {
+              if (saScene.type === "tool-call" && saScene.diff) {
+                editCount++;
+                filesModified.add(saScene.diff.filePath);
+              }
+            }
           }
           break;
         }

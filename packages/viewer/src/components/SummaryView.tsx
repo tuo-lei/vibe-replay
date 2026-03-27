@@ -187,6 +187,23 @@ export default function SummaryView({ session }: Props) {
               model: sa.model,
               sceneCount: sa.scenes.length,
             });
+            // Count file modifications from sub-agent scenes
+            for (const saScene of sa.scenes) {
+              if (saScene.type === "tool-call" && saScene.diff) {
+                const f = getFile(saScene.diff.filePath);
+                f.editCount++;
+                const turnIdx = turns.length;
+                f.turnEdits.set(turnIdx, (f.turnEdits.get(turnIdx) || 0) + 1);
+                const oldL = saScene.diff.oldContent
+                  ? saScene.diff.oldContent.split("\n").length
+                  : 0;
+                const newL = saScene.diff.newContent
+                  ? saScene.diff.newContent.split("\n").length
+                  : 0;
+                f.linesAdded += Math.max(0, newL - oldL);
+                f.linesRemoved += Math.max(0, oldL - newL);
+              }
+            }
           } else if (tn === "Bash") {
             if (scene.bashOutput) {
               const cat = classifyBash(scene.bashOutput.command);

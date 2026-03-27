@@ -346,7 +346,11 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
               block.name === "NotebookEdit" ||
               block.name === "Delete"
             ) {
-              const fp = block.input?.file_path || block.input?.filePath;
+              const fp =
+                block.input?.file_path ??
+                block.input?.filePath ??
+                block.input?.path ??
+                block.input?.relativeWorkspacePath;
               if (fp) {
                 editCount++;
                 const short = shortenPath(fp);
@@ -359,7 +363,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
     }
   }
 
-  // Count subagent files (don't parse them — just count)
+  // Count subagent files and extract their file modifications
   let subAgentCount = 0;
   if (input.filePaths.length > 0) {
     const mainFile = input.filePaths[0];
@@ -367,7 +371,49 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
     const subagentsDir = join(sessionDir, "subagents");
     try {
       const files = await readdir(subagentsDir);
-      subAgentCount = files.filter((f) => f.endsWith(".jsonl")).length;
+      const jsonlFiles = files.filter((f) => f.endsWith(".jsonl"));
+      subAgentCount = jsonlFiles.length;
+
+      // Scan sub-agent JSONL files for file modifications
+      for (const saFile of jsonlFiles) {
+        let saContent: string;
+        try {
+          saContent = await readFile(join(subagentsDir, saFile), "utf-8");
+        } catch {
+          continue;
+        }
+        for (const saLine of saContent.split("\n")) {
+          if (!saLine.trim()) continue;
+          let saObj: any;
+          try {
+            saObj = JSON.parse(saLine);
+          } catch {
+            continue;
+          }
+          const saMsg = saObj?.message;
+          if (saMsg?.role !== "assistant" || !Array.isArray(saMsg.content)) continue;
+          for (const block of saMsg.content) {
+            if (block.type !== "tool_use") continue;
+            if (
+              block.name === "Edit" ||
+              block.name === "Write" ||
+              block.name === "NotebookEdit" ||
+              block.name === "Delete"
+            ) {
+              const fp =
+                block.input?.file_path ??
+                block.input?.filePath ??
+                block.input?.path ??
+                block.input?.relativeWorkspacePath;
+              if (fp) {
+                editCount++;
+                const short = shortenPath(fp);
+                fileEditCounts.set(short, (fileEditCounts.get(short) || 0) + 1);
+              }
+            }
+          }
+        }
+      }
     } catch {
       // No subagents directory
     }
@@ -515,6 +561,31 @@ function buildScanResultFromParsed(
         typeof block.input.subagent_type === "string"
       ) {
         derivedSubAgentCount++;
+      }
+
+      // Count file modifications from sub-agent scenes
+      if (block.name === "Agent" && block._subAgent?.scenes) {
+        for (const saScene of block._subAgent.scenes) {
+          if (saScene.type !== "tool-call") continue;
+          const saTool = saScene.toolName;
+          if (
+            saTool !== "Edit" &&
+            saTool !== "Write" &&
+            saTool !== "NotebookEdit" &&
+            saTool !== "Delete"
+          ) {
+            continue;
+          }
+          const saPath =
+            saScene.input?.file_path ??
+            saScene.input?.filePath ??
+            saScene.input?.path ??
+            saScene.input?.relativeWorkspacePath;
+          if (typeof saPath !== "string" || !saPath.trim()) continue;
+          editCount++;
+          const short = shortenPath(saPath);
+          fileEditCounts.set(short, (fileEditCounts.get(short) || 0) + 1);
+        }
       }
 
       if (
