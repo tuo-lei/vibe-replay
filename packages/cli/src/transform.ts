@@ -171,6 +171,9 @@ export function transformToReplay(
       ...(parsed.trackedFiles && parsed.trackedFiles.length > 0
         ? { trackedFiles: parsed.trackedFiles.map(redactPath) }
         : {}),
+      ...(parsed.contextFiles && parsed.contextFiles.length > 0
+        ? { contextFiles: parsed.contextFiles.map(redactPath) }
+        : {}),
     },
     scenes,
   };

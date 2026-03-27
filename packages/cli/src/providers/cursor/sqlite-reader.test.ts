@@ -205,6 +205,81 @@ describe("cursor sqlite metrics helpers", () => {
     ]);
   });
 
+  it("extracts Cursor context files from bubbles and request sidecars", () => {
+    const summary = __testables.extractCursorContextSummary(
+      [
+        {
+          turn: { role: "assistant", blocks: [{ type: "text", text: "done" }] },
+          bubble: {
+            relevantFiles: ["src/auth.ts", "src/index.ts", "src/auth.ts"],
+            recentlyViewedFiles: [{ path: "docs/plan.md" }],
+          },
+        },
+      ] as any,
+      [
+        {
+          terminalFiles: [{ filePath: "logs/dev.log" }],
+          cursorRules: ['{"name":"instructions","body":"Always lint"}'],
+          attachedFoldersListDirResults: [
+            '{"directoryRelativeWorkspacePath":"src","files":[{"name":"utils.ts"}]}',
+          ],
+        },
+      ],
+    );
+
+    expect(summary.contextFiles).toEqual([
+      "src/auth.ts",
+      "src/index.ts",
+      "docs/plan.md",
+      "logs/dev.log",
+      "src/utils.ts",
+    ]);
+    expect(summary.hasRequestContextSidecars).toBe(true);
+    expect(summary.hasCursorRules).toBe(true);
+  });
+
+  it("merges global-state metadata into store-backed Cursor parses", () => {
+    const merged = __testables.mergeCursorParseResults(
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "",
+        turns: [{ role: "user", blocks: [{ type: "text", text: "prompt" }] }],
+        dataSource: "sqlite",
+        dataSourceInfo: {
+          primary: "sqlite",
+          sources: ["cursor/chats/<workspace-hash>/<session-id>/store.db"],
+          notes: ["Token usage is unavailable for this Cursor SQLite session."],
+        },
+      },
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "/workspace/project",
+        turns: [{ role: "assistant", blocks: [{ type: "text", text: "reply" }] }],
+        dataSource: "global-state",
+        dataSourceInfo: {
+          primary: "global-state",
+          sources: ["cursor/user/globalStorage/state.vscdb"],
+          notes: ["Git branch is inferred from Cursor composer metadata."],
+        },
+        gitBranch: "feat/auth",
+        apiErrors: [{ timestamp: "2026-03-20T10:00:00.000Z", errorType: "rate_limit_error" }],
+        contextFiles: ["src/auth.ts"],
+      },
+    );
+
+    expect(merged.dataSource).toBe("sqlite");
+    expect(merged.turns).toHaveLength(1);
+    expect(merged.cwd).toBe("/workspace/project");
+    expect(merged.gitBranch).toBe("feat/auth");
+    expect(merged.apiErrors).toEqual([
+      { timestamp: "2026-03-20T10:00:00.000Z", errorType: "rate_limit_error" },
+    ]);
+    expect(merged.contextFiles).toEqual(["src/auth.ts"]);
+    expect(merged.dataSourceInfo?.supplements).toContain("cursor/user/globalStorage/state.vscdb");
+  });
+
   it("builds dense store turn stats aligned to user turns", () => {
     const turnStats = __testables.buildStoreTurnStats([
       {

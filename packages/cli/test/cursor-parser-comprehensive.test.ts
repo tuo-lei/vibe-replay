@@ -406,6 +406,23 @@ describe("Cursor → transform — comprehensive", () => {
     expect(replay.meta.stats.sceneCount).toBe(replay.scenes.length);
   });
 
+  it("passes context files through to replay metadata", () => {
+    const home = homedir();
+    const replay = transformToReplay(
+      {
+        sessionId: "cursor-context-session",
+        slug: "cursor-c",
+        cwd: join(home, "project"),
+        turns: [{ role: "user", blocks: [{ type: "text", text: "Debug auth flow" }] }],
+        contextFiles: [join(home, "project/src/auth.ts"), "docs/incident.md"],
+      },
+      "cursor",
+      "~/test",
+    );
+
+    expect(replay.meta.contextFiles).toEqual(["~/project/src/auth.ts", "docs/incident.md"]);
+  });
+
   it("creates minimal sub-agent metadata for Cursor agent tasks", () => {
     const replay = transformToReplay(
       {

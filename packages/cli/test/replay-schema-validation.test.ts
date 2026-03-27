@@ -166,6 +166,7 @@ describe("replay schema validation", () => {
           { prNumber: 1, prUrl: "https://github.com/org/repo/pull/1", prRepository: "org/repo" },
         ],
         compactions: [],
+        contextFiles: ["src/auth.ts", "docs/plan.md"],
       },
       scenes: [
         { type: "user-prompt", content: "fix the bug", timestamp: "2025-01-01T00:00:00Z" },

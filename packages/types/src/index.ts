@@ -163,6 +163,8 @@ export interface ReplaySession {
     }>;
     /** Files tracked/backed up during this session */
     trackedFiles?: string[];
+    /** Files Cursor appears to have used as request context breadcrumbs */
+    contextFiles?: string[];
   };
   scenes: Scene[];
   annotations?: Annotation[];

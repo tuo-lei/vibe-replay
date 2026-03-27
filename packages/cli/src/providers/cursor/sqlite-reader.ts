@@ -624,7 +624,12 @@ export async function parseCursorSqlite(
   sessionId: string,
 ): Promise<ProviderParseResult | null> {
   const storeResult = await parseCursorStoreDb(sessionId);
-  if (storeResult) return storeResult;
+  if (storeResult) {
+    const globalStateResult = await parseCursorGlobalStateDb(sessionId);
+    return globalStateResult
+      ? mergeCursorParseResults(storeResult, globalStateResult)
+      : storeResult;
+  }
   return parseCursorGlobalStateDb(sessionId);
 }
 
@@ -1036,6 +1041,217 @@ function extractCursorApiErrors(
   return apiErrors.length > 0 ? apiErrors : undefined;
 }
 
+function normalizeCursorContextFile(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.includes("\n")) return undefined;
+  return trimmed;
+}
+
+function extractCursorContextFileFromObject(value: unknown): string | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const obj = value as Record<string, any>;
+  const direct =
+    normalizeCursorContextFile(obj.filePath) ||
+    normalizeCursorContextFile(obj.path) ||
+    normalizeCursorContextFile(obj.fsPath) ||
+    normalizeCursorContextFile(obj.uri) ||
+    normalizeCursorContextFile(obj.relativeWorkspacePath) ||
+    normalizeCursorContextFile(obj.relativePath);
+  if (direct) return direct;
+
+  const name = normalizeCursorContextFile(obj.name);
+  if (name && (name.includes("/") || name.includes(".") || name.startsWith("~"))) {
+    return name;
+  }
+  return undefined;
+}
+
+function addUniqueContextFile(files: string[], seen: Set<string>, value: unknown): void {
+  const file =
+    normalizeCursorContextFile(value) || extractCursorContextFileFromObject(value) || undefined;
+  if (!file || seen.has(file)) return;
+  seen.add(file);
+  files.push(file);
+}
+
+function addContextFilesFromAttachedFolderResult(
+  files: string[],
+  seen: Set<string>,
+  value: unknown,
+): void {
+  const parsed =
+    typeof value === "string"
+      ? parseJson<Record<string, any>>(value)
+      : value && typeof value === "object"
+        ? (value as Record<string, any>)
+        : undefined;
+  if (!parsed) return;
+
+  const directory =
+    normalizeCursorContextFile(parsed.directoryRelativeWorkspacePath) ||
+    normalizeCursorContextFile(parsed.directoryPath);
+
+  if (Array.isArray(parsed.files)) {
+    for (const file of parsed.files) {
+      const name =
+        file && typeof file === "object"
+          ? normalizeCursorContextFile((file as Record<string, any>).name)
+          : normalizeCursorContextFile(file);
+      if (directory && name) {
+        addUniqueContextFile(files, seen, join(directory, name));
+        continue;
+      }
+
+      const direct =
+        file && typeof file === "object"
+          ? normalizeCursorContextFile((file as Record<string, any>).filePath) ||
+            normalizeCursorContextFile((file as Record<string, any>).path) ||
+            normalizeCursorContextFile((file as Record<string, any>).fsPath) ||
+            normalizeCursorContextFile((file as Record<string, any>).uri) ||
+            normalizeCursorContextFile((file as Record<string, any>).relativeWorkspacePath) ||
+            normalizeCursorContextFile((file as Record<string, any>).relativePath)
+          : undefined;
+      if (direct) {
+        addUniqueContextFile(files, seen, direct);
+      } else if (name) {
+        addUniqueContextFile(files, seen, name);
+      }
+    }
+  }
+}
+
+function extractCursorContextSummary(
+  entries: GlobalStateTurnEntry[],
+  requestContexts: Record<string, any>[],
+): {
+  contextFiles?: string[];
+  hasRequestContextSidecars: boolean;
+  hasCursorRules: boolean;
+} {
+  const files: string[] = [];
+  const seen = new Set<string>();
+  let hasRequestContextSidecars = false;
+  let hasCursorRules = false;
+
+  for (const entry of entries) {
+    for (const key of ["relevantFiles", "recentlyViewedFiles"] as const) {
+      if (!Array.isArray(entry.bubble[key])) continue;
+      for (const item of entry.bubble[key]) {
+        addUniqueContextFile(files, seen, item);
+      }
+    }
+  }
+
+  for (const context of requestContexts) {
+    const hasNonEmptyPayload = [
+      context.terminalFiles,
+      context.cursorRules,
+      context.attachedFoldersListDirResults,
+      context.summarizedComposers,
+    ].some((value) => Array.isArray(value) && value.length > 0);
+    if (!hasNonEmptyPayload) continue;
+
+    hasRequestContextSidecars = true;
+    if (Array.isArray(context.cursorRules) && context.cursorRules.length > 0) {
+      hasCursorRules = true;
+    }
+
+    if (Array.isArray(context.terminalFiles)) {
+      for (const item of context.terminalFiles) {
+        addUniqueContextFile(files, seen, item);
+      }
+    }
+    if (Array.isArray(context.attachedFoldersListDirResults)) {
+      for (const item of context.attachedFoldersListDirResults) {
+        addContextFilesFromAttachedFolderResult(files, seen, item);
+      }
+    }
+  }
+
+  return {
+    ...(files.length > 0 ? { contextFiles: files.slice(0, 200) } : {}),
+    hasRequestContextSidecars,
+    hasCursorRules,
+  };
+}
+
+function loadCursorRequestContexts(db: any, sessionId: string): Record<string, any>[] {
+  const rows = db.exec("SELECT value FROM cursorDiskKV WHERE key LIKE ?", [
+    `messageRequestContext:${sessionId}:%`,
+  ]);
+  if (!rows.length) return [];
+
+  const contexts: Record<string, any>[] = [];
+  for (const row of rows[0].values) {
+    const raw = valueToString(row[0]);
+    const parsed = parseJson<Record<string, any>>(raw);
+    if (parsed) contexts.push(parsed);
+  }
+  return contexts;
+}
+
+function mergeUniqueStrings(...groups: Array<string[] | undefined>): string[] | undefined {
+  const merged: string[] = [];
+  const seen = new Set<string>();
+  for (const group of groups) {
+    if (!group) continue;
+    for (const item of group) {
+      if (!item || seen.has(item)) continue;
+      seen.add(item);
+      merged.push(item);
+    }
+  }
+  return merged.length > 0 ? merged : undefined;
+}
+
+function mergeCursorParseResults(
+  primary: ProviderParseResult,
+  enrichment: ProviderParseResult,
+): ProviderParseResult {
+  const supplements = mergeUniqueStrings(
+    primary.dataSourceInfo?.supplements,
+    enrichment.dataSourceInfo?.sources,
+  );
+  const notes = mergeUniqueStrings(
+    primary.dataSourceInfo?.notes,
+    primary.gitBranch ||
+      primary.prLinks?.length ||
+      primary.apiErrors?.length ||
+      primary.contextFiles?.length
+      ? undefined
+      : ["Session metadata was enriched from Cursor global-state payloads."],
+    enrichment.contextFiles?.length
+      ? ["Context files are inferred from Cursor relevantFiles and request-context sidecars."]
+      : undefined,
+  );
+
+  return {
+    ...primary,
+    cwd: primary.cwd || enrichment.cwd,
+    ...(primary.gitBranch ? {} : enrichment.gitBranch ? { gitBranch: enrichment.gitBranch } : {}),
+    ...(primary.gitBranches
+      ? {}
+      : enrichment.gitBranches
+        ? { gitBranches: enrichment.gitBranches }
+        : {}),
+    ...(primary.prLinks ? {} : enrichment.prLinks ? { prLinks: enrichment.prLinks } : {}),
+    ...(primary.apiErrors ? {} : enrichment.apiErrors ? { apiErrors: enrichment.apiErrors } : {}),
+    ...(primary.contextFiles
+      ? {}
+      : enrichment.contextFiles
+        ? { contextFiles: enrichment.contextFiles }
+        : {}),
+    dataSourceInfo: primary.dataSourceInfo
+      ? {
+          ...primary.dataSourceInfo,
+          ...(supplements ? { supplements } : {}),
+          ...(notes ? { notes } : {}),
+        }
+      : enrichment.dataSourceInfo,
+  };
+}
+
 function extractBubbleModelName(
   bubble: Record<string, any>,
   fallbackModel: string | undefined,
@@ -1249,6 +1465,7 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
       typeof composer.modelConfig.modelName === "string"
         ? composer.modelConfig.modelName
         : undefined;
+    const requestContexts = loadCursorRequestContexts(db, sessionId);
 
     const startTime = toIsoTimestamp(composer.createdAt);
     const endTime = toIsoTimestamp(composer.lastUpdatedAt);
@@ -1257,6 +1474,7 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
     const branchMeta = extractCursorBranchMetadata(composer);
     const prLinks = extractCursorPrLinks(entries);
     const apiErrors = extractCursorApiErrors(entries);
+    const contextSummary = extractCursorContextSummary(entries, requestContexts);
 
     const notes = ["cursorDiskKV keys: composerData:* + bubbleId:*"];
     if (!metrics.tokenUsage) {
@@ -1283,6 +1501,17 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
     if (branchMeta.gitBranch) {
       notes.push("Git branch is inferred from Cursor composer metadata.");
     }
+    if (contextSummary.contextFiles?.length) {
+      notes.push(
+        "Context files are inferred from Cursor relevantFiles and request-context sidecars.",
+      );
+    }
+    if (contextSummary.hasRequestContextSidecars) {
+      notes.push("Session context was enriched from Cursor messageRequestContext sidecars.");
+    }
+    if (contextSummary.hasCursorRules) {
+      notes.push("Cursor request context included workspace rules.");
+    }
 
     return {
       sessionId,
@@ -1304,6 +1533,7 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
       ...(branchMeta.gitBranches ? { gitBranches: branchMeta.gitBranches } : {}),
       ...(prLinks.length > 0 ? { prLinks } : {}),
       ...(apiErrors ? { apiErrors } : {}),
+      ...(contextSummary.contextFiles ? { contextFiles: contextSummary.contextFiles } : {}),
       turns,
       dataSource: "global-state",
       dataSourceInfo: {
@@ -1835,10 +2065,12 @@ export const __testables = {
   estimateTokenIncrement,
   extractCursorApiErrors,
   extractCursorBranchMetadata,
+  extractCursorContextSummary,
   extractCursorPrLinks,
   hasReplayableRootBlob,
   mapCursorToolName,
   mapToolArgs,
+  mergeCursorParseResults,
   normalizeTurnText,
   parseUserContent,
 };

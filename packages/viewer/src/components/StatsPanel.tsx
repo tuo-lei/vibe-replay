@@ -272,6 +272,12 @@ export default function StatsPanel({ session }: Props) {
         </div>
       )}
 
+      {meta.contextFiles && meta.contextFiles.length > 0 && (
+        <div className="text-terminal-dim">
+          Context files: <span className="text-terminal-text">{meta.contextFiles.length}</span>
+        </div>
+      )}
+
       {/* PR Links */}
       {meta.prLinks && meta.prLinks.length > 0 && (
         <div>

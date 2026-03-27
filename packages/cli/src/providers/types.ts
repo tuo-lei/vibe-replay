@@ -56,4 +56,5 @@ export interface ProviderParseResult {
     retryAttempt?: number;
   }>;
   trackedFiles?: string[];
+  contextFiles?: string[];
 }
