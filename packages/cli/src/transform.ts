@@ -338,14 +338,39 @@ const SECRET_PATTERNS = [
 
 function redactSubAgentScene(s: any): Scene {
   if (s.type === "tool-call") {
-    return {
+    const toolName = s.toolName || "";
+    const input = s.input || {};
+    const scene: Scene = {
       type: "tool-call",
-      toolName: s.toolName || "",
+      toolName,
       input: s.input ? sanitizeInput(s.input) : {},
       result: truncate(redactPath(s.result || ""), 1000),
       timestamp: s.timestamp,
       isError: s.isError || false,
     };
+
+    // Preserve diff for file-modifying tools (same logic as buildToolScene)
+    if (toolName === "Edit" && input.file_path) {
+      (scene as any).diff = {
+        filePath: redactPath(input.file_path),
+        oldContent: input.old_string ?? "",
+        newContent: input.new_string ?? "",
+      };
+    } else if (toolName === "Write" && input.file_path) {
+      (scene as any).diff = {
+        filePath: redactPath(input.file_path),
+        oldContent: "",
+        newContent: truncate(input.content || "", 3000),
+      };
+    } else if (toolName === "Delete" && input.file_path) {
+      (scene as any).diff = {
+        filePath: redactPath(input.file_path),
+        oldContent: input.old_string ?? "(file deleted)",
+        newContent: "",
+      };
+    }
+
+    return scene;
   }
   return {
     type: s.type || "text-response",
