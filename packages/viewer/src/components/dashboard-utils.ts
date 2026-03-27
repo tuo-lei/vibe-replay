@@ -90,13 +90,13 @@ export function shortModelName(model?: string): string {
     const family = legacy[3].charAt(0).toUpperCase() + legacy[3].slice(1).toLowerCase();
     return `${family} ${legacy[1]}.${legacy[2]}`;
   }
-  // claude-sonnet-4-20250514, claude-opus-4-6 (new naming)
+  // claude-sonnet-4-20250514, claude-opus-4-6, claude-opus-4-6-20250619 (new naming)
   const m = model.match(
-    /claude-(?:(opus|sonnet|haiku)-)?(\d+(?:[.-]\d+)?)-(?:\d{8}-)?(opus|sonnet|haiku)?/i,
+    /claude-(?:(opus|sonnet|haiku)-)?((?:\d+)(?:[.-](?!\d{8})\d+)*)(?:-\d{8})?(?:-(opus|sonnet|haiku))?(?:$|\b)/i,
   );
   if (m) {
     const family = (m[1] || m[3] || "").toLowerCase();
-    const ver = m[2].replace("-", ".");
+    const ver = m[2].replace(/-/g, ".");
     const label = family.charAt(0).toUpperCase() + family.slice(1);
     return label ? `${label} ${ver}` : `Claude ${ver}`;
   }
