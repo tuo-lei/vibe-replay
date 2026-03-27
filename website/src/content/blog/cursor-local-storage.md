@@ -18,6 +18,10 @@ On my Mac, that prints:
 | `~/.cursor` | **2.1 GB** |
 | `~/Library/Application Support/Cursor` | **4.9 GB** |
 
+One important caveat up front: this is a local audit of one heavily used macOS machine, not an official Cursor storage spec.
+
+The exact sizes and counts on your machine will differ. The useful part is the shape of the system.
+
 I expected Cursor to have one obvious "session log" folder, the way Claude Code has `~/.claude/projects/*.jsonl`.
 
 It doesn't.
@@ -244,20 +248,9 @@ On this machine, I decoded over **32,000** readable `agentKv:blob:*` payloads. T
 - `content`
 - sometimes `providerOptions.cursor.requestId`
 
-Across those decoded rows I saw:
+The important takeaway is not the exact row count. It is that Cursor appears to keep a request-level message/blob archive with assistant text, tool traffic, reasoning blocks, and injected context wrappers like `<user_query>` and `<open_and_recently_viewed_files>`.
 
-- **17,297** tool messages
-- **12,985** assistant messages
-- **2,003** user messages
-- content blocks like `tool-call`, `tool-result`, `text`, `reasoning`, and `image`
-
-I also found user-context wrappers embedded in this layer, especially:
-
-- `<user_query>`
-- `<open_and_recently_viewed_files>`
-- occasionally `<system_reminder>`
-
-So `agentKv` looks less like a simple cache and more like a request/message archive that sits beside the main replay-oriented session stores.
+I would not treat `agentKv` as the main replay source yet. But it is strong evidence that Cursor stores more than just transcript text and chat summaries.
 
 ---
 
@@ -374,16 +367,10 @@ On my machine it's about **14.7 MB**, and it has tables like:
 
 This does **not** look like the main chat/session database. It looks more like Cursor's internal AI-attribution and provenance system.
 
-Some real examples from my machine:
+The two most revealing tables were:
 
-- `ai_code_hashes` had **about 42k** rows
-- sources were mainly `cli` and `composer`
-- models included:
-  - `gpt-5.3-codex-high`
-  - `claude-4.6-opus-high-thinking`
-  - `gpt-5.4-high`
-
-The most revealing table is `scored_commits`, which had **1,071** rows and fields like:
+- `ai_code_hashes`, with **about 42k** rows linking hashes to sources like `cli` and `composer`
+- `scored_commits`, with **1,071** rows and fields like:
 
 - `commitHash`
 - `branchName`
@@ -397,7 +384,7 @@ In other words: Cursor appears to keep a local database specifically for trackin
 
 I also found that `ai_code_hashes.conversationId` overlaps real `composerData` session IDs in many cases on this machine, which suggests this attribution layer is not fully separate from Cursor's session model.
 
-That is a very different kind of local artifact from a replay log, but it's a fascinating one.
+That is a very different kind of local artifact from a replay log, so I would treat it as a secondary storage layer, not "where the chats are."
 
 ---
 
@@ -517,5 +504,11 @@ npx vibe-replay
 
 It already knows how to merge Cursor's JSONL, SQLite, and global-state layers into a replayable session view.
 
-Cursor stores a lot more locally than its UI reveals. You just have to know where to look.
+Cursor stores a lot more locally than its UI reveals.
+
+That is the headline.
+
+The deeper point is that Cursor's local footprint is not one transcript directory you can casually inspect. It is a stack of overlapping systems for replay, recovery, request context, and attribution.
+
+Once you look at it that way, the scattered files start to make sense.
 

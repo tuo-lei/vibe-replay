@@ -142,10 +142,22 @@ describe("cursor sqlite metrics helpers", () => {
     ]);
   });
 
+  it("sorts Cursor branch history by last interaction before choosing current branch", () => {
+    const branchMeta = __testables.extractCursorBranchMetadata({
+      branches: [
+        { branchName: "feature/current", lastInteractionAt: 20 },
+        { branchName: "feature/old", lastInteractionAt: 10 },
+      ],
+      activeBranch: { branchName: "feature/current", lastInteractionAt: 20 },
+    });
+
+    expect(branchMeta.gitBranch).toBe("feature/current");
+    expect(branchMeta.gitBranches).toEqual(["feature/old", "feature/current"]);
+  });
+
   it("extracts Cursor PR links from bubble payloads and deduplicates by URL", () => {
     const links = __testables.extractCursorPrLinks([
       {
-        turn: { role: "assistant", blocks: [{ type: "text", text: "done" }] },
         bubble: {
           pullRequests: [
             {
@@ -182,7 +194,7 @@ describe("cursor sqlite metrics helpers", () => {
   it("extracts Cursor API errors from bubble errorDetails", () => {
     const apiErrors = __testables.extractCursorApiErrors([
       {
-        turn: { role: "assistant", timestamp: "2026-03-20T10:00:00.000Z", blocks: [] },
+        turnTimestamp: "2026-03-20T10:00:00.000Z",
         bubble: {
           createdAt: Date.parse("2026-03-20T10:00:00.000Z"),
           retryAttempt: 2,
@@ -209,7 +221,6 @@ describe("cursor sqlite metrics helpers", () => {
     const summary = __testables.extractCursorContextSummary(
       [
         {
-          turn: { role: "assistant", blocks: [{ type: "text", text: "done" }] },
           bubble: {
             relevantFiles: ["src/auth.ts", "src/index.ts", "src/auth.ts"],
             recentlyViewedFiles: [{ path: "docs/plan.md" }],
@@ -236,6 +247,27 @@ describe("cursor sqlite metrics helpers", () => {
     ]);
     expect(summary.hasRequestContextSidecars).toBe(true);
     expect(summary.hasCursorRules).toBe(true);
+  });
+
+  it("extracts API errors even when the error bubble has no replayable turn content", () => {
+    const apiErrors = __testables.extractCursorApiErrors([
+      {
+        bubble: {
+          createdAt: Date.parse("2026-03-20T10:00:00.000Z"),
+          errorDetails: {
+            error:
+              '{"error":"ERROR_EXTENSION_HOST_TIMEOUT","details":{"title":"Agent Stream Start Timeout"}}',
+          },
+        },
+      },
+    ] as any);
+
+    expect(apiErrors).toEqual([
+      {
+        timestamp: "2026-03-20T10:00:00.000Z",
+        errorType: "ERROR_EXTENSION_HOST_TIMEOUT",
+      },
+    ]);
   });
 
   it("merges global-state metadata into store-backed Cursor parses", () => {

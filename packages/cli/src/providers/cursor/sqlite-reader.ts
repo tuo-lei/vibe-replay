@@ -868,6 +868,11 @@ interface GlobalStateTurnEntry {
   bubble: Record<string, any>;
 }
 
+interface GlobalStateBubbleEntry {
+  bubble: Record<string, any>;
+  turnTimestamp?: string;
+}
+
 function branchNameFromCursorValue(value: unknown): string | undefined {
   if (typeof value === "string") {
     const trimmed = value.trim();
@@ -890,6 +895,24 @@ function addUniqueBranch(branches: string[], seen: Set<string>, value: unknown):
   branches.push(branch);
 }
 
+function sortCursorBranches(branches: unknown[]): unknown[] {
+  if (
+    branches.every(
+      (branch) =>
+        branch &&
+        typeof branch === "object" &&
+        Number.isFinite((branch as Record<string, any>).lastInteractionAt),
+    )
+  ) {
+    return [...branches].sort(
+      (a, b) =>
+        Number((a as Record<string, any>).lastInteractionAt) -
+        Number((b as Record<string, any>).lastInteractionAt),
+    );
+  }
+  return branches;
+}
+
 function extractCursorBranchMetadata(composer: Record<string, any>): {
   gitBranch?: string;
   gitBranches?: string[];
@@ -900,7 +923,7 @@ function extractCursorBranchMetadata(composer: Record<string, any>): {
   // Keep a stable timeline-ish order: created -> known branches -> committed/PR -> active.
   addUniqueBranch(orderedBranches, seen, composer.createdOnBranch);
   if (Array.isArray(composer.branches)) {
-    for (const branch of composer.branches) {
+    for (const branch of sortCursorBranches(composer.branches)) {
       addUniqueBranch(orderedBranches, seen, branch);
     }
   }
@@ -929,7 +952,7 @@ function extractRepositoryFromPrUrl(url: string): string {
   return match ? match[1] : "";
 }
 
-function extractCursorPrLinks(entries: GlobalStateTurnEntry[]): PrLink[] {
+function extractCursorPrLinks(entries: GlobalStateBubbleEntry[]): PrLink[] {
   const links: PrLink[] = [];
   const seenUrls = new Set<string>();
 
@@ -978,7 +1001,7 @@ function extractCursorPrLinks(entries: GlobalStateTurnEntry[]): PrLink[] {
 }
 
 function extractCursorApiErrors(
-  entries: GlobalStateTurnEntry[],
+  entries: GlobalStateBubbleEntry[],
 ): ProviderParseResult["apiErrors"] | undefined {
   const apiErrors: NonNullable<ProviderParseResult["apiErrors"]> = [];
   const seenKeys = new Set<string>();
@@ -1023,7 +1046,7 @@ function extractCursorApiErrors(
     const timestamp =
       toIsoTimestamp(entry.bubble.createdAt) ||
       toIsoTimestamp(entry.bubble.lastUpdatedAt) ||
-      entry.turn.timestamp ||
+      entry.turnTimestamp ||
       new Date().toISOString();
 
     const dedupeKey = `${details.generationUUID || ""}::${timestamp}::${details.message || ""}`;
@@ -1122,7 +1145,7 @@ function addContextFilesFromAttachedFolderResult(
 }
 
 function extractCursorContextSummary(
-  entries: GlobalStateTurnEntry[],
+  entries: GlobalStateBubbleEntry[],
   requestContexts: Record<string, any>[],
 ): {
   contextFiles?: string[];
@@ -1429,6 +1452,7 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
     const headers = composer.fullConversationHeadersOnly as any[];
 
     const entries: GlobalStateTurnEntry[] = [];
+    const bubbleEntries: GlobalStateBubbleEntry[] = [];
     const bubbleStmt = db.prepare("SELECT value FROM cursorDiskKV WHERE key = ?");
     for (const header of headers) {
       const bubbleId =
@@ -1443,6 +1467,13 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
           const rawBubble = valueToString(bubbleStmt.get()[0]);
           const bubble = parseJson<Record<string, any>>(rawBubble);
           if (bubble) {
+            bubbleEntries.push({
+              bubble,
+              turnTimestamp:
+                toIsoTimestamp(bubble.createdAt) ||
+                toIsoTimestamp(bubble.lastUpdatedAt) ||
+                undefined,
+            });
             const turn = bubbleToTurn(bubble);
             if (turn) entries.push({ turn, bubble });
           }
@@ -1472,9 +1503,9 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
     const sessionTokenUsage = tokenUsageFromCursorTokenCount(composer.tokenCount);
     const metrics = buildGlobalStateMetrics(entries, modelName, sessionTokenUsage);
     const branchMeta = extractCursorBranchMetadata(composer);
-    const prLinks = extractCursorPrLinks(entries);
-    const apiErrors = extractCursorApiErrors(entries);
-    const contextSummary = extractCursorContextSummary(entries, requestContexts);
+    const prLinks = extractCursorPrLinks(bubbleEntries);
+    const apiErrors = extractCursorApiErrors(bubbleEntries);
+    const contextSummary = extractCursorContextSummary(bubbleEntries, requestContexts);
 
     const notes = ["cursorDiskKV keys: composerData:* + bubbleId:*"];
     if (!metrics.tokenUsage) {

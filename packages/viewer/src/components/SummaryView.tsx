@@ -41,6 +41,30 @@ function classifyBash(command: string): string {
   return "other";
 }
 
+function formatDataSourceLabel(source?: string): string {
+  if (!source) return "unknown";
+  const labels: Record<string, string> = {
+    sqlite: "SQLite (store.db)",
+    "global-state": "SQLite (global state.vscdb)",
+    jsonl: "JSONL transcript",
+    "jsonl+tools": "JSONL + agent-tools",
+  };
+  return labels[source] || source;
+}
+
+function formatBranchBadge(gitBranch?: string, gitBranches?: string[]): string | undefined {
+  if (!gitBranch) return undefined;
+  if (!gitBranches || gitBranches.length <= 1) return gitBranch;
+
+  const ordered = [...gitBranches];
+  const currentIdx = ordered.lastIndexOf(gitBranch);
+  if (currentIdx >= 0 && currentIdx !== ordered.length - 1) {
+    ordered.splice(currentIdx, 1);
+    ordered.push(gitBranch);
+  }
+  return ordered.join(" → ");
+}
+
 /** Hook for chart hover: tracks which turn index the mouse is over */
 function useChartHover(turnCount: number) {
   const [hovered, setHovered] = useState<number | null>(null);
@@ -300,11 +324,9 @@ export default function SummaryView({ session }: Props) {
           {meta.gitBranch && (
             <span
               className="shrink-0 text-[10px] font-mono text-terminal-purple px-1.5 py-0.5 rounded bg-terminal-purple/10 border border-terminal-purple/20"
-              title={meta.gitBranches ? meta.gitBranches.join(" → ") : undefined}
+              title={formatBranchBadge(meta.gitBranch, meta.gitBranches)}
             >
-              {meta.gitBranches && meta.gitBranches.length > 1
-                ? `${meta.gitBranches[0]} → ${meta.gitBranch}`
-                : meta.gitBranch}
+              {formatBranchBadge(meta.gitBranch, meta.gitBranches)}
             </span>
           )}
           {meta.permissionMode === "bypassPermissions" && (
@@ -326,6 +348,43 @@ export default function SummaryView({ session }: Props) {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {(meta.dataSource || meta.dataSourceInfo) && (
+          <div className="rounded border border-terminal-border-subtle bg-terminal-surface/40 px-3 py-2">
+            <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-1">
+              Data Source
+            </div>
+            <div className="text-xs font-mono text-terminal-text">
+              {formatDataSourceLabel(meta.dataSourceInfo?.primary || meta.dataSource)}
+            </div>
+            {meta.dataSourceInfo?.sources && meta.dataSourceInfo.sources.length > 0 && (
+              <div className="mt-1 space-y-0.5">
+                {meta.dataSourceInfo.sources.map((source) => (
+                  <div
+                    key={source}
+                    className="text-xs font-mono text-terminal-dim truncate"
+                    title={source}
+                  >
+                    <span className="text-terminal-green">source:</span> {source}
+                  </div>
+                ))}
+              </div>
+            )}
+            {meta.dataSourceInfo?.supplements && meta.dataSourceInfo.supplements.length > 0 && (
+              <div className="mt-1 space-y-0.5">
+                {meta.dataSourceInfo.supplements.map((source) => (
+                  <div
+                    key={source}
+                    className="text-xs font-mono text-terminal-dim truncate"
+                    title={source}
+                  >
+                    <span className="text-terminal-purple">supplement:</span> {source}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
