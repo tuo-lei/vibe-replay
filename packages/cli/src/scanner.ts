@@ -346,7 +346,11 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
               block.name === "NotebookEdit" ||
               block.name === "Delete"
             ) {
-              const fp = block.input?.file_path || block.input?.filePath;
+              const fp =
+                block.input?.file_path ??
+                block.input?.filePath ??
+                block.input?.path ??
+                block.input?.relativeWorkspacePath;
               if (fp) {
                 editCount++;
                 const short = shortenPath(fp);
@@ -396,7 +400,11 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
               block.name === "NotebookEdit" ||
               block.name === "Delete"
             ) {
-              const fp = block.input?.file_path || block.input?.filePath;
+              const fp =
+                block.input?.file_path ??
+                block.input?.filePath ??
+                block.input?.path ??
+                block.input?.relativeWorkspacePath;
               if (fp) {
                 editCount++;
                 const short = shortenPath(fp);
