@@ -270,6 +270,38 @@ describe("cursor sqlite metrics helpers", () => {
     ]);
   });
 
+  it("keeps distinct Cursor API errors when only the error type differs", () => {
+    const apiErrors = __testables.extractCursorApiErrors([
+      {
+        bubble: {
+          createdAt: Date.parse("2026-03-20T10:00:00.000Z"),
+          errorDetails: {
+            error: '{"error":"ERROR_EXTENSION_HOST_TIMEOUT"}',
+          },
+        },
+      },
+      {
+        bubble: {
+          createdAt: Date.parse("2026-03-20T10:00:00.000Z"),
+          errorDetails: {
+            error: '{"error":"ERROR_RATE_LIMITED"}',
+          },
+        },
+      },
+    ] as any);
+
+    expect(apiErrors).toEqual([
+      {
+        timestamp: "2026-03-20T10:00:00.000Z",
+        errorType: "ERROR_EXTENSION_HOST_TIMEOUT",
+      },
+      {
+        timestamp: "2026-03-20T10:00:00.000Z",
+        errorType: "ERROR_RATE_LIMITED",
+      },
+    ]);
+  });
+
   it("merges global-state metadata into store-backed Cursor parses", () => {
     const merged = __testables.mergeCursorParseResults(
       {
@@ -310,6 +342,57 @@ describe("cursor sqlite metrics helpers", () => {
     ]);
     expect(merged.contextFiles).toEqual(["src/auth.ts"]);
     expect(merged.dataSourceInfo?.supplements).toContain("cursor/user/globalStorage/state.vscdb");
+  });
+
+  it("does not add enrichment notes when primary metadata already exists", () => {
+    const merged = __testables.mergeCursorParseResults(
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "",
+        gitBranch: "feat/existing",
+        turns: [{ role: "user", blocks: [{ type: "text", text: "prompt" }] }],
+        dataSource: "sqlite",
+        dataSourceInfo: {
+          primary: "sqlite",
+          sources: ["cursor/chats/<workspace-hash>/<session-id>/store.db"],
+          notes: ["Token usage is unavailable for this Cursor SQLite session."],
+        },
+      },
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "/workspace/project",
+        turns: [{ role: "assistant", blocks: [{ type: "text", text: "reply" }] }],
+        dataSource: "global-state",
+        dataSourceInfo: {
+          primary: "global-state",
+          sources: ["cursor/user/globalStorage/state.vscdb"],
+          notes: ["Git branch is inferred from Cursor composer metadata."],
+        },
+        gitBranch: "feat/enriched",
+      },
+    );
+
+    expect(merged.gitBranch).toBe("feat/existing");
+    expect(merged.dataSourceInfo?.notes).toEqual([
+      "Token usage is unavailable for this Cursor SQLite session.",
+    ]);
+  });
+
+  it("normalizes file URIs in Cursor context files", () => {
+    const summary = __testables.extractCursorContextSummary(
+      [
+        {
+          bubble: {
+            relevantFiles: [{ uri: "file:///Users/test/project/src/auth%20flow.ts" }],
+          },
+        },
+      ] as any,
+      [],
+    );
+
+    expect(summary.contextFiles).toEqual(["/Users/test/project/src/auth flow.ts"]);
   });
 
   it("builds dense store turn stats aligned to user turns", () => {

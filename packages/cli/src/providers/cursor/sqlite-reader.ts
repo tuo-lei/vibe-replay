@@ -10,6 +10,7 @@ const CURSOR_CHATS_DIR = join(homedir(), ".cursor", "chats");
 const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const MIN_STORE_DB_SIZE = 8192;
+const MAX_CURSOR_REQUEST_CONTEXT_ROWS = 500;
 
 function createRetryableInit<T>(factory: () => Promise<T>): () => Promise<T> {
   let promise: Promise<T> | null = null;
@@ -28,6 +29,15 @@ const getSqlJs = createRetryableInit(async () => {
   const mod = await import("sql.js");
   return mod.default();
 });
+
+interface CachedSqlJsDb {
+  dbPath: string;
+  db: any;
+  size: number;
+  mtimeMs: number;
+}
+
+let cachedGlobalStateDb: CachedSqlJsDb | null = null;
 
 export function workspaceHash(absolutePath: string): string {
   return createHash("md5").update(absolutePath).digest("hex");
@@ -63,6 +73,50 @@ async function findGlobalStateDb(): Promise<string | null> {
     if (s?.isFile() && s.size >= MIN_STORE_DB_SIZE) return candidate;
   }
   return null;
+}
+
+async function openGlobalStateDb(): Promise<CachedSqlJsDb | null> {
+  const dbPath = await findGlobalStateDb();
+  if (!dbPath) return null;
+
+  const dbStat = await stat(dbPath).catch(() => null);
+  if (!dbStat?.isFile() || dbStat.size < MIN_STORE_DB_SIZE) return null;
+
+  if (
+    cachedGlobalStateDb &&
+    cachedGlobalStateDb.dbPath === dbPath &&
+    cachedGlobalStateDb.size === dbStat.size &&
+    cachedGlobalStateDb.mtimeMs === dbStat.mtimeMs
+  ) {
+    return cachedGlobalStateDb;
+  }
+
+  let SQL: any;
+  try {
+    SQL = await getSqlJs();
+  } catch {
+    return null;
+  }
+
+  const dbBuffer = await readFile(dbPath).catch(() => null);
+  if (!dbBuffer) return null;
+
+  const db = new SQL.Database(dbBuffer);
+  cachedGlobalStateDb?.db.close();
+  cachedGlobalStateDb = {
+    dbPath,
+    db,
+    size: dbStat.size,
+    mtimeMs: dbStat.mtimeMs,
+  };
+  return cachedGlobalStateDb;
+}
+
+function hasGlobalStateSession(db: any, sessionId: string): boolean {
+  const rows = db.exec("SELECT 1 FROM cursorDiskKV WHERE key = ? LIMIT 1", [
+    `composerData:${sessionId}`,
+  ]);
+  return rows.length > 0 && rows[0].values.length > 0;
 }
 
 /**
@@ -464,20 +518,9 @@ export async function discoverGlobalStateOnlySessions(
   const sessions: SessionInfo[] = [];
   const unknownProjectSessions: SessionInfo[] = [];
 
-  const dbPath = await findGlobalStateDb();
-  if (!dbPath) return { sessions, sessionIds };
-
-  let SQL: any;
-  try {
-    SQL = await getSqlJs();
-  } catch {
-    return { sessions, sessionIds };
-  }
-
-  const dbBuffer = await readFile(dbPath).catch(() => null);
-  if (!dbBuffer) return { sessions, sessionIds };
-
-  const db = new SQL.Database(dbBuffer);
+  const globalStateDb = await openGlobalStateDb();
+  if (!globalStateDb) return { sessions, sessionIds };
+  const { dbPath, db } = globalStateDb;
 
   try {
     const rows = db.exec("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'");
@@ -536,8 +579,6 @@ export async function discoverGlobalStateOnlySessions(
     }
   } catch {
     // no-op: ignore malformed db rows and return what we have
-  } finally {
-    db.close();
   }
 
   // Keep only the most recent sessions per inferred project.
@@ -625,7 +666,11 @@ export async function parseCursorSqlite(
 ): Promise<ProviderParseResult | null> {
   const storeResult = await parseCursorStoreDb(sessionId);
   if (storeResult) {
-    const globalStateResult = await parseCursorGlobalStateDb(sessionId);
+    const globalStateDb = await openGlobalStateDb();
+    if (!globalStateDb || !hasGlobalStateSession(globalStateDb.db, sessionId)) {
+      return storeResult;
+    }
+    const globalStateResult = await parseCursorGlobalStateDb(sessionId, globalStateDb);
     return globalStateResult
       ? mergeCursorParseResults(storeResult, globalStateResult)
       : storeResult;
@@ -936,11 +981,6 @@ function extractCursorBranchMetadata(composer: Record<string, any>): {
     branchNameFromCursorValue(composer.committedToBranch) ||
     orderedBranches[orderedBranches.length - 1];
 
-  if (gitBranch && !seen.has(gitBranch)) {
-    seen.add(gitBranch);
-    orderedBranches.push(gitBranch);
-  }
-
   return {
     ...(gitBranch ? { gitBranch } : {}),
     ...(orderedBranches.length > 1 ? { gitBranches: orderedBranches } : {}),
@@ -1049,7 +1089,7 @@ function extractCursorApiErrors(
       entry.turnTimestamp ||
       new Date().toISOString();
 
-    const dedupeKey = `${details.generationUUID || ""}::${timestamp}::${details.message || ""}`;
+    const dedupeKey = `${details.generationUUID || ""}::${timestamp}::${statusCode || ""}::${errorType || ""}::${details.message || ""}`;
     if (seenKeys.has(dedupeKey)) continue;
     seenKeys.add(dedupeKey);
 
@@ -1066,8 +1106,17 @@ function extractCursorApiErrors(
 
 function normalizeCursorContextFile(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
+  let trimmed = value.trim();
   if (!trimmed || trimmed.includes("\n")) return undefined;
+  if (/^file:\/\//i.test(trimmed)) {
+    trimmed = trimmed.replace(/^file:\/\/(?:localhost)?/i, "");
+    try {
+      trimmed = decodeURIComponent(trimmed);
+    } catch {
+      return undefined;
+    }
+    trimmed = trimmed.replace(/^\/([a-z]:\/)/i, "$1");
+  }
   return trimmed;
 }
 
@@ -1200,9 +1249,10 @@ function extractCursorContextSummary(
 }
 
 function loadCursorRequestContexts(db: any, sessionId: string): Record<string, any>[] {
-  const rows = db.exec("SELECT value FROM cursorDiskKV WHERE key LIKE ?", [
-    `messageRequestContext:${sessionId}:%`,
-  ]);
+  const rows = db.exec(
+    `SELECT value FROM cursorDiskKV WHERE key LIKE ? LIMIT ${MAX_CURSOR_REQUEST_CONTEXT_ROWS}`,
+    [`messageRequestContext:${sessionId}:%`],
+  );
   if (!rows.length) return [];
 
   const contexts: Record<string, any>[] = [];
@@ -1260,6 +1310,8 @@ function mergeCursorParseResults(
         : {}),
     ...(primary.prLinks ? {} : enrichment.prLinks ? { prLinks: enrichment.prLinks } : {}),
     ...(primary.apiErrors ? {} : enrichment.apiErrors ? { apiErrors: enrichment.apiErrors } : {}),
+    // store.db is currently the primary replay source and does not emit inferred context files.
+    // If that changes, revisit this precedence rule instead of silently dropping enrichment files.
     ...(primary.contextFiles
       ? {}
       : enrichment.contextFiles
@@ -1422,21 +1474,13 @@ function bubbleToTurn(bubble: Record<string, any>): ParsedTurn | null {
   };
 }
 
-async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderParseResult | null> {
-  const dbPath = await findGlobalStateDb();
-  if (!dbPath) return null;
-
-  let SQL: any;
-  try {
-    SQL = await getSqlJs();
-  } catch {
-    return null;
-  }
-
-  const dbBuffer = await readFile(dbPath).catch(() => null);
-  if (!dbBuffer) return null;
-
-  const db = new SQL.Database(dbBuffer);
+async function parseCursorGlobalStateDb(
+  sessionId: string,
+  globalStateDb?: CachedSqlJsDb,
+): Promise<ProviderParseResult | null> {
+  const resolvedGlobalStateDb = globalStateDb ?? (await openGlobalStateDb());
+  if (!resolvedGlobalStateDb) return null;
+  const { db } = resolvedGlobalStateDb;
 
   try {
     const composerRows = db.exec("SELECT value FROM cursorDiskKV WHERE key = ?", [
@@ -1575,8 +1619,6 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
     };
   } catch {
     return null;
-  } finally {
-    db.close();
   }
 }
 

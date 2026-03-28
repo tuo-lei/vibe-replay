@@ -52,9 +52,9 @@ function formatDataSourceLabel(source?: string): string {
   return labels[source] || source;
 }
 
-function formatBranchBadge(gitBranch?: string, gitBranches?: string[]): string | undefined {
+function getOrderedBranchChain(gitBranch?: string, gitBranches?: string[]): string[] | undefined {
   if (!gitBranch) return undefined;
-  if (!gitBranches || gitBranches.length <= 1) return gitBranch;
+  if (!gitBranches || gitBranches.length <= 1) return [gitBranch];
 
   const ordered = [...gitBranches];
   const currentIdx = ordered.lastIndexOf(gitBranch);
@@ -62,7 +62,18 @@ function formatBranchBadge(gitBranch?: string, gitBranches?: string[]): string |
     ordered.splice(currentIdx, 1);
     ordered.push(gitBranch);
   }
-  return ordered.join(" → ");
+  return ordered;
+}
+
+function formatBranchBadge(gitBranch?: string, gitBranches?: string[]): string | undefined {
+  const ordered = getOrderedBranchChain(gitBranch, gitBranches);
+  if (!ordered) return undefined;
+  return ordered.length > 1 ? `${ordered[0]} → ${ordered[ordered.length - 1]}` : ordered[0];
+}
+
+function formatBranchTooltip(gitBranch?: string, gitBranches?: string[]): string | undefined {
+  const ordered = getOrderedBranchChain(gitBranch, gitBranches);
+  return ordered?.join(" → ");
 }
 
 /** Hook for chart hover: tracks which turn index the mouse is over */
@@ -324,7 +335,7 @@ export default function SummaryView({ session }: Props) {
           {meta.gitBranch && (
             <span
               className="shrink-0 text-[10px] font-mono text-terminal-purple px-1.5 py-0.5 rounded bg-terminal-purple/10 border border-terminal-purple/20"
-              title={formatBranchBadge(meta.gitBranch, meta.gitBranches)}
+              title={formatBranchTooltip(meta.gitBranch, meta.gitBranches)}
             >
               {formatBranchBadge(meta.gitBranch, meta.gitBranches)}
             </span>
