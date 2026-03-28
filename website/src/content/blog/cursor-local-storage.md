@@ -127,6 +127,16 @@ One important nuance: not every big key family here is equally useful for replay
 
 One subtle thing I learned after a deeper pass: `messageRequestContext:<uuid>:<uuid>` does appear to share its **first** UUID with `composerData` / checkpoint session IDs, so this layer is probably best understood as a per-session context sidecar rather than random junk.
 
+An even more important nuance is that Cursor does **not** appear to use one universal session UUID across all of these stores.
+
+On this machine, the `store.db` session IDs and the `composerData` session IDs were disjoint. The transcript layer sat across both:
+
+- **106** transcript IDs matched `store.db` sessions
+- **24** transcript IDs matched `composerData` sessions
+- **0** matched both
+
+That pushed me to a more precise mental model: Cursor has at least **two replay stacks**, and transcript JSONL can attach to either one.
+
 ---
 
 ## Cursor doesn't have one transcript format. It has a local storage stack.
@@ -142,10 +152,36 @@ session = one JSONL file
 With Cursor, the practical model is closer to:
 
 ```text
-session = SQLite chat store + global composer state + bubble state + optional transcript JSONL + tool sidecars + workspace UI state
+store-backed session = store.db + optional transcript JSONL
+composer-backed session = composerData + bubbleId + optional transcript JSONL + context / checkpoint sidecars
+request-scoped provenance = agentKv + checkpoint metadata + ai_code_hashes
 ```
 
 That complexity is exactly why tools like [vibe-replay](https://github.com/tuo-lei/vibe-replay) have to merge multiple Cursor sources instead of just reading one folder.
+
+---
+
+## How the pieces actually connect
+
+The most useful thing I learned on the second pass was not "there are more tables." It was "these UUIDs do not all mean the same thing."
+
+The cleanest public-safe mental model I have now is:
+
+- one replay stack built around `store.db`
+- another replay stack built around `composerData` + `bubbleId`
+- a transcript layer that can attach to either stack
+- a separate request/provenance axis built around request IDs
+
+In practice, that means:
+
+- `store.db` session IDs can line up with transcript JSONL IDs
+- `composerData:<session-id>` lines up cleanly with `bubbleId:<session-id>:<bubble-id>`
+- the **first** UUID in `messageRequestContext:<uuid>:<uuid>` appears to line up with composer session IDs
+- checkpoint `metadata.json.agentRequestId`, `agentKv.providerOptions.cursor.requestId`, and `ai_code_hashes.requestId` line up with each other
+
+The important caution is that those request IDs are **not** the same thing as the main replay session IDs.
+
+That is why Cursor feels more like a distributed local state system than a chat log: replay, request context, recovery, and attribution are all stored locally, but they are not all keyed the same way.
 
 ---
 
@@ -252,6 +288,8 @@ The important takeaway is not the exact row count. It is that Cursor appears to 
 
 I would not treat `agentKv` as the main replay source yet. But it is strong evidence that Cursor stores more than just transcript text and chat summaries.
 
+After a deeper join-key pass, I am more confident about *what kind* of thing `agentKv` is: it sits on a **request/provenance axis**, not the main session axis. On this machine, checkpoint `metadata.json.agentRequestId` values overlapped both `agentKv.providerOptions.cursor.requestId` and `ai_code_hashes.requestId`, while `messageRequestContext`'s second UUID did not.
+
 ---
 
 ## Does Cursor keep a prompt history?
@@ -325,6 +363,8 @@ And one diff payload looked like a real file-level patch snapshot with:
 - `kind`
 
 So Cursor checkpoints are not just a UI concept. They have real local file artifacts behind them.
+
+The relationship part matters too: the checkpoint folder's `metadata.json` is request-scoped. Its `agentRequestId` lined up with request IDs I found in both `agentKv` and `ai_code_hashes`, which makes checkpoints feel less like "chat history" and more like a provenance/recovery sidecar for specific agent requests.
 
 There is also a **separate** recovery system:
 
@@ -462,6 +502,11 @@ If I had to answer in one sentence:
 
 **Cursor's equivalent is a storage system, not a transcript directory.**
 
+If I had to answer in two sentences:
+
+**Cursor appears to have at least two replay stacks locally, plus a separate request/provenance layer.**  
+**That is the real reason local reverse-engineering and replay tooling for Cursor are harder than for Claude Code.**
+
 The closest "core set" is:
 
 ```text
@@ -502,7 +547,7 @@ If you want the interactive version instead of grepping databases:
 npx vibe-replay
 ```
 
-It already knows how to merge Cursor's JSONL, SQLite, and global-state layers into a replayable session view.
+It already knows how to merge Cursor's JSONL, SQLite, and global-state layers into a replayable session view, and newer builds can also surface some Cursor-specific sidecars such as request-context breadcrumbs and checkpoint-side metadata when those local artifacts exist.
 
 Cursor stores a lot more locally than its UI reveals.
 

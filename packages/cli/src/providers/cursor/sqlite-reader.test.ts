@@ -245,6 +245,7 @@ describe("cursor sqlite metrics helpers", () => {
       "logs/dev.log",
       "src/utils.ts",
     ]);
+    expect(summary.requestContextCount).toBe(1);
     expect(summary.hasRequestContextSidecars).toBe(true);
     expect(summary.hasCursorRules).toBe(true);
   });
@@ -330,6 +331,11 @@ describe("cursor sqlite metrics helpers", () => {
         gitBranch: "feat/auth",
         apiErrors: [{ timestamp: "2026-03-20T10:00:00.000Z", errorType: "rate_limit_error" }],
         contextFiles: ["src/auth.ts"],
+        cursorSidecars: {
+          requestContextCount: 2,
+          checkpointCount: 6,
+          hasWorkspaceRules: true,
+        },
       },
     );
 
@@ -341,6 +347,11 @@ describe("cursor sqlite metrics helpers", () => {
       { timestamp: "2026-03-20T10:00:00.000Z", errorType: "rate_limit_error" },
     ]);
     expect(merged.contextFiles).toEqual(["src/auth.ts"]);
+    expect(merged.cursorSidecars).toEqual({
+      requestContextCount: 2,
+      checkpointCount: 6,
+      hasWorkspaceRules: true,
+    });
     expect(merged.dataSourceInfo?.supplements).toContain("cursor/user/globalStorage/state.vscdb");
   });
 
@@ -393,6 +404,38 @@ describe("cursor sqlite metrics helpers", () => {
     );
 
     expect(summary.contextFiles).toEqual(["/Users/test/project/src/auth flow.ts"]);
+  });
+
+  it("keeps existing Cursor sidecars when primary parse already has them", () => {
+    const merged = __testables.mergeCursorParseResults(
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "",
+        turns: [{ role: "user", blocks: [{ type: "text", text: "prompt" }] }],
+        cursorSidecars: {
+          requestContextCount: 1,
+          hasWorkspaceRules: false,
+        },
+      },
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "/workspace/project",
+        turns: [{ role: "assistant", blocks: [{ type: "text", text: "reply" }] }],
+        cursorSidecars: {
+          requestContextCount: 2,
+          checkpointCount: 6,
+          hasWorkspaceRules: true,
+        },
+      },
+    );
+
+    expect(merged.cursorSidecars).toEqual({
+      requestContextCount: 1,
+      checkpointCount: 6,
+      hasWorkspaceRules: false,
+    });
   });
 
   it("builds dense store turn stats aligned to user turns", () => {

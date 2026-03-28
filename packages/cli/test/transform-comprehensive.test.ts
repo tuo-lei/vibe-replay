@@ -571,6 +571,26 @@ describe("transform — metadata", () => {
     expect(replay.meta.stats.durationMs).toBe(42000);
   });
 
+  it("passes Cursor sidecars through to replay metadata", () => {
+    const replay = transformToReplay(
+      buildParsed({
+        cursorSidecars: {
+          requestContextCount: 2,
+          checkpointCount: 6,
+          hasWorkspaceRules: true,
+        },
+      }),
+      "cursor",
+      "~/project",
+    );
+
+    expect(replay.meta.cursorSidecars).toEqual({
+      requestContextCount: 2,
+      checkpointCount: 6,
+      hasWorkspaceRules: true,
+    });
+  });
+
   it("stats count scenes correctly", () => {
     const replay = transformToReplay(
       buildParsed({

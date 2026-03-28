@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { PrLink, TokenUsage, TurnStat } from "@vibe-replay/types";
+import type { CursorSidecars, PrLink, TokenUsage, TurnStat } from "@vibe-replay/types";
 import type { ContentBlock, ParsedTurn, SessionInfo } from "../../types.js";
 import type { ProviderParseResult } from "../types.js";
 
@@ -1198,6 +1198,7 @@ function extractCursorContextSummary(
   requestContexts: Record<string, any>[],
 ): {
   contextFiles?: string[];
+  requestContextCount?: number;
   hasRequestContextSidecars: boolean;
   hasCursorRules: boolean;
 } {
@@ -1205,6 +1206,7 @@ function extractCursorContextSummary(
   const seen = new Set<string>();
   let hasRequestContextSidecars = false;
   let hasCursorRules = false;
+  let requestContextCount = 0;
 
   for (const entry of entries) {
     for (const key of ["relevantFiles", "recentlyViewedFiles"] as const) {
@@ -1225,6 +1227,7 @@ function extractCursorContextSummary(
     if (!hasNonEmptyPayload) continue;
 
     hasRequestContextSidecars = true;
+    requestContextCount++;
     if (Array.isArray(context.cursorRules) && context.cursorRules.length > 0) {
       hasCursorRules = true;
     }
@@ -1243,6 +1246,7 @@ function extractCursorContextSummary(
 
   return {
     ...(files.length > 0 ? { contextFiles: files.slice(0, 200) } : {}),
+    ...(requestContextCount > 0 ? { requestContextCount } : {}),
     hasRequestContextSidecars,
     hasCursorRules,
   };
@@ -1262,6 +1266,14 @@ function loadCursorRequestContexts(db: any, sessionId: string): Record<string, a
     if (parsed) contexts.push(parsed);
   }
   return contexts;
+}
+
+function countCursorCheckpointEntries(db: any, sessionId: string): number {
+  const rows = db.exec("SELECT COUNT(*) FROM cursorDiskKV WHERE key LIKE ?", [
+    `checkpointId:${sessionId}:%`,
+  ]);
+  if (!rows.length || !rows[0].values.length) return 0;
+  return toNonNegativeInt(rows[0].values[0][0]);
 }
 
 function mergeUniqueStrings(...groups: Array<string[] | undefined>): string[] | undefined {
@@ -1298,6 +1310,7 @@ function mergeCursorParseResults(
       ? ["Context files are inferred from Cursor relevantFiles and request-context sidecars."]
       : undefined,
   );
+  const cursorSidecars = mergeCursorSidecars(primary.cursorSidecars, enrichment.cursorSidecars);
 
   return {
     ...primary,
@@ -1317,6 +1330,7 @@ function mergeCursorParseResults(
       : enrichment.contextFiles
         ? { contextFiles: enrichment.contextFiles }
         : {}),
+    ...(cursorSidecars ? { cursorSidecars } : {}),
     dataSourceInfo: primary.dataSourceInfo
       ? {
           ...primary.dataSourceInfo,
@@ -1325,6 +1339,27 @@ function mergeCursorParseResults(
         }
       : enrichment.dataSourceInfo,
   };
+}
+
+function mergeCursorSidecars(
+  primary: CursorSidecars | undefined,
+  enrichment: CursorSidecars | undefined,
+): CursorSidecars | undefined {
+  if (!primary && !enrichment) return undefined;
+
+  const merged: CursorSidecars = {
+    ...((primary?.requestContextCount ?? enrichment?.requestContextCount)
+      ? { requestContextCount: primary?.requestContextCount ?? enrichment?.requestContextCount }
+      : {}),
+    ...((primary?.checkpointCount ?? enrichment?.checkpointCount)
+      ? { checkpointCount: primary?.checkpointCount ?? enrichment?.checkpointCount }
+      : {}),
+    ...((primary?.hasWorkspaceRules ?? enrichment?.hasWorkspaceRules) !== undefined
+      ? { hasWorkspaceRules: primary?.hasWorkspaceRules ?? enrichment?.hasWorkspaceRules }
+      : {}),
+  };
+
+  return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
 function extractBubbleModelName(
@@ -1550,6 +1585,7 @@ async function parseCursorGlobalStateDb(
     const prLinks = extractCursorPrLinks(bubbleEntries);
     const apiErrors = extractCursorApiErrors(bubbleEntries);
     const contextSummary = extractCursorContextSummary(bubbleEntries, requestContexts);
+    const checkpointCount = countCursorCheckpointEntries(db, sessionId);
 
     const notes = ["cursorDiskKV keys: composerData:* + bubbleId:*"];
     if (!metrics.tokenUsage) {
@@ -1581,12 +1617,16 @@ async function parseCursorGlobalStateDb(
         "Context files are inferred from Cursor relevantFiles and request-context sidecars.",
       );
     }
-    if (contextSummary.hasRequestContextSidecars) {
-      notes.push("Session context was enriched from Cursor messageRequestContext sidecars.");
-    }
-    if (contextSummary.hasCursorRules) {
-      notes.push("Cursor request context included workspace rules.");
-    }
+    const cursorSidecars =
+      contextSummary.requestContextCount || checkpointCount > 0 || contextSummary.hasCursorRules
+        ? {
+            ...(contextSummary.requestContextCount
+              ? { requestContextCount: contextSummary.requestContextCount }
+              : {}),
+            ...(checkpointCount > 0 ? { checkpointCount } : {}),
+            ...(contextSummary.hasCursorRules ? { hasWorkspaceRules: true } : {}),
+          }
+        : undefined;
 
     return {
       sessionId,
@@ -1609,6 +1649,7 @@ async function parseCursorGlobalStateDb(
       ...(prLinks.length > 0 ? { prLinks } : {}),
       ...(apiErrors ? { apiErrors } : {}),
       ...(contextSummary.contextFiles ? { contextFiles: contextSummary.contextFiles } : {}),
+      ...(cursorSidecars ? { cursorSidecars } : {}),
       turns,
       dataSource: "global-state",
       dataSourceInfo: {

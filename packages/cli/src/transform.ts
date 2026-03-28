@@ -174,6 +174,7 @@ export function transformToReplay(
       ...(parsed.contextFiles && parsed.contextFiles.length > 0
         ? { contextFiles: parsed.contextFiles.map(redactPath) }
         : {}),
+      ...(parsed.cursorSidecars ? { cursorSidecars: parsed.cursorSidecars } : {}),
     },
     scenes,
   };

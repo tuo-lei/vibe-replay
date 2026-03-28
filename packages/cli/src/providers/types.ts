@@ -1,4 +1,4 @@
-import type { PrLink, TokenUsage, TurnStat } from "@vibe-replay/types";
+import type { CursorSidecars, PrLink, TokenUsage, TurnStat } from "@vibe-replay/types";
 import type { DataSource, DataSourceInfo, ParsedTurn, SessionInfo } from "../types.js";
 
 export type { DataSource, DataSourceInfo, TokenUsage };
@@ -57,4 +57,5 @@ export interface ProviderParseResult {
   }>;
   trackedFiles?: string[];
   contextFiles?: string[];
+  cursorSidecars?: CursorSidecars;
 }

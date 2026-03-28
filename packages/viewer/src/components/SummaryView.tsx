@@ -399,6 +399,39 @@ export default function SummaryView({ session }: Props) {
           </div>
         )}
 
+        {meta.provider === "cursor" &&
+          meta.cursorSidecars &&
+          (meta.cursorSidecars.requestContextCount ||
+            meta.cursorSidecars.checkpointCount ||
+            meta.cursorSidecars.hasWorkspaceRules) && (
+            <div className="rounded border border-terminal-border-subtle bg-terminal-surface/40 px-3 py-2">
+              <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-1">
+                Cursor Sidecars
+              </div>
+              <div className="space-y-0.5 text-xs font-mono text-terminal-dim">
+                {meta.cursorSidecars.requestContextCount ? (
+                  <div>
+                    <span className="text-terminal-green">request context:</span>{" "}
+                    {meta.cursorSidecars.requestContextCount} sidecar
+                    {meta.cursorSidecars.requestContextCount === 1 ? "" : "s"}
+                  </div>
+                ) : null}
+                {meta.cursorSidecars.hasWorkspaceRules ? (
+                  <div>
+                    <span className="text-terminal-purple">workspace rules:</span> included
+                  </div>
+                ) : null}
+                {meta.cursorSidecars.checkpointCount ? (
+                  <div>
+                    <span className="text-terminal-orange">checkpoint state:</span>{" "}
+                    {meta.cursorSidecars.checkpointCount} entr
+                    {meta.cursorSidecars.checkpointCount === 1 ? "y" : "ies"}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          )}
+
         {/* Overview: Key Metrics + Duration/Cost + Tokens */}
         <div>
           <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-3">
