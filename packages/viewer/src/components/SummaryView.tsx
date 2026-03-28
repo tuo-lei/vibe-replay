@@ -598,7 +598,9 @@ export default function SummaryView({ session }: Props) {
                       .
                     </div>
                     <div className="text-terminal-dimmer">
-                      All errors were automatically retried and resolved.
+                      {maxRetry > 0
+                        ? "Cursor automatically retried some of these errors."
+                        : "These errors were observed in local Cursor metadata."}
                     </div>
                   </>
                 );
@@ -630,7 +632,7 @@ export default function SummaryView({ session }: Props) {
         {meta.contextFiles && meta.contextFiles.length > 0 && (
           <div>
             <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
-              Context Files ({meta.contextFiles.length})
+              Context Files (inferred, {meta.contextFiles.length})
             </div>
             <div className="space-y-0.5 max-h-[200px] overflow-y-auto">
               {meta.contextFiles.map((f) => (

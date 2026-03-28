@@ -666,6 +666,9 @@ export async function parseCursorSqlite(
 ): Promise<ProviderParseResult | null> {
   const storeResult = await parseCursorStoreDb(sessionId);
   if (storeResult) {
+    // sql.js needs the whole DB loaded into memory, so the first global-state probe is expensive.
+    // Keep the cheap composer-key existence check below so store-backed sessions avoid the full
+    // enrichment parse when they do not actually exist in state.vscdb.
     const globalStateDb = await openGlobalStateDb();
     if (!globalStateDb || !hasGlobalStateSession(globalStateDb.db, sessionId)) {
       return storeResult;
@@ -1298,14 +1301,18 @@ function mergeCursorParseResults(
     primary.dataSourceInfo?.supplements,
     enrichment.dataSourceInfo?.sources,
   );
+  const hasMeaningfulEnrichment =
+    (!!enrichment.gitBranch && !primary.gitBranch) ||
+    (!!enrichment.gitBranches?.length && !primary.gitBranches?.length) ||
+    (!!enrichment.prLinks?.length && !primary.prLinks?.length) ||
+    (!!enrichment.apiErrors?.length && !primary.apiErrors?.length) ||
+    (!!enrichment.contextFiles?.length && !primary.contextFiles?.length) ||
+    (!!enrichment.cursorSidecars && !primary.cursorSidecars);
   const notes = mergeUniqueStrings(
     primary.dataSourceInfo?.notes,
-    primary.gitBranch ||
-      primary.prLinks?.length ||
-      primary.apiErrors?.length ||
-      primary.contextFiles?.length
-      ? undefined
-      : ["Session metadata was enriched from Cursor global-state payloads."],
+    hasMeaningfulEnrichment
+      ? ["Session metadata was enriched from Cursor global-state payloads."]
+      : undefined,
     enrichment.contextFiles?.length
       ? ["Context files are inferred from Cursor relevantFiles and request-context sidecars."]
       : undefined,

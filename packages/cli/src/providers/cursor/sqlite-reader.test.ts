@@ -391,6 +391,39 @@ describe("cursor sqlite metrics helpers", () => {
     ]);
   });
 
+  it("does not add enrichment notes when global-state contributes no merged metadata", () => {
+    const merged = __testables.mergeCursorParseResults(
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "/workspace/project",
+        turns: [{ role: "user", blocks: [{ type: "text", text: "prompt" }] }],
+        dataSource: "sqlite",
+        dataSourceInfo: {
+          primary: "sqlite",
+          sources: ["cursor/chats/<workspace-hash>/<session-id>/store.db"],
+          notes: ["Token usage is unavailable for this Cursor SQLite session."],
+        },
+      },
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "/workspace/project",
+        turns: [{ role: "assistant", blocks: [{ type: "text", text: "reply" }] }],
+        dataSource: "global-state",
+        dataSourceInfo: {
+          primary: "global-state",
+          sources: ["cursor/user/globalStorage/state.vscdb"],
+          notes: ["Duration is unavailable for this Cursor global-state session."],
+        },
+      },
+    );
+
+    expect(merged.dataSourceInfo?.notes).toEqual([
+      "Token usage is unavailable for this Cursor SQLite session.",
+    ]);
+  });
+
   it("normalizes file URIs in Cursor context files", () => {
     const summary = __testables.extractCursorContextSummary(
       [
