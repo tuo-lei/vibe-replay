@@ -41,6 +41,41 @@ function classifyBash(command: string): string {
   return "other";
 }
 
+function formatDataSourceLabel(source?: string): string {
+  if (!source) return "unknown";
+  const labels: Record<string, string> = {
+    sqlite: "SQLite (store.db)",
+    "global-state": "SQLite (global state.vscdb)",
+    jsonl: "JSONL transcript",
+    "jsonl+tools": "JSONL + agent-tools",
+  };
+  return labels[source] || source;
+}
+
+function getOrderedBranchChain(gitBranch?: string, gitBranches?: string[]): string[] | undefined {
+  if (!gitBranch) return undefined;
+  if (!gitBranches || gitBranches.length <= 1) return [gitBranch];
+
+  const ordered = [...gitBranches];
+  const currentIdx = ordered.lastIndexOf(gitBranch);
+  if (currentIdx >= 0 && currentIdx !== ordered.length - 1) {
+    ordered.splice(currentIdx, 1);
+    ordered.push(gitBranch);
+  }
+  return ordered;
+}
+
+function formatBranchBadge(gitBranch?: string, gitBranches?: string[]): string | undefined {
+  const ordered = getOrderedBranchChain(gitBranch, gitBranches);
+  if (!ordered) return undefined;
+  return ordered.length > 1 ? `${ordered[0]} → ${ordered[ordered.length - 1]}` : ordered[0];
+}
+
+function formatBranchTooltip(gitBranch?: string, gitBranches?: string[]): string | undefined {
+  const ordered = getOrderedBranchChain(gitBranch, gitBranches);
+  return ordered?.join(" → ");
+}
+
 /** Hook for chart hover: tracks which turn index the mouse is over */
 function useChartHover(turnCount: number) {
   const [hovered, setHovered] = useState<number | null>(null);
@@ -300,11 +335,9 @@ export default function SummaryView({ session }: Props) {
           {meta.gitBranch && (
             <span
               className="shrink-0 text-[10px] font-mono text-terminal-purple px-1.5 py-0.5 rounded bg-terminal-purple/10 border border-terminal-purple/20"
-              title={meta.gitBranches ? meta.gitBranches.join(" → ") : undefined}
+              title={formatBranchTooltip(meta.gitBranch, meta.gitBranches)}
             >
-              {meta.gitBranches && meta.gitBranches.length > 1
-                ? `${meta.gitBranches[0]} → ${meta.gitBranch}`
-                : meta.gitBranch}
+              {formatBranchBadge(meta.gitBranch, meta.gitBranches)}
             </span>
           )}
           {meta.permissionMode === "bypassPermissions" && (
@@ -328,6 +361,76 @@ export default function SummaryView({ session }: Props) {
             </div>
           </div>
         )}
+
+        {(meta.dataSource || meta.dataSourceInfo) && (
+          <div className="rounded border border-terminal-border-subtle bg-terminal-surface/40 px-3 py-2">
+            <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-1">
+              Data Source
+            </div>
+            <div className="text-xs font-mono text-terminal-text">
+              {formatDataSourceLabel(meta.dataSourceInfo?.primary || meta.dataSource)}
+            </div>
+            {meta.dataSourceInfo?.sources && meta.dataSourceInfo.sources.length > 0 && (
+              <div className="mt-1 space-y-0.5">
+                {meta.dataSourceInfo.sources.map((source) => (
+                  <div
+                    key={source}
+                    className="text-xs font-mono text-terminal-dim truncate"
+                    title={source}
+                  >
+                    <span className="text-terminal-green">source:</span> {source}
+                  </div>
+                ))}
+              </div>
+            )}
+            {meta.dataSourceInfo?.supplements && meta.dataSourceInfo.supplements.length > 0 && (
+              <div className="mt-1 space-y-0.5">
+                {meta.dataSourceInfo.supplements.map((source) => (
+                  <div
+                    key={source}
+                    className="text-xs font-mono text-terminal-dim truncate"
+                    title={source}
+                  >
+                    <span className="text-terminal-purple">supplement:</span> {source}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {meta.provider === "cursor" &&
+          meta.cursorSidecars &&
+          (meta.cursorSidecars.requestContextCount ||
+            meta.cursorSidecars.checkpointCount ||
+            meta.cursorSidecars.hasWorkspaceRules) && (
+            <div className="rounded border border-terminal-border-subtle bg-terminal-surface/40 px-3 py-2">
+              <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-1">
+                Cursor Sidecars
+              </div>
+              <div className="space-y-0.5 text-xs font-mono text-terminal-dim">
+                {meta.cursorSidecars.requestContextCount ? (
+                  <div>
+                    <span className="text-terminal-green">request context:</span>{" "}
+                    {meta.cursorSidecars.requestContextCount} sidecar
+                    {meta.cursorSidecars.requestContextCount === 1 ? "" : "s"}
+                  </div>
+                ) : null}
+                {meta.cursorSidecars.hasWorkspaceRules ? (
+                  <div>
+                    <span className="text-terminal-purple">workspace rules:</span> included
+                  </div>
+                ) : null}
+                {meta.cursorSidecars.checkpointCount ? (
+                  <div>
+                    <span className="text-terminal-orange">checkpoint state:</span>{" "}
+                    {meta.cursorSidecars.checkpointCount} entr
+                    {meta.cursorSidecars.checkpointCount === 1 ? "y" : "ies"}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          )}
 
         {/* Overview: Key Metrics + Duration/Cost + Tokens */}
         <div>
@@ -495,7 +598,9 @@ export default function SummaryView({ session }: Props) {
                       .
                     </div>
                     <div className="text-terminal-dimmer">
-                      All errors were automatically retried and resolved.
+                      {maxRetry > 0
+                        ? "Cursor automatically retried some of these errors."
+                        : "These errors were observed in local Cursor metadata."}
                     </div>
                   </>
                 );
@@ -512,6 +617,25 @@ export default function SummaryView({ session }: Props) {
             </div>
             <div className="space-y-0.5 max-h-[200px] overflow-y-auto">
               {meta.trackedFiles.map((f) => (
+                <div
+                  key={f}
+                  className="text-[10px] font-mono text-terminal-dim truncate px-2 py-0.5 rounded hover:bg-terminal-surface-hover"
+                  title={f}
+                >
+                  {f}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {meta.contextFiles && meta.contextFiles.length > 0 && (
+          <div>
+            <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
+              Context Files (inferred, {meta.contextFiles.length})
+            </div>
+            <div className="space-y-0.5 max-h-[200px] overflow-y-auto">
+              {meta.contextFiles.map((f) => (
                 <div
                   key={f}
                   className="text-[10px] font-mono text-terminal-dim truncate px-2 py-0.5 rounded hover:bg-terminal-surface-hover"

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { TokenUsage, TurnStat } from "@vibe-replay/types";
+import type { CursorSidecars, PrLink, TokenUsage, TurnStat } from "@vibe-replay/types";
 import type { ContentBlock, ParsedTurn, SessionInfo } from "../../types.js";
 import type { ProviderParseResult } from "../types.js";
 
@@ -10,6 +10,7 @@ const CURSOR_CHATS_DIR = join(homedir(), ".cursor", "chats");
 const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const MIN_STORE_DB_SIZE = 8192;
+const MAX_CURSOR_REQUEST_CONTEXT_ROWS = 500;
 
 function createRetryableInit<T>(factory: () => Promise<T>): () => Promise<T> {
   let promise: Promise<T> | null = null;
@@ -28,6 +29,15 @@ const getSqlJs = createRetryableInit(async () => {
   const mod = await import("sql.js");
   return mod.default();
 });
+
+interface CachedSqlJsDb {
+  dbPath: string;
+  db: any;
+  size: number;
+  mtimeMs: number;
+}
+
+let cachedGlobalStateDb: CachedSqlJsDb | null = null;
 
 export function workspaceHash(absolutePath: string): string {
   return createHash("md5").update(absolutePath).digest("hex");
@@ -63,6 +73,50 @@ async function findGlobalStateDb(): Promise<string | null> {
     if (s?.isFile() && s.size >= MIN_STORE_DB_SIZE) return candidate;
   }
   return null;
+}
+
+async function openGlobalStateDb(): Promise<CachedSqlJsDb | null> {
+  const dbPath = await findGlobalStateDb();
+  if (!dbPath) return null;
+
+  const dbStat = await stat(dbPath).catch(() => null);
+  if (!dbStat?.isFile() || dbStat.size < MIN_STORE_DB_SIZE) return null;
+
+  if (
+    cachedGlobalStateDb &&
+    cachedGlobalStateDb.dbPath === dbPath &&
+    cachedGlobalStateDb.size === dbStat.size &&
+    cachedGlobalStateDb.mtimeMs === dbStat.mtimeMs
+  ) {
+    return cachedGlobalStateDb;
+  }
+
+  let SQL: any;
+  try {
+    SQL = await getSqlJs();
+  } catch {
+    return null;
+  }
+
+  const dbBuffer = await readFile(dbPath).catch(() => null);
+  if (!dbBuffer) return null;
+
+  const db = new SQL.Database(dbBuffer);
+  cachedGlobalStateDb?.db.close();
+  cachedGlobalStateDb = {
+    dbPath,
+    db,
+    size: dbStat.size,
+    mtimeMs: dbStat.mtimeMs,
+  };
+  return cachedGlobalStateDb;
+}
+
+function hasGlobalStateSession(db: any, sessionId: string): boolean {
+  const rows = db.exec("SELECT 1 FROM cursorDiskKV WHERE key = ? LIMIT 1", [
+    `composerData:${sessionId}`,
+  ]);
+  return rows.length > 0 && rows[0].values.length > 0;
 }
 
 /**
@@ -464,20 +518,9 @@ export async function discoverGlobalStateOnlySessions(
   const sessions: SessionInfo[] = [];
   const unknownProjectSessions: SessionInfo[] = [];
 
-  const dbPath = await findGlobalStateDb();
-  if (!dbPath) return { sessions, sessionIds };
-
-  let SQL: any;
-  try {
-    SQL = await getSqlJs();
-  } catch {
-    return { sessions, sessionIds };
-  }
-
-  const dbBuffer = await readFile(dbPath).catch(() => null);
-  if (!dbBuffer) return { sessions, sessionIds };
-
-  const db = new SQL.Database(dbBuffer);
+  const globalStateDb = await openGlobalStateDb();
+  if (!globalStateDb) return { sessions, sessionIds };
+  const { dbPath, db } = globalStateDb;
 
   try {
     const rows = db.exec("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'");
@@ -536,8 +579,6 @@ export async function discoverGlobalStateOnlySessions(
     }
   } catch {
     // no-op: ignore malformed db rows and return what we have
-  } finally {
-    db.close();
   }
 
   // Keep only the most recent sessions per inferred project.
@@ -624,7 +665,19 @@ export async function parseCursorSqlite(
   sessionId: string,
 ): Promise<ProviderParseResult | null> {
   const storeResult = await parseCursorStoreDb(sessionId);
-  if (storeResult) return storeResult;
+  if (storeResult) {
+    // sql.js needs the whole DB loaded into memory, so the first global-state probe is expensive.
+    // Keep the cheap composer-key existence check below so store-backed sessions avoid the full
+    // enrichment parse when they do not actually exist in state.vscdb.
+    const globalStateDb = await openGlobalStateDb();
+    if (!globalStateDb || !hasGlobalStateSession(globalStateDb.db, sessionId)) {
+      return storeResult;
+    }
+    const globalStateResult = await parseCursorGlobalStateDb(sessionId, globalStateDb);
+    return globalStateResult
+      ? mergeCursorParseResults(storeResult, globalStateResult)
+      : storeResult;
+  }
   return parseCursorGlobalStateDb(sessionId);
 }
 
@@ -863,6 +916,459 @@ interface GlobalStateTurnEntry {
   bubble: Record<string, any>;
 }
 
+interface GlobalStateBubbleEntry {
+  bubble: Record<string, any>;
+  turnTimestamp?: string;
+}
+
+function branchNameFromCursorValue(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : undefined;
+  }
+  if (!value || typeof value !== "object") return undefined;
+  const obj = value as Record<string, any>;
+  return (
+    branchNameFromCursorValue(obj.branchName) ||
+    branchNameFromCursorValue(obj.name) ||
+    branchNameFromCursorValue(obj.branch) ||
+    branchNameFromCursorValue(obj.ref)
+  );
+}
+
+function addUniqueBranch(branches: string[], seen: Set<string>, value: unknown): void {
+  const branch = branchNameFromCursorValue(value);
+  if (!branch || seen.has(branch)) return;
+  seen.add(branch);
+  branches.push(branch);
+}
+
+function sortCursorBranches(branches: unknown[]): unknown[] {
+  if (
+    branches.every(
+      (branch) =>
+        branch &&
+        typeof branch === "object" &&
+        Number.isFinite((branch as Record<string, any>).lastInteractionAt),
+    )
+  ) {
+    return [...branches].sort(
+      (a, b) =>
+        Number((a as Record<string, any>).lastInteractionAt) -
+        Number((b as Record<string, any>).lastInteractionAt),
+    );
+  }
+  return branches;
+}
+
+function extractCursorBranchMetadata(composer: Record<string, any>): {
+  gitBranch?: string;
+  gitBranches?: string[];
+} {
+  const orderedBranches: string[] = [];
+  const seen = new Set<string>();
+
+  // Keep a stable timeline-ish order: created -> known branches -> committed/PR -> active.
+  addUniqueBranch(orderedBranches, seen, composer.createdOnBranch);
+  if (Array.isArray(composer.branches)) {
+    for (const branch of sortCursorBranches(composer.branches)) {
+      addUniqueBranch(orderedBranches, seen, branch);
+    }
+  }
+  addUniqueBranch(orderedBranches, seen, composer.committedToBranch);
+  addUniqueBranch(orderedBranches, seen, composer.prBranchName);
+  addUniqueBranch(orderedBranches, seen, composer.activeBranch);
+
+  const gitBranch =
+    branchNameFromCursorValue(composer.activeBranch) ||
+    branchNameFromCursorValue(composer.committedToBranch) ||
+    orderedBranches[orderedBranches.length - 1];
+
+  return {
+    ...(gitBranch ? { gitBranch } : {}),
+    ...(orderedBranches.length > 1 ? { gitBranches: orderedBranches } : {}),
+  };
+}
+
+function extractRepositoryFromPrUrl(url: string): string {
+  const match = url.match(/github\.com\/([^/]+\/[^/]+)\/pull\/\d+/i);
+  return match ? match[1] : "";
+}
+
+function extractCursorPrLinks(entries: GlobalStateBubbleEntry[]): PrLink[] {
+  const links: PrLink[] = [];
+  const seenUrls = new Set<string>();
+
+  for (const entry of entries) {
+    const pullRequests = entry.bubble.pullRequests;
+    if (!Array.isArray(pullRequests)) continue;
+
+    for (const pr of pullRequests) {
+      if (!pr || typeof pr !== "object") continue;
+      const prObj = pr as Record<string, any>;
+      const prUrl =
+        typeof prObj.prUrl === "string"
+          ? prObj.prUrl
+          : typeof prObj.url === "string"
+            ? prObj.url
+            : typeof prObj.htmlUrl === "string"
+              ? prObj.htmlUrl
+              : typeof prObj.html_url === "string"
+                ? prObj.html_url
+                : "";
+      if (!prUrl || seenUrls.has(prUrl)) continue;
+
+      let prNumber = toNonNegativeInt(prObj.prNumber ?? prObj.number);
+      if (prNumber <= 0) {
+        const match = prUrl.match(/\/pull\/(\d+)(?:[/?#]|$)/);
+        if (match) prNumber = Number.parseInt(match[1], 10);
+      }
+      if (!Number.isFinite(prNumber) || prNumber <= 0) continue;
+
+      const prRepository =
+        (typeof prObj.prRepository === "string" && prObj.prRepository) ||
+        (typeof prObj.repository === "string" && prObj.repository) ||
+        (typeof prObj.repoFullName === "string" && prObj.repoFullName) ||
+        extractRepositoryFromPrUrl(prUrl);
+
+      seenUrls.add(prUrl);
+      links.push({
+        prNumber,
+        prUrl,
+        prRepository,
+      });
+    }
+  }
+
+  return links;
+}
+
+function extractCursorApiErrors(
+  entries: GlobalStateBubbleEntry[],
+): ProviderParseResult["apiErrors"] | undefined {
+  const apiErrors: NonNullable<ProviderParseResult["apiErrors"]> = [];
+  const seenKeys = new Set<string>();
+
+  for (const entry of entries) {
+    const rawDetails = entry.bubble.errorDetails;
+    if (!rawDetails) continue;
+
+    const details =
+      typeof rawDetails === "string"
+        ? (parseJson<Record<string, any>>(rawDetails) ?? { message: rawDetails })
+        : typeof rawDetails === "object"
+          ? (rawDetails as Record<string, any>)
+          : null;
+    if (!details) continue;
+
+    const nestedError =
+      typeof details.error === "string"
+        ? parseJson<Record<string, any>>(details.error)
+        : typeof details.error === "object"
+          ? (details.error as Record<string, any>)
+          : undefined;
+
+    const statusCode =
+      toNonNegativeInt(details.statusCode) ||
+      toNonNegativeInt(details.status) ||
+      toNonNegativeInt(nestedError?.statusCode) ||
+      toNonNegativeInt(nestedError?.status) ||
+      undefined;
+
+    const errorType =
+      (typeof nestedError?.error === "string" && nestedError.error) ||
+      (typeof nestedError?.type === "string" && nestedError.type) ||
+      (typeof details.type === "string" && details.type) ||
+      undefined;
+
+    const retryAttempt =
+      toNonNegativeInt(details.retryAttempt) ||
+      toNonNegativeInt(entry.bubble.retryAttempt) ||
+      undefined;
+
+    const timestamp =
+      toIsoTimestamp(entry.bubble.createdAt) ||
+      toIsoTimestamp(entry.bubble.lastUpdatedAt) ||
+      entry.turnTimestamp ||
+      new Date().toISOString();
+
+    const dedupeKey = `${details.generationUUID || ""}::${timestamp}::${statusCode || ""}::${errorType || ""}::${details.message || ""}`;
+    if (seenKeys.has(dedupeKey)) continue;
+    seenKeys.add(dedupeKey);
+
+    apiErrors.push({
+      timestamp,
+      ...(statusCode ? { statusCode } : {}),
+      ...(errorType ? { errorType } : {}),
+      ...(retryAttempt ? { retryAttempt } : {}),
+    });
+  }
+
+  return apiErrors.length > 0 ? apiErrors : undefined;
+}
+
+function normalizeCursorContextFile(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  let trimmed = value.trim();
+  if (!trimmed || trimmed.includes("\n")) return undefined;
+  if (/^file:\/\//i.test(trimmed)) {
+    trimmed = trimmed.replace(/^file:\/\/(?:localhost)?/i, "");
+    try {
+      trimmed = decodeURIComponent(trimmed);
+    } catch {
+      return undefined;
+    }
+    trimmed = trimmed.replace(/^\/([a-z]:\/)/i, "$1");
+  }
+  return trimmed;
+}
+
+function extractCursorContextFileFromObject(value: unknown): string | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const obj = value as Record<string, any>;
+  const direct =
+    normalizeCursorContextFile(obj.filePath) ||
+    normalizeCursorContextFile(obj.path) ||
+    normalizeCursorContextFile(obj.fsPath) ||
+    normalizeCursorContextFile(obj.uri) ||
+    normalizeCursorContextFile(obj.relativeWorkspacePath) ||
+    normalizeCursorContextFile(obj.relativePath);
+  if (direct) return direct;
+
+  const name = normalizeCursorContextFile(obj.name);
+  if (name && (name.includes("/") || name.includes(".") || name.startsWith("~"))) {
+    return name;
+  }
+  return undefined;
+}
+
+function addUniqueContextFile(files: string[], seen: Set<string>, value: unknown): void {
+  const file =
+    normalizeCursorContextFile(value) || extractCursorContextFileFromObject(value) || undefined;
+  if (!file || seen.has(file)) return;
+  seen.add(file);
+  files.push(file);
+}
+
+function addContextFilesFromAttachedFolderResult(
+  files: string[],
+  seen: Set<string>,
+  value: unknown,
+): void {
+  const parsed =
+    typeof value === "string"
+      ? parseJson<Record<string, any>>(value)
+      : value && typeof value === "object"
+        ? (value as Record<string, any>)
+        : undefined;
+  if (!parsed) return;
+
+  const directory =
+    normalizeCursorContextFile(parsed.directoryRelativeWorkspacePath) ||
+    normalizeCursorContextFile(parsed.directoryPath);
+
+  if (Array.isArray(parsed.files)) {
+    for (const file of parsed.files) {
+      const name =
+        file && typeof file === "object"
+          ? normalizeCursorContextFile((file as Record<string, any>).name)
+          : normalizeCursorContextFile(file);
+      if (directory && name) {
+        addUniqueContextFile(files, seen, join(directory, name));
+        continue;
+      }
+
+      const direct =
+        file && typeof file === "object"
+          ? normalizeCursorContextFile((file as Record<string, any>).filePath) ||
+            normalizeCursorContextFile((file as Record<string, any>).path) ||
+            normalizeCursorContextFile((file as Record<string, any>).fsPath) ||
+            normalizeCursorContextFile((file as Record<string, any>).uri) ||
+            normalizeCursorContextFile((file as Record<string, any>).relativeWorkspacePath) ||
+            normalizeCursorContextFile((file as Record<string, any>).relativePath)
+          : undefined;
+      if (direct) {
+        addUniqueContextFile(files, seen, direct);
+      } else if (name) {
+        addUniqueContextFile(files, seen, name);
+      }
+    }
+  }
+}
+
+function extractCursorContextSummary(
+  entries: GlobalStateBubbleEntry[],
+  requestContexts: Record<string, any>[],
+): {
+  contextFiles?: string[];
+  requestContextCount?: number;
+  hasRequestContextSidecars: boolean;
+  hasCursorRules: boolean;
+} {
+  const files: string[] = [];
+  const seen = new Set<string>();
+  let hasRequestContextSidecars = false;
+  let hasCursorRules = false;
+  let requestContextCount = 0;
+
+  for (const entry of entries) {
+    for (const key of ["relevantFiles", "recentlyViewedFiles"] as const) {
+      if (!Array.isArray(entry.bubble[key])) continue;
+      for (const item of entry.bubble[key]) {
+        addUniqueContextFile(files, seen, item);
+      }
+    }
+  }
+
+  for (const context of requestContexts) {
+    const hasNonEmptyPayload = [
+      context.terminalFiles,
+      context.cursorRules,
+      context.attachedFoldersListDirResults,
+      context.summarizedComposers,
+    ].some((value) => Array.isArray(value) && value.length > 0);
+    if (!hasNonEmptyPayload) continue;
+
+    hasRequestContextSidecars = true;
+    requestContextCount++;
+    if (Array.isArray(context.cursorRules) && context.cursorRules.length > 0) {
+      hasCursorRules = true;
+    }
+
+    if (Array.isArray(context.terminalFiles)) {
+      for (const item of context.terminalFiles) {
+        addUniqueContextFile(files, seen, item);
+      }
+    }
+    if (Array.isArray(context.attachedFoldersListDirResults)) {
+      for (const item of context.attachedFoldersListDirResults) {
+        addContextFilesFromAttachedFolderResult(files, seen, item);
+      }
+    }
+  }
+
+  return {
+    ...(files.length > 0 ? { contextFiles: files.slice(0, 200) } : {}),
+    ...(requestContextCount > 0 ? { requestContextCount } : {}),
+    hasRequestContextSidecars,
+    hasCursorRules,
+  };
+}
+
+function loadCursorRequestContexts(db: any, sessionId: string): Record<string, any>[] {
+  const rows = db.exec(
+    `SELECT value FROM cursorDiskKV WHERE key LIKE ? LIMIT ${MAX_CURSOR_REQUEST_CONTEXT_ROWS}`,
+    [`messageRequestContext:${sessionId}:%`],
+  );
+  if (!rows.length) return [];
+
+  const contexts: Record<string, any>[] = [];
+  for (const row of rows[0].values) {
+    const raw = valueToString(row[0]);
+    const parsed = parseJson<Record<string, any>>(raw);
+    if (parsed) contexts.push(parsed);
+  }
+  return contexts;
+}
+
+function countCursorCheckpointEntries(db: any, sessionId: string): number {
+  const rows = db.exec("SELECT COUNT(*) FROM cursorDiskKV WHERE key LIKE ?", [
+    `checkpointId:${sessionId}:%`,
+  ]);
+  if (!rows.length || !rows[0].values.length) return 0;
+  return toNonNegativeInt(rows[0].values[0][0]);
+}
+
+function mergeUniqueStrings(...groups: Array<string[] | undefined>): string[] | undefined {
+  const merged: string[] = [];
+  const seen = new Set<string>();
+  for (const group of groups) {
+    if (!group) continue;
+    for (const item of group) {
+      if (!item || seen.has(item)) continue;
+      seen.add(item);
+      merged.push(item);
+    }
+  }
+  return merged.length > 0 ? merged : undefined;
+}
+
+function mergeCursorParseResults(
+  primary: ProviderParseResult,
+  enrichment: ProviderParseResult,
+): ProviderParseResult {
+  const supplements = mergeUniqueStrings(
+    primary.dataSourceInfo?.supplements,
+    enrichment.dataSourceInfo?.sources,
+  );
+  const hasMeaningfulEnrichment =
+    (!!enrichment.gitBranch && !primary.gitBranch) ||
+    (!!enrichment.gitBranches?.length && !primary.gitBranches?.length) ||
+    (!!enrichment.prLinks?.length && !primary.prLinks?.length) ||
+    (!!enrichment.apiErrors?.length && !primary.apiErrors?.length) ||
+    (!!enrichment.contextFiles?.length && !primary.contextFiles?.length) ||
+    (!!enrichment.cursorSidecars && !primary.cursorSidecars);
+  const notes = mergeUniqueStrings(
+    primary.dataSourceInfo?.notes,
+    hasMeaningfulEnrichment
+      ? ["Session metadata was enriched from Cursor global-state payloads."]
+      : undefined,
+    enrichment.contextFiles?.length
+      ? ["Context files are inferred from Cursor relevantFiles and request-context sidecars."]
+      : undefined,
+  );
+  const cursorSidecars = mergeCursorSidecars(primary.cursorSidecars, enrichment.cursorSidecars);
+
+  return {
+    ...primary,
+    cwd: primary.cwd || enrichment.cwd,
+    ...(primary.gitBranch ? {} : enrichment.gitBranch ? { gitBranch: enrichment.gitBranch } : {}),
+    ...(primary.gitBranches
+      ? {}
+      : enrichment.gitBranches
+        ? { gitBranches: enrichment.gitBranches }
+        : {}),
+    ...(primary.prLinks ? {} : enrichment.prLinks ? { prLinks: enrichment.prLinks } : {}),
+    ...(primary.apiErrors ? {} : enrichment.apiErrors ? { apiErrors: enrichment.apiErrors } : {}),
+    // store.db is currently the primary replay source and does not emit inferred context files.
+    // If that changes, revisit this precedence rule instead of silently dropping enrichment files.
+    ...(primary.contextFiles
+      ? {}
+      : enrichment.contextFiles
+        ? { contextFiles: enrichment.contextFiles }
+        : {}),
+    ...(cursorSidecars ? { cursorSidecars } : {}),
+    dataSourceInfo: primary.dataSourceInfo
+      ? {
+          ...primary.dataSourceInfo,
+          ...(supplements ? { supplements } : {}),
+          ...(notes ? { notes } : {}),
+        }
+      : enrichment.dataSourceInfo,
+  };
+}
+
+function mergeCursorSidecars(
+  primary: CursorSidecars | undefined,
+  enrichment: CursorSidecars | undefined,
+): CursorSidecars | undefined {
+  if (!primary && !enrichment) return undefined;
+
+  const merged: CursorSidecars = {
+    ...((primary?.requestContextCount ?? enrichment?.requestContextCount)
+      ? { requestContextCount: primary?.requestContextCount ?? enrichment?.requestContextCount }
+      : {}),
+    ...((primary?.checkpointCount ?? enrichment?.checkpointCount)
+      ? { checkpointCount: primary?.checkpointCount ?? enrichment?.checkpointCount }
+      : {}),
+    ...((primary?.hasWorkspaceRules ?? enrichment?.hasWorkspaceRules) !== undefined
+      ? { hasWorkspaceRules: primary?.hasWorkspaceRules ?? enrichment?.hasWorkspaceRules }
+      : {}),
+  };
+
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
 function extractBubbleModelName(
   bubble: Record<string, any>,
   fallbackModel: string | undefined,
@@ -1010,21 +1516,13 @@ function bubbleToTurn(bubble: Record<string, any>): ParsedTurn | null {
   };
 }
 
-async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderParseResult | null> {
-  const dbPath = await findGlobalStateDb();
-  if (!dbPath) return null;
-
-  let SQL: any;
-  try {
-    SQL = await getSqlJs();
-  } catch {
-    return null;
-  }
-
-  const dbBuffer = await readFile(dbPath).catch(() => null);
-  if (!dbBuffer) return null;
-
-  const db = new SQL.Database(dbBuffer);
+async function parseCursorGlobalStateDb(
+  sessionId: string,
+  globalStateDb?: CachedSqlJsDb,
+): Promise<ProviderParseResult | null> {
+  const resolvedGlobalStateDb = globalStateDb ?? (await openGlobalStateDb());
+  if (!resolvedGlobalStateDb) return null;
+  const { db } = resolvedGlobalStateDb;
 
   try {
     const composerRows = db.exec("SELECT value FROM cursorDiskKV WHERE key = ?", [
@@ -1040,6 +1538,7 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
     const headers = composer.fullConversationHeadersOnly as any[];
 
     const entries: GlobalStateTurnEntry[] = [];
+    const bubbleEntries: GlobalStateBubbleEntry[] = [];
     const bubbleStmt = db.prepare("SELECT value FROM cursorDiskKV WHERE key = ?");
     for (const header of headers) {
       const bubbleId =
@@ -1054,6 +1553,13 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
           const rawBubble = valueToString(bubbleStmt.get()[0]);
           const bubble = parseJson<Record<string, any>>(rawBubble);
           if (bubble) {
+            bubbleEntries.push({
+              bubble,
+              turnTimestamp:
+                toIsoTimestamp(bubble.createdAt) ||
+                toIsoTimestamp(bubble.lastUpdatedAt) ||
+                undefined,
+            });
             const turn = bubbleToTurn(bubble);
             if (turn) entries.push({ turn, bubble });
           }
@@ -1076,11 +1582,17 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
       typeof composer.modelConfig.modelName === "string"
         ? composer.modelConfig.modelName
         : undefined;
+    const requestContexts = loadCursorRequestContexts(db, sessionId);
 
     const startTime = toIsoTimestamp(composer.createdAt);
     const endTime = toIsoTimestamp(composer.lastUpdatedAt);
     const sessionTokenUsage = tokenUsageFromCursorTokenCount(composer.tokenCount);
     const metrics = buildGlobalStateMetrics(entries, modelName, sessionTokenUsage);
+    const branchMeta = extractCursorBranchMetadata(composer);
+    const prLinks = extractCursorPrLinks(bubbleEntries);
+    const apiErrors = extractCursorApiErrors(bubbleEntries);
+    const contextSummary = extractCursorContextSummary(bubbleEntries, requestContexts);
+    const checkpointCount = countCursorCheckpointEntries(db, sessionId);
 
     const notes = ["cursorDiskKV keys: composerData:* + bubbleId:*"];
     if (!metrics.tokenUsage) {
@@ -1104,6 +1616,24 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
     if (!hasDetailedTurnStats) {
       notes.push("Per-turn metrics are limited for this session.");
     }
+    if (branchMeta.gitBranch) {
+      notes.push("Git branch is inferred from Cursor composer metadata.");
+    }
+    if (contextSummary.contextFiles?.length) {
+      notes.push(
+        "Context files are inferred from Cursor relevantFiles and request-context sidecars.",
+      );
+    }
+    const cursorSidecars =
+      contextSummary.requestContextCount || checkpointCount > 0 || contextSummary.hasCursorRules
+        ? {
+            ...(contextSummary.requestContextCount
+              ? { requestContextCount: contextSummary.requestContextCount }
+              : {}),
+            ...(checkpointCount > 0 ? { checkpointCount } : {}),
+            ...(contextSummary.hasCursorRules ? { hasWorkspaceRules: true } : {}),
+          }
+        : undefined;
 
     return {
       sessionId,
@@ -1121,6 +1651,12 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
       ...(metrics.tokenUsage ? { tokenUsage: metrics.tokenUsage } : {}),
       ...(metrics.tokenUsageByModel ? { tokenUsageByModel: metrics.tokenUsageByModel } : {}),
       ...(metrics.turnStats ? { turnStats: metrics.turnStats } : {}),
+      ...(branchMeta.gitBranch ? { gitBranch: branchMeta.gitBranch } : {}),
+      ...(branchMeta.gitBranches ? { gitBranches: branchMeta.gitBranches } : {}),
+      ...(prLinks.length > 0 ? { prLinks } : {}),
+      ...(apiErrors ? { apiErrors } : {}),
+      ...(contextSummary.contextFiles ? { contextFiles: contextSummary.contextFiles } : {}),
+      ...(cursorSidecars ? { cursorSidecars } : {}),
       turns,
       dataSource: "global-state",
       dataSourceInfo: {
@@ -1131,8 +1667,6 @@ async function parseCursorGlobalStateDb(sessionId: string): Promise<ProviderPars
     };
   } catch {
     return null;
-  } finally {
-    db.close();
   }
 }
 
@@ -1650,9 +2184,14 @@ export const __testables = {
   buildStoreTurnStats,
   createRetryableInit,
   estimateTokenIncrement,
+  extractCursorApiErrors,
+  extractCursorBranchMetadata,
+  extractCursorContextSummary,
+  extractCursorPrLinks,
   hasReplayableRootBlob,
   mapCursorToolName,
   mapToolArgs,
+  mergeCursorParseResults,
   normalizeTurnText,
   parseUserContent,
 };

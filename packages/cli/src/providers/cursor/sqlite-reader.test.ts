@@ -119,6 +119,358 @@ describe("cursor sqlite metrics helpers", () => {
     expect(metrics.turnStats?.[1]?.tokenUsage).toBeUndefined();
   });
 
+  it("extracts Cursor branch metadata from composer payload", () => {
+    const branchMeta = __testables.extractCursorBranchMetadata({
+      createdOnBranch: "feature/start",
+      branches: [
+        { branchName: "main" },
+        { branchName: "feature/work" },
+        { branchName: "feature/work" },
+      ],
+      committedToBranch: "feature/work",
+      prBranchName: "feature/pr",
+      activeBranch: { branchName: "feature/final" },
+    });
+
+    expect(branchMeta.gitBranch).toBe("feature/final");
+    expect(branchMeta.gitBranches).toEqual([
+      "feature/start",
+      "main",
+      "feature/work",
+      "feature/pr",
+      "feature/final",
+    ]);
+  });
+
+  it("sorts Cursor branch history by last interaction before choosing current branch", () => {
+    const branchMeta = __testables.extractCursorBranchMetadata({
+      branches: [
+        { branchName: "feature/current", lastInteractionAt: 20 },
+        { branchName: "feature/old", lastInteractionAt: 10 },
+      ],
+      activeBranch: { branchName: "feature/current", lastInteractionAt: 20 },
+    });
+
+    expect(branchMeta.gitBranch).toBe("feature/current");
+    expect(branchMeta.gitBranches).toEqual(["feature/old", "feature/current"]);
+  });
+
+  it("extracts Cursor PR links from bubble payloads and deduplicates by URL", () => {
+    const links = __testables.extractCursorPrLinks([
+      {
+        bubble: {
+          pullRequests: [
+            {
+              number: 42,
+              url: "https://github.com/acme/vibe-replay/pull/42",
+            },
+            {
+              prNumber: 42,
+              prUrl: "https://github.com/acme/vibe-replay/pull/42",
+            },
+            {
+              prUrl: "https://github.com/acme/another/pull/99",
+              prRepository: "acme/another",
+            },
+          ],
+        },
+      },
+    ] as any);
+
+    expect(links).toEqual([
+      {
+        prNumber: 42,
+        prUrl: "https://github.com/acme/vibe-replay/pull/42",
+        prRepository: "acme/vibe-replay",
+      },
+      {
+        prNumber: 99,
+        prUrl: "https://github.com/acme/another/pull/99",
+        prRepository: "acme/another",
+      },
+    ]);
+  });
+
+  it("extracts Cursor API errors from bubble errorDetails", () => {
+    const apiErrors = __testables.extractCursorApiErrors([
+      {
+        turnTimestamp: "2026-03-20T10:00:00.000Z",
+        bubble: {
+          createdAt: Date.parse("2026-03-20T10:00:00.000Z"),
+          retryAttempt: 2,
+          errorDetails: {
+            generationUUID: "gen-1",
+            message: "Error",
+            error:
+              '{"error":"ERROR_USER_ABORTED_REQUEST","details":{"title":"User aborted request."},"isExpected":true}',
+          },
+        },
+      },
+    ] as any);
+
+    expect(apiErrors).toEqual([
+      {
+        timestamp: "2026-03-20T10:00:00.000Z",
+        errorType: "ERROR_USER_ABORTED_REQUEST",
+        retryAttempt: 2,
+      },
+    ]);
+  });
+
+  it("extracts Cursor context files from bubbles and request sidecars", () => {
+    const summary = __testables.extractCursorContextSummary(
+      [
+        {
+          bubble: {
+            relevantFiles: ["src/auth.ts", "src/index.ts", "src/auth.ts"],
+            recentlyViewedFiles: [{ path: "docs/plan.md" }],
+          },
+        },
+      ] as any,
+      [
+        {
+          terminalFiles: [{ filePath: "logs/dev.log" }],
+          cursorRules: ['{"name":"instructions","body":"Always lint"}'],
+          attachedFoldersListDirResults: [
+            '{"directoryRelativeWorkspacePath":"src","files":[{"name":"utils.ts"}]}',
+          ],
+        },
+      ],
+    );
+
+    expect(summary.contextFiles).toEqual([
+      "src/auth.ts",
+      "src/index.ts",
+      "docs/plan.md",
+      "logs/dev.log",
+      "src/utils.ts",
+    ]);
+    expect(summary.requestContextCount).toBe(1);
+    expect(summary.hasRequestContextSidecars).toBe(true);
+    expect(summary.hasCursorRules).toBe(true);
+  });
+
+  it("extracts API errors even when the error bubble has no replayable turn content", () => {
+    const apiErrors = __testables.extractCursorApiErrors([
+      {
+        bubble: {
+          createdAt: Date.parse("2026-03-20T10:00:00.000Z"),
+          errorDetails: {
+            error:
+              '{"error":"ERROR_EXTENSION_HOST_TIMEOUT","details":{"title":"Agent Stream Start Timeout"}}',
+          },
+        },
+      },
+    ] as any);
+
+    expect(apiErrors).toEqual([
+      {
+        timestamp: "2026-03-20T10:00:00.000Z",
+        errorType: "ERROR_EXTENSION_HOST_TIMEOUT",
+      },
+    ]);
+  });
+
+  it("keeps distinct Cursor API errors when only the error type differs", () => {
+    const apiErrors = __testables.extractCursorApiErrors([
+      {
+        bubble: {
+          createdAt: Date.parse("2026-03-20T10:00:00.000Z"),
+          errorDetails: {
+            error: '{"error":"ERROR_EXTENSION_HOST_TIMEOUT"}',
+          },
+        },
+      },
+      {
+        bubble: {
+          createdAt: Date.parse("2026-03-20T10:00:00.000Z"),
+          errorDetails: {
+            error: '{"error":"ERROR_RATE_LIMITED"}',
+          },
+        },
+      },
+    ] as any);
+
+    expect(apiErrors).toEqual([
+      {
+        timestamp: "2026-03-20T10:00:00.000Z",
+        errorType: "ERROR_EXTENSION_HOST_TIMEOUT",
+      },
+      {
+        timestamp: "2026-03-20T10:00:00.000Z",
+        errorType: "ERROR_RATE_LIMITED",
+      },
+    ]);
+  });
+
+  it("merges global-state metadata into store-backed Cursor parses", () => {
+    const merged = __testables.mergeCursorParseResults(
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "",
+        turns: [{ role: "user", blocks: [{ type: "text", text: "prompt" }] }],
+        dataSource: "sqlite",
+        dataSourceInfo: {
+          primary: "sqlite",
+          sources: ["cursor/chats/<workspace-hash>/<session-id>/store.db"],
+          notes: ["Token usage is unavailable for this Cursor SQLite session."],
+        },
+      },
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "/workspace/project",
+        turns: [{ role: "assistant", blocks: [{ type: "text", text: "reply" }] }],
+        dataSource: "global-state",
+        dataSourceInfo: {
+          primary: "global-state",
+          sources: ["cursor/user/globalStorage/state.vscdb"],
+          notes: ["Git branch is inferred from Cursor composer metadata."],
+        },
+        gitBranch: "feat/auth",
+        apiErrors: [{ timestamp: "2026-03-20T10:00:00.000Z", errorType: "rate_limit_error" }],
+        contextFiles: ["src/auth.ts"],
+        cursorSidecars: {
+          requestContextCount: 2,
+          checkpointCount: 6,
+          hasWorkspaceRules: true,
+        },
+      },
+    );
+
+    expect(merged.dataSource).toBe("sqlite");
+    expect(merged.turns).toHaveLength(1);
+    expect(merged.cwd).toBe("/workspace/project");
+    expect(merged.gitBranch).toBe("feat/auth");
+    expect(merged.apiErrors).toEqual([
+      { timestamp: "2026-03-20T10:00:00.000Z", errorType: "rate_limit_error" },
+    ]);
+    expect(merged.contextFiles).toEqual(["src/auth.ts"]);
+    expect(merged.cursorSidecars).toEqual({
+      requestContextCount: 2,
+      checkpointCount: 6,
+      hasWorkspaceRules: true,
+    });
+    expect(merged.dataSourceInfo?.supplements).toContain("cursor/user/globalStorage/state.vscdb");
+  });
+
+  it("does not add enrichment notes when primary metadata already exists", () => {
+    const merged = __testables.mergeCursorParseResults(
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "",
+        gitBranch: "feat/existing",
+        turns: [{ role: "user", blocks: [{ type: "text", text: "prompt" }] }],
+        dataSource: "sqlite",
+        dataSourceInfo: {
+          primary: "sqlite",
+          sources: ["cursor/chats/<workspace-hash>/<session-id>/store.db"],
+          notes: ["Token usage is unavailable for this Cursor SQLite session."],
+        },
+      },
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "/workspace/project",
+        turns: [{ role: "assistant", blocks: [{ type: "text", text: "reply" }] }],
+        dataSource: "global-state",
+        dataSourceInfo: {
+          primary: "global-state",
+          sources: ["cursor/user/globalStorage/state.vscdb"],
+          notes: ["Git branch is inferred from Cursor composer metadata."],
+        },
+        gitBranch: "feat/enriched",
+      },
+    );
+
+    expect(merged.gitBranch).toBe("feat/existing");
+    expect(merged.dataSourceInfo?.notes).toEqual([
+      "Token usage is unavailable for this Cursor SQLite session.",
+    ]);
+  });
+
+  it("does not add enrichment notes when global-state contributes no merged metadata", () => {
+    const merged = __testables.mergeCursorParseResults(
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "/workspace/project",
+        turns: [{ role: "user", blocks: [{ type: "text", text: "prompt" }] }],
+        dataSource: "sqlite",
+        dataSourceInfo: {
+          primary: "sqlite",
+          sources: ["cursor/chats/<workspace-hash>/<session-id>/store.db"],
+          notes: ["Token usage is unavailable for this Cursor SQLite session."],
+        },
+      },
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "/workspace/project",
+        turns: [{ role: "assistant", blocks: [{ type: "text", text: "reply" }] }],
+        dataSource: "global-state",
+        dataSourceInfo: {
+          primary: "global-state",
+          sources: ["cursor/user/globalStorage/state.vscdb"],
+          notes: ["Duration is unavailable for this Cursor global-state session."],
+        },
+      },
+    );
+
+    expect(merged.dataSourceInfo?.notes).toEqual([
+      "Token usage is unavailable for this Cursor SQLite session.",
+    ]);
+  });
+
+  it("normalizes file URIs in Cursor context files", () => {
+    const summary = __testables.extractCursorContextSummary(
+      [
+        {
+          bubble: {
+            relevantFiles: [{ uri: "file:///Users/test/project/src/auth%20flow.ts" }],
+          },
+        },
+      ] as any,
+      [],
+    );
+
+    expect(summary.contextFiles).toEqual(["/Users/test/project/src/auth flow.ts"]);
+  });
+
+  it("keeps existing Cursor sidecars when primary parse already has them", () => {
+    const merged = __testables.mergeCursorParseResults(
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "",
+        turns: [{ role: "user", blocks: [{ type: "text", text: "prompt" }] }],
+        cursorSidecars: {
+          requestContextCount: 1,
+          hasWorkspaceRules: false,
+        },
+      },
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "/workspace/project",
+        turns: [{ role: "assistant", blocks: [{ type: "text", text: "reply" }] }],
+        cursorSidecars: {
+          requestContextCount: 2,
+          checkpointCount: 6,
+          hasWorkspaceRules: true,
+        },
+      },
+    );
+
+    expect(merged.cursorSidecars).toEqual({
+      requestContextCount: 1,
+      checkpointCount: 6,
+      hasWorkspaceRules: false,
+    });
+  });
+
   it("builds dense store turn stats aligned to user turns", () => {
     const turnStats = __testables.buildStoreTurnStats([
       {

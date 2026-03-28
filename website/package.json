@@ -4,9 +4,9 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "dev": "astro dev",
-    "build": "astro build",
-    "preview": "astro preview"
+    "dev": "bash ./scripts/run-with-required-node.sh dev",
+    "build": "bash ./scripts/run-with-required-node.sh build",
+    "preview": "bash ./scripts/run-with-required-node.sh preview"
   },
   "devDependencies": {
     "@astrojs/rss": "^4.0.17",

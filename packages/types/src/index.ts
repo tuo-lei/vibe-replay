@@ -22,6 +22,15 @@ export interface PrLink {
   prRepository: string;
 }
 
+export interface CursorSidecars {
+  /** Number of non-empty messageRequestContext sidecars observed for the session */
+  requestContextCount?: number;
+  /** Number of checkpointId state entries observed for the session */
+  checkpointCount?: number;
+  /** Whether Cursor request context included workspace rules */
+  hasWorkspaceRules?: boolean;
+}
+
 export interface SubAgent {
   agentId: string;
   agentType: string;
@@ -163,6 +172,10 @@ export interface ReplaySession {
     }>;
     /** Files tracked/backed up during this session */
     trackedFiles?: string[];
+    /** Files Cursor appears to have used as request context breadcrumbs */
+    contextFiles?: string[];
+    /** Cursor-only sidecar coverage from global-state session metadata */
+    cursorSidecars?: CursorSidecars;
   };
   scenes: Scene[];
   annotations?: Annotation[];

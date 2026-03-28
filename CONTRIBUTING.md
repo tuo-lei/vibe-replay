@@ -12,6 +12,7 @@ pnpm build
 ```
 
 Requires Node.js >= 20 and pnpm.
+Website scripts use Astro 6 and require Node.js >= 22.12.0 inside `website/`. When `nvm` is available, they will try `nvm use` from `website/.nvmrc` automatically.
 
 ## Development
 

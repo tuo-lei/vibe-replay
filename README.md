@@ -117,6 +117,8 @@ pnpm dev              # Viewer (Vite HMR) + CLI (auto-restart) — full HMR
 pnpm dev:website      # Website (Astro HMR) + Viewer (Vite HMR)
 ```
 
+CLI usage requires Node.js >= 20. The `website` package uses Astro 6 and requires Node.js >= 22.12.0. When `nvm` is available, `website` scripts will try `nvm use` from `website/.nvmrc` automatically.
+
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for architecture details and development workflow.
 
 ## License
