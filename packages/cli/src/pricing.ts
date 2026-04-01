@@ -34,6 +34,13 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
     cacheCreateRate: 3.75,
     cacheReadRate: 0.3,
   },
+  // Sonnet 4 (non-4.5/4.6) — same rates per Claude Code source (COST_TIER_3_15)
+  "sonnet-4": {
+    inputRate: 3,
+    outputRate: 15,
+    cacheCreateRate: 3.75,
+    cacheReadRate: 0.3,
+  },
   // Sonnet 3.7/3.5 and earlier
   sonnet: {
     inputRate: 3,
@@ -68,9 +75,10 @@ export function getModelPricing(model: string): ModelPricing {
   // Opus: 4.6/4.5 → new pricing, 4.1 and earlier → legacy
   if (lower.includes("opus-4-6") || lower.includes("opus-4-5")) return MODEL_PRICING["opus-4-new"];
   if (lower.includes("opus")) return MODEL_PRICING.opus;
-  // Sonnet: 4.6/4.5 → new pricing with tiered, earlier → standard
+  // Sonnet: 4.6/4.5 → new pricing, Sonnet 4 → explicit, earlier → standard
   if (lower.includes("sonnet-4-6") || lower.includes("sonnet-4-5"))
     return MODEL_PRICING["sonnet-4-new"];
+  if (lower.includes("sonnet-4")) return MODEL_PRICING["sonnet-4"];
   if (lower.includes("sonnet")) return MODEL_PRICING.sonnet;
   // Haiku: 4.5/4.6 → new pricing, 3.5 and earlier → legacy
   if (lower.includes("haiku-4-5") || lower.includes("haiku-4-6")) return MODEL_PRICING["haiku-4-5"];

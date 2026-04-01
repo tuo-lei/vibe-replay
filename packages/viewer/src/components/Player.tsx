@@ -263,14 +263,11 @@ export default function Player({
     const getGroupFirstIndex = (idx: number): number => {
       const scenes = session.scenes;
       if (idx < 0 || idx >= scenes.length) return idx;
-      if (scenes[idx].type === "user-prompt" || scenes[idx].type === "compaction-summary")
-        return idx;
+      const isBoundary = (t: string) =>
+        t === "user-prompt" || t === "compaction-summary" || t === "context-injection";
+      if (isBoundary(scenes[idx].type)) return idx;
       let first = idx;
-      while (
-        first > 0 &&
-        scenes[first - 1].type !== "user-prompt" &&
-        scenes[first - 1].type !== "compaction-summary"
-      ) {
+      while (first > 0 && !isBoundary(scenes[first - 1].type)) {
         first--;
       }
       return first;

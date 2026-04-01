@@ -47,8 +47,15 @@ export interface SubAgent {
 export type Scene =
   | { type: "user-prompt"; content: string; timestamp?: string; images?: string[] }
   | { type: "compaction-summary"; content: string; timestamp?: string }
+  | {
+      type: "context-injection";
+      content: string;
+      timestamp?: string;
+      /** What kind of injection: "skill", "local-command", "slash-command", "image", or "other" */
+      injectionType?: string;
+    }
   | { type: "thinking"; content: string; timestamp?: string }
-  | { type: "text-response"; content: string; timestamp?: string }
+  | { type: "text-response"; content: string; timestamp?: string; isTruncated?: boolean }
   | {
       type: "tool-call";
       toolName: string;
@@ -176,6 +183,10 @@ export interface ReplaySession {
     contextFiles?: string[];
     /** Cursor-only sidecar coverage from global-state session metadata */
     cursorSidecars?: CursorSidecars;
+    /** API service tier observed (e.g. "standard") */
+    serviceTier?: string;
+    /** Number of assistant responses truncated by max_tokens */
+    truncatedResponses?: number;
   };
   scenes: Scene[];
   annotations?: Annotation[];

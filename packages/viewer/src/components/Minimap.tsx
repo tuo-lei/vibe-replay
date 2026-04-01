@@ -25,7 +25,7 @@ interface TurnOutline {
 }
 
 interface CompactionOutline {
-  kind: "compaction";
+  kind: "compaction" | "injection";
   promptIndex: number;
   preview: string;
 }
@@ -65,14 +65,14 @@ export default function Minimap({
           subAgentCalls: 0,
           endIndex: i,
         };
-      } else if (scene.type === "compaction-summary") {
+      } else if (scene.type === "compaction-summary" || scene.type === "context-injection") {
         if (current) {
           current.endIndex = i - 1;
           result.push(current);
           current = null;
         }
         result.push({
-          kind: "compaction",
+          kind: scene.type === "context-injection" ? "injection" : "compaction",
           promptIndex: i,
           preview: scene.content.replace(/\n/g, " ").slice(0, 80),
         });
@@ -105,7 +105,9 @@ export default function Minimap({
         const isActive = i === activeIdx;
         const isPast = i < activeIdx;
 
-        if (item.kind === "compaction") {
+        if (item.kind === "compaction" || item.kind === "injection") {
+          const label = item.kind === "injection" ? "System context" : "Context compacted";
+          const icon = item.kind === "injection" ? "⚡" : "⟳";
           return (
             <button
               key={`c-${item.promptIndex}`}
@@ -117,9 +119,9 @@ export default function Minimap({
               }`}
             >
               <div className="flex items-center gap-2">
-                <span className="text-xs font-mono text-terminal-dimmer shrink-0">{"⟳"}</span>
+                <span className="text-xs font-mono text-terminal-dimmer shrink-0">{icon}</span>
                 <span className="text-xs font-mono text-terminal-dimmer italic truncate">
-                  Context compacted
+                  {label}
                 </span>
               </div>
             </button>

@@ -14,6 +14,8 @@ function sceneColor(type: Scene["type"]): string {
       return "#3fb950";
     case "compaction-summary":
       return "#666666";
+    case "context-injection":
+      return "#4488cc";
     case "thinking":
       return "#b392f0";
     case "text-response":
@@ -44,6 +46,7 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
       const typePriority: Record<Scene["type"], number> = {
         "user-prompt": 4,
         "compaction-summary": 1,
+        "context-injection": 1,
         "tool-call": 3,
         "text-response": 2,
         thinking: 1,

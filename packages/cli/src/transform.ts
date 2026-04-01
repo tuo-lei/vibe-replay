@@ -38,6 +38,13 @@ export function transformToReplay(
             content: redactSecrets(redactPath(content)),
             timestamp: turn.timestamp,
           });
+        } else if (turn.subtype === "context-injection") {
+          scenes.push({
+            type: "context-injection",
+            content: redactSecrets(redactPath(content)),
+            timestamp: turn.timestamp,
+            injectionType: classifyInjection(content),
+          });
         } else {
           scenes.push({
             type: "user-prompt",
@@ -65,11 +72,15 @@ export function transformToReplay(
       } else if (block.type === "text") {
         const text = (block as any).text || "";
         if (text.trim()) {
-          scenes.push({
+          const scene: Scene = {
             type: "text-response",
             content: redactSecrets(redactPath(text)),
             timestamp: turn.timestamp,
-          });
+          };
+          if (turn.stopReason === "max_tokens") {
+            (scene as any).isTruncated = true;
+          }
+          scenes.push(scene);
         }
       } else if (block.type === "tool_use") {
         const toolBlock = block as any;
@@ -175,6 +186,8 @@ export function transformToReplay(
         ? { contextFiles: parsed.contextFiles.map(redactPath) }
         : {}),
       ...(parsed.cursorSidecars ? { cursorSidecars: parsed.cursorSidecars } : {}),
+      ...(parsed.serviceTier ? { serviceTier: parsed.serviceTier } : {}),
+      ...(parsed.truncatedResponses ? { truncatedResponses: parsed.truncatedResponses } : {}),
     },
     scenes,
   };
@@ -288,6 +301,15 @@ function normalizeCursorAgentType(agentType: string): string {
   if (normalized === "generalpurpose") return "general-purpose";
   if (normalized === "shell") return "Shell";
   return agentType;
+}
+
+/** Classify isMeta injection by content pattern */
+function classifyInjection(content: string): string {
+  if (content.startsWith("<local-command-caveat>")) return "local-command";
+  if (content.startsWith("Base directory for this skill:")) return "skill";
+  if (content.startsWith("Usage: /")) return "slash-command";
+  if (content.startsWith("[Image:")) return "image";
+  return "other";
 }
 
 // Redact common secret patterns from output

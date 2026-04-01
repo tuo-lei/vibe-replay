@@ -27,6 +27,8 @@ function scenePreview(scene: Scene): { label: string; text: string } {
     }
     case "compaction-summary":
       return { label: "Compaction", text: scene.content.slice(0, 80) };
+    case "context-injection":
+      return { label: "Injection", text: scene.content.slice(0, 80) };
     case "thinking":
       return { label: "Thinking", text: scene.content.slice(0, 80) };
     case "text-response": {
@@ -54,6 +56,8 @@ function sceneLabelColor(scene: Scene): string {
       return "text-terminal-green";
     case "compaction-summary":
       return "text-terminal-dim";
+    case "context-injection":
+      return "text-blue-400";
     case "thinking":
       return "text-terminal-purple";
     case "text-response":

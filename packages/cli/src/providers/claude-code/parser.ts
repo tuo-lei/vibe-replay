@@ -68,6 +68,12 @@ export async function parseClaudeCodeSession(
   // Tracked files (from file-history-snapshot messages)
   const trackedFiles = new Set<string>();
 
+  // Stop reasons per message ID — "max_tokens" indicates truncation
+  const stopReasons = new Map<string, string>();
+
+  // Service tier (from API usage data, e.g. "standard")
+  let serviceTier: string | undefined;
+
   // Group assistant messages by message.id
   const assistantBlocks = new Map<string, ContentBlock[]>();
   const assistantTimestamps = new Map<string, string>();
@@ -187,12 +193,35 @@ export async function parseClaudeCodeSession(
 
     const { role, content: msgContent, id: msgId } = obj.message;
 
+    // Capture system-injected messages as context-injection turns (not regular user turns)
+    if (obj.isMeta && role === "user") {
+      const text =
+        typeof msgContent === "string"
+          ? msgContent
+          : Array.isArray(msgContent)
+            ? (msgContent as any[])
+                .filter((b: any) => b.type === "text")
+                .map((b: any) => b.text || "")
+                .join("\n")
+            : "";
+      if (text.trim()) {
+        userTurns.push({
+          role: "user",
+          subtype: "context-injection",
+          timestamp: obj.timestamp,
+          blocks: [{ type: "text", text }],
+        });
+      }
+      continue;
+    }
+
     // User message with string content = human prompt (or compaction summary)
     if (role === "user" && typeof msgContent === "string") {
       if (isSystemGeneratedMessage(msgContent)) continue;
-      const isCompaction = msgContent.startsWith(
-        "This session is being continued from a previous conversation",
-      );
+      // Prefer the isCompactSummary flag; fall back to string prefix for older sessions
+      const isCompaction =
+        obj.isCompactSummary ||
+        msgContent.startsWith("This session is being continued from a previous conversation");
       userTurns.push({
         role: "user",
         ...(isCompaction ? { subtype: "compaction-summary" } : {}),
@@ -261,9 +290,19 @@ export async function parseClaudeCodeSession(
       if (!model && obj.message.model) model = obj.message.model;
 
       // Track usage per message ID — overwrite so we keep the last (final) value
-      const usage = (obj.message as any).usage;
+      const usage = obj.message.usage || (obj.message as any).usage;
       if (usage && msgId) {
         usageByMsgId.set(msgId, { ...usage, model: obj.message.model });
+        // Track service_tier from usage data
+        if (usage.service_tier && !serviceTier) {
+          serviceTier = usage.service_tier;
+        }
+      }
+
+      // Track stop_reason — "max_tokens" means truncated response
+      const stopReason = obj.message.stop_reason || (obj.message as any).stop_reason;
+      if (stopReason && msgId) {
+        stopReasons.set(msgId, stopReason);
       }
 
       // Track per-message model
@@ -330,6 +369,7 @@ export async function parseClaudeCodeSession(
       return block;
     });
     const msgModel = assistantModels.get(msgId);
+    const stopReason = stopReasons.get(msgId);
     assistantTurns.push({
       turn: {
         role: "assistant",
@@ -337,6 +377,7 @@ export async function parseClaudeCodeSession(
         model: msgModel || model,
         timestamp: assistantTimestamps.get(msgId),
         blocks: enrichedBlocks,
+        ...(stopReason === "max_tokens" ? { stopReason: "max_tokens" as const } : {}),
       },
       timestamp: assistantTimestamps.get(msgId) || "",
     });
@@ -415,6 +456,9 @@ export async function parseClaudeCodeSession(
   const trackedFilesArr =
     trackedFiles.size > 0 ? [...trackedFiles].sort().slice(0, 200) : undefined;
 
+  // Count truncated assistant responses (stop_reason: "max_tokens")
+  const truncatedCount = [...stopReasons.values()].filter((r) => r === "max_tokens").length;
+
   return {
     sessionId,
     slug,
@@ -437,6 +481,8 @@ export async function parseClaudeCodeSession(
     permissionMode,
     apiErrors: apiErrors.length > 0 ? apiErrors : undefined,
     trackedFiles: trackedFilesArr,
+    serviceTier,
+    truncatedResponses: truncatedCount > 0 ? truncatedCount : undefined,
   };
 }
 
