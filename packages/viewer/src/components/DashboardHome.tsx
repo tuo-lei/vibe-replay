@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SessionSummary, SourceSession } from "../types";
+import { SessionDetailPopup } from "./Dashboard";
 import {
   isCacheFresh,
   navigateTo,
@@ -581,6 +582,7 @@ function RecentSessionsList({
   onViewAll,
   onGenerate,
   onViewReplay,
+  onSessionClick,
   generatingSlug,
   generateErrorSlug,
 }: {
@@ -589,6 +591,7 @@ function RecentSessionsList({
   onViewAll: () => void;
   onGenerate: (source: SourceSession) => void;
   onViewReplay: (slug: string) => void;
+  onSessionClick: (source: SourceSession) => void;
   generatingSlug: string | null;
   generateErrorSlug: string | null;
 }) {
@@ -611,7 +614,8 @@ function RecentSessionsList({
         return (
           <div
             key={`${s.provider}-${s.slug}`}
-            className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-terminal-surface-hover transition-colors duration-200"
+            onClick={() => onSessionClick(s)}
+            className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-terminal-surface-hover transition-colors duration-200 cursor-pointer"
           >
             <ProviderBadge provider={s.provider} />
             <div className="flex-1 min-w-0">
@@ -628,7 +632,10 @@ function RecentSessionsList({
               </span>
               {hasReplay ? (
                 <button
-                  onClick={() => onViewReplay(s.existingReplay!)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onViewReplay(s.existingReplay!);
+                  }}
                   className="h-6 px-2.5 text-[11px] font-sans font-semibold rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 flex items-center gap-1"
                 >
                   <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
@@ -638,7 +645,10 @@ function RecentSessionsList({
                 </button>
               ) : (
                 <button
-                  onClick={() => onGenerate(s)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onGenerate(s);
+                  }}
                   disabled={isGenerating}
                   className={`h-6 px-2.5 text-[11px] font-sans font-semibold rounded-md transition-all duration-200 disabled:opacity-50 flex items-center gap-1 ${
                     hasError
@@ -926,20 +936,15 @@ const ToolsIcon = () => (
 // ─── Main Component ──────────────────────────────────────────────────
 
 export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
-  const {
-    sources,
-    replays,
-    loading,
-    loadingSources,
-    loadingReplays,
-    error,
-    scanProgress,
-    enrichmentStatus,
-  } = useDashboardData();
+  const { sources, replays, loading, loadingSources, loadingReplays, error } = useDashboardData();
   const insights = useMemo(() => computeInsights(sources, replays), [sources, replays]);
   const { scanStatus, userInsights } = useScanInsightsContext();
   const [generatingSlug, setGeneratingSlug] = useState<string | null>(null);
   const [generateErrorSlug, setGenerateErrorSlug] = useState<string | null>(null);
+  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  const selectedSession = selectedSlug
+    ? (sources.find((s) => s.slug === selectedSlug) ?? null)
+    : null;
   const showRecentProjectsSkeleton =
     !userInsights && (loadingSources || Boolean(scanStatus?.running) || sources.length > 0);
 
@@ -973,6 +978,52 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
       setTimeout(() => setGenerateErrorSlug((prev) => (prev === source.slug ? null : prev)), 2000);
     } finally {
       setGeneratingSlug(null);
+    }
+  };
+
+  const submitGenerateFromPopup = async (source: SourceSession, title: string) => {
+    setSelectedSlug(null);
+    setGeneratingSlug(source.slug);
+    setGenerateErrorSlug(null);
+    try {
+      const resp = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: source.provider,
+          filePaths: source.filePaths,
+          toolPaths: source.toolPaths,
+          title: normalizeTitleText(title) || undefined,
+          sessionSlug: source.slug,
+          sessionProject: source.project,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || "Generation failed");
+      navigateTo({ view: null, session: data.slug });
+    } catch (err) {
+      console.error("Generate error:", err);
+      setGenerateErrorSlug(source.slug);
+      setTimeout(() => setGenerateErrorSlug((prev) => (prev === source.slug ? null : prev)), 2000);
+    } finally {
+      setGeneratingSlug(null);
+    }
+  };
+
+  const handleTitleSave = async (slug: string, title: string) => {
+    const resp = await fetch(`/api/sessions/${encodeURIComponent(slug)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+    if (!resp.ok) throw new Error("Failed to update title");
+  };
+
+  const handleDeleteReplay = async (slug: string) => {
+    try {
+      await fetch(`/api/sessions/${encodeURIComponent(slug)}`, { method: "DELETE" });
+    } catch {
+      // ignore
     }
   };
 
@@ -1016,33 +1067,6 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 space-y-6">
-        {scanProgress != null && (
-          <div className="flex items-center gap-2 px-1">
-            <div className="w-1.5 h-1.5 rounded-full bg-terminal-green animate-pulse" />
-            <span className="text-xs font-mono text-terminal-dim">
-              Scanning... {scanProgress} sessions
-            </span>
-          </div>
-        )}
-
-        {scanStatus?.running && scanStatus.total > 0 && (
-          <div className="flex items-center gap-2 px-1">
-            <div className="w-1.5 h-1.5 rounded-full bg-terminal-purple animate-pulse" />
-            <span className="text-xs font-mono text-terminal-dim">
-              Analyzing sessions... {scanStatus.scanned}/{scanStatus.total}
-            </span>
-          </div>
-        )}
-
-        {enrichmentStatus?.running && enrichmentStatus.total > 0 && (
-          <div className="flex items-center gap-2 px-1">
-            <div className="w-1.5 h-1.5 rounded-full bg-terminal-blue animate-pulse" />
-            <span className="text-xs font-mono text-terminal-dim">
-              Enriching Cursor stats... {enrichmentStatus.processed}/{enrichmentStatus.total}
-            </span>
-          </div>
-        )}
-
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <MetricCard
             label="Sessions"
@@ -1181,6 +1205,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
               onViewAll={() => onNavigate("sessions")}
               onGenerate={handleGenerate}
               onViewReplay={handleOpenReplay}
+              onSessionClick={(s) => setSelectedSlug(s.slug)}
               generatingSlug={generatingSlug}
               generateErrorSlug={generateErrorSlug}
             />
@@ -1206,6 +1231,21 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
 
         <SystemChecksSection />
       </div>
+
+      {/* Session detail popup */}
+      {selectedSession && (
+        <SessionDetailPopup
+          session={selectedSession}
+          onClose={() => setSelectedSlug(null)}
+          onGenerate={submitGenerateFromPopup}
+          onViewReplay={(slug) => navigateTo({ view: null, session: slug })}
+          onArchive={() => setSelectedSlug(null)}
+          onTitleSave={handleTitleSave}
+          onDeleteReplay={handleDeleteReplay}
+          isGenerating={generatingSlug === selectedSession.slug}
+          isArchived={false}
+        />
+      )}
     </div>
   );
 }

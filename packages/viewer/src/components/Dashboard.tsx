@@ -227,6 +227,528 @@ function SessionMoreMenu({
   );
 }
 
+/** Per-session scan result (from background scanner) */
+export interface SessionScanData {
+  costEstimate?: number;
+  tokenUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheCreationTokens: number;
+    cacheReadTokens: number;
+  };
+  subAgentCount: number;
+  apiErrorCount: number;
+  compactionCount: number;
+  editCount: number;
+  filesModified: Array<{ file: string; count: number }>;
+  prLinks?: Array<{ prNumber: number; prUrl: string; prRepository: string }>;
+  entrypoint?: string;
+  permissionMode?: string;
+  startTime?: string;
+  endTime?: string;
+  durationMs?: number;
+  promptCount: number;
+  toolCallCount: number;
+  gitBranches?: string[];
+  dataSource?: string;
+}
+
+/** Session detail popup — shows full metadata, editable title, Generate CTA */
+export function SessionDetailPopup({
+  session: s,
+  onClose,
+  onGenerate,
+  onViewReplay,
+  onArchive,
+  onTitleSave,
+  onDeleteReplay,
+  isGenerating,
+  isArchived,
+}: {
+  session: SourceSession;
+  onClose: () => void;
+  onGenerate: (session: SourceSession, title: string) => void;
+  onViewReplay: (slug: string) => void;
+  onArchive: (slug: string) => void;
+  onTitleSave: (slug: string, title: string) => Promise<void>;
+  onDeleteReplay: (slug: string) => void;
+  isGenerating: boolean;
+  isArchived: boolean;
+}) {
+  const suggested = sourceSuggestedTitle(s);
+  const [titleValue, setTitleValue] = useState(s.replay?.title || suggested);
+  const [savingTitle, setSavingTitle] = useState(false);
+  const [scanData, setScanData] = useState<SessionScanData | null>(null);
+  const titleInputRef = useRef<HTMLTextAreaElement>(null);
+
+  // ESC to close
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  // Focus title on open
+  useEffect(() => {
+    const el = titleInputRef.current;
+    if (el) {
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    }
+  }, []);
+
+  // Fetch scan results for richer data
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/scan/results")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data?.results) return;
+        const match = (data.results as SessionScanData[]).find(
+          (r: SessionScanData & { slug?: string }) => r.slug === s.slug,
+        );
+        if (match) setScanData(match);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [s.slug]);
+
+  const branch =
+    s.gitBranch && s.gitBranch !== "main" && s.gitBranch !== "master" ? s.gitBranch : undefined;
+
+  const prompts = (s.prompts || []).map((p) => cleanPrompt(p)).filter((p) => p.length > 0);
+  if (prompts.length === 0 && s.firstPrompt) {
+    const cleaned = cleanPrompt(s.firstPrompt);
+    if (cleaned) prompts.push(cleaned);
+  }
+
+  // Use scan data when available, fall back to discovery estimates
+  const promptCount = scanData?.promptCount || s.promptCount;
+  const toolCallCount = scanData?.toolCallCount || s.toolCallCount;
+  const editCount = scanData?.editCount || s.editCountEst;
+  const durationMs = scanData?.durationMs || s.durationMsEst;
+  const cost = scanData?.costEstimate || s.replay?.stats?.totalCost;
+  const totalTokens = scanData?.tokenUsage
+    ? scanData.tokenUsage.inputTokens + scanData.tokenUsage.outputTokens
+    : undefined;
+
+  const handleSaveTitle = async () => {
+    if (!s.replay || savingTitle) return;
+    const normalized = normalizeTitleText(titleValue);
+    if (normalized === normalizeTitleText(s.replay.title || suggested)) return;
+    setSavingTitle(true);
+    try {
+      await onTitleSave(s.slug, normalized);
+    } finally {
+      setSavingTitle(false);
+    }
+  };
+
+  const handleGenerate = () => {
+    onGenerate(s, titleValue);
+  };
+
+  const EXPIRY_WARN_DAYS = 7;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div
+        className="absolute inset-0 bg-black/60 backdrop-blur-md animate-in fade-in duration-300"
+        onClick={onClose}
+      />
+      <div
+        className="relative max-w-4xl w-full bg-terminal-bg border border-terminal-border-subtle rounded-2xl shadow-layer-xl animate-in zoom-in-95 fade-in duration-200 flex flex-col max-h-[88vh]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-7 pt-5 pb-3">
+          <div className="flex items-center gap-2">
+            <ProviderBadge provider={s.provider} />
+            {s.model && (
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-terminal-surface-2 text-terminal-dimmer">
+                {shortModelName(s.model)}
+              </span>
+            )}
+            {scanData?.entrypoint && (
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-terminal-surface-2 text-terminal-dimmer">
+                {scanData.entrypoint}
+              </span>
+            )}
+            {scanData?.permissionMode === "bypassPermissions" && (
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-terminal-orange-subtle text-terminal-orange">
+                trust mode
+              </span>
+            )}
+            {s.replay?.replayOutdated && (
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-terminal-orange-subtle text-terminal-orange">
+                outdated replay
+              </span>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            className="h-7 w-7 flex items-center justify-center rounded-md text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            >
+              <path d="M4 4l8 8M12 4l-8 8" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Scrollable content */}
+        <div className="flex-1 overflow-y-auto px-7 space-y-5 pb-5">
+          {/* Title section */}
+          <div>
+            <div className="flex items-center justify-between mb-2 px-1">
+              <span className="text-xs font-sans uppercase tracking-widest text-terminal-dimmer">
+                Title
+              </span>
+              <span className="text-xs font-mono text-terminal-dimmer">{s.slug}</span>
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (s.replay) handleSaveTitle();
+                else handleGenerate();
+              }}
+            >
+              <textarea
+                ref={titleInputRef}
+                value={titleValue}
+                onChange={(e) => setTitleValue(e.target.value.replace(/\n/g, ""))}
+                onBlur={() => {
+                  if (s.replay) handleSaveTitle();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    if (s.replay) handleSaveTitle();
+                    else handleGenerate();
+                  }
+                }}
+                rows={2}
+                className="w-full bg-terminal-surface rounded-xl px-5 py-4 text-lg font-mono text-terminal-text placeholder:text-terminal-dimmer outline-none ring-1 ring-terminal-border-subtle focus:ring-terminal-green/40 transition-shadow duration-200 resize-none leading-relaxed"
+                placeholder={suggested}
+                maxLength={TITLE_MAX_CHARS}
+              />
+            </form>
+          </div>
+
+          {/* Two-column layout: info + stats */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {/* Left: info grid */}
+            <div className="bg-terminal-surface rounded-xl px-5 py-4 space-y-2.5">
+              <div className="text-[10px] font-sans uppercase tracking-widest text-terminal-dimmer mb-1">
+                Session Info
+              </div>
+              <InfoRow label="Project" value={projectName(s.project)} title={s.project} />
+              {branch && <InfoRow label="Branch" value={branch} />}
+              {scanData?.gitBranches && scanData.gitBranches.length > 1 && (
+                <InfoRow label="Branches" value={scanData.gitBranches.join(", ")} />
+              )}
+              <InfoRow
+                label="Started"
+                value={`${formatDate(s.timestamp)} (${timeAgo(s.timestamp)})`}
+              />
+              {scanData?.endTime && <InfoRow label="Ended" value={formatDate(scanData.endTime)} />}
+              {!!durationMs && (
+                <InfoRow label="Duration" value={`~${formatDuration(durationMs)}`} />
+              )}
+              <InfoRow label="Size" value={formatSize(s.fileSize)} />
+              <InfoRow label="Lines" value={s.lineCount.toLocaleString()} />
+              {s.filePaths.length > 1 && (
+                <InfoRow label="Parts" value={`${s.filePaths.length} files`} />
+              )}
+              <InfoRow
+                label="Data"
+                value={s.hasSqlite ? "SQLite + JSONL" : scanData?.dataSource || "JSONL"}
+              />
+            </div>
+
+            {/* Right: stats */}
+            <div className="bg-terminal-surface rounded-xl px-5 py-4 space-y-2.5">
+              <div className="text-[10px] font-sans uppercase tracking-widest text-terminal-dimmer mb-1">
+                Stats
+              </div>
+              {!!promptCount && <InfoRow label="Prompts" value={String(promptCount)} />}
+              {!!toolCallCount && <InfoRow label="Tools" value={String(toolCallCount)} />}
+              {!!editCount && (
+                <InfoRow label="Edits" value={scanData ? String(editCount) : `~${editCount}`} />
+              )}
+              {cost != null && cost > 0 && <InfoRow label="Cost" value={formatCost(cost)} />}
+              {totalTokens != null && (
+                <InfoRow
+                  label="Tokens"
+                  value={totalTokens.toLocaleString()}
+                  title={
+                    scanData?.tokenUsage
+                      ? `In: ${scanData.tokenUsage.inputTokens.toLocaleString()} / Out: ${scanData.tokenUsage.outputTokens.toLocaleString()} / Cache write: ${scanData.tokenUsage.cacheCreationTokens.toLocaleString()} / Cache read: ${scanData.tokenUsage.cacheReadTokens.toLocaleString()}`
+                      : undefined
+                  }
+                />
+              )}
+              {scanData != null && scanData.subAgentCount > 0 && (
+                <InfoRow label="Agents" value={`${scanData.subAgentCount} sub-agents`} />
+              )}
+              {scanData != null && scanData.compactionCount > 0 && (
+                <InfoRow label="Compacts" value={String(scanData.compactionCount)} />
+              )}
+              {scanData != null && scanData.apiErrorCount > 0 && (
+                <InfoRow label="Errors" value={`${scanData.apiErrorCount} API errors`} />
+              )}
+              {s.hasPR && !scanData?.prLinks?.length && <InfoRow label="PR" value="Yes" />}
+              {scanData?.prLinks?.map((pr) => (
+                <InfoRow
+                  key={pr.prNumber}
+                  label="PR"
+                  value={`#${pr.prNumber} (${pr.prRepository})`}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Files modified (from scan) */}
+          {scanData?.filesModified && scanData.filesModified.length > 0 && (
+            <div>
+              <div className="text-[10px] font-sans uppercase tracking-widest text-terminal-dimmer mb-2">
+                Files Modified ({scanData.filesModified.length})
+              </div>
+              <div className="max-h-[120px] overflow-y-auto bg-terminal-surface rounded-xl px-4 py-2.5 space-y-1">
+                {scanData.filesModified.slice(0, 20).map((f) => (
+                  <div
+                    key={f.file}
+                    className="flex items-center justify-between gap-3 text-xs font-mono"
+                  >
+                    <span className="text-terminal-dim truncate">{f.file}</span>
+                    <span className="text-terminal-dimmer shrink-0 tabular-nums">{f.count}x</span>
+                  </div>
+                ))}
+                {scanData.filesModified.length > 20 && (
+                  <div className="text-xs font-mono text-terminal-dimmer">
+                    +{scanData.filesModified.length - 20} more files
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Prompts */}
+          {prompts.length > 0 && (
+            <div>
+              <div className="text-[10px] font-sans uppercase tracking-widest text-terminal-dimmer mb-2">
+                Prompts
+              </div>
+              <div className="max-h-[180px] overflow-y-auto space-y-1.5 pr-1">
+                {prompts.map((p, i) => (
+                  <div key={i} className="flex gap-2 items-start">
+                    <span className="text-xs text-terminal-green shrink-0 mt-px select-none">
+                      &gt;
+                    </span>
+                    <p className="text-sm text-terminal-dim line-clamp-2 leading-relaxed">{p}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Replay info (if exists) */}
+          {s.replay && (
+            <div className="border-t border-terminal-border-subtle pt-4">
+              <div className="text-[10px] font-sans uppercase tracking-widest text-terminal-dimmer mb-2">
+                Replay
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                {s.replay.replaySize != null && (
+                  <span className="text-xs font-mono px-2 py-1 rounded-md bg-terminal-surface text-terminal-dim">
+                    {formatSize(s.replay.replaySize)}
+                  </span>
+                )}
+                {s.replay.generatorVersion && (
+                  <span className="text-xs font-mono px-2 py-1 rounded-md bg-terminal-surface text-terminal-dimmer">
+                    v{s.replay.generatorVersion}
+                  </span>
+                )}
+                {!!s.replay.annotationCount && (
+                  <span className="text-xs font-mono px-2 py-1 rounded-md bg-terminal-surface text-terminal-dim">
+                    {s.replay.annotationCount} annotations
+                  </span>
+                )}
+                {(s.replay.cloud || s.replay.gist) && (
+                  <span className="text-xs font-mono px-2 py-1 rounded-md bg-terminal-green-subtle text-terminal-green">
+                    {s.replay.cloud ? "Cloud" : "Gist"}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Expiry warning */}
+          {s.expiresInDays != null && s.expiresInDays <= EXPIRY_WARN_DAYS && (
+            <div
+              className={`rounded-lg px-4 py-2.5 text-sm font-mono ${
+                s.expiresInDays <= 2
+                  ? "bg-terminal-red-subtle text-terminal-red"
+                  : "bg-terminal-orange-subtle text-terminal-orange"
+              }`}
+            >
+              {s.expiresInDays === 0
+                ? "Transcript expires today"
+                : `Transcript expires in ${s.expiresInDays} day${s.expiresInDays !== 1 ? "s" : ""}`}
+              {" — generate a replay to preserve it."}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between px-7 py-4 border-t border-terminal-border-subtle">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                onArchive(s.slug);
+                onClose();
+              }}
+              className="h-9 px-3 text-xs font-sans rounded-lg text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors flex items-center gap-1.5"
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              >
+                <path d="M2 4h12v2H2zM3 6v7h10V6M6.5 8h3" />
+              </svg>
+              {isArchived ? "Unarchive" : "Archive"}
+            </button>
+            {s.replay && (
+              <button
+                onClick={() => {
+                  onDeleteReplay(s.slug);
+                  onClose();
+                }}
+                className="h-9 px-3 text-xs font-sans rounded-lg text-terminal-red/70 hover:text-terminal-red hover:bg-terminal-red-subtle transition-colors flex items-center gap-1.5"
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                >
+                  <path d="M3 4h10M5.5 4V3h5v1M6 7v4M10 7v4M4.5 4l.5 9h6l.5-9" />
+                </svg>
+                Delete replay
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {s.replay && (
+              <>
+                <button
+                  onClick={() => onGenerate(s, titleValue)}
+                  disabled={isGenerating}
+                  className="h-11 px-5 text-sm font-sans font-semibold rounded-xl bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200 flex items-center gap-2 disabled:opacity-50"
+                >
+                  {isGenerating ? (
+                    <span className="animate-pulse">Regenerating...</span>
+                  ) : (
+                    <>
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+                        <path d="M21 3v5h-5" />
+                        <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+                        <path d="M8 16H3v5" />
+                      </svg>
+                      Regenerate
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={() => onViewReplay(s.existingReplay!)}
+                  className="h-11 px-6 text-sm font-sans font-bold rounded-xl bg-terminal-green text-terminal-bg hover:brightness-110 transition-all duration-200 flex items-center gap-2"
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                  >
+                    <path d="M5 3l8 5-8 5V3z" />
+                  </svg>
+                  View Replay
+                </button>
+              </>
+            )}
+            {!s.replay && (
+              <button
+                onClick={handleGenerate}
+                disabled={isGenerating}
+                className="h-12 px-8 text-sm font-sans font-bold rounded-xl bg-terminal-green text-terminal-bg hover:brightness-110 transition-all duration-200 flex items-center gap-2 shadow-lg shadow-terminal-green/20 disabled:opacity-50"
+              >
+                {isGenerating ? (
+                  <span className="animate-pulse">Generating...</span>
+                ) : (
+                  <>
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
+                      <path d="M8 2v12M2 8h12" />
+                    </svg>
+                    Generate Replay
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Info row for popup metadata grid */
+export function InfoRow({ label, value, title }: { label: string; value: string; title?: string }) {
+  return (
+    <div className="flex items-baseline gap-2 min-w-0">
+      <span className="text-[11px] font-sans text-terminal-dimmer uppercase tracking-wider shrink-0 w-[68px]">
+        {label}
+      </span>
+      <span className="text-sm font-mono text-terminal-dim truncate" title={title || value}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
 /** Shared card for displaying a replay — used by both Sessions and Replays tabs */
 function ReplayCard({
   summary: s,
@@ -669,13 +1191,14 @@ function SessionsPanel() {
 
   const [generatingSlug, setGeneratingSlug] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
-  const [titleInput, setTitleInput] = useState<{ slug: string; defaultTitle: string } | null>(null);
-  const [titleValue, setTitleValue] = useState("");
-  const titleInputRef = useRef<HTMLInputElement>(null);
+  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const wasEnrichingRef = useRef(false);
   const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());
   const [enrichmentStatus, setEnrichmentStatus] = useState<SourcesEnrichmentStatus | null>(null);
   const hasCursorSources = sources.some((source) => source.provider === "cursor");
+  const selectedSession = selectedSlug
+    ? (sources.find((s) => s.slug === selectedSlug) ?? null)
+    : null;
 
   const loadSources = useCallback(async (opts?: { forceRefresh?: boolean }) => {
     setLoading(true);
@@ -800,10 +1323,6 @@ function SessionsPanel() {
     return () => window.clearInterval(timer);
   }, []);
 
-  useEffect(() => {
-    if (titleInput) titleInputRef.current?.focus();
-  }, [titleInput]);
-
   const handleTitleSave = async (slug: string, title: string) => {
     const resp = await fetch(`/api/sessions/${encodeURIComponent(slug)}`, {
       method: "PATCH",
@@ -821,18 +1340,8 @@ function SessionsPanel() {
     );
   };
 
-  const handleGenerate = (source: SourceSession) => {
-    const suggested = sourceSuggestedTitle(source);
-    setTitleInput({ slug: source.slug, defaultTitle: suggested });
-    setTitleValue(suggested);
-  };
-
-  const submitGenerate = async () => {
-    if (!titleInput) return;
-    const source = sources.find((s) => s.slug === titleInput.slug);
-    if (!source) return;
-
-    setTitleInput(null);
+  const submitGenerate = async (source: SourceSession, title: string) => {
+    setSelectedSlug(null);
     setGeneratingSlug(source.slug);
     setGenerateError(null);
 
@@ -844,7 +1353,7 @@ function SessionsPanel() {
           provider: source.provider,
           filePaths: source.filePaths,
           toolPaths: source.toolPaths,
-          title: normalizeTitleText(titleValue) || undefined,
+          title: normalizeTitleText(title) || undefined,
           sessionSlug: source.slug,
           sessionProject: source.project,
         }),
@@ -1242,47 +1751,6 @@ function SessionsPanel() {
           </div>
         )}
 
-        {/* Title input */}
-        {titleInput && (
-          <div className="mx-4 mb-2 bg-terminal-surface rounded-lg px-4 py-3.5 space-y-3 shrink-0 shadow-layer-md">
-            <div className="text-xs font-mono text-terminal-dim">
-              Title for <span className="text-terminal-text">{titleInput.slug}</span>
-            </div>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                submitGenerate();
-              }}
-              className="flex gap-2"
-            >
-              <input
-                ref={titleInputRef}
-                value={titleValue}
-                onChange={(e) => setTitleValue(e.target.value)}
-                className="flex-1 bg-terminal-bg rounded-lg px-3 py-2.5 text-sm font-mono text-terminal-text placeholder:text-terminal-dimmer outline-none ring-1 ring-terminal-border-subtle focus:ring-terminal-green/40 transition-shadow duration-200"
-                placeholder={titleInput.defaultTitle}
-                maxLength={TITLE_MAX_CHARS}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") setTitleInput(null);
-                }}
-              />
-              <button
-                type="submit"
-                className="px-4 py-2 text-xs font-mono rounded-lg bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-colors duration-200 font-medium"
-              >
-                Generate
-              </button>
-              <button
-                type="button"
-                onClick={() => setTitleInput(null)}
-                className="px-3 py-2 text-xs font-mono rounded-lg text-terminal-dim hover:text-terminal-text transition-colors"
-              >
-                Cancel
-              </button>
-            </form>
-          </div>
-        )}
-
         {/* Session list */}
         <div className="flex-1 overflow-y-auto">
           {showInitialLoading ? (
@@ -1308,7 +1776,7 @@ function SessionsPanel() {
                         navigateTo({ view: null, session: s.existingReplay!, v: "export" })
                       }
                       onTitleSave={handleTitleSave}
-                      onRegenerate={() => handleGenerate(s)}
+                      onRegenerate={() => setSelectedSlug(s.slug)}
                       isRegenerating={generatingSlug === s.slug}
                       onDelete={() => handleDeleteReplay(s.slug)}
                       onArchive={() => toggleArchive(s.slug)}
@@ -1333,7 +1801,7 @@ function SessionsPanel() {
                 return (
                   <div
                     key={`${s.provider}-${s.slug}`}
-                    onClick={() => handleGenerate(s)}
+                    onClick={() => setSelectedSlug(s.slug)}
                     className={`bg-terminal-surface rounded-xl px-5 py-4 hover:bg-terminal-surface-hover transition-all duration-300 ease-material space-y-2.5 shadow-layer-sm cursor-pointer hover-lift ${isArchived ? "opacity-50" : ""}`}
                   >
                     {/* Row 1: title + meta (left) / time + actions (right) */}
@@ -1373,7 +1841,7 @@ function SessionsPanel() {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleGenerate(s);
+                              setSelectedSlug(s.slug);
                             }}
                             disabled={generatingSlug === s.slug}
                             className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1 disabled:opacity-50"
@@ -1508,6 +1976,23 @@ function SessionsPanel() {
             </div>
           )}
         </div>
+
+        {/* Session detail popup */}
+        {selectedSession && (
+          <SessionDetailPopup
+            session={selectedSession}
+            onClose={() => setSelectedSlug(null)}
+            onGenerate={submitGenerate}
+            onViewReplay={(slug) => navigateTo({ view: null, session: slug })}
+            onArchive={(slug) => {
+              toggleArchive(slug);
+            }}
+            onTitleSave={handleTitleSave}
+            onDeleteReplay={handleDeleteReplay}
+            isGenerating={generatingSlug === selectedSession.slug}
+            isArchived={archivedSlugs.has(selectedSession.slug)}
+          />
+        )}
       </div>
     </div>
   );
@@ -2068,6 +2553,21 @@ function ReplaysPanel() {
   );
 }
 
+// ─── Nav scan indicator (lives inside ScanInsightsProvider) ─────────
+
+function NavScanIndicator() {
+  const { scanStatus } = useScanInsightsContext();
+  if (!scanStatus?.running || !scanStatus.total) return null;
+  return (
+    <div className="flex items-center gap-2">
+      <div className="w-1.5 h-1.5 rounded-full bg-terminal-purple animate-pulse" />
+      <span className="text-xs font-mono text-terminal-dim tabular-nums">
+        Scanning {scanStatus.scanned}/{scanStatus.total}
+      </span>
+    </div>
+  );
+}
+
 // ─── Main Dashboard ─────────────────────────────────────────────────
 
 export default function Dashboard() {
@@ -2114,13 +2614,14 @@ export default function Dashboard() {
       <div className="flex-1 flex flex-col min-h-0">
         {/* Tab bar — only show when running with local server */}
         {isEditor && (
-          <div className="shrink-0 px-5 py-3 border-b border-terminal-border-subtle bg-terminal-surface/30">
+          <div className="shrink-0 px-5 py-3 border-b border-terminal-border-subtle bg-terminal-surface/30 flex items-center justify-between">
             <div className="inline-flex items-center rounded-xl bg-terminal-surface p-0.5 shadow-layer-sm">
               {tabButton("home", "Home")}
               {tabButton("sessions", "Sessions")}
               {tabButton("replays", "Replays")}
               {tabButton("projects", "Projects")}
             </div>
+            <NavScanIndicator />
           </div>
         )}
 
