@@ -225,6 +225,7 @@ function useDashboardData() {
 
   return {
     sources,
+    setSources,
     replays,
     loading,
     loadingSources,
@@ -936,7 +937,8 @@ const ToolsIcon = () => (
 // ─── Main Component ──────────────────────────────────────────────────
 
 export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
-  const { sources, replays, loading, loadingSources, loadingReplays, error } = useDashboardData();
+  const { sources, setSources, replays, loading, loadingSources, loadingReplays, error } =
+    useDashboardData();
   const insights = useMemo(() => computeInsights(sources, replays), [sources, replays]);
   const { scanStatus, userInsights } = useScanInsightsContext();
   const [generatingSlug, setGeneratingSlug] = useState<string | null>(null);
@@ -1017,11 +1019,22 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
       body: JSON.stringify({ title }),
     });
     if (!resp.ok) throw new Error("Failed to update title");
+    setSources((prev) =>
+      prev.map((s) =>
+        s.slug === slug && s.replay
+          ? { ...s, replay: { ...s.replay, title: title || undefined } }
+          : s,
+      ),
+    );
   };
 
   const handleDeleteReplay = async (slug: string) => {
     try {
-      await fetch(`/api/sessions/${encodeURIComponent(slug)}`, { method: "DELETE" });
+      const resp = await fetch(`/api/sessions/${encodeURIComponent(slug)}`, { method: "DELETE" });
+      if (!resp.ok) return;
+      setSources((prev) =>
+        prev.map((s) => (s.slug === slug ? { ...s, replay: undefined, existingReplay: null } : s)),
+      );
     } catch {
       // ignore
     }
@@ -1239,7 +1252,10 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           onClose={() => setSelectedSlug(null)}
           onGenerate={submitGenerateFromPopup}
           onViewReplay={(slug) => navigateTo({ view: null, session: slug })}
-          onArchive={() => setSelectedSlug(null)}
+          onArchive={(slug) => {
+            fetch(`/api/archive/${slug}`, { method: "POST" }).catch(() => {});
+            setSelectedSlug(null);
+          }}
           onTitleSave={handleTitleSave}
           onDeleteReplay={handleDeleteReplay}
           isGenerating={generatingSlug === selectedSession.slug}

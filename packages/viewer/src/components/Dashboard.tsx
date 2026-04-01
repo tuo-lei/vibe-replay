@@ -227,8 +227,32 @@ function SessionMoreMenu({
   );
 }
 
+// Module-level cache for scan results (avoids re-fetching on every popup open)
+let scanResultsCache: SessionScanData[] | null = null;
+let scanResultsFetchPromise: Promise<SessionScanData[] | null> | null = null;
+
+function fetchScanResults(): Promise<SessionScanData[] | null> {
+  if (scanResultsCache) return Promise.resolve(scanResultsCache);
+  if (scanResultsFetchPromise) return scanResultsFetchPromise;
+  scanResultsFetchPromise = fetch("/api/scan/results")
+    .then((r) => (r.ok ? r.json() : null))
+    .then((data) => {
+      const results = data?.results ?? null;
+      scanResultsCache = results;
+      // Invalidate after 30s so fresh data can come in
+      setTimeout(() => {
+        scanResultsCache = null;
+        scanResultsFetchPromise = null;
+      }, 30_000);
+      return results;
+    })
+    .catch(() => null);
+  return scanResultsFetchPromise;
+}
+
 /** Per-session scan result (from background scanner) */
 export interface SessionScanData {
+  slug?: string;
   costEstimate?: number;
   tokenUsage?: {
     inputTokens: number;
@@ -299,19 +323,14 @@ export function SessionDetailPopup({
     }
   }, []);
 
-  // Fetch scan results for richer data
+  // Fetch scan results for richer data (cached at module level)
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/scan/results")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (cancelled || !data?.results) return;
-        const match = (data.results as SessionScanData[]).find(
-          (r: SessionScanData & { slug?: string }) => r.slug === s.slug,
-        );
-        if (match) setScanData(match);
-      })
-      .catch(() => {});
+    fetchScanResults().then((results) => {
+      if (cancelled || !results) return;
+      const match = results.find((r) => r.slug === s.slug);
+      if (match) setScanData(match);
+    });
     return () => {
       cancelled = true;
     };
@@ -1742,10 +1761,8 @@ function SessionsPanel() {
               </div>
               <div className="text-[11px] font-mono text-terminal-orange/70 mt-0.5">
                 Claude Code auto-deletes transcripts after{" "}
-                {cleanupPeriodDays != null
-                  ? `${cleanupPeriodDays} days (cleanupPeriodDays)`
-                  : "cleanupPeriodDays"}
-                . Generate replays to preserve them.
+                {cleanupPeriodDays != null ? `${cleanupPeriodDays} days` : "the configured period"}.
+                Generate replays to preserve them.
               </div>
             </div>
           </div>
