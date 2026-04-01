@@ -49,14 +49,25 @@ describe("Claude Code source insights: isMeta as context-injection", () => {
     expect(regularTurns).toHaveLength(2);
   });
 
-  it("transforms context-injection to scene with injectionType", async () => {
+  it("transforms context-injection to scene with specific injectionType", async () => {
     const parsed = await parseClaudeCodeSession(FIXTURE);
     const replay = transformToReplay(parsed, "claude-code", "~/test");
     const injectionScenes = replay.scenes.filter((s) => s.type === "context-injection");
     expect(injectionScenes).toHaveLength(1);
     expect(
       injectionScenes[0].type === "context-injection" && injectionScenes[0].injectionType,
-    ).toBe("skill");
+    ).toBe("skill:auth-skill");
+  });
+
+  it("extracts skillsUsed from isMeta skill injections", async () => {
+    const result = await parseClaudeCodeSession(FIXTURE);
+    expect(result.skillsUsed).toEqual(["auth-skill"]);
+  });
+
+  it("passes skillsUsed through to ReplaySession", async () => {
+    const parsed = await parseClaudeCodeSession(FIXTURE);
+    const replay = transformToReplay(parsed, "claude-code", "~/test");
+    expect(replay.meta.skillsUsed).toEqual(["auth-skill"]);
   });
 });
 

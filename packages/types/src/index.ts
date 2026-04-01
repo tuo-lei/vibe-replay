@@ -185,6 +185,8 @@ export interface ReplaySession {
     cursorSidecars?: CursorSidecars;
     /** API service tier observed (e.g. "standard") */
     serviceTier?: string;
+    /** Skills / slash commands used (e.g. ["playwright-cli", "/insights"]) */
+    skillsUsed?: string[];
     /** Number of assistant responses truncated by max_tokens */
     truncatedResponses?: number;
   };

@@ -74,6 +74,9 @@ export async function parseClaudeCodeSession(
   // Service tier (from API usage data, e.g. "standard")
   let serviceTier: string | undefined;
 
+  // Skills used in the session (extracted from isMeta skill injection messages)
+  const skillsUsed = new Set<string>();
+
   // Group assistant messages by message.id
   const assistantBlocks = new Map<string, ContentBlock[]>();
   const assistantTimestamps = new Map<string, string>();
@@ -193,7 +196,7 @@ export async function parseClaudeCodeSession(
 
     const { role, content: msgContent, id: msgId } = obj.message;
 
-    // Capture system-injected messages as context-injection turns (not regular user turns)
+    // Capture system-injected messages: extract skill names and emit meaningful ones as scenes
     if (obj.isMeta && role === "user") {
       const text =
         typeof msgContent === "string"
@@ -205,12 +208,34 @@ export async function parseClaudeCodeSession(
                 .join("\n")
             : "";
       if (text.trim()) {
-        userTurns.push({
-          role: "user",
-          subtype: "context-injection",
-          timestamp: obj.timestamp,
-          blocks: [{ type: "text", text }],
-        });
+        // Extract skill name from skill injection messages
+        if (text.startsWith("Base directory for this skill:")) {
+          const skillPath = text
+            .split("\n")[0]
+            .replace("Base directory for this skill: ", "")
+            .trim();
+          const skillName = skillPath.split("/").pop() || skillPath;
+          skillsUsed.add(skillName);
+        }
+        // Extract slash command name from command output
+        if (text.startsWith("The user just ran /")) {
+          const cmd = text.split("/")[1]?.split(/[\s\n]/)[0];
+          if (cmd) skillsUsed.add(`/${cmd}`);
+        }
+        // Only emit context-injection scenes for content with real information value.
+        // Skip local-command caveats (just a wrapper telling the model to ignore) and
+        // bare resume continuations — they add noise without insight.
+        const isLowValue =
+          text.startsWith("<local-command-caveat>") ||
+          text.trim() === "Continue from where you left off.";
+        if (!isLowValue) {
+          userTurns.push({
+            role: "user",
+            subtype: "context-injection",
+            timestamp: obj.timestamp,
+            blocks: [{ type: "text", text }],
+          });
+        }
       }
       continue;
     }
@@ -483,6 +508,7 @@ export async function parseClaudeCodeSession(
     trackedFiles: trackedFilesArr,
     serviceTier,
     truncatedResponses: truncatedCount > 0 ? truncatedCount : undefined,
+    skillsUsed: skillsUsed.size > 0 ? [...skillsUsed].sort() : undefined,
   };
 }
 

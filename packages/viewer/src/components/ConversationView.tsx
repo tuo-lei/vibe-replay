@@ -518,16 +518,16 @@ const GroupCard = memo(function GroupCard({
   if (group.type === "context-injection") {
     const scene = visibleScenes[0]?.scene;
     if (!scene || scene.type !== "context-injection") return null;
-    const label =
-      scene.injectionType === "skill"
-        ? "Skill Injection"
-        : scene.injectionType === "local-command"
-          ? "Local Command"
-          : scene.injectionType === "slash-command"
-            ? "Slash Command"
-            : scene.injectionType === "image"
-              ? "Image Injection"
-              : "System Context";
+    const it = scene.injectionType || "system";
+    const label = it.startsWith("skill:")
+      ? `Skill: ${it.slice(6)}`
+      : it.startsWith("command:")
+        ? `Command: ${it.slice(8)}`
+        : it === "image"
+          ? "Image Injection"
+          : it === "local-command"
+            ? "Local Command"
+            : "System Context";
     return (
       <div
         id={`scene-${firstIndex}`}

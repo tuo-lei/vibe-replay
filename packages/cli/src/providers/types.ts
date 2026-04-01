@@ -60,6 +60,8 @@ export interface ProviderParseResult {
   cursorSidecars?: CursorSidecars;
   /** API service tier (e.g. "standard") from usage data */
   serviceTier?: string;
+  /** Skills / slash commands used in the session (e.g. ["playwright-cli", "/insights"]) */
+  skillsUsed?: string[];
   /** Count of assistant responses truncated by max_tokens */
   truncatedResponses?: number;
 }

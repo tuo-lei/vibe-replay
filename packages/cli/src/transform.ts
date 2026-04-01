@@ -187,6 +187,7 @@ export function transformToReplay(
         : {}),
       ...(parsed.cursorSidecars ? { cursorSidecars: parsed.cursorSidecars } : {}),
       ...(parsed.serviceTier ? { serviceTier: parsed.serviceTier } : {}),
+      ...(parsed.skillsUsed ? { skillsUsed: parsed.skillsUsed } : {}),
       ...(parsed.truncatedResponses ? { truncatedResponses: parsed.truncatedResponses } : {}),
     },
     scenes,
@@ -303,13 +304,27 @@ function normalizeCursorAgentType(agentType: string): string {
   return agentType;
 }
 
-/** Classify isMeta injection by content pattern */
+/**
+ * Classify isMeta injection by content pattern.
+ * Returns a specific label like "skill:playwright-cli" or "command:/insights".
+ */
 function classifyInjection(content: string): string {
-  if (content.startsWith("<local-command-caveat>")) return "local-command";
-  if (content.startsWith("Base directory for this skill:")) return "skill";
-  if (content.startsWith("Usage: /")) return "slash-command";
+  if (content.startsWith("Base directory for this skill:")) {
+    const skillPath = content.split("\n")[0].replace("Base directory for this skill: ", "").trim();
+    const name = skillPath.split("/").pop() || "unknown";
+    return `skill:${name}`;
+  }
+  if (content.startsWith("The user just ran /")) {
+    const cmd = content.split("/")[1]?.split(/[\s\n]/)[0] || "unknown";
+    return `command:/${cmd}`;
+  }
+  if (content.startsWith("Usage: /")) {
+    const cmd = content.split("Usage: /")[1]?.split(/[\s\n]/)[0] || "unknown";
+    return `command:/${cmd}`;
+  }
   if (content.startsWith("[Image:")) return "image";
-  return "other";
+  if (content.startsWith("<local-command-caveat>")) return "local-command";
+  return "system";
 }
 
 // Redact common secret patterns from output
