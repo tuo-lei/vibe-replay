@@ -21,6 +21,8 @@ function getSceneText(scene: Scene): string {
       return scene.content;
     case "compaction-summary":
       return scene.content;
+    case "context-injection":
+      return scene.content;
     case "thinking":
       return scene.content;
     case "text-response":
@@ -51,6 +53,7 @@ function highlightMatch(text: string, query: string): string {
 const TYPE_LABELS: Record<string, string> = {
   "user-prompt": "User",
   "compaction-summary": "Compaction",
+  "context-injection": "Injection",
   thinking: "Thinking",
   "text-response": "Response",
   "tool-call": "Tool",
@@ -59,6 +62,7 @@ const TYPE_LABELS: Record<string, string> = {
 const TYPE_COLORS: Record<string, string> = {
   "user-prompt": "text-terminal-green",
   "compaction-summary": "text-terminal-dim",
+  "context-injection": "text-blue-400",
   thinking: "text-terminal-purple",
   "text-response": "text-terminal-blue",
   "tool-call": "text-terminal-orange",

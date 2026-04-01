@@ -128,8 +128,8 @@ describe("Claude Code parser — extended system message filtering", () => {
   it("keeps real user prompts alongside filtered messages", async () => {
     const result = await parseClaudeCodeSession(REAL);
     const userTurns = result.turns.filter((t) => t.role === "user" && !t.subtype);
-    // 2 turns: the real prompt + the isMeta skill injection (which is not filtered)
-    expect(userTurns.length).toBe(2);
+    // Only the real prompt — isMeta skill injection is now correctly filtered out
+    expect(userTurns.length).toBe(1);
     const texts = userTurns.map((t) => (t.blocks[0] as any).text);
     expect(texts).toContain("Implement the feature");
   });
@@ -139,21 +139,32 @@ describe("Claude Code parser — extended system message filtering", () => {
 // isMeta / sourceToolUseID messages (skill injections)
 // ---------------------------------------------------------------------------
 describe("Claude Code parser — isMeta skill injection messages", () => {
-  it("currently includes isMeta messages as user turns (known behavior)", async () => {
+  it("captures isMeta messages as context-injection turns", async () => {
     const result = await parseClaudeCodeSession(REAL);
-    const userTurns = result.turns.filter((t) => t.role === "user");
-    // isMeta messages with sourceToolUseID (not sourceToolAssistantUUID) are not filtered
-    // This documents current behavior — the skill injection text passes through
-    const allUserText = userTurns
+    // isMeta messages are captured with subtype "context-injection", not as regular user turns
+    const injections = result.turns.filter(
+      (t) => t.role === "user" && t.subtype === "context-injection",
+    );
+    expect(injections.length).toBeGreaterThanOrEqual(1);
+    const injectionText = injections
       .flatMap((t) => t.blocks)
       .filter((b) => b.type === "text")
       .map((b) => (b as any).text);
-    // The skill injection message has text content and no sourceToolAssistantUUID,
-    // so it currently passes through as a user turn
-    const hasSkillText = allUserText.some((t: string) =>
-      t.includes("Base directory for this skill"),
+    expect(injectionText.some((t: string) => t.includes("Base directory for this skill"))).toBe(
+      true,
     );
-    expect(hasSkillText).toBe(true);
+  });
+
+  it("does not include isMeta messages in regular user turns", async () => {
+    const result = await parseClaudeCodeSession(REAL);
+    const regularTurns = result.turns.filter((t) => t.role === "user" && !t.subtype);
+    const regularText = regularTurns
+      .flatMap((t) => t.blocks)
+      .filter((b) => b.type === "text")
+      .map((b) => (b as any).text);
+    expect(regularText.some((t: string) => t.includes("Base directory for this skill"))).toBe(
+      false,
+    );
   });
 });
 

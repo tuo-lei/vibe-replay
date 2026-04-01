@@ -268,6 +268,7 @@ export interface SessionScanData {
   prLinks?: Array<{ prNumber: number; prUrl: string; prRepository: string }>;
   entrypoint?: string;
   permissionMode?: string;
+  skillsUsed?: string[];
   startTime?: string;
   endTime?: string;
   durationMs?: number;
@@ -402,6 +403,14 @@ export function SessionDetailPopup({
                 trust mode
               </span>
             )}
+            {scanData?.skillsUsed?.map((skill) => (
+              <span
+                key={skill}
+                className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400"
+              >
+                {skill}
+              </span>
+            ))}
             {s.replay?.replayOutdated && (
               <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-terminal-orange-subtle text-terminal-orange">
                 outdated replay
@@ -475,6 +484,9 @@ export function SessionDetailPopup({
               {branch && <InfoRow label="Branch" value={branch} />}
               {scanData?.gitBranches && scanData.gitBranches.length > 1 && (
                 <InfoRow label="Branches" value={scanData.gitBranches.join(", ")} />
+              )}
+              {scanData?.skillsUsed && scanData.skillsUsed.length > 0 && (
+                <InfoRow label="Skills" value={scanData.skillsUsed.join(", ")} />
               )}
               <InfoRow
                 label="Started"

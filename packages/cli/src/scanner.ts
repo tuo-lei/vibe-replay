@@ -66,6 +66,7 @@ export interface SessionScanResult {
   // Meta
   entrypoint?: string;
   permissionMode?: string;
+  skillsUsed?: string[];
   compactionCount: number;
   dataSource?: DataSource;
   dataQualityNotes?: string[];
@@ -202,6 +203,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
   const gitBranches: string[] = [];
   let entrypoint: string | undefined;
   let permissionMode: string | undefined;
+  const skillsUsed = new Set<string>();
 
   let promptCount = 0;
   let toolCallCount = 0;
@@ -294,6 +296,19 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
         }
         if (obj.subtype === "compact_boundary") compactionCount++;
         if (obj.subtype === "api_error") apiErrorCount++;
+        continue;
+      }
+
+      // Extract skill/command names from isMeta messages
+      if (obj.isMeta) {
+        const text = extractMetaText(obj.message?.content);
+        if (text.startsWith("Base directory for this skill:")) {
+          const name = text.split("\n")[0].split("/").pop()?.trim();
+          if (name) skillsUsed.add(name);
+        } else if (text.startsWith("The user just ran /")) {
+          const cmd = text.split("/")[1]?.split(/[\s\n]/)[0];
+          if (cmd) skillsUsed.add(`/${cmd}`);
+        }
         continue;
       }
 
@@ -497,6 +512,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
     compactionCount,
     entrypoint,
     permissionMode,
+    skillsUsed: skillsUsed.size > 0 ? [...skillsUsed].sort() : undefined,
   };
 }
 
@@ -641,6 +657,7 @@ function buildScanResultFromParsed(
     compactionCount: parsed.compactions?.length || 0,
     entrypoint: parsed.entrypoint,
     permissionMode: parsed.permissionMode,
+    skillsUsed: parsed.skillsUsed,
     dataSource: parsed.dataSource,
     dataQualityNotes: parsed.dataSourceInfo?.notes,
     turnStatCount: parsed.turnStats?.length,
@@ -1142,4 +1159,16 @@ function shortenPath(path: string): string {
   const home = homedir();
   if (path.startsWith(home)) return `~${path.slice(home.length)}`;
   return path;
+}
+
+/** Extract plain text from a message content field (string or content block array). */
+function extractMetaText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter((b: any) => b.type === "text")
+      .map((b: any) => b.text || "")
+      .join("\n");
+  }
+  return "";
 }

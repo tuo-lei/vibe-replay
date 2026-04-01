@@ -38,6 +38,8 @@ export function sceneDuration(scene: Scene, speed: number): number {
       }
       case "compaction-summary":
         return 800;
+      case "context-injection":
+        return 600;
       default: {
         const _exhaustive: never = scene;
         return 800;

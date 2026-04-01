@@ -24,7 +24,7 @@ interface Props {
 }
 
 interface TurnGroup {
-  type: "user" | "assistant" | "compaction";
+  type: "user" | "assistant" | "compaction" | "context-injection";
   timestamp?: string;
   scenes: { scene: Scene; index: number }[];
   turnNumber?: number;
@@ -67,9 +67,18 @@ export default function ConversationView({
 
     for (let i = 0; i < scenes.length; i++) {
       const scene = scenes[i];
-      if (scene.type === "user-prompt" || scene.type === "compaction-summary") {
+      if (
+        scene.type === "user-prompt" ||
+        scene.type === "compaction-summary" ||
+        scene.type === "context-injection"
+      ) {
         if (current && current.scenes.length > 0) result.push(current);
-        const type = scene.type === "compaction-summary" ? "compaction" : "user";
+        const type =
+          scene.type === "compaction-summary"
+            ? "compaction"
+            : scene.type === "context-injection"
+              ? "context-injection"
+              : "user";
         if (type === "user") turnCount++;
         result.push({
           type,
@@ -494,6 +503,46 @@ const GroupCard = memo(function GroupCard({
         <div className="flex items-center gap-2 mb-2">
           <span className="text-[10px] font-sans font-semibold text-terminal-dim uppercase tracking-widest">
             Context Compaction
+          </span>
+          {group.timestamp && (
+            <span className="text-xs font-mono text-terminal-dimmer">
+              {formatTime(group.timestamp)}
+            </span>
+          )}
+        </div>
+        <CompactionSummaryBlock content={scene.content} isActive={firstIndex === currentIndex} />
+      </div>
+    );
+  }
+
+  if (group.type === "context-injection") {
+    const scene = visibleScenes[0]?.scene;
+    if (!scene || scene.type !== "context-injection") return null;
+    const it = scene.injectionType || "system";
+    const label = it.startsWith("skill:")
+      ? `Skill: ${it.slice(6)}`
+      : it.startsWith("command:")
+        ? `Command: ${it.slice(8)}`
+        : it === "image"
+          ? "Image Injection"
+          : it === "local-command"
+            ? "Local Command"
+            : "System Context";
+    return (
+      <div
+        id={`scene-${firstIndex}`}
+        data-scene-index={firstIndex}
+        className={`group relative rounded-xl px-5 py-3.5 transition-all duration-200 ease-material ${
+          groupHasFocusedTarget
+            ? "scene-nav-focused bg-terminal-surface border-l-2 border-blue-500/60 shadow-layer-sm"
+            : groupHasCurrent
+              ? "bg-terminal-surface border-l-2 border-blue-500/40 shadow-layer-sm"
+              : "bg-terminal-surface/50"
+        }`}
+      >
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-[10px] font-sans font-semibold text-blue-400/80 uppercase tracking-widest">
+            {label}
           </span>
           {group.timestamp && (
             <span className="text-xs font-mono text-terminal-dimmer">
@@ -1203,10 +1252,21 @@ const SceneBlock = memo(function SceneBlock({
       );
     case "compaction-summary":
       return <CompactionSummaryBlock content={scene.content} isActive={isActive} />;
+    case "context-injection":
+      return <CompactionSummaryBlock content={scene.content} isActive={isActive} />;
     case "thinking":
       return <ThinkingBlock content={scene.content} isActive={isActive} />;
     case "text-response":
-      return <TextResponseBlock content={effectiveContent ?? scene.content} isActive={isActive} />;
+      return (
+        <>
+          <TextResponseBlock content={effectiveContent ?? scene.content} isActive={isActive} />
+          {scene.isTruncated && (
+            <div className="mt-1 text-[10px] font-mono text-terminal-orange/70 italic">
+              Response truncated (max_tokens reached)
+            </div>
+          )}
+        </>
+      );
     case "tool-call":
       return <ToolCallBlock scene={scene} isActive={isActive} forceCollapse={collapseTools} />;
   }

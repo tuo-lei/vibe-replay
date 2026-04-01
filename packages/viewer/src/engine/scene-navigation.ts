@@ -1,6 +1,11 @@
 import type { Scene } from "../types";
 import { findBatchEnd } from "./scene-timing";
 
+/** Check if a scene type acts as a turn boundary (user prompt, compaction, or context injection) */
+function isBoundaryType(type: Scene["type"]): boolean {
+  return type === "user-prompt" || type === "compaction-summary" || type === "context-injection";
+}
+
 /** Compute indices of all user-prompt scenes */
 export function computeUserPromptIndices(scenes: Scene[]): number[] {
   const indices: number[] = [];
@@ -47,27 +52,18 @@ export function computeNextIndex(
   if (nextIdx >= scenes.length) return -1;
 
   if (prefs.promptsOnly) {
-    while (
-      nextIdx < scenes.length &&
-      scenes[nextIdx].type !== "user-prompt" &&
-      scenes[nextIdx].type !== "compaction-summary"
-    ) {
+    while (nextIdx < scenes.length && !isBoundaryType(scenes[nextIdx].type)) {
       nextIdx++;
     }
     return nextIdx >= scenes.length ? -1 : nextIdx;
   }
 
   if (prefs.compactAssistant) {
-    const isBoundary =
-      scenes[nextIdx].type === "user-prompt" || scenes[nextIdx].type === "compaction-summary";
+    const isBoundary = isBoundaryType(scenes[nextIdx].type);
     if (!isBoundary) {
       // It's entering an assistant group. Skip to the LAST scene of this group.
       let end = nextIdx;
-      while (
-        end + 1 < scenes.length &&
-        scenes[end + 1].type !== "user-prompt" &&
-        scenes[end + 1].type !== "compaction-summary"
-      ) {
+      while (end + 1 < scenes.length && !isBoundaryType(scenes[end + 1].type)) {
         end++;
       }
       return end; // Lands on the last scene of the assistant block
@@ -92,29 +88,19 @@ export function computePrevIndex(
   if (currentIndex <= 0) return 0;
 
   if (prefs.promptsOnly) {
-    while (
-      prevIdx > 0 &&
-      scenes[prevIdx].type !== "user-prompt" &&
-      scenes[prevIdx].type !== "compaction-summary"
-    ) {
+    while (prevIdx > 0 && !isBoundaryType(scenes[prevIdx].type)) {
       prevIdx--;
     }
     return prevIdx;
   }
 
   if (prefs.compactAssistant) {
-    const isCurrentBoundary =
-      scenes[currentIndex].type === "user-prompt" ||
-      scenes[currentIndex].type === "compaction-summary";
+    const isCurrentBoundary = isBoundaryType(scenes[currentIndex].type);
 
     if (!isCurrentBoundary) {
       // We are inside/at the end of an assistant block. Skip backwards to the previous user prompt.
       let start = currentIndex;
-      while (
-        start > 0 &&
-        scenes[start - 1].type !== "user-prompt" &&
-        scenes[start - 1].type !== "compaction-summary"
-      ) {
+      while (start > 0 && !isBoundaryType(scenes[start - 1].type)) {
         start--;
       }
       return Math.max(0, start - 1);

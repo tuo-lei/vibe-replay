@@ -68,6 +68,15 @@ export async function parseClaudeCodeSession(
   // Tracked files (from file-history-snapshot messages)
   const trackedFiles = new Set<string>();
 
+  // Stop reasons per message ID — "max_tokens" indicates truncation
+  const stopReasons = new Map<string, string>();
+
+  // Service tier (from API usage data, e.g. "standard")
+  let serviceTier: string | undefined;
+
+  // Skills used in the session (extracted from isMeta skill injection messages)
+  const skillsUsed = new Set<string>();
+
   // Group assistant messages by message.id
   const assistantBlocks = new Map<string, ContentBlock[]>();
   const assistantTimestamps = new Map<string, string>();
@@ -187,12 +196,49 @@ export async function parseClaudeCodeSession(
 
     const { role, content: msgContent, id: msgId } = obj.message;
 
+    // Capture system-injected messages: extract skill names and emit meaningful ones as scenes
+    if (obj.isMeta && role === "user") {
+      const text = extractMessageText(msgContent);
+      if (text.trim()) {
+        // Extract skill name from skill injection messages
+        if (text.startsWith("Base directory for this skill:")) {
+          const skillPath = text
+            .split("\n")[0]
+            .replace("Base directory for this skill: ", "")
+            .trim();
+          const skillName = skillPath.split("/").pop() || skillPath;
+          skillsUsed.add(skillName);
+        }
+        // Extract slash command name from command output
+        if (text.startsWith("The user just ran /")) {
+          const cmd = text.split("/")[1]?.split(/[\s\n]/)[0];
+          if (cmd) skillsUsed.add(`/${cmd}`);
+        }
+        // Only emit context-injection scenes for content with real information value.
+        // Skip local-command caveats (just a wrapper telling the model to ignore) and
+        // bare resume continuations — they add noise without insight.
+        const isLowValue =
+          text.startsWith("<local-command-caveat>") ||
+          text.trim() === "Continue from where you left off.";
+        if (!isLowValue) {
+          userTurns.push({
+            role: "user",
+            subtype: "context-injection",
+            timestamp: obj.timestamp,
+            blocks: [{ type: "text", text }],
+          });
+        }
+      }
+      continue;
+    }
+
     // User message with string content = human prompt (or compaction summary)
     if (role === "user" && typeof msgContent === "string") {
       if (isSystemGeneratedMessage(msgContent)) continue;
-      const isCompaction = msgContent.startsWith(
-        "This session is being continued from a previous conversation",
-      );
+      // Prefer the isCompactSummary flag; fall back to string prefix for older sessions
+      const isCompaction =
+        obj.isCompactSummary ||
+        msgContent.startsWith("This session is being continued from a previous conversation");
       userTurns.push({
         role: "user",
         ...(isCompaction ? { subtype: "compaction-summary" } : {}),
@@ -261,9 +307,19 @@ export async function parseClaudeCodeSession(
       if (!model && obj.message.model) model = obj.message.model;
 
       // Track usage per message ID — overwrite so we keep the last (final) value
-      const usage = (obj.message as any).usage;
+      const usage = obj.message.usage;
       if (usage && msgId) {
         usageByMsgId.set(msgId, { ...usage, model: obj.message.model });
+        // Only record first; tier is stable within a session
+        if (usage.service_tier && !serviceTier) {
+          serviceTier = usage.service_tier;
+        }
+      }
+
+      // Track stop_reason — "max_tokens" means truncated response
+      const stopReason = obj.message.stop_reason;
+      if (stopReason && msgId) {
+        stopReasons.set(msgId, stopReason);
       }
 
       // Track per-message model
@@ -330,6 +386,7 @@ export async function parseClaudeCodeSession(
       return block;
     });
     const msgModel = assistantModels.get(msgId);
+    const stopReason = stopReasons.get(msgId);
     assistantTurns.push({
       turn: {
         role: "assistant",
@@ -337,6 +394,7 @@ export async function parseClaudeCodeSession(
         model: msgModel || model,
         timestamp: assistantTimestamps.get(msgId),
         blocks: enrichedBlocks,
+        ...(stopReason === "max_tokens" ? { stopReason: "max_tokens" as const } : {}),
       },
       timestamp: assistantTimestamps.get(msgId) || "",
     });
@@ -415,6 +473,9 @@ export async function parseClaudeCodeSession(
   const trackedFilesArr =
     trackedFiles.size > 0 ? [...trackedFiles].sort().slice(0, 200) : undefined;
 
+  // Count truncated assistant responses (stop_reason: "max_tokens")
+  const truncatedCount = [...stopReasons.values()].filter((r) => r === "max_tokens").length;
+
   return {
     sessionId,
     slug,
@@ -437,7 +498,22 @@ export async function parseClaudeCodeSession(
     permissionMode,
     apiErrors: apiErrors.length > 0 ? apiErrors : undefined,
     trackedFiles: trackedFilesArr,
+    serviceTier,
+    truncatedResponses: truncatedCount > 0 ? truncatedCount : undefined,
+    skillsUsed: skillsUsed.size > 0 ? [...skillsUsed].sort() : undefined,
   };
+}
+
+/** Extract plain text from a message content field (string or array of content blocks). */
+function extractMessageText(content: string | any[]): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter((b: any) => b.type === "text")
+      .map((b: any) => b.text || "")
+      .join("\n");
+  }
+  return "";
 }
 
 function extractImages(block: ContentBlock): string[] {

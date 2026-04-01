@@ -48,18 +48,26 @@ export interface ParsedTurn {
   model?: string;
   timestamp?: string;
   blocks: ContentBlock[];
+  /** Present when the assistant response was truncated (stop_reason: "max_tokens") */
+  stopReason?: "max_tokens";
 }
 
 export interface RawMessage {
   parentUuid: string | null;
   uuid?: string;
   isSidechain: boolean;
+  /** True for system-injected messages (skill injection, context injection, etc.) */
+  isMeta?: boolean;
+  /** True for compaction summary messages */
+  isCompactSummary?: boolean;
   userType: string;
   cwd: string;
   sessionId: string;
   version: string;
   gitBranch?: string;
   slug: string;
+  /** UUID of the assistant message that triggered the tool whose result this message carries */
+  sourceToolAssistantUUID?: string;
   type:
     | "user"
     | "assistant"
@@ -70,7 +78,17 @@ export interface RawMessage {
     | "queue-operation"
     | "last-prompt"
     | "pr-link"
-    | "agent-name";
+    | "agent-name"
+    | "agent-color"
+    | "agent-setting"
+    | "summary"
+    | "ai-title"
+    | "tag"
+    | "mode"
+    | "worktree-state"
+    | "speculation-accept"
+    | "attribution-snapshot"
+    | "content-replacement";
   subtype?: string;
   timestamp?: string;
   message?: {
@@ -78,6 +96,14 @@ export interface RawMessage {
     id?: string;
     model?: string;
     content: string | ContentBlock[];
+    stop_reason?: string;
+    usage?: {
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_creation_input_tokens?: number;
+      cache_read_input_tokens?: number;
+      service_tier?: string;
+    };
   };
   data?: any;
   title?: string;
