@@ -301,15 +301,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
 
       // Extract skill/command names from isMeta messages
       if (obj.isMeta) {
-        const text =
-          typeof obj.message?.content === "string"
-            ? obj.message.content
-            : Array.isArray(obj.message?.content)
-              ? obj.message.content
-                  .filter((b: any) => b.type === "text")
-                  .map((b: any) => b.text || "")
-                  .join("\n")
-              : "";
+        const text = extractMetaText(obj.message?.content);
         if (text.startsWith("Base directory for this skill:")) {
           const name = text.split("\n")[0].split("/").pop()?.trim();
           if (name) skillsUsed.add(name);
@@ -1167,4 +1159,16 @@ function shortenPath(path: string): string {
   const home = homedir();
   if (path.startsWith(home)) return `~${path.slice(home.length)}`;
   return path;
+}
+
+/** Extract plain text from a message content field (string or content block array). */
+function extractMetaText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter((b: any) => b.type === "text")
+      .map((b: any) => b.text || "")
+      .join("\n");
+  }
+  return "";
 }

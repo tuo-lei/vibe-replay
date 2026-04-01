@@ -198,15 +198,7 @@ export async function parseClaudeCodeSession(
 
     // Capture system-injected messages: extract skill names and emit meaningful ones as scenes
     if (obj.isMeta && role === "user") {
-      const text =
-        typeof msgContent === "string"
-          ? msgContent
-          : Array.isArray(msgContent)
-            ? (msgContent as any[])
-                .filter((b: any) => b.type === "text")
-                .map((b: any) => b.text || "")
-                .join("\n")
-            : "";
+      const text = extractMessageText(msgContent);
       if (text.trim()) {
         // Extract skill name from skill injection messages
         if (text.startsWith("Base directory for this skill:")) {
@@ -315,17 +307,17 @@ export async function parseClaudeCodeSession(
       if (!model && obj.message.model) model = obj.message.model;
 
       // Track usage per message ID — overwrite so we keep the last (final) value
-      const usage = obj.message.usage || (obj.message as any).usage;
+      const usage = obj.message.usage;
       if (usage && msgId) {
         usageByMsgId.set(msgId, { ...usage, model: obj.message.model });
-        // Track service_tier from usage data
+        // Only record first; tier is stable within a session
         if (usage.service_tier && !serviceTier) {
           serviceTier = usage.service_tier;
         }
       }
 
       // Track stop_reason — "max_tokens" means truncated response
-      const stopReason = obj.message.stop_reason || (obj.message as any).stop_reason;
+      const stopReason = obj.message.stop_reason;
       if (stopReason && msgId) {
         stopReasons.set(msgId, stopReason);
       }
@@ -510,6 +502,18 @@ export async function parseClaudeCodeSession(
     truncatedResponses: truncatedCount > 0 ? truncatedCount : undefined,
     skillsUsed: skillsUsed.size > 0 ? [...skillsUsed].sort() : undefined,
   };
+}
+
+/** Extract plain text from a message content field (string or array of content blocks). */
+function extractMessageText(content: string | any[]): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter((b: any) => b.type === "text")
+      .map((b: any) => b.text || "")
+      .join("\n");
+  }
+  return "";
 }
 
 function extractImages(block: ContentBlock): string[] {

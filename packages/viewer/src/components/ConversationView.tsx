@@ -1257,7 +1257,16 @@ const SceneBlock = memo(function SceneBlock({
     case "thinking":
       return <ThinkingBlock content={scene.content} isActive={isActive} />;
     case "text-response":
-      return <TextResponseBlock content={effectiveContent ?? scene.content} isActive={isActive} />;
+      return (
+        <>
+          <TextResponseBlock content={effectiveContent ?? scene.content} isActive={isActive} />
+          {scene.isTruncated && (
+            <div className="mt-1 text-[10px] font-mono text-terminal-orange/70 italic">
+              Response truncated (max_tokens reached)
+            </div>
+          )}
+        </>
+      );
     case "tool-call":
       return <ToolCallBlock scene={scene} isActive={isActive} forceCollapse={collapseTools} />;
   }

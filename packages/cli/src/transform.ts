@@ -72,15 +72,12 @@ export function transformToReplay(
       } else if (block.type === "text") {
         const text = (block as any).text || "";
         if (text.trim()) {
-          const scene: Scene = {
+          scenes.push({
             type: "text-response",
             content: redactSecrets(redactPath(text)),
             timestamp: turn.timestamp,
-          };
-          if (turn.stopReason === "max_tokens") {
-            (scene as any).isTruncated = true;
-          }
-          scenes.push(scene);
+            ...(turn.stopReason === "max_tokens" ? { isTruncated: true as const } : {}),
+          });
         }
       } else if (block.type === "tool_use") {
         const toolBlock = block as any;
