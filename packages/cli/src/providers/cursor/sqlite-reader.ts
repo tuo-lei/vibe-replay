@@ -774,16 +774,58 @@ function bubbleTypeToRole(type: unknown): "user" | "assistant" {
 }
 
 function parseThinking(value: unknown): string {
-  if (typeof value === "string") return value.trim();
+  if (typeof value === "string") return sanitizeCursorReasoningText(value);
   if (
     value &&
     typeof value === "object" &&
     "text" in value &&
     typeof (value as { text: unknown }).text === "string"
   ) {
-    return (value as { text: string }).text.trim();
+    return sanitizeCursorReasoningText((value as { text: string }).text);
   }
   return "";
+}
+
+function trimInternalPlanningTail(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+
+  const headingBreak = /\n{2,}\*\*[^*\n]{3,120}\*\*\n{2,}/g;
+  let match: RegExpExecArray | null;
+  while ((match = headingBreak.exec(trimmed)) !== null) {
+    const tail = trimmed.slice(match.index + match[0].length).trim();
+    if (!looksLikeInternalPlanning(tail)) continue;
+    return trimmed.slice(0, match.index).trim();
+  }
+
+  const leadingHeading = trimmed.match(/^\*\*[^*\n]{3,120}\*\*\n{2,}([\s\S]*)$/);
+  if (leadingHeading && looksLikeInternalPlanning(leadingHeading[1] || "")) {
+    return "";
+  }
+
+  return trimmed;
+}
+
+function sanitizeCursorReasoningText(value: string): string {
+  return trimInternalPlanningTail(value);
+}
+
+function sanitizeCursorAssistantText(value: string, hasToolContext: boolean): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (!hasToolContext && !/\n{2,}\*\*[^*\n]{3,120}\*\*\n{2,}/.test(trimmed)) return trimmed;
+  return trimInternalPlanningTail(trimmed);
+}
+
+function looksLikeInternalPlanning(text: string): boolean {
+  const probe = text.slice(0, 500).replace(/\s+/g, " ").trim();
+  if (!probe) return false;
+  const matches = probe.match(
+    /\b(?:I need|I think|I should|I might|I could|I'm|I am|I'll|I will|let's|we need to|we should)\b/gi,
+  );
+  return (
+    (matches?.length || 0) >= 2 || /it (?:looks|seems) like|the next step|I wonder if/i.test(probe)
+  );
 }
 
 function normalizeTurnText(raw: unknown): string {
@@ -791,6 +833,12 @@ function normalizeTurnText(raw: unknown): string {
   const cleaned = raw.replace(/<\/?user_query>/g, "").trim();
   if (!cleaned || CURSOR_SYSTEM_CONTEXT_RE.test(cleaned)) return "";
   return cleaned;
+}
+
+function normalizeAssistantTurnText(raw: unknown, hasToolContext: boolean): string {
+  const cleaned = normalizeTurnText(raw);
+  if (!cleaned) return "";
+  return sanitizeCursorAssistantText(cleaned, hasToolContext);
 }
 
 function extractToolResultText(value: unknown): string {
@@ -1496,7 +1544,7 @@ function bubbleToTurn(bubble: Record<string, any>): ParsedTurn | null {
     const thinking = parseThinking(bubble.thinking);
     if (thinking) blocks.push({ type: "thinking", thinking } as ContentBlock);
 
-    const text = normalizeTurnText(bubble.text);
+    const text = normalizeAssistantTurnText(bubble.text, !!bubble.toolFormerData);
     if (text) blocks.push({ type: "text", text });
 
     if (bubble.toolFormerData && typeof bubble.toolFormerData === "object") {
@@ -1770,15 +1818,19 @@ function parseAssistantContent(
 ): ContentBlock[] {
   if (!content) return [];
   if (typeof content === "string") {
-    return content.trim() ? [{ type: "text", text: content }] : [];
+    const cleaned = sanitizeCursorAssistantText(content, false);
+    return cleaned ? [{ type: "text", text: cleaned }] : [];
   }
 
   const blocks: ContentBlock[] = [];
+  const hasToolCalls = content.some((block) => block.type === "tool-call");
   for (const b of content) {
     if (b.type === "reasoning" && b.text?.trim()) {
-      blocks.push({ type: "thinking", thinking: b.text } as ContentBlock);
+      const thinking = sanitizeCursorReasoningText(b.text);
+      if (thinking) blocks.push({ type: "thinking", thinking } as ContentBlock);
     } else if (b.type === "text" && b.text?.trim()) {
-      blocks.push({ type: "text", text: b.text });
+      const text = sanitizeCursorAssistantText(b.text, hasToolCalls);
+      if (text) blocks.push({ type: "text", text });
     } else if (b.type === "tool-call" && b.toolCallId && b.toolName) {
       const result = toolResults.get(b.toolCallId);
       const toolBlock: any = {
@@ -2192,6 +2244,8 @@ export const __testables = {
   mapCursorToolName,
   mapToolArgs,
   mergeCursorParseResults,
+  parseAssistantContent,
   normalizeTurnText,
+  parseThinking,
   parseUserContent,
 };

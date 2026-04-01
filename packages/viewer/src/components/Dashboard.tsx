@@ -7,6 +7,7 @@ import {
   formatCacheAge,
   formatCompactAge,
   formatCost,
+  formatDataSourceLabel,
   formatDate,
   formatSize,
   getErrorMessage,
@@ -20,6 +21,7 @@ import {
   replaySuggestedTitle,
   type SourcesEnrichmentStatus,
   shortModelName,
+  sourceDisplayTitle,
   sourceSuggestedTitle,
   TITLE_MAX_CHARS,
   timeAgo,
@@ -252,6 +254,8 @@ function fetchScanResults(): Promise<SessionScanData[] | null> {
 
 /** Per-session scan result (from background scanner) */
 export interface SessionScanData {
+  title?: string;
+  firstPrompt?: string;
   slug?: string;
   costEstimate?: number;
   tokenUsage?: {
@@ -269,6 +273,8 @@ export interface SessionScanData {
   entrypoint?: string;
   permissionMode?: string;
   skillsUsed?: string[];
+  model?: string;
+  gitBranch?: string;
   startTime?: string;
   endTime?: string;
   durationMs?: number;
@@ -276,11 +282,44 @@ export interface SessionScanData {
   toolCallCount: number;
   gitBranches?: string[];
   dataSource?: string;
+  dataQualityNotes?: string[];
+}
+
+function sessionPromptPreview(
+  session: Pick<SourceSession, "prompts" | "firstPrompt">,
+  scanData?: Pick<SessionScanData, "firstPrompt"> | null,
+): string[] {
+  const prompts: string[] = [];
+  const seen = new Set<string>();
+  const candidates = [
+    scanData?.firstPrompt,
+    ...(session.prompts || []),
+    scanData?.firstPrompt ? undefined : session.firstPrompt,
+  ];
+  for (const candidate of candidates) {
+    const cleaned = cleanPrompt(candidate || "");
+    if (!cleaned || seen.has(cleaned)) continue;
+    seen.add(cleaned);
+    prompts.push(cleaned);
+  }
+  return prompts;
+}
+
+function nonDefaultBranch(branch?: string): string | undefined {
+  return branch && branch !== "main" && branch !== "master" ? branch : undefined;
+}
+
+function dataSourceBadgeClass(dataSource?: string, hasSqlite?: boolean): string {
+  if (dataSource === "jsonl") return "bg-terminal-orange-subtle text-terminal-orange";
+  if (dataSource === "global-state") return "bg-terminal-blue-subtle text-terminal-blue";
+  if (dataSource === "sqlite" || hasSqlite) return "bg-terminal-green-subtle text-terminal-green";
+  return "bg-terminal-surface-2 text-terminal-dimmer";
 }
 
 /** Session detail popup — shows full metadata, editable title, Generate CTA */
 export function SessionDetailPopup({
   session: s,
+  scanData: initialScanData = null,
   onClose,
   onGenerate,
   onViewReplay,
@@ -291,6 +330,7 @@ export function SessionDetailPopup({
   isArchived,
 }: {
   session: SourceSession;
+  scanData?: SessionScanData | null;
   onClose: () => void;
   onGenerate: (session: SourceSession, title: string) => void;
   onViewReplay: (slug: string) => void;
@@ -300,10 +340,11 @@ export function SessionDetailPopup({
   isGenerating: boolean;
   isArchived: boolean;
 }) {
-  const suggested = sourceSuggestedTitle(s);
+  const [scanData, setScanData] = useState<SessionScanData | null>(initialScanData);
+  const fallbackSuggested = sourceSuggestedTitle(s);
+  const suggested = sourceDisplayTitle(s, scanData);
   const [titleValue, setTitleValue] = useState(s.replay?.title || suggested);
   const [savingTitle, setSavingTitle] = useState(false);
-  const [scanData, setScanData] = useState<SessionScanData | null>(null);
   const titleInputRef = useRef<HTMLTextAreaElement>(null);
 
   // ESC to close
@@ -324,8 +365,13 @@ export function SessionDetailPopup({
     }
   }, []);
 
+  useEffect(() => {
+    setScanData(initialScanData);
+  }, [initialScanData]);
+
   // Fetch scan results for richer data (cached at module level)
   useEffect(() => {
+    if (initialScanData) return;
     let cancelled = false;
     fetchScanResults().then((results) => {
       if (cancelled || !results) return;
@@ -335,26 +381,42 @@ export function SessionDetailPopup({
     return () => {
       cancelled = true;
     };
-  }, [s.slug]);
+  }, [initialScanData, s.slug]);
 
-  const branch =
-    s.gitBranch && s.gitBranch !== "main" && s.gitBranch !== "master" ? s.gitBranch : undefined;
+  useEffect(() => {
+    setTitleValue((current) => {
+      const normalizedCurrent = normalizeTitleText(current);
+      const normalizedSuggested = normalizeTitleText(suggested);
+      const normalizedReplay = normalizeTitleText(s.replay?.title);
+      if (
+        !normalizedCurrent ||
+        normalizedCurrent === normalizedReplay ||
+        normalizedCurrent === s.slug
+      ) {
+        return s.replay?.title || suggested;
+      }
+      if (normalizedSuggested && normalizedCurrent === normalizeTitleText(fallbackSuggested)) {
+        return s.replay?.title || suggested;
+      }
+      return current;
+    });
+  }, [fallbackSuggested, suggested, s.replay?.title, s.slug]);
 
-  const prompts = (s.prompts || []).map((p) => cleanPrompt(p)).filter((p) => p.length > 0);
-  if (prompts.length === 0 && s.firstPrompt) {
-    const cleaned = cleanPrompt(s.firstPrompt);
-    if (cleaned) prompts.push(cleaned);
-  }
+  const branch = nonDefaultBranch(scanData?.gitBranch || s.gitBranch);
+  const model = scanData?.model || s.model;
+  const prompts = sessionPromptPreview(s, scanData);
+  const dataQualityNotes = scanData?.dataQualityNotes || [];
 
   // Use scan data when available, fall back to discovery estimates
-  const promptCount = scanData?.promptCount || s.promptCount;
-  const toolCallCount = scanData?.toolCallCount || s.toolCallCount;
-  const editCount = scanData?.editCount || s.editCountEst;
-  const durationMs = scanData?.durationMs || s.durationMsEst;
-  const cost = scanData?.costEstimate || s.replay?.stats?.totalCost;
+  const promptCount = scanData?.promptCount ?? s.promptCount;
+  const toolCallCount = scanData?.toolCallCount ?? s.toolCallCount;
+  const editCount = scanData?.editCount ?? s.editCountEst;
+  const durationMs = scanData?.durationMs ?? s.durationMsEst;
+  const cost = scanData?.costEstimate ?? s.replay?.stats?.costEstimate;
   const totalTokens = scanData?.tokenUsage
     ? scanData.tokenUsage.inputTokens + scanData.tokenUsage.outputTokens
     : undefined;
+  const startedAt = scanData?.startTime || s.timestamp;
 
   const handleSaveTitle = async () => {
     if (!s.replay || savingTitle) return;
@@ -388,9 +450,16 @@ export function SessionDetailPopup({
         <div className="flex items-center justify-between px-7 pt-5 pb-3">
           <div className="flex items-center gap-2">
             <ProviderBadge provider={s.provider} />
-            {s.model && (
+            {model && (
               <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-terminal-surface-2 text-terminal-dimmer">
-                {shortModelName(s.model)}
+                {shortModelName(model)}
+              </span>
+            )}
+            {scanData?.dataSource && (
+              <span
+                className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full ${dataSourceBadgeClass(scanData.dataSource, s.hasSqlite)}`}
+              >
+                {formatDataSourceLabel(s.hasSqlite, scanData.dataSource)}
               </span>
             )}
             {scanData?.entrypoint && (
@@ -488,10 +557,7 @@ export function SessionDetailPopup({
               {scanData?.skillsUsed && scanData.skillsUsed.length > 0 && (
                 <InfoRow label="Skills" value={scanData.skillsUsed.join(", ")} />
               )}
-              <InfoRow
-                label="Started"
-                value={`${formatDate(s.timestamp)} (${timeAgo(s.timestamp)})`}
-              />
+              <InfoRow label="Started" value={`${formatDate(startedAt)} (${timeAgo(startedAt)})`} />
               {scanData?.endTime && <InfoRow label="Ended" value={formatDate(scanData.endTime)} />}
               {!!durationMs && (
                 <InfoRow label="Duration" value={`~${formatDuration(durationMs)}`} />
@@ -503,7 +569,7 @@ export function SessionDetailPopup({
               )}
               <InfoRow
                 label="Data"
-                value={s.hasSqlite ? "SQLite + JSONL" : scanData?.dataSource || "JSONL"}
+                value={formatDataSourceLabel(s.hasSqlite, scanData?.dataSource)}
               />
             </div>
 
@@ -548,6 +614,25 @@ export function SessionDetailPopup({
               ))}
             </div>
           </div>
+
+          {dataQualityNotes.length > 0 && (
+            <div>
+              <div className="text-[10px] font-sans uppercase tracking-widest text-terminal-dimmer mb-2">
+                Data Quality
+              </div>
+              <div className="bg-terminal-surface rounded-xl px-4 py-3 space-y-1.5">
+                {dataQualityNotes.map((note) => (
+                  <div
+                    key={note}
+                    className="flex gap-2 items-start text-xs font-mono text-terminal-dim"
+                  >
+                    <span className="text-terminal-orange shrink-0 mt-px">!</span>
+                    <span>{note}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Files modified (from scan) */}
           {scanData?.filesModified && scanData.filesModified.length > 0 && (
@@ -1168,6 +1253,7 @@ const ALL_PROJECTS = "__all__";
 
 function SessionsPanel() {
   const [sources, setSources] = useState<SourceSession[]>([]);
+  const [scanResultsBySlug, setScanResultsBySlug] = useState<Record<string, SessionScanData>>({});
   const [cleanupPeriodDays, setCleanupPeriodDays] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1310,6 +1396,31 @@ function SessionsPanel() {
   useEffect(() => {
     void loadSources();
   }, [loadSources]);
+
+  useEffect(() => {
+    if (sources.length === 0) return;
+    let cancelled = false;
+    const loadScanResults = async () => {
+      const results = await fetchScanResults();
+      if (cancelled || !results) return;
+      setScanResultsBySlug(
+        Object.fromEntries(
+          results.filter((result) => result.slug).map((result) => [result.slug!, result]),
+        ),
+      );
+    };
+    void loadScanResults();
+    const timer = window.setInterval(
+      () => {
+        void loadScanResults();
+      },
+      scanStatus?.running ? 5000 : 30000,
+    );
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [scanStatus?.running, sources.length]);
 
   useEffect(() => {
     if (!loading && !hasCursorSources && !wasEnrichingRef.current) return;
@@ -1793,13 +1904,22 @@ function SessionsPanel() {
           ) : (
             <div className="space-y-2.5 px-4 py-3">
               {filtered.map((s) => {
+                const scanData = scanResultsBySlug[s.slug];
                 // Sessions with replay: use the shared ReplayCard
                 if (s.replay) {
                   const isArchived = archivedSlugs.has(s.slug);
                   return (
                     <ReplayCard
                       key={`${s.provider}-${s.slug}`}
-                      summary={s.replay}
+                      summary={{
+                        ...s.replay,
+                        title: sourceDisplayTitle(s, scanData),
+                        firstMessage: scanData?.firstPrompt || s.replay.firstMessage,
+                        messages: scanData?.firstPrompt
+                          ? [scanData.firstPrompt]
+                          : s.replay.messages,
+                        model: scanData?.model || s.replay.model,
+                      }}
                       onOpen={() => navigateTo({ view: null, session: s.existingReplay! })}
                       onShare={() =>
                         navigateTo({ view: null, session: s.existingReplay!, v: "export" })
@@ -1814,18 +1934,15 @@ function SessionsPanel() {
                   );
                 }
                 // Sessions without replay: simpler card with Generate
-                const prompts = (s.prompts || [])
-                  .map((p) => cleanPrompt(p))
-                  .filter((p) => p.length > 0);
-                if (prompts.length === 0 && s.firstPrompt) {
-                  const cleaned = cleanPrompt(s.firstPrompt);
-                  if (cleaned) prompts.push(cleaned);
-                }
-                const branch =
-                  s.gitBranch && s.gitBranch !== "main" && s.gitBranch !== "master"
-                    ? s.gitBranch
-                    : undefined;
-                const sessionTitle = sourceSuggestedTitle(s);
+                const prompts = sessionPromptPreview(s, scanData);
+                const branch = nonDefaultBranch(scanData?.gitBranch || s.gitBranch);
+                const sessionTitle = sourceDisplayTitle(s, scanData);
+                const displayPromptCount = scanData?.promptCount ?? s.promptCount;
+                const displayToolCount = scanData?.toolCallCount ?? s.toolCallCount;
+                const displayDurationMs = scanData?.durationMs ?? s.durationMsEst;
+                const displayEditCount = scanData?.editCount ?? s.editCountEst;
+                const displayModel = scanData?.model || s.model;
+                const dataSourceLabel = formatDataSourceLabel(s.hasSqlite, scanData?.dataSource);
                 const isArchived = archivedSlugs.has(s.slug);
                 return (
                   <div
@@ -1913,36 +2030,36 @@ function SessionsPanel() {
                     ))}
                     {/* Row 3: stats */}
                     {(s.promptCount ||
-                      s.toolCallCount ||
-                      s.durationMsEst ||
-                      s.editCountEst ||
+                      displayToolCount ||
+                      displayDurationMs ||
+                      displayEditCount ||
                       s.hasPR ||
                       (s.expiresInDays != null && s.expiresInDays <= EXPIRY_WARN_DAYS)) && (
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        {!!s.promptCount && (
+                        {!!displayPromptCount && (
                           <span className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim">
-                            {s.promptCount} prompts
+                            {displayPromptCount} prompts
                           </span>
                         )}
-                        {!!s.toolCallCount && (
+                        {!!displayToolCount && (
                           <span className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-orange-subtle text-terminal-orange">
-                            {s.toolCallCount} tools
+                            {displayToolCount} tools
                           </span>
                         )}
-                        {!!s.durationMsEst && (
+                        {!!displayDurationMs && (
                           <span
                             className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim"
                             title="Estimated active duration"
                           >
-                            ~{formatDuration(s.durationMsEst)}
+                            ~{formatDuration(displayDurationMs)}
                           </span>
                         )}
-                        {!!s.editCountEst && (
+                        {!!displayEditCount && (
                           <span
                             className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim"
                             title="Estimated file edits"
                           >
-                            ~{s.editCountEst} edits
+                            ~{displayEditCount} edits
                           </span>
                         )}
                         {s.hasPR && (
@@ -1980,9 +2097,9 @@ function SessionsPanel() {
                           {projectLabels.get(s.project) || projectName(s.project)}
                         </span>
                       )}
-                      {s.model && (
+                      {displayModel && (
                         <span className="text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dimmer">
-                          {shortModelName(s.model)}
+                          {shortModelName(displayModel)}
                         </span>
                       )}
                       <span className="text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dimmer">
@@ -1993,9 +2110,12 @@ function SessionsPanel() {
                           {s.filePaths.length} parts
                         </span>
                       )}
-                      {s.hasSqlite && (
-                        <span className="text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-green-subtle text-terminal-green">
-                          db
+                      {(s.hasSqlite || scanData?.dataSource) && (
+                        <span
+                          className={`text-xs font-mono px-1.5 py-0.5 rounded-md ${dataSourceBadgeClass(scanData?.dataSource, s.hasSqlite)}`}
+                          title={dataSourceLabel}
+                        >
+                          {dataSourceLabel}
                         </span>
                       )}
                     </div>
@@ -2010,6 +2130,7 @@ function SessionsPanel() {
         {selectedSession && (
           <SessionDetailPopup
             session={selectedSession}
+            scanData={scanResultsBySlug[selectedSession.slug] || null}
             onClose={() => setSelectedSlug(null)}
             onGenerate={submitGenerate}
             onViewReplay={(slug) => navigateTo({ view: null, session: slug })}
