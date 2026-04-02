@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SessionSummary, SourceSession } from "../types";
-import { parseCachedList } from "./dashboard-utils";
+import { formatCompactDuration, parseCachedList } from "./dashboard-utils";
 import { useScanInsightsContext } from "./InsightsPanel";
 import { formatDuration } from "./StatsPanel";
 
@@ -254,18 +254,6 @@ function formatCost(cost: number): string {
 function formatCompactNum(n: number): string {
   if (n >= 10000) return `${(n / 1000).toFixed(1)}k`;
   return n.toLocaleString();
-}
-
-function formatCompactDuration(ms: number): string {
-  if (ms === 0) return "0m";
-  const mins = Math.floor(ms / 60000);
-  if (mins < 60) return `${mins}m`;
-  const hours = Math.floor(mins / 60);
-  const remMins = mins % 60;
-  if (hours < 24) return remMins > 0 ? `${hours}h ${remMins}m` : `${hours}h`;
-  const days = Math.floor(hours / 24);
-  const remHours = hours % 24;
-  return remHours > 0 ? `${days}d ${remHours}h` : `${days}d`;
 }
 
 function rangeLabel(range: TimeRange): string {
@@ -1090,11 +1078,16 @@ export default function InsightsPage() {
           providers={userInsights.providers || {}}
         />
 
-        {/* Activity Heatmap */}
+        {/* Activity Heatmap — always shows full history regardless of range filter */}
         <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm">
-          <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider mb-4">
-            Activity
-          </h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
+              Activity
+            </h3>
+            {range !== "all" && (
+              <span className="text-[9px] font-mono text-terminal-dimmer">Last 52 weeks</span>
+            )}
+          </div>
           <ContributionHeatmap sessionsPerDay={userInsights.sessionsPerDay || {}} />
         </div>
 

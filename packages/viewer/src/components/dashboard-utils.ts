@@ -105,6 +105,18 @@ export function shortModelName(model?: string): string {
   return parts.length > 1 ? parts.slice(0, 2).join("-") : model;
 }
 
+export function formatCompactDuration(ms: number): string {
+  if (ms === 0) return "0m";
+  const mins = Math.floor(ms / 60000);
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  const remMins = mins % 60;
+  if (hours < 24) return remMins > 0 ? `${hours}h ${remMins}m` : `${hours}h`;
+  const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  return remHours > 0 ? `${days}d ${remHours}h` : `${days}d`;
+}
+
 export function formatSize(bytes: number): string {
   const kb = Math.round(bytes / 1024);
   return kb >= 1024 ? `${(kb / 1024).toFixed(1)}MB` : `${kb}KB`;
