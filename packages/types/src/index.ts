@@ -187,6 +187,8 @@ export interface ReplaySession {
     serviceTier?: string;
     /** Skills / slash commands used (e.g. ["playwright-cli", "/insights"]) */
     skillsUsed?: string[];
+    /** MCP servers used (e.g. ["claude-in-chrome", "playwright"]) */
+    mcpServersUsed?: string[];
     /** Number of assistant responses truncated by max_tokens */
     truncatedResponses?: number;
   };

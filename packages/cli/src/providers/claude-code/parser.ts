@@ -77,6 +77,9 @@ export async function parseClaudeCodeSession(
   // Skills used in the session (extracted from isMeta skill injection messages)
   const skillsUsed = new Set<string>();
 
+  // MCP servers used (extracted from mcp__server__tool naming convention)
+  const mcpServersUsed = new Set<string>();
+
   // Group assistant messages by message.id
   const assistantBlocks = new Map<string, ContentBlock[]>();
   const assistantTimestamps = new Map<string, string>();
@@ -341,6 +344,11 @@ export async function parseClaudeCodeSession(
           blocks.push(block);
         } else if (block.type === "tool_use") {
           blocks.push(block);
+          // Track MCP server usage from mcp__server__tool naming convention
+          if (block.name.startsWith("mcp__")) {
+            const server = block.name.split("__")[1];
+            if (server) mcpServersUsed.add(server);
+          }
         }
       }
     }
@@ -501,6 +509,7 @@ export async function parseClaudeCodeSession(
     serviceTier,
     truncatedResponses: truncatedCount > 0 ? truncatedCount : undefined,
     skillsUsed: skillsUsed.size > 0 ? [...skillsUsed].sort() : undefined,
+    mcpServersUsed: mcpServersUsed.size > 0 ? [...mcpServersUsed].sort() : undefined,
   };
 }
 

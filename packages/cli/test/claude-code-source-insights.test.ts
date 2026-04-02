@@ -138,23 +138,49 @@ describe("Claude Code source insights: combined parsing", () => {
     // 5. text-response (truncated) "Now I'll write..."
     // 6. compaction-summary
     // 7. context-injection (skill)
-    // 8. user-prompt "Continue building..."
-    // 9. text-response "I'll continue..."
-    expect(replay.scenes).toHaveLength(9);
+    // 8. tool-call mcp__claude-in-chrome__tabs_context_mcp
+    // 9. user-prompt "Continue building..."
+    // 10. text-response "I'll continue..."
+    expect(replay.scenes).toHaveLength(10);
     expect(replay.meta.stats.userPrompts).toBe(2);
   });
 
   it("calculates token usage correctly across all messages", async () => {
     const result = await parseClaudeCodeSession(FIXTURE);
     expect(result.tokenUsage).toBeDefined();
-    // Total across 4 assistant messages:
-    // input: 1000+1200+1500+800 = 4500
-    // output: 200+50+16384+100 = 16734
-    // cache_creation: 500+0+0+200 = 700
-    // cache_read: 8000+9500+10000+5000 = 32500
-    expect(result.tokenUsage!.inputTokens).toBe(4500);
-    expect(result.tokenUsage!.outputTokens).toBe(16734);
+    // Total across 5 assistant messages (including MCP tool call):
+    // input: 1000+1200+1500+900+800 = 5400
+    // output: 200+50+16384+30+100 = 16764
+    // cache_creation: 500+0+0+0+200 = 700
+    // cache_read: 8000+9500+10000+5500+5000 = 38000
+    expect(result.tokenUsage!.inputTokens).toBe(5400);
+    expect(result.tokenUsage!.outputTokens).toBe(16764);
     expect(result.tokenUsage!.cacheCreationTokens).toBe(700);
-    expect(result.tokenUsage!.cacheReadTokens).toBe(32500);
+    expect(result.tokenUsage!.cacheReadTokens).toBe(38000);
+  });
+});
+
+describe("Claude Code source insights: MCP server detection", () => {
+  it("extracts MCP servers from tool names", async () => {
+    const result = await parseClaudeCodeSession(FIXTURE);
+    expect(result.mcpServersUsed).toEqual(["claude-in-chrome"]);
+  });
+
+  it("passes mcpServersUsed through to ReplaySession", async () => {
+    const parsed = await parseClaudeCodeSession(FIXTURE);
+    const replay = transformToReplay(parsed, "claude-code", "~/test");
+    expect(replay.meta.mcpServersUsed).toEqual(["claude-in-chrome"]);
+  });
+
+  it("MCP tool-call scene preserves full tool name", async () => {
+    const parsed = await parseClaudeCodeSession(FIXTURE);
+    const replay = transformToReplay(parsed, "claude-code", "~/test");
+    const mcpScene = replay.scenes.find(
+      (s) => s.type === "tool-call" && s.toolName.startsWith("mcp__"),
+    );
+    expect(mcpScene).toBeDefined();
+    expect(mcpScene!.type === "tool-call" && mcpScene!.toolName).toBe(
+      "mcp__claude-in-chrome__tabs_context_mcp",
+    );
   });
 });

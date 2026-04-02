@@ -62,6 +62,8 @@ export interface ProviderParseResult {
   serviceTier?: string;
   /** Skills / slash commands used in the session (e.g. ["playwright-cli", "/insights"]) */
   skillsUsed?: string[];
+  /** MCP servers used in the session (e.g. ["claude-in-chrome", "playwright"]) */
+  mcpServersUsed?: string[];
   /** Count of assistant responses truncated by max_tokens */
   truncatedResponses?: number;
 }
