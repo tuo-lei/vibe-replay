@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { CursorSidecars, PrLink, TokenUsage, TurnStat } from "@vibe-replay/types";
 import type { ContentBlock, ParsedTurn, SessionInfo } from "../../types.js";
 import type { ProviderParseResult } from "../types.js";
@@ -363,12 +363,87 @@ async function inferProjectFromComposerData(
     }
   }
 
-  const matches = rawComposerData.match(/\/(?:Users|home)\/[^"'\s,}{]{1,240}/g) || [];
+  const hintedRoots = extractComposerProjectRootHints(rawComposerData);
+  const basenameMatches = new Map<string, string[]>();
+  for (const workspacePath of uniqueDecoded) {
+    const key = basename(workspacePath);
+    if (!key) continue;
+    const existing = basenameMatches.get(key) || [];
+    existing.push(workspacePath);
+    basenameMatches.set(key, existing);
+  }
+
+  for (const hint of hintedRoots) {
+    const matchingDecoded = basenameMatches.get(basename(hint)) || [];
+    if (matchingDecoded.length === 1) return matchingDecoded[0];
+
+    const resolved = await resolveProjectRootFromPath(hint);
+    if (resolved && !isLowSignalProjectRoot(resolved)) return resolved;
+  }
+
+  const matches =
+    rawComposerData.match(/\/(?:Users|home|workspace|workspaces|tmp)\/[^"'\s,}{]{1,240}/g) || [];
   for (const match of matches) {
     const resolved = await resolveProjectRootFromPath(match);
-    if (resolved) return resolved;
+    if (resolved && !isLowSignalProjectRoot(resolved)) return resolved;
   }
+  const bestHint = hintedRoots.find((hint) => !isLowSignalProjectRoot(hint));
+  if (bestHint) return bestHint;
   return "";
+}
+
+function extractComposerProjectRootHints(rawComposerData: string): string[] {
+  const matches =
+    rawComposerData.match(/\/(?:Users|home|workspace|workspaces|tmp)\/[^"'\s,}{]{1,240}/g) || [];
+  const roots = matches
+    .map((match) => inferProjectRootFromPathHint(match))
+    .filter((value): value is string => Boolean(value));
+  return [...new Set(roots)].sort((a, b) => b.length - a.length);
+}
+
+function inferProjectRootFromPathHint(pathValue: string): string | null {
+  const normalized = pathValue.replaceAll("\\", "/").replace(/[)"',]+$/g, "");
+  if (!normalized.startsWith("/")) return null;
+
+  if (
+    normalized.includes("/.config/") ||
+    normalized.includes("/.cursor/skills/") ||
+    normalized.includes("/.cursor/extensions/")
+  ) {
+    return null;
+  }
+
+  const dotMarker = ["/.git/", "/.devcontainer/", "/.cursor/"].find((marker) =>
+    normalized.includes(marker),
+  );
+  if (dotMarker) {
+    const root = normalized.slice(0, normalized.indexOf(dotMarker));
+    return root || null;
+  }
+
+  const workspaceMatch = normalized.match(/^\/(workspace|workspaces)\/([^/]+)/);
+  if (workspaceMatch?.[2] && !workspaceMatch[2].startsWith(".")) {
+    return `/${workspaceMatch[1]}/${workspaceMatch[2]}`;
+  }
+
+  const parts = normalized.split("/").filter(Boolean);
+  if (parts[0] === "Users" && parts.length >= 4) {
+    return `/${parts.slice(0, 4).join("/")}`;
+  }
+  if (parts[0] === "home" && parts.length >= 3 && !parts[2].startsWith(".")) {
+    return `/${parts.slice(0, 3).join("/")}`;
+  }
+  return null;
+}
+
+function isLowSignalProjectRoot(pathValue: string): boolean {
+  return (
+    pathValue === "/home" ||
+    pathValue === "/tmp" ||
+    pathValue === "/workspace" ||
+    pathValue === "/workspaces" ||
+    /^\/home\/[^/]+$/.test(pathValue)
+  );
 }
 
 function hasReplayableRootBlob(data: unknown): boolean {
@@ -753,7 +828,9 @@ async function parseCursorStoreDb(sessionId: string): Promise<ProviderParseResul
       slug,
       title,
       cwd: "",
-      model: metaJson.lastUsedModel,
+      model:
+        normalizeCursorModelName(metaJson.lastUsedModel) ||
+        turnStats.find((stat) => typeof stat.model === "string" && stat.model)?.model,
       startTime: metaJson.createdAt ? new Date(metaJson.createdAt).toISOString() : undefined,
       ...(totalDurationMs !== undefined ? { totalDurationMs } : {}),
       ...(turnStats.length > 0 ? { turnStats } : {}),
@@ -1304,31 +1381,58 @@ function mergeCursorParseResults(
   primary: ProviderParseResult,
   enrichment: ProviderParseResult,
 ): ProviderParseResult {
+  const mergedModel = chooseMergedCursorModel(primary.model, enrichment.model);
+  const mergedTurnStats = mergeTurnStats(primary.turnStats, enrichment.turnStats);
+  const mergedTokenUsage = primary.tokenUsage || enrichment.tokenUsage;
+  const mergedTokenUsageByModel = primary.tokenUsageByModel || enrichment.tokenUsageByModel;
+  const mergedTotalDurationMs =
+    primary.totalDurationMs ||
+    enrichment.totalDurationMs ||
+    (mergedTurnStats && mergedTurnStats.length > 0
+      ? mergedTurnStats.reduce((sum, stat) => sum + (stat.durationMs || 0), 0) || undefined
+      : undefined);
+  const mergedDuration = mergedTotalDurationMs !== undefined && !primary.totalDurationMs;
+  const mergedTokens =
+    (!primary.tokenUsage && !!enrichment.tokenUsage) ||
+    (!primary.tokenUsageByModel && !!enrichment.tokenUsageByModel);
   const supplements = mergeUniqueStrings(
     primary.dataSourceInfo?.supplements,
     enrichment.dataSourceInfo?.sources,
   );
   const hasMeaningfulEnrichment =
+    (!!mergedModel && mergedModel !== primary.model) ||
+    mergedDuration ||
+    mergedTokens ||
     (!!enrichment.gitBranch && !primary.gitBranch) ||
     (!!enrichment.gitBranches?.length && !primary.gitBranches?.length) ||
     (!!enrichment.prLinks?.length && !primary.prLinks?.length) ||
     (!!enrichment.apiErrors?.length && !primary.apiErrors?.length) ||
     (!!enrichment.contextFiles?.length && !primary.contextFiles?.length) ||
-    (!!enrichment.cursorSidecars && !primary.cursorSidecars);
+    (!!enrichment.cursorSidecars && !primary.cursorSidecars) ||
+    (!!mergedTurnStats &&
+      JSON.stringify(mergedTurnStats) !== JSON.stringify(primary.turnStats || undefined));
+  const primaryNotes = (primary.dataSourceInfo?.notes || []).filter(
+    (note) =>
+      !(mergedTokens && /token usage is unavailable/i.test(note)) &&
+      !(mergedDuration && /per-turn duration metrics are unavailable/i.test(note)),
+  );
   const notes = mergeUniqueStrings(
-    primary.dataSourceInfo?.notes,
+    primaryNotes,
     hasMeaningfulEnrichment
       ? ["Session metadata was enriched from Cursor global-state payloads."]
       : undefined,
-    enrichment.contextFiles?.length
-      ? ["Context files are inferred from Cursor relevantFiles and request-context sidecars."]
-      : undefined,
+    hasMeaningfulEnrichment ? enrichment.dataSourceInfo?.notes : undefined,
   );
   const cursorSidecars = mergeCursorSidecars(primary.cursorSidecars, enrichment.cursorSidecars);
 
   return {
     ...primary,
     cwd: primary.cwd || enrichment.cwd,
+    ...(mergedModel ? { model: mergedModel } : {}),
+    ...(mergedTotalDurationMs !== undefined ? { totalDurationMs: mergedTotalDurationMs } : {}),
+    ...(mergedTokenUsage ? { tokenUsage: mergedTokenUsage } : {}),
+    ...(mergedTokenUsageByModel ? { tokenUsageByModel: mergedTokenUsageByModel } : {}),
+    ...(mergedTurnStats ? { turnStats: mergedTurnStats } : {}),
     ...(primary.gitBranch ? {} : enrichment.gitBranch ? { gitBranch: enrichment.gitBranch } : {}),
     ...(primary.gitBranches
       ? {}
@@ -1376,6 +1480,77 @@ function mergeCursorSidecars(
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
+function normalizeCursorModelName(model: unknown): string | undefined {
+  if (typeof model !== "string") return undefined;
+  const unique = [
+    ...new Set(
+      model
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  ];
+  if (unique.length === 0) return undefined;
+  return unique[unique.length - 1];
+}
+
+function chooseMergedCursorModel(
+  primary: string | undefined,
+  enrichment: string | undefined,
+): string | undefined {
+  const normalizedPrimary = normalizeCursorModelName(primary);
+  const normalizedEnrichment = normalizeCursorModelName(enrichment);
+  return normalizedPrimary || normalizedEnrichment;
+}
+
+function mergeTurnStats(
+  primary: TurnStat[] | undefined,
+  enrichment: TurnStat[] | undefined,
+): TurnStat[] | undefined {
+  if (!primary?.length) return enrichment;
+  if (!enrichment?.length) return primary;
+
+  const maxTurnIndex = Math.max(
+    ...primary.map((stat) => stat.turnIndex),
+    ...enrichment.map((stat) => stat.turnIndex),
+  );
+  const primaryByIndex = new Map(primary.map((stat) => [stat.turnIndex, stat]));
+  const enrichmentByIndex = new Map(enrichment.map((stat) => [stat.turnIndex, stat]));
+  const merged: TurnStat[] = [];
+
+  for (let turnIndex = 0; turnIndex <= maxTurnIndex; turnIndex++) {
+    const current = primaryByIndex.get(turnIndex);
+    const extra = enrichmentByIndex.get(turnIndex);
+    if (!current && extra) {
+      merged.push(extra);
+      continue;
+    }
+    if (!current) continue;
+    if (!extra) {
+      merged.push(current);
+      continue;
+    }
+
+    merged.push({
+      ...current,
+      ...(current.model ? {} : extra.model ? { model: extra.model } : {}),
+      ...(current.durationMs !== undefined
+        ? {}
+        : extra.durationMs !== undefined
+          ? { durationMs: extra.durationMs }
+          : {}),
+      ...(current.tokenUsage ? {} : extra.tokenUsage ? { tokenUsage: extra.tokenUsage } : {}),
+      ...(current.contextTokens !== undefined
+        ? {}
+        : extra.contextTokens !== undefined
+          ? { contextTokens: extra.contextTokens }
+          : {}),
+    });
+  }
+
+  return merged;
+}
+
 function extractBubbleModelName(
   bubble: Record<string, any>,
   fallbackModel: string | undefined,
@@ -1393,7 +1568,7 @@ function extractBubbleModelName(
     typeof bubble.modelConfig.modelName === "string"
       ? bubble.modelConfig.modelName
       : undefined;
-  return fromModelInfo || fromBubble || fromConfig || fallbackModel;
+  return normalizeCursorModelName(fromModelInfo || fromBubble || fromConfig || fallbackModel);
 }
 
 function extractBubbleDurationMs(bubble: Record<string, any>): number | undefined {
@@ -1583,12 +1758,13 @@ async function parseCursorGlobalStateDb(
     const firstUser = turns.find((t) => t.role === "user");
     const firstText = firstUser?.blocks.find((b) => b.type === "text") as any;
     const inferredProject = await inferProjectFromComposerData(rawComposer, []);
-    const modelName =
+    const modelName = normalizeCursorModelName(
       composer.modelConfig &&
-      typeof composer.modelConfig === "object" &&
-      typeof composer.modelConfig.modelName === "string"
+        typeof composer.modelConfig === "object" &&
+        typeof composer.modelConfig.modelName === "string"
         ? composer.modelConfig.modelName
-        : undefined;
+        : undefined,
+    );
     const requestContexts = loadCursorRequestContexts(db, sessionId);
 
     const startTime = toIsoTimestamp(composer.createdAt);
@@ -2185,7 +2361,7 @@ function extractModel(msg: CursorMessage): string | undefined {
   if (!Array.isArray(msg.content)) return undefined;
   for (const b of msg.content) {
     const model = b.providerOptions?.cursor?.modelName;
-    if (model) return model;
+    if (model) return normalizeCursorModelName(model);
   }
   return undefined;
 }
@@ -2204,7 +2380,9 @@ export const __testables = {
   mapToolArgs,
   mergeCursorParseResults,
   parseAssistantContent,
+  inferProjectRootFromPathHint,
   normalizeTurnText,
+  normalizeCursorModelName,
   parseThinking,
   parseUserContent,
 };

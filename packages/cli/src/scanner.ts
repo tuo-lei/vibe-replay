@@ -5,7 +5,9 @@
  * extracts only aggregate metadata for project/user-level insights. It reads
  * each JSONL line once and collects counts, timestamps, branches, PRs, etc.
  *
- * Results are cached per-session keyed by (fileMtimeMs, fileSize, scannerVersion)
+ * Results are cached per-session keyed by input file metadata + scannerVersion.
+ * Cursor sessions with SQLite/global-state enrichment bypass this cache because
+ * their parsed output depends on DBs outside the transcript/tool file set.
  * so unchanged sessions are never re-scanned.
  */
 
@@ -20,7 +22,7 @@ import type { ProviderParseResult } from "./providers/types.js";
 import type { DataSource, PrLink, SessionInfo, TokenUsage } from "./types.js";
 
 // Bump this when we extract new fields — forces re-scan of all sessions.
-const SCANNER_VERSION = 4;
+const SCANNER_VERSION = 5;
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -725,6 +727,11 @@ async function checkCache(
   return { valid: false, meta };
 }
 
+function shouldUseScanCache(session: ScanInput): boolean {
+  if (session.provider === "cursor" && session.hasSqlite) return false;
+  return true;
+}
+
 // ─── Background scanner ────────────────────────────────────────────
 
 export interface BackgroundScanState {
@@ -759,9 +766,16 @@ export async function runBackgroundScan(
 
     // Check cache (single stat() pass — returns meta on miss)
     const cached = cache.entries[session.sessionId];
-    const cacheCheck = await checkCache(cached, session.filePaths);
+    const cacheablePaths = [...session.filePaths, ...(session.toolPaths || [])];
+    const cacheEnabled = shouldUseScanCache(session);
+    const cacheCheck = cacheEnabled
+      ? await checkCache(cached, cacheablePaths)
+      : ({
+          valid: false,
+          meta: await getFileMeta(cacheablePaths),
+        } as const);
 
-    if (cacheCheck.valid && cached) {
+    if (cacheEnabled && cacheCheck.valid && cached) {
       results.push(cached.result);
     } else {
       try {
@@ -769,16 +783,18 @@ export async function runBackgroundScan(
         results.push(result);
 
         // Update cache entry (reuse meta from checkCache — no second stat round)
-        const { meta } = cacheCheck as {
-          valid: false;
-          meta: { mtimeMs: number; fileSize: number };
-        };
-        cache.entries[session.sessionId] = {
-          mtimeMs: meta.mtimeMs,
-          fileSize: meta.fileSize,
-          scannedAt: new Date().toISOString(),
-          result,
-        };
+        if (cacheEnabled) {
+          const { meta } = cacheCheck as {
+            valid: false;
+            meta: { mtimeMs: number; fileSize: number };
+          };
+          cache.entries[session.sessionId] = {
+            mtimeMs: meta.mtimeMs,
+            fileSize: meta.fileSize,
+            scannedAt: new Date().toISOString(),
+            result,
+          };
+        }
 
         // Write cache every 10 sessions to avoid losing progress
         if ((i + 1) % 10 === 0) {
