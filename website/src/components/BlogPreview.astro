@@ -1,0 +1,65 @@
+---
+import { getCollection } from "astro:content";
+import { formatDate } from "../utils/date";
+
+const posts = (await getCollection("blog", ({ data }) => data.draft !== true))
+  .sort((a, b) => b.data.date.getTime() - a.data.date.getTime())
+  .slice(0, 3);
+---
+
+<section class="relative py-16 md:py-24 px-6">
+  <div class="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-px bg-gradient-to-r from-transparent via-border to-transparent"></div>
+
+  <div class="max-w-5xl mx-auto">
+    <div class="flex items-end justify-between mb-10">
+      <div>
+        <span class="block text-accent/70 font-mono text-sm font-medium tracking-wider uppercase mb-3">Blog</span>
+        <h2 class="text-3xl sm:text-4xl font-bold tracking-tight">Latest posts</h2>
+      </div>
+      <a href="/blog/" class="text-accent text-sm font-medium hover:underline hidden sm:block">
+        View all &rarr;
+      </a>
+    </div>
+
+    <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+      {posts.map((post) => (
+        <a href={`/blog/${post.id}/`} class="group block">
+          <article class="h-full rounded-2xl border border-border/40 bg-surface-1/30 hover:bg-surface-1/60 hover:border-accent/20 transition-all duration-300 overflow-hidden flex flex-col">
+            {post.data.cover && (
+              <div class="relative overflow-hidden h-40">
+                <img
+                  src={post.data.cover}
+                  alt={post.data.title}
+                  class="w-full h-full object-cover object-top group-hover:scale-[1.02] transition-transform duration-500"
+                  loading="lazy"
+                />
+                <div class="absolute inset-0 bg-gradient-to-t from-surface-1/80 to-transparent" />
+              </div>
+            )}
+            <div class="p-5 flex flex-col flex-1">
+              <div class="flex items-center gap-2 text-xs text-text-muted mb-2">
+                <time datetime={post.data.date.toISOString().split("T")[0]}>
+                  {formatDate(post.data.date)}
+                </time>
+                <span class="w-1 h-1 rounded-full bg-text-muted" />
+                <span>{post.data.readTime}</span>
+              </div>
+              <h3 class="text-base font-semibold mb-2 group-hover:text-accent transition-colors leading-snug">
+                {post.data.title}
+              </h3>
+              <p class="text-text-secondary text-sm leading-relaxed line-clamp-2 flex-1">
+                {post.data.excerpt}
+              </p>
+            </div>
+          </article>
+        </a>
+      ))}
+    </div>
+
+    <div class="mt-6 text-center sm:hidden">
+      <a href="/blog/" class="text-accent text-sm font-medium hover:underline">
+        View all posts &rarr;
+      </a>
+    </div>
+  </div>
+</section>

@@ -58,7 +58,8 @@ function looksLikeConversationSummary(text: string): boolean {
   const normalized = text.trim();
   return (
     /^\[Previous conversation summary\]:/i.test(normalized) ||
-    /^Summary:\s*1\.\s*Primary Request and Intent:/i.test(normalized)
+    /^Summary:\s*1\.\s*Primary Request and Intent:/i.test(normalized) ||
+    /^and merge infrastructure was built for human-paced output/i.test(normalized)
   );
 }
 

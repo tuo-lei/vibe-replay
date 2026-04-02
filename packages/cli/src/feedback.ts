@@ -30,12 +30,32 @@ export interface FeedbackItem {
   improvedPrompt?: string;
 }
 
+export interface FrictionPoint {
+  type: "misunderstood" | "wrong_approach" | "buggy_code" | "excessive_changes" | "user_unclear";
+  description: string;
+  turn: number;
+}
+
 export interface FeedbackResult {
   summary: string;
   score: number;
   strengths: string[];
   improvements: string[];
   feedbackItems: FeedbackItem[];
+  // Session-level analysis (Phase 1A — optional for weaker models)
+  outcome?:
+    | "fully_achieved"
+    | "mostly_achieved"
+    | "partially_achieved"
+    | "not_achieved"
+    | "unclear";
+  sessionGoal?: string;
+  frictionPoints?: FrictionPoint[];
+  aiPerformance?: {
+    rating: "poor" | "below_average" | "average" | "good" | "excellent";
+    strengths: string[];
+    weaknesses: string[];
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -86,7 +106,9 @@ export function buildSessionDigest(session: ReplaySession): string {
 
   // Adaptive truncation budgets based on number of prompts
   const maxPromptChars = Math.min(3000, Math.floor(25000 / Math.max(promptCount, 1)));
-  const maxResponseChars = Math.min(800, Math.floor(12000 / Math.max(promptCount, 1)));
+  const maxResponseChars = Math.min(1500, Math.floor(20000 / Math.max(promptCount, 1)));
+  const maxDiffChars = Math.min(500, Math.floor(8000 / Math.max(promptCount, 1)));
+  const maxBashOutputChars = Math.min(300, Math.floor(5000 / Math.max(promptCount, 1)));
 
   let turnNum = 0;
   let turnLines: string[] = [];
@@ -133,12 +155,32 @@ export function buildSessionDigest(session: ReplaySession): string {
     } else if (scene.type === "tool-call") {
       if (scene.diff) {
         turnLines.push(`  - ${scene.toolName}: ${scene.diff.filePath}`);
+        // Include diff content so the coach can evaluate code quality
+        const diffText = scene.diff.newContent || scene.diff.oldContent;
+        if (diffText && responseChars < maxResponseChars) {
+          const diffPreview =
+            diffText.length > maxDiffChars ? `${diffText.slice(0, maxDiffChars)}...` : diffText;
+          turnLines.push(`    ${diffPreview.replace(/\n/g, "\n    ")}`);
+          responseChars += diffPreview.length;
+        }
       } else if (scene.bashOutput) {
         const cmd =
           scene.bashOutput.command.length > 120
             ? `${scene.bashOutput.command.slice(0, 120)}...`
             : scene.bashOutput.command;
         turnLines.push(`  - Bash: ${cmd}`);
+        // Include command output so the coach can see results/errors
+        if (scene.bashOutput.stdout && responseChars < maxResponseChars) {
+          const output = scene.bashOutput.stdout.trim();
+          if (output) {
+            const outputPreview =
+              output.length > maxBashOutputChars
+                ? `${output.slice(0, maxBashOutputChars)}...`
+                : output;
+            turnLines.push(`    Output: ${outputPreview.replace(/\n/g, "\n    ")}`);
+            responseChars += outputPreview.length;
+          }
+        }
       } else {
         const input = JSON.stringify(scene.input).slice(0, 100);
         turnLines.push(`  - ${scene.toolName}: ${input}`);
@@ -149,10 +191,10 @@ export function buildSessionDigest(session: ReplaySession): string {
   }
   flush();
 
-  // Hard cap for safety (roughly 30KB ≈ ~7500 tokens)
+  // Hard cap for safety (roughly 40KB ≈ ~10000 tokens)
   const digest = lines.join("\n");
-  if (digest.length > 35000) {
-    return `${digest.slice(0, 35000)}\n\n... (remaining turns omitted due to length)`;
+  if (digest.length > 50000) {
+    return `${digest.slice(0, 50000)}\n\n... (remaining turns omitted due to length)`;
   }
   return digest;
 }
@@ -162,7 +204,21 @@ export function buildSessionDigest(session: ReplaySession): string {
 // ---------------------------------------------------------------------------
 
 const FEEDBACK_SCHEMA = `{
-  "summary": "<string: 2-3 paragraph overall assessment>",
+  "sessionGoal": "<string: one sentence — what the user was trying to achieve>",
+  "outcome": "<fully_achieved|mostly_achieved|partially_achieved|not_achieved|unclear>",
+  "frictionPoints": [
+    {
+      "type": "<misunderstood|wrong_approach|buggy_code|excessive_changes|user_unclear>",
+      "description": "<string: what went wrong>",
+      "turn": <number: which turn this happened in>
+    }
+  ],
+  "aiPerformance": {
+    "rating": "<poor|below_average|average|good|excellent>",
+    "strengths": ["<string>"],
+    "weaknesses": ["<string>"]
+  },
+  "summary": "<string: 2-3 paragraph overall assessment covering both prompting technique AND session effectiveness>",
   "score": <number 1-10>,
   "strengths": ["<string>", ...],
   "improvements": ["<string>", ...],
@@ -172,13 +228,27 @@ const FEEDBACK_SCHEMA = `{
       "title": "<string: short descriptive title>",
       "feedback": "<string: detailed actionable feedback>",
       "category": "<clarity|specificity|context|efficiency|iteration|tool-usage>",
-      "improvedPrompt": "<string|null: optional rewritten prompt>"
+      "improvedPrompt": "<string|null: rewritten prompt — REQUIRED for clarity/specificity/context>"
     }
   ]
 }`;
 
 const FEEDBACK_EXAMPLE = `{
-  "summary": "The user demonstrates good instincts for task decomposition, breaking complex work into manageable steps. However, several prompts lack specificity — the AI had to spend extra turns searching for context that could have been provided upfront. The strongest prompts came later in the session after the user learned what information the AI needed.",
+  "sessionGoal": "Fix an authentication bug and add test coverage",
+  "outcome": "mostly_achieved",
+  "frictionPoints": [
+    {
+      "type": "misunderstood",
+      "description": "AI searched the wrong directory for auth files because user didn't specify the path",
+      "turn": 1
+    }
+  ],
+  "aiPerformance": {
+    "rating": "good",
+    "strengths": ["Found and fixed the bug correctly once pointed to the right file"],
+    "weaknesses": ["Wasted 3 tool calls searching before asking for clarification"]
+  },
+  "summary": "The user demonstrates good instincts for task decomposition, breaking complex work into manageable steps. However, several prompts lack specificity — the AI had to spend extra turns searching for context that could have been provided upfront. The goal was mostly achieved: the bug was fixed but tests were not added due to running out of context.",
   "score": 6,
   "strengths": [
     "Good task decomposition — complex feature was broken into clear steps",
@@ -212,7 +282,7 @@ function buildFeedbackPrompt(digest: string, session: ReplaySession): string {
     ? `$${session.meta.stats.costEstimate.toFixed(2)}`
     : "unknown";
 
-  return `You are an expert AI coding coach. Analyze this recorded AI coding session and provide detailed, constructive feedback on the user's prompting technique.
+  return `You are an expert AI coding coach. Analyze this recorded AI coding session and provide feedback on BOTH the user's prompting technique AND the overall session effectiveness.
 
 ## Session Info
 - Provider: ${session.meta.provider}
@@ -230,7 +300,19 @@ ${digest}
 ## Valid User-Prompt Scene Indices
 ONLY use these values for sceneIndex: [${userPromptIndices.join(", ")}]
 
-## Analysis Guidelines
+## Step 1: Session-Level Analysis
+First, assess the session as a whole:
+- **Goal**: What was the user trying to achieve? (one sentence)
+- **Outcome**: Was the goal achieved? (fully_achieved / mostly_achieved / partially_achieved / not_achieved / unclear)
+- **Friction**: Where did things go wrong? Classify each friction point:
+  - misunderstood: AI misinterpreted the user's request
+  - wrong_approach: AI took wrong approach to correct goal
+  - buggy_code: AI produced code that didn't work
+  - excessive_changes: AI over-engineered or changed too much
+  - user_unclear: User's prompt was too vague to act on
+- **AI Performance**: How well did the AI perform? Rate and list specific strengths/weaknesses based on what you observe in the transcript (tool call results, code diffs, bash output).
+
+## Step 2: Per-Prompt Analysis
 For each user prompt, consider:
 1. **Clarity** — Was it unambiguous? Could the AI misinterpret?
 2. **Specificity** — Enough detail, file paths, constraints?
@@ -254,8 +336,8 @@ CRITICAL RULES:
 - sceneIndex MUST be one of: [${userPromptIndices.join(", ")}]
 - Provide feedback for the most impactful prompts (at least ${Math.min(userPromptIndices.length, 3)}, up to ${Math.min(userPromptIndices.length, 10)})
 - score: 1 = very poor, 5 = average, 8 = strong, 10 = expert
+- For feedback items with category "clarity", "specificity", or "context", you MUST provide an improvedPrompt showing a concrete rewrite
 - Be constructive and encouraging, but honest
-- improvedPrompt is optional — only when you have a concretely better version
 - Think step by step about each prompt in context before judging it`;
 }
 
@@ -428,12 +510,68 @@ export function parseFeedbackResponse(
     });
   }
 
+  // Parse new session-level fields (optional — graceful degradation for weaker models)
+  const validOutcomes = new Set([
+    "fully_achieved",
+    "mostly_achieved",
+    "partially_achieved",
+    "not_achieved",
+    "unclear",
+  ]);
+  const validFrictionTypes = new Set([
+    "misunderstood",
+    "wrong_approach",
+    "buggy_code",
+    "excessive_changes",
+    "user_unclear",
+  ]);
+  const validAiRatings = new Set(["poor", "below_average", "average", "good", "excellent"]);
+
+  const outcome = validOutcomes.has(parsed.outcome) ? parsed.outcome : undefined;
+  const sessionGoal =
+    typeof parsed.sessionGoal === "string" && parsed.sessionGoal ? parsed.sessionGoal : undefined;
+
+  let frictionPoints: FrictionPoint[] | undefined;
+  if (Array.isArray(parsed.frictionPoints) && parsed.frictionPoints.length > 0) {
+    frictionPoints = parsed.frictionPoints
+      .filter(
+        (f: any) =>
+          f &&
+          typeof f === "object" &&
+          validFrictionTypes.has(f.type) &&
+          typeof f.description === "string" &&
+          typeof f.turn === "number",
+      )
+      .map((f: any) => ({ type: f.type, description: f.description, turn: f.turn }));
+    if (frictionPoints.length === 0) frictionPoints = undefined;
+  }
+
+  let aiPerformance: FeedbackResult["aiPerformance"];
+  if (parsed.aiPerformance && typeof parsed.aiPerformance === "object") {
+    const ap = parsed.aiPerformance;
+    if (validAiRatings.has(ap.rating)) {
+      aiPerformance = {
+        rating: ap.rating,
+        strengths: Array.isArray(ap.strengths)
+          ? ap.strengths.filter((s: any) => typeof s === "string")
+          : [],
+        weaknesses: Array.isArray(ap.weaknesses)
+          ? ap.weaknesses.filter((s: any) => typeof s === "string")
+          : [],
+      };
+    }
+  }
+
   return {
     summary: parsed.summary,
     score: parsed.score,
     strengths: parsed.strengths.filter((s: any) => typeof s === "string"),
     improvements: parsed.improvements.filter((s: any) => typeof s === "string"),
     feedbackItems: items,
+    outcome,
+    sessionGoal,
+    frictionPoints,
+    aiPerformance,
   };
 }
 
@@ -602,16 +740,66 @@ export function feedbackToAnnotations(feedback: FeedbackResult): Annotation[] {
   const annotations: Annotation[] = [];
 
   // Overall summary (attached to first scene)
-  const summaryBody = [
-    `## Prompting Score: ${feedback.score}/10\n`,
-    feedback.summary,
-    "",
-    "**Strengths**",
-    ...feedback.strengths.map((s) => `- ${s}`),
-    "",
-    "**Areas for Improvement**",
-    ...feedback.improvements.map((s) => `- ${s}`),
-  ].join("\n");
+  const outcomeLabel: Record<string, string> = {
+    fully_achieved: "Fully Achieved",
+    mostly_achieved: "Mostly Achieved",
+    partially_achieved: "Partially Achieved",
+    not_achieved: "Not Achieved",
+    unclear: "Unclear",
+  };
+
+  const summaryParts: string[] = [];
+
+  // Session goal + outcome header
+  if (feedback.sessionGoal || feedback.outcome) {
+    const goalLine = feedback.sessionGoal ? `**Goal:** ${feedback.sessionGoal}` : "";
+    const outcomeLine = feedback.outcome
+      ? `**Outcome:** ${outcomeLabel[feedback.outcome] || feedback.outcome}`
+      : "";
+    summaryParts.push([goalLine, outcomeLine].filter(Boolean).join(" · "));
+    summaryParts.push("");
+  }
+
+  summaryParts.push(`## Prompting Score: ${feedback.score}/10\n`);
+  summaryParts.push(feedback.summary);
+
+  // AI performance
+  if (feedback.aiPerformance) {
+    const ap = feedback.aiPerformance;
+    const ratingLabel: Record<string, string> = {
+      poor: "Poor",
+      below_average: "Below Average",
+      average: "Average",
+      good: "Good",
+      excellent: "Excellent",
+    };
+    summaryParts.push("");
+    summaryParts.push(`**AI Performance:** ${ratingLabel[ap.rating] || ap.rating}`);
+    if (ap.strengths.length > 0) {
+      summaryParts.push(...ap.strengths.map((s) => `- (+) ${s}`));
+    }
+    if (ap.weaknesses.length > 0) {
+      summaryParts.push(...ap.weaknesses.map((s) => `- (-) ${s}`));
+    }
+  }
+
+  // Friction points
+  if (feedback.frictionPoints && feedback.frictionPoints.length > 0) {
+    summaryParts.push("");
+    summaryParts.push("**Friction Points**");
+    for (const fp of feedback.frictionPoints) {
+      summaryParts.push(`- Turn ${fp.turn}: \`${fp.type}\` — ${fp.description}`);
+    }
+  }
+
+  summaryParts.push("");
+  summaryParts.push("**Strengths**");
+  summaryParts.push(...feedback.strengths.map((s) => `- ${s}`));
+  summaryParts.push("");
+  summaryParts.push("**Areas for Improvement**");
+  summaryParts.push(...feedback.improvements.map((s) => `- ${s}`));
+
+  const summaryBody = summaryParts.join("\n");
 
   annotations.push({
     id: randomUUID(),

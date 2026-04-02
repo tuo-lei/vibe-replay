@@ -26,6 +26,7 @@ import {
   TITLE_MAX_CHARS,
   timeAgo,
 } from "./dashboard-utils";
+import InsightsPage from "./InsightsPage";
 import {
   ScanInsightsProvider,
   ScanProgressBar,
@@ -36,7 +37,7 @@ import {
 import ProjectsPanel from "./ProjectsPanel";
 import { formatDuration } from "./StatsPanel";
 
-type Tab = "home" | "sessions" | "replays" | "projects";
+type Tab = "home" | "sessions" | "replays" | "projects" | "insights";
 
 // ─── URL state parsers (module-level for stable references) ─────────
 function getProjectFromUrl(): string {
@@ -273,6 +274,7 @@ export interface SessionScanData {
   entrypoint?: string;
   permissionMode?: string;
   skillsUsed?: string[];
+  mcpServersUsed?: string[];
   model?: string;
   gitBranch?: string;
   startTime?: string;
@@ -485,6 +487,14 @@ export function SessionDetailPopup({
                 {skill}
               </span>
             ))}
+            {scanData?.mcpServersUsed?.map((server) => (
+              <span
+                key={server}
+                className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-purple-500/10 text-purple-400"
+              >
+                {server}
+              </span>
+            ))}
             {s.replay?.replayOutdated && (
               <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-terminal-orange-subtle text-terminal-orange">
                 outdated replay
@@ -561,6 +571,9 @@ export function SessionDetailPopup({
               )}
               {scanData?.skillsUsed && scanData.skillsUsed.length > 0 && (
                 <InfoRow label="Skills" value={scanData.skillsUsed.join(", ")} />
+              )}
+              {scanData?.mcpServersUsed && scanData.mcpServersUsed.length > 0 && (
+                <InfoRow label="MCP Servers" value={scanData.mcpServersUsed.join(", ")} />
               )}
               <InfoRow label="Started" value={`${formatDate(startedAt)} (${timeAgo(startedAt)})`} />
               {scanData?.endTime && <InfoRow label="Ended" value={formatDate(scanData.endTime)} />}
@@ -2738,7 +2751,8 @@ export default function Dashboard() {
   const getTabFromUrl = useCallback((): Tab => {
     const params = new URLSearchParams(window.location.search);
     const t = params.get("tab") as Tab;
-    if (t === "home" || t === "sessions" || t === "replays" || t === "projects") return t;
+    if (t === "home" || t === "sessions" || t === "replays" || t === "projects" || t === "insights")
+      return t;
     return isEditor ? "home" : "replays";
   }, [isEditor]);
 
@@ -2781,6 +2795,7 @@ export default function Dashboard() {
               {tabButton("sessions", "Sessions")}
               {tabButton("replays", "Replays")}
               {tabButton("projects", "Projects")}
+              {tabButton("insights", "Insights")}
             </div>
             <NavScanIndicator />
           </div>
@@ -2789,6 +2804,8 @@ export default function Dashboard() {
         {/* Tab content */}
         {tab === "home" && isEditor ? (
           <DashboardHome onNavigate={handleTabChange} />
+        ) : tab === "insights" && isEditor ? (
+          <InsightsPage />
         ) : tab === "projects" && isEditor ? (
           <ProjectsPanel onNavigate={handleTabChange} />
         ) : tab === "sessions" && isEditor ? (

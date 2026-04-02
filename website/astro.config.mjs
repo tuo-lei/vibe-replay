@@ -9,6 +9,7 @@ const workerDevUrl = process.env.DEV_WORKER_URL || "http://localhost:8787";
 
 export default defineConfig({
   site: "https://vibe-replay.com",
+  trailingSlash: "always",
   integrations: [sitemap()],
   vite: {
     server: {

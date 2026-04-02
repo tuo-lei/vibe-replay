@@ -1,5 +1,6 @@
 import { memo, useState } from "react";
 import type { Scene, SubAgent } from "../types";
+import { displayToolName } from "../utils/toolName";
 import BashBlock from "./BashBlock";
 import CodeDiffBlock from "./CodeDiffBlock";
 import { formatDuration } from "./StatsPanel";
@@ -27,6 +28,7 @@ interface Props {
 }
 
 function toolIcon(name: string): string {
+  if (name.startsWith("mcp__")) return "\uD83D\uDD0C"; // 🔌
   switch (name) {
     case "Read":
       return "\uD83D\uDCC4";
@@ -174,7 +176,9 @@ function SubAgentSceneItem({ scene }: { scene: Scene }) {
           onClick={() => setExpanded(!expanded)}
           className="flex items-center gap-1 text-[10px] font-mono w-full text-left hover:bg-terminal-surface-hover/30 rounded px-1"
         >
-          <span className="text-terminal-orange font-bold">{toolScene.toolName}</span>
+          <span className="text-terminal-orange font-bold">
+            {displayToolName(toolScene.toolName)}
+          </span>
           <span className="text-terminal-dim truncate flex-1">
             {summarizeInput(toolScene.toolName, toolScene.input)}
           </span>
@@ -200,7 +204,7 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
     return (
       <div className="flex items-center gap-2 px-3 py-1 text-xs font-mono text-terminal-dim">
         <span>{toolIcon(scene.toolName)}</span>
-        <span className="text-terminal-orange font-bold">{scene.toolName}</span>
+        <span className="text-terminal-orange font-bold">{displayToolName(scene.toolName)}</span>
         <span className="truncate">{summarizeInput(scene.toolName, scene.input)}</span>
         {scene.subAgent && <AgentTypeBadge type={scene.subAgent.agentType} />}
         <ToolDuration ms={scene.durationMs} />
@@ -273,7 +277,9 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
           className="w-full flex items-center gap-2 px-3 py-2 bg-terminal-surface hover:bg-terminal-surface-hover transition-colors duration-200 ease-material text-left"
         >
           <span className="text-xs font-mono">{toolIcon(scene.toolName)}</span>
-          <span className="text-xs font-mono font-bold text-terminal-orange">{scene.toolName}</span>
+          <span className="text-xs font-mono font-bold text-terminal-orange">
+            {displayToolName(scene.toolName)}
+          </span>
           <span className="text-xs text-terminal-dim font-mono truncate flex-1">
             {summarizeInput(scene.toolName, scene.input)}
           </span>
