@@ -250,6 +250,106 @@ describe("cursor sqlite metrics helpers", () => {
     expect(summary.hasCursorRules).toBe(true);
   });
 
+  it("strips hidden planning text from Cursor thinking payloads", () => {
+    expect(
+      __testables.parseThinking(
+        [
+          "**Waiting for generation**",
+          "",
+          "I need to wait for the generation to complete before checking the page.",
+          "I might inspect the network if the button stays disabled.",
+        ].join("\n"),
+      ),
+    ).toBe("");
+
+    expect(
+      __testables.parseThinking(
+        [
+          "Short visible note",
+          "",
+          "**Planning next steps**",
+          "",
+          "I need to inspect the parser before deciding how to fix it.",
+          "I should compare the SQLite path too.",
+        ].join("\n"),
+      ),
+    ).toBe("Short visible note");
+  });
+
+  it("strips hidden planning tails from store-backed assistant content", () => {
+    const blocks = __testables.parseAssistantContent(
+      [
+        {
+          type: "text",
+          text: [
+            "我先验证一下本地生成链路。",
+            "",
+            "**Exploring tool functions**",
+            "",
+            "I need to inspect the current session and compare the SQLite path.",
+            "I should verify whether tool-call blocks already contain enough metadata.",
+          ].join("\n"),
+        },
+        {
+          type: "reasoning",
+          text: [
+            "**Waiting for generation**",
+            "",
+            "I need to wait for the replay generation to finish.",
+            "I might inspect the network if the page does not navigate.",
+          ].join("\n"),
+        },
+        {
+          type: "tool-call",
+          toolCallId: "tool-1",
+          toolName: "ReadFile",
+          args: { path: "/tmp/demo.ts" },
+        },
+      ] as any,
+      new Map(),
+    );
+
+    expect(blocks).toEqual([
+      { type: "text", text: "我先验证一下本地生成链路。" },
+      {
+        type: "tool_use",
+        id: "tool-1",
+        name: "Read",
+        input: { file_path: "/tmp/demo.ts" },
+        _result: "",
+      },
+    ]);
+  });
+
+  it("keeps non-planning bold headings in assistant content", () => {
+    const blocks = __testables.parseAssistantContent(
+      [
+        {
+          type: "text",
+          text: [
+            "**Why this fix works**",
+            "",
+            "I need to mention that this function has a subtle bug.",
+            "I should explain why before I fix it.",
+          ].join("\n"),
+        },
+      ] as any,
+      new Map(),
+    );
+
+    expect(blocks).toEqual([
+      {
+        type: "text",
+        text: [
+          "**Why this fix works**",
+          "",
+          "I need to mention that this function has a subtle bug.",
+          "I should explain why before I fix it.",
+        ].join("\n"),
+      },
+    ]);
+  });
+
   it("extracts API errors even when the error bubble has no replayable turn content", () => {
     const apiErrors = __testables.extractCursorApiErrors([
       {

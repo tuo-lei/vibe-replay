@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import type { CursorSidecars, PrLink, TokenUsage, TurnStat } from "@vibe-replay/types";
 import type { ContentBlock, ParsedTurn, SessionInfo } from "../../types.js";
 import type { ProviderParseResult } from "../types.js";
+import { sanitizeCursorAssistantText, sanitizeCursorReasoningText } from "./sanitize.js";
 
 const CURSOR_CHATS_DIR = join(homedir(), ".cursor", "chats");
 const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -774,14 +775,14 @@ function bubbleTypeToRole(type: unknown): "user" | "assistant" {
 }
 
 function parseThinking(value: unknown): string {
-  if (typeof value === "string") return value.trim();
+  if (typeof value === "string") return sanitizeCursorReasoningText(value);
   if (
     value &&
     typeof value === "object" &&
     "text" in value &&
     typeof (value as { text: unknown }).text === "string"
   ) {
-    return (value as { text: string }).text.trim();
+    return sanitizeCursorReasoningText((value as { text: string }).text);
   }
   return "";
 }
@@ -791,6 +792,12 @@ function normalizeTurnText(raw: unknown): string {
   const cleaned = raw.replace(/<\/?user_query>/g, "").trim();
   if (!cleaned || CURSOR_SYSTEM_CONTEXT_RE.test(cleaned)) return "";
   return cleaned;
+}
+
+function normalizeAssistantTurnText(raw: unknown, hasToolContext: boolean): string {
+  const cleaned = normalizeTurnText(raw);
+  if (!cleaned) return "";
+  return sanitizeCursorAssistantText(cleaned, hasToolContext);
 }
 
 function extractToolResultText(value: unknown): string {
@@ -1496,7 +1503,7 @@ function bubbleToTurn(bubble: Record<string, any>): ParsedTurn | null {
     const thinking = parseThinking(bubble.thinking);
     if (thinking) blocks.push({ type: "thinking", thinking } as ContentBlock);
 
-    const text = normalizeTurnText(bubble.text);
+    const text = normalizeAssistantTurnText(bubble.text, !!bubble.toolFormerData);
     if (text) blocks.push({ type: "text", text });
 
     if (bubble.toolFormerData && typeof bubble.toolFormerData === "object") {
@@ -1770,15 +1777,19 @@ function parseAssistantContent(
 ): ContentBlock[] {
   if (!content) return [];
   if (typeof content === "string") {
-    return content.trim() ? [{ type: "text", text: content }] : [];
+    const cleaned = sanitizeCursorAssistantText(content, false);
+    return cleaned ? [{ type: "text", text: cleaned }] : [];
   }
 
   const blocks: ContentBlock[] = [];
+  const hasToolCalls = content.some((block) => block.type === "tool-call");
   for (const b of content) {
     if (b.type === "reasoning" && b.text?.trim()) {
-      blocks.push({ type: "thinking", thinking: b.text } as ContentBlock);
+      const thinking = sanitizeCursorReasoningText(b.text);
+      if (thinking) blocks.push({ type: "thinking", thinking } as ContentBlock);
     } else if (b.type === "text" && b.text?.trim()) {
-      blocks.push({ type: "text", text: b.text });
+      const text = sanitizeCursorAssistantText(b.text, hasToolCalls);
+      if (text) blocks.push({ type: "text", text });
     } else if (b.type === "tool-call" && b.toolCallId && b.toolName) {
       const result = toolResults.get(b.toolCallId);
       const toolBlock: any = {
@@ -2192,6 +2203,8 @@ export const __testables = {
   mapCursorToolName,
   mapToolArgs,
   mergeCursorParseResults,
+  parseAssistantContent,
   normalizeTurnText,
+  parseThinking,
   parseUserContent,
 };

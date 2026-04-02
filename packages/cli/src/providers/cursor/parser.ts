@@ -1,8 +1,9 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, extname, join } from "node:path";
-import type { ParsedTurn, SessionInfo } from "../../types.js";
+import type { ContentBlock, ParsedTurn, SessionInfo } from "../../types.js";
 import type { DataSourceInfo, ProviderParseResult } from "../types.js";
+import { sanitizeCursorAssistantText } from "./sanitize.js";
 import { isSystemContextText, parseCursorSqlite } from "./sqlite-reader.js";
 
 function toErrorMessage(err: unknown): string {
@@ -132,6 +133,9 @@ async function parseCursorJsonl(
 ): Promise<ProviderParseResult> {
   const allTurns: ParsedTurn[] = [];
   let syntheticToolId = 0;
+  const toolResults = new Map<string, string>();
+  const toolErrors = new Map<string, boolean>();
+  const toolImages = new Map<string, string[]>();
   const sortedTranscriptPaths = await sortByMtime(transcriptPaths);
   const sessionId = basename(sortedTranscriptPaths[sortedTranscriptPaths.length - 1], ".jsonl");
 
@@ -155,7 +159,15 @@ async function parseCursorJsonl(
       const userImages: string[] = [];
       const imageFilePaths = new Set<string>();
       for (const block of contentBlocks) {
-        if (block.type === "text" && block.text) {
+        if (block.type === "tool_result") {
+          const toolUseId = typeof block.tool_use_id === "string" ? block.tool_use_id : "";
+          if (toolUseId) {
+            toolResults.set(toolUseId, extractToolResultText(block));
+            if ((block as any).is_error) toolErrors.set(toolUseId, true);
+            const images = extractToolResultImages(block);
+            if (images.length > 0) toolImages.set(toolUseId, images);
+          }
+        } else if (block.type === "text" && block.text) {
           let text = stripUserQueryWrapper(block.text);
           if (role === "user" && isSystemContextText(text)) continue;
           const extracted = extractImageFilePathsFromText(text);
@@ -176,15 +188,11 @@ async function parseCursorJsonl(
         if (dataUrl) userImages.push(dataUrl);
       }
 
-      if (textParts.length === 0 && userImages.length === 0) continue;
-
-      const fullText = textParts.join("\n");
-      const markerParsed = role === "assistant" ? splitToolMarker(fullText) : undefined;
-      const markerName = markerParsed?.markerName;
-      const markerTextBody = markerParsed?.textBody;
+      if (role === "user" && textParts.length === 0 && userImages.length === 0) continue;
 
       if (role === "user") {
         const blocks: any[] = [];
+        const fullText = textParts.join("\n");
         if (fullText) blocks.push({ type: "text", text: fullText });
         const dedupedImages = [...new Set(userImages)];
         if (dedupedImages.length > 0) {
@@ -196,22 +204,44 @@ async function parseCursorJsonl(
         continue;
       }
 
-      if (markerName) {
-        // Markers are status indicators — store as a placeholder that
-        // attachToolEvents() can upgrade to a real tool_use if an
-        // agent-tools file matches, otherwise convert to thinking.
-        const blocks: any[] = [];
-        if (markerTextBody) blocks.push({ type: "text", text: markerTextBody });
-        blocks.push({
-          type: "tool_use",
-          id: `cursor-marker-${syntheticToolId++}`,
-          name: markerName,
-          input: { marker: markerName },
-          _isPendingMarker: true,
+      const hasInlineToolUse = contentBlocks.some((block) => block?.type === "tool_use");
+      const blocks: any[] = [];
+      for (const block of contentBlocks as ContentBlock[]) {
+        if (block.type === "text" && block.text) {
+          const cleanedText = sanitizeAssistantTextForReplay(block.text, hasInlineToolUse);
+          if (!cleanedText) continue;
+          const markerParsed = splitToolMarker(cleanedText);
+          if (markerParsed?.markerName) {
+            if (markerParsed.textBody) blocks.push({ type: "text", text: markerParsed.textBody });
+            blocks.push({
+              type: "tool_use",
+              id: `cursor-marker-${syntheticToolId++}`,
+              name: markerParsed.markerName,
+              input: { marker: markerParsed.markerName },
+              _isPendingMarker: true,
+            });
+          } else {
+            blocks.push({ type: "text", text: cleanedText });
+          }
+        } else if (block.type === "tool_use") {
+          blocks.push({
+            type: "tool_use",
+            id:
+              typeof block.id === "string" && block.id.trim()
+                ? block.id
+                : `cursor-inline-${syntheticToolId++}`,
+            name: typeof block.name === "string" && block.name.trim() ? block.name : "Tool",
+            input: block.input && typeof block.input === "object" ? block.input : {},
+          });
+        }
+      }
+
+      if (blocks.length > 0) {
+        allTurns.push({
+          role,
+          ...(typeof obj.timestamp === "string" ? { timestamp: obj.timestamp } : {}),
+          blocks,
         });
-        allTurns.push({ role, blocks });
-      } else {
-        allTurns.push({ role, blocks: [{ type: "text", text: fullText }] });
       }
     }
   }
@@ -224,6 +254,7 @@ async function parseCursorJsonl(
         : [];
   const toolEvents = await loadToolEvents(toolPaths);
   attachToolEvents(allTurns, toolEvents);
+  attachToolResults(allTurns, toolResults, toolErrors, toolImages);
 
   // Derive slug from session ID
   const slug = sessionId.slice(0, 8);
@@ -255,6 +286,10 @@ async function parseCursorJsonl(
 
 function stripUserQueryWrapper(text: string): string {
   return text.replace(/<\/?user_query>/g, "").trim();
+}
+
+function sanitizeAssistantTextForReplay(text: string, hasInlineToolUse: boolean): string {
+  return sanitizeCursorAssistantText(stripUserQueryWrapper(text), hasInlineToolUse);
 }
 
 function normalizeImagePlaceholderLines(text: string): string {
@@ -344,6 +379,51 @@ function countUserImages(turns: ParsedTurn[]): number {
     count += collectUserImages(turn).length;
   }
   return count;
+}
+
+function extractToolResultText(block: Extract<ContentBlock, { type: "tool_result" }>): string {
+  if (typeof block.content === "string") return block.content;
+  if (!Array.isArray(block.content)) return "";
+  return block.content
+    .map((item) => {
+      if (!item || typeof item !== "object") return "";
+      if (typeof (item as any).text === "string") return (item as any).text;
+      if (typeof (item as any).content === "string") return (item as any).content;
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function extractToolResultImages(block: Extract<ContentBlock, { type: "tool_result" }>): string[] {
+  if (!Array.isArray(block.content)) return [];
+  return block.content
+    .map((item) => {
+      if (item?.type !== "image" || !item.source?.data) return null;
+      const source = item.source;
+      const mediaType = source.media_type || "image/png";
+      return `data:${mediaType};base64,${source.data}`;
+    })
+    .filter((value): value is string => typeof value === "string");
+}
+
+function attachToolResults(
+  turns: ParsedTurn[],
+  toolResults: Map<string, string>,
+  toolErrors: Map<string, boolean>,
+  toolImages: Map<string, string[]>,
+): void {
+  for (const turn of turns) {
+    if (turn.role !== "assistant") continue;
+    for (const block of turn.blocks as any[]) {
+      if (block?.type !== "tool_use" || typeof block.id !== "string") continue;
+      const result = toolResults.get(block.id);
+      if (result !== undefined) block._result = result;
+      const images = toolImages.get(block.id);
+      if (images?.length) block._images = images;
+      if (toolErrors.get(block.id)) block._isError = true;
+    }
+  }
 }
 
 /**

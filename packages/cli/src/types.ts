@@ -119,4 +119,5 @@ export type ContentBlock =
 
 export type ToolResultContent =
   | { type: "text"; text: string }
-  | { type: "tool_result"; tool_use_id: string; content: string };
+  | { type: "tool_result"; tool_use_id: string; content: string }
+  | { type: "image"; source: { type: string; media_type: string; data: string } };

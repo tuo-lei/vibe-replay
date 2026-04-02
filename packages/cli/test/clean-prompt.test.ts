@@ -59,4 +59,34 @@ describe("cleanPromptText", () => {
     const result = cleanPromptText(input);
     expect(result).toContain("Fix the bug please");
   });
+
+  it("drops previous conversation summaries entirely", () => {
+    const input = `[Previous conversation summary]: Summary:
+1. Primary Request and Intent:
+   The user asked for a dashboard cleanup.`;
+    expect(cleanPromptText(input)).toBe("");
+  });
+
+  it("strips terminal transcript noise and keeps the real question", () => {
+    const input = `Last login: Thu Mar 26 12:19:46 on ttys001
+➜  ros-2 git:(main) gh auth status
+github.com
+  ✓ Logged in to github.com account tleiroblox (keyring)
+  - Active account: true
+credential.helper=osxkeychain
+user.email=45369003+tuo-lei@users.noreply.github.com
+
+我现在默认GIT CONFIG是用的我公司的ACCOUNT吗TLEIROBLOX?`;
+    expect(cleanPromptText(input)).toBe("我现在默认GIT CONFIG是用的我公司的ACCOUNT吗TLEIROBLOX?");
+  });
+
+  it("drops attachment wrapper prompts that are only code selections", () => {
+    const input = `<attached_files>
+
+<code_selection path="/tmp/example.ts" lines="1-3">
+1|const a = 1;
+2|const b = 2;
+3|const c = 3;`;
+    expect(cleanPromptText(input)).toBe("");
+  });
 });

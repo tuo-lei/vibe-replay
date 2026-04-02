@@ -432,7 +432,14 @@ function selectCursorEnrichmentCandidates(
     .filter(
       (s) =>
         s.provider === "cursor" &&
-        (s.promptCount == null || s.toolCallCount == null) &&
+        (s.promptCount == null ||
+          s.toolCallCount == null ||
+          typeof s.title !== "string" ||
+          !s.title.trim() ||
+          typeof s.model !== "string" ||
+          !s.model ||
+          looksLikeCursorDisplayNoise(s.title) ||
+          looksLikeCursorDisplayNoise(s.firstPrompt)) &&
         (s.hasSqlite || s.filePaths.length > 0),
     )
     .map((s) => {
@@ -473,6 +480,37 @@ function countSessionStats(turns: ParsedTurn[]): {
     }
   }
   return { promptCount, toolCallCount };
+}
+
+function extractPromptPreviewsFromTurns(turns: ParsedTurn[], limit = 3): string[] {
+  const prompts: string[] = [];
+  for (const turn of turns) {
+    if (turn.role !== "user" || turn.subtype === "compaction-summary") continue;
+    const text = turn.blocks
+      .filter((block) => block.type === "text")
+      .map((block) => block.text)
+      .join("\n")
+      .trim();
+    const cleaned = cleanPromptText(text).slice(0, 200);
+    if (cleaned.length < 8 || prompts.includes(cleaned)) continue;
+    prompts.push(cleaned);
+    if (prompts.length >= limit) break;
+  }
+  return prompts;
+}
+
+function looksLikeCursorDisplayNoise(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const text = value.trim();
+  if (!text) return false;
+  return (
+    /^\[Previous conversation summary\]:/i.test(text) ||
+    /^Last login:/i.test(text) ||
+    /^Patrick Desjardins\s+\[\d{1,2}:\d{2}\s?(?:AM|PM)\]/i.test(text) ||
+    /^<attached_files>/i.test(text) ||
+    /^<code_selection\b/i.test(text) ||
+    /^and merge infrastructure was built for human-paced output/i.test(text)
+  );
 }
 
 /**
@@ -558,7 +596,7 @@ async function buildSourcesResult(
       provider: s.provider,
       sessionId: s.sessionId,
       slug: s.slug,
-      title: s.title,
+      title: normalizeTitle(cleanPromptText(typeof s.title === "string" ? s.title : "")),
       project: s.project,
       timestamp: s.timestamp,
       fileSize: s.fileSize,
@@ -838,19 +876,53 @@ export async function startServer(
           const paths = [...session.filePaths, ...(session.toolPaths || [])];
           const parsed = await cursorProvider.parse(paths, session);
           const counts = countSessionStats(parsed.turns);
+          const promptPreviews = extractPromptPreviewsFromTurns(parsed.turns);
+          const enrichedTitle =
+            normalizeTitle(cleanPromptText(parsed.title || "")) ||
+            normalizeTitle(promptPreviews[0] || "");
+          const enrichedFirstPrompt =
+            promptPreviews[0] ||
+            cleanPromptText(parsed.title || "").slice(0, 200) ||
+            cleanPromptText(session.firstPrompt).slice(0, 200);
           const target = pickSourceRecordForSession(session, bySessionId, byKey);
-          if (
-            target &&
-            (target.promptCount !== counts.promptCount ||
-              target.toolCallCount !== counts.toolCallCount)
-          ) {
-            target.promptCount = counts.promptCount;
-            target.toolCallCount = counts.toolCallCount;
-            changed = true;
-            sourcesEnrichmentStatus = {
-              ...sourcesEnrichmentStatus,
-              updated: sourcesEnrichmentStatus.updated + 1,
-            };
+          if (target) {
+            let targetChanged = false;
+            if (target.promptCount !== counts.promptCount) {
+              target.promptCount = counts.promptCount;
+              targetChanged = true;
+            }
+            if (target.toolCallCount !== counts.toolCallCount) {
+              target.toolCallCount = counts.toolCallCount;
+              targetChanged = true;
+            }
+            if (typeof enrichedTitle === "string" && target.title !== enrichedTitle) {
+              target.title = enrichedTitle;
+              targetChanged = true;
+            }
+            if (enrichedFirstPrompt && target.firstPrompt !== enrichedFirstPrompt) {
+              target.firstPrompt = enrichedFirstPrompt;
+              targetChanged = true;
+            }
+            const nextPrompts = promptPreviews.length > 0 ? promptPreviews : undefined;
+            if (JSON.stringify(target.prompts) !== JSON.stringify(nextPrompts)) {
+              target.prompts = nextPrompts;
+              targetChanged = true;
+            }
+            if (parsed.model && target.model !== parsed.model) {
+              target.model = parsed.model;
+              targetChanged = true;
+            }
+            if (parsed.gitBranch && target.gitBranch !== parsed.gitBranch) {
+              target.gitBranch = parsed.gitBranch;
+              targetChanged = true;
+            }
+            if (targetChanged) {
+              changed = true;
+              sourcesEnrichmentStatus = {
+                ...sourcesEnrichmentStatus,
+                updated: sourcesEnrichmentStatus.updated + 1,
+              };
+            }
           }
         } catch {
           // Best-effort enrichment only.
