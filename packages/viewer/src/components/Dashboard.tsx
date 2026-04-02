@@ -273,6 +273,7 @@ export interface SessionScanData {
   entrypoint?: string;
   permissionMode?: string;
   skillsUsed?: string[];
+  mcpServersUsed?: string[];
   model?: string;
   gitBranch?: string;
   startTime?: string;
@@ -485,6 +486,14 @@ export function SessionDetailPopup({
                 {skill}
               </span>
             ))}
+            {scanData?.mcpServersUsed?.map((server) => (
+              <span
+                key={server}
+                className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-purple-500/10 text-purple-400"
+              >
+                {server}
+              </span>
+            ))}
             {s.replay?.replayOutdated && (
               <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-terminal-orange-subtle text-terminal-orange">
                 outdated replay
@@ -561,6 +570,9 @@ export function SessionDetailPopup({
               )}
               {scanData?.skillsUsed && scanData.skillsUsed.length > 0 && (
                 <InfoRow label="Skills" value={scanData.skillsUsed.join(", ")} />
+              )}
+              {scanData?.mcpServersUsed && scanData.mcpServersUsed.length > 0 && (
+                <InfoRow label="MCP Servers" value={scanData.mcpServersUsed.join(", ")} />
               )}
               <InfoRow label="Started" value={`${formatDate(startedAt)} (${timeAgo(startedAt)})`} />
               {scanData?.endTime && <InfoRow label="Ended" value={formatDate(scanData.endTime)} />}

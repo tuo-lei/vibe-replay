@@ -67,6 +67,7 @@ export interface SessionScanResult {
   entrypoint?: string;
   permissionMode?: string;
   skillsUsed?: string[];
+  mcpServersUsed?: string[];
   compactionCount: number;
   dataSource?: DataSource;
   dataQualityNotes?: string[];
@@ -204,6 +205,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
   let entrypoint: string | undefined;
   let permissionMode: string | undefined;
   const skillsUsed = new Set<string>();
+  const mcpServersUsed = new Set<string>();
 
   let promptCount = 0;
   let toolCallCount = 0;
@@ -354,6 +356,11 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
         for (const block of msgContent) {
           if (block.type === "tool_use") {
             toolCallCount++;
+            // Track MCP server usage
+            if (typeof block.name === "string" && block.name.startsWith("mcp__")) {
+              const server = block.name.split("__")[1];
+              if (server) mcpServersUsed.add(server);
+            }
             // Track file modifications
             if (
               block.name === "Edit" ||
@@ -513,6 +520,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
     entrypoint,
     permissionMode,
     skillsUsed: skillsUsed.size > 0 ? [...skillsUsed].sort() : undefined,
+    mcpServersUsed: mcpServersUsed.size > 0 ? [...mcpServersUsed].sort() : undefined,
   };
 }
 
@@ -658,6 +666,7 @@ function buildScanResultFromParsed(
     entrypoint: parsed.entrypoint,
     permissionMode: parsed.permissionMode,
     skillsUsed: parsed.skillsUsed,
+    mcpServersUsed: parsed.mcpServersUsed,
     dataSource: parsed.dataSource,
     dataQualityNotes: parsed.dataSourceInfo?.notes,
     turnStatCount: parsed.turnStats?.length,

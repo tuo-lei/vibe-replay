@@ -185,6 +185,7 @@ export function transformToReplay(
       ...(parsed.cursorSidecars ? { cursorSidecars: parsed.cursorSidecars } : {}),
       ...(parsed.serviceTier ? { serviceTier: parsed.serviceTier } : {}),
       ...(parsed.skillsUsed ? { skillsUsed: parsed.skillsUsed } : {}),
+      ...(parsed.mcpServersUsed ? { mcpServersUsed: parsed.mcpServersUsed } : {}),
       ...(parsed.truncatedResponses ? { truncatedResponses: parsed.truncatedResponses } : {}),
     },
     scenes,

@@ -641,10 +641,11 @@ const GroupCard = memo(function GroupCard({
   );
 });
 
-/** Shorten long MCP-style tool names: mcp__service__method → method */
+/** Format MCP tool names for display: mcp__server__tool → server · tool */
 function shortToolName(name: string): string {
   if (name.startsWith("mcp__")) {
     const parts = name.split("__");
+    if (parts.length >= 3) return `${parts[1]} · ${parts.slice(2).join("__")}`;
     return parts[parts.length - 1];
   }
   return name;
