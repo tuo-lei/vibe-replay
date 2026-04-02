@@ -173,6 +173,67 @@ describe("cursor sqlite metrics helpers", () => {
     ).toBe("claude-4.6-opus-high-thinking");
   });
 
+  it("merges turn stats by preferring primary fields and enrichment gaps", () => {
+    expect(__testables.mergeTurnStats(undefined, undefined)).toBeUndefined();
+    expect(__testables.mergeTurnStats([{ turnIndex: 0 } as any], undefined)).toEqual([
+      { turnIndex: 0 },
+    ]);
+    expect(__testables.mergeTurnStats(undefined, [{ turnIndex: 1 } as any])).toEqual([
+      { turnIndex: 1 },
+    ]);
+
+    expect(
+      __testables.mergeTurnStats(
+        [
+          {
+            turnIndex: 0,
+            model: "gpt-5.4-high",
+          },
+          {
+            turnIndex: 2,
+            tokenUsage: {
+              inputTokens: 10,
+              outputTokens: 2,
+              cacheCreationTokens: 0,
+              cacheReadTokens: 0,
+            },
+          },
+        ] as any,
+        [
+          {
+            turnIndex: 0,
+            durationMs: 4200,
+            contextTokens: 900,
+          },
+          {
+            turnIndex: 1,
+            model: "claude-4.6-opus-high-thinking",
+          },
+        ] as any,
+      ),
+    ).toEqual([
+      {
+        turnIndex: 0,
+        model: "gpt-5.4-high",
+        durationMs: 4200,
+        contextTokens: 900,
+      },
+      {
+        turnIndex: 1,
+        model: "claude-4.6-opus-high-thinking",
+      },
+      {
+        turnIndex: 2,
+        tokenUsage: {
+          inputTokens: 10,
+          outputTokens: 2,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 0,
+        },
+      },
+    ]);
+  });
+
   it("extracts Cursor PR links from bubble payloads and deduplicates by URL", () => {
     const links = __testables.extractCursorPrLinks([
       {

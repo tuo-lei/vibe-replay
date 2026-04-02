@@ -509,6 +509,8 @@ function looksLikeCursorDisplayNoise(value: unknown): boolean {
     /^Patrick Desjardins\s+\[\d{1,2}:\d{2}\s?(?:AM|PM)\]/i.test(text) ||
     /^<attached_files>/i.test(text) ||
     /^<code_selection\b/i.test(text) ||
+    // Hide the same truncated Cursor summary fragment at the API layer so
+    // source titles stay aligned with CLI/viewer-side prompt cleanup.
     /^and merge infrastructure was built for human-paced output/i.test(text)
   );
 }

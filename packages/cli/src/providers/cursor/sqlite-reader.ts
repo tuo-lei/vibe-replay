@@ -1491,6 +1491,9 @@ function normalizeCursorModelName(model: unknown): string | undefined {
     ),
   ];
   if (unique.length === 0) return undefined;
+  // Cursor can concatenate model labels as the session switches models.
+  // We keep the last distinct label because it best represents the final model
+  // shown to the user and matches how global-state payloads append updates.
   return unique[unique.length - 1];
 }
 
@@ -2379,6 +2382,7 @@ export const __testables = {
   mapCursorToolName,
   mapToolArgs,
   mergeCursorParseResults,
+  mergeTurnStats,
   parseAssistantContent,
   inferProjectRootFromPathHint,
   normalizeTurnText,
