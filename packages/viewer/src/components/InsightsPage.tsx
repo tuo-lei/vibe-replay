@@ -19,6 +19,7 @@ type TimeRange = "7d" | "30d" | "90d" | "all";
 
 interface ComputedStats {
   sessions: number;
+  replays: number;
   durationMs: number;
   cost: number;
   prompts: number;
@@ -89,6 +90,7 @@ function computeStats(
     totalEdits: number;
     totalToolCalls: number;
     totalSessions: number;
+    totalReplays: number;
     totalProjects: number;
   },
   range: TimeRange,
@@ -96,6 +98,7 @@ function computeStats(
   if (range === "all") {
     return {
       sessions: totalStats.totalSessions,
+      replays: totalStats.totalReplays,
       durationMs: totalStats.totalDurationMs,
       cost: totalStats.totalCost,
       prompts: totalStats.totalPrompts,
@@ -110,12 +113,13 @@ function computeStats(
   const ratio = totalStats.totalSessions > 0 ? sessions / totalStats.totalSessions : 0;
   return {
     sessions,
+    replays: Math.round(totalStats.totalReplays * ratio),
     durationMs: Math.round(totalStats.totalDurationMs * ratio),
     cost: totalStats.totalCost * ratio,
     prompts: Math.round(totalStats.totalPrompts * ratio),
     edits: Math.round(totalStats.totalEdits * ratio),
     toolCalls: Math.round(totalStats.totalToolCalls * ratio),
-    projects: totalStats.totalProjects, // projects don't change by range
+    projects: totalStats.totalProjects,
   };
 }
 
@@ -486,14 +490,38 @@ function ShareCard({
           )}
         </div>
 
-        {/* Stats grid */}
-        <div className="grid grid-cols-3 gap-x-8 gap-y-5 mb-6">
+        {/* Stats grid — 4 columns matching homepage cards */}
+        <div className="grid grid-cols-4 gap-x-6 gap-y-5 mb-6">
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-green tabular-nums">
               {formatCompactNum(stats.sessions)}
             </div>
             <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
               sessions
+            </div>
+          </div>
+          <div>
+            <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-blue tabular-nums">
+              {formatCompactNum(stats.replays)}
+            </div>
+            <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
+              replays
+            </div>
+          </div>
+          <div>
+            <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-text tabular-nums">
+              {formatCompactNum(stats.prompts)}
+            </div>
+            <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
+              turns
+            </div>
+          </div>
+          <div>
+            <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-orange tabular-nums">
+              {formatCompactNum(stats.toolCalls)}
+            </div>
+            <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
+              tool calls
             </div>
           </div>
           <div>
@@ -510,14 +538,6 @@ function ShareCard({
             </div>
             <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
               spent
-            </div>
-          </div>
-          <div>
-            <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-text tabular-nums">
-              {formatCompactNum(stats.prompts)}
-            </div>
-            <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
-              prompts
             </div>
           </div>
           <div>
@@ -911,6 +931,7 @@ function InsightsPageSkeleton() {
 function useHomePageCounts() {
   const [counts, setCounts] = useState<{
     sessions: number;
+    replays: number;
     prompts: number;
     toolCalls: number;
     duration: number;
@@ -945,6 +966,7 @@ function useHomePageCounts() {
 
     setCounts({
       sessions: sources.length,
+      replays: replays.length,
       prompts: totalPrompts,
       toolCalls: totalToolCalls,
       duration: totalDuration,
@@ -985,6 +1007,7 @@ export default function InsightsPage() {
         return {
           stats: {
             sessions: 0,
+            replays: 0,
             durationMs: 0,
             cost: 0,
             prompts: 0,
@@ -1009,6 +1032,7 @@ export default function InsightsPage() {
       const mergedTotals = {
         ...userInsights,
         totalSessions: Math.max(userInsights.totalSessions, homePageCounts?.sessions ?? 0),
+        totalReplays: homePageCounts?.replays ?? 0,
         totalPrompts: Math.max(userInsights.totalPrompts, homePageCounts?.prompts ?? 0),
         totalToolCalls: Math.max(userInsights.totalToolCalls, homePageCounts?.toolCalls ?? 0),
         totalDurationMs: Math.max(userInsights.totalDurationMs, homePageCounts?.duration ?? 0),

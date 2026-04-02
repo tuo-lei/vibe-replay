@@ -1017,13 +1017,13 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
             <ProviderBreakdownInline breakdown={insights.providerBreakdown} />
           </div>
           {userInsights?.sessionsPerDay ? (
-            <ContributionHeatmap sessionsPerDay={userInsights.sessionsPerDay} weeks={30} />
+            <ContributionHeatmap sessionsPerDay={userInsights.sessionsPerDay} weeks={52} />
           ) : (
             <ContributionHeatmap
               sessionsPerDay={Object.fromEntries(
                 insights.activityByDay.map((d) => [d.date, d.claude + d.cursor]),
               )}
-              weeks={30}
+              weeks={52}
             />
           )}
         </div>
