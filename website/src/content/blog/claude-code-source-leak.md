@@ -1,13 +1,13 @@
 ---
-title: "Claude Code's Source Leaked. We Read It and Shipped 6 Features in a Day."
+title: "Claude Code's Source Leaked. We Read It and Shipped 5 Features in a Day."
 excerpt: "513,000 lines of TypeScript, extracted from a source map left in the npm package. We found undocumented JSONL fields, hidden metadata, and MCP tool naming conventions — then turned them into product improvements."
-date: 2026-04-01
+date: 2026-04-02
 readTime: "7 min read"
 ---
 
 On March 31, 2026, security researcher [Chaofan Shou](https://x.com/Fried_rice) discovered that Anthropic had shipped a source map file inside the published `@anthropic-ai/claude-code` npm package. The `cli.js.map` file contained the `sourcesContent` of every original TypeScript file — 1,987 files, 513,000 lines of code, trivially extractable.
 
-Within hours, multiple GitHub repositories had the full source. Anthropic acknowledged it and subsequently made the code available in the public domain.
+Within hours, multiple GitHub repositories had the full source. Anthropic acknowledged it and subsequently made the code publicly available.
 
 We build [vibe-replay](https://github.com/tuo-lei/vibe-replay), a tool that parses Claude Code's JSONL session files and turns them into interactive replays. We'd been reverse-engineering the JSONL format from observed data for months. Now we had the actual source of truth.
 
@@ -45,7 +45,7 @@ Claude Code injects system messages into the conversation that are invisible in 
 
 Our parser was treating them as regular user turns. In replays, they'd show up as mysterious user prompts with XML tags or skill configuration text that the user never actually typed.
 
-After reading the source, we understood the taxonomy:
+After reading the source, we understood the taxonomy (counts from one developer machine, 129 sessions):
 
 | `isMeta` pattern | Frequency | Value |
 |---|---|---|
@@ -69,9 +69,9 @@ We also extract the skill names into a `skillsUsed` metadata field. In the dashb
 
 ## Discovery 3: `stop_reason` — detecting truncated responses
 
-Every assistant message in the JSONL carries a `stop_reason` field: `end_turn`, `tool_use`, or `max_tokens`.
+Every assistant message in the JSONL carries a `stop_reason` field: `end_turn`, `tool_use`, or `max_tokens`. This is a standard Anthropic API field — we just hadn't wired it up.
 
-We'd never looked at it. But `max_tokens` means Claude's response was cut off mid-sentence — important context that was invisible in replays.
+`max_tokens` means Claude's response was cut off mid-sentence — important context that was invisible in replays.
 
 We now track this per-message and surface it:
 - `ParsedTurn` gets a `stopReason: "max_tokens"` field
@@ -100,7 +100,7 @@ Before the leak, these names rendered verbatim in replays — long, ugly, and ha
 3. **Format display names** as `server · tool` (e.g., "claude-in-chrome · navigate")
 4. **Use a plug icon** instead of the generic gear for MCP tools
 
-On one test machine, 20+ sessions used MCP tools with 1,036 total calls — primarily `claude-in-chrome` (454 calls) and `playwright` (16 calls).
+On one test machine, 21 sessions used MCP tools across over 1,000 total calls — primarily `claude-in-chrome` (454 calls) and `playwright` (16 calls).
 
 ---
 
