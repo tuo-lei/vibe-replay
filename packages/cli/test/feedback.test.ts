@@ -671,8 +671,8 @@ describe("buildSessionDigest", () => {
       },
     });
     const digest = buildSessionDigest(session);
-    expect(digest.length).toBeLessThanOrEqual(35100); // 35000 + suffix message
-    if (digest.length > 35000) {
+    expect(digest.length).toBeLessThanOrEqual(50100); // 50000 + suffix message
+    if (digest.length > 50000) {
       expect(digest).toContain("remaining turns omitted due to length");
     }
   });

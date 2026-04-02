@@ -2303,6 +2303,8 @@ export async function startServer(
         annotations: newAnnotations,
         score: fb.result.score,
         itemCount: fb.result.feedbackItems.length,
+        outcome: fb.result.outcome,
+        sessionGoal: fb.result.sessionGoal,
       });
     } catch (err) {
       return c.json({ error: getErrorMessage(err) }, 500);
