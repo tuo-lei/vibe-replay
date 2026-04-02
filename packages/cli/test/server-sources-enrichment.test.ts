@@ -41,6 +41,8 @@ describe("sources enrichment helpers", () => {
         hasSqlite: true,
         promptCount: 12,
         toolCallCount: 8,
+        title: "Clean session title",
+        model: "claude-sonnet-4-20250514",
       },
     ] as any[];
 
@@ -97,6 +99,8 @@ describe("sources enrichment helpers", () => {
         filePaths: ["/tmp/session-done.jsonl"],
         promptCount: 4,
         toolCallCount: 2,
+        title: "Already enriched title",
+        model: "claude-sonnet-4-20250514",
       },
     ] as any[];
 

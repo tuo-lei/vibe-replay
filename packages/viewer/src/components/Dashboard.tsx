@@ -288,6 +288,7 @@ export interface SessionScanData {
 function sessionPromptPreview(
   session: Pick<SourceSession, "prompts" | "firstPrompt">,
   scanData?: Pick<SessionScanData, "firstPrompt"> | null,
+  displayTitle?: string,
 ): string[] {
   const prompts: string[] = [];
   const seen = new Set<string>();
@@ -298,6 +299,13 @@ function sessionPromptPreview(
     if (!cleaned || seen.has(cleaned)) continue;
     seen.add(cleaned);
     prompts.push(cleaned);
+  }
+  const normalizedTitle = cleanPrompt(displayTitle || "");
+  if (prompts.length > 1 && normalizedTitle && prompts[0] === normalizedTitle) {
+    prompts.shift();
+  }
+  if (prompts.length > 1 && /^(?:and|but|or|so|then)\b/i.test(prompts[0] || "")) {
+    prompts.shift();
   }
   return prompts;
 }
@@ -401,7 +409,7 @@ export function SessionDetailPopup({
 
   const branch = nonDefaultBranch(scanData?.gitBranch || s.gitBranch);
   const model = scanData?.model || s.model;
-  const prompts = sessionPromptPreview(s, scanData);
+  const prompts = sessionPromptPreview(s, scanData, suggested);
   const dataQualityNotes = scanData?.dataQualityNotes || [];
 
   // Use scan data when available, fall back to discovery estimates
@@ -1905,16 +1913,22 @@ function SessionsPanel() {
                 // Sessions with replay: use the shared ReplayCard
                 if (s.replay) {
                   const isArchived = archivedSlugs.has(s.slug);
+                  const displayTitle = sourceDisplayTitle(s, scanData);
+                  const promptPreview = sessionPromptPreview(s, scanData, displayTitle);
                   return (
                     <ReplayCard
                       key={`${s.provider}-${s.slug}`}
                       summary={{
                         ...s.replay,
-                        title: sourceDisplayTitle(s, scanData),
-                        firstMessage: scanData?.firstPrompt || s.replay.firstMessage,
-                        messages: scanData?.firstPrompt
-                          ? [scanData.firstPrompt]
-                          : s.replay.messages,
+                        title: displayTitle,
+                        firstMessage:
+                          promptPreview[0] || scanData?.firstPrompt || s.replay.firstMessage,
+                        messages:
+                          promptPreview.length > 0
+                            ? promptPreview.slice(0, 2)
+                            : scanData?.firstPrompt
+                              ? [scanData.firstPrompt]
+                              : s.replay.messages,
                         model: scanData?.model || s.replay.model,
                       }}
                       onOpen={() => navigateTo({ view: null, session: s.existingReplay! })}
@@ -1931,9 +1945,9 @@ function SessionsPanel() {
                   );
                 }
                 // Sessions without replay: simpler card with Generate
-                const prompts = sessionPromptPreview(s, scanData);
-                const branch = nonDefaultBranch(scanData?.gitBranch || s.gitBranch);
                 const sessionTitle = sourceDisplayTitle(s, scanData);
+                const prompts = sessionPromptPreview(s, scanData, sessionTitle);
+                const branch = nonDefaultBranch(scanData?.gitBranch || s.gitBranch);
                 const displayPromptCount = scanData?.promptCount ?? s.promptCount;
                 const displayToolCount = scanData?.toolCallCount ?? s.toolCallCount;
                 const displayDurationMs = scanData?.durationMs ?? s.durationMsEst;
