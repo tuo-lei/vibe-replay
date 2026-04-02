@@ -205,6 +205,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
   let entrypoint: string | undefined;
   let permissionMode: string | undefined;
   const skillsUsed = new Set<string>();
+  // MCP tracking for the raw-JSONL scan path only; parse-based path uses parsed.mcpServersUsed
   const mcpServersUsed = new Set<string>();
 
   let promptCount = 0;

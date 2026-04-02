@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { OverlayActions } from "../hooks/useOverlays";
 import type { EffectivePrefs } from "../hooks/useViewPrefs";
 import type { Scene, TurnStat } from "../types";
+import { displayToolName } from "../utils/toolName";
 import CompactionSummaryBlock from "./CompactionSummaryBlock";
 import { formatDuration } from "./StatsPanel";
 import TextResponseBlock from "./TextResponseBlock";
@@ -641,15 +642,7 @@ const GroupCard = memo(function GroupCard({
   );
 });
 
-/** Format MCP tool names for display: mcp__server__tool → server · tool */
-function shortToolName(name: string): string {
-  if (name.startsWith("mcp__")) {
-    const parts = name.split("__");
-    if (parts.length >= 3) return `${parts[1]} · ${parts.slice(2).join("__")}`;
-    return parts[parts.length - 1];
-  }
-  return name;
-}
+// MCP tool name formatting is in ../utils/toolName.ts (shared with ToolCallBlock)
 
 /**
  * Compact assistant group: shows a STABLE summary (computed from ALL scenes
@@ -713,7 +706,7 @@ function CompactAssistantGroup({
             subAgentTypes.push(scene.subAgent.agentType);
           }
         }
-        const displayName = shortToolName(scene.toolName);
+        const displayName = displayToolName(scene.toolName);
         toolBreakdown[displayName] = (toolBreakdown[displayName] || 0) + 1;
         if (scene.toolName === "Bash" && scene.input?.command) {
           const cmd = scene.input.command.trim().split(/[\s|;&]/)[0];

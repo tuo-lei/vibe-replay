@@ -1,5 +1,6 @@
 import { memo, useState } from "react";
 import type { Scene, SubAgent } from "../types";
+import { displayToolName } from "../utils/toolName";
 import BashBlock from "./BashBlock";
 import CodeDiffBlock from "./CodeDiffBlock";
 import { formatDuration } from "./StatsPanel";
@@ -24,21 +25,6 @@ interface Props {
   scene: ToolScene;
   isActive: boolean;
   forceCollapse?: boolean;
-}
-
-/** Parse MCP tool name: "mcp__server__tool" → { server, tool } or null */
-function parseMcpName(name: string): { server: string; tool: string } | null {
-  if (!name.startsWith("mcp__")) return null;
-  const parts = name.split("__");
-  if (parts.length < 3) return null;
-  return { server: parts[1], tool: parts.slice(2).join("__") };
-}
-
-/** Display-friendly tool name: "mcp__chrome__navigate" → "chrome · navigate" */
-function displayToolName(name: string): string {
-  const mcp = parseMcpName(name);
-  if (mcp) return `${mcp.server} · ${mcp.tool}`;
-  return name;
 }
 
 function toolIcon(name: string): string {
