@@ -486,6 +486,109 @@ describe("parseFeedbackResponse", () => {
     expect(result!.feedbackItems[0].improvedPrompt).toBeUndefined();
   });
 
+  // --- Session-level fields (Phase 1A) ---
+
+  it("parses outcome and sessionGoal when present", () => {
+    const result = parseFeedbackResponse(
+      makeValidFeedbackJson({
+        outcome: "mostly_achieved",
+        sessionGoal: "Fix the login bug",
+      }),
+      session,
+    );
+    expect(result).not.toBeNull();
+    expect(result!.outcome).toBe("mostly_achieved");
+    expect(result!.sessionGoal).toBe("Fix the login bug");
+  });
+
+  it("ignores invalid outcome values", () => {
+    const result = parseFeedbackResponse(makeValidFeedbackJson({ outcome: "kinda_done" }), session);
+    expect(result).not.toBeNull();
+    expect(result!.outcome).toBeUndefined();
+  });
+
+  it("parses frictionPoints when valid", () => {
+    const result = parseFeedbackResponse(
+      makeValidFeedbackJson({
+        frictionPoints: [
+          { type: "misunderstood", description: "AI read wrong file", turn: 2 },
+          { type: "buggy_code", description: "Test failed", turn: 4 },
+        ],
+      }),
+      session,
+    );
+    expect(result).not.toBeNull();
+    expect(result!.frictionPoints).toHaveLength(2);
+    expect(result!.frictionPoints![0].type).toBe("misunderstood");
+    expect(result!.frictionPoints![1].turn).toBe(4);
+  });
+
+  it("filters out invalid frictionPoints entries", () => {
+    const result = parseFeedbackResponse(
+      makeValidFeedbackJson({
+        frictionPoints: [
+          { type: "invalid_type", description: "nope", turn: 1 },
+          { type: "buggy_code", description: "valid", turn: 3 },
+          { type: "wrong_approach" }, // missing description and turn
+        ],
+      }),
+      session,
+    );
+    expect(result).not.toBeNull();
+    expect(result!.frictionPoints).toHaveLength(1);
+    expect(result!.frictionPoints![0].type).toBe("buggy_code");
+  });
+
+  it("sets frictionPoints to undefined when all entries are invalid", () => {
+    const result = parseFeedbackResponse(
+      makeValidFeedbackJson({
+        frictionPoints: [{ type: "fake", description: "nope", turn: 1 }],
+      }),
+      session,
+    );
+    expect(result).not.toBeNull();
+    expect(result!.frictionPoints).toBeUndefined();
+  });
+
+  it("parses aiPerformance when valid", () => {
+    const result = parseFeedbackResponse(
+      makeValidFeedbackJson({
+        aiPerformance: {
+          rating: "good",
+          strengths: ["Fast search"],
+          weaknesses: ["Missed edge case"],
+        },
+      }),
+      session,
+    );
+    expect(result).not.toBeNull();
+    expect(result!.aiPerformance).toBeDefined();
+    expect(result!.aiPerformance!.rating).toBe("good");
+    expect(result!.aiPerformance!.strengths).toEqual(["Fast search"]);
+    expect(result!.aiPerformance!.weaknesses).toEqual(["Missed edge case"]);
+  });
+
+  it("ignores aiPerformance with invalid rating", () => {
+    const result = parseFeedbackResponse(
+      makeValidFeedbackJson({
+        aiPerformance: { rating: "meh", strengths: [], weaknesses: [] },
+      }),
+      session,
+    );
+    expect(result).not.toBeNull();
+    expect(result!.aiPerformance).toBeUndefined();
+  });
+
+  it("gracefully handles missing session-level fields", () => {
+    // Basic JSON without any new fields — should still parse fine
+    const result = parseFeedbackResponse(makeValidFeedbackJson(), session);
+    expect(result).not.toBeNull();
+    expect(result!.outcome).toBeUndefined();
+    expect(result!.sessionGoal).toBeUndefined();
+    expect(result!.frictionPoints).toBeUndefined();
+    expect(result!.aiPerformance).toBeUndefined();
+  });
+
   it("extracts JSON from noisy output with surrounding text", () => {
     const json = makeValidFeedbackJson();
     const noisy = `Here is my analysis:\n\n${json}\n\nI hope this helps!`;
@@ -580,6 +683,25 @@ describe("buildSessionDigest", () => {
     });
     const digest = buildSessionDigest(session);
     expect(digest).toContain("Bash: pnpm test");
+    expect(digest).toContain("all passed");
+  });
+
+  it("includes diff newContent in digest", () => {
+    const session = makeSession({
+      scenes: [
+        { type: "user-prompt", content: "Edit file" },
+        {
+          type: "tool-call",
+          toolName: "Edit",
+          input: { file_path: "src/app.ts" },
+          result: "ok",
+          diff: { filePath: "src/app.ts", oldContent: "const x = 1;", newContent: "const x = 2;" },
+        },
+      ],
+    });
+    const digest = buildSessionDigest(session);
+    expect(digest).toContain("Edit: src/app.ts");
+    expect(digest).toContain("const x = 2;");
   });
 
   it("truncates long bash commands", () => {
