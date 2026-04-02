@@ -156,11 +156,10 @@ export function buildSessionDigest(session: ReplaySession): string {
       if (scene.diff) {
         turnLines.push(`  - ${scene.toolName}: ${scene.diff.filePath}`);
         // Include diff content so the coach can evaluate code quality
-        if (scene.diff.diff && responseChars < maxResponseChars) {
+        const diffText = scene.diff.newContent || scene.diff.oldContent;
+        if (diffText && responseChars < maxResponseChars) {
           const diffPreview =
-            scene.diff.diff.length > maxDiffChars
-              ? `${scene.diff.diff.slice(0, maxDiffChars)}...`
-              : scene.diff.diff;
+            diffText.length > maxDiffChars ? `${diffText.slice(0, maxDiffChars)}...` : diffText;
           turnLines.push(`    ${diffPreview.replace(/\n/g, "\n    ")}`);
           responseChars += diffPreview.length;
         }
@@ -171,8 +170,8 @@ export function buildSessionDigest(session: ReplaySession): string {
             : scene.bashOutput.command;
         turnLines.push(`  - Bash: ${cmd}`);
         // Include command output so the coach can see results/errors
-        if (scene.bashOutput.output && responseChars < maxResponseChars) {
-          const output = scene.bashOutput.output.trim();
+        if (scene.bashOutput.stdout && responseChars < maxResponseChars) {
+          const output = scene.bashOutput.stdout.trim();
           if (output) {
             const outputPreview =
               output.length > maxBashOutputChars
