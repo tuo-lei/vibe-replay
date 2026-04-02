@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import type { CursorSidecars, PrLink, TokenUsage, TurnStat } from "@vibe-replay/types";
 import type { ContentBlock, ParsedTurn, SessionInfo } from "../../types.js";
 import type { ProviderParseResult } from "../types.js";
+import { sanitizeCursorAssistantText, sanitizeCursorReasoningText } from "./sanitize.js";
 
 const CURSOR_CHATS_DIR = join(homedir(), ".cursor", "chats");
 const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -784,48 +785,6 @@ function parseThinking(value: unknown): string {
     return sanitizeCursorReasoningText((value as { text: string }).text);
   }
   return "";
-}
-
-function trimInternalPlanningTail(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) return "";
-
-  const headingBreak = /\n{2,}\*\*[^*\n]{3,120}\*\*\n{2,}/g;
-  let match: RegExpExecArray | null;
-  while ((match = headingBreak.exec(trimmed)) !== null) {
-    const tail = trimmed.slice(match.index + match[0].length).trim();
-    if (!looksLikeInternalPlanning(tail)) continue;
-    return trimmed.slice(0, match.index).trim();
-  }
-
-  const leadingHeading = trimmed.match(/^\*\*[^*\n]{3,120}\*\*\n{2,}([\s\S]*)$/);
-  if (leadingHeading && looksLikeInternalPlanning(leadingHeading[1] || "")) {
-    return "";
-  }
-
-  return trimmed;
-}
-
-function sanitizeCursorReasoningText(value: string): string {
-  return trimInternalPlanningTail(value);
-}
-
-function sanitizeCursorAssistantText(value: string, hasToolContext: boolean): string {
-  const trimmed = value.trim();
-  if (!trimmed) return "";
-  if (!hasToolContext && !/\n{2,}\*\*[^*\n]{3,120}\*\*\n{2,}/.test(trimmed)) return trimmed;
-  return trimInternalPlanningTail(trimmed);
-}
-
-function looksLikeInternalPlanning(text: string): boolean {
-  const probe = text.slice(0, 500).replace(/\s+/g, " ").trim();
-  if (!probe) return false;
-  const matches = probe.match(
-    /\b(?:I need|I think|I should|I might|I could|I'm|I am|I'll|I will|let's|we need to|we should)\b/gi,
-  );
-  return (
-    (matches?.length || 0) >= 2 || /it (?:looks|seems) like|the next step|I wonder if/i.test(probe)
-  );
 }
 
 function normalizeTurnText(raw: unknown): string {

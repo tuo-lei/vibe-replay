@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { basename, extname, join } from "node:path";
 import type { ContentBlock, ParsedTurn, SessionInfo } from "../../types.js";
 import type { DataSourceInfo, ProviderParseResult } from "../types.js";
+import { sanitizeCursorAssistantText } from "./sanitize.js";
 import { isSystemContextText, parseCursorSqlite } from "./sqlite-reader.js";
 
 function toErrorMessage(err: unknown): string {
@@ -288,35 +289,7 @@ function stripUserQueryWrapper(text: string): string {
 }
 
 function sanitizeAssistantTextForReplay(text: string, hasInlineToolUse: boolean): string {
-  const trimmed = stripUserQueryWrapper(text);
-  if (!trimmed) return "";
-  if (!hasInlineToolUse && !/\n{2,}\*\*[^*\n]{3,120}\*\*\n{2,}/.test(trimmed)) return trimmed;
-
-  const headingBreak = /\n{2,}\*\*[^*\n]{3,120}\*\*\n{2,}/g;
-  let match: RegExpExecArray | null;
-  while ((match = headingBreak.exec(trimmed)) !== null) {
-    const tail = trimmed.slice(match.index + match[0].length).trim();
-    if (!looksLikeInternalPlanning(tail)) continue;
-    return trimmed.slice(0, match.index).trim();
-  }
-
-  const leadingHeading = trimmed.match(/^\*\*[^*\n]{3,120}\*\*\n{2,}([\s\S]*)$/);
-  if (leadingHeading && looksLikeInternalPlanning(leadingHeading[1] || "")) {
-    return "";
-  }
-
-  return trimmed;
-}
-
-function looksLikeInternalPlanning(text: string): boolean {
-  const probe = text.slice(0, 500).replace(/\s+/g, " ").trim();
-  if (!probe) return false;
-  const matches = probe.match(
-    /\b(?:I need|I think|I should|I might|I could|I'm|I am|I'll|I will|let's|we need to|we should)\b/gi,
-  );
-  return (
-    (matches?.length || 0) >= 2 || /it (?:looks|seems) like|the next step|I wonder if/i.test(probe)
-  );
+  return sanitizeCursorAssistantText(stripUserQueryWrapper(text), hasInlineToolUse);
 }
 
 function normalizeImagePlaceholderLines(text: string): string {
@@ -426,8 +399,8 @@ function extractToolResultImages(block: Extract<ContentBlock, { type: "tool_resu
   if (!Array.isArray(block.content)) return [];
   return block.content
     .map((item) => {
-      const source = (item as any)?.source;
-      if (!source?.data) return null;
+      if (item?.type !== "image" || !item.source?.data) return null;
+      const source = item.source;
       const mediaType = source.media_type || "image/png";
       return `data:${mediaType};base64,${source.data}`;
     })

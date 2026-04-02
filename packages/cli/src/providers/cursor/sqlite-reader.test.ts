@@ -321,6 +321,35 @@ describe("cursor sqlite metrics helpers", () => {
     ]);
   });
 
+  it("keeps non-planning bold headings in assistant content", () => {
+    const blocks = __testables.parseAssistantContent(
+      [
+        {
+          type: "text",
+          text: [
+            "**Why this fix works**",
+            "",
+            "I need to mention that this function has a subtle bug.",
+            "I should explain why before I fix it.",
+          ].join("\n"),
+        },
+      ] as any,
+      new Map(),
+    );
+
+    expect(blocks).toEqual([
+      {
+        type: "text",
+        text: [
+          "**Why this fix works**",
+          "",
+          "I need to mention that this function has a subtle bug.",
+          "I should explain why before I fix it.",
+        ].join("\n"),
+      },
+    ]);
+  });
+
   it("extracts API errors even when the error bubble has no replayable turn content", () => {
     const apiErrors = __testables.extractCursorApiErrors([
       {

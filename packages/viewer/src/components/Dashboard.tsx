@@ -291,11 +291,8 @@ function sessionPromptPreview(
 ): string[] {
   const prompts: string[] = [];
   const seen = new Set<string>();
-  const candidates = [
-    scanData?.firstPrompt,
-    ...(session.prompts || []),
-    scanData?.firstPrompt ? undefined : session.firstPrompt,
-  ];
+  const candidates = [scanData?.firstPrompt, ...(session.prompts || [])];
+  if (!scanData?.firstPrompt) candidates.push(session.firstPrompt);
   for (const candidate of candidates) {
     const cleaned = cleanPrompt(candidate || "");
     if (!cleaned || seen.has(cleaned)) continue;

@@ -249,4 +249,46 @@ describe("parseCursorSession", () => {
     expect(textResponses.join("\n")).not.toContain("I need to inspect the parser");
     expect(textResponses.join("\n")).not.toContain("Internal only");
   });
+
+  it("keeps visible assistant prose when bold headings are not Cursor planning markers", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "cursor-parser-test-"));
+    tempDirs.push(dir);
+    const transcript = join(dir, "session.jsonl");
+
+    const lines = [
+      JSON.stringify({
+        role: "user",
+        message: {
+          content: [{ type: "text", text: "<user_query>Inspect this session</user_query>" }],
+        },
+      }),
+      JSON.stringify({
+        role: "assistant",
+        message: {
+          content: [
+            {
+              type: "text",
+              text: [
+                "**Why this fix works**",
+                "",
+                "I need to mention that this function has a subtle bug.",
+                "I should explain why before I fix it.",
+              ].join("\n"),
+            },
+          ],
+        },
+      }),
+    ].join("\n");
+    await writeFile(transcript, `${lines}\n`, "utf-8");
+
+    const parsed = await parseCursorSession([transcript]);
+    const replay = transformToReplay(parsed, "cursor", "~/test");
+    const textResponses = replay.scenes
+      .filter((scene) => scene.type === "text-response")
+      .map((scene) => scene.content);
+
+    expect(textResponses).toContain(
+      "**Why this fix works**\n\nI need to mention that this function has a subtle bug.\nI should explain why before I fix it.",
+    );
+  });
 });
