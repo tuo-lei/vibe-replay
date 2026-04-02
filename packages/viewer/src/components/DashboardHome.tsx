@@ -14,13 +14,14 @@ import {
   sourceSuggestedTitle,
   timeAgo,
 } from "./dashboard-utils";
+import { ContributionHeatmap } from "./InsightsPage";
 import { useScanInsightsContext } from "./InsightsPanel";
 import { formatDuration } from "./StatsPanel";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
 interface DashboardHomeProps {
-  onNavigate: (view: "home" | "sessions" | "replays" | "projects") => void;
+  onNavigate: (view: "home" | "sessions" | "replays" | "projects" | "insights") => void;
 }
 
 interface InsightStats {
@@ -335,12 +336,14 @@ function MetricCard({
   sub,
   color = "green",
   icon,
+  onClick,
 }: {
   label: string;
   value: string;
   sub?: string;
   color?: "green" | "blue" | "orange" | "purple";
   icon: React.ReactNode;
+  onClick?: () => void;
 }) {
   const textColor: Record<string, string> = {
     green: "text-terminal-green",
@@ -362,7 +365,19 @@ function MetricCard({
   };
 
   return (
-    <div className="premium-card bg-terminal-surface rounded-xl p-5 shadow-layer-sm hover:bg-terminal-surface-hover transition-all duration-300 hover-lift group">
+    <div
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") onClick();
+            }
+          : undefined
+      }
+      className={`premium-card bg-terminal-surface rounded-xl p-5 shadow-layer-sm hover:bg-terminal-surface-hover transition-all duration-300 hover-lift group ${onClick ? "cursor-pointer" : ""}`}
+    >
       <div className="flex items-start justify-between relative z-10">
         <div className="space-y-1.5">
           <p className="text-[10px] font-sans font-bold text-terminal-dim uppercase tracking-widest opacity-80 group-hover:opacity-100 transition-opacity">
@@ -434,135 +449,24 @@ function RecentProjectsSkeleton() {
   );
 }
 
-function ActivityChart({ data }: { data: InsightStats["activityByDay"] }) {
-  const maxVal = Math.max(...data.map((d) => d.claude + d.cursor), 1);
-  const hasActivity = data.some((d) => d.claude > 0 || d.cursor > 0);
-
-  const axisLabels = useMemo(() => {
-    const labels: { index: number; label: string }[] = [];
-    let lastMonth = -1;
-    for (let i = 0; i < data.length; i++) {
-      const d = new Date(data[i].date);
-      const month = d.getMonth();
-      if (month !== lastMonth) {
-        labels.push({
-          index: i,
-          label: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-        });
-        lastMonth = month;
-      } else if (d.getDay() === 1 && i > 0) {
-        // Monday — show day number only
-        labels.push({ index: i, label: `${d.getDate()}` });
-      }
-    }
-    return labels;
-  }, [data]);
-
-  if (!hasActivity) {
-    return (
-      <div className="flex items-center justify-center h-full text-terminal-dimmer text-xs font-mono">
-        No activity in the last 30 days
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1 flex items-stretch gap-px min-h-0">
-        {data.map((d) => {
-          const total = d.claude + d.cursor;
-          const heightPct = Math.max((total / maxVal) * 100, total > 0 ? 4 : 0);
-          const claudePct = total > 0 ? (d.claude / total) * 100 : 0;
-          const isToday = d.date === new Date().toISOString().slice(0, 10);
-          return (
-            <div
-              key={d.date}
-              className="flex-1 flex flex-col justify-end h-full group relative"
-              title={`${d.label}: ${d.claude} Claude, ${d.cursor} Cursor`}
-            >
-              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-10">
-                <div className="bg-terminal-surface-2 border border-terminal-border-subtle rounded-lg px-2.5 py-1.5 shadow-layer-md whitespace-nowrap">
-                  <div className="text-[10px] font-mono text-terminal-dim">{d.label}</div>
-                  {d.claude > 0 && (
-                    <div className="text-[10px] font-mono text-terminal-orange">
-                      {d.claude} Claude
-                    </div>
-                  )}
-                  {d.cursor > 0 && (
-                    <div className="text-[10px] font-mono text-terminal-blue">
-                      {d.cursor} Cursor
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div
-                className={`rounded-sm transition-all duration-200 ${isToday ? "ring-1 ring-terminal-orange/30" : ""} ${total > 0 ? "hover:opacity-80" : ""}`}
-                style={{
-                  height: `${heightPct}%`,
-                  minHeight: total > 0 ? "4px" : "0",
-                  background:
-                    total > 0
-                      ? `linear-gradient(to top, var(--orange) ${claudePct}%, var(--blue) ${claudePct}%)`
-                      : "transparent",
-                  opacity: total > 0 ? 0.8 : 0.05,
-                  boxShadow:
-                    total > 0
-                      ? `0 0 10px ${d.claude > d.cursor ? "var(--orange-subtle)" : "var(--blue-subtle)"}`
-                      : "none",
-                }}
-              />
-            </div>
-          );
-        })}
-      </div>
-      <div className="flex items-center mt-1.5 relative h-4">
-        {axisLabels.map((w) => (
-          <span
-            key={w.index}
-            className="absolute text-[9px] font-mono text-terminal-dimmer"
-            style={{ left: `${(w.index / data.length) * 100}%` }}
-          >
-            {w.label}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ProviderBreakdownCard({ breakdown }: { breakdown: InsightStats["providerBreakdown"] }) {
-  const total = breakdown.reduce((sum, b) => sum + b.count, 0);
-  const colors: Record<string, { bar: string; text: string }> = {
-    "claude-code": { bar: "bg-terminal-orange", text: "text-terminal-orange" },
-    cursor: { bar: "bg-terminal-blue", text: "text-terminal-blue" },
+function ProviderBreakdownInline({ breakdown }: { breakdown: InsightStats["providerBreakdown"] }) {
+  const colors: Record<string, string> = {
+    "claude-code": "bg-terminal-orange",
+    cursor: "bg-terminal-blue",
   };
-
-  if (breakdown.length === 0) {
-    return <div className="text-terminal-dimmer text-xs font-mono">No provider data</div>;
-  }
-
   return (
-    <div className="space-y-3">
-      {breakdown.map((b) => {
-        const pct = total > 0 ? (b.count / total) * 100 : 0;
-        const c = colors[b.provider] || { bar: "bg-terminal-dim", text: "text-terminal-dim" };
-        return (
-          <div key={b.provider} className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <span className={`text-xs font-sans font-medium ${c.text}`}>{b.label}</span>
-              <span className="text-xs font-mono text-terminal-dim tabular-nums">
-                {b.count} ({Math.round(pct)}%)
-              </span>
-            </div>
-            <div className="h-1.5 rounded-full bg-terminal-surface-2 overflow-hidden">
-              <div
-                className={`h-full rounded-full ${c.bar} transition-all duration-500`}
-                style={{ width: `${pct}%`, opacity: 0.7 }}
-              />
-            </div>
-          </div>
-        );
-      })}
+    <div className="flex items-center gap-3">
+      {breakdown.map((b) => (
+        <div key={b.provider} className="flex items-center gap-1.5">
+          <span
+            className={`w-2 h-2 rounded-sm ${colors[b.provider] || "bg-terminal-dim"}`}
+            style={{ opacity: 0.7 }}
+          />
+          <span className="text-[10px] font-mono text-terminal-dimmer">
+            {b.label} {b.count}
+          </span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -1087,6 +991,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
             sub={`${insights.projectCount} project${insights.projectCount !== 1 ? "s" : ""}`}
             color="green"
             icon={<SessionsIcon />}
+            onClick={() => onNavigate("insights")}
           />
           <MetricCard
             label="Replays"
@@ -1094,6 +999,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
             sub={insights.publishedCount > 0 ? `${insights.publishedCount} published` : undefined}
             color="blue"
             icon={<ReplaysIcon />}
+            onClick={() => onNavigate("insights")}
           />
           <MetricCard
             label="Turns"
@@ -1101,6 +1007,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
             sub={countsSub}
             color="green"
             icon={<PromptsIcon />}
+            onClick={() => onNavigate("insights")}
           />
           <MetricCard
             label="Tool Calls"
@@ -1108,40 +1015,61 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
             sub={countsSub}
             color="orange"
             icon={<ToolsIcon />}
+            onClick={() => onNavigate("insights")}
           />
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-          {/* Activity Chart (2/3 width) */}
-          <div className="lg:col-span-2 bg-terminal-surface rounded-xl p-4 shadow-layer-sm">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
-                Activity
-              </h3>
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-sm bg-terminal-orange opacity-70" />
-                  <span className="text-[10px] font-mono text-terminal-dimmer">Claude</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-sm bg-terminal-blue opacity-70" />
-                  <span className="text-[10px] font-mono text-terminal-dimmer">Cursor</span>
-                </div>
-              </div>
-            </div>
-            <div className="h-32">
-              <ActivityChart data={insights.activityByDay} />
-            </div>
-          </div>
-
-          {/* Summary Panel (1/3 width) */}
-          <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm space-y-4">
+        {/* Activity Heatmap (GitHub-style, full width) */}
+        <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm">
+          <div className="flex items-center justify-between mb-3">
             <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
-              Summary
+              Activity
             </h3>
-            <ProviderBreakdownCard breakdown={insights.providerBreakdown} />
+            <ProviderBreakdownInline breakdown={insights.providerBreakdown} />
           </div>
+          {userInsights?.sessionsPerDay ? (
+            <ContributionHeatmap sessionsPerDay={userInsights.sessionsPerDay} weeks={30} />
+          ) : (
+            <ContributionHeatmap
+              sessionsPerDay={Object.fromEntries(
+                insights.activityByDay.map((d) => [d.date, d.claude + d.cursor]),
+              )}
+              weeks={30}
+            />
+          )}
         </div>
+
+        {/* CTA to Insights */}
+        <button
+          onClick={() => onNavigate("insights")}
+          className="w-full py-3.5 rounded-xl bg-gradient-to-r from-terminal-green/10 to-terminal-blue/10 border border-terminal-green/20 hover:border-terminal-green/40 text-sm font-sans font-medium text-terminal-text hover:text-terminal-green transition-all group flex items-center justify-center gap-2"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            className="text-terminal-green"
+          >
+            <path d="M3 3v18h18" />
+            <path d="M7 16l4-8 4 4 5-10" />
+          </svg>
+          View your personal insights
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            className="opacity-50 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all"
+          >
+            <path d="M5 3l5 5-5 5" />
+          </svg>
+        </button>
 
         {/* Recent Projects (from scan data — top 5 by lastActivity) */}
         {showRecentProjectsSkeleton ? (

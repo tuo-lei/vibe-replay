@@ -26,6 +26,7 @@ import {
   TITLE_MAX_CHARS,
   timeAgo,
 } from "./dashboard-utils";
+import InsightsPage from "./InsightsPage";
 import {
   ScanInsightsProvider,
   ScanProgressBar,
@@ -36,7 +37,7 @@ import {
 import ProjectsPanel from "./ProjectsPanel";
 import { formatDuration } from "./StatsPanel";
 
-type Tab = "home" | "sessions" | "replays" | "projects";
+type Tab = "home" | "sessions" | "replays" | "projects" | "insights";
 
 // ─── URL state parsers (module-level for stable references) ─────────
 function getProjectFromUrl(): string {
@@ -2750,7 +2751,8 @@ export default function Dashboard() {
   const getTabFromUrl = useCallback((): Tab => {
     const params = new URLSearchParams(window.location.search);
     const t = params.get("tab") as Tab;
-    if (t === "home" || t === "sessions" || t === "replays" || t === "projects") return t;
+    if (t === "home" || t === "sessions" || t === "replays" || t === "projects" || t === "insights")
+      return t;
     return isEditor ? "home" : "replays";
   }, [isEditor]);
 
@@ -2793,6 +2795,7 @@ export default function Dashboard() {
               {tabButton("sessions", "Sessions")}
               {tabButton("replays", "Replays")}
               {tabButton("projects", "Projects")}
+              {tabButton("insights", "Insights")}
             </div>
             <NavScanIndicator />
           </div>
@@ -2801,6 +2804,8 @@ export default function Dashboard() {
         {/* Tab content */}
         {tab === "home" && isEditor ? (
           <DashboardHome onNavigate={handleTabChange} />
+        ) : tab === "insights" && isEditor ? (
+          <InsightsPage />
         ) : tab === "projects" && isEditor ? (
           <ProjectsPanel onNavigate={handleTabChange} />
         ) : tab === "sessions" && isEditor ? (
