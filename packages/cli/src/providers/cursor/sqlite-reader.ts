@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { CursorSidecars, PrLink, TokenUsage, TurnStat } from "@vibe-replay/types";
+import { readFileCache, writeFileCache } from "../../cache.js";
 import type { ContentBlock, ParsedTurn, SessionInfo } from "../../types.js";
 import type { ProviderParseResult } from "../types.js";
 import { sanitizeCursorAssistantText, sanitizeCursorReasoningText } from "./sanitize.js";
@@ -38,7 +39,27 @@ interface CachedSqlJsDb {
   mtimeMs: number;
 }
 
+interface StoreDbIndexEntry {
+  dbPath: string;
+  sessionId: string;
+  workspaceHash: string;
+  size: number;
+  mtimeMs: number;
+}
+
+interface GlobalStateDiscoveryCache {
+  dbPath: string;
+  size: number;
+  mtimeMs: number;
+  decodedPathsHash: string;
+  sessions: SessionInfo[];
+  sessionIds: string[];
+}
+
 let cachedGlobalStateDb: CachedSqlJsDb | null = null;
+let cachedStoreDbIndex: Map<string, StoreDbIndexEntry> | null = null;
+const resolvedProjectRootCache = new Map<string, Promise<string | null>>();
+const GLOBAL_STATE_DISCOVERY_CACHE_PREFIX = "cursor-global-state-discovery-v1";
 
 export function workspaceHash(absolutePath: string): string {
   return createHash("md5").update(absolutePath).digest("hex");
@@ -125,33 +146,13 @@ function hasGlobalStateSession(db: any, sessionId: string): boolean {
  * Session UUIDs are unique across workspaces, so we can match by UUID alone
  * without needing to correctly decode the workspace path.
  */
-async function findStoreDb(sessionId: string): Promise<string | null> {
+async function buildStoreDbIndex(): Promise<Map<string, StoreDbIndexEntry>> {
+  const index = new Map<string, StoreDbIndexEntry>();
   let workspaceDirs: string[];
   try {
     workspaceDirs = await readdir(CURSOR_CHATS_DIR);
   } catch {
-    return null;
-  }
-  for (const wsHash of workspaceDirs) {
-    const dbPath = join(CURSOR_CHATS_DIR, wsHash, sessionId, "store.db");
-    const s = await stat(dbPath).catch(() => null);
-    if (s?.isFile()) return dbPath;
-  }
-  return null;
-}
-
-export async function storeDbExists(_workspacePath: string, sessionId: string): Promise<boolean> {
-  const dbPath = await findStoreDb(sessionId);
-  return dbPath !== null;
-}
-
-export async function listStoreDbSessionIds(): Promise<Set<string>> {
-  const sessionIds = new Set<string>();
-  let workspaceDirs: string[];
-  try {
-    workspaceDirs = await readdir(CURSOR_CHATS_DIR);
-  } catch {
-    return sessionIds;
+    return index;
   }
 
   for (const wsHash of workspaceDirs) {
@@ -171,11 +172,39 @@ export async function listStoreDbSessionIds(): Promise<Set<string>> {
       const dbPath = join(wsDir, sessionId, "store.db");
       const dbStat = await stat(dbPath).catch(() => null);
       if (!dbStat?.isFile() || dbStat.size < MIN_STORE_DB_SIZE) continue;
-      sessionIds.add(sessionId);
+      index.set(sessionId, {
+        dbPath,
+        sessionId,
+        workspaceHash: wsHash,
+        size: dbStat.size,
+        mtimeMs: dbStat.mtimeMs,
+      });
     }
   }
 
-  return sessionIds;
+  return index;
+}
+
+async function getStoreDbIndex(forceRefresh = false): Promise<Map<string, StoreDbIndexEntry>> {
+  if (!forceRefresh && cachedStoreDbIndex) return cachedStoreDbIndex;
+  cachedStoreDbIndex = await buildStoreDbIndex();
+  return cachedStoreDbIndex;
+}
+
+async function findStoreDb(sessionId: string): Promise<string | null> {
+  const cached = await getStoreDbIndex();
+  if (cached.has(sessionId)) return cached.get(sessionId)?.dbPath || null;
+  const refreshed = await getStoreDbIndex(true);
+  return refreshed.get(sessionId)?.dbPath || null;
+}
+
+export async function storeDbExists(_workspacePath: string, sessionId: string): Promise<boolean> {
+  const dbPath = await findStoreDb(sessionId);
+  return dbPath !== null;
+}
+
+export async function listStoreDbSessionIds(forceRefresh = false): Promise<Set<string>> {
+  return new Set((await getStoreDbIndex(forceRefresh)).keys());
 }
 
 function valueToString(value: unknown): string {
@@ -319,6 +348,11 @@ function tokenUsageFromCursorTokenCount(value: unknown): TokenUsage | undefined 
   return hasAnyTokens(usage) ? usage : undefined;
 }
 
+function hashWorkspacePaths(paths: string[]): string {
+  const normalized = [...new Set(paths.filter(Boolean))].sort().join("\n");
+  return createHash("sha1").update(normalized).digest("hex").slice(0, 16);
+}
+
 async function resolveProjectRootFromPath(rawPath: string): Promise<string | null> {
   const candidate = rawPath
     .replaceAll("\\\\", "/")
@@ -327,23 +361,31 @@ async function resolveProjectRootFromPath(rawPath: string): Promise<string | nul
     .replace(/[),]+$/g, "");
   if (!candidate.startsWith("/")) return null;
 
-  let current = candidate;
-  const initial = await stat(current).catch(() => null);
-  if (initial?.isFile()) current = dirname(current);
+  const cached = resolvedProjectRootCache.get(candidate);
+  if (cached) return cached;
 
-  let deepestExisting: string | null = null;
-  while (current && current !== "/") {
-    const dirStat = await stat(current).catch(() => null);
-    if (dirStat?.isDirectory()) {
-      if (!deepestExisting) deepestExisting = current;
-      const gitStat = await stat(join(current, ".git")).catch(() => null);
-      if (gitStat) return current;
+  const resolving = (async () => {
+    let current = candidate;
+    const initial = await stat(current).catch(() => null);
+    if (initial?.isFile()) current = dirname(current);
+
+    let deepestExisting: string | null = null;
+    while (current && current !== "/") {
+      const dirStat = await stat(current).catch(() => null);
+      if (dirStat?.isDirectory()) {
+        if (!deepestExisting) deepestExisting = current;
+        const gitStat = await stat(join(current, ".git")).catch(() => null);
+        if (gitStat) return current;
+      }
+      const parent = dirname(current);
+      if (parent === current) break;
+      current = parent;
     }
-    const parent = dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
-  return deepestExisting;
+    return deepestExisting;
+  })();
+
+  resolvedProjectRootCache.set(candidate, resolving);
+  return resolving;
 }
 
 async function inferProjectFromComposerData(
@@ -363,12 +405,104 @@ async function inferProjectFromComposerData(
     }
   }
 
-  const matches = rawComposerData.match(/\/(?:Users|home)\/[^"'\s,}{]{1,240}/g) || [];
+  const hintedRoots = extractComposerProjectRootHints(rawComposerData);
+  const basenameMatches = new Map<string, string[]>();
+  for (const workspacePath of uniqueDecoded) {
+    const key = basename(workspacePath);
+    if (!key) continue;
+    const existing = basenameMatches.get(key) || [];
+    existing.push(workspacePath);
+    basenameMatches.set(key, existing);
+  }
+
+  const bestHint = hintedRoots.find((hint) => !isLowSignalProjectRoot(hint));
+  if (bestHint) {
+    const matchingDecoded = basenameMatches.get(basename(bestHint)) || [];
+    if (matchingDecoded.length === 1) return matchingDecoded[0];
+    if (canUseComposerProjectHintDirectly(bestHint)) return bestHint;
+  }
+
+  for (const hint of hintedRoots) {
+    const matchingDecoded = basenameMatches.get(basename(hint)) || [];
+    if (matchingDecoded.length === 1) return matchingDecoded[0];
+
+    if (canUseComposerProjectHintDirectly(hint)) return hint;
+
+    const resolved = await resolveProjectRootFromPath(hint);
+    if (resolved && !isLowSignalProjectRoot(resolved)) return resolved;
+  }
+
+  const matches =
+    rawComposerData.match(/\/(?:Users|home|workspace|workspaces|tmp)\/[^"'\s,}{]{1,240}/g) || [];
   for (const match of matches) {
     const resolved = await resolveProjectRootFromPath(match);
-    if (resolved) return resolved;
+    if (resolved && !isLowSignalProjectRoot(resolved)) return resolved;
   }
+  if (bestHint) return bestHint;
   return "";
+}
+
+function extractComposerProjectRootHints(rawComposerData: string): string[] {
+  const matches =
+    rawComposerData.match(/\/(?:Users|home|workspace|workspaces|tmp)\/[^"'\s,}{]{1,240}/g) || [];
+  const roots = matches
+    .map((match) => inferProjectRootFromPathHint(match))
+    .filter((value): value is string => Boolean(value));
+  return [...new Set(roots)].sort((a, b) => b.length - a.length);
+}
+
+function inferProjectRootFromPathHint(pathValue: string): string | null {
+  const normalized = pathValue.replaceAll("\\", "/").replace(/[)"',]+$/g, "");
+  if (!normalized.startsWith("/")) return null;
+
+  if (
+    normalized.includes("/.config/") ||
+    normalized.includes("/.cursor/skills/") ||
+    normalized.includes("/.cursor/extensions/")
+  ) {
+    return null;
+  }
+
+  const dotMarker = ["/.git/", "/.devcontainer/", "/.cursor/"].find((marker) =>
+    normalized.includes(marker),
+  );
+  if (dotMarker) {
+    const root = normalized.slice(0, normalized.indexOf(dotMarker));
+    return root || null;
+  }
+
+  const workspaceMatch = normalized.match(/^\/(workspace|workspaces)\/([^/]+)/);
+  if (workspaceMatch?.[2] && !workspaceMatch[2].startsWith(".")) {
+    return `/${workspaceMatch[1]}/${workspaceMatch[2]}`;
+  }
+
+  const parts = normalized.split("/").filter(Boolean);
+  if (parts[0] === "Users" && parts.length >= 4) {
+    return `/${parts.slice(0, 4).join("/")}`;
+  }
+  if (parts[0] === "home" && parts.length >= 3 && !parts[2].startsWith(".")) {
+    return `/${parts.slice(0, 3).join("/")}`;
+  }
+  return null;
+}
+
+function isLowSignalProjectRoot(pathValue: string): boolean {
+  return (
+    pathValue === "/home" ||
+    pathValue === "/tmp" ||
+    pathValue === "/workspace" ||
+    pathValue === "/workspaces" ||
+    /^\/home\/[^/]+$/.test(pathValue)
+  );
+}
+
+function canUseComposerProjectHintDirectly(pathValue: string): boolean {
+  return (
+    /^\/workspaces\/[^/]+$/.test(pathValue) ||
+    /^\/workspace\/[^/]+$/.test(pathValue) ||
+    /^\/home\/[^/]+\/[^/]+$/.test(pathValue) ||
+    /^\/Users\/[^/]+\/[^/]+\/[^/]+$/.test(pathValue)
+  );
 }
 
 function hasReplayableRootBlob(data: unknown): boolean {
@@ -432,64 +566,42 @@ async function readStoreDbMeta(dbPath: string): Promise<StoreDbMetaPreview | nul
 export async function discoverSqliteOnlySessions(
   knownSessionIds: Set<string>,
   decodedWorkspacePaths: string[] = [],
+  forceRefreshStoreDbIndex = false,
 ): Promise<SessionInfo[]> {
   const sessions: SessionInfo[] = [];
-  let workspaceHashDirs: string[];
-  try {
-    workspaceHashDirs = await readdir(CURSOR_CHATS_DIR);
-  } catch {
-    return sessions;
-  }
-
+  const storeDbIndex = await getStoreDbIndex(forceRefreshStoreDbIndex);
   const hashToProject = buildHashToProjectMap(decodedWorkspacePaths);
 
-  for (const wsHash of workspaceHashDirs) {
-    const wsDir = join(CURSOR_CHATS_DIR, wsHash);
-    const wsStat = await stat(wsDir).catch(() => null);
-    if (!wsStat?.isDirectory()) continue;
+  for (const entry of storeDbIndex.values()) {
+    if (knownSessionIds.has(entry.sessionId)) continue;
 
-    let sessionDirs: string[];
-    try {
-      sessionDirs = await readdir(wsDir);
-    } catch {
-      continue;
-    }
+    const metaPreview = await readStoreDbMeta(entry.dbPath);
+    if (!metaPreview?.hasReplayableRoot) continue;
+    const meta = metaPreview.meta;
 
-    for (const sessionId of sessionDirs) {
-      if (knownSessionIds.has(sessionId)) continue;
+    const project = hashToProject.get(entry.workspaceHash) || "";
+    const firstPrompt = meta.name || "(sqlite-only session)";
+    const timestamp = meta.createdAt
+      ? new Date(meta.createdAt).toISOString()
+      : new Date(entry.mtimeMs).toISOString();
 
-      const dbPath = join(wsDir, sessionId, "store.db");
-      const dbStat = await stat(dbPath).catch(() => null);
-      if (!dbStat?.isFile() || dbStat.size < MIN_STORE_DB_SIZE) continue;
-
-      const metaPreview = await readStoreDbMeta(dbPath);
-      if (!metaPreview?.hasReplayableRoot) continue;
-      const meta = metaPreview.meta;
-
-      const project = hashToProject.get(wsHash) || "";
-      const firstPrompt = meta.name || "(sqlite-only session)";
-      const timestamp = meta.createdAt
-        ? new Date(meta.createdAt).toISOString()
-        : new Date(dbStat.mtimeMs).toISOString();
-
-      sessions.push({
-        provider: "cursor",
-        sessionId,
-        slug: sessionId.slice(0, 8),
-        title: meta.name,
-        project: shortenPath(project),
-        cwd: project,
-        version: "",
-        timestamp,
-        lineCount: 0,
-        fileSize: dbStat.size,
-        filePath: dbPath,
-        filePaths: [],
-        workspacePath: project,
-        hasSqlite: true,
-        firstPrompt,
-      });
-    }
+    sessions.push({
+      provider: "cursor",
+      sessionId: entry.sessionId,
+      slug: entry.sessionId.slice(0, 8),
+      title: meta.name,
+      project: shortenPath(project),
+      cwd: project,
+      version: "",
+      timestamp,
+      lineCount: 0,
+      fileSize: entry.size,
+      filePath: entry.dbPath,
+      filePaths: [],
+      workspacePath: project,
+      hasSqlite: true,
+      firstPrompt,
+    });
   }
 
   return sessions;
@@ -506,6 +618,47 @@ export function countComposerConversationHeaders(composer: Record<string, any>):
     : 0;
 }
 
+function finalizeGlobalStateDiscovery(
+  discoveredSessions: SessionInfo[],
+  knownSessionIds: Set<string>,
+  decodedWorkspacePaths: string[],
+): SessionInfo[] {
+  const sessions: SessionInfo[] = [];
+  const unknownProjectSessions: SessionInfo[] = [];
+
+  for (const session of discoveredSessions) {
+    if (knownSessionIds.has(session.sessionId)) continue;
+    if (session.cwd) {
+      sessions.push(session);
+    } else {
+      unknownProjectSessions.push(session);
+    }
+  }
+
+  const perProjectLimit = 40;
+  const byProject = new Map<string, SessionInfo[]>();
+  for (const session of sessions) {
+    const key = session.project;
+    if (!byProject.has(key)) byProject.set(key, []);
+    byProject.get(key)?.push(session);
+  }
+
+  const cappedProjectSessions: SessionInfo[] = [];
+  for (const projectSessions of byProject.values()) {
+    projectSessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    cappedProjectSessions.push(...projectSessions.slice(0, perProjectLimit));
+  }
+
+  const includeUnknownLimit = decodedWorkspacePaths.length > 0 ? 50 : Number.POSITIVE_INFINITY;
+  unknownProjectSessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  const finalSessions = [
+    ...cappedProjectSessions,
+    ...unknownProjectSessions.slice(0, includeUnknownLimit),
+  ];
+  finalSessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  return finalSessions;
+}
+
 /**
  * Discover sessions from Cursor's globalStorage state.vscdb.
  * This is where devcontainer/remote sessions can keep rich `composerData:*`
@@ -516,16 +669,35 @@ export async function discoverGlobalStateOnlySessions(
   decodedWorkspacePaths: string[] = [],
 ): Promise<GlobalStateDiscoveryResult> {
   const sessionIds = new Set<string>();
-  const sessions: SessionInfo[] = [];
-  const unknownProjectSessions: SessionInfo[] = [];
-
   const globalStateDb = await openGlobalStateDb();
-  if (!globalStateDb) return { sessions, sessionIds };
+  if (!globalStateDb) return { sessions: [], sessionIds };
   const { dbPath, db } = globalStateDb;
+  const decodedPathsHash = hashWorkspacePaths(decodedWorkspacePaths);
+  const cacheKey = `${GLOBAL_STATE_DISCOVERY_CACHE_PREFIX}-${decodedPathsHash}`;
+
+  const cached = await readFileCache<GlobalStateDiscoveryCache>(cacheKey);
+  if (
+    cached?.data.dbPath === dbPath &&
+    cached.data.size === globalStateDb.size &&
+    cached.data.mtimeMs === globalStateDb.mtimeMs &&
+    cached.data.decodedPathsHash === decodedPathsHash
+  ) {
+    const cachedIds = new Set(cached.data.sessionIds);
+    return {
+      sessions: finalizeGlobalStateDiscovery(
+        cached.data.sessions,
+        knownSessionIds,
+        decodedWorkspacePaths,
+      ),
+      sessionIds: cachedIds,
+    };
+  }
+
+  const discoveredSessions: SessionInfo[] = [];
 
   try {
     const rows = db.exec("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'");
-    if (!rows.length || !rows[0].values.length) return { sessions, sessionIds };
+    if (!rows.length || !rows[0].values.length) return { sessions: [], sessionIds };
 
     for (const [keyValue, value] of rows[0].values) {
       const key = valueToString(keyValue);
@@ -541,7 +713,6 @@ export async function discoverGlobalStateOnlySessions(
 
       // Track only replayable global-state sessions for downstream hasSqlite marking.
       sessionIds.add(sessionId);
-      if (knownSessionIds.has(sessionId)) continue;
 
       const timestamp =
         toIsoTimestamp(composer.lastUpdatedAt) ||
@@ -571,41 +742,42 @@ export async function discoverGlobalStateOnlySessions(
         hasSqlite: true,
         firstPrompt,
       };
-
-      if (projectPath) {
-        sessions.push(sessionInfo);
-      } else {
-        unknownProjectSessions.push(sessionInfo);
-      }
+      discoveredSessions.push(sessionInfo);
     }
   } catch {
     // no-op: ignore malformed db rows and return what we have
   }
 
-  // Keep only the most recent sessions per inferred project.
-  const perProjectLimit = 40;
-  const byProject = new Map<string, SessionInfo[]>();
-  for (const session of sessions) {
-    const key = session.project;
-    if (!byProject.has(key)) byProject.set(key, []);
-    byProject.get(key)?.push(session);
-  }
-  const cappedProjectSessions: SessionInfo[] = [];
-  for (const projectSessions of byProject.values()) {
-    projectSessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-    cappedProjectSessions.push(...projectSessions.slice(0, perProjectLimit));
+  await writeFileCache<GlobalStateDiscoveryCache>(cacheKey, {
+    dbPath,
+    size: globalStateDb.size,
+    mtimeMs: globalStateDb.mtimeMs,
+    decodedPathsHash,
+    sessions: discoveredSessions,
+    sessionIds: [...sessionIds],
+  });
+
+  return {
+    sessions: finalizeGlobalStateDiscovery(
+      discoveredSessions,
+      knownSessionIds,
+      decodedWorkspacePaths,
+    ),
+    sessionIds,
+  };
+}
+
+export async function getCursorSessionCachePaths(sessionId: string): Promise<string[]> {
+  const paths: string[] = [];
+  const storeDb = await findStoreDb(sessionId);
+  if (storeDb) paths.push(storeDb);
+
+  const globalStateDb = await openGlobalStateDb();
+  if (globalStateDb && hasGlobalStateSession(globalStateDb.db, sessionId)) {
+    paths.push(globalStateDb.dbPath);
   }
 
-  // Avoid flooding picker with thousands of unknown-history sessions.
-  const includeUnknownLimit = decodedWorkspacePaths.length > 0 ? 50 : Number.POSITIVE_INFINITY;
-  unknownProjectSessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-  const finalSessions = [
-    ...cappedProjectSessions,
-    ...unknownProjectSessions.slice(0, includeUnknownLimit),
-  ];
-  finalSessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-
-  return { sessions: finalSessions, sessionIds };
+  return [...new Set(paths)];
 }
 
 function shortenPath(path: string): string {
@@ -753,7 +925,9 @@ async function parseCursorStoreDb(sessionId: string): Promise<ProviderParseResul
       slug,
       title,
       cwd: "",
-      model: metaJson.lastUsedModel,
+      model:
+        normalizeCursorModelName(metaJson.lastUsedModel) ||
+        turnStats.find((stat) => typeof stat.model === "string" && stat.model)?.model,
       startTime: metaJson.createdAt ? new Date(metaJson.createdAt).toISOString() : undefined,
       ...(totalDurationMs !== undefined ? { totalDurationMs } : {}),
       ...(turnStats.length > 0 ? { turnStats } : {}),
@@ -1304,31 +1478,58 @@ function mergeCursorParseResults(
   primary: ProviderParseResult,
   enrichment: ProviderParseResult,
 ): ProviderParseResult {
+  const mergedModel = chooseMergedCursorModel(primary.model, enrichment.model);
+  const mergedTurnStats = mergeTurnStats(primary.turnStats, enrichment.turnStats);
+  const mergedTokenUsage = primary.tokenUsage || enrichment.tokenUsage;
+  const mergedTokenUsageByModel = primary.tokenUsageByModel || enrichment.tokenUsageByModel;
+  const mergedTotalDurationMs =
+    primary.totalDurationMs ||
+    enrichment.totalDurationMs ||
+    (mergedTurnStats && mergedTurnStats.length > 0
+      ? mergedTurnStats.reduce((sum, stat) => sum + (stat.durationMs || 0), 0) || undefined
+      : undefined);
+  const mergedDuration = mergedTotalDurationMs !== undefined && !primary.totalDurationMs;
+  const mergedTokens =
+    (!primary.tokenUsage && !!enrichment.tokenUsage) ||
+    (!primary.tokenUsageByModel && !!enrichment.tokenUsageByModel);
   const supplements = mergeUniqueStrings(
     primary.dataSourceInfo?.supplements,
     enrichment.dataSourceInfo?.sources,
   );
   const hasMeaningfulEnrichment =
+    (!!mergedModel && mergedModel !== primary.model) ||
+    mergedDuration ||
+    mergedTokens ||
     (!!enrichment.gitBranch && !primary.gitBranch) ||
     (!!enrichment.gitBranches?.length && !primary.gitBranches?.length) ||
     (!!enrichment.prLinks?.length && !primary.prLinks?.length) ||
     (!!enrichment.apiErrors?.length && !primary.apiErrors?.length) ||
     (!!enrichment.contextFiles?.length && !primary.contextFiles?.length) ||
-    (!!enrichment.cursorSidecars && !primary.cursorSidecars);
+    (!!enrichment.cursorSidecars && !primary.cursorSidecars) ||
+    (!!mergedTurnStats &&
+      JSON.stringify(mergedTurnStats) !== JSON.stringify(primary.turnStats || undefined));
+  const primaryNotes = (primary.dataSourceInfo?.notes || []).filter(
+    (note) =>
+      !(mergedTokens && /token usage is unavailable/i.test(note)) &&
+      !(mergedDuration && /per-turn duration metrics are unavailable/i.test(note)),
+  );
   const notes = mergeUniqueStrings(
-    primary.dataSourceInfo?.notes,
+    primaryNotes,
     hasMeaningfulEnrichment
       ? ["Session metadata was enriched from Cursor global-state payloads."]
       : undefined,
-    enrichment.contextFiles?.length
-      ? ["Context files are inferred from Cursor relevantFiles and request-context sidecars."]
-      : undefined,
+    hasMeaningfulEnrichment ? enrichment.dataSourceInfo?.notes : undefined,
   );
   const cursorSidecars = mergeCursorSidecars(primary.cursorSidecars, enrichment.cursorSidecars);
 
   return {
     ...primary,
     cwd: primary.cwd || enrichment.cwd,
+    ...(mergedModel ? { model: mergedModel } : {}),
+    ...(mergedTotalDurationMs !== undefined ? { totalDurationMs: mergedTotalDurationMs } : {}),
+    ...(mergedTokenUsage ? { tokenUsage: mergedTokenUsage } : {}),
+    ...(mergedTokenUsageByModel ? { tokenUsageByModel: mergedTokenUsageByModel } : {}),
+    ...(mergedTurnStats ? { turnStats: mergedTurnStats } : {}),
     ...(primary.gitBranch ? {} : enrichment.gitBranch ? { gitBranch: enrichment.gitBranch } : {}),
     ...(primary.gitBranches
       ? {}
@@ -1376,6 +1577,80 @@ function mergeCursorSidecars(
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
+function normalizeCursorModelName(model: unknown): string | undefined {
+  if (typeof model !== "string") return undefined;
+  const unique = [
+    ...new Set(
+      model
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  ];
+  if (unique.length === 0) return undefined;
+  // Cursor can concatenate model labels as the session switches models.
+  // We keep the last distinct label because it best represents the final model
+  // shown to the user and matches how global-state payloads append updates.
+  return unique[unique.length - 1];
+}
+
+function chooseMergedCursorModel(
+  primary: string | undefined,
+  enrichment: string | undefined,
+): string | undefined {
+  const normalizedPrimary = normalizeCursorModelName(primary);
+  const normalizedEnrichment = normalizeCursorModelName(enrichment);
+  return normalizedPrimary || normalizedEnrichment;
+}
+
+function mergeTurnStats(
+  primary: TurnStat[] | undefined,
+  enrichment: TurnStat[] | undefined,
+): TurnStat[] | undefined {
+  if (!primary?.length) return enrichment;
+  if (!enrichment?.length) return primary;
+
+  const maxTurnIndex = Math.max(
+    ...primary.map((stat) => stat.turnIndex),
+    ...enrichment.map((stat) => stat.turnIndex),
+  );
+  const primaryByIndex = new Map(primary.map((stat) => [stat.turnIndex, stat]));
+  const enrichmentByIndex = new Map(enrichment.map((stat) => [stat.turnIndex, stat]));
+  const merged: TurnStat[] = [];
+
+  for (let turnIndex = 0; turnIndex <= maxTurnIndex; turnIndex++) {
+    const current = primaryByIndex.get(turnIndex);
+    const extra = enrichmentByIndex.get(turnIndex);
+    if (!current && extra) {
+      merged.push(extra);
+      continue;
+    }
+    if (!current) continue;
+    if (!extra) {
+      merged.push(current);
+      continue;
+    }
+
+    merged.push({
+      ...current,
+      ...(current.model ? {} : extra.model ? { model: extra.model } : {}),
+      ...(current.durationMs !== undefined
+        ? {}
+        : extra.durationMs !== undefined
+          ? { durationMs: extra.durationMs }
+          : {}),
+      ...(current.tokenUsage ? {} : extra.tokenUsage ? { tokenUsage: extra.tokenUsage } : {}),
+      ...(current.contextTokens !== undefined
+        ? {}
+        : extra.contextTokens !== undefined
+          ? { contextTokens: extra.contextTokens }
+          : {}),
+    });
+  }
+
+  return merged;
+}
+
 function extractBubbleModelName(
   bubble: Record<string, any>,
   fallbackModel: string | undefined,
@@ -1393,7 +1668,7 @@ function extractBubbleModelName(
     typeof bubble.modelConfig.modelName === "string"
       ? bubble.modelConfig.modelName
       : undefined;
-  return fromModelInfo || fromBubble || fromConfig || fallbackModel;
+  return normalizeCursorModelName(fromModelInfo || fromBubble || fromConfig || fallbackModel);
 }
 
 function extractBubbleDurationMs(bubble: Record<string, any>): number | undefined {
@@ -1583,12 +1858,13 @@ async function parseCursorGlobalStateDb(
     const firstUser = turns.find((t) => t.role === "user");
     const firstText = firstUser?.blocks.find((b) => b.type === "text") as any;
     const inferredProject = await inferProjectFromComposerData(rawComposer, []);
-    const modelName =
+    const modelName = normalizeCursorModelName(
       composer.modelConfig &&
-      typeof composer.modelConfig === "object" &&
-      typeof composer.modelConfig.modelName === "string"
+        typeof composer.modelConfig === "object" &&
+        typeof composer.modelConfig.modelName === "string"
         ? composer.modelConfig.modelName
-        : undefined;
+        : undefined,
+    );
     const requestContexts = loadCursorRequestContexts(db, sessionId);
 
     const startTime = toIsoTimestamp(composer.createdAt);
@@ -2185,7 +2461,7 @@ function extractModel(msg: CursorMessage): string | undefined {
   if (!Array.isArray(msg.content)) return undefined;
   for (const b of msg.content) {
     const model = b.providerOptions?.cursor?.modelName;
-    if (model) return model;
+    if (model) return normalizeCursorModelName(model);
   }
   return undefined;
 }
@@ -2203,8 +2479,12 @@ export const __testables = {
   mapCursorToolName,
   mapToolArgs,
   mergeCursorParseResults,
+  mergeTurnStats,
   parseAssistantContent,
+  inferProjectFromComposerData,
+  inferProjectRootFromPathHint,
   normalizeTurnText,
+  normalizeCursorModelName,
   parseThinking,
   parseUserContent,
 };

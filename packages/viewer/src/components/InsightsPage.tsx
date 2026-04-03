@@ -9,7 +9,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SessionSummary, SourceSession } from "../types";
-import { formatCompactDuration, parseCachedList } from "./dashboard-utils";
+import { DataQualityIndicator } from "./DataQualityIndicator";
+import {
+  formatCompactDuration,
+  parseCachedList,
+  projectName,
+  shortModelName,
+} from "./dashboard-utils";
 import { useScanInsightsContext } from "./InsightsPanel";
 import { formatDuration } from "./StatsPanel";
 
@@ -260,6 +266,92 @@ function formatCompactNum(n: number): string {
   return n.toLocaleString();
 }
 
+function buildAggregateMetricQuality(notes: string[] | undefined): {
+  overall?: string;
+  duration?: string;
+  cost?: string;
+} {
+  const allNotes = notes?.filter(Boolean) || [];
+  const durationNotes = allNotes.filter((note) =>
+    /duration estimates|timing data|duration/i.test(note),
+  );
+  const costNotes = allNotes.filter((note) =>
+    /token snapshots|token and cost|cost totals/i.test(note),
+  );
+
+  return {
+    overall: allNotes.length > 0 ? allNotes.join("\n") : undefined,
+    duration:
+      durationNotes.length > 0
+        ? ["Coding time is approximate for Cursor sessions.", ...durationNotes].join("\n")
+        : undefined,
+    cost:
+      costNotes.length > 0
+        ? ["Spend is a lower bound for Cursor sessions, not the full total.", ...costNotes].join(
+            "\n",
+          )
+        : undefined,
+  };
+}
+
+function useAnimatedNumber(target: number, durationMs = 500): number {
+  const [display, setDisplay] = useState(target);
+  const currentRef = useRef(target);
+
+  useEffect(() => {
+    const startValue = currentRef.current;
+    const delta = target - startValue;
+    if (Math.abs(delta) < 1) {
+      currentRef.current = target;
+      setDisplay(target);
+      return;
+    }
+
+    let frame = 0;
+    const startAt = performance.now();
+    const step = (now: number) => {
+      const t = Math.min(1, (now - startAt) / durationMs);
+      const eased = 1 - (1 - t) ** 3;
+      const next = startValue + delta * eased;
+      currentRef.current = next;
+      setDisplay(next);
+      if (t < 1) {
+        frame = requestAnimationFrame(step);
+      } else {
+        currentRef.current = target;
+        setDisplay(target);
+      }
+    };
+
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [target, durationMs]);
+
+  return display;
+}
+
+function AnimatedShareValue({
+  value,
+  formatter,
+}: {
+  value: number;
+  formatter: (value: number) => string;
+}) {
+  const animated = useAnimatedNumber(value);
+  return <>{formatter(animated)}</>;
+}
+
+function splitModelLabels(model: string): string[] {
+  return [
+    ...new Set(
+      model
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
+
 function rangeLabel(range: TimeRange): string {
   if (range === "7d") return "Last 7 Days";
   if (range === "30d") return "Last 30 Days";
@@ -444,6 +536,7 @@ function ShareCard({
   sessionsPerDay,
   range,
   providers,
+  dataQualityNotes,
 }: {
   stats: ComputedStats;
   streak: StreakInfo;
@@ -451,6 +544,7 @@ function ShareCard({
   sessionsPerDay: Record<string, number>;
   range: TimeRange;
   providers: Record<string, number>;
+  dataQualityNotes?: string[];
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
 
@@ -464,6 +558,19 @@ function ShareCard({
     };
     return entries.map(([k]) => labels[k] || k).join(" + ");
   }, [providers]);
+  const metricQuality = useMemo(
+    () => buildAggregateMetricQuality(dataQualityNotes),
+    [dataQualityNotes],
+  );
+
+  const MetricLabel = ({ label, title }: { label: string; title?: string }) => (
+    <div className="mt-0.5 flex items-center gap-1">
+      <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider">
+        {label}
+      </div>
+      {title ? <DataQualityIndicator title={title} className="shrink-0" /> : null}
+    </div>
+  );
 
   return (
     <div
@@ -484,6 +591,9 @@ function ShareCard({
             <span className="text-[10px] font-mono text-terminal-dimmer px-2 py-0.5 rounded-full bg-terminal-surface-2">
               {rangeLabel(range)}
             </span>
+            {metricQuality.overall ? (
+              <DataQualityIndicator title={metricQuality.overall} className="shrink-0" />
+            ) : null}
           </div>
           {providerLabel && (
             <span className="text-[10px] font-mono text-terminal-dim">{providerLabel}</span>
@@ -494,67 +604,57 @@ function ShareCard({
         <div className="grid grid-cols-4 gap-x-6 gap-y-5 mb-6">
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-green tabular-nums">
-              {formatCompactNum(stats.sessions)}
+              <AnimatedShareValue value={stats.sessions} formatter={formatCompactNum} />
             </div>
-            <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
-              sessions
-            </div>
+            <MetricLabel label="sessions" />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-blue tabular-nums">
-              {formatCompactNum(stats.replays)}
+              <AnimatedShareValue value={stats.replays} formatter={formatCompactNum} />
             </div>
-            <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
-              replays
-            </div>
+            <MetricLabel label="replays" />
           </div>
           <div>
-            <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-text tabular-nums">
-              {formatCompactNum(stats.prompts)}
+            <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-green tabular-nums">
+              <AnimatedShareValue value={stats.prompts} formatter={formatCompactNum} />
             </div>
-            <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
-              turns
-            </div>
+            <MetricLabel label="turns" />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-orange tabular-nums">
-              {formatCompactNum(stats.toolCalls)}
+              <AnimatedShareValue value={stats.toolCalls} formatter={formatCompactNum} />
             </div>
-            <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
-              tool calls
-            </div>
+            <MetricLabel label="tool calls" />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-text tabular-nums">
-              {formatCompactDuration(stats.durationMs)}
+              <AnimatedShareValue
+                value={stats.durationMs}
+                formatter={(n) => formatCompactDuration(n)}
+              />
             </div>
-            <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
-              coding
-            </div>
+            <MetricLabel label="coding" title={metricQuality.duration} />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-orange tabular-nums">
-              {formatCost(stats.cost)}
+              <AnimatedShareValue value={stats.cost} formatter={(n) => formatCost(n)} />
             </div>
-            <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
-              spent
-            </div>
+            <MetricLabel label="spent" title={metricQuality.cost} />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-blue tabular-nums">
-              {formatCompactNum(stats.edits)}
+              <AnimatedShareValue value={stats.edits} formatter={formatCompactNum} />
             </div>
-            <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
-              file edits
-            </div>
+            <MetricLabel label="file edits" />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-purple tabular-nums">
-              {stats.projects}
+              <AnimatedShareValue
+                value={stats.projects}
+                formatter={(n) => Math.round(n).toString()}
+              />
             </div>
-            <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
-              projects
-            </div>
+            <MetricLabel label="projects" />
           </div>
         </div>
 
@@ -574,7 +674,7 @@ function ShareCard({
             )}
             {bestDay && bestDay.count > 0 && (
               <span className="text-xs font-mono text-terminal-dim">
-                Most active: {bestDay.day}s
+                Most active: {bestDay.day}
               </span>
             )}
           </div>
@@ -745,7 +845,7 @@ function TopProjectsList({
   return (
     <div className="space-y-2">
       {projects.slice(0, 8).map((p) => {
-        const name = p.project.split("/").pop() || p.project;
+        const name = projectName(p.project);
         const pct = (p.sessions / maxSessions) * 100;
         return (
           <div key={p.project} className="space-y-1">
@@ -777,7 +877,28 @@ function ModelBreakdown({ models }: { models: Record<string, number> }) {
   const entries = useMemo(
     () =>
       Object.entries(models)
-        .map(([model, count]) => ({ model: shortModelName(model), count }))
+        .flatMap(([model, count]) =>
+          splitModelLabels(model).map((label) => ({ model: label, count })),
+        )
+        .reduce<Array<{ model: string; count: number }>>((acc, entry) => {
+          const existing = acc.find((item) => item.model === entry.model);
+          if (existing) {
+            existing.count += entry.count;
+          } else {
+            acc.push({ ...entry });
+          }
+          return acc;
+        }, [])
+        .map(({ model, count }) => ({ model: shortModelName(model), count }))
+        .reduce<Array<{ model: string; count: number }>>((acc, entry) => {
+          const existing = acc.find((item) => item.model === entry.model);
+          if (existing) {
+            existing.count += entry.count;
+          } else {
+            acc.push({ ...entry });
+          }
+          return acc;
+        }, [])
         .sort((a, b) => b.count - a.count),
     [models],
   );
@@ -827,14 +948,6 @@ function ModelBreakdown({ models }: { models: Record<string, number> }) {
       </div>
     </div>
   );
-}
-
-function shortModelName(model: string): string {
-  // Strip version suffixes for display
-  return model
-    .replace(/^claude-/, "")
-    .replace(/-\d{8}$/, "")
-    .replace(/^(sonnet|opus|haiku)-(\d)/, "$1 $2");
 }
 
 // ─── Provider Breakdown ─────────────────────────────────────────────
@@ -925,6 +1038,47 @@ function InsightsPageSkeleton() {
   );
 }
 
+function InsightsLoadingState({
+  scanStatus,
+  hasCachedInsights,
+}: {
+  scanStatus:
+    | {
+        running: boolean;
+        scanned: number;
+        total: number;
+        phase?: "discovering" | "scanning";
+        hasCachedResults?: boolean;
+      }
+    | null
+    | undefined;
+  hasCachedInsights: boolean;
+}) {
+  const detail =
+    scanStatus?.phase === "discovering"
+      ? "Finding sessions across providers and restoring the latest local data."
+      : scanStatus?.total
+        ? `Refreshing ${scanStatus.scanned}/${scanStatus.total} sessions in the background.`
+        : "Preparing your latest session insights.";
+
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <div className="max-w-4xl mx-auto px-4 md:px-6 py-8 space-y-4">
+        <div className="rounded-xl border border-terminal-purple/20 bg-terminal-surface px-4 py-3">
+          <div className="flex items-center gap-2 text-sm font-sans text-terminal-text">
+            <span className="w-2 h-2 rounded-full bg-terminal-purple animate-pulse" />
+            <span>
+              {hasCachedInsights ? "Refreshing cached insights" : "Loading your insights"}
+            </span>
+          </div>
+          <p className="mt-1 text-xs font-mono text-terminal-dim">{detail}</p>
+        </div>
+        <InsightsPageSkeleton />
+      </div>
+    </div>
+  );
+}
+
 // ─── Source/Replay counts (consistent with homepage) ────────────────
 
 /** Fetch same source + replay data as homepage to ensure consistent totals. */
@@ -999,7 +1153,7 @@ export default function InsightsPage() {
   const homePageCounts = useHomePageCounts();
   const [range, setRange] = useState<TimeRange>("all");
 
-  const isScanning = scanStatus?.running && !userInsights;
+  const isInitialScan = scanStatus?.running && !userInsights;
 
   const { stats, streak, dayOfWeek, bestDay, peak, weeklyTrend, activeDays, firstSessionDate } =
     useMemo(() => {
@@ -1059,7 +1213,16 @@ export default function InsightsPage() {
       };
     }, [userInsights, range, homePageCounts]);
 
-  if (loading || isScanning || !userInsights) {
+  if (!userInsights && (loading || isInitialScan || scanStatus?.phase === "discovering")) {
+    return (
+      <InsightsLoadingState
+        scanStatus={scanStatus}
+        hasCachedInsights={Boolean(scanStatus?.hasCachedResults)}
+      />
+    );
+  }
+
+  if (!userInsights) {
     return <InsightsPageSkeleton />;
   }
 
@@ -1092,6 +1255,26 @@ export default function InsightsPage() {
           </div>
         </div>
 
+        {scanStatus?.running && (
+          <div className="rounded-xl border border-terminal-blue/20 bg-terminal-surface px-4 py-3">
+            <div className="flex items-center gap-2 text-sm font-sans text-terminal-text">
+              <span className="w-2 h-2 rounded-full bg-terminal-blue animate-pulse" />
+              <span>
+                {scanStatus.phase === "discovering"
+                  ? "Refreshing source discovery in the background"
+                  : "Refreshing insights in the background"}
+              </span>
+            </div>
+            <p className="mt-1 text-xs font-mono text-terminal-dim">
+              {scanStatus.phase === "discovering"
+                ? "Showing your last completed insights while we look for new sessions."
+                : scanStatus.total > 0
+                  ? `Showing cached insights while ${scanStatus.scanned}/${scanStatus.total} sessions refresh.`
+                  : "Showing cached insights while new scan data loads."}
+            </p>
+          </div>
+        )}
+
         {/* Share Card */}
         <ShareCard
           stats={stats}
@@ -1100,6 +1283,7 @@ export default function InsightsPage() {
           sessionsPerDay={userInsights.sessionsPerDay || {}}
           range={range}
           providers={userInsights.providers || {}}
+          dataQualityNotes={userInsights.dataQuality?.notes}
         />
 
         {/* Activity Heatmap — always shows full history regardless of range filter */}

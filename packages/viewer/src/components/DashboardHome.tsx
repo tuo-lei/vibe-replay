@@ -33,7 +33,7 @@ interface InsightStats {
   totalDuration: number;
   providerBreakdown: { provider: string; count: number; label: string }[];
   projectCount: number;
-  activityByDay: { date: string; label: string; claude: number; cursor: number }[];
+  sessionsPerDay: Record<string, number>;
   recentSources: SourceSession[];
   recentReplays: SessionSummary[];
   publishedCount: number;
@@ -270,30 +270,13 @@ function computeInsights(sources: SourceSession[], replays: SessionSummary[]): I
   for (const s of sources) projects.add(s.project);
   for (const r of replays) projects.add(r.project);
 
-  // Activity by day (last 30 days) — grouped by provider
-  const now = new Date();
-  const dayMs = 86400000;
-  const activityByDay: InsightStats["activityByDay"] = [];
-  for (let i = 29; i >= 0; i--) {
-    const dayStart = new Date(now.getTime() - i * dayMs);
-    dayStart.setHours(0, 0, 0, 0);
-    const dayEnd = new Date(dayStart.getTime() + dayMs);
-    const dateStr = dayStart.toISOString().slice(0, 10);
-    const dayLabel = dayStart.toLocaleDateString("en-US", {
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-    });
-    let claude = 0;
-    let cursor = 0;
-    for (const s of sources) {
-      const ts = new Date(s.timestamp);
-      if (ts >= dayStart && ts < dayEnd) {
-        if (s.provider === "cursor") cursor++;
-        else claude++;
-      }
-    }
-    activityByDay.push({ date: dateStr, label: dayLabel, claude, cursor });
+  // Home activity should reflect the latest discovered sessions immediately,
+  // even while richer scan insights are still refreshing in the background.
+  const sessionsPerDay: Record<string, number> = {};
+  for (const s of sources) {
+    const day = s.timestamp?.slice(0, 10);
+    if (!day) continue;
+    sessionsPerDay[day] = (sessionsPerDay[day] || 0) + 1;
   }
 
   const totalSessions = sources.length;
@@ -309,12 +292,59 @@ function computeInsights(sources: SourceSession[], replays: SessionSummary[]): I
     totalDuration,
     providerBreakdown,
     projectCount: projects.size,
-    activityByDay,
+    sessionsPerDay,
     recentSources: [...sources].sort((a, b) => b.timestamp.localeCompare(a.timestamp)).slice(0, 5),
     recentReplays: [...replays].sort((a, b) => b.startTime.localeCompare(a.startTime)).slice(0, 5),
     publishedCount: replays.filter((r) => r.gist?.gistId).length,
     replayConversionPct,
   };
+}
+
+function useAnimatedNumber(target: number, durationMs = 450): number {
+  const [display, setDisplay] = useState(target);
+  const currentRef = useRef(target);
+
+  useEffect(() => {
+    const startValue = currentRef.current;
+    const delta = target - startValue;
+    if (Math.abs(delta) < 1) {
+      currentRef.current = target;
+      setDisplay(target);
+      return;
+    }
+
+    let frame = 0;
+    const startAt = performance.now();
+    const step = (now: number) => {
+      const t = Math.min(1, (now - startAt) / durationMs);
+      const eased = 1 - (1 - t) ** 3;
+      const next = startValue + delta * eased;
+      currentRef.current = next;
+      setDisplay(next);
+      if (t < 1) {
+        frame = requestAnimationFrame(step);
+      } else {
+        currentRef.current = target;
+        setDisplay(target);
+      }
+    };
+
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [target, durationMs]);
+
+  return display;
+}
+
+function AnimatedMetricValue({
+  value,
+  formatter = (n) => Math.round(n).toLocaleString(),
+}: {
+  value: number;
+  formatter?: (value: number) => string;
+}) {
+  const animated = useAnimatedNumber(value);
+  return <>{formatter(animated)}</>;
 }
 
 // ─── UI Components ───────────────────────────────────────────────────
@@ -328,7 +358,7 @@ function MetricCard({
   onClick,
 }: {
   label: string;
-  value: string;
+  value: React.ReactNode;
   sub?: string;
   color?: "green" | "blue" | "orange" | "purple";
   icon: React.ReactNode;
@@ -842,6 +872,28 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     : null;
   const showRecentProjectsSkeleton =
     !userInsights && (loadingSources || Boolean(scanStatus?.running) || sources.length > 0);
+  const displayProjectCount = Math.max(insights.projectCount, userInsights?.totalProjects ?? 0);
+  const displayTotalPrompts = userInsights?.totalPrompts ?? insights.totalPrompts;
+  const displayTotalToolCalls = userInsights?.totalToolCalls ?? insights.totalToolCalls;
+  const displayProviderBreakdown =
+    insights.providerBreakdown.length > 0
+      ? insights.providerBreakdown
+      : Object.entries(userInsights?.providers || {})
+          .map(([provider, count]) => ({
+            provider,
+            count,
+            label:
+              provider === "claude-code"
+                ? "Claude Code"
+                : provider === "cursor"
+                  ? "Cursor"
+                  : provider,
+          }))
+          .sort((a, b) => b.count - a.count);
+  const displaySessionsPerDay =
+    Object.keys(insights.sessionsPerDay).length > 0
+      ? insights.sessionsPerDay
+      : (userInsights?.sessionsPerDay ?? {});
 
   const handleOpenReplay = (slug: string) => {
     navigateTo({ view: null, session: slug });
@@ -966,9 +1018,11 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   }
 
   const hasCounts = sources.every((s) => s.promptCount != null);
-  const countsSub = hasCounts
-    ? `across ${insights.projectCount} projects`
-    : `${sources.filter((s) => s.promptCount != null).length} of ${sources.length} scanned`;
+  const countsSub = userInsights
+    ? `across ${displayProjectCount} projects`
+    : hasCounts
+      ? `across ${insights.projectCount} projects`
+      : `${sources.filter((s) => s.promptCount != null).length} of ${sources.length} scanned`;
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -976,15 +1030,15 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <MetricCard
             label="Sessions"
-            value={insights.totalSessions.toLocaleString()}
-            sub={`${insights.projectCount} project${insights.projectCount !== 1 ? "s" : ""}`}
+            value={<AnimatedMetricValue value={insights.totalSessions} />}
+            sub={`${displayProjectCount} project${displayProjectCount !== 1 ? "s" : ""}`}
             color="green"
             icon={<SessionsIcon />}
             onClick={() => onNavigate("insights")}
           />
           <MetricCard
             label="Replays"
-            value={insights.totalReplays.toLocaleString()}
+            value={<AnimatedMetricValue value={insights.totalReplays} />}
             sub={insights.publishedCount > 0 ? `${insights.publishedCount} published` : undefined}
             color="blue"
             icon={<ReplaysIcon />}
@@ -992,7 +1046,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           />
           <MetricCard
             label="Turns"
-            value={insights.totalPrompts.toLocaleString()}
+            value={<AnimatedMetricValue value={displayTotalPrompts} />}
             sub={countsSub}
             color="green"
             icon={<PromptsIcon />}
@@ -1000,7 +1054,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           />
           <MetricCard
             label="Tool Calls"
-            value={insights.totalToolCalls.toLocaleString()}
+            value={<AnimatedMetricValue value={displayTotalToolCalls} />}
             sub={countsSub}
             color="orange"
             icon={<ToolsIcon />}
@@ -1008,24 +1062,35 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           />
         </div>
 
+        {scanStatus?.running && (
+          <div className="rounded-xl border border-terminal-purple/20 bg-terminal-surface px-4 py-3">
+            <div className="flex items-center gap-2 text-sm font-sans text-terminal-text">
+              <span className="w-2 h-2 rounded-full bg-terminal-purple animate-pulse" />
+              <span>
+                {scanStatus.phase === "discovering"
+                  ? "Refreshing session discovery"
+                  : "Refreshing dashboard insights"}
+              </span>
+            </div>
+            <p className="mt-1 text-xs font-mono text-terminal-dim">
+              {scanStatus.phase === "discovering"
+                ? "Showing the last completed dashboard while new sessions are discovered."
+                : scanStatus.total > 0
+                  ? `Showing cached totals while ${scanStatus.scanned}/${scanStatus.total} sessions refresh.`
+                  : "Showing cached totals while the latest scan spins up."}
+            </p>
+          </div>
+        )}
+
         {/* Activity Heatmap (GitHub-style, full width) */}
         <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
               Activity
             </h3>
-            <ProviderBreakdownInline breakdown={insights.providerBreakdown} />
+            <ProviderBreakdownInline breakdown={displayProviderBreakdown} />
           </div>
-          {userInsights?.sessionsPerDay ? (
-            <ContributionHeatmap sessionsPerDay={userInsights.sessionsPerDay} weeks={52} />
-          ) : (
-            <ContributionHeatmap
-              sessionsPerDay={Object.fromEntries(
-                insights.activityByDay.map((d) => [d.date, d.claude + d.cursor]),
-              )}
-              weeks={52}
-            />
-          )}
+          <ContributionHeatmap sessionsPerDay={displaySessionsPerDay} weeks={52} />
         </div>
 
         {/* CTA to Insights */}
@@ -1070,7 +1135,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
                 Recent Projects
               </h3>
               <span className="text-[10px] font-mono text-terminal-dimmer tabular-nums">
-                {userInsights.topProjects.length} total
+                {displayProjectCount} total
               </span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
@@ -1078,7 +1143,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
                 .sort((a, b) => (b.lastActivity || "").localeCompare(a.lastActivity || ""))
                 .slice(0, 5)
                 .map((p) => {
-                  const name = p.project.split("/").pop() || p.project;
+                  const name = projectName(p.project);
                   return (
                     <button
                       key={p.project}

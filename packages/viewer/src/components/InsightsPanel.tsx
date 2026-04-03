@@ -18,7 +18,7 @@ import {
   useState,
 } from "react";
 import { DataQualityIndicator } from "./DataQualityIndicator";
-import { shortModelName } from "./dashboard-utils";
+import { CACHE_REFRESH_TTL_MS, isCacheFresh, shortModelName } from "./dashboard-utils";
 import { formatDuration } from "./StatsPanel";
 
 // ─── Types (mirror the server scanner types) ────────────────────────
@@ -108,9 +108,14 @@ interface ScanStatus {
   scanned: number;
   total: number;
   resultCount: number;
+  currentSession?: string;
+  phase?: "discovering" | "scanning";
   startedAt?: string;
   finishedAt?: string;
   hasInsights?: boolean;
+  hasCachedResults?: boolean;
+  cachedResultCount?: number;
+  cachedAt?: string;
 }
 
 // ─── Singleton Context Provider ──────────────────────────────────────
@@ -144,9 +149,44 @@ export function ScanInsightsProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(false);
   const fetchedUserRef = useRef(false);
 
-  // Start background scan once
+  // Start background scan once, but avoid immediately re-scanning when we already
+  // have fresh cached insights/results to show.
   useEffect(() => {
-    fetch("/api/scan/start", { method: "POST" }).catch(() => {});
+    let stopped = false;
+    let refreshTimer: number | undefined;
+
+    const startScan = () => {
+      if (stopped) return;
+      fetch("/api/scan/start", { method: "POST" }).catch(() => {});
+    };
+
+    const scheduleRefresh = async () => {
+      try {
+        const resp = await fetch("/api/scan/status");
+        if (!resp.ok || stopped) return;
+        const status = (await resp.json()) as ScanStatus;
+        setScanStatus(status);
+
+        if (status.running) return;
+        if (!status.hasCachedResults || !isCacheFresh(status.cachedAt, CACHE_REFRESH_TTL_MS)) {
+          startScan();
+          return;
+        }
+
+        const ageMs = Date.now() - new Date(status.cachedAt!).getTime();
+        const delayMs = Math.max(1_000, CACHE_REFRESH_TTL_MS - ageMs);
+        refreshTimer = window.setTimeout(startScan, delayMs);
+      } catch {
+        startScan();
+      }
+    };
+
+    void scheduleRefresh();
+
+    return () => {
+      stopped = true;
+      if (refreshTimer) window.clearTimeout(refreshTimer);
+    };
   }, []);
 
   // Single polling chain
@@ -263,20 +303,31 @@ export function ScanInsightsProvider({ children }: { children: ReactNode }) {
 // ─── Scan progress bar ──────────────────────────────────────────────
 
 export function ScanProgressBar({ status }: { status: ScanStatus }) {
-  if (!status.running || status.total === 0) return null;
-  const pct = Math.round((status.scanned / status.total) * 100);
+  if (!status.running) return null;
+  const pct = status.total > 0 ? Math.round((status.scanned / status.total) * 100) : 0;
+  const label =
+    status.phase === "discovering"
+      ? "Discovering sessions..."
+      : status.total > 0
+        ? `Refreshing insights... ${status.scanned}/${status.total}`
+        : "Preparing insights refresh...";
   return (
     <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-mono bg-terminal-surface text-terminal-dim shrink-0">
       <span className="w-1.5 h-1.5 rounded-full bg-terminal-purple animate-pulse" />
-      <span>
-        Analyzing sessions... {status.scanned}/{status.total}
-      </span>
-      <div className="flex-1 max-w-[120px] h-1 rounded-full bg-terminal-surface-2 overflow-hidden">
-        <div
-          className="h-full bg-terminal-purple rounded-full transition-all duration-300"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
+      <span>{label}</span>
+      {status.hasCachedResults && (
+        <span className="text-[10px] text-terminal-dimmer">
+          showing {status.cachedResultCount || status.resultCount} cached
+        </span>
+      )}
+      {status.total > 0 && (
+        <div className="flex-1 max-w-[120px] h-1 rounded-full bg-terminal-surface-2 overflow-hidden">
+          <div
+            className="h-full bg-terminal-purple rounded-full transition-all duration-300"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      )}
     </div>
   );
 }

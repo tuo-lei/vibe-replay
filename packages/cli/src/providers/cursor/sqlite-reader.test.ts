@@ -155,6 +155,96 @@ describe("cursor sqlite metrics helpers", () => {
     expect(branchMeta.gitBranches).toEqual(["feature/old", "feature/current"]);
   });
 
+  it("extracts remote workspace roots from composer path hints", () => {
+    expect(
+      __testables.inferProjectRootFromPathHint("/workspaces/api/src/resolvers/export.ts\\"),
+    ).toBe("/workspaces/api");
+    expect(
+      __testables.inferProjectRootFromPathHint("/workspaces/.devcontainer/docker-compose.yml"),
+    ).toBe("/workspaces");
+    expect(__testables.inferProjectRootFromPathHint("/home/node/.config/git/config")).toBeNull();
+  });
+
+  it("prefers direct high-confidence composer project hints before filesystem probing", async () => {
+    await expect(
+      __testables.inferProjectFromComposerData(
+        JSON.stringify({
+          currentFile: "/workspaces/api/src/resolvers/export.ts",
+        }),
+        [],
+      ),
+    ).resolves.toBe("/workspaces/api");
+  });
+
+  it("normalizes composite Cursor model labels to the latest distinct model", () => {
+    expect(
+      __testables.normalizeCursorModelName(
+        "gpt-5.2-high,claude-4.6-opus-high-thinking,claude-4.6-opus-high-thinking",
+      ),
+    ).toBe("claude-4.6-opus-high-thinking");
+  });
+
+  it("merges turn stats by preferring primary fields and enrichment gaps", () => {
+    expect(__testables.mergeTurnStats(undefined, undefined)).toBeUndefined();
+    expect(__testables.mergeTurnStats([{ turnIndex: 0 } as any], undefined)).toEqual([
+      { turnIndex: 0 },
+    ]);
+    expect(__testables.mergeTurnStats(undefined, [{ turnIndex: 1 } as any])).toEqual([
+      { turnIndex: 1 },
+    ]);
+
+    expect(
+      __testables.mergeTurnStats(
+        [
+          {
+            turnIndex: 0,
+            model: "gpt-5.4-high",
+          },
+          {
+            turnIndex: 2,
+            tokenUsage: {
+              inputTokens: 10,
+              outputTokens: 2,
+              cacheCreationTokens: 0,
+              cacheReadTokens: 0,
+            },
+          },
+        ] as any,
+        [
+          {
+            turnIndex: 0,
+            durationMs: 4200,
+            contextTokens: 900,
+          },
+          {
+            turnIndex: 1,
+            model: "claude-4.6-opus-high-thinking",
+          },
+        ] as any,
+      ),
+    ).toEqual([
+      {
+        turnIndex: 0,
+        model: "gpt-5.4-high",
+        durationMs: 4200,
+        contextTokens: 900,
+      },
+      {
+        turnIndex: 1,
+        model: "claude-4.6-opus-high-thinking",
+      },
+      {
+        turnIndex: 2,
+        tokenUsage: {
+          inputTokens: 10,
+          outputTokens: 2,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 0,
+        },
+      },
+    ]);
+  });
+
   it("extracts Cursor PR links from bubble payloads and deduplicates by URL", () => {
     const links = __testables.extractCursorPrLinks([
       {
@@ -426,8 +516,41 @@ describe("cursor sqlite metrics helpers", () => {
         dataSourceInfo: {
           primary: "global-state",
           sources: ["cursor/user/globalStorage/state.vscdb"],
-          notes: ["Git branch is inferred from Cursor composer metadata."],
+          notes: [
+            "Token usage is estimated from Cursor token snapshots.",
+            "Duration is estimated from Cursor thinking and tool execution timing.",
+            "Git branch is inferred from Cursor composer metadata.",
+          ],
         },
+        model: "claude-4.6-opus-high-thinking",
+        totalDurationMs: 4200,
+        tokenUsage: {
+          inputTokens: 1200,
+          outputTokens: 80,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 0,
+        },
+        tokenUsageByModel: {
+          "claude-4.6-opus-high-thinking": {
+            inputTokens: 1200,
+            outputTokens: 80,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+          },
+        },
+        turnStats: [
+          {
+            turnIndex: 0,
+            model: "claude-4.6-opus-high-thinking",
+            durationMs: 4200,
+            tokenUsage: {
+              inputTokens: 1200,
+              outputTokens: 80,
+              cacheCreationTokens: 0,
+              cacheReadTokens: 0,
+            },
+          },
+        ],
         gitBranch: "feat/auth",
         apiErrors: [{ timestamp: "2026-03-20T10:00:00.000Z", errorType: "rate_limit_error" }],
         contextFiles: ["src/auth.ts"],
@@ -443,6 +566,15 @@ describe("cursor sqlite metrics helpers", () => {
     expect(merged.turns).toHaveLength(1);
     expect(merged.cwd).toBe("/workspace/project");
     expect(merged.gitBranch).toBe("feat/auth");
+    expect(merged.model).toBe("claude-4.6-opus-high-thinking");
+    expect(merged.totalDurationMs).toBe(4200);
+    expect(merged.tokenUsage).toMatchObject({ inputTokens: 1200, outputTokens: 80 });
+    expect(merged.tokenUsageByModel).toHaveProperty("claude-4.6-opus-high-thinking");
+    expect(merged.turnStats?.[0]).toMatchObject({
+      turnIndex: 0,
+      model: "claude-4.6-opus-high-thinking",
+      durationMs: 4200,
+    });
     expect(merged.apiErrors).toEqual([
       { timestamp: "2026-03-20T10:00:00.000Z", errorType: "rate_limit_error" },
     ]);

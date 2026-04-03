@@ -6,6 +6,10 @@ import { CLI_VERSION } from "./version.js";
 const CACHE_ENVELOPE_VERSION = 1;
 const CACHE_DIR = join(homedir(), ".vibe-replay", "cache");
 
+function isFileCacheDisabled(): boolean {
+  return process.env.VIBE_REPLAY_DISABLE_FILE_CACHE === "1";
+}
+
 interface CacheEnvelope<T> {
   envelopeVersion: number;
   appVersion: string;
@@ -24,6 +28,7 @@ function toCachePath(key: string): string {
 }
 
 export async function readFileCache<T>(key: string): Promise<FileCacheEntry<T> | null> {
+  if (isFileCacheDisabled()) return null;
   try {
     const raw = await readFile(toCachePath(key), "utf-8");
     const parsed = JSON.parse(raw) as Partial<CacheEnvelope<T>>;
@@ -42,6 +47,7 @@ export async function readFileCache<T>(key: string): Promise<FileCacheEntry<T> |
 }
 
 export async function writeFileCache<T>(key: string, data: T): Promise<void> {
+  if (isFileCacheDisabled()) return;
   try {
     await mkdir(CACHE_DIR, { recursive: true });
     const payload: CacheEnvelope<T> = {

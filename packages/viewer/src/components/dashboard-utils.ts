@@ -201,7 +201,10 @@ function looksLikeConversationSummary(text: string): boolean {
   const normalized = text.trim();
   return (
     /^\[Previous conversation summary\]:/i.test(normalized) ||
-    /^Summary:\s*1\.\s*Primary Request and Intent:/i.test(normalized)
+    /^Summary:\s*1\.\s*Primary Request and Intent:/i.test(normalized) ||
+    // Mirror the CLI cleanup so cached Cursor previews hide the same
+    // truncated summary fragment instead of surfacing it as a title/prompt.
+    /^and merge infrastructure was built for human-paced output/i.test(normalized)
   );
 }
 
