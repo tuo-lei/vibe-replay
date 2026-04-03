@@ -2,6 +2,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { SessionInfo } from "../../types.js";
+import { shortenPath } from "../../utils.js";
 import {
   discoverGlobalStateOnlySessions,
   discoverSqliteOnlySessions,
@@ -102,12 +103,6 @@ async function decodeProjectDir(encoded: string): Promise<string> {
 
   const result = await resolve(1, `/${parts[0]}`);
   return result || `/${encoded.replace(/-/g, "/")}`;
-}
-
-function shortenPath(path: string): string {
-  const home = homedir();
-  if (path.startsWith(home)) return `~${path.slice(home.length)}`;
-  return path;
 }
 
 async function extractSessionInfo(

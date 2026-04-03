@@ -5,6 +5,7 @@ import { basename, dirname, join } from "node:path";
 import type { CursorSidecars, PrLink, TokenUsage, TurnStat } from "@vibe-replay/types";
 import { readFileCache, writeFileCache } from "../../cache.js";
 import type { ContentBlock, ParsedTurn, SessionInfo } from "../../types.js";
+import { shortenPath } from "../../utils.js";
 import type { ProviderParseResult } from "../types.js";
 import { sanitizeCursorAssistantText, sanitizeCursorReasoningText } from "./sanitize.js";
 
@@ -778,12 +779,6 @@ export async function getCursorSessionCachePaths(sessionId: string): Promise<str
   }
 
   return [...new Set(paths)];
-}
-
-function shortenPath(path: string): string {
-  const home = homedir();
-  if (path.startsWith(home)) return `~${path.slice(home.length)}`;
-  return path;
 }
 
 interface ChatMeta {

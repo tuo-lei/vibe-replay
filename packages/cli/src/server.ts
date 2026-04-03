@@ -60,6 +60,7 @@ import type {
   SessionInfo,
   SessionOverlays,
 } from "./types.js";
+import { normalizeTitle } from "./utils.js";
 import { CLI_VERSION } from "./version.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -83,13 +84,6 @@ function getErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (typeof err === "string") return err;
   return "Unknown error";
-}
-
-const MAX_TITLE_CHARS = 120;
-
-function normalizeTitle(title: string): string | undefined {
-  const cleaned = title.replace(/\s+/g, " ").trim().slice(0, MAX_TITLE_CHARS);
-  return cleaned || undefined;
 }
 
 function normalizeProjectPath(project: string): string {

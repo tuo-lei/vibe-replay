@@ -20,6 +20,7 @@ import { parseCursorSession } from "./providers/cursor/parser.js";
 import { getCursorSessionCachePaths } from "./providers/cursor/sqlite-reader.js";
 import type { ProviderParseResult } from "./providers/types.js";
 import type { DataSource, PrLink, SessionInfo, TokenUsage } from "./types.js";
+import { extractToolFilePath, shortenPath } from "./utils.js";
 
 // Bump this when we extract new fields — forces re-scan of all sessions.
 const SCANNER_VERSION = 6;
@@ -371,11 +372,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
               block.name === "NotebookEdit" ||
               block.name === "Delete"
             ) {
-              const fp =
-                block.input?.file_path ??
-                block.input?.filePath ??
-                block.input?.path ??
-                block.input?.relativeWorkspacePath;
+              const fp = extractToolFilePath(block.input);
               if (fp) {
                 editCount++;
                 const short = shortenPath(fp);
@@ -425,11 +422,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
               block.name === "NotebookEdit" ||
               block.name === "Delete"
             ) {
-              const fp =
-                block.input?.file_path ??
-                block.input?.filePath ??
-                block.input?.path ??
-                block.input?.relativeWorkspacePath;
+              const fp = extractToolFilePath(block.input);
               if (fp) {
                 editCount++;
                 const short = shortenPath(fp);
@@ -603,12 +596,8 @@ function buildScanResultFromParsed(
           ) {
             continue;
           }
-          const saPath =
-            saScene.input?.file_path ??
-            saScene.input?.filePath ??
-            saScene.input?.path ??
-            saScene.input?.relativeWorkspacePath;
-          if (typeof saPath !== "string" || !saPath.trim()) continue;
+          const saPath = extractToolFilePath(saScene.input);
+          if (!saPath) continue;
           editCount++;
           const short = shortenPath(saPath);
           fileEditCounts.set(short, (fileEditCounts.get(short) || 0) + 1);
@@ -624,12 +613,8 @@ function buildScanResultFromParsed(
         continue;
       }
 
-      const rawPath =
-        block.input?.file_path ??
-        block.input?.filePath ??
-        block.input?.path ??
-        block.input?.relativeWorkspacePath;
-      if (typeof rawPath !== "string" || !rawPath.trim()) continue;
+      const rawPath = extractToolFilePath(block.input);
+      if (!rawPath) continue;
       editCount++;
       const short = shortenPath(rawPath);
       fileEditCounts.set(short, (fileEditCounts.get(short) || 0) + 1);
@@ -1195,12 +1180,6 @@ function parseFrontmatter(content: string): {
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────
-
-function shortenPath(path: string): string {
-  const home = homedir();
-  if (path.startsWith(home)) return `~${path.slice(home.length)}`;
-  return path;
-}
 
 /** Extract plain text from a message content field (string or content block array). */
 function extractMetaText(content: unknown): string {

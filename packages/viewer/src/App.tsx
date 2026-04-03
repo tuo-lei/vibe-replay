@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Dashboard from "./components/Dashboard";
 import { navigateTo } from "./components/dashboard-utils";
 import Player from "./components/Player";
 import type { ActiveView } from "./components/ViewTabBar";
+import { useOutsideClick } from "./hooks/useOutsideClick";
 import { useSessionLoader } from "./hooks/useSessionLoader";
 import { useTheme } from "./hooks/useTheme";
 import { useViewPrefs } from "./hooks/useViewPrefs";
@@ -280,16 +281,8 @@ export default function App() {
   useEffect(() => {
     if (prefs.displayMode !== "custom") setCustomOpen(false);
   }, [prefs.displayMode]);
-  useEffect(() => {
-    if (!customOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (customRef.current && !customRef.current.contains(e.target as Node)) {
-        setCustomOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [customOpen]);
+  const closeCustom = useCallback(() => setCustomOpen(false), []);
+  useOutsideClick(customRef, closeCustom, customOpen);
 
   if (loadState.status === "loading") {
     return (

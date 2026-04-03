@@ -377,6 +377,33 @@ export function providerBadgeClass(provider: string): string {
   return PROVIDER_BADGE_COLORS[provider] || "bg-terminal-surface text-terminal-dim";
 }
 
+// ─── Archive helpers ────────────────────────────────────────────────
+
+/** Optimistic archive toggle with rollback on failure. */
+export async function toggleArchiveSlug(
+  slug: string,
+  archivedSlugs: Set<string>,
+  setArchivedSlugs: React.Dispatch<React.SetStateAction<Set<string>>>,
+): Promise<void> {
+  const isArchived = archivedSlugs.has(slug);
+  setArchivedSlugs((prev) => {
+    const next = new Set(prev);
+    isArchived ? next.delete(slug) : next.add(slug);
+    return next;
+  });
+  try {
+    const resp = await fetch(`/api/archive/${slug}`, { method: isArchived ? "DELETE" : "POST" });
+    if (!resp.ok) throw new Error("Archive toggle failed");
+  } catch (err) {
+    console.error("Archive toggle failed:", getErrorMessage(err));
+    setArchivedSlugs((prev) => {
+      const next = new Set(prev);
+      isArchived ? next.add(slug) : next.delete(slug);
+      return next;
+    });
+  }
+}
+
 export function getErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (typeof err === "string") return err;
