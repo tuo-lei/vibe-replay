@@ -253,6 +253,8 @@ I found bubble payloads with token snapshots like:
 
 That's enough to do best-effort token and cost estimation for some Cursor sessions.
 
+The important caveat, after building and testing [vibe-replay](https://github.com/tuo-lei/vibe-replay) against a much larger Cursor corpus, is coverage: many sessions still have **no** usable token snapshots. In practice, that means aggregate Cursor cost totals are often a **lower bound**, not a full bill.
+
 ### Timing
 
 I also found fields like:
@@ -263,7 +265,7 @@ I also found fields like:
 }
 ```
 
-So Cursor does expose some local timing signals. They just aren't sitting in one neat append-only log.
+So Cursor does expose some local timing signals. They just aren't sitting in one neat append-only log, and coverage is uneven enough that duration often has to be reconstructed from partial signals instead of read directly from one authoritative source.
 
 ### File context
 
