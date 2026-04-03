@@ -320,49 +320,47 @@ export default function App() {
   if (loadState.status === "dashboard") {
     return (
       <div className="h-screen bg-terminal-bg flex flex-col overflow-hidden">
-        <header className="border-b border-terminal-border-subtle px-5 py-2.5 flex items-center justify-between shrink-0 glass-effect z-40 safe-top">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => navigateTo({ view: null, session: null })}
-              className="text-sm font-sans font-bold bg-gradient-to-r from-terminal-green to-terminal-blue bg-clip-text text-transparent hover:opacity-80 transition-opacity"
-            >
-              vibe-replay
-            </button>
-            <span className="instant-tooltip inline-flex items-center gap-1.5 text-[10px] font-sans font-bold px-2.5 py-1 rounded-full bg-terminal-green/10 text-terminal-green uppercase tracking-wider border border-terminal-green/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-terminal-green animate-pulse" />
-              Local
-              <span className="instant-tooltip-text">
-                {`Viewer ${window.location.host}${import.meta.env.VITE_API_PORT ? `\nCLI :${import.meta.env.VITE_API_PORT}` : ""}${__CLOUD_API_URL__ ? `\nCloud ${__CLOUD_API_URL__}` : ""}`}
+        <Dashboard
+          headerLeft={
+            <div className="flex items-center gap-2.5 shrink-0">
+              <button
+                onClick={() => navigateTo({ view: null, session: null })}
+                className="text-sm font-sans font-bold bg-gradient-to-r from-terminal-green to-terminal-blue bg-clip-text text-transparent hover:opacity-80 transition-opacity"
+              >
+                vibe-replay
+              </button>
+              <span className="instant-tooltip inline-flex items-center gap-1 text-[9px] font-sans font-bold px-2 py-0.5 rounded-full bg-terminal-green/10 text-terminal-green uppercase tracking-wider border border-terminal-green/20">
+                <span className="w-1 h-1 rounded-full bg-terminal-green animate-pulse" />
+                Local
+                <span className="instant-tooltip-text">
+                  {`v${__CLI_VERSION__}\nViewer ${window.location.host}${import.meta.env.VITE_API_PORT ? `\nCLI :${import.meta.env.VITE_API_PORT}` : ""}${__CLOUD_API_URL__ ? `\nCloud ${__CLOUD_API_URL__}` : ""}`}
+                </span>
               </span>
-            </span>
-            <span className="text-terminal-border/40 text-sm select-none">|</span>
-            <span className="text-sm font-sans font-semibold text-terminal-text/90">Dashboard</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <GitHubStarButton />
-            <button
-              onClick={toggleTheme}
-              className="w-7 h-7 flex items-center justify-center rounded-md border border-terminal-border text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover text-sm transition-colors"
-            >
-              {theme === "dark" ? "\u263E" : "\u2600"}
-            </button>
-            <DashboardAuthStatus isEditor={true} />
-          </div>
-        </header>
-        <Dashboard />
+            </div>
+          }
+          headerRight={
+            <div className="flex items-center gap-2 shrink-0">
+              <GitHubStarButton />
+              <button
+                onClick={toggleTheme}
+                className="w-7 h-7 flex items-center justify-center rounded-md bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover text-sm transition-colors"
+              >
+                {theme === "dark" ? "\u263E" : "\u2600"}
+              </button>
+              <DashboardAuthStatus isEditor={true} />
+            </div>
+          }
+        />
       </div>
     );
   }
 
   const { meta } = session!;
-  // Show back-to-dashboard button when viewing a session via ?session= param
-  const showDashboardBack = isEditor && new URLSearchParams(window.location.search).has("session");
-
   return (
     <div className="h-screen bg-terminal-bg flex flex-col overflow-hidden">
-      <header className="relative z-40 border-b border-terminal-border-subtle px-5 pt-5 pb-3 md:py-3 flex items-center justify-between shrink-0 glass-effect safe-top">
-        {/* Left: branding + session info */}
-        <div className="flex items-center gap-2 md:gap-3 min-w-0">
+      <header className="relative z-40 border-b border-terminal-border-subtle px-5 py-2 flex items-center gap-4 shrink-0 glass-effect safe-top">
+        {/* Left: branding */}
+        <div className="flex items-center gap-2.5 shrink-0">
           {isEditor ? (
             <button
               onClick={() => navigateTo({ view: "dashboard", session: null })}
@@ -381,97 +379,64 @@ export default function App() {
             </a>
           )}
           {isEditor && (
-            <span className="instant-tooltip inline-flex items-center gap-1.5 text-[10px] font-sans font-bold px-2.5 py-1 rounded-full bg-terminal-green/10 text-terminal-green uppercase tracking-wider border border-terminal-green/20">
-              <span className="w-1.5 h-1.5 rounded-full bg-terminal-green animate-pulse" />
+            <span className="instant-tooltip inline-flex items-center gap-1 text-[9px] font-sans font-bold px-2 py-0.5 rounded-full bg-terminal-green/10 text-terminal-green uppercase tracking-wider border border-terminal-green/20">
+              <span className="w-1 h-1 rounded-full bg-terminal-green animate-pulse" />
               Local
               <span className="instant-tooltip-text">
-                {`Viewer ${window.location.host}${import.meta.env.VITE_API_PORT ? `\nCLI :${import.meta.env.VITE_API_PORT}` : ""}${__CLOUD_API_URL__ ? `\nCloud ${__CLOUD_API_URL__}` : ""}`}
+                {`v${__CLI_VERSION__}\nViewer ${window.location.host}${import.meta.env.VITE_API_PORT ? `\nCLI :${import.meta.env.VITE_API_PORT}` : ""}${__CLOUD_API_URL__ ? `\nCloud ${__CLOUD_API_URL__}` : ""}`}
               </span>
             </span>
-          )}
-          {showDashboardBack && (
-            <span className="hidden md:flex items-center gap-0.5">
-              <span className="text-terminal-border/40 text-sm select-none">|</span>
-              <button
-                onClick={() => navigateTo({ view: "dashboard", session: null })}
-                className="flex items-center gap-0.5 text-sm font-sans font-medium text-terminal-dim hover:text-terminal-text transition-colors"
-              >
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M10 3L5 8l5 5" />
-                </svg>
-                Dashboard
-              </button>
-            </span>
-          )}
-          {meta.title && (
-            <>
-              <span className="text-terminal-border/40 text-sm select-none hidden md:inline">
-                |
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  returnToLandingRef.current?.();
-                  handleViewChange("replay");
-                }}
-                className="text-terminal-text text-xs font-sans font-medium truncate max-w-[180px] md:max-w-[300px] hover:text-terminal-green transition-colors"
-                title="Back to landing page"
-              >
-                {meta.title}
-              </button>
-            </>
-          )}
-          {gistOwner && (
-            <div className="hidden sm:flex items-center gap-1.5 text-xs font-mono text-terminal-dim">
-              <span className="text-terminal-border">&middot;</span>
-              <span className="text-terminal-dimmer">shared by</span>
-              <a
-                href={`https://github.com/${gistOwner}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-terminal-dim hover:text-terminal-text transition-colors"
-              >
-                @{gistOwner}
-              </a>
-            </div>
           )}
         </div>
 
-        <div className="flex items-center gap-1.5 md:gap-2 shrink-0">
-          {/* Dashboard button (editor mode only, when not already navigated from dashboard) */}
-          {isEditor && !showDashboardBack && (
-            <button
-              onClick={() => navigateTo({ view: "dashboard", session: null })}
-              className="h-7 px-2.5 flex items-center gap-1.5 rounded-md bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover text-xs font-sans font-medium transition-colors"
-              title="All replays"
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
+        {/* Tabs (editor) */}
+        {isEditor && (
+          <nav className="hidden md:inline-flex items-center rounded-xl bg-terminal-surface p-0.5 shadow-layer-sm shrink-0">
+            {(["home", "sessions", "replays", "projects", "insights"] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => navigateTo({ view: "dashboard", session: null, tab: t })}
+                className="px-3.5 py-1.5 text-xs font-sans font-semibold rounded-lg text-terminal-dim hover:text-terminal-text transition-all duration-200 ease-material"
               >
-                <rect x="1" y="1" width="6" height="6" rx="1" />
-                <rect x="9" y="1" width="6" height="6" rx="1" />
-                <rect x="1" y="9" width="6" height="6" rx="1" />
-                <rect x="9" y="9" width="6" height="6" rx="1" />
-              </svg>
-              <span className="hidden sm:inline">Dashboard</span>
+                {t.charAt(0).toUpperCase() + t.slice(1)}
+              </button>
+            ))}
+          </nav>
+        )}
+        {/* Session title */}
+        {meta.title && (
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-terminal-border/40 text-sm select-none hidden md:inline">|</span>
+            <button
+              type="button"
+              onClick={() => {
+                returnToLandingRef.current?.();
+                handleViewChange("replay");
+              }}
+              className="text-terminal-text text-xs font-sans font-medium truncate max-w-[180px] md:max-w-[300px] hover:text-terminal-green transition-colors"
+              title="Back to landing page"
+            >
+              {meta.title}
             </button>
-          )}
+            {gistOwner && (
+              <div className="hidden sm:flex items-center gap-1.5 text-xs font-mono text-terminal-dim">
+                <span className="text-terminal-border">&middot;</span>
+                <span className="text-terminal-dimmer">shared by</span>
+                <a
+                  href={`https://github.com/${gistOwner}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-terminal-dim hover:text-terminal-text transition-colors"
+                >
+                  @{gistOwner}
+                </a>
+              </div>
+            )}
+          </div>
+        )}
+        <div className="flex-1" />
 
+        <div className="flex items-center gap-1.5 md:gap-2 shrink-0">
           {/* Display mode + Star + Theme — desktop inline */}
           <div ref={customRef} className="hidden md:flex items-center gap-1.5">
             {/* Display mode: segmented control + Custom dropdown */}

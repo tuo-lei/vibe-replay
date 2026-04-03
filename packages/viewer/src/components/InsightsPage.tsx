@@ -667,8 +667,7 @@ function ShareCard({
         <div className="flex items-center justify-between pt-4 border-t border-terminal-border/30">
           <div className="flex items-center gap-4">
             {streak.current > 0 && (
-              <span className="text-xs font-mono text-terminal-dim flex items-center gap-1.5">
-                <span className="text-terminal-orange">&#9632;</span>
+              <span className="text-xs font-mono text-terminal-dim">
                 {streak.current} day streak
               </span>
             )}
@@ -1254,26 +1253,6 @@ export default function InsightsPage() {
             ))}
           </div>
         </div>
-
-        {scanStatus?.running && (
-          <div className="rounded-xl border border-terminal-blue/20 bg-terminal-surface px-4 py-3">
-            <div className="flex items-center gap-2 text-sm font-sans text-terminal-text">
-              <span className="w-2 h-2 rounded-full bg-terminal-blue animate-pulse" />
-              <span>
-                {scanStatus.phase === "discovering"
-                  ? "Refreshing source discovery in the background"
-                  : "Refreshing insights in the background"}
-              </span>
-            </div>
-            <p className="mt-1 text-xs font-mono text-terminal-dim">
-              {scanStatus.phase === "discovering"
-                ? "Showing your last completed insights while we look for new sessions."
-                : scanStatus.total > 0
-                  ? `Showing cached insights while ${scanStatus.scanned}/${scanStatus.total} sessions refresh.`
-                  : "Showing cached insights while new scan data loads."}
-            </p>
-          </div>
-        )}
 
         {/* Share Card */}
         <ShareCard

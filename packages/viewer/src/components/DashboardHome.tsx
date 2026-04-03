@@ -51,8 +51,8 @@ function useDashboardData() {
   const [loadingSources, setLoadingSources] = useState(true);
   const [loadingReplays, setLoadingReplays] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [scanProgress, setScanProgress] = useState<number | null>(null);
-  const [enrichmentStatus, setEnrichmentStatus] = useState<SourcesEnrichmentStatus | null>(null);
+  const [, setScanProgress] = useState<number | null>(null);
+  const [, setEnrichmentStatus] = useState<SourcesEnrichmentStatus | null>(null);
   const wasEnrichingRef = useRef(false);
   const hasCursorSources = useMemo(
     () => sources.some((source) => source.provider === "cursor"),
@@ -221,8 +221,6 @@ function useDashboardData() {
     loadingSources,
     loadingReplays,
     error,
-    scanProgress,
-    enrichmentStatus,
   };
 }
 
@@ -349,99 +347,6 @@ function AnimatedMetricValue({
 
 // ─── UI Components ───────────────────────────────────────────────────
 
-function MetricCard({
-  label,
-  value,
-  sub,
-  color = "green",
-  icon,
-  onClick,
-}: {
-  label: string;
-  value: React.ReactNode;
-  sub?: string;
-  color?: "green" | "blue" | "orange" | "purple";
-  icon: React.ReactNode;
-  onClick?: () => void;
-}) {
-  const textColor: Record<string, string> = {
-    green: "text-terminal-green",
-    blue: "text-terminal-blue",
-    orange: "text-terminal-orange",
-    purple: "text-terminal-purple",
-  };
-  const bgColor: Record<string, string> = {
-    green: "bg-terminal-green/10",
-    blue: "bg-terminal-blue/10",
-    orange: "bg-terminal-orange/10",
-    purple: "bg-terminal-purple/10",
-  };
-  const gradientBorder: Record<string, string> = {
-    green: "from-terminal-green/20 to-terminal-blue/10",
-    blue: "from-terminal-blue/20 to-terminal-cyan/10",
-    orange: "from-terminal-orange/20 to-terminal-red/10",
-    purple: "from-terminal-purple/20 to-terminal-blue/10",
-  };
-
-  return (
-    <div
-      role={onClick ? "button" : undefined}
-      tabIndex={onClick ? 0 : undefined}
-      onClick={onClick}
-      onKeyDown={
-        onClick
-          ? (e) => {
-              if (e.key === "Enter" || e.key === " ") onClick();
-            }
-          : undefined
-      }
-      className={`premium-card bg-terminal-surface rounded-xl p-5 shadow-layer-sm hover:bg-terminal-surface-hover transition-all duration-300 hover-lift group ${onClick ? "cursor-pointer" : ""}`}
-    >
-      <div className="flex items-start justify-between relative z-10">
-        <div className="space-y-1.5">
-          <p className="text-[10px] font-sans font-bold text-terminal-dim uppercase tracking-widest opacity-80 group-hover:opacity-100 transition-opacity">
-            {label}
-          </p>
-          <p
-            className={`text-3xl font-mono font-bold tabular-nums tracking-tight ${textColor[color]}`}
-          >
-            {value}
-          </p>
-          {sub && (
-            <p className="text-[11px] font-mono text-terminal-dimmer flex items-center gap-1.5">
-              <span className={`w-1 h-1 rounded-full ${textColor[color]} opacity-50`} />
-              {sub}
-            </p>
-          )}
-        </div>
-        <div
-          className={`w-11 h-11 rounded-xl flex items-center justify-center ${bgColor[color]} border border-white/5 shadow-inner transition-transform duration-300 group-hover:scale-110 group-hover:rotate-3`}
-        >
-          {icon}
-        </div>
-      </div>
-      <div
-        className={`absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 bg-gradient-to-br ${gradientBorder[color]} blur-2xl -z-10 pointer-events-none`}
-      />
-    </div>
-  );
-}
-
-function MetricCardSkeleton() {
-  return (
-    <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm space-y-3">
-      <div className="flex justify-between">
-        <div className="space-y-2 flex-1">
-          <div className="h-3 w-20 skeleton opacity-40" />
-          <div className="h-8 w-24 skeleton opacity-60" />
-          <div className="h-3 w-32 skeleton opacity-30" />
-        </div>
-        <div className="w-11 h-11 rounded-xl skeleton opacity-20" />
-      </div>
-    </div>
-  );
-}
-
 function RecentProjectsSkeleton() {
   return (
     <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm animate-pulse">
@@ -464,28 +369,6 @@ function RecentProjectsSkeleton() {
         ))}
       </div>
       <div className="h-9 mt-2 rounded-lg bg-terminal-surface-2 skeleton opacity-20" />
-    </div>
-  );
-}
-
-function ProviderBreakdownInline({ breakdown }: { breakdown: InsightStats["providerBreakdown"] }) {
-  const colors: Record<string, string> = {
-    "claude-code": "bg-terminal-orange",
-    cursor: "bg-terminal-blue",
-  };
-  return (
-    <div className="flex items-center gap-3">
-      {breakdown.map((b) => (
-        <div key={b.provider} className="flex items-center gap-1.5">
-          <span
-            className={`w-2 h-2 rounded-sm ${colors[b.provider] || "bg-terminal-dim"}`}
-            style={{ opacity: 0.7 }}
-          />
-          <span className="text-[10px] font-mono text-terminal-dimmer">
-            {b.label} {b.count}
-          </span>
-        </div>
-      ))}
     </div>
   );
 }
@@ -818,45 +701,6 @@ function SystemChecksSection() {
   );
 }
 
-// ─── Icons ───────────────────────────────────────────────────────────
-
-const I = ({ c, children }: { c: string; children: React.ReactNode }) => (
-  <svg
-    width="18"
-    height="18"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.5"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={c}
-  >
-    {children}
-  </svg>
-);
-const SessionsIcon = () => (
-  <I c="text-terminal-green">
-    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-  </I>
-);
-const ReplaysIcon = () => (
-  <I c="text-terminal-blue">
-    <polygon points="5 3 19 12 5 21 5 3" />
-  </I>
-);
-const PromptsIcon = () => (
-  <I c="text-terminal-green">
-    <polyline points="4 17 10 11 4 5" />
-    <line x1="12" y1="19" x2="20" y2="19" />
-  </I>
-);
-const ToolsIcon = () => (
-  <I c="text-terminal-orange">
-    <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
-  </I>
-);
-
 // ─── Main Component ──────────────────────────────────────────────────
 
 export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
@@ -987,20 +831,24 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
 
   if (loading && !sources.length && !replays.length) {
     return (
-      <div className="flex-1 overflow-auto p-4 md:p-8 space-y-8 animate-in fade-in duration-500">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[...Array(4)].map((_, i) => (
-            <MetricCardSkeleton key={i} />
-          ))}
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-6">
-            <div className="bg-terminal-surface rounded-xl p-6 h-[300px] skeleton opacity-10" />
-            <div className="bg-terminal-surface rounded-xl p-6 h-[400px] skeleton opacity-10" />
+      <div className="flex-1 overflow-auto animate-in fade-in duration-500">
+        <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 space-y-6 animate-pulse">
+          {/* Overview + activity skeleton */}
+          <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm space-y-4">
+            <div className="grid grid-cols-4 gap-6">
+              {Array.from({ length: 4 }, (_, i) => (
+                <div key={i} className="space-y-2">
+                  <div className="h-7 w-16 skeleton rounded" />
+                  <div className="h-3 w-12 skeleton rounded opacity-40" />
+                </div>
+              ))}
+            </div>
+            <div className="h-[120px] w-full skeleton rounded opacity-15" />
           </div>
-          <div className="space-y-6">
-            <div className="bg-terminal-surface rounded-xl p-6 h-[250px] skeleton opacity-10" />
-            <div className="bg-terminal-surface rounded-xl p-6 h-[350px] skeleton opacity-10" />
+          {/* Sessions + Replays skeleton */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <div className="bg-terminal-surface rounded-xl p-4 h-[300px] skeleton opacity-10" />
+            <div className="bg-terminal-surface rounded-xl p-4 h-[300px] skeleton opacity-10" />
           </div>
         </div>
       </div>
@@ -1017,115 +865,124 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     );
   }
 
-  const hasCounts = sources.every((s) => s.promptCount != null);
-  const countsSub = userInsights
-    ? `across ${displayProjectCount} projects`
-    : hasCounts
-      ? `across ${insights.projectCount} projects`
-      : `${sources.filter((s) => s.promptCount != null).length} of ${sources.length} scanned`;
-
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 space-y-6">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <MetricCard
-            label="Sessions"
-            value={<AnimatedMetricValue value={insights.totalSessions} />}
-            sub={`${displayProjectCount} project${displayProjectCount !== 1 ? "s" : ""}`}
-            color="green"
-            icon={<SessionsIcon />}
+        {/* Combined Overview + Activity */}
+        <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm">
+          {/* Compact stats row */}
+          <div className="flex items-start justify-between mb-4">
+            <div className="grid grid-cols-4 gap-x-6 gap-y-1 flex-1 min-w-0">
+              <div>
+                <div className="text-2xl font-mono font-bold text-terminal-green tabular-nums">
+                  <AnimatedMetricValue value={insights.totalSessions} />
+                </div>
+                <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest mt-0.5">
+                  sessions
+                </div>
+              </div>
+              <div>
+                <div className="text-2xl font-mono font-bold text-terminal-blue tabular-nums">
+                  <AnimatedMetricValue value={insights.totalReplays} />
+                </div>
+                <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest mt-0.5">
+                  replays
+                </div>
+              </div>
+              <div>
+                <div className="text-2xl font-mono font-bold text-terminal-green tabular-nums">
+                  <AnimatedMetricValue value={displayTotalPrompts} />
+                </div>
+                <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest mt-0.5">
+                  turns
+                </div>
+              </div>
+              <div>
+                <div className="text-2xl font-mono font-bold text-terminal-orange tabular-nums">
+                  <AnimatedMetricValue value={displayTotalToolCalls} />
+                </div>
+                <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest mt-0.5">
+                  tool calls
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-col items-end gap-1 shrink-0">
+              {displayProviderBreakdown.map((b) => (
+                <div
+                  key={b.provider}
+                  className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md ${b.provider === "claude-code" ? "bg-terminal-orange/8" : b.provider === "cursor" ? "bg-terminal-blue/8" : "bg-terminal-dim/8"}`}
+                >
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${b.provider === "claude-code" ? "bg-terminal-orange" : b.provider === "cursor" ? "bg-terminal-blue" : "bg-terminal-dim"}`}
+                  />
+                  <span
+                    className={`text-[10px] font-mono tabular-nums ${b.provider === "claude-code" ? "text-terminal-orange/80" : b.provider === "cursor" ? "text-terminal-blue/80" : "text-terminal-dim"}`}
+                  >
+                    {b.label}
+                  </span>
+                  <span
+                    className={`text-[10px] font-mono font-bold tabular-nums ${b.provider === "claude-code" ? "text-terminal-orange" : b.provider === "cursor" ? "text-terminal-blue" : "text-terminal-dim"}`}
+                  >
+                    {b.count}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Heatmap */}
+          <ContributionHeatmap sessionsPerDay={displaySessionsPerDay} weeks={52} />
+
+          {/* CTA link */}
+          <button
             onClick={() => onNavigate("insights")}
-          />
-          <MetricCard
-            label="Replays"
-            value={<AnimatedMetricValue value={insights.totalReplays} />}
-            sub={insights.publishedCount > 0 ? `${insights.publishedCount} published` : undefined}
-            color="blue"
-            icon={<ReplaysIcon />}
-            onClick={() => onNavigate("insights")}
-          />
-          <MetricCard
-            label="Turns"
-            value={<AnimatedMetricValue value={displayTotalPrompts} />}
-            sub={countsSub}
-            color="green"
-            icon={<PromptsIcon />}
-            onClick={() => onNavigate("insights")}
-          />
-          <MetricCard
-            label="Tool Calls"
-            value={<AnimatedMetricValue value={displayTotalToolCalls} />}
-            sub={countsSub}
-            color="orange"
-            icon={<ToolsIcon />}
-            onClick={() => onNavigate("insights")}
-          />
+            className="w-full py-2 mt-3 text-xs font-sans font-semibold rounded-lg bg-terminal-surface-2 text-terminal-dim hover:text-terminal-green hover:bg-terminal-surface-hover transition-colors"
+          >
+            View personal insights &rarr;
+          </button>
         </div>
 
-        {scanStatus?.running && (
-          <div className="rounded-xl border border-terminal-purple/20 bg-terminal-surface px-4 py-3">
-            <div className="flex items-center gap-2 text-sm font-sans text-terminal-text">
-              <span className="w-2 h-2 rounded-full bg-terminal-purple animate-pulse" />
-              <span>
-                {scanStatus.phase === "discovering"
-                  ? "Refreshing session discovery"
-                  : "Refreshing dashboard insights"}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
+                Recent Sessions
+              </h3>
+              <span className="text-[10px] font-mono text-terminal-dimmer tabular-nums">
+                {insights.totalSessions} total
               </span>
             </div>
-            <p className="mt-1 text-xs font-mono text-terminal-dim">
-              {scanStatus.phase === "discovering"
-                ? "Showing the last completed dashboard while new sessions are discovered."
-                : scanStatus.total > 0
-                  ? `Showing cached totals while ${scanStatus.scanned}/${scanStatus.total} sessions refresh.`
-                  : "Showing cached totals while the latest scan spins up."}
-            </p>
+            <RecentSessionsList
+              sessions={insights.recentSources}
+              isLoading={loadingSources}
+              onViewAll={() => onNavigate("sessions")}
+              onGenerate={handleGenerate}
+              onViewReplay={handleOpenReplay}
+              onSessionClick={(s) => setSelectedSlug(s.slug)}
+              generatingSlug={generatingSlug}
+              generateErrorSlug={generateErrorSlug}
+            />
           </div>
-        )}
 
-        {/* Activity Heatmap (GitHub-style, full width) */}
-        <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
-              Activity
-            </h3>
-            <ProviderBreakdownInline breakdown={displayProviderBreakdown} />
+          <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
+                Recent Replays
+              </h3>
+              <span className="text-[10px] font-mono text-terminal-dimmer tabular-nums">
+                {insights.totalReplays} total
+              </span>
+            </div>
+            <RecentReplaysList
+              replays={insights.recentReplays}
+              isLoading={loadingReplays}
+              onViewAll={() => onNavigate("replays")}
+              onOpen={handleOpenReplay}
+            />
           </div>
-          <ContributionHeatmap sessionsPerDay={displaySessionsPerDay} weeks={52} />
         </div>
 
-        {/* CTA to Insights */}
-        <button
-          onClick={() => onNavigate("insights")}
-          className="w-full py-3.5 rounded-xl bg-gradient-to-r from-terminal-green/10 to-terminal-blue/10 border border-terminal-green/20 hover:border-terminal-green/40 text-sm font-sans font-medium text-terminal-text hover:text-terminal-green transition-all group flex items-center justify-center gap-2"
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            className="text-terminal-green"
-          >
-            <path d="M3 3v18h18" />
-            <path d="M7 16l4-8 4 4 5-10" />
-          </svg>
-          View your personal insights
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            className="opacity-50 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all"
-          >
-            <path d="M5 3l5 5-5 5" />
-          </svg>
-        </button>
-
-        {/* Recent Projects (from scan data — top 5 by lastActivity) */}
+        {/* Recent Projects (below sessions/replays to match tab menu order) */}
         {showRecentProjectsSkeleton ? (
           <RecentProjectsSkeleton />
         ) : userInsights && userInsights.topProjects.length > 1 ? (
@@ -1183,46 +1040,6 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
             )}
           </div>
         ) : null}
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
-                Recent Sessions
-              </h3>
-              <span className="text-[10px] font-mono text-terminal-dimmer tabular-nums">
-                {insights.totalSessions} total
-              </span>
-            </div>
-            <RecentSessionsList
-              sessions={insights.recentSources}
-              isLoading={loadingSources}
-              onViewAll={() => onNavigate("sessions")}
-              onGenerate={handleGenerate}
-              onViewReplay={handleOpenReplay}
-              onSessionClick={(s) => setSelectedSlug(s.slug)}
-              generatingSlug={generatingSlug}
-              generateErrorSlug={generateErrorSlug}
-            />
-          </div>
-
-          <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
-                Recent Replays
-              </h3>
-              <span className="text-[10px] font-mono text-terminal-dimmer tabular-nums">
-                {insights.totalReplays} total
-              </span>
-            </div>
-            <RecentReplaysList
-              replays={insights.recentReplays}
-              isLoading={loadingReplays}
-              onViewAll={() => onNavigate("replays")}
-              onOpen={handleOpenReplay}
-            />
-          </div>
-        </div>
 
         <SystemChecksSection />
       </div>
