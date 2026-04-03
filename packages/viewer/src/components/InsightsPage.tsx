@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SessionSummary, SourceSession } from "../types";
+import { DataQualityIndicator } from "./DataQualityIndicator";
 import {
   formatCompactDuration,
   parseCachedList,
@@ -265,6 +266,34 @@ function formatCompactNum(n: number): string {
   return n.toLocaleString();
 }
 
+function buildAggregateMetricQuality(notes: string[] | undefined): {
+  overall?: string;
+  duration?: string;
+  cost?: string;
+} {
+  const allNotes = notes?.filter(Boolean) || [];
+  const durationNotes = allNotes.filter((note) =>
+    /duration estimates|timing data|duration/i.test(note),
+  );
+  const costNotes = allNotes.filter((note) =>
+    /token snapshots|token and cost|cost totals/i.test(note),
+  );
+
+  return {
+    overall: allNotes.length > 0 ? allNotes.join("\n") : undefined,
+    duration:
+      durationNotes.length > 0
+        ? ["Coding time is approximate for Cursor sessions.", ...durationNotes].join("\n")
+        : undefined,
+    cost:
+      costNotes.length > 0
+        ? ["Spend is a lower bound for Cursor sessions, not the full total.", ...costNotes].join(
+            "\n",
+          )
+        : undefined,
+  };
+}
+
 function useAnimatedNumber(target: number, durationMs = 500): number {
   const [display, setDisplay] = useState(target);
   const currentRef = useRef(target);
@@ -507,6 +536,7 @@ function ShareCard({
   sessionsPerDay,
   range,
   providers,
+  dataQualityNotes,
 }: {
   stats: ComputedStats;
   streak: StreakInfo;
@@ -514,6 +544,7 @@ function ShareCard({
   sessionsPerDay: Record<string, number>;
   range: TimeRange;
   providers: Record<string, number>;
+  dataQualityNotes?: string[];
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
 
@@ -527,6 +558,19 @@ function ShareCard({
     };
     return entries.map(([k]) => labels[k] || k).join(" + ");
   }, [providers]);
+  const metricQuality = useMemo(
+    () => buildAggregateMetricQuality(dataQualityNotes),
+    [dataQualityNotes],
+  );
+
+  const MetricLabel = ({ label, title }: { label: string; title?: string }) => (
+    <div className="mt-0.5 flex items-center gap-1">
+      <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider">
+        {label}
+      </div>
+      {title ? <DataQualityIndicator title={title} className="shrink-0" /> : null}
+    </div>
+  );
 
   return (
     <div
@@ -547,6 +591,9 @@ function ShareCard({
             <span className="text-[10px] font-mono text-terminal-dimmer px-2 py-0.5 rounded-full bg-terminal-surface-2">
               {rangeLabel(range)}
             </span>
+            {metricQuality.overall ? (
+              <DataQualityIndicator title={metricQuality.overall} className="shrink-0" />
+            ) : null}
           </div>
           {providerLabel && (
             <span className="text-[10px] font-mono text-terminal-dim">{providerLabel}</span>
@@ -559,33 +606,25 @@ function ShareCard({
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-green tabular-nums">
               <AnimatedShareValue value={stats.sessions} formatter={formatCompactNum} />
             </div>
-            <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
-              sessions
-            </div>
+            <MetricLabel label="sessions" />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-blue tabular-nums">
               <AnimatedShareValue value={stats.replays} formatter={formatCompactNum} />
             </div>
-            <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
-              replays
-            </div>
+            <MetricLabel label="replays" />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-green tabular-nums">
               <AnimatedShareValue value={stats.prompts} formatter={formatCompactNum} />
             </div>
-            <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
-              turns
-            </div>
+            <MetricLabel label="turns" />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-orange tabular-nums">
               <AnimatedShareValue value={stats.toolCalls} formatter={formatCompactNum} />
             </div>
-            <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
-              tool calls
-            </div>
+            <MetricLabel label="tool calls" />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-text tabular-nums">
@@ -594,25 +633,19 @@ function ShareCard({
                 formatter={(n) => formatCompactDuration(n)}
               />
             </div>
-            <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
-              coding
-            </div>
+            <MetricLabel label="coding" title={metricQuality.duration} />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-orange tabular-nums">
               <AnimatedShareValue value={stats.cost} formatter={(n) => formatCost(n)} />
             </div>
-            <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
-              spent
-            </div>
+            <MetricLabel label="spent" title={metricQuality.cost} />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-blue tabular-nums">
               <AnimatedShareValue value={stats.edits} formatter={formatCompactNum} />
             </div>
-            <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
-              file edits
-            </div>
+            <MetricLabel label="file edits" />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-purple tabular-nums">
@@ -621,9 +654,7 @@ function ShareCard({
                 formatter={(n) => Math.round(n).toString()}
               />
             </div>
-            <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
-              projects
-            </div>
+            <MetricLabel label="projects" />
           </div>
         </div>
 
@@ -1252,6 +1283,7 @@ export default function InsightsPage() {
           sessionsPerDay={userInsights.sessionsPerDay || {}}
           range={range}
           providers={userInsights.providers || {}}
+          dataQualityNotes={userInsights.dataQuality?.notes}
         />
 
         {/* Activity Heatmap — always shows full history regardless of range filter */}
