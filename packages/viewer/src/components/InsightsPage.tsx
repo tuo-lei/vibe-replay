@@ -572,7 +572,7 @@ function ShareCard({
             </div>
           </div>
           <div>
-            <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-text tabular-nums">
+            <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-green tabular-nums">
               <AnimatedShareValue value={stats.prompts} formatter={formatCompactNum} />
             </div>
             <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">

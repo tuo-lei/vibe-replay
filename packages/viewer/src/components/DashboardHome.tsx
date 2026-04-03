@@ -33,7 +33,7 @@ interface InsightStats {
   totalDuration: number;
   providerBreakdown: { provider: string; count: number; label: string }[];
   projectCount: number;
-  activityByDay: { date: string; label: string; claude: number; cursor: number }[];
+  sessionsPerDay: Record<string, number>;
   recentSources: SourceSession[];
   recentReplays: SessionSummary[];
   publishedCount: number;
@@ -270,30 +270,13 @@ function computeInsights(sources: SourceSession[], replays: SessionSummary[]): I
   for (const s of sources) projects.add(s.project);
   for (const r of replays) projects.add(r.project);
 
-  // Activity by day (last 30 days) — grouped by provider
-  const now = new Date();
-  const dayMs = 86400000;
-  const activityByDay: InsightStats["activityByDay"] = [];
-  for (let i = 29; i >= 0; i--) {
-    const dayStart = new Date(now.getTime() - i * dayMs);
-    dayStart.setHours(0, 0, 0, 0);
-    const dayEnd = new Date(dayStart.getTime() + dayMs);
-    const dateStr = dayStart.toISOString().slice(0, 10);
-    const dayLabel = dayStart.toLocaleDateString("en-US", {
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-    });
-    let claude = 0;
-    let cursor = 0;
-    for (const s of sources) {
-      const ts = new Date(s.timestamp);
-      if (ts >= dayStart && ts < dayEnd) {
-        if (s.provider === "cursor") cursor++;
-        else claude++;
-      }
-    }
-    activityByDay.push({ date: dateStr, label: dayLabel, claude, cursor });
+  // Home activity should reflect the latest discovered sessions immediately,
+  // even while richer scan insights are still refreshing in the background.
+  const sessionsPerDay: Record<string, number> = {};
+  for (const s of sources) {
+    const day = s.timestamp?.slice(0, 10);
+    if (!day) continue;
+    sessionsPerDay[day] = (sessionsPerDay[day] || 0) + 1;
   }
 
   const totalSessions = sources.length;
@@ -309,7 +292,7 @@ function computeInsights(sources: SourceSession[], replays: SessionSummary[]): I
     totalDuration,
     providerBreakdown,
     projectCount: projects.size,
-    activityByDay,
+    sessionsPerDay,
     recentSources: [...sources].sort((a, b) => b.timestamp.localeCompare(a.timestamp)).slice(0, 5),
     recentReplays: [...replays].sort((a, b) => b.startTime.localeCompare(a.startTime)).slice(0, 5),
     publishedCount: replays.filter((r) => r.gist?.gistId).length,
@@ -892,6 +875,25 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   const displayProjectCount = Math.max(insights.projectCount, userInsights?.totalProjects ?? 0);
   const displayTotalPrompts = userInsights?.totalPrompts ?? insights.totalPrompts;
   const displayTotalToolCalls = userInsights?.totalToolCalls ?? insights.totalToolCalls;
+  const displayProviderBreakdown =
+    insights.providerBreakdown.length > 0
+      ? insights.providerBreakdown
+      : Object.entries(userInsights?.providers || {})
+          .map(([provider, count]) => ({
+            provider,
+            count,
+            label:
+              provider === "claude-code"
+                ? "Claude Code"
+                : provider === "cursor"
+                  ? "Cursor"
+                  : provider,
+          }))
+          .sort((a, b) => b.count - a.count);
+  const displaySessionsPerDay =
+    Object.keys(insights.sessionsPerDay).length > 0
+      ? insights.sessionsPerDay
+      : (userInsights?.sessionsPerDay ?? {});
 
   const handleOpenReplay = (slug: string) => {
     navigateTo({ view: null, session: slug });
@@ -1086,18 +1088,9 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
             <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
               Activity
             </h3>
-            <ProviderBreakdownInline breakdown={insights.providerBreakdown} />
+            <ProviderBreakdownInline breakdown={displayProviderBreakdown} />
           </div>
-          {userInsights?.sessionsPerDay ? (
-            <ContributionHeatmap sessionsPerDay={userInsights.sessionsPerDay} weeks={52} />
-          ) : (
-            <ContributionHeatmap
-              sessionsPerDay={Object.fromEntries(
-                insights.activityByDay.map((d) => [d.date, d.claude + d.cursor]),
-              )}
-              weeks={52}
-            />
-          )}
+          <ContributionHeatmap sessionsPerDay={displaySessionsPerDay} weeks={52} />
         </div>
 
         {/* CTA to Insights */}
