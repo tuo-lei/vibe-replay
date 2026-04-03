@@ -6,9 +6,8 @@
  * each JSONL line once and collects counts, timestamps, branches, PRs, etc.
  *
  * Results are cached per-session keyed by input file metadata + scannerVersion.
- * Cursor sessions with SQLite/global-state enrichment bypass this cache because
- * their parsed output depends on DBs outside the transcript/tool file set.
- * so unchanged sessions are never re-scanned.
+ * Cursor sessions extend that fingerprint with sqlite/global-state dependencies
+ * so repeated dashboard loads can reuse cached scans without serving stale data.
  */
 
 import { readdir, readFile, stat } from "node:fs/promises";
@@ -18,11 +17,12 @@ import { readFileCache, writeFileCache } from "./cache.js";
 import { estimateActiveDuration } from "./duration.js";
 import { estimateCost, estimateCostSimple } from "./pricing.js";
 import { parseCursorSession } from "./providers/cursor/parser.js";
+import { getCursorSessionCachePaths } from "./providers/cursor/sqlite-reader.js";
 import type { ProviderParseResult } from "./providers/types.js";
 import type { DataSource, PrLink, SessionInfo, TokenUsage } from "./types.js";
 
 // Bump this when we extract new fields — forces re-scan of all sessions.
-const SCANNER_VERSION = 5;
+const SCANNER_VERSION = 6;
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -685,6 +685,7 @@ function estimateParsedCost(parsed: ProviderParseResult): number | undefined {
 // ─── Cache management ───────────────────────────────────────────────
 
 const SCAN_CACHE_KEY = "session-scans-v1";
+const SCAN_CONCURRENCY = 4;
 
 export async function readScanCache(): Promise<ScanCacheData | null> {
   const cached = await readFileCache<ScanCacheData>(SCAN_CACHE_KEY);
@@ -727,9 +728,12 @@ async function checkCache(
   return { valid: false, meta };
 }
 
-function shouldUseScanCache(session: ScanInput): boolean {
-  if (session.provider === "cursor" && session.hasSqlite) return false;
-  return true;
+async function getScanCachePaths(session: ScanInput): Promise<string[]> {
+  const paths = [...session.filePaths, ...(session.toolPaths || [])];
+  if (session.provider === "cursor" && session.hasSqlite) {
+    paths.push(...(await getCursorSessionCachePaths(session.sessionId)));
+  }
+  return [...new Set(paths)];
 }
 
 // ─── Background scanner ────────────────────────────────────────────
@@ -739,6 +743,8 @@ export interface BackgroundScanState {
   scanned: number;
   total: number;
   results: SessionScanResult[];
+  currentSession?: string;
+  phase?: "discovering" | "scanning";
   startedAt?: string;
   finishedAt?: string;
 }
@@ -752,62 +758,71 @@ export async function runBackgroundScan(
   onProgress?: (progress: ScanProgress) => void,
 ): Promise<SessionScanResult[]> {
   const cache = (await readScanCache()) || { scannerVersion: SCANNER_VERSION, entries: {} };
-  const results: SessionScanResult[] = [];
+  const results = new Array<SessionScanResult | undefined>(sessions.length);
+  let completed = 0;
+  let nextIndex = 0;
+  let writeChain: Promise<void> = Promise.resolve();
 
-  for (let i = 0; i < sessions.length; i++) {
-    const session = sessions[i];
+  const queueCacheWrite = (): void => {
+    writeChain = writeChain.then(() => writeScanCache(cache)).catch(() => {});
+  };
 
-    onProgress?.({
-      scanned: i,
-      total: sessions.length,
-      currentSession: session.slug,
-      done: false,
-    });
-
-    // Check cache (single stat() pass — returns meta on miss)
+  const processSession = async (index: number): Promise<void> => {
+    const session = sessions[index];
     const cached = cache.entries[session.sessionId];
-    const cacheablePaths = [...session.filePaths, ...(session.toolPaths || [])];
-    const cacheEnabled = shouldUseScanCache(session);
-    const cacheCheck = cacheEnabled
-      ? await checkCache(cached, cacheablePaths)
-      : ({
-          valid: false,
-          meta: await getFileMeta(cacheablePaths),
-        } as const);
+    const cacheablePaths = await getScanCachePaths(session);
+    const cacheCheck = await checkCache(cached, cacheablePaths);
 
-    if (cacheEnabled && cacheCheck.valid && cached) {
-      results.push(cached.result);
+    if (cacheCheck.valid && cached) {
+      results[index] = cached.result;
     } else {
       try {
         const result = await scanSession(session);
-        results.push(result);
+        results[index] = result;
 
-        // Update cache entry (reuse meta from checkCache — no second stat round)
-        if (cacheEnabled) {
-          const { meta } = cacheCheck as {
-            valid: false;
-            meta: { mtimeMs: number; fileSize: number };
-          };
-          cache.entries[session.sessionId] = {
-            mtimeMs: meta.mtimeMs,
-            fileSize: meta.fileSize,
-            scannedAt: new Date().toISOString(),
-            result,
-          };
-        }
-
-        // Write cache every 10 sessions to avoid losing progress
-        if ((i + 1) % 10 === 0) {
-          await writeScanCache(cache);
-        }
+        const { meta } = cacheCheck as {
+          valid: false;
+          meta: { mtimeMs: number; fileSize: number };
+        };
+        cache.entries[session.sessionId] = {
+          mtimeMs: meta.mtimeMs,
+          fileSize: meta.fileSize,
+          scannedAt: new Date().toISOString(),
+          result,
+        };
       } catch {
         // Skip failed sessions silently
       }
     }
-  }
 
-  // Final cache write
-  await writeScanCache(cache);
+    completed++;
+    onProgress?.({
+      scanned: completed,
+      total: sessions.length,
+      currentSession: session.slug,
+      done: false,
+    });
+    if (completed % 25 === 0) queueCacheWrite();
+  };
+
+  const worker = async (): Promise<void> => {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= sessions.length) return;
+      await processSession(index);
+    }
+  };
+
+  onProgress?.({
+    scanned: 0,
+    total: sessions.length,
+    done: false,
+  });
+
+  const workerCount = Math.min(SCAN_CONCURRENCY, sessions.length || 1);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  queueCacheWrite();
+  await writeChain;
 
   onProgress?.({
     scanned: sessions.length,
@@ -815,7 +830,7 @@ export async function runBackgroundScan(
     done: true,
   });
 
-  return results;
+  return results.filter((result): result is SessionScanResult => Boolean(result));
 }
 
 // ─── Aggregation ────────────────────────────────────────────────────

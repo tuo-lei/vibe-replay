@@ -165,6 +165,17 @@ describe("cursor sqlite metrics helpers", () => {
     expect(__testables.inferProjectRootFromPathHint("/home/node/.config/git/config")).toBeNull();
   });
 
+  it("prefers direct high-confidence composer project hints before filesystem probing", async () => {
+    await expect(
+      __testables.inferProjectFromComposerData(
+        JSON.stringify({
+          currentFile: "/workspaces/api/src/resolvers/export.ts",
+        }),
+        [],
+      ),
+    ).resolves.toBe("/workspaces/api");
+  });
+
   it("normalizes composite Cursor model labels to the latest distinct model", () => {
     expect(
       __testables.normalizeCursorModelName(

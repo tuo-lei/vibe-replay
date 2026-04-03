@@ -400,6 +400,12 @@ interface SourcesEnrichmentStatus {
   message?: string;
 }
 
+interface PersistedInsightsCache {
+  userInsights: UserInsights | null;
+  projectInsights: Array<[string, ProjectInsights]>;
+  computedAt: string | null;
+}
+
 function sourceSessionKey(provider: string, project: string, slug: string): string {
   return `${provider}::${project}::${slug}`;
 }
@@ -759,6 +765,8 @@ export async function startServer(
   const cacheKeySuffix = createHash("sha1").update(baseDir).digest("hex").slice(0, 12);
   const sourcesCacheKey = `dashboard-sources-v1-${cacheKeySuffix}`;
   const replaysCacheKey = `dashboard-replays-v1-${cacheKeySuffix}`;
+  const scanResultsCacheKey = `dashboard-scan-results-v1-${cacheKeySuffix}`;
+  const insightsCacheKey = `dashboard-insights-v1-${cacheKeySuffix}`;
   const refreshReplaysCache = async (): Promise<any[] | null> => {
     try {
       const sessions = await scanSessions(baseDir);
@@ -957,12 +965,16 @@ export async function startServer(
     });
   };
 
+  const persistedScanResults = await readFileCache<SessionScanResult[]>(scanResultsCacheKey);
+  const persistedInsights = await readFileCache<PersistedInsightsCache>(insightsCacheKey);
+
   // ─── Background session scanner state ─────────────────────────────
   let scanState: BackgroundScanState = {
     running: false,
-    scanned: 0,
-    total: 0,
-    results: [],
+    scanned: persistedScanResults?.data.length || 0,
+    total: persistedScanResults?.data.length || 0,
+    results: persistedScanResults?.data || [],
+    finishedAt: persistedScanResults?.updatedAt,
   };
 
   // Pre-computed insights cache — populated after each scan completes.
@@ -971,11 +983,17 @@ export async function startServer(
     userInsights: UserInsights | null;
     projectInsights: Map<string, ProjectInsights>;
     computedAt: string | null;
-  } = {
-    userInsights: null,
-    projectInsights: new Map(),
-    computedAt: null,
-  };
+  } = persistedInsights?.data
+    ? {
+        userInsights: persistedInsights.data.userInsights,
+        projectInsights: new Map(persistedInsights.data.projectInsights),
+        computedAt: persistedInsights.data.computedAt,
+      }
+    : {
+        userInsights: null,
+        projectInsights: new Map(),
+        computedAt: null,
+      };
 
   /** Pre-compute all insights from scan results and store in cache. */
   const precomputeInsightsCache = async (results: SessionScanResult[]): Promise<void> => {
@@ -1004,6 +1022,11 @@ export async function startServer(
       projectInsights: projects,
       computedAt: new Date().toISOString(),
     };
+    await writeFileCache<PersistedInsightsCache>(insightsCacheKey, {
+      userInsights: insightsCache.userInsights,
+      projectInsights: [...insightsCache.projectInsights.entries()],
+      computedAt: insightsCache.computedAt,
+    });
   };
 
   /**
@@ -1013,12 +1036,16 @@ export async function startServer(
    */
   const startBackgroundScan = (): void => {
     if (scanState.running) return;
+    const previousResults = scanState.results;
+    const previousFinishedAt = scanState.finishedAt;
     scanState = {
       running: true,
       scanned: 0,
       total: 0,
-      results: [],
+      results: previousResults,
+      phase: "discovering",
       startedAt: new Date().toISOString(),
+      finishedAt: previousFinishedAt,
     };
 
     void (async () => {
@@ -1060,8 +1087,10 @@ export async function startServer(
         const results = await runBackgroundScan(scanInputs, (progress) => {
           scanState = {
             ...scanState,
+            phase: "scanning",
             scanned: progress.scanned,
             total: progress.total,
+            currentSession: progress.currentSession,
           };
         });
 
@@ -1070,9 +1099,13 @@ export async function startServer(
           scanned: results.length,
           total: scanInputs.length,
           results,
+          currentSession: undefined,
+          phase: undefined,
           startedAt: scanState.startedAt,
           finishedAt: new Date().toISOString(),
         };
+
+        await writeFileCache(scanResultsCacheKey, results);
 
         // Pre-compute insights cache in background (non-blocking)
         precomputeInsightsCache(results).catch(() => {});
@@ -1080,6 +1113,8 @@ export async function startServer(
         scanState = {
           ...scanState,
           running: false,
+          currentSession: undefined,
+          phase: undefined,
           finishedAt: new Date().toISOString(),
         };
       }
@@ -1457,9 +1492,14 @@ export async function startServer(
       scanned: scanState.scanned,
       total: scanState.total,
       resultCount: scanState.results.length,
+      currentSession: scanState.currentSession,
+      phase: scanState.phase,
       startedAt: scanState.startedAt,
       finishedAt: scanState.finishedAt,
       hasInsights: insightsCache.userInsights !== null,
+      hasCachedResults: scanState.results.length > 0,
+      cachedResultCount: scanState.results.length,
+      cachedAt: scanState.finishedAt,
     });
   });
 

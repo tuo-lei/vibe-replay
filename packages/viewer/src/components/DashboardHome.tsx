@@ -317,6 +317,53 @@ function computeInsights(sources: SourceSession[], replays: SessionSummary[]): I
   };
 }
 
+function useAnimatedNumber(target: number, durationMs = 450): number {
+  const [display, setDisplay] = useState(target);
+  const currentRef = useRef(target);
+
+  useEffect(() => {
+    const startValue = currentRef.current;
+    const delta = target - startValue;
+    if (Math.abs(delta) < 1) {
+      currentRef.current = target;
+      setDisplay(target);
+      return;
+    }
+
+    let frame = 0;
+    const startAt = performance.now();
+    const step = (now: number) => {
+      const t = Math.min(1, (now - startAt) / durationMs);
+      const eased = 1 - (1 - t) ** 3;
+      const next = startValue + delta * eased;
+      currentRef.current = next;
+      setDisplay(next);
+      if (t < 1) {
+        frame = requestAnimationFrame(step);
+      } else {
+        currentRef.current = target;
+        setDisplay(target);
+      }
+    };
+
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [target, durationMs]);
+
+  return display;
+}
+
+function AnimatedMetricValue({
+  value,
+  formatter = (n) => Math.round(n).toLocaleString(),
+}: {
+  value: number;
+  formatter?: (value: number) => string;
+}) {
+  const animated = useAnimatedNumber(value);
+  return <>{formatter(animated)}</>;
+}
+
 // ─── UI Components ───────────────────────────────────────────────────
 
 function MetricCard({
@@ -328,7 +375,7 @@ function MetricCard({
   onClick,
 }: {
   label: string;
-  value: string;
+  value: React.ReactNode;
   sub?: string;
   color?: "green" | "blue" | "orange" | "purple";
   icon: React.ReactNode;
@@ -981,7 +1028,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <MetricCard
             label="Sessions"
-            value={insights.totalSessions.toLocaleString()}
+            value={<AnimatedMetricValue value={insights.totalSessions} />}
             sub={`${displayProjectCount} project${displayProjectCount !== 1 ? "s" : ""}`}
             color="green"
             icon={<SessionsIcon />}
@@ -989,7 +1036,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           />
           <MetricCard
             label="Replays"
-            value={insights.totalReplays.toLocaleString()}
+            value={<AnimatedMetricValue value={insights.totalReplays} />}
             sub={insights.publishedCount > 0 ? `${insights.publishedCount} published` : undefined}
             color="blue"
             icon={<ReplaysIcon />}
@@ -997,7 +1044,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           />
           <MetricCard
             label="Turns"
-            value={displayTotalPrompts.toLocaleString()}
+            value={<AnimatedMetricValue value={displayTotalPrompts} />}
             sub={countsSub}
             color="green"
             icon={<PromptsIcon />}
@@ -1005,13 +1052,33 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           />
           <MetricCard
             label="Tool Calls"
-            value={displayTotalToolCalls.toLocaleString()}
+            value={<AnimatedMetricValue value={displayTotalToolCalls} />}
             sub={countsSub}
             color="orange"
             icon={<ToolsIcon />}
             onClick={() => onNavigate("insights")}
           />
         </div>
+
+        {scanStatus?.running && (
+          <div className="rounded-xl border border-terminal-purple/20 bg-terminal-surface px-4 py-3">
+            <div className="flex items-center gap-2 text-sm font-sans text-terminal-text">
+              <span className="w-2 h-2 rounded-full bg-terminal-purple animate-pulse" />
+              <span>
+                {scanStatus.phase === "discovering"
+                  ? "Refreshing session discovery"
+                  : "Refreshing dashboard insights"}
+              </span>
+            </div>
+            <p className="mt-1 text-xs font-mono text-terminal-dim">
+              {scanStatus.phase === "discovering"
+                ? "Showing the last completed dashboard while new sessions are discovered."
+                : scanStatus.total > 0
+                  ? `Showing cached totals while ${scanStatus.scanned}/${scanStatus.total} sessions refresh.`
+                  : "Showing cached totals while the latest scan spins up."}
+            </p>
+          </div>
+        )}
 
         {/* Activity Heatmap (GitHub-style, full width) */}
         <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm">

@@ -59,7 +59,7 @@ export async function discoverCursorSessions(): Promise<SessionInfo[]> {
   const transcriptSessions = sessions.slice();
   const knownIds = new Set(transcriptSessions.map((s) => s.sessionId));
   const decodedPaths = [...new Set(sessions.map((s) => s.cwd).filter(Boolean))];
-  const sqliteOnly = await discoverSqliteOnlySessions(knownIds, decodedPaths);
+  const sqliteOnly = await discoverSqliteOnlySessions(knownIds, decodedPaths, true);
   sessions.push(...sqliteOnly);
   for (const s of sqliteOnly) knownIds.add(s.sessionId);
 

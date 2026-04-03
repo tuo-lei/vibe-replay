@@ -3,6 +3,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type { CursorSidecars, PrLink, TokenUsage, TurnStat } from "@vibe-replay/types";
+import { readFileCache, writeFileCache } from "../../cache.js";
 import type { ContentBlock, ParsedTurn, SessionInfo } from "../../types.js";
 import type { ProviderParseResult } from "../types.js";
 import { sanitizeCursorAssistantText, sanitizeCursorReasoningText } from "./sanitize.js";
@@ -38,7 +39,27 @@ interface CachedSqlJsDb {
   mtimeMs: number;
 }
 
+interface StoreDbIndexEntry {
+  dbPath: string;
+  sessionId: string;
+  workspaceHash: string;
+  size: number;
+  mtimeMs: number;
+}
+
+interface GlobalStateDiscoveryCache {
+  dbPath: string;
+  size: number;
+  mtimeMs: number;
+  decodedPathsHash: string;
+  sessions: SessionInfo[];
+  sessionIds: string[];
+}
+
 let cachedGlobalStateDb: CachedSqlJsDb | null = null;
+let cachedStoreDbIndex: Map<string, StoreDbIndexEntry> | null = null;
+const resolvedProjectRootCache = new Map<string, Promise<string | null>>();
+const GLOBAL_STATE_DISCOVERY_CACHE_PREFIX = "cursor-global-state-discovery-v1";
 
 export function workspaceHash(absolutePath: string): string {
   return createHash("md5").update(absolutePath).digest("hex");
@@ -125,33 +146,13 @@ function hasGlobalStateSession(db: any, sessionId: string): boolean {
  * Session UUIDs are unique across workspaces, so we can match by UUID alone
  * without needing to correctly decode the workspace path.
  */
-async function findStoreDb(sessionId: string): Promise<string | null> {
+async function buildStoreDbIndex(): Promise<Map<string, StoreDbIndexEntry>> {
+  const index = new Map<string, StoreDbIndexEntry>();
   let workspaceDirs: string[];
   try {
     workspaceDirs = await readdir(CURSOR_CHATS_DIR);
   } catch {
-    return null;
-  }
-  for (const wsHash of workspaceDirs) {
-    const dbPath = join(CURSOR_CHATS_DIR, wsHash, sessionId, "store.db");
-    const s = await stat(dbPath).catch(() => null);
-    if (s?.isFile()) return dbPath;
-  }
-  return null;
-}
-
-export async function storeDbExists(_workspacePath: string, sessionId: string): Promise<boolean> {
-  const dbPath = await findStoreDb(sessionId);
-  return dbPath !== null;
-}
-
-export async function listStoreDbSessionIds(): Promise<Set<string>> {
-  const sessionIds = new Set<string>();
-  let workspaceDirs: string[];
-  try {
-    workspaceDirs = await readdir(CURSOR_CHATS_DIR);
-  } catch {
-    return sessionIds;
+    return index;
   }
 
   for (const wsHash of workspaceDirs) {
@@ -171,11 +172,39 @@ export async function listStoreDbSessionIds(): Promise<Set<string>> {
       const dbPath = join(wsDir, sessionId, "store.db");
       const dbStat = await stat(dbPath).catch(() => null);
       if (!dbStat?.isFile() || dbStat.size < MIN_STORE_DB_SIZE) continue;
-      sessionIds.add(sessionId);
+      index.set(sessionId, {
+        dbPath,
+        sessionId,
+        workspaceHash: wsHash,
+        size: dbStat.size,
+        mtimeMs: dbStat.mtimeMs,
+      });
     }
   }
 
-  return sessionIds;
+  return index;
+}
+
+async function getStoreDbIndex(forceRefresh = false): Promise<Map<string, StoreDbIndexEntry>> {
+  if (!forceRefresh && cachedStoreDbIndex) return cachedStoreDbIndex;
+  cachedStoreDbIndex = await buildStoreDbIndex();
+  return cachedStoreDbIndex;
+}
+
+async function findStoreDb(sessionId: string): Promise<string | null> {
+  const cached = await getStoreDbIndex();
+  if (cached.has(sessionId)) return cached.get(sessionId)?.dbPath || null;
+  const refreshed = await getStoreDbIndex(true);
+  return refreshed.get(sessionId)?.dbPath || null;
+}
+
+export async function storeDbExists(_workspacePath: string, sessionId: string): Promise<boolean> {
+  const dbPath = await findStoreDb(sessionId);
+  return dbPath !== null;
+}
+
+export async function listStoreDbSessionIds(forceRefresh = false): Promise<Set<string>> {
+  return new Set((await getStoreDbIndex(forceRefresh)).keys());
 }
 
 function valueToString(value: unknown): string {
@@ -319,6 +348,11 @@ function tokenUsageFromCursorTokenCount(value: unknown): TokenUsage | undefined 
   return hasAnyTokens(usage) ? usage : undefined;
 }
 
+function hashWorkspacePaths(paths: string[]): string {
+  const normalized = [...new Set(paths.filter(Boolean))].sort().join("\n");
+  return createHash("sha1").update(normalized).digest("hex").slice(0, 16);
+}
+
 async function resolveProjectRootFromPath(rawPath: string): Promise<string | null> {
   const candidate = rawPath
     .replaceAll("\\\\", "/")
@@ -327,23 +361,31 @@ async function resolveProjectRootFromPath(rawPath: string): Promise<string | nul
     .replace(/[),]+$/g, "");
   if (!candidate.startsWith("/")) return null;
 
-  let current = candidate;
-  const initial = await stat(current).catch(() => null);
-  if (initial?.isFile()) current = dirname(current);
+  const cached = resolvedProjectRootCache.get(candidate);
+  if (cached) return cached;
 
-  let deepestExisting: string | null = null;
-  while (current && current !== "/") {
-    const dirStat = await stat(current).catch(() => null);
-    if (dirStat?.isDirectory()) {
-      if (!deepestExisting) deepestExisting = current;
-      const gitStat = await stat(join(current, ".git")).catch(() => null);
-      if (gitStat) return current;
+  const resolving = (async () => {
+    let current = candidate;
+    const initial = await stat(current).catch(() => null);
+    if (initial?.isFile()) current = dirname(current);
+
+    let deepestExisting: string | null = null;
+    while (current && current !== "/") {
+      const dirStat = await stat(current).catch(() => null);
+      if (dirStat?.isDirectory()) {
+        if (!deepestExisting) deepestExisting = current;
+        const gitStat = await stat(join(current, ".git")).catch(() => null);
+        if (gitStat) return current;
+      }
+      const parent = dirname(current);
+      if (parent === current) break;
+      current = parent;
     }
-    const parent = dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
-  return deepestExisting;
+    return deepestExisting;
+  })();
+
+  resolvedProjectRootCache.set(candidate, resolving);
+  return resolving;
 }
 
 async function inferProjectFromComposerData(
@@ -373,9 +415,18 @@ async function inferProjectFromComposerData(
     basenameMatches.set(key, existing);
   }
 
+  const bestHint = hintedRoots.find((hint) => !isLowSignalProjectRoot(hint));
+  if (bestHint) {
+    const matchingDecoded = basenameMatches.get(basename(bestHint)) || [];
+    if (matchingDecoded.length === 1) return matchingDecoded[0];
+    if (canUseComposerProjectHintDirectly(bestHint)) return bestHint;
+  }
+
   for (const hint of hintedRoots) {
     const matchingDecoded = basenameMatches.get(basename(hint)) || [];
     if (matchingDecoded.length === 1) return matchingDecoded[0];
+
+    if (canUseComposerProjectHintDirectly(hint)) return hint;
 
     const resolved = await resolveProjectRootFromPath(hint);
     if (resolved && !isLowSignalProjectRoot(resolved)) return resolved;
@@ -387,7 +438,6 @@ async function inferProjectFromComposerData(
     const resolved = await resolveProjectRootFromPath(match);
     if (resolved && !isLowSignalProjectRoot(resolved)) return resolved;
   }
-  const bestHint = hintedRoots.find((hint) => !isLowSignalProjectRoot(hint));
   if (bestHint) return bestHint;
   return "";
 }
@@ -443,6 +493,15 @@ function isLowSignalProjectRoot(pathValue: string): boolean {
     pathValue === "/workspace" ||
     pathValue === "/workspaces" ||
     /^\/home\/[^/]+$/.test(pathValue)
+  );
+}
+
+function canUseComposerProjectHintDirectly(pathValue: string): boolean {
+  return (
+    /^\/workspaces\/[^/]+$/.test(pathValue) ||
+    /^\/workspace\/[^/]+$/.test(pathValue) ||
+    /^\/home\/[^/]+\/[^/]+$/.test(pathValue) ||
+    /^\/Users\/[^/]+\/[^/]+\/[^/]+$/.test(pathValue)
   );
 }
 
@@ -507,64 +566,42 @@ async function readStoreDbMeta(dbPath: string): Promise<StoreDbMetaPreview | nul
 export async function discoverSqliteOnlySessions(
   knownSessionIds: Set<string>,
   decodedWorkspacePaths: string[] = [],
+  forceRefreshStoreDbIndex = false,
 ): Promise<SessionInfo[]> {
   const sessions: SessionInfo[] = [];
-  let workspaceHashDirs: string[];
-  try {
-    workspaceHashDirs = await readdir(CURSOR_CHATS_DIR);
-  } catch {
-    return sessions;
-  }
-
+  const storeDbIndex = await getStoreDbIndex(forceRefreshStoreDbIndex);
   const hashToProject = buildHashToProjectMap(decodedWorkspacePaths);
 
-  for (const wsHash of workspaceHashDirs) {
-    const wsDir = join(CURSOR_CHATS_DIR, wsHash);
-    const wsStat = await stat(wsDir).catch(() => null);
-    if (!wsStat?.isDirectory()) continue;
+  for (const entry of storeDbIndex.values()) {
+    if (knownSessionIds.has(entry.sessionId)) continue;
 
-    let sessionDirs: string[];
-    try {
-      sessionDirs = await readdir(wsDir);
-    } catch {
-      continue;
-    }
+    const metaPreview = await readStoreDbMeta(entry.dbPath);
+    if (!metaPreview?.hasReplayableRoot) continue;
+    const meta = metaPreview.meta;
 
-    for (const sessionId of sessionDirs) {
-      if (knownSessionIds.has(sessionId)) continue;
+    const project = hashToProject.get(entry.workspaceHash) || "";
+    const firstPrompt = meta.name || "(sqlite-only session)";
+    const timestamp = meta.createdAt
+      ? new Date(meta.createdAt).toISOString()
+      : new Date(entry.mtimeMs).toISOString();
 
-      const dbPath = join(wsDir, sessionId, "store.db");
-      const dbStat = await stat(dbPath).catch(() => null);
-      if (!dbStat?.isFile() || dbStat.size < MIN_STORE_DB_SIZE) continue;
-
-      const metaPreview = await readStoreDbMeta(dbPath);
-      if (!metaPreview?.hasReplayableRoot) continue;
-      const meta = metaPreview.meta;
-
-      const project = hashToProject.get(wsHash) || "";
-      const firstPrompt = meta.name || "(sqlite-only session)";
-      const timestamp = meta.createdAt
-        ? new Date(meta.createdAt).toISOString()
-        : new Date(dbStat.mtimeMs).toISOString();
-
-      sessions.push({
-        provider: "cursor",
-        sessionId,
-        slug: sessionId.slice(0, 8),
-        title: meta.name,
-        project: shortenPath(project),
-        cwd: project,
-        version: "",
-        timestamp,
-        lineCount: 0,
-        fileSize: dbStat.size,
-        filePath: dbPath,
-        filePaths: [],
-        workspacePath: project,
-        hasSqlite: true,
-        firstPrompt,
-      });
-    }
+    sessions.push({
+      provider: "cursor",
+      sessionId: entry.sessionId,
+      slug: entry.sessionId.slice(0, 8),
+      title: meta.name,
+      project: shortenPath(project),
+      cwd: project,
+      version: "",
+      timestamp,
+      lineCount: 0,
+      fileSize: entry.size,
+      filePath: entry.dbPath,
+      filePaths: [],
+      workspacePath: project,
+      hasSqlite: true,
+      firstPrompt,
+    });
   }
 
   return sessions;
@@ -581,6 +618,47 @@ export function countComposerConversationHeaders(composer: Record<string, any>):
     : 0;
 }
 
+function finalizeGlobalStateDiscovery(
+  discoveredSessions: SessionInfo[],
+  knownSessionIds: Set<string>,
+  decodedWorkspacePaths: string[],
+): SessionInfo[] {
+  const sessions: SessionInfo[] = [];
+  const unknownProjectSessions: SessionInfo[] = [];
+
+  for (const session of discoveredSessions) {
+    if (knownSessionIds.has(session.sessionId)) continue;
+    if (session.cwd) {
+      sessions.push(session);
+    } else {
+      unknownProjectSessions.push(session);
+    }
+  }
+
+  const perProjectLimit = 40;
+  const byProject = new Map<string, SessionInfo[]>();
+  for (const session of sessions) {
+    const key = session.project;
+    if (!byProject.has(key)) byProject.set(key, []);
+    byProject.get(key)?.push(session);
+  }
+
+  const cappedProjectSessions: SessionInfo[] = [];
+  for (const projectSessions of byProject.values()) {
+    projectSessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    cappedProjectSessions.push(...projectSessions.slice(0, perProjectLimit));
+  }
+
+  const includeUnknownLimit = decodedWorkspacePaths.length > 0 ? 50 : Number.POSITIVE_INFINITY;
+  unknownProjectSessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  const finalSessions = [
+    ...cappedProjectSessions,
+    ...unknownProjectSessions.slice(0, includeUnknownLimit),
+  ];
+  finalSessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  return finalSessions;
+}
+
 /**
  * Discover sessions from Cursor's globalStorage state.vscdb.
  * This is where devcontainer/remote sessions can keep rich `composerData:*`
@@ -591,16 +669,35 @@ export async function discoverGlobalStateOnlySessions(
   decodedWorkspacePaths: string[] = [],
 ): Promise<GlobalStateDiscoveryResult> {
   const sessionIds = new Set<string>();
-  const sessions: SessionInfo[] = [];
-  const unknownProjectSessions: SessionInfo[] = [];
-
   const globalStateDb = await openGlobalStateDb();
-  if (!globalStateDb) return { sessions, sessionIds };
+  if (!globalStateDb) return { sessions: [], sessionIds };
   const { dbPath, db } = globalStateDb;
+  const decodedPathsHash = hashWorkspacePaths(decodedWorkspacePaths);
+  const cacheKey = `${GLOBAL_STATE_DISCOVERY_CACHE_PREFIX}-${decodedPathsHash}`;
+
+  const cached = await readFileCache<GlobalStateDiscoveryCache>(cacheKey);
+  if (
+    cached?.data.dbPath === dbPath &&
+    cached.data.size === globalStateDb.size &&
+    cached.data.mtimeMs === globalStateDb.mtimeMs &&
+    cached.data.decodedPathsHash === decodedPathsHash
+  ) {
+    const cachedIds = new Set(cached.data.sessionIds);
+    return {
+      sessions: finalizeGlobalStateDiscovery(
+        cached.data.sessions,
+        knownSessionIds,
+        decodedWorkspacePaths,
+      ),
+      sessionIds: cachedIds,
+    };
+  }
+
+  const discoveredSessions: SessionInfo[] = [];
 
   try {
     const rows = db.exec("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'");
-    if (!rows.length || !rows[0].values.length) return { sessions, sessionIds };
+    if (!rows.length || !rows[0].values.length) return { sessions: [], sessionIds };
 
     for (const [keyValue, value] of rows[0].values) {
       const key = valueToString(keyValue);
@@ -616,7 +713,6 @@ export async function discoverGlobalStateOnlySessions(
 
       // Track only replayable global-state sessions for downstream hasSqlite marking.
       sessionIds.add(sessionId);
-      if (knownSessionIds.has(sessionId)) continue;
 
       const timestamp =
         toIsoTimestamp(composer.lastUpdatedAt) ||
@@ -646,41 +742,42 @@ export async function discoverGlobalStateOnlySessions(
         hasSqlite: true,
         firstPrompt,
       };
-
-      if (projectPath) {
-        sessions.push(sessionInfo);
-      } else {
-        unknownProjectSessions.push(sessionInfo);
-      }
+      discoveredSessions.push(sessionInfo);
     }
   } catch {
     // no-op: ignore malformed db rows and return what we have
   }
 
-  // Keep only the most recent sessions per inferred project.
-  const perProjectLimit = 40;
-  const byProject = new Map<string, SessionInfo[]>();
-  for (const session of sessions) {
-    const key = session.project;
-    if (!byProject.has(key)) byProject.set(key, []);
-    byProject.get(key)?.push(session);
-  }
-  const cappedProjectSessions: SessionInfo[] = [];
-  for (const projectSessions of byProject.values()) {
-    projectSessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-    cappedProjectSessions.push(...projectSessions.slice(0, perProjectLimit));
+  await writeFileCache<GlobalStateDiscoveryCache>(cacheKey, {
+    dbPath,
+    size: globalStateDb.size,
+    mtimeMs: globalStateDb.mtimeMs,
+    decodedPathsHash,
+    sessions: discoveredSessions,
+    sessionIds: [...sessionIds],
+  });
+
+  return {
+    sessions: finalizeGlobalStateDiscovery(
+      discoveredSessions,
+      knownSessionIds,
+      decodedWorkspacePaths,
+    ),
+    sessionIds,
+  };
+}
+
+export async function getCursorSessionCachePaths(sessionId: string): Promise<string[]> {
+  const paths: string[] = [];
+  const storeDb = await findStoreDb(sessionId);
+  if (storeDb) paths.push(storeDb);
+
+  const globalStateDb = await openGlobalStateDb();
+  if (globalStateDb && hasGlobalStateSession(globalStateDb.db, sessionId)) {
+    paths.push(globalStateDb.dbPath);
   }
 
-  // Avoid flooding picker with thousands of unknown-history sessions.
-  const includeUnknownLimit = decodedWorkspacePaths.length > 0 ? 50 : Number.POSITIVE_INFINITY;
-  unknownProjectSessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-  const finalSessions = [
-    ...cappedProjectSessions,
-    ...unknownProjectSessions.slice(0, includeUnknownLimit),
-  ];
-  finalSessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-
-  return { sessions: finalSessions, sessionIds };
+  return [...new Set(paths)];
 }
 
 function shortenPath(path: string): string {
@@ -2384,6 +2481,7 @@ export const __testables = {
   mergeCursorParseResults,
   mergeTurnStats,
   parseAssistantContent,
+  inferProjectFromComposerData,
   inferProjectRootFromPathHint,
   normalizeTurnText,
   normalizeCursorModelName,

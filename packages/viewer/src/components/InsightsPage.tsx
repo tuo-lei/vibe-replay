@@ -265,6 +265,53 @@ function formatCompactNum(n: number): string {
   return n.toLocaleString();
 }
 
+function useAnimatedNumber(target: number, durationMs = 500): number {
+  const [display, setDisplay] = useState(target);
+  const currentRef = useRef(target);
+
+  useEffect(() => {
+    const startValue = currentRef.current;
+    const delta = target - startValue;
+    if (Math.abs(delta) < 1) {
+      currentRef.current = target;
+      setDisplay(target);
+      return;
+    }
+
+    let frame = 0;
+    const startAt = performance.now();
+    const step = (now: number) => {
+      const t = Math.min(1, (now - startAt) / durationMs);
+      const eased = 1 - (1 - t) ** 3;
+      const next = startValue + delta * eased;
+      currentRef.current = next;
+      setDisplay(next);
+      if (t < 1) {
+        frame = requestAnimationFrame(step);
+      } else {
+        currentRef.current = target;
+        setDisplay(target);
+      }
+    };
+
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [target, durationMs]);
+
+  return display;
+}
+
+function AnimatedShareValue({
+  value,
+  formatter,
+}: {
+  value: number;
+  formatter: (value: number) => string;
+}) {
+  const animated = useAnimatedNumber(value);
+  return <>{formatter(animated)}</>;
+}
+
 function splitModelLabels(model: string): string[] {
   return [
     ...new Set(
@@ -510,7 +557,7 @@ function ShareCard({
         <div className="grid grid-cols-4 gap-x-6 gap-y-5 mb-6">
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-green tabular-nums">
-              {formatCompactNum(stats.sessions)}
+              <AnimatedShareValue value={stats.sessions} formatter={formatCompactNum} />
             </div>
             <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
               sessions
@@ -518,7 +565,7 @@ function ShareCard({
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-blue tabular-nums">
-              {formatCompactNum(stats.replays)}
+              <AnimatedShareValue value={stats.replays} formatter={formatCompactNum} />
             </div>
             <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
               replays
@@ -526,7 +573,7 @@ function ShareCard({
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-text tabular-nums">
-              {formatCompactNum(stats.prompts)}
+              <AnimatedShareValue value={stats.prompts} formatter={formatCompactNum} />
             </div>
             <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
               turns
@@ -534,7 +581,7 @@ function ShareCard({
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-orange tabular-nums">
-              {formatCompactNum(stats.toolCalls)}
+              <AnimatedShareValue value={stats.toolCalls} formatter={formatCompactNum} />
             </div>
             <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
               tool calls
@@ -542,7 +589,10 @@ function ShareCard({
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-text tabular-nums">
-              {formatCompactDuration(stats.durationMs)}
+              <AnimatedShareValue
+                value={stats.durationMs}
+                formatter={(n) => formatCompactDuration(n)}
+              />
             </div>
             <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
               coding
@@ -550,7 +600,7 @@ function ShareCard({
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-orange tabular-nums">
-              {formatCost(stats.cost)}
+              <AnimatedShareValue value={stats.cost} formatter={(n) => formatCost(n)} />
             </div>
             <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
               spent
@@ -558,7 +608,7 @@ function ShareCard({
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-blue tabular-nums">
-              {formatCompactNum(stats.edits)}
+              <AnimatedShareValue value={stats.edits} formatter={formatCompactNum} />
             </div>
             <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
               file edits
@@ -566,7 +616,10 @@ function ShareCard({
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-purple tabular-nums">
-              {stats.projects}
+              <AnimatedShareValue
+                value={stats.projects}
+                formatter={(n) => Math.round(n).toString()}
+              />
             </div>
             <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider mt-0.5">
               projects
@@ -954,6 +1007,47 @@ function InsightsPageSkeleton() {
   );
 }
 
+function InsightsLoadingState({
+  scanStatus,
+  hasCachedInsights,
+}: {
+  scanStatus:
+    | {
+        running: boolean;
+        scanned: number;
+        total: number;
+        phase?: "discovering" | "scanning";
+        hasCachedResults?: boolean;
+      }
+    | null
+    | undefined;
+  hasCachedInsights: boolean;
+}) {
+  const detail =
+    scanStatus?.phase === "discovering"
+      ? "Finding sessions across providers and restoring the latest local data."
+      : scanStatus?.total
+        ? `Refreshing ${scanStatus.scanned}/${scanStatus.total} sessions in the background.`
+        : "Preparing your latest session insights.";
+
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <div className="max-w-4xl mx-auto px-4 md:px-6 py-8 space-y-4">
+        <div className="rounded-xl border border-terminal-purple/20 bg-terminal-surface px-4 py-3">
+          <div className="flex items-center gap-2 text-sm font-sans text-terminal-text">
+            <span className="w-2 h-2 rounded-full bg-terminal-purple animate-pulse" />
+            <span>
+              {hasCachedInsights ? "Refreshing cached insights" : "Loading your insights"}
+            </span>
+          </div>
+          <p className="mt-1 text-xs font-mono text-terminal-dim">{detail}</p>
+        </div>
+        <InsightsPageSkeleton />
+      </div>
+    </div>
+  );
+}
+
 // ─── Source/Replay counts (consistent with homepage) ────────────────
 
 /** Fetch same source + replay data as homepage to ensure consistent totals. */
@@ -1028,7 +1122,7 @@ export default function InsightsPage() {
   const homePageCounts = useHomePageCounts();
   const [range, setRange] = useState<TimeRange>("all");
 
-  const isScanning = scanStatus?.running && !userInsights;
+  const isInitialScan = scanStatus?.running && !userInsights;
 
   const { stats, streak, dayOfWeek, bestDay, peak, weeklyTrend, activeDays, firstSessionDate } =
     useMemo(() => {
@@ -1088,7 +1182,16 @@ export default function InsightsPage() {
       };
     }, [userInsights, range, homePageCounts]);
 
-  if (loading || isScanning || !userInsights) {
+  if (!userInsights && (loading || isInitialScan || scanStatus?.phase === "discovering")) {
+    return (
+      <InsightsLoadingState
+        scanStatus={scanStatus}
+        hasCachedInsights={Boolean(scanStatus?.hasCachedResults)}
+      />
+    );
+  }
+
+  if (!userInsights) {
     return <InsightsPageSkeleton />;
   }
 
@@ -1120,6 +1223,26 @@ export default function InsightsPage() {
             ))}
           </div>
         </div>
+
+        {scanStatus?.running && (
+          <div className="rounded-xl border border-terminal-blue/20 bg-terminal-surface px-4 py-3">
+            <div className="flex items-center gap-2 text-sm font-sans text-terminal-text">
+              <span className="w-2 h-2 rounded-full bg-terminal-blue animate-pulse" />
+              <span>
+                {scanStatus.phase === "discovering"
+                  ? "Refreshing source discovery in the background"
+                  : "Refreshing insights in the background"}
+              </span>
+            </div>
+            <p className="mt-1 text-xs font-mono text-terminal-dim">
+              {scanStatus.phase === "discovering"
+                ? "Showing your last completed insights while we look for new sessions."
+                : scanStatus.total > 0
+                  ? `Showing cached insights while ${scanStatus.scanned}/${scanStatus.total} sessions refresh.`
+                  : "Showing cached insights while new scan data loads."}
+            </p>
+          </div>
+        )}
 
         {/* Share Card */}
         <ShareCard
