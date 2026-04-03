@@ -558,49 +558,61 @@ function ShareCard({
         <div className="grid grid-cols-4 gap-x-6 gap-y-5 mb-6">
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-green tabular-nums">
-              <AnimatedValue value={stats.sessions} formatter={formatCompactNum} />
+              <AnimatedValue durationMs={500} value={stats.sessions} formatter={formatCompactNum} />
             </div>
             <MetricLabel label="sessions" />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-blue tabular-nums">
-              <AnimatedValue value={stats.replays} formatter={formatCompactNum} />
+              <AnimatedValue durationMs={500} value={stats.replays} formatter={formatCompactNum} />
             </div>
             <MetricLabel label="replays" />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-green tabular-nums">
-              <AnimatedValue value={stats.prompts} formatter={formatCompactNum} />
+              <AnimatedValue durationMs={500} value={stats.prompts} formatter={formatCompactNum} />
             </div>
             <MetricLabel label="turns" />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-orange tabular-nums">
-              <AnimatedValue value={stats.toolCalls} formatter={formatCompactNum} />
+              <AnimatedValue
+                durationMs={500}
+                value={stats.toolCalls}
+                formatter={formatCompactNum}
+              />
             </div>
             <MetricLabel label="tool calls" />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-text tabular-nums">
-              <AnimatedValue value={stats.durationMs} formatter={(n) => formatCompactDuration(n)} />
+              <AnimatedValue
+                durationMs={500}
+                value={stats.durationMs}
+                formatter={(n) => formatCompactDuration(n)}
+              />
             </div>
             <MetricLabel label="coding" title={metricQuality.duration} />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-orange tabular-nums">
-              <AnimatedValue value={stats.cost} formatter={(n) => formatCost(n)} />
+              <AnimatedValue durationMs={500} value={stats.cost} formatter={(n) => formatCost(n)} />
             </div>
             <MetricLabel label="spent" title={metricQuality.cost} />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-blue tabular-nums">
-              <AnimatedValue value={stats.edits} formatter={formatCompactNum} />
+              <AnimatedValue durationMs={500} value={stats.edits} formatter={formatCompactNum} />
             </div>
             <MetricLabel label="file edits" />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-purple tabular-nums">
-              <AnimatedValue value={stats.projects} formatter={(n) => Math.round(n).toString()} />
+              <AnimatedValue
+                durationMs={500}
+                value={stats.projects}
+                formatter={(n) => Math.round(n).toString()}
+              />
             </div>
             <MetricLabel label="projects" />
           </div>

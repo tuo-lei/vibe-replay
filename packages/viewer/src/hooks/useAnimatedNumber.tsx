@@ -38,11 +38,13 @@ export function useAnimatedNumber(target: number, durationMs = 450): number {
 
 export function AnimatedValue({
   value,
+  durationMs,
   formatter = (n) => Math.round(n).toLocaleString(),
 }: {
   value: number;
+  durationMs?: number;
   formatter?: (value: number) => string;
 }) {
-  const animated = useAnimatedNumber(value);
+  const animated = useAnimatedNumber(value, durationMs);
   return <>{formatter(animated)}</>;
 }
