@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatedValue } from "../hooks/useAnimatedNumber";
 import type { SessionSummary, SourceSession } from "../types";
 import { DataQualityIndicator } from "./DataQualityIndicator";
 import {
@@ -294,53 +295,6 @@ function buildAggregateMetricQuality(notes: string[] | undefined): {
   };
 }
 
-function useAnimatedNumber(target: number, durationMs = 500): number {
-  const [display, setDisplay] = useState(target);
-  const currentRef = useRef(target);
-
-  useEffect(() => {
-    const startValue = currentRef.current;
-    const delta = target - startValue;
-    if (Math.abs(delta) < 1) {
-      currentRef.current = target;
-      setDisplay(target);
-      return;
-    }
-
-    let frame = 0;
-    const startAt = performance.now();
-    const step = (now: number) => {
-      const t = Math.min(1, (now - startAt) / durationMs);
-      const eased = 1 - (1 - t) ** 3;
-      const next = startValue + delta * eased;
-      currentRef.current = next;
-      setDisplay(next);
-      if (t < 1) {
-        frame = requestAnimationFrame(step);
-      } else {
-        currentRef.current = target;
-        setDisplay(target);
-      }
-    };
-
-    frame = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(frame);
-  }, [target, durationMs]);
-
-  return display;
-}
-
-function AnimatedShareValue({
-  value,
-  formatter,
-}: {
-  value: number;
-  formatter: (value: number) => string;
-}) {
-  const animated = useAnimatedNumber(value);
-  return <>{formatter(animated)}</>;
-}
-
 function splitModelLabels(model: string): string[] {
   return [
     ...new Set(
@@ -604,55 +558,49 @@ function ShareCard({
         <div className="grid grid-cols-4 gap-x-6 gap-y-5 mb-6">
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-green tabular-nums">
-              <AnimatedShareValue value={stats.sessions} formatter={formatCompactNum} />
+              <AnimatedValue value={stats.sessions} formatter={formatCompactNum} />
             </div>
             <MetricLabel label="sessions" />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-blue tabular-nums">
-              <AnimatedShareValue value={stats.replays} formatter={formatCompactNum} />
+              <AnimatedValue value={stats.replays} formatter={formatCompactNum} />
             </div>
             <MetricLabel label="replays" />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-green tabular-nums">
-              <AnimatedShareValue value={stats.prompts} formatter={formatCompactNum} />
+              <AnimatedValue value={stats.prompts} formatter={formatCompactNum} />
             </div>
             <MetricLabel label="turns" />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-orange tabular-nums">
-              <AnimatedShareValue value={stats.toolCalls} formatter={formatCompactNum} />
+              <AnimatedValue value={stats.toolCalls} formatter={formatCompactNum} />
             </div>
             <MetricLabel label="tool calls" />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-text tabular-nums">
-              <AnimatedShareValue
-                value={stats.durationMs}
-                formatter={(n) => formatCompactDuration(n)}
-              />
+              <AnimatedValue value={stats.durationMs} formatter={(n) => formatCompactDuration(n)} />
             </div>
             <MetricLabel label="coding" title={metricQuality.duration} />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-orange tabular-nums">
-              <AnimatedShareValue value={stats.cost} formatter={(n) => formatCost(n)} />
+              <AnimatedValue value={stats.cost} formatter={(n) => formatCost(n)} />
             </div>
             <MetricLabel label="spent" title={metricQuality.cost} />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-blue tabular-nums">
-              <AnimatedShareValue value={stats.edits} formatter={formatCompactNum} />
+              <AnimatedValue value={stats.edits} formatter={formatCompactNum} />
             </div>
             <MetricLabel label="file edits" />
           </div>
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-purple tabular-nums">
-              <AnimatedShareValue
-                value={stats.projects}
-                formatter={(n) => Math.round(n).toString()}
-              />
+              <AnimatedValue value={stats.projects} formatter={(n) => Math.round(n).toString()} />
             </div>
             <MetricLabel label="projects" />
           </div>
@@ -875,30 +823,18 @@ function TopProjectsList({
 function ModelBreakdown({ models }: { models: Record<string, number> }) {
   const entries = useMemo(
     () =>
-      Object.entries(models)
-        .flatMap(([model, count]) =>
-          splitModelLabels(model).map((label) => ({ model: label, count })),
-        )
-        .reduce<Array<{ model: string; count: number }>>((acc, entry) => {
-          const existing = acc.find((item) => item.model === entry.model);
-          if (existing) {
-            existing.count += entry.count;
-          } else {
-            acc.push({ ...entry });
+      (() => {
+        const map = new Map<string, number>();
+        for (const [model, count] of Object.entries(models)) {
+          for (const label of splitModelLabels(model)) {
+            const short = shortModelName(label);
+            map.set(short, (map.get(short) ?? 0) + count);
           }
-          return acc;
-        }, [])
-        .map(({ model, count }) => ({ model: shortModelName(model), count }))
-        .reduce<Array<{ model: string; count: number }>>((acc, entry) => {
-          const existing = acc.find((item) => item.model === entry.model);
-          if (existing) {
-            existing.count += entry.count;
-          } else {
-            acc.push({ ...entry });
-          }
-          return acc;
-        }, [])
-        .sort((a, b) => b.count - a.count),
+        }
+        return [...map.entries()]
+          .map(([model, count]) => ({ model, count }))
+          .sort((a, b) => b.count - a.count);
+      })(),
     [models],
   );
   const total = entries.reduce((a, b) => a + b.count, 0);

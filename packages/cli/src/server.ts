@@ -506,28 +506,9 @@ function extractPromptPreviewsFromTurns(turns: ParsedTurn[], limit = 3): string[
 }
 
 function looksLikeCursorDisplayNoise(value: unknown): boolean {
-  if (typeof value !== "string") return false;
-  const text = value.trim();
-  if (!text) return false;
-  return (
-    /^\[Previous conversation summary\]:/i.test(text) ||
-    /^Last login:/i.test(text) ||
-    /^Patrick Desjardins\s+\[\d{1,2}:\d{2}\s?(?:AM|PM)\]/i.test(text) ||
-    /^<attached_files>/i.test(text) ||
-    /^<code_selection\b/i.test(text) ||
-    // Hide the same truncated Cursor summary fragment at the API layer so
-    // source titles stay aligned with CLI/viewer-side prompt cleanup.
-    /^and merge infrastructure was built for human-paced output/i.test(text)
-  );
+  if (typeof value !== "string" || !value.trim()) return false;
+  return !cleanPromptText(value);
 }
-
-/**
- * Merge multiple JSONL files that share the same slug + project into one entry.
- * Claude Code creates a new file per /resume, but they're the same logical session.
- */
-/** Shared post-processing for /api/sources and /api/sources/stream:
- *  normalizes project paths, checks directory existence + git status,
- *  looks up existing replays, and maps to the response shape. */
 
 /** Build dual lookup maps for replays — match by slug or sessionId */
 function buildReplayMaps(replays: any[]): {
