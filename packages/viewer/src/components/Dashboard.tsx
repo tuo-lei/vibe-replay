@@ -2715,22 +2715,50 @@ function ReplaysPanel() {
 
 function ScanToast() {
   const { scanStatus } = useScanInsightsContext();
-  if (!scanStatus?.running) return null;
+  const isRunning = !!scanStatus?.running;
+  const [visible, setVisible] = useState(false);
+  const [exiting, setExiting] = useState(false);
+  const lastStatusRef = useRef(scanStatus);
+  if (scanStatus) lastStatusRef.current = scanStatus;
+  const displayStatus = lastStatusRef.current;
+
+  useEffect(() => {
+    if (isRunning) {
+      setExiting(false);
+      setVisible(true);
+    } else if (visible) {
+      setExiting(true);
+      const timer = setTimeout(() => {
+        setVisible(false);
+        setExiting(false);
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [isRunning, visible]);
+
+  if (!visible || !displayStatus) return null;
 
   const label =
-    scanStatus.phase === "discovering"
+    displayStatus.phase === "discovering"
       ? "Discovering sessions..."
-      : scanStatus.total > 0
-        ? `Scanning ${scanStatus.scanned}/${scanStatus.total}`
+      : displayStatus.total > 0
+        ? `Scanning ${displayStatus.scanned}/${displayStatus.total}`
         : "Preparing scan...";
 
-  const pct = scanStatus.total > 0 ? Math.round((scanStatus.scanned / scanStatus.total) * 100) : 0;
+  const pct =
+    displayStatus.total > 0 ? Math.round((displayStatus.scanned / displayStatus.total) * 100) : 0;
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2.5 rounded-lg px-3.5 py-2.5 text-xs font-mono bg-terminal-surface border border-terminal-border shadow-layer-md animate-in fade-in slide-in-from-bottom-2 duration-300">
+    <div
+      className={`fixed bottom-4 right-4 z-50 flex items-center gap-2.5 rounded-lg px-3.5 py-2.5 text-xs font-mono bg-terminal-surface border border-terminal-border shadow-layer-md transition-all duration-300 ${
+        exiting
+          ? "opacity-0 translate-y-2"
+          : "opacity-100 translate-y-0 animate-in fade-in slide-in-from-bottom-2 duration-300"
+      }`}
+    >
       <span className="w-1.5 h-1.5 rounded-full bg-terminal-purple animate-pulse shrink-0" />
       <span className="text-terminal-dim">{label}</span>
-      {scanStatus.total > 0 && (
+      {displayStatus.total > 0 && (
         <div className="w-16 h-1 rounded-full bg-terminal-surface-2 overflow-hidden">
           <div
             className="h-full bg-terminal-purple rounded-full transition-all duration-300"

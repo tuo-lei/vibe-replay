@@ -51,8 +51,8 @@ function useDashboardData() {
   const [loadingSources, setLoadingSources] = useState(true);
   const [loadingReplays, setLoadingReplays] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [scanProgress, setScanProgress] = useState<number | null>(null);
-  const [enrichmentStatus, setEnrichmentStatus] = useState<SourcesEnrichmentStatus | null>(null);
+  const [, setScanProgress] = useState<number | null>(null);
+  const [, setEnrichmentStatus] = useState<SourcesEnrichmentStatus | null>(null);
   const wasEnrichingRef = useRef(false);
   const hasCursorSources = useMemo(
     () => sources.some((source) => source.provider === "cursor"),
@@ -221,8 +221,6 @@ function useDashboardData() {
     loadingSources,
     loadingReplays,
     error,
-    scanProgress,
-    enrichmentStatus,
   };
 }
 
