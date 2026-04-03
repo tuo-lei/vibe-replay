@@ -31,7 +31,7 @@ export default function AiStudioDrawer({
 
   return (
     <div
-      className={`fixed inset-0 z-30 hidden md:block transition-opacity duration-300 ${
+      className={`fixed inset-0 z-50 hidden md:block transition-opacity duration-300 ${
         open ? "opacity-100" : "opacity-0 pointer-events-none"
       }`}
     >
