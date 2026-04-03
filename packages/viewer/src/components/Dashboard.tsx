@@ -29,7 +29,6 @@ import {
 import InsightsPage from "./InsightsPage";
 import {
   ScanInsightsProvider,
-  ScanProgressBar,
   TitleInsightsHeader,
   TitleInsightsHeaderSkeleton,
   useScanInsightsContext,
@@ -1855,13 +1854,6 @@ function SessionsPanel() {
           </div>
         )}
 
-        {/* Background scan progress */}
-        {scanStatus?.running && (
-          <div className="mx-4 mb-2 shrink-0">
-            <ScanProgressBar status={scanStatus} />
-          </div>
-        )}
-
         {/* Error toast */}
         {refreshError && (
           <div className="mx-4 mb-2 flex items-center gap-2 bg-terminal-orange-subtle rounded-lg px-3 py-2.5 text-xs font-mono text-terminal-orange shrink-0 shadow-layer-sm">
@@ -2191,8 +2183,7 @@ function ReplaysPanel() {
   const [showArchived, setShowArchived] = useState(getShowArchivedFromUrl());
 
   // Background scan + insights (shared singleton context)
-  const { scanStatus, userInsights, projectInsightsCache, fetchProjectInsights } =
-    useScanInsightsContext();
+  const { userInsights, projectInsightsCache, fetchProjectInsights } = useScanInsightsContext();
 
   // Fetch project insights when selected project changes
   useEffect(() => {
@@ -2683,13 +2674,6 @@ function ReplaysPanel() {
           </div>
         )}
 
-        {/* Scan progress */}
-        {scanStatus?.running && (
-          <div className="mx-4 mb-2 shrink-0">
-            <ScanProgressBar status={scanStatus} />
-          </div>
-        )}
-
         {/* Replay list */}
         <div className="flex-1 overflow-y-auto">
           {showInitialLoading ? (
@@ -2727,24 +2711,46 @@ function ReplaysPanel() {
   );
 }
 
-// ─── Nav scan indicator (lives inside ScanInsightsProvider) ─────────
+// ─── Global scan toast (fixed bottom-right, no layout shift) ────────
 
-function NavScanIndicator() {
+function ScanToast() {
   const { scanStatus } = useScanInsightsContext();
-  if (!scanStatus?.running || !scanStatus.total) return null;
+  if (!scanStatus?.running) return null;
+
+  const label =
+    scanStatus.phase === "discovering"
+      ? "Discovering sessions..."
+      : scanStatus.total > 0
+        ? `Scanning ${scanStatus.scanned}/${scanStatus.total}`
+        : "Preparing scan...";
+
+  const pct = scanStatus.total > 0 ? Math.round((scanStatus.scanned / scanStatus.total) * 100) : 0;
+
   return (
-    <div className="flex items-center gap-2">
-      <div className="w-1.5 h-1.5 rounded-full bg-terminal-purple animate-pulse" />
-      <span className="text-xs font-mono text-terminal-dim tabular-nums">
-        Scanning {scanStatus.scanned}/{scanStatus.total}
-      </span>
+    <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2.5 rounded-lg px-3.5 py-2.5 text-xs font-mono bg-terminal-surface border border-terminal-border shadow-layer-md animate-in fade-in slide-in-from-bottom-2 duration-300">
+      <span className="w-1.5 h-1.5 rounded-full bg-terminal-purple animate-pulse shrink-0" />
+      <span className="text-terminal-dim">{label}</span>
+      {scanStatus.total > 0 && (
+        <div className="w-16 h-1 rounded-full bg-terminal-surface-2 overflow-hidden">
+          <div
+            className="h-full bg-terminal-purple rounded-full transition-all duration-300"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      )}
     </div>
   );
 }
 
 // ─── Main Dashboard ─────────────────────────────────────────────────
 
-export default function Dashboard() {
+export default function Dashboard({
+  headerLeft,
+  headerRight,
+}: {
+  headerLeft?: React.ReactNode;
+  headerRight?: React.ReactNode;
+}) {
   const isEditor = !!window.__VIBE_REPLAY_EDITOR__;
 
   // Sync tab with URL query param
@@ -2774,7 +2780,7 @@ export default function Dashboard() {
     <button
       key={id}
       onClick={() => handleTabChange(id)}
-      className={`px-5 py-2 text-xs font-sans font-semibold rounded-lg transition-all duration-200 ease-material ${
+      className={`px-3.5 py-1.5 text-xs font-sans font-semibold rounded-lg transition-all duration-200 ease-material ${
         tab === id
           ? "bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
           : "text-terminal-dim hover:text-terminal-text"
@@ -2787,17 +2793,19 @@ export default function Dashboard() {
   return (
     <ScanInsightsProvider>
       <div className="flex-1 flex flex-col min-h-0">
-        {/* Tab bar — only show when running with local server */}
+        {/* Unified header: logo + tabs + actions in one row */}
         {isEditor && (
-          <div className="shrink-0 px-5 py-3 border-b border-terminal-border-subtle bg-terminal-surface/30 flex items-center justify-between">
-            <div className="inline-flex items-center rounded-xl bg-terminal-surface p-0.5 shadow-layer-sm">
+          <div className="shrink-0 px-5 py-2 border-b border-terminal-border-subtle glass-effect z-40 safe-top flex items-center gap-4">
+            {headerLeft}
+            <div className="inline-flex items-center rounded-xl bg-terminal-surface p-0.5 shadow-layer-sm shrink-0">
               {tabButton("home", "Home")}
               {tabButton("sessions", "Sessions")}
               {tabButton("replays", "Replays")}
               {tabButton("projects", "Projects")}
               {tabButton("insights", "Insights")}
             </div>
-            <NavScanIndicator />
+            <div className="flex-1" />
+            {headerRight}
           </div>
         )}
 
@@ -2814,6 +2822,7 @@ export default function Dashboard() {
           <ReplaysPanel />
         )}
       </div>
+      <ScanToast />
     </ScanInsightsProvider>
   );
 }

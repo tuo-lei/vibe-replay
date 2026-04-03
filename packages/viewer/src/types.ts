@@ -81,6 +81,7 @@ export interface SourceSession {
 }
 
 declare global {
+  const __CLI_VERSION__: string;
   interface Window {
     __VIBE_REPLAY_DATA__?: ReplaySession;
     __VIBE_REPLAY_EDITOR__?: boolean;

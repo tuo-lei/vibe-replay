@@ -1,6 +1,18 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 import { viteSingleFile } from "vite-plugin-singlefile";
+
+/** Read CLI package.json version at build time */
+function getCliVersion(): string {
+  try {
+    const pkg = JSON.parse(readFileSync(resolve(__dirname, "../cli/package.json"), "utf-8"));
+    return pkg.version || "dev";
+  } catch {
+    return "dev";
+  }
+}
 
 /** Inject __VIBE_REPLAY_EDITOR__ flag in dev mode so the viewer enters editor mode */
 function editorFlagPlugin(): Plugin {
@@ -20,6 +32,7 @@ export default defineConfig({
     // Bake cloud API URL at build time. Vite's import.meta.env.VITE_* replacement
     // runs before define, so we use a custom global instead.
     __CLOUD_API_URL__: JSON.stringify(process.env.VITE_CLOUD_API_URL || "https://vibe-replay.com"),
+    __CLI_VERSION__: JSON.stringify(getCliVersion()),
   },
   build: {
     outDir: "dist",
