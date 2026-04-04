@@ -1,60 +1,53 @@
 ---
-title: "Claude Code /simplify — Watch It Clean Up a Real Codebase"
-excerpt: "The /simplify slash command reviews your code for duplication, quality issues, and inefficiency — then fixes them. Here's how it works, what it catches, and a full interactive replay of a real session."
+title: "What Actually Happens When Claude Code /simplify Cleans Your Codebase"
+excerpt: "We ran the built-in /simplify command on our own repo and captured every file read, agent spawn, and fix as an interactive replay. Here's what we learned by watching the black box."
 date: 2026-04-03
 readTime: "5 min read"
 ---
 
-## What is /simplify?
+## AI code cleanup is a black box — until you watch the replay
 
-`/simplify` is a [Claude Code custom slash command](https://docs.anthropic.com/en/docs/claude-code/slash-commands) that reviews your recently changed code for reuse opportunities, quality issues, and efficiency problems — then fixes them directly.
+`/simplify` is a built-in [Claude Code slash command](https://docs.anthropic.com/en/docs/claude-code/slash-commands) that reviews your recently changed code for duplication, quality issues, and inefficiency — then fixes them directly.
 
-It's not a linter. It doesn't flag style nits. It looks for structural problems: duplicated functions across files, redundant state in React components, O(n^2) loops that should be a Map, polling without change detection, copy-pasted logic that should be a shared hook.
+You type `/simplify`, walk away, come back to a cleaner codebase. But what actually happened? Which files did it read? How did it decide what to change and what to skip? Did it break anything along the way?
 
-You type `/simplify`, walk away, come back to a cleaner codebase with all tests passing.
-
-We ran it on [vibe-replay](https://github.com/tuo-lei/vibe-replay) itself — a 150-file TypeScript monorepo — and captured the entire session as an interactive replay:
+We ran `/simplify` on [vibe-replay](https://github.com/tuo-lei/vibe-replay) itself — a 150-file TypeScript monorepo — and captured the entire session as an interactive replay so you can see exactly what the AI did:
 
 **[Watch the full session replay (67 min, 108 tool calls)](https://vibe-replay.com/view/?gist=e5b2731d90cfa20fee4f3f7ab980cbb1)**
 
 ---
 
-## How /simplify works
+## What we learned by watching the replay
 
-The command runs a three-phase protocol: identify what changed, review in parallel, then fix.
+Without the replay, we'd just see a diff. With vibe-replay, we could watch the entire decision-making process unfold — every `git diff`, every file exploration, every sub-agent spawned, every test run. Here's what `/simplify` actually did:
 
-### Phase 1: Identify changes
+### Phase 1: Scoping the work
 
-`/simplify` starts by running `git diff` to find recently changed files. If there are no uncommitted changes, it reviews the most recent commits. This gives the review agents a focused scope — what code was touched recently and might have introduced duplication or shortcuts.
+The replay shows `/simplify` starting with `git diff` to find recently changed files, then exploring the surrounding codebase for context. You can see it reading files it never changes — understanding the codebase before making decisions.
 
 ### Phase 2: Three parallel review agents
 
-This is where it gets interesting. `/simplify` spawns **three independent sub-agents simultaneously**, each analyzing the same code from a different angle:
+This is where the replay gets interesting. You can watch `/simplify` spawn **three independent sub-agents simultaneously**, each analyzing the same code from a different angle:
 
-**Agent 1 — Code Reuse**
-Searches for existing utilities and helpers that could replace newly written code. Flags new functions that duplicate existing functionality. Looks for inline logic that could use an existing utility — hand-rolled string manipulation, custom path handling, ad-hoc type guards.
+- **Code Reuse agent** — searches for existing utilities that could replace newly written code
+- **Code Quality agent** — reviews for redundant state, copy-paste patterns, parameter sprawl
+- **Efficiency agent** — hunts for unnecessary work, missed concurrency, hot-path bloat
 
-**Agent 2 — Code Quality**
-Reviews for redundant state, parameter sprawl, copy-paste with slight variation, leaky abstractions, stringly-typed code where constants exist, unnecessary JSX nesting, and comments that explain "what" instead of "why."
-
-**Agent 3 — Efficiency**
-Hunts for unnecessary work (redundant computations, duplicate API calls, N+1 patterns), missed concurrency (sequential awaits that could be parallel), hot-path bloat, recurring no-op updates in polling loops, and overly broad operations.
-
-Each agent reads the full diff, explores the surrounding codebase for context, and reports back independently. The main agent then aggregates findings and filters false positives before making any changes.
+In the replay, you can see each agent exploring different parts of the codebase in parallel, then reporting back independently. The main agent aggregates findings and filters false positives before making any changes.
 
 ### Phase 3: Fix and verify
 
-The agent works through validated findings one by one. After each batch of changes, it runs the full verification cycle — lint, build, test suite — to ensure nothing broke. If a test fails, it diagnoses and fixes before moving on.
+The replay shows the agent working through validated findings one by one. After each batch of changes, you can watch it run the full verification cycle — lint, build, test suite — and when a test fails, you can see exactly how it diagnoses and fixes the issue before moving on.
 
 ---
 
 ## What it found in our codebase
 
-We ran `/simplify` on vibe-replay, a monorepo with four packages (CLI, React viewer, shared types, Cloudflare worker). Here's what the agents caught:
+By watching the replay, we could see not just what changed, but *why* each change was made:
 
 ### Duplicated utility functions
 
-`shortenPath()` — a 4-line function that replaces `$HOME` with `~` — was copy-pasted into **four separate files** across two provider directories and the scanner. `/simplify` extracted it to a shared `utils.ts` and updated all imports.
+`shortenPath()` — a 4-line function that replaces `$HOME` with `~` — was copy-pasted into **four separate files** across two provider directories and the scanner. The replay shows the reuse agent discovering each copy, then extracting it to a shared `utils.ts`.
 
 `normalizeTitle()` — identical whitespace-collapsing logic in both `index.ts` and `server.ts`, with the constant `TITLE_MAX_CHARS = 120` duplicated too.
 
@@ -64,23 +57,15 @@ The outside-click handler pattern — `useEffect` + `addEventListener("mousedown
 
 Identical filter state + URL sync logic (3 `useState` calls, a `popstate` listener, 3 handler functions) was duplicated between `SessionsPanel` and `ReplaysPanel`. Extracted to a `usePanelFilters` hook.
 
-An 18-line optimistic archive toggle with rollback-on-failure was copied verbatim between two panels. Extracted to `toggleArchiveSlug` in shared utils.
-
 ### Hardcoded validation patterns
 
-The Cloudflare worker had the regex `/^[a-zA-Z0-9_-]{10,16}$/` copy-pasted **six times** for cloud replay ID validation, and `/^[a-f0-9]{20,40}$/` three times for gist IDs. The `isDev` environment check (`env.BETTER_AUTH_URL?.startsWith("http://localhost")`) appeared in three separate route handlers.
+The Cloudflare worker had the regex `/^[a-zA-Z0-9_-]{10,16}$/` copy-pasted **six times** for cloud replay ID validation. All extracted to module-level constants.
 
-All extracted to module-level constants and a shared helper function.
+### What it skipped (and why)
 
-### Inefficiency
+This was the most valuable part of watching the replay. The agents flagged validation constants in `feedback.ts` as duplicated — the same enum values appeared in a JSON schema string and in runtime `Set` checks. But watching the replay, you can see the agent reason through this: the schema string is an LLM prompt template, not code logic. Different purpose, not real duplication. It recognized this and moved on.
 
-A React component was polling a cache endpoint every 2.5 seconds and calling `setSources()` unconditionally — triggering re-renders even when the data hadn't changed. `/simplify` added a `cachedAt` timestamp check to skip no-op updates.
-
-A model breakdown component used two sequential `.reduce()` calls with nested `.find()` lookups (O(n^2)) to aggregate model usage data. Replaced with a single-pass `Map`.
-
-### What it skipped (false positives)
-
-Not everything flagged was worth fixing. The agents found that validation constants in `feedback.ts` looked duplicated — the same enum values appeared in a JSON schema string and in runtime `Set` checks. But the schema string is an LLM prompt template, not code logic. Different purpose, not real duplication. `/simplify` recognized this and moved on.
+Without the replay, you'd never know this judgment call happened.
 
 ---
 
@@ -102,26 +87,14 @@ Not everything flagged was worth fixing. The agents found that validation consta
 
 ---
 
-## How to set it up
+## Try it yourself
 
-`/simplify` is a [custom slash command](https://docs.anthropic.com/en/docs/claude-code/slash-commands). You can add it to any project by creating a markdown file in your `.claude/commands/` directory:
+1. Run `/simplify` in any [Claude Code](https://docs.anthropic.com/en/docs/claude-code) session — it's built in, no setup required.
+2. After the session, run `npx vibe-replay` to generate an interactive replay of what happened.
+3. Watch the replay to understand every decision the AI made.
 
-```bash
-mkdir -p .claude/commands
-```
-
-Then create `.claude/commands/simplify.md` with your review instructions. The command file is a prompt template — it tells Claude Code what to look for and how to structure the review. You can customize the review criteria for your codebase.
-
-Once the file exists, type `/simplify` in any Claude Code session and it runs the full review protocol.
-
----
-
-## Watch the full session
-
-The best way to understand `/simplify` is to watch it work. This replay captures the entire 67-minute session — every file read, every agent spawned, every fix applied, every test run:
+The more complex the AI session, the more valuable the replay. `/simplify` is a great example — it spawns parallel agents, makes nuanced judgment calls, and runs verification loops. All of that is invisible without a replay.
 
 **[Watch the interactive replay](https://vibe-replay.com/view/?gist=e5b2731d90cfa20fee4f3f7ab980cbb1)**
-
-The replay was generated with [vibe-replay](https://github.com/tuo-lei/vibe-replay) — one command (`npx vibe-replay`) that turns any Claude Code session into an interactive animation. The tool replaying its own refactoring.
 
 **[GitHub](https://github.com/tuo-lei/vibe-replay)** | **[Explore Public Replays](/explore)**
