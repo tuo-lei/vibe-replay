@@ -955,29 +955,81 @@ function ProviderBreakdown({ providers }: { providers: Record<string, number> })
 function InsightsPageSkeleton() {
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-4xl mx-auto px-4 md:px-6 py-8 space-y-6 animate-pulse">
-        {/* Share card skeleton */}
-        <div className="rounded-2xl bg-terminal-surface border border-terminal-border/30 p-8 space-y-6">
-          <div className="flex justify-between">
-            <div className="h-4 w-24 skeleton rounded" />
-            <div className="h-3 w-16 skeleton rounded opacity-40" />
+      <div className="max-w-4xl mx-auto px-4 md:px-6 py-6 space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="h-6 w-32 skeleton rounded" />
+          <div className="flex gap-1">
+            {Array.from({ length: 4 }, (_, i) => (
+              <div key={i} className="h-7 w-10 skeleton rounded-md" />
+            ))}
           </div>
-          <div className="grid grid-cols-3 gap-8">
-            {Array.from({ length: 6 }, (_, i) => (
+        </div>
+        {/* Share card skeleton */}
+        <div className="rounded-2xl bg-terminal-surface border border-terminal-border/30 p-6 space-y-5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="h-4 w-20 skeleton rounded" />
+              <div className="h-5 w-12 skeleton rounded-md" />
+            </div>
+            <div className="h-3 w-28 skeleton rounded" />
+          </div>
+          <div className="grid grid-cols-4 gap-6">
+            {Array.from({ length: 8 }, (_, i) => (
               <div key={i} className="space-y-2">
-                <div className="h-8 w-16 skeleton rounded" />
-                <div className="h-3 w-12 skeleton rounded opacity-40" />
+                <div
+                  className="h-7 skeleton rounded"
+                  style={{ width: `${45 + ((i * 13) % 40)}%` }}
+                />
+                <div className="h-3 w-16 skeleton rounded" />
               </div>
             ))}
           </div>
-          <div className="h-3 w-full skeleton rounded opacity-20" />
+          <div className="h-2.5 w-full skeleton rounded" />
+          <div className="flex justify-between">
+            <div className="h-3 w-40 skeleton rounded" />
+            <div className="h-3 w-24 skeleton rounded" />
+          </div>
         </div>
-        {/* Heatmap skeleton */}
-        <div className="rounded-xl bg-terminal-surface p-6 h-40 skeleton opacity-10" />
-        {/* Highlights skeleton */}
+        {/* Activity heatmap skeleton */}
+        <div className="rounded-xl bg-terminal-surface p-5 shadow-layer-sm space-y-4">
+          <div className="h-3 w-16 skeleton rounded" />
+          <div className="space-y-1.5">
+            {Array.from({ length: 3 }, (_, i) => (
+              <div key={i} className="h-3 skeleton rounded" />
+            ))}
+          </div>
+        </div>
+        {/* Highlight cards skeleton */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {Array.from({ length: 4 }, (_, i) => (
-            <div key={i} className="rounded-xl bg-terminal-surface p-4 h-20 skeleton opacity-15" />
+            <div key={i} className="rounded-xl bg-terminal-surface p-4 shadow-layer-sm space-y-2.5">
+              <div className="flex items-center gap-2">
+                <div className="h-5 w-5 skeleton rounded" />
+                <div className="h-3 w-20 skeleton rounded" />
+              </div>
+              <div className="h-6 w-24 skeleton rounded" />
+              <div className="h-2.5 w-16 skeleton rounded" />
+            </div>
+          ))}
+        </div>
+        {/* Weekly Trend + Day of Week skeleton */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {Array.from({ length: 2 }, (_, col) => (
+            <div key={col} className="rounded-xl bg-terminal-surface p-5 shadow-layer-sm space-y-4">
+              <div className="h-3 w-24 skeleton rounded" />
+              <div className="space-y-2">
+                {Array.from({ length: 5 }, (_, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <div className="h-3 w-8 skeleton rounded shrink-0" />
+                    <div
+                      className="h-5 skeleton rounded"
+                      style={{ width: `${25 + ((i * 17 + col * 31) % 60)}%` }}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       </div>
