@@ -11,6 +11,18 @@ import { cloudReplays, replays } from "./db/schema";
 // Types
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Validation constants
+// ---------------------------------------------------------------------------
+
+const CLOUD_REPLAY_ID_RE = /^[a-zA-Z0-9_-]{10,16}$/;
+const GIST_ID_RE = /^[a-f0-9]{20,40}$/;
+const VALID_VISIBILITY = new Set(["public", "unlisted", "private"]);
+
+function isDev(env: { BETTER_AUTH_URL?: string }): boolean {
+  return !!env.BETTER_AUTH_URL?.startsWith("http://localhost");
+}
+
 type Env = AuthEnv & {
   ASSETS: Fetcher;
   REPLAY_BUCKET: R2Bucket;
@@ -33,7 +45,7 @@ const app = new Hono<HonoEnv>();
 // ---------------------------------------------------------------------------
 
 app.use("/api/*", async (c, next) => {
-  const isDev = c.env.BETTER_AUTH_URL?.startsWith("http://localhost");
+  const dev = isDev(c.env);
   const mw = cors({
     origin: (origin) => {
       if (!origin) return PROD_ORIGINS[0];
@@ -42,7 +54,7 @@ app.use("/api/*", async (c, next) => {
       // Allow any localhost origin (CLI dashboard uses random ports)
       if (origin.match(/^http:\/\/localhost(:\d+)?$/)) return origin;
       // In dev mode, allow additional dev origins
-      if (isDev && DEV_ORIGINS.includes(origin)) return origin;
+      if (dev && DEV_ORIGINS.includes(origin)) return origin;
       return null;
     },
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -72,12 +84,12 @@ app.post("/api/auth/sign-out", async (c) => {
     "better-auth.session_data",
     "better-auth.dont_remember",
   ];
-  const isDev = c.env.BETTER_AUTH_URL?.startsWith("http://localhost");
-  const cookieNames = isDev
+  const dev = isDev(c.env);
+  const cookieNames = dev
     ? baseCookieNames
     : [...baseCookieNames, ...baseCookieNames.map((n) => `__Secure-${n}`)];
   const setCookies = cookieNames.map(
-    (name) => `${name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${isDev ? "" : "; Secure"}`,
+    (name) => `${name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${dev ? "" : "; Secure"}`,
   );
   return new Response(JSON.stringify({ success: true }), {
     headers: [
@@ -275,8 +287,8 @@ body{background:#0a0a0f;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFo
   // Read the signed session cookie — Better Auth cookies are in `token.signature`
   // format. The session API returns only the raw token, but the BFF must send the
   // full signed cookie for auth to work.
-  const isDev = c.env.BETTER_AUTH_URL.startsWith("http://localhost");
-  const cookieName = isDev ? "better-auth.session_token" : "__Secure-better-auth.session_token";
+  const dev = isDev(c.env);
+  const cookieName = dev ? "better-auth.session_token" : "__Secure-better-auth.session_token";
   const cookies = (c.req.raw.headers.get("cookie") || "").split(";").map((s) => s.trim());
   const sessionCookie = cookies.find((ck) => ck.startsWith(`${cookieName}=`));
   const signedToken = sessionCookie
@@ -393,7 +405,7 @@ app.post("/api/cloud-replays", async (c) => {
   }
 
   const visibility = body.visibility || "unlisted";
-  if (!["public", "unlisted", "private"].includes(visibility)) {
+  if (!VALID_VISIBILITY.has(visibility)) {
     return c.json({ error: "Invalid visibility" }, 400);
   }
 
@@ -461,7 +473,7 @@ app.post("/api/cloud-replays", async (c) => {
 /** Download a cloud replay */
 app.get("/api/cloud-replays/:id", async (c) => {
   const id = c.req.param("id");
-  if (!/^[a-zA-Z0-9_-]{10,16}$/.test(id)) {
+  if (!CLOUD_REPLAY_ID_RE.test(id)) {
     return c.json({ error: "Invalid ID" }, 400);
   }
 
@@ -566,13 +578,13 @@ app.patch("/api/cloud-replays/:id", async (c) => {
   const { userId } = authResult;
 
   const id = c.req.param("id");
-  if (!/^[a-zA-Z0-9_-]{10,16}$/.test(id)) {
+  if (!CLOUD_REPLAY_ID_RE.test(id)) {
     return c.json({ error: "Invalid ID" }, 400);
   }
 
   const body = await c.req.json();
   const { visibility } = body;
-  if (!visibility || !["public", "unlisted", "private"].includes(visibility)) {
+  if (!visibility || !VALID_VISIBILITY.has(visibility)) {
     return c.json({ error: "Invalid visibility (must be public, unlisted, or private)" }, 400);
   }
 
@@ -598,7 +610,7 @@ app.delete("/api/cloud-replays/:id", async (c) => {
   const { userId } = authResult;
 
   const id = c.req.param("id");
-  if (!/^[a-zA-Z0-9_-]{10,16}$/.test(id)) {
+  if (!CLOUD_REPLAY_ID_RE.test(id)) {
     return c.json({ error: "Invalid ID" }, 400);
   }
 
@@ -745,7 +757,7 @@ app.patch("/api/gists/:gistId", async (c) => {
   const { userId } = authResult;
 
   const gistId = c.req.param("gistId");
-  if (!/^[a-f0-9]{20,40}$/.test(gistId)) {
+  if (!GIST_ID_RE.test(gistId)) {
     return c.json({ error: "Invalid gist ID" }, 400);
   }
 
@@ -985,7 +997,7 @@ app.get("/api/replays", async (c) => {
 /** Increment view count for a gist-backed cloud replay (by gist ID, no auth required) */
 app.post("/api/cloud-replays/view-gist/:gistId", async (c) => {
   const gistId = c.req.param("gistId");
-  if (!/^[a-f0-9]{20,40}$/.test(gistId)) {
+  if (!GIST_ID_RE.test(gistId)) {
     return c.json({ ok: false }, 400);
   }
   const db = drizzle(c.env.DB);
@@ -1014,7 +1026,7 @@ app.put("/api/replays", async (c) => {
 
 app.get("/r/:id", (c) => {
   const id = c.req.param("id");
-  if (!/^[a-zA-Z0-9_-]{10,16}$/.test(id)) {
+  if (!CLOUD_REPLAY_ID_RE.test(id)) {
     return c.text("Not Found", 404);
   }
   const baseUrl = getBaseUrl(c);
@@ -1174,7 +1186,7 @@ async function handlePostReplay(c: { env: Env; req: { json: () => Promise<any> }
     if (!body.gist_id || typeof body.gist_id !== "string") {
       return Response.json({ error: "gist_id required" }, { status: 400 });
     }
-    if (!/^[a-f0-9]{20,40}$/.test(body.gist_id)) {
+    if (!GIST_ID_RE.test(body.gist_id)) {
       return Response.json({ error: "invalid gist_id" }, { status: 400 });
     }
 

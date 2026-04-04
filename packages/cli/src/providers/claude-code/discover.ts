@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { cleanPromptText, isSystemGeneratedMessage } from "../../clean-prompt.js";
 import type { SessionInfo } from "../../types.js";
+import { shortenPath } from "../../utils.js";
 
 const CLAUDE_DIR = join(homedir(), ".claude", "projects");
 
@@ -54,14 +55,6 @@ function decodeProjectDir(encoded: string): string {
     return `/${encoded.slice(1).replace(/-/g, "/")}`;
   }
   return encoded;
-}
-
-function shortenPath(path: string): string {
-  const home = homedir();
-  if (path.startsWith(home)) {
-    return `~${path.slice(home.length)}`;
-  }
-  return path;
 }
 
 export async function extractSessionInfo(

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatedValue } from "../hooks/useAnimatedNumber";
 import type { SessionSummary, SourceSession } from "../types";
 import { SessionDetailPopup } from "./Dashboard";
 import {
@@ -54,6 +55,7 @@ function useDashboardData() {
   const [, setScanProgress] = useState<number | null>(null);
   const [, setEnrichmentStatus] = useState<SourcesEnrichmentStatus | null>(null);
   const wasEnrichingRef = useRef(false);
+  const lastSourcesCachedAtRef = useRef<string | undefined>(undefined);
   const hasCursorSources = useMemo(
     () => sources.some((source) => source.provider === "cursor"),
     [sources],
@@ -181,7 +183,12 @@ function useDashboardData() {
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null);
       const cached = parseCachedList<SourceSession>(payload);
-      if (!cancelled && cached?.sessions.length) {
+      if (
+        !cancelled &&
+        cached?.sessions.length &&
+        cached.cachedAt !== lastSourcesCachedAtRef.current
+      ) {
+        lastSourcesCachedAtRef.current = cached.cachedAt;
         setSources(cached.sessions);
       }
     };
@@ -296,53 +303,6 @@ function computeInsights(sources: SourceSession[], replays: SessionSummary[]): I
     publishedCount: replays.filter((r) => r.gist?.gistId).length,
     replayConversionPct,
   };
-}
-
-function useAnimatedNumber(target: number, durationMs = 450): number {
-  const [display, setDisplay] = useState(target);
-  const currentRef = useRef(target);
-
-  useEffect(() => {
-    const startValue = currentRef.current;
-    const delta = target - startValue;
-    if (Math.abs(delta) < 1) {
-      currentRef.current = target;
-      setDisplay(target);
-      return;
-    }
-
-    let frame = 0;
-    const startAt = performance.now();
-    const step = (now: number) => {
-      const t = Math.min(1, (now - startAt) / durationMs);
-      const eased = 1 - (1 - t) ** 3;
-      const next = startValue + delta * eased;
-      currentRef.current = next;
-      setDisplay(next);
-      if (t < 1) {
-        frame = requestAnimationFrame(step);
-      } else {
-        currentRef.current = target;
-        setDisplay(target);
-      }
-    };
-
-    frame = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(frame);
-  }, [target, durationMs]);
-
-  return display;
-}
-
-function AnimatedMetricValue({
-  value,
-  formatter = (n) => Math.round(n).toLocaleString(),
-}: {
-  value: number;
-  formatter?: (value: number) => string;
-}) {
-  const animated = useAnimatedNumber(value);
-  return <>{formatter(animated)}</>;
 }
 
 // ─── UI Components ───────────────────────────────────────────────────
@@ -875,7 +835,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
             <div className="grid grid-cols-4 gap-x-6 gap-y-1 flex-1 min-w-0">
               <div>
                 <div className="text-2xl font-mono font-bold text-terminal-green tabular-nums">
-                  <AnimatedMetricValue value={insights.totalSessions} />
+                  <AnimatedValue value={insights.totalSessions} />
                 </div>
                 <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest mt-0.5">
                   sessions
@@ -883,7 +843,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
               </div>
               <div>
                 <div className="text-2xl font-mono font-bold text-terminal-blue tabular-nums">
-                  <AnimatedMetricValue value={insights.totalReplays} />
+                  <AnimatedValue value={insights.totalReplays} />
                 </div>
                 <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest mt-0.5">
                   replays
@@ -891,7 +851,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
               </div>
               <div>
                 <div className="text-2xl font-mono font-bold text-terminal-green tabular-nums">
-                  <AnimatedMetricValue value={displayTotalPrompts} />
+                  <AnimatedValue value={displayTotalPrompts} />
                 </div>
                 <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest mt-0.5">
                   turns
@@ -899,7 +859,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
               </div>
               <div>
                 <div className="text-2xl font-mono font-bold text-terminal-orange tabular-nums">
-                  <AnimatedMetricValue value={displayTotalToolCalls} />
+                  <AnimatedValue value={displayTotalToolCalls} />
                 </div>
                 <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest mt-0.5">
                   tool calls

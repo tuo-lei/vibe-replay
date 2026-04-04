@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useOutsideClick } from "../hooks/useOutsideClick";
+import { ALL_PROJECTS, usePanelFilters } from "../hooks/usePanelFilters";
 import type { SessionSummary, SourceSession } from "../types";
 import DashboardHome from "./DashboardHome";
 import {
@@ -25,6 +27,7 @@ import {
   sourceSuggestedTitle,
   TITLE_MAX_CHARS,
   timeAgo,
+  toggleArchiveSlug,
 } from "./dashboard-utils";
 import InsightsPage from "./InsightsPage";
 import {
@@ -37,20 +40,6 @@ import ProjectsPanel from "./ProjectsPanel";
 import { formatDuration } from "./StatsPanel";
 
 type Tab = "home" | "sessions" | "replays" | "projects" | "insights";
-
-// ─── URL state parsers (module-level for stable references) ─────────
-function getProjectFromUrl(): string {
-  const params = new URLSearchParams(window.location.search);
-  return params.get("project") || ALL_PROJECTS;
-}
-function getFilterFromUrl(): string {
-  const params = new URLSearchParams(window.location.search);
-  return params.get("q") || "";
-}
-function getShowArchivedFromUrl(): boolean {
-  const params = new URLSearchParams(window.location.search);
-  return params.get("archived") === "true";
-}
 
 const MoreDotsIcon = () => (
   <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
@@ -180,14 +169,8 @@ function SessionMoreMenu({
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
+  const close = useCallback(() => setOpen(false), []);
+  useOutsideClick(ref, close, open);
 
   return (
     <div className="relative" ref={ref}>
@@ -910,18 +893,11 @@ function ReplayCard({
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Close menu on outside click
-  useEffect(() => {
-    if (!menuOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-        setConfirmingDelete(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [menuOpen]);
+  const closeMenu = useCallback(() => {
+    setMenuOpen(false);
+    setConfirmingDelete(false);
+  }, []);
+  useOutsideClick(menuRef, closeMenu, menuOpen);
 
   return (
     <div
@@ -1265,9 +1241,6 @@ function RegenerateAllButton() {
 
 // ─── Sessions Tab (source sessions from providers) ─────────────────
 
-/** "All projects" sentinel */
-const ALL_PROJECTS = "__all__";
-
 function SessionsPanel() {
   const [sources, setSources] = useState<SourceSession[]>([]);
   const [scanResultsBySlug, setScanResultsBySlug] = useState<Record<string, SessionScanData>>({});
@@ -1279,35 +1252,14 @@ function SessionsPanel() {
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const [refreshClockMs, setRefreshClockMs] = useState(() => Date.now());
-  const [selectedProject, setSelectedProject] = useState<string>(getProjectFromUrl());
-  const [filter, setFilter] = useState(getFilterFromUrl());
-  const [showArchived, setShowArchived] = useState(getShowArchivedFromUrl());
-
-  useEffect(() => {
-    const handler = () => {
-      setSelectedProject(getProjectFromUrl());
-      setFilter(getFilterFromUrl());
-      setShowArchived(getShowArchivedFromUrl());
-    };
-    window.addEventListener("popstate", handler);
-    return () => window.removeEventListener("popstate", handler);
-  }, []);
-
-  const handleProjectChange = (project: string) => {
-    setSelectedProject(project);
-    navigateTo({ project: project === ALL_PROJECTS ? null : project });
-  };
-
-  const handleFilterChange = (val: string) => {
-    setFilter(val);
-    navigateTo({ q: val || null }, { replace: true });
-  };
-
-  const handleToggleArchived = () => {
-    const next = !showArchived;
-    setShowArchived(next);
-    navigateTo({ archived: next ? "true" : null });
-  };
+  const {
+    selectedProject,
+    filter,
+    showArchived,
+    handleProjectChange,
+    handleFilterChange,
+    handleToggleArchived,
+  } = usePanelFilters();
 
   // Background scan + insights (shared singleton context)
   const { scanStatus, userInsights, projectInsightsCache, fetchProjectInsights } =
@@ -1390,25 +1342,7 @@ function SessionsPanel() {
     }
   }, []);
 
-  const toggleArchive = async (slug: string) => {
-    const isArchived = archivedSlugs.has(slug);
-    setArchivedSlugs((prev) => {
-      const next = new Set(prev);
-      isArchived ? next.delete(slug) : next.add(slug);
-      return next;
-    });
-    try {
-      const resp = await fetch(`/api/archive/${slug}`, { method: isArchived ? "DELETE" : "POST" });
-      if (!resp.ok) throw new Error("Archive toggle failed");
-    } catch (err) {
-      console.error("Archive toggle failed:", getErrorMessage(err));
-      setArchivedSlugs((prev) => {
-        const next = new Set(prev);
-        isArchived ? next.add(slug) : next.delete(slug);
-        return next;
-      });
-    }
-  };
+  const toggleArchive = (slug: string) => toggleArchiveSlug(slug, archivedSlugs, setArchivedSlugs);
 
   useEffect(() => {
     void loadSources();
@@ -2178,9 +2112,14 @@ function ReplaysPanel() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [regeneratingSlug, setRegeneratingSlug] = useState<string | null>(null);
 
-  const [filter, setFilter] = useState(getFilterFromUrl());
-  const [selectedProject, setSelectedProject] = useState<string>(getProjectFromUrl());
-  const [showArchived, setShowArchived] = useState(getShowArchivedFromUrl());
+  const {
+    selectedProject,
+    filter,
+    showArchived,
+    handleProjectChange,
+    handleFilterChange,
+    handleToggleArchived,
+  } = usePanelFilters();
 
   // Background scan + insights (shared singleton context)
   const { userInsights, projectInsightsCache, fetchProjectInsights } = useScanInsightsContext();
@@ -2194,32 +2133,6 @@ function ReplaysPanel() {
 
   const projectInsights =
     selectedProject !== ALL_PROJECTS ? projectInsightsCache.get(selectedProject) : undefined;
-
-  useEffect(() => {
-    const handler = () => {
-      setSelectedProject(getProjectFromUrl());
-      setFilter(getFilterFromUrl());
-      setShowArchived(getShowArchivedFromUrl());
-    };
-    window.addEventListener("popstate", handler);
-    return () => window.removeEventListener("popstate", handler);
-  }, []);
-
-  const handleProjectChange = (project: string) => {
-    setSelectedProject(project);
-    navigateTo({ project: project === ALL_PROJECTS ? null : project });
-  };
-
-  const handleFilterChange = (val: string) => {
-    setFilter(val);
-    navigateTo({ q: val || null }, { replace: true });
-  };
-
-  const handleToggleArchived = () => {
-    const next = !showArchived;
-    setShowArchived(next);
-    navigateTo({ archived: next ? "true" : null });
-  };
 
   useEffect(() => {
     let mounted = true;
@@ -2295,25 +2208,7 @@ function ReplaysPanel() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const toggleArchive = async (slug: string) => {
-    const isArchived = archivedSlugs.has(slug);
-    setArchivedSlugs((prev) => {
-      const next = new Set(prev);
-      isArchived ? next.delete(slug) : next.add(slug);
-      return next;
-    });
-    try {
-      const resp = await fetch(`/api/archive/${slug}`, { method: isArchived ? "DELETE" : "POST" });
-      if (!resp.ok) throw new Error("Archive toggle failed");
-    } catch (err) {
-      console.error("Archive toggle failed:", getErrorMessage(err));
-      setArchivedSlugs((prev) => {
-        const next = new Set(prev);
-        isArchived ? next.add(slug) : next.delete(slug);
-        return next;
-      });
-    }
-  };
+  const toggleArchive = (slug: string) => toggleArchiveSlug(slug, archivedSlugs, setArchivedSlugs);
 
   const handleTitleSave = async (slug: string, title: string) => {
     const resp = await fetch(`/api/sessions/${encodeURIComponent(slug)}`, {

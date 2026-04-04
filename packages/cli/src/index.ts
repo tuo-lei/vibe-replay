@@ -27,18 +27,14 @@ import { scanForSecrets } from "./scan.js";
 import { startDashboard, startServer } from "./server.js";
 import { transformToReplay } from "./transform.js";
 import type { SessionInfo } from "./types.js";
+import { normalizeTitle } from "./utils.js";
 import { CLI_VERSION } from "./version.js";
 
 const DEV_MENU_ENABLED = process.env.VIBE_REPLAY_DEV_MENU === "1";
 const SESSION_DISCOVERY_CACHE_KEY = "session-discovery-v1";
-const TITLE_MAX_CHARS = 120;
-
-function normalizeTitle(value?: string): string {
-  return (value || "").replace(/\s+/g, " ").trim().slice(0, TITLE_MAX_CHARS);
-}
 
 function normalizePromptTitle(value?: string): string {
-  return normalizeTitle(cleanPromptText(value || ""));
+  return normalizeTitle(cleanPromptText(value || "")) || "";
 }
 
 function suggestedReplayTitle(
@@ -60,7 +56,7 @@ function suggestedReplayTitle(
   const firstPromptTitle = normalizePromptTitle(sessionInfo?.firstPrompt);
   if (firstPromptTitle) return firstPromptTitle;
 
-  return replayCandidate || slug;
+  return replayCandidate || slug || replaySlug;
 }
 
 async function discoverAllSessions(): Promise<SessionInfo[]> {

@@ -75,9 +75,10 @@ describe("checkCleanupWarnings", () => {
 
   it("detects sessions within warning threshold", () => {
     const sessions = [
-      // 25 days old → 5 days left → within 7-day threshold
+      // 24.5 days old → 5 days left → within 7-day threshold
+      // (use .5 to avoid Math.floor boundary flakiness across timezones)
       makeSession({
-        timestamp: new Date(Date.now() - 25 * 24 * 60 * 60 * 1000).toISOString(),
+        timestamp: new Date(Date.now() - 24.5 * 24 * 60 * 60 * 1000).toISOString(),
         filePath: "/path/expiring.jsonl",
       }),
       // 10 days old → 20 days left → safe
