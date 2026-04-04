@@ -453,7 +453,7 @@ function RecentSessionsList({
       })}
       <button
         onClick={onViewAll}
-        className="w-full py-2 mt-auto pt-1 text-xs font-sans font-semibold rounded-lg bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200"
+        className="w-full py-2 mt-auto text-xs font-sans font-semibold rounded-lg bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200"
       >
         View all sessions &rarr;
       </button>
@@ -525,7 +525,7 @@ function RecentReplaysList({
       ))}
       <button
         onClick={onViewAll}
-        className="w-full py-2 mt-auto pt-1 text-xs font-sans font-semibold rounded-lg bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200"
+        className="w-full py-2 mt-auto text-xs font-sans font-semibold rounded-lg bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200"
       >
         View all replays &rarr;
       </button>
