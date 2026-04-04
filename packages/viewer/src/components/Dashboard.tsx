@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useOutsideClick } from "../hooks/useOutsideClick";
-import { usePanelFilters } from "../hooks/usePanelFilters";
+import { ALL_PROJECTS, usePanelFilters } from "../hooks/usePanelFilters";
 import type { SessionSummary, SourceSession } from "../types";
 import DashboardHome from "./DashboardHome";
 import {
@@ -1240,9 +1240,6 @@ function RegenerateAllButton() {
 }
 
 // ─── Sessions Tab (source sessions from providers) ─────────────────
-
-/** "All projects" sentinel */
-const ALL_PROJECTS = "__all__";
 
 function SessionsPanel() {
   const [sources, setSources] = useState<SourceSession[]>([]);

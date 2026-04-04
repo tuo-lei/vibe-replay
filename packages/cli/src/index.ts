@@ -34,7 +34,7 @@ const DEV_MENU_ENABLED = process.env.VIBE_REPLAY_DEV_MENU === "1";
 const SESSION_DISCOVERY_CACHE_KEY = "session-discovery-v1";
 
 function normalizePromptTitle(value?: string): string {
-  return normalizeTitle(cleanPromptText(value || ""));
+  return normalizeTitle(cleanPromptText(value || "")) || "";
 }
 
 function suggestedReplayTitle(
@@ -56,7 +56,7 @@ function suggestedReplayTitle(
   const firstPromptTitle = normalizePromptTitle(sessionInfo?.firstPrompt);
   if (firstPromptTitle) return firstPromptTitle;
 
-  return replayCandidate || slug;
+  return replayCandidate || slug || replaySlug;
 }
 
 async function discoverAllSessions(): Promise<SessionInfo[]> {

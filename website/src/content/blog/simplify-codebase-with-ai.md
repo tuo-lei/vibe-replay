@@ -1,5 +1,5 @@
 ---
-title: "Claude Code /simplify — Watch It Delete 193 Lines From a Real Codebase"
+title: "Claude Code /simplify — Watch It Clean Up a Real Codebase"
 excerpt: "The /simplify slash command reviews your code for duplication, quality issues, and inefficiency — then fixes them. Here's how it works, what it catches, and a full interactive replay of a real session."
 date: 2026-04-03
 readTime: "5 min read"
@@ -92,9 +92,9 @@ Not everything flagged was worth fixing. The agents found that validation consta
 | AI tool calls | 108 |
 | Sub-agents spawned | 7 (parallel) |
 | Files changed | 16 |
-| Lines added | 198 |
-| Lines removed | 217 |
-| **Net** | **-193 lines** |
+| Lines added | 289 |
+| Lines removed | 369 |
+| **Net** | **-80 lines** |
 | Unit tests | 694 passed |
 | E2E tests | 23 passed |
 | Tests broken | 0 |

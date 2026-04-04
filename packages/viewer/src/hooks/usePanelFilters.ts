@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { navigateTo } from "../components/dashboard-utils";
 
-const ALL_PROJECTS = "__all__";
+export const ALL_PROJECTS = "__all__";
 
 function getProjectFromUrl(): string {
   return new URLSearchParams(window.location.search).get("project") || ALL_PROJECTS;
