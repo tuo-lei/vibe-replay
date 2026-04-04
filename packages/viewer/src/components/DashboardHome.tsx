@@ -309,26 +309,29 @@ function computeInsights(sources: SourceSession[], replays: SessionSummary[]): I
 
 function RecentProjectsSkeleton() {
   return (
-    <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm animate-pulse">
+    <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm">
       <div className="flex items-center justify-between mb-3">
         <div className="h-3 w-28 skeleton rounded" />
-        <div className="h-3 w-14 skeleton rounded opacity-40" />
+        <div className="h-3 w-14 skeleton rounded" />
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
         {Array.from({ length: 5 }, (_, i) => (
           <div
             key={i}
-            className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg bg-terminal-bg"
+            className="flex items-center justify-between gap-2 px-3 py-3 rounded-lg bg-terminal-bg"
           >
-            <div className="min-w-0 flex-1 space-y-2">
-              <div className="h-3.5 w-24 max-w-[70%] skeleton rounded" />
-              <div className="h-3 w-36 max-w-full skeleton rounded opacity-40" />
+            <div className="min-w-0 flex-1 space-y-2.5">
+              <div
+                className="h-3.5 skeleton rounded"
+                style={{ width: `${50 + ((i * 17) % 30)}%` }}
+              />
+              <div className="h-3 skeleton rounded" style={{ width: `${60 + ((i * 23) % 25)}%` }} />
             </div>
-            <div className="h-3 w-10 shrink-0 skeleton rounded opacity-30" />
+            <div className="h-4 w-14 shrink-0 skeleton rounded" />
           </div>
         ))}
       </div>
-      <div className="h-9 mt-2 rounded-lg bg-terminal-surface-2 skeleton opacity-20" />
+      <div className="h-8 mt-2 rounded-lg skeleton" />
     </div>
   );
 }
@@ -373,7 +376,7 @@ function RecentSessionsList({
   }
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1 flex-1 flex flex-col">
       {sessions.map((s) => {
         const hasReplay = !!s.existingReplay;
         const isGenerating = generatingSlug === s.slug;
@@ -403,7 +406,7 @@ function RecentSessionsList({
                     e.stopPropagation();
                     onViewReplay(s.existingReplay!);
                   }}
-                  className="h-6 px-2.5 text-[11px] font-sans font-semibold rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 flex items-center gap-1"
+                  className="h-7 px-3 text-xs font-sans font-semibold rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 flex items-center gap-1"
                 >
                   <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
                     <polygon points="4 2 14 8 4 14" />
@@ -417,7 +420,7 @@ function RecentSessionsList({
                     onGenerate(s);
                   }}
                   disabled={isGenerating}
-                  className={`h-6 px-2.5 text-[11px] font-sans font-semibold rounded-md transition-all duration-200 disabled:opacity-50 flex items-center gap-1 ${
+                  className={`h-7 px-3 text-xs font-sans font-semibold rounded-md transition-all duration-200 disabled:opacity-50 flex items-center gap-1 ${
                     hasError
                       ? "bg-terminal-red-subtle text-terminal-red"
                       : "bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis"
@@ -450,7 +453,7 @@ function RecentSessionsList({
       })}
       <button
         onClick={onViewAll}
-        className="w-full py-2 mt-1 text-xs font-sans font-semibold rounded-lg bg-terminal-surface-2 text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors"
+        className="w-full py-2 mt-auto pt-1 text-xs font-sans font-semibold rounded-lg bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200"
       >
         View all sessions &rarr;
       </button>
@@ -478,7 +481,7 @@ function RecentReplaysList({
   }
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1 flex-1 flex flex-col">
       {replays.map((r) => (
         <button
           key={r.slug}
@@ -522,7 +525,7 @@ function RecentReplaysList({
       ))}
       <button
         onClick={onViewAll}
-        className="w-full py-2 mt-1 text-xs font-sans font-semibold rounded-lg bg-terminal-surface-2 text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors"
+        className="w-full py-2 mt-auto pt-1 text-xs font-sans font-semibold rounded-lg bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200"
       >
         View all replays &rarr;
       </button>
@@ -792,23 +795,52 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   if (loading && !sources.length && !replays.length) {
     return (
       <div className="flex-1 overflow-auto animate-in fade-in duration-500">
-        <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 space-y-6 animate-pulse">
+        <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 space-y-6">
           {/* Overview + activity skeleton */}
           <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm space-y-4">
             <div className="grid grid-cols-4 gap-6">
               {Array.from({ length: 4 }, (_, i) => (
                 <div key={i} className="space-y-2">
-                  <div className="h-7 w-16 skeleton rounded" />
-                  <div className="h-3 w-12 skeleton rounded opacity-40" />
+                  <div className="h-8 w-20 skeleton rounded" />
+                  <div className="h-3 w-14 skeleton rounded" />
                 </div>
               ))}
             </div>
-            <div className="h-[120px] w-full skeleton rounded opacity-15" />
+            {/* Heatmap placeholder */}
+            <div className="space-y-1.5 pt-2">
+              {Array.from({ length: 3 }, (_, i) => (
+                <div key={i} className="h-3 skeleton rounded" />
+              ))}
+            </div>
+            <div className="h-9 skeleton rounded" />
           </div>
           {/* Sessions + Replays skeleton */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            <div className="bg-terminal-surface rounded-xl p-4 h-[300px] skeleton opacity-10" />
-            <div className="bg-terminal-surface rounded-xl p-4 h-[300px] skeleton opacity-10" />
+            {Array.from({ length: 2 }, (_, col) => (
+              <div
+                key={col}
+                className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm space-y-3"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="h-3 w-28 skeleton rounded" />
+                  <div className="h-3 w-14 skeleton rounded" />
+                </div>
+                {Array.from({ length: 5 }, (_, i) => (
+                  <div key={i} className="flex items-center gap-3 px-1 py-1">
+                    <div className="h-5 w-14 skeleton rounded-full shrink-0" />
+                    <div className="flex-1 space-y-1.5">
+                      <div
+                        className="h-3.5 skeleton rounded"
+                        style={{ width: `${55 + ((i * 19) % 35)}%` }}
+                      />
+                      <div className="h-2.5 w-20 skeleton rounded" />
+                    </div>
+                    <div className="h-3 w-12 skeleton rounded shrink-0" />
+                  </div>
+                ))}
+                <div className="h-8 skeleton rounded" />
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -896,14 +928,14 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           {/* CTA link */}
           <button
             onClick={() => onNavigate("insights")}
-            className="w-full py-2 mt-3 text-xs font-sans font-semibold rounded-lg bg-terminal-surface-2 text-terminal-dim hover:text-terminal-green hover:bg-terminal-surface-hover transition-colors"
+            className="w-full py-2.5 mt-3 text-xs font-sans font-semibold rounded-lg bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200"
           >
             View personal insights &rarr;
           </button>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-stretch">
+          <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm flex flex-col">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
                 Recent Sessions
@@ -912,19 +944,21 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
                 {insights.totalSessions} total
               </span>
             </div>
-            <RecentSessionsList
-              sessions={insights.recentSources}
-              isLoading={loadingSources}
-              onViewAll={() => onNavigate("sessions")}
-              onGenerate={handleGenerate}
-              onViewReplay={handleOpenReplay}
-              onSessionClick={(s) => setSelectedSlug(s.slug)}
-              generatingSlug={generatingSlug}
-              generateErrorSlug={generateErrorSlug}
-            />
+            <div className="flex-1 flex flex-col justify-between">
+              <RecentSessionsList
+                sessions={insights.recentSources}
+                isLoading={loadingSources}
+                onViewAll={() => onNavigate("sessions")}
+                onGenerate={handleGenerate}
+                onViewReplay={handleOpenReplay}
+                onSessionClick={(s) => setSelectedSlug(s.slug)}
+                generatingSlug={generatingSlug}
+                generateErrorSlug={generateErrorSlug}
+              />
+            </div>
           </div>
 
-          <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm">
+          <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm flex flex-col">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
                 Recent Replays
@@ -933,12 +967,14 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
                 {insights.totalReplays} total
               </span>
             </div>
-            <RecentReplaysList
-              replays={insights.recentReplays}
-              isLoading={loadingReplays}
-              onViewAll={() => onNavigate("replays")}
-              onOpen={handleOpenReplay}
-            />
+            <div className="flex-1 flex flex-col justify-between">
+              <RecentReplaysList
+                replays={insights.recentReplays}
+                isLoading={loadingReplays}
+                onViewAll={() => onNavigate("replays")}
+                onOpen={handleOpenReplay}
+              />
+            </div>
           </div>
         </div>
 
@@ -993,7 +1029,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
             {userInsights.topProjects.length > 5 && (
               <button
                 onClick={() => onNavigate("projects")}
-                className="w-full py-2 mt-2 text-xs font-sans font-semibold rounded-lg bg-terminal-surface-2 text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors"
+                className="w-full py-2 mt-2 text-xs font-sans font-semibold rounded-lg bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200"
               >
                 View all projects &rarr;
               </button>
