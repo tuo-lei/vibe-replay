@@ -116,6 +116,32 @@ export const verification = sqliteTable(
 );
 
 // ---------------------------------------------------------------------------
+// User Files — generic R2-backed file storage (GIF, SVG, etc.)
+// ---------------------------------------------------------------------------
+
+export const userFiles = sqliteTable(
+  "user_files",
+  {
+    id: text("id").primaryKey(), // nanoid, 12 chars
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    contentType: text("content_type").notNull(), // "image/gif" | "image/svg+xml"
+    filename: text("filename"), // original filename, optional
+    sizeBytes: integer("size_bytes").default(0).notNull(),
+    visibility: text("visibility").default("unlisted").notNull(), // "public" | "unlisted" | "private"
+    parentReplayId: text("parent_replay_id"), // optional link to cloud_replays.id
+    viewCount: integer("view_count").default(0),
+    createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
+    expiresAt: text("expires_at"), // nullable — 7 days for free tier
+  },
+  (table) => [
+    index("idx_user_files_user").on(table.userId),
+    index("idx_user_files_expires").on(table.expiresAt),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // Cloud Replays — unified table for R2 and gist-backed replays
 // ---------------------------------------------------------------------------
 

@@ -5,7 +5,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { nanoid } from "nanoid";
 import { type AuthEnv, createAuth, DEV_ORIGINS, PROD_ORIGINS } from "./auth";
-import { cloudReplays, replays, sessionInsights } from "./db/schema";
+import { cloudReplays, replays, sessionInsights, userFiles } from "./db/schema";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -389,6 +389,26 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 const MAX_TOTAL_STORAGE = 20 * 1024 * 1024; // 20 MB
 const RETENTION_DAYS = 7;
 
+const ALLOWED_FILE_TYPES = new Map([
+  ["image/gif", "gif"],
+  ["image/svg+xml", "svg"],
+]);
+
+/** Sum R2 storage across cloud_replays + user_files for a user */
+async function getUserR2Storage(db: ReturnType<typeof drizzle>, userId: string): Promise<number> {
+  const [replaysStorage, filesStorage] = await Promise.all([
+    db
+      .select({ total: sql<number>`coalesce(sum(${cloudReplays.sizeBytes}), 0)` })
+      .from(cloudReplays)
+      .where(and(eq(cloudReplays.userId, userId), eq(cloudReplays.storageType, "r2"))),
+    db
+      .select({ total: sql<number>`coalesce(sum(${userFiles.sizeBytes}), 0)` })
+      .from(userFiles)
+      .where(eq(userFiles.userId, userId)),
+  ]);
+  return (replaysStorage[0]?.total || 0) + (filesStorage[0]?.total || 0);
+}
+
 /** Upload a replay to R2 */
 app.post("/api/cloud-replays", async (c) => {
   const authResult = await requireAuth(c);
@@ -416,12 +436,9 @@ app.post("/api/cloud-replays", async (c) => {
   }
 
   const db = drizzle(c.env.DB);
-  // Only count R2 storage (gist entries have sizeBytes=0 but shouldn't pollute accounting)
-  const userStorage = await db
-    .select({ total: sql<number>`coalesce(sum(${cloudReplays.sizeBytes}), 0)` })
-    .from(cloudReplays)
-    .where(and(eq(cloudReplays.userId, userId), eq(cloudReplays.storageType, "r2")));
-  if ((userStorage[0]?.total || 0) + sizeBytes > MAX_TOTAL_STORAGE) {
+  // Count R2 storage across cloud_replays + user_files
+  const totalUsed = await getUserR2Storage(db, userId);
+  if (totalUsed + sizeBytes > MAX_TOTAL_STORAGE) {
     return c.json({ error: "Storage quota exceeded (max 20MB)" }, 413);
   }
 
@@ -560,14 +577,11 @@ app.get("/api/cloud-replays", async (c) => {
     .orderBy(desc(cloudReplays.createdAt))
     .limit(100);
 
-  const storage = await db
-    .select({ total: sql<number>`coalesce(sum(${cloudReplays.sizeBytes}), 0)` })
-    .from(cloudReplays)
-    .where(and(eq(cloudReplays.userId, userId), eq(cloudReplays.storageType, "r2")));
+  const totalUsed = await getUserR2Storage(db, userId);
 
   return c.json({
     replays: results,
-    storage: { used: storage[0]?.total || 0, limit: MAX_TOTAL_STORAGE },
+    storage: { used: totalUsed, limit: MAX_TOTAL_STORAGE },
   });
 });
 
@@ -1302,9 +1316,213 @@ app.get("/api/insights/summary", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// Short URL for cloud replays — redirect to viewer
+// User Files API — R2-backed file storage (GIF, SVG)
 // ---------------------------------------------------------------------------
 
+/** Upload a file to R2 */
+app.post("/api/files", async (c) => {
+  const authResult = await requireAuth(c);
+  if (authResult instanceof Response) return authResult;
+  const { userId } = authResult;
+
+  const body = await c.req.json();
+  const { content, contentType, filename, parentReplayId, visibility: vis } = body;
+
+  if (!content || typeof content !== "string") {
+    return c.json({ error: "content required (base64-encoded)" }, 400);
+  }
+  if (!contentType || !ALLOWED_FILE_TYPES.has(contentType)) {
+    return c.json(
+      { error: `Unsupported content type. Allowed: ${[...ALLOWED_FILE_TYPES.keys()].join(", ")}` },
+      400,
+    );
+  }
+
+  const visibility = vis || "unlisted";
+  if (!VALID_VISIBILITY.has(visibility)) {
+    return c.json({ error: "Invalid visibility" }, 400);
+  }
+
+  // Decode base64 to binary
+  let binary: Uint8Array;
+  try {
+    binary = Uint8Array.from(atob(content), (ch) => ch.charCodeAt(0));
+  } catch {
+    return c.json({ error: "Invalid base64 content" }, 400);
+  }
+
+  // Magic bytes validation — reject mismatched content
+  if (contentType === "image/gif") {
+    // GIF87a or GIF89a
+    if (binary.length < 6 || String.fromCharCode(...binary.slice(0, 4)) !== "GIF8") {
+      return c.json({ error: "Invalid GIF file" }, 400);
+    }
+  } else if (contentType === "image/svg+xml") {
+    const head = new TextDecoder().decode(binary.slice(0, 256)).trimStart();
+    if (!head.startsWith("<svg") && !head.startsWith("<?xml")) {
+      return c.json({ error: "Invalid SVG file" }, 400);
+    }
+  }
+
+  const sizeBytes = binary.byteLength;
+  if (sizeBytes > MAX_FILE_SIZE) {
+    return c.json({ error: "File too large (max 10MB)" }, 413);
+  }
+
+  const db = drizzle(c.env.DB);
+  const totalUsed = await getUserR2Storage(db, userId);
+  if (totalUsed + sizeBytes > MAX_TOTAL_STORAGE) {
+    return c.json({ error: "Storage quota exceeded (max 20MB)" }, 413);
+  }
+
+  const id = nanoid(12);
+  const ext = ALLOWED_FILE_TYPES.get(contentType);
+  const r2Key = `files/${id}.${ext}`;
+  await c.env.REPLAY_BUCKET.put(r2Key, binary, {
+    httpMetadata: { contentType },
+    customMetadata: { userId },
+  });
+
+  const expiresAt = new Date(Date.now() + RETENTION_DAYS * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .replace("T", " ")
+    .slice(0, 19);
+
+  try {
+    await db.insert(userFiles).values({
+      id,
+      userId,
+      contentType,
+      filename: filename ? String(filename).slice(0, 255) : null,
+      sizeBytes,
+      visibility,
+      parentReplayId: parentReplayId || null,
+      expiresAt,
+    });
+  } catch (e) {
+    await c.env.REPLAY_BUCKET.delete(r2Key).catch(() => {});
+    throw e;
+  }
+
+  const baseUrl = getBaseUrl(c);
+  return c.json({ id, url: `${baseUrl}/f/${id}`, expiresAt, sizeBytes });
+});
+
+/** List current user's files */
+app.get("/api/files", async (c) => {
+  const authResult = await requireAuth(c);
+  if (authResult instanceof Response) return authResult;
+  const { userId } = authResult;
+
+  const db = drizzle(c.env.DB);
+  const results = await db
+    .select({
+      id: userFiles.id,
+      contentType: userFiles.contentType,
+      filename: userFiles.filename,
+      sizeBytes: userFiles.sizeBytes,
+      visibility: userFiles.visibility,
+      parentReplayId: userFiles.parentReplayId,
+      viewCount: userFiles.viewCount,
+      createdAt: userFiles.createdAt,
+      expiresAt: userFiles.expiresAt,
+    })
+    .from(userFiles)
+    .where(eq(userFiles.userId, userId))
+    .orderBy(desc(userFiles.createdAt))
+    .limit(100);
+
+  return c.json({ files: results });
+});
+
+/** Delete a user file */
+app.delete("/api/files/:id", async (c) => {
+  const authResult = await requireAuth(c);
+  if (authResult instanceof Response) return authResult;
+  const { userId } = authResult;
+
+  const id = c.req.param("id");
+  if (!CLOUD_REPLAY_ID_RE.test(id)) {
+    return c.json({ error: "Invalid ID" }, 400);
+  }
+
+  const db = drizzle(c.env.DB);
+  const [record] = await db
+    .select({ userId: userFiles.userId, contentType: userFiles.contentType })
+    .from(userFiles)
+    .where(eq(userFiles.id, id))
+    .limit(1);
+  if (!record || record.userId !== userId) {
+    return c.json({ error: "Not found" }, 404);
+  }
+
+  const ext = ALLOWED_FILE_TYPES.get(record.contentType) || "bin";
+  await Promise.all([
+    db.delete(userFiles).where(eq(userFiles.id, id)),
+    c.env.REPLAY_BUCKET.delete(`files/${id}.${ext}`),
+  ]);
+
+  return c.json({ ok: true });
+});
+
+// ---------------------------------------------------------------------------
+// Short URLs — serve files and redirect replays
+// ---------------------------------------------------------------------------
+
+/** Serve a user file directly (for embedding in markdown, PRs, etc.) */
+app.get("/f/:idRaw", async (c) => {
+  const raw = c.req.param("idRaw");
+  // Strip optional extension: /f/abc123.gif → id=abc123
+  const id = raw.replace(/\.(gif|svg)$/, "");
+  if (!CLOUD_REPLAY_ID_RE.test(id)) {
+    return c.text("Not Found", 404);
+  }
+
+  const db = drizzle(c.env.DB);
+  const [record] = await db.select().from(userFiles).where(eq(userFiles.id, id)).limit(1);
+  if (!record) return c.text("Not Found", 404);
+
+  // Expiration check
+  if (
+    record.expiresAt &&
+    new Date(record.expiresAt.endsWith("Z") ? record.expiresAt : `${record.expiresAt}Z`) <
+      new Date()
+  ) {
+    return c.text("Expired", 410);
+  }
+
+  // Visibility check
+  if (record.visibility === "private") {
+    const authResult = await requireAuth(c);
+    if (authResult instanceof Response) return authResult;
+    if (authResult.userId !== record.userId) {
+      return c.text("Not Found", 404);
+    }
+  }
+
+  const ext = ALLOWED_FILE_TYPES.get(record.contentType) || "bin";
+  const obj = await c.env.REPLAY_BUCKET.get(`files/${id}.${ext}`);
+  if (!obj) return c.text("Not Found", 404);
+
+  // Increment view count (fire-and-forget)
+  db.update(userFiles)
+    .set({ viewCount: sql`${userFiles.viewCount} + 1` })
+    .where(eq(userFiles.id, id))
+    .catch(() => {});
+
+  const headers: Record<string, string> = {
+    "Content-Type": record.contentType,
+    "Cache-Control": record.visibility === "private" ? "private, no-store" : "public, max-age=3600",
+  };
+  // Security: prevent script execution in SVGs
+  if (record.contentType === "image/svg+xml") {
+    headers["Content-Security-Policy"] = "script-src 'none'; style-src 'unsafe-inline'";
+  }
+
+  return new Response(obj.body, { headers });
+});
+
+/** Short URL for cloud replays — redirect to viewer */
 app.get("/r/:id", (c) => {
   const id = c.req.param("id");
   if (!CLOUD_REPLAY_ID_RE.test(id)) {
@@ -1430,6 +1648,8 @@ export default {
     // Cron deletes R2 objects after grace period, zeros sizeBytes to free quota.
     // D1 rows are kept permanently for history/analytics.
     const GRACE_DAYS = 7;
+
+    // Clean expired cloud replays
     for (;;) {
       const expired = await db
         .select({ id: cloudReplays.id })
@@ -1445,11 +1665,32 @@ export default {
       for (const id of expiredIds) {
         await env.REPLAY_BUCKET.delete(`replays/${id}.json`);
       }
-      // Zero out sizeBytes in bulk (frees quota, marks as cleaned)
       await db
         .update(cloudReplays)
         .set({ sizeBytes: 0 })
         .where(inArray(cloudReplays.id, expiredIds));
+
+      if (expired.length < BATCH) break;
+    }
+
+    // Clean expired user files
+    for (;;) {
+      const expired = await db
+        .select({ id: userFiles.id, contentType: userFiles.contentType })
+        .from(userFiles)
+        .where(
+          sql`${userFiles.expiresAt} IS NOT NULL AND ${userFiles.expiresAt} < datetime('now', '-${GRACE_DAYS} days') AND ${userFiles.sizeBytes} > 0`,
+        )
+        .limit(BATCH);
+
+      if (expired.length === 0) break;
+
+      for (const { id, contentType } of expired) {
+        const ext = ALLOWED_FILE_TYPES.get(contentType) || "bin";
+        await env.REPLAY_BUCKET.delete(`files/${id}.${ext}`);
+      }
+      const expiredIds = expired.map(({ id }) => id);
+      await db.update(userFiles).set({ sizeBytes: 0 }).where(inArray(userFiles.id, expiredIds));
 
       if (expired.length < BATCH) break;
     }

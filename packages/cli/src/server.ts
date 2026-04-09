@@ -1983,6 +1983,72 @@ export async function startServer(
     }
   });
 
+  // Proxy user file APIs via local auth session (BFF mode for editor)
+  app.post("/api/files", async (c) => {
+    try {
+      const body = await c.req.text();
+      const proxied = await fetchCloudApiWithLocalAuth("/api/files", {
+        method: "POST",
+        headers: { "Content-Type": c.req.header("content-type") || "application/json" },
+        body,
+      });
+      if (proxied.unauthorized) return c.json({ error: "Unauthorized" }, 401);
+      const contentType = proxied.response.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        const text = await proxied.response.text();
+        return c.body(text, proxied.response.status as any, {
+          "Content-Type": contentType || "text/plain",
+        });
+      }
+      const data = await proxied.response.json().catch(() => ({}));
+      return c.json(data, proxied.response.status as any);
+    } catch (err) {
+      return c.json({ error: `File upload failed: ${getErrorMessage(err)}` }, 502);
+    }
+  });
+
+  app.get("/api/files", async (c) => {
+    try {
+      const proxied = await fetchCloudApiWithLocalAuth("/api/files");
+      if (proxied.unauthorized) return c.json({ error: "Unauthorized" }, 401);
+      const contentType = proxied.response.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        const text = await proxied.response.text();
+        return c.body(text, proxied.response.status as any, {
+          "Content-Type": contentType || "text/plain",
+        });
+      }
+      const data = await proxied.response.json().catch(() => ({}));
+      return c.json(data, proxied.response.status as any);
+    } catch (err) {
+      return c.json({ error: `File list failed: ${getErrorMessage(err)}` }, 502);
+    }
+  });
+
+  app.delete("/api/files/:id", async (c) => {
+    const id = c.req.param("id");
+    if (!/^[a-zA-Z0-9_-]{10,16}$/.test(id)) {
+      return c.json({ error: "Invalid file ID" }, 400);
+    }
+    try {
+      const proxied = await fetchCloudApiWithLocalAuth(`/api/files/${id}`, {
+        method: "DELETE",
+      });
+      if (proxied.unauthorized) return c.json({ error: "Unauthorized" }, 401);
+      const contentType = proxied.response.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        const text = await proxied.response.text();
+        return c.body(text, proxied.response.status as any, {
+          "Content-Type": contentType || "text/plain",
+        });
+      }
+      const data = await proxied.response.json().catch(() => ({}));
+      return c.json(data, proxied.response.status as any);
+    } catch (err) {
+      return c.json({ error: `File delete failed: ${getErrorMessage(err)}` }, 502);
+    }
+  });
+
   app.post("/api/gists", async (c) => {
     try {
       const body = await c.req.text();

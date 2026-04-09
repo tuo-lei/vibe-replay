@@ -141,6 +141,10 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
   } | null>(null);
   const [storageUsed, setStorageUsed] = useState<number | null>(null);
   const [storageLimit, setStorageLimit] = useState<number | null>(null);
+  const [gifShareInfo, setGifShareInfo] = useState<{ id: string; url: string } | null>(null);
+  const [svgShareInfo, setSvgShareInfo] = useState<{ id: string; url: string } | null>(null);
+  const [fileSharing, setFileSharing] = useState<"gif" | "svg" | null>(null);
+  const [fileShareStatus, setFileShareStatus] = useState<Status>(null);
   const authPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const authPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const authMessageTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -450,6 +454,77 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
       setCloudSharing(false);
     }
   }, [cloudInfo, cloudFetch]);
+
+  /** Refresh storage usage after file operations */
+  const refreshStorage = useCallback(() => {
+    cloudFetch("/api/cloud-replays")
+      .then((r) => r.json())
+      .then((d: any) => {
+        setStorageUsed(d.storage?.used ?? null);
+        setStorageLimit(d.storage?.limit ?? null);
+      })
+      .catch(() => {});
+  }, [cloudFetch]);
+
+  /** Upload a GIF or SVG to cloud file storage */
+  const handleShareFile = useCallback(
+    async (type: "gif" | "svg") => {
+      const content = type === "gif" ? ghExportResult?.gifContent : ghExportResult?.svgContent;
+      if (!content) return;
+
+      setFileSharing(type);
+      setFileShareStatus(null);
+      try {
+        // For SVG, encode text to base64; GIF content is already base64
+        const base64 = type === "svg" ? btoa(unescape(encodeURIComponent(content))) : content;
+        const contentType = type === "gif" ? "image/gif" : "image/svg+xml";
+        const filename = `session-preview.${type}`;
+
+        // Delete old file of same type first
+        const oldInfo = type === "gif" ? gifShareInfo : svgShareInfo;
+        if (oldInfo) {
+          await cloudFetch(`/api/files/${oldInfo.id}`, { method: "DELETE" }).catch(() => {});
+        }
+
+        const resp = await cloudFetch("/api/files", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: base64,
+            contentType,
+            filename,
+            parentReplayId: cloudInfo?.id || null,
+            visibility: cloudVisibility,
+          }),
+        });
+        if (!resp.ok) {
+          const data = (await resp.json().catch(() => ({}))) as { error?: string };
+          if (resp.status === 401) setGhAvailable(false);
+          throw new Error(data.error || "Upload failed");
+        }
+        const result = (await resp.json()) as { id: string; url: string; expiresAt: string };
+        const info = { id: result.id, url: result.url };
+        if (type === "gif") setGifShareInfo(info);
+        else setSvgShareInfo(info);
+        setFileShareStatus({ type: "success", text: "Shared!" });
+        navigator.clipboard.writeText(result.url).catch(() => {});
+        refreshStorage();
+      } catch (e) {
+        setFileShareStatus({ type: "error", text: e instanceof Error ? e.message : String(e) });
+      } finally {
+        setFileSharing(null);
+      }
+    },
+    [
+      ghExportResult,
+      gifShareInfo,
+      svgShareInfo,
+      cloudInfo,
+      cloudVisibility,
+      cloudFetch,
+      refreshStorage,
+    ],
+  );
 
   const handleExportGithub = useCallback(async () => {
     if (!exportGithub) return;
@@ -1108,19 +1183,54 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                         />
                       </div>
 
-                      <div className="px-5 py-3 space-y-1.5 border-t border-terminal-border-subtle">
+                      <div className="px-5 py-3 space-y-2 border-t border-terminal-border-subtle">
                         {ghExportResult.gifPath && (
                           <FilePath
                             label="File"
                             path={`${ghExportResult.gifPath}  (${formatBytes(ghExportResult.gifContent?.length ?? 0, true)})`}
                           />
                         )}
-                        <p className="text-[10px] font-mono text-terminal-dimmer leading-relaxed pt-1">
-                          Usage:{" "}
-                          <span className="text-terminal-text">
-                            {"![Session](./session-preview.gif)"}
-                          </span>
-                        </p>
+                        {gifShareInfo ? (
+                          <div className="flex items-center gap-2 bg-terminal-bg rounded-lg px-3 py-2 border border-terminal-border-subtle">
+                            <span className="inline-flex items-center gap-1 text-[10px] font-mono font-semibold text-terminal-green px-1.5 py-0.5 rounded-full bg-terminal-green-subtle shrink-0">
+                              <span className="w-1.5 h-1.5 rounded-full bg-terminal-green" />
+                              Shared
+                            </span>
+                            <span className="flex-1 text-xs font-mono text-terminal-purple truncate">
+                              {gifShareInfo.url}
+                            </span>
+                            <CopyButton text={gifShareInfo.url} />
+                          </div>
+                        ) : (
+                          <p className="text-[10px] font-mono text-terminal-dimmer leading-relaxed">
+                            Usage:{" "}
+                            <span className="text-terminal-text">
+                              {"![Session](./session-preview.gif)"}
+                            </span>
+                          </p>
+                        )}
+                        {ghAvailable && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleShareFile("gif")}
+                              disabled={fileSharing === "gif"}
+                              className="text-[11px] font-mono px-3 py-1.5 rounded-lg transition-colors bg-terminal-purple-subtle text-terminal-purple hover:bg-[rgba(168,85,247,0.25)] border border-[rgba(168,85,247,0.2)]"
+                            >
+                              {fileSharing === "gif"
+                                ? "Uploading..."
+                                : gifShareInfo
+                                  ? "Update link"
+                                  : "Share to Cloud"}
+                            </button>
+                            {fileShareStatus && fileSharing === null && (
+                              <span
+                                className={`text-[10px] font-mono ${fileShareStatus.type === "success" ? "text-terminal-green" : "text-terminal-red"}`}
+                              >
+                                {fileShareStatus.text}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1179,7 +1289,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                         dangerouslySetInnerHTML={{ __html: sanitizedSvg }}
                       />
 
-                      <div className="px-5 py-3 space-y-1.5 border-t border-terminal-border-subtle">
+                      <div className="px-5 py-3 space-y-2 border-t border-terminal-border-subtle">
                         <FilePath
                           label="File"
                           path={`${ghExportResult.svgPath}  (${formatBytes(ghExportResult.svgContent?.length ?? 0)})`}
@@ -1197,12 +1307,47 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                             </a>
                           </div>
                         )}
-                        <p className="text-[10px] font-mono text-terminal-dimmer leading-relaxed pt-1">
-                          Usage:{" "}
-                          <span className="text-terminal-text">
-                            {"![Session](./session-preview.svg)"}
-                          </span>
-                        </p>
+                        {svgShareInfo ? (
+                          <div className="flex items-center gap-2 bg-terminal-bg rounded-lg px-3 py-2 border border-terminal-border-subtle">
+                            <span className="inline-flex items-center gap-1 text-[10px] font-mono font-semibold text-terminal-green px-1.5 py-0.5 rounded-full bg-terminal-green-subtle shrink-0">
+                              <span className="w-1.5 h-1.5 rounded-full bg-terminal-green" />
+                              Shared
+                            </span>
+                            <span className="flex-1 text-xs font-mono text-terminal-purple truncate">
+                              {svgShareInfo.url}
+                            </span>
+                            <CopyButton text={svgShareInfo.url} />
+                          </div>
+                        ) : (
+                          <p className="text-[10px] font-mono text-terminal-dimmer leading-relaxed">
+                            Usage:{" "}
+                            <span className="text-terminal-text">
+                              {"![Session](./session-preview.svg)"}
+                            </span>
+                          </p>
+                        )}
+                        {ghAvailable && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleShareFile("svg")}
+                              disabled={fileSharing === "svg"}
+                              className="text-[11px] font-mono px-3 py-1.5 rounded-lg transition-colors bg-terminal-purple-subtle text-terminal-purple hover:bg-[rgba(168,85,247,0.25)] border border-[rgba(168,85,247,0.2)]"
+                            >
+                              {fileSharing === "svg"
+                                ? "Uploading..."
+                                : svgShareInfo
+                                  ? "Update link"
+                                  : "Share to Cloud"}
+                            </button>
+                            {fileShareStatus && fileSharing === null && (
+                              <span
+                                className={`text-[10px] font-mono ${fileShareStatus.type === "success" ? "text-terminal-green" : "text-terminal-red"}`}
+                              >
+                                {fileShareStatus.text}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
