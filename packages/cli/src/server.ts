@@ -996,7 +996,7 @@ export async function startServer(
 
     const apiUrl = getUrl();
     const cookieName = getCookie(apiUrl);
-    const BATCH_SIZE = 100;
+    const BATCH_SIZE = 25;
     const allSyncedIds = new Map<string, string>();
 
     for (let i = 0; i < unsynced.length; i += BATCH_SIZE) {
@@ -1612,8 +1612,8 @@ export async function startServer(
       return c.json({ synced: 0, message: "All insights already synced" });
     }
 
-    // Batch sync to cloud (chunks of 100)
-    const BATCH_SIZE = 100;
+    // Batch sync to cloud (chunks of 25 — Workers have CPU time limits)
+    const BATCH_SIZE = 25;
     let totalSynced = 0;
     const allSyncedIds = new Map<string, string>();
     const apiUrl = getApiUrl();

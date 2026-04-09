@@ -36,6 +36,12 @@ note: 一句话备注     # 可选
 
 这样下次看 plan 或 STATUS 时，不会误以为还没做完。
 
+# PR 合并规则
+
+- **禁止跳过 CI review 直接合并**：PR 创建后，必须等 CI 中的 Claude review 完成，并 address 所有 review comments 之后才能合并。
+- 唯一例外：用户明确说"直接合并"或"跳过 review"时才可以绕过。
+- 不要用 `--admin` 强制合并来绕过 branch protection。
+
 # Agent 自验原则
 
 > 核心原则：**agent 自己验证，不消耗用户时间。** 永远不要把"你刷新一下试试"当作验证手段。
