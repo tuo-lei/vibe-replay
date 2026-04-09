@@ -144,7 +144,8 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
   const [gifShareInfo, setGifShareInfo] = useState<{ id: string; url: string } | null>(null);
   const [svgShareInfo, setSvgShareInfo] = useState<{ id: string; url: string } | null>(null);
   const [fileSharing, setFileSharing] = useState<"gif" | "svg" | null>(null);
-  const [fileShareStatus, setFileShareStatus] = useState<Status>(null);
+  const [gifShareStatus, setGifShareStatus] = useState<Status>(null);
+  const [svgShareStatus, setSvgShareStatus] = useState<Status>(null);
   const authPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const authPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const authMessageTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -472,20 +473,20 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
       const content = type === "gif" ? ghExportResult?.gifContent : ghExportResult?.svgContent;
       if (!content) return;
 
+      const setStatus = type === "gif" ? setGifShareStatus : setSvgShareStatus;
       setFileSharing(type);
-      setFileShareStatus(null);
+      setStatus(null);
       try {
         // For SVG, encode text to base64; GIF content is already base64
-        const base64 = type === "svg" ? btoa(unescape(encodeURIComponent(content))) : content;
+        const base64 =
+          type === "svg"
+            ? btoa(String.fromCharCode(...new TextEncoder().encode(content)))
+            : content;
         const contentType = type === "gif" ? "image/gif" : "image/svg+xml";
         const filename = `session-preview.${type}`;
 
-        // Delete old file of same type first
+        // Upload new file first, then delete old one on success (upload-then-delete)
         const oldInfo = type === "gif" ? gifShareInfo : svgShareInfo;
-        if (oldInfo) {
-          await cloudFetch(`/api/files/${oldInfo.id}`, { method: "DELETE" }).catch(() => {});
-        }
-
         const resp = await cloudFetch("/api/files", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -503,14 +504,18 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
           throw new Error(data.error || "Upload failed");
         }
         const result = (await resp.json()) as { id: string; url: string; expiresAt: string };
+        // Delete old file after successful upload
+        if (oldInfo) {
+          await cloudFetch(`/api/files/${oldInfo.id}`, { method: "DELETE" }).catch(() => {});
+        }
         const info = { id: result.id, url: result.url };
         if (type === "gif") setGifShareInfo(info);
         else setSvgShareInfo(info);
-        setFileShareStatus({ type: "success", text: "Shared!" });
+        setStatus({ type: "success", text: "Shared!" });
         navigator.clipboard.writeText(result.url).catch(() => {});
         refreshStorage();
       } catch (e) {
-        setFileShareStatus({ type: "error", text: e instanceof Error ? e.message : String(e) });
+        setStatus({ type: "error", text: e instanceof Error ? e.message : String(e) });
       } finally {
         setFileSharing(null);
       }
@@ -1222,11 +1227,11 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                                   ? "Update link"
                                   : "Share to Cloud"}
                             </button>
-                            {fileShareStatus && fileSharing === null && (
+                            {gifShareStatus && fileSharing === null && (
                               <span
-                                className={`text-[10px] font-mono ${fileShareStatus.type === "success" ? "text-terminal-green" : "text-terminal-red"}`}
+                                className={`text-[10px] font-mono ${gifShareStatus.type === "success" ? "text-terminal-green" : "text-terminal-red"}`}
                               >
-                                {fileShareStatus.text}
+                                {gifShareStatus.text}
                               </span>
                             )}
                           </div>
@@ -1339,11 +1344,11 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                                   ? "Update link"
                                   : "Share to Cloud"}
                             </button>
-                            {fileShareStatus && fileSharing === null && (
+                            {svgShareStatus && fileSharing === null && (
                               <span
-                                className={`text-[10px] font-mono ${fileShareStatus.type === "success" ? "text-terminal-green" : "text-terminal-red"}`}
+                                className={`text-[10px] font-mono ${svgShareStatus.type === "success" ? "text-terminal-green" : "text-terminal-red"}`}
                               >
-                                {fileShareStatus.text}
+                                {svgShareStatus.text}
                               </span>
                             )}
                           </div>

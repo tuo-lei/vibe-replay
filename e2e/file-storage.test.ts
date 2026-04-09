@@ -8,7 +8,7 @@
  * - Full flow: test upload→serve→delete through editor BFF if auth available
  */
 import { type ChildProcess, execSync, spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { type Browser, chromium } from "playwright";
@@ -25,13 +25,6 @@ const VALID_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1">
 function wranglerExec(sql: string) {
   execSync(
     `pnpm wrangler d1 execute vibe-replay-db --local --command="${sql.replace(/"/g, '\\"')}"`,
-    { cwd: "cloudflare", stdio: "pipe" },
-  );
-}
-
-function wranglerR2Put(key: string, content: string) {
-  execSync(
-    `echo '${content}' | pnpm wrangler r2 object put vibe-replay-storage/${key} --local --pipe`,
     { cwd: "cloudflare", stdio: "pipe" },
   );
 }
@@ -161,7 +154,7 @@ describeWorker("File serve via wrangler dev", () => {
     const resp = await fetch(`${WORKER_URL}/f/test-svg-0001`);
     expect(resp.status).toBe(200);
     expect(resp.headers.get("content-type")).toBe("image/svg+xml");
-    expect(resp.headers.get("content-security-policy")).toContain("script-src 'none'");
+    expect(resp.headers.get("content-security-policy")).toContain("default-src 'none'");
     const text = await resp.text();
     expect(text).toContain("<svg");
   });

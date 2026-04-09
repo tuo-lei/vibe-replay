@@ -1358,8 +1358,9 @@ app.post("/api/files", async (c) => {
       return c.json({ error: "Invalid GIF file" }, 400);
     }
   } else if (contentType === "image/svg+xml") {
-    const head = new TextDecoder().decode(binary.slice(0, 256)).trimStart();
-    if (!head.startsWith("<svg") && !head.startsWith("<?xml")) {
+    // Require <svg element within first 512 bytes (may follow <?xml prolog)
+    const head = new TextDecoder().decode(binary.slice(0, 512));
+    if (!head.includes("<svg")) {
       return c.json({ error: "Invalid SVG file" }, 400);
     }
   }
@@ -1367,6 +1368,10 @@ app.post("/api/files", async (c) => {
   const sizeBytes = binary.byteLength;
   if (sizeBytes > MAX_FILE_SIZE) {
     return c.json({ error: "File too large (max 10MB)" }, 413);
+  }
+
+  if (parentReplayId && !CLOUD_REPLAY_ID_RE.test(parentReplayId)) {
+    return c.json({ error: "Invalid parentReplayId" }, 400);
   }
 
   const db = drizzle(c.env.DB);
@@ -1513,10 +1518,11 @@ app.get("/f/:idRaw", async (c) => {
   const headers: Record<string, string> = {
     "Content-Type": record.contentType,
     "Cache-Control": record.visibility === "private" ? "private, no-store" : "public, max-age=3600",
+    "X-Content-Type-Options": "nosniff",
   };
-  // Security: prevent script execution in SVGs
+  // Security: prevent script/style execution in SVGs
   if (record.contentType === "image/svg+xml") {
-    headers["Content-Security-Policy"] = "script-src 'none'; style-src 'unsafe-inline'";
+    headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'";
   }
 
   return new Response(obj.body, { headers });
