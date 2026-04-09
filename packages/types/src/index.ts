@@ -180,6 +180,10 @@ export interface SessionInsight {
   updatedAt?: string;
   dataSource?: DataSource;
 
+  // Machine identity (for multi-machine aggregation)
+  machineId?: string;
+  machineName?: string;
+
   // Sync state (local-only, not sent to cloud)
   syncedAt?: string;
   cloudId?: string;

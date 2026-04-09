@@ -190,6 +190,10 @@ export const sessionInsights = sqliteTable(
     subAgentCount: integer("sub_agent_count").default(0),
     apiErrorCount: integer("api_error_count").default(0),
 
+    // Machine identity (for multi-machine aggregation)
+    machineId: text("machine_id"),
+    machineName: text("machine_name"),
+
     // JSON blob for extensible fields (full SessionInsight minus queryable columns)
     metadata: text("metadata"),
 
@@ -204,5 +208,6 @@ export const sessionInsights = sqliteTable(
     index("idx_insights_user").on(table.userId),
     index("idx_insights_project").on(table.userId, table.project),
     index("idx_insights_start").on(table.userId, table.startTime),
+    index("idx_insights_machine").on(table.userId, table.machineId),
   ],
 );

@@ -17,6 +17,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { InsightsStore, SessionInsight } from "@vibe-replay/types";
 import { INSIGHTS_SCHEMA_VERSION } from "@vibe-replay/types";
+import { getMachineId, getMachineName } from "./machine-id.js";
 import type { SessionScanResult } from "./scanner.js";
 import { CLI_VERSION } from "./version.js";
 
@@ -121,6 +122,8 @@ export function scanResultToInsight(scan: SessionScanResult): SessionInsight {
     firstPrompt: scan.firstPrompt,
     capturedAt: new Date().toISOString(),
     capturedByVersion: CLI_VERSION,
+    machineId: getMachineId(),
+    machineName: getMachineName(),
     dataSource: scan.dataSource,
   };
 }

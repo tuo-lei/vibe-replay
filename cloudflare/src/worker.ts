@@ -1072,7 +1072,8 @@ app.post("/api/insights/sync", async (c) => {
         c.env.DB.prepare(
           `UPDATE session_insights SET title=?, project=?, model=?, start_time=?, duration_ms=?,
            prompt_count=?, tool_call_count=?, edit_count=?, cost_estimate=?, has_pr=?,
-           sub_agent_count=?, api_error_count=?, metadata=?, captured_by_version=?, updated_at=?
+           sub_agent_count=?, api_error_count=?, machine_id=?, machine_name=?,
+           metadata=?, captured_by_version=?, updated_at=?
            WHERE id=?`,
         ).bind(
           insight.title?.slice(0, 500) || null,
@@ -1087,6 +1088,8 @@ app.post("/api/insights/sync", async (c) => {
           insight.hasPR ? 1 : 0,
           clamp(insight.subAgentCount, 0, 10_000),
           clamp(insight.apiErrorCount, 0, 10_000),
+          insight.machineId?.slice(0, 64) || null,
+          insight.machineName?.slice(0, 200) || null,
           metadata,
           insight.capturedByVersion?.slice(0, 50) || null,
           now,
@@ -1100,8 +1103,9 @@ app.post("/api/insights/sync", async (c) => {
         c.env.DB.prepare(
           `INSERT INTO session_insights (id, user_id, session_id, provider, slug, title, project,
            model, start_time, duration_ms, prompt_count, tool_call_count, edit_count, cost_estimate,
-           has_pr, sub_agent_count, api_error_count, metadata, captured_at, captured_by_version)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           has_pr, sub_agent_count, api_error_count, machine_id, machine_name,
+           metadata, captured_at, captured_by_version)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).bind(
           id,
           userId,
@@ -1120,6 +1124,8 @@ app.post("/api/insights/sync", async (c) => {
           insight.hasPR ? 1 : 0,
           clamp(insight.subAgentCount, 0, 10_000),
           clamp(insight.apiErrorCount, 0, 10_000),
+          insight.machineId?.slice(0, 64) || null,
+          insight.machineName?.slice(0, 200) || null,
           metadata,
           insight.capturedAt || new Date().toISOString(),
           insight.capturedByVersion?.slice(0, 50) || null,
