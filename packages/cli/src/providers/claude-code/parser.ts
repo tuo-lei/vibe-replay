@@ -297,7 +297,7 @@ export async function parseClaudeCodeSession(
           (t) => ({ type: "text", text: t }) as ContentBlock,
         );
         if (userImages.length > 0) {
-          blocks.push({ type: "_user_images", images: userImages } as any);
+          blocks.push({ type: "_user_images", images: userImages });
         }
         userTurns.push({ role: "user", timestamp: obj.timestamp, blocks });
       }

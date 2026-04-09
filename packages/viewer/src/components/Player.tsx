@@ -70,7 +70,6 @@ export default function Player({
     }
   }, [returnToLandingRef]);
   const [navFocusIndex, setNavFocusIndex] = useState<number | undefined>(undefined);
-  const [_navJumpSeq, setNavJumpSeq] = useState(0);
   const [commentDrawerOpen, setCommentDrawerOpen] = useState(false);
   const [studioDrawerOpen, setStudioDrawerOpen] = useState(false);
   const [commentTargetScene, setCommentTargetScene] = useState<number | null>(null);
@@ -101,7 +100,6 @@ export default function Player({
   const [mobileDrawerTab, setMobileDrawerTab] = useState<"outline" | "comments">("outline");
   const [searchOpen, setSearchOpen] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
-  const [_scrollHintDismissed, setScrollHintDismissed] = useState(false);
   const pendingSeekRef = useRef<number | null>(null);
   const navFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Flag to suppress auto-scroll when scene advance comes from scroll-to-reveal
@@ -205,7 +203,6 @@ export default function Player({
       // Manual jumps should pause playback so focus doesn't move away immediately.
       pause();
       pendingSeekRef.current = clamped;
-      setNavJumpSeq((n) => n + 1);
       setNavFocusIndex(clamped);
       if (navFocusTimerRef.current) clearTimeout(navFocusTimerRef.current);
       navFocusTimerRef.current = setTimeout(() => setNavFocusIndex(undefined), 2500);
@@ -239,11 +236,6 @@ export default function Player({
 
   // Track whether auto-scroll is active (programmatic) vs user-initiated
   const programScrollRef = useRef(false);
-
-  // Reset scroll hint when playback resumes
-  useEffect(() => {
-    if (state === "playing") setScrollHintDismissed(false);
-  }, [state]);
 
   // Auto-scroll to keep the current scene visible.
   // During playback → center the scene. When paused (arrow-key stepping) → ensure
@@ -311,8 +303,6 @@ export default function Player({
     const handleUserScroll = () => {
       // Ignore programmatic scrolls
       if (programScrollRef.current) return;
-      // Dismiss scroll hint on first user scroll
-      setScrollHintDismissed(true);
       // Pause if playing
       if (state === "playing") {
         pause();
