@@ -1,0 +1,478 @@
+---
+import Footer from "../components/Footer.astro";
+import GitHubStar from "../components/GitHubStar.astro";
+import Layout from "../layouts/Layout.astro";
+---
+
+<Layout title="Insights - vibe-replay" description="Track your AI coding sessions across all machines. View cost, productivity trends, and project analytics.">
+  <div class="min-h-screen flex flex-col">
+    <!-- Header -->
+    <nav class="border-b border-border/50 px-6 py-3">
+      <div class="max-w-6xl mx-auto flex items-center justify-between">
+        <div class="flex items-center gap-4">
+          <a href="/" class="font-mono font-bold text-sm hover:opacity-80 transition-opacity bg-gradient-to-r from-accent via-emerald-400 to-cyan-400 bg-clip-text text-transparent">vibe-replay</a>
+          <span class="text-border hidden sm:inline">|</span>
+          <a href="/blog" class="text-text-secondary hover:text-accent text-sm transition-colors hidden sm:inline underline underline-offset-4 decoration-text-muted hover:decoration-accent">Blog</a>
+          <span class="text-text-secondary text-sm hidden sm:inline">Insights</span>
+        </div>
+        <div class="flex items-center gap-3">
+          <GitHubStar />
+          <div id="auth-container" style="display:none">
+            <button id="auth-login" style="display:none" class="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-[#24292f] hover:bg-[#32383f] text-white text-xs font-medium transition-colors cursor-pointer border border-white/10">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              Sign in
+            </button>
+            <div id="auth-user" style="display:none" class="relative">
+              <button id="auth-avatar-btn" class="flex items-center justify-center w-8 h-8 rounded-full border border-border/60 hover:border-accent/70 transition-all cursor-pointer overflow-hidden">
+                <img id="auth-avatar" class="w-full h-full rounded-full object-cover" alt="" />
+              </button>
+              <div id="auth-dropdown" class="hidden absolute right-0 top-full mt-2 min-w-[160px] bg-surface-1 border border-border rounded-lg shadow-lg py-1 z-50">
+                <a id="auth-username" href="/profile" class="block px-3 py-2 text-xs text-text-secondary border-b border-border truncate hover:text-accent transition-colors"></a>
+                <a href="/profile" class="block px-3 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-2 transition-colors">Profile</a>
+                <button id="auth-logout" class="w-full text-left px-3 py-2 text-sm text-text-secondary hover:text-red-400 hover:bg-surface-2 transition-colors cursor-pointer">Logout</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main content -->
+    <main class="flex-1 max-w-6xl mx-auto w-full px-6 py-10">
+      <!-- Loading state -->
+      <div id="loading" class="text-center py-20">
+        <div class="text-text-muted font-mono text-sm animate-pulse">Loading...</div>
+      </div>
+
+      <!-- Not logged in state -->
+      <div id="signed-out" class="hidden">
+        <div class="flex items-center justify-center py-20">
+          <div class="rounded-xl border border-border bg-surface-1 p-10 max-w-md text-center">
+            <div class="text-4xl mb-4">&#128202;</div>
+            <h2 class="text-lg font-semibold text-text-primary mb-2">Sign in to view Insights</h2>
+            <p class="text-text-muted text-sm mb-4">Track your AI coding sessions across all machines. Sync insights from the CLI to view cost trends, project analytics, and more.</p>
+            <p class="text-text-muted text-xs font-mono mb-6">npx vibe-replay &rarr; Dashboard &rarr; Sync Insights</p>
+            <button id="signin-btn" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#24292f] hover:bg-[#32383f] text-white text-sm font-medium transition-colors cursor-pointer border border-white/10">
+              <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              Sign in with GitHub
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- No data state -->
+      <div id="no-data" class="hidden">
+        <div class="flex items-center justify-center py-20">
+          <div class="rounded-xl border border-border bg-surface-1 p-10 max-w-md text-center">
+            <div class="text-4xl mb-4">&#128640;</div>
+            <h2 class="text-lg font-semibold text-text-primary mb-2">No insights synced yet</h2>
+            <p class="text-text-muted text-sm mb-4">Sync your local session insights from the CLI dashboard to see them here.</p>
+            <div class="bg-surface-2 rounded-lg p-4 text-left">
+              <p class="text-text-muted text-xs font-mono mb-1"># In the CLI dashboard, click "Sync Insights"</p>
+              <p class="text-text-muted text-xs font-mono mb-1"># Or use the API endpoint:</p>
+              <p class="text-accent text-xs font-mono">npx vibe-replay -d</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Insights content -->
+      <div id="insights-content" class="hidden">
+        <!-- Page title -->
+        <div class="mb-8">
+          <h1 class="text-2xl font-bold text-text-primary mb-1">Insights</h1>
+          <p class="text-text-muted text-sm font-mono">Your AI coding activity across all machines</p>
+        </div>
+
+        <!-- Summary stats -->
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
+          <div class="rounded-xl border border-border bg-surface-1 p-4">
+            <div class="text-[11px] font-mono text-text-muted mb-1">Sessions</div>
+            <div id="stat-sessions" class="text-xl font-bold text-text-primary font-mono">0</div>
+          </div>
+          <div class="rounded-xl border border-border bg-surface-1 p-4">
+            <div class="text-[11px] font-mono text-text-muted mb-1">Projects</div>
+            <div id="stat-projects" class="text-xl font-bold text-text-primary font-mono">0</div>
+          </div>
+          <div class="rounded-xl border border-border bg-surface-1 p-4">
+            <div class="text-[11px] font-mono text-text-muted mb-1">Total Cost</div>
+            <div id="stat-cost" class="text-xl font-bold text-accent font-mono">$0</div>
+          </div>
+          <div class="rounded-xl border border-border bg-surface-1 p-4">
+            <div class="text-[11px] font-mono text-text-muted mb-1">Duration</div>
+            <div id="stat-duration" class="text-xl font-bold text-text-primary font-mono">0h</div>
+          </div>
+          <div class="rounded-xl border border-border bg-surface-1 p-4">
+            <div class="text-[11px] font-mono text-text-muted mb-1">Prompts</div>
+            <div id="stat-prompts" class="text-xl font-bold text-text-primary font-mono">0</div>
+          </div>
+          <div class="rounded-xl border border-border bg-surface-1 p-4">
+            <div class="text-[11px] font-mono text-text-muted mb-1">Tool Calls</div>
+            <div id="stat-tools" class="text-xl font-bold text-text-primary font-mono">0</div>
+          </div>
+        </div>
+
+        <!-- Activity chart -->
+        <div class="rounded-xl border border-border bg-surface-1 p-5 mb-8">
+          <h2 class="text-sm font-semibold text-text-primary mb-4">Activity (last 90 days)</h2>
+          <div id="activity-chart" class="flex items-end gap-[2px] h-24 overflow-hidden"></div>
+          <div class="flex justify-between mt-2 text-[10px] font-mono text-text-muted">
+            <span id="chart-start"></span>
+            <span id="chart-end"></span>
+          </div>
+        </div>
+
+        <!-- Two-column: providers/models + top projects -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          <!-- Provider & Model breakdown -->
+          <div class="rounded-xl border border-border bg-surface-1 p-5">
+            <h2 class="text-sm font-semibold text-text-primary mb-4">Providers & Models</h2>
+            <div class="mb-4">
+              <div class="text-[11px] font-mono text-text-muted mb-2 uppercase tracking-wider">Providers</div>
+              <div id="providers-list" class="space-y-2"></div>
+            </div>
+            <div>
+              <div class="text-[11px] font-mono text-text-muted mb-2 uppercase tracking-wider">Models</div>
+              <div id="models-list" class="space-y-2"></div>
+            </div>
+          </div>
+
+          <!-- Time range -->
+          <div class="rounded-xl border border-border bg-surface-1 p-5">
+            <h2 class="text-sm font-semibold text-text-primary mb-4">Time Range</h2>
+            <div class="space-y-3">
+              <div>
+                <div class="text-[11px] font-mono text-text-muted mb-1">First session</div>
+                <div id="time-first" class="text-sm font-mono text-text-primary">-</div>
+              </div>
+              <div>
+                <div class="text-[11px] font-mono text-text-muted mb-1">Last session</div>
+                <div id="time-last" class="text-sm font-mono text-text-primary">-</div>
+              </div>
+              <div>
+                <div class="text-[11px] font-mono text-text-muted mb-1">Avg. cost per session</div>
+                <div id="avg-cost" class="text-sm font-mono text-accent">-</div>
+              </div>
+              <div>
+                <div class="text-[11px] font-mono text-text-muted mb-1">Avg. duration per session</div>
+                <div id="avg-duration" class="text-sm font-mono text-text-primary">-</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Top projects -->
+        <div class="rounded-xl border border-border bg-surface-1 p-5 mb-8">
+          <h2 class="text-sm font-semibold text-text-primary mb-4">Top Projects</h2>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="border-b border-border text-[11px] font-mono text-text-muted uppercase tracking-wider">
+                  <th class="text-left py-2 pr-4">Project</th>
+                  <th class="text-right py-2 px-3">Sessions</th>
+                  <th class="text-right py-2 px-3">Cost</th>
+                  <th class="text-right py-2 px-3 hidden sm:table-cell">Duration</th>
+                  <th class="text-right py-2 px-3 hidden md:table-cell">Prompts</th>
+                  <th class="text-right py-2 px-3 hidden md:table-cell">Tools</th>
+                  <th class="text-right py-2 pl-3 hidden lg:table-cell">Edits</th>
+                </tr>
+              </thead>
+              <tbody id="projects-table" class="font-mono text-xs"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <Footer />
+  </div>
+</Layout>
+
+<script>
+  function escapeHtml(s: string): string {
+    const div = document.createElement("div");
+    div.textContent = s;
+    return div.innerHTML;
+  }
+
+  function formatDuration(ms: number): string {
+    if (!ms) return "0m";
+    const secs = Math.floor(ms / 1000);
+    if (secs < 60) return `${secs}s`;
+    const mins = Math.floor(secs / 60);
+    if (mins < 60) return `${mins}m`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ${mins % 60}m`;
+    const days = Math.floor(hrs / 24);
+    return `${days}d ${hrs % 24}h`;
+  }
+
+  function formatCost(cost: number): string {
+    if (cost < 0.01) return "$0.00";
+    if (cost < 1) return `$${cost.toFixed(2)}`;
+    if (cost < 100) return `$${cost.toFixed(1)}`;
+    return `$${Math.round(cost)}`;
+  }
+
+  function formatNumber(n: number): string {
+    if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+    return String(n);
+  }
+
+  function formatDateLong(iso: string): string {
+    if (!iso) return "-";
+    const d = new Date(iso);
+    return d.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  }
+
+  interface InsightsSummary {
+    totalSessions: number;
+    totalProjects: number;
+    totalDurationMs: number;
+    totalCost: number;
+    totalPrompts: number;
+    totalToolCalls: number;
+    totalEdits: number;
+    providers: Record<string, number>;
+    models: Record<string, number>;
+    topProjects: Array<{
+      project: string;
+      sessions: number;
+      cost: number;
+      durationMs: number;
+      prompts: number;
+      toolCalls: number;
+      edits: number;
+      lastActivity: string;
+    }>;
+    timeRange: { first: string; last: string };
+    sessionsPerDay: Record<string, number>;
+  }
+
+  function renderBreakdown(
+    containerId: string,
+    data: Record<string, number>,
+  ): void {
+    const container = document.getElementById(containerId)!;
+    const entries = Object.entries(data).sort((a, b) => b[1] - a[1]);
+    if (entries.length === 0) {
+      container.innerHTML = '<div class="text-text-muted text-xs font-mono">No data</div>';
+      return;
+    }
+    const maxCount = entries[0][1];
+    container.innerHTML = entries
+      .slice(0, 8)
+      .map(
+        ([name, count]) => `
+      <div class="flex items-center gap-3">
+        <div class="text-xs font-mono text-text-secondary w-40 truncate shrink-0" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
+        <div class="flex-1 h-4 bg-surface-2 rounded-sm overflow-hidden">
+          <div class="h-full bg-accent/30 rounded-sm" style="width: ${(count / maxCount) * 100}%"></div>
+        </div>
+        <div class="text-[11px] font-mono text-text-muted w-12 text-right shrink-0">${count}</div>
+      </div>
+    `,
+      )
+      .join("");
+  }
+
+  function renderActivityChart(sessionsPerDay: Record<string, number>): void {
+    const chart = document.getElementById("activity-chart")!;
+    const startEl = document.getElementById("chart-start")!;
+    const endEl = document.getElementById("chart-end")!;
+
+    // Generate 90-day range
+    const days: string[] = [];
+    const now = new Date();
+    for (let i = 89; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      days.push(d.toISOString().slice(0, 10));
+    }
+
+    const maxCount = Math.max(1, ...days.map((d) => sessionsPerDay[d] || 0));
+
+    chart.innerHTML = days
+      .map((day) => {
+        const count = sessionsPerDay[day] || 0;
+        const height = count > 0 ? Math.max(4, (count / maxCount) * 96) : 2;
+        const bg = count > 0 ? "bg-accent/60 hover:bg-accent" : "bg-surface-2";
+        const title = `${day}: ${count} session${count !== 1 ? "s" : ""}`;
+        return `<div class="flex-1 min-w-[2px] rounded-t ${bg} transition-colors cursor-default" style="height: ${height}px" title="${title}"></div>`;
+      })
+      .join("");
+
+    startEl.textContent = days[0];
+    endEl.textContent = days[days.length - 1];
+  }
+
+  function renderProjectsTable(
+    projects: InsightsSummary["topProjects"],
+  ): void {
+    const tbody = document.getElementById("projects-table")!;
+    if (projects.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" class="text-center py-8 text-text-muted text-xs font-mono">No projects</td></tr>';
+      return;
+    }
+    tbody.innerHTML = projects
+      .map(
+        (p) => `
+      <tr class="border-b border-border/50 hover:bg-surface-2/50 transition-colors">
+        <td class="py-2.5 pr-4 text-text-primary truncate max-w-[200px]" title="${escapeHtml(p.project)}">${escapeHtml(p.project)}</td>
+        <td class="text-right py-2.5 px-3 text-text-secondary">${p.sessions}</td>
+        <td class="text-right py-2.5 px-3 text-accent">${formatCost(p.cost)}</td>
+        <td class="text-right py-2.5 px-3 text-text-secondary hidden sm:table-cell">${formatDuration(p.durationMs)}</td>
+        <td class="text-right py-2.5 px-3 text-text-secondary hidden md:table-cell">${formatNumber(p.prompts)}</td>
+        <td class="text-right py-2.5 px-3 text-text-secondary hidden md:table-cell">${formatNumber(p.toolCalls)}</td>
+        <td class="text-right py-2.5 pl-3 text-text-secondary hidden lg:table-cell">${formatNumber(p.edits)}</td>
+      </tr>
+    `,
+      )
+      .join("");
+  }
+
+  async function initInsights(): Promise<void> {
+    const loading = document.getElementById("loading")!;
+    const signedOut = document.getElementById("signed-out")!;
+    const noData = document.getElementById("no-data")!;
+    const content = document.getElementById("insights-content")!;
+
+    // Check auth
+    let user: { name?: string; image?: string } | null = null;
+    try {
+      const res = await fetch("/api/auth/get-session", { credentials: "include" });
+      const data = await res.json();
+      if (data?.session && data?.user) user = data.user;
+    } catch { /* ignore */ }
+
+    loading.classList.add("hidden");
+
+    if (!user) {
+      signedOut.classList.remove("hidden");
+      return;
+    }
+
+    // Fetch insights summary
+    let summary: InsightsSummary;
+    try {
+      const res = await fetch("/api/insights/summary", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch");
+      summary = await res.json();
+    } catch {
+      noData.classList.remove("hidden");
+      return;
+    }
+
+    if (summary.totalSessions === 0) {
+      noData.classList.remove("hidden");
+      return;
+    }
+
+    content.classList.remove("hidden");
+
+    // Populate stats
+    document.getElementById("stat-sessions")!.textContent = formatNumber(summary.totalSessions);
+    document.getElementById("stat-projects")!.textContent = formatNumber(summary.totalProjects);
+    document.getElementById("stat-cost")!.textContent = formatCost(summary.totalCost);
+    document.getElementById("stat-duration")!.textContent = formatDuration(summary.totalDurationMs);
+    document.getElementById("stat-prompts")!.textContent = formatNumber(summary.totalPrompts);
+    document.getElementById("stat-tools")!.textContent = formatNumber(summary.totalToolCalls);
+
+    // Time range
+    document.getElementById("time-first")!.textContent = formatDateLong(summary.timeRange.first);
+    document.getElementById("time-last")!.textContent = formatDateLong(summary.timeRange.last);
+    document.getElementById("avg-cost")!.textContent =
+      summary.totalSessions > 0
+        ? formatCost(summary.totalCost / summary.totalSessions)
+        : "-";
+    document.getElementById("avg-duration")!.textContent =
+      summary.totalSessions > 0
+        ? formatDuration(summary.totalDurationMs / summary.totalSessions)
+        : "-";
+
+    // Breakdowns
+    renderBreakdown("providers-list", summary.providers);
+    renderBreakdown("models-list", summary.models);
+
+    // Activity chart
+    renderActivityChart(summary.sessionsPerDay);
+
+    // Projects table
+    renderProjectsTable(summary.topProjects);
+  }
+
+  // --- Auth UI (same pattern as profile page) ---
+  function initAuth(): void {
+    const container = document.getElementById("auth-container")!;
+    const loginBtn = document.getElementById("auth-login")!;
+    const userEl = document.getElementById("auth-user")!;
+    const avatarBtn = document.getElementById("auth-avatar-btn")!;
+    const avatar = document.getElementById("auth-avatar") as HTMLImageElement;
+    const dropdown = document.getElementById("auth-dropdown")!;
+    const username = document.getElementById("auth-username")!;
+    const logoutBtn = document.getElementById("auth-logout")!;
+    const signinBtn = document.getElementById("signin-btn");
+
+    container.style.display = "";
+
+    fetch("/api/auth/get-session", { credentials: "include" })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.session && data?.user) {
+          loginBtn.style.display = "none";
+          userEl.style.display = "";
+          if (data.user.image) avatar.src = data.user.image;
+          username.textContent = data.user.name || data.user.email || "User";
+        } else {
+          loginBtn.style.display = "";
+          userEl.style.display = "none";
+        }
+      })
+      .catch(() => {
+        loginBtn.style.display = "";
+      });
+
+    const doLogin = async () => {
+      try {
+        const res = await fetch("/api/auth/sign-in/social", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ provider: "github", callbackURL: "/insights" }),
+        });
+        const data = await res.json();
+        if (data?.url) window.location.href = data.url;
+      } catch {
+        // Fallback to redirect-based login
+        window.location.href = "/auth/login?callback=/insights";
+      }
+    };
+    loginBtn.addEventListener("click", doLogin);
+    signinBtn?.addEventListener("click", doLogin);
+
+    avatarBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      dropdown.classList.toggle("hidden");
+    });
+    document.addEventListener("click", () => dropdown.classList.add("hidden"));
+
+    logoutBtn.addEventListener("click", async () => {
+      try {
+        await fetch("/api/auth/sign-out", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: "{}",
+        });
+      } catch { /* ignore */ }
+      window.location.reload();
+    });
+  }
+
+  initAuth();
+  initInsights();
+</script>

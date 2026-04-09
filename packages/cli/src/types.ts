@@ -1,15 +1,20 @@
 // Shared types — single source of truth
 export type {
   Annotation,
+  CloudInsightsSummary,
   DataSource,
   DataSourceInfo,
+  InsightsStore,
   PrLink,
   ReplaySession,
   Scene,
+  SessionInsight,
   SubAgent,
   TokenUsage,
   TurnStat,
 } from "@vibe-replay/types";
+
+export { INSIGHTS_SCHEMA_VERSION } from "@vibe-replay/types";
 
 // CLI-only types below
 

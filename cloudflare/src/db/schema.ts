@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, real, sqliteTable, text, unique } from "drizzle-orm/sqlite-core";
 
 // ---------------------------------------------------------------------------
 // Replays (existing)
@@ -152,5 +152,57 @@ export const cloudReplays = sqliteTable(
     index("idx_cloud_replays_expires").on(table.expiresAt),
     index("idx_cloud_replays_gist").on(table.gistId),
     index("idx_cloud_replays_public").on(table.visibility, table.createdAt),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Session Insights — synced from CLI for long-term persistence
+// ---------------------------------------------------------------------------
+
+export const sessionInsights = sqliteTable(
+  "session_insights",
+  {
+    id: text("id").primaryKey(), // nanoid, 12 chars
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+
+    // Identity
+    sessionId: text("session_id").notNull(),
+    provider: text("provider").notNull(),
+    slug: text("slug").notNull(),
+
+    // Core queryable fields
+    title: text("title"),
+    project: text("project"),
+    model: text("model"),
+    startTime: text("start_time"),
+    durationMs: integer("duration_ms"),
+
+    // Stats
+    promptCount: integer("prompt_count").default(0),
+    toolCallCount: integer("tool_call_count").default(0),
+    editCount: integer("edit_count").default(0),
+    costEstimate: real("cost_estimate"),
+
+    // Flags
+    hasPR: integer("has_pr", { mode: "boolean" }).default(false),
+    subAgentCount: integer("sub_agent_count").default(0),
+    apiErrorCount: integer("api_error_count").default(0),
+
+    // JSON blob for extensible fields (full SessionInsight minus queryable columns)
+    metadata: text("metadata"),
+
+    // Tracking
+    capturedAt: text("captured_at").notNull(),
+    capturedByVersion: text("captured_by_version"),
+    createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
+    updatedAt: text("updated_at").default(sql`(datetime('now'))`),
+  },
+  (table) => [
+    unique("uq_user_session").on(table.userId, table.sessionId),
+    index("idx_insights_user").on(table.userId),
+    index("idx_insights_project").on(table.userId, table.project),
+    index("idx_insights_start").on(table.userId, table.startTime),
   ],
 );

@@ -118,6 +118,105 @@ export interface SessionOverlays {
   overlays: SceneOverlay[];
 }
 
+// ---------------------------------------------------------------------------
+// Session Insights — durable local cache that survives source file deletion
+// ---------------------------------------------------------------------------
+
+/** Schema version for the insights store. Bump when adding breaking changes. */
+export const INSIGHTS_SCHEMA_VERSION = 1;
+
+/**
+ * A single session's insights — lightweight metadata persisted locally so it
+ * survives after source JSONL files are deleted (e.g. Claude Code 30-day cleanup).
+ * Maps closely to SessionScanResult but is schema-versioned independently.
+ */
+export interface SessionInsight {
+  // Identity
+  sessionId: string;
+  slug: string;
+  provider: string;
+
+  // Metadata
+  title?: string;
+  project: string;
+  model?: string;
+  gitBranch?: string;
+  gitBranches?: string[];
+
+  // Time
+  startTime?: string;
+  endTime?: string;
+  durationMs?: number;
+
+  // Stats
+  promptCount: number;
+  toolCallCount: number;
+  editCount: number;
+  filesModified?: Array<{ file: string; count: number }>;
+
+  // Cost
+  tokenUsage?: TokenUsage;
+  costEstimate?: number;
+
+  // Derived signals
+  hasPR: boolean;
+  prLinks?: PrLink[];
+  skillsUsed?: string[];
+  mcpServersUsed?: string[];
+  subAgentCount: number;
+  apiErrorCount: number;
+  compactionCount: number;
+
+  // Session context
+  entrypoint?: string;
+  permissionMode?: string;
+
+  // Display
+  firstPrompt?: string;
+
+  // Provenance
+  capturedAt: string;
+  capturedByVersion: string;
+  updatedAt?: string;
+  dataSource?: DataSource;
+
+  // Sync state (local-only, not sent to cloud)
+  syncedAt?: string;
+  cloudId?: string;
+}
+
+/** The on-disk structure for ~/.vibe-replay/insights/store.json */
+export interface InsightsStore {
+  schemaVersion: number;
+  lastUpdated: string;
+  sessions: SessionInsight[];
+}
+
+/** Summary returned by the cloud insights API */
+export interface CloudInsightsSummary {
+  totalSessions: number;
+  totalProjects: number;
+  totalDurationMs: number;
+  totalCost: number;
+  totalPrompts: number;
+  totalToolCalls: number;
+  totalEdits: number;
+  providers: Record<string, number>;
+  models: Record<string, number>;
+  topProjects: Array<{
+    project: string;
+    sessions: number;
+    cost: number;
+    durationMs: number;
+    prompts: number;
+    toolCalls: number;
+    edits: number;
+    lastActivity: string;
+  }>;
+  timeRange: { first: string; last: string };
+  sessionsPerDay: Record<string, number>;
+}
+
 export interface ReplaySession {
   meta: {
     sessionId: string;

@@ -22,6 +22,7 @@ import {
 import { generateGitHubGif } from "./formatters/gif.js";
 import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.js";
 import { generateOutput } from "./generator.js";
+import { mergeInsights, readInsightsStore, writeInsightsStore } from "./insights.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
 import {
   getApiUrl,
@@ -970,6 +971,13 @@ export async function startServer(
         computedAt: null,
       };
 
+  /** Persist scan results into the durable local insights store. */
+  const persistInsightsFromScan = async (results: SessionScanResult[]): Promise<void> => {
+    const store = await readInsightsStore();
+    const updated = mergeInsights(store, results);
+    await writeInsightsStore(updated);
+  };
+
   /** Pre-compute all insights from scan results and store in cache. */
   const precomputeInsightsCache = async (results: SessionScanResult[]): Promise<void> => {
     // User-level insights
@@ -1081,6 +1089,9 @@ export async function startServer(
         };
 
         await writeFileCache(scanResultsCacheKey, results);
+
+        // Persist insights to durable local store (survives source file deletion)
+        persistInsightsFromScan(results).catch(() => {});
 
         // Pre-compute insights cache in background (non-blocking)
         precomputeInsightsCache(results).catch(() => {});
@@ -1518,6 +1529,106 @@ export async function startServer(
     }
     const insights = aggregateUserInsights(scans);
     return c.json({ type: "user", insights });
+  });
+
+  // --- Local insights store (durable, survives source deletion) ---
+
+  app.get("/api/insights/local", async (c) => {
+    const store = await readInsightsStore();
+    return c.json(store);
+  });
+
+  app.get("/api/insights/local/stats", async (c) => {
+    const { getInsightsStats } = await import("./insights.js");
+    const store = await readInsightsStore();
+    return c.json(getInsightsStats(store));
+  });
+
+  app.post("/api/insights/sync", async (c) => {
+    const { getUnsyncedInsights, markSynced } = await import("./insights.js");
+    const { loadAuthToken, getApiUrl, getSessionCookieName } = await import(
+      "./publishers/cloud.js"
+    );
+
+    const auth = await loadAuthToken();
+    if (!auth) {
+      return c.json({ error: "Not logged in. Run: vibe-replay auth login" }, 401);
+    }
+
+    const store = await readInsightsStore();
+    const unsynced = getUnsyncedInsights(store);
+    if (unsynced.length === 0) {
+      return c.json({ synced: 0, message: "All insights already synced" });
+    }
+
+    // Batch sync to cloud (chunks of 100)
+    const BATCH_SIZE = 100;
+    let totalSynced = 0;
+    const allSyncedIds = new Map<string, string>();
+    const apiUrl = getApiUrl();
+    const cookieName = getSessionCookieName(apiUrl);
+
+    let lastError: string | undefined;
+
+    for (let i = 0; i < unsynced.length; i += BATCH_SIZE) {
+      const batch = unsynced.slice(i, i + BATCH_SIZE);
+      // Strip local-only fields before sending
+      const payload = batch.map(({ syncedAt, cloudId, ...rest }) => rest);
+
+      let resp: Response;
+      try {
+        resp = await fetch(`${apiUrl}/api/insights/sync`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Cookie: `${cookieName}=${auth.token}`,
+          },
+          body: JSON.stringify({ insights: payload }),
+          signal: AbortSignal.timeout(30_000),
+        });
+      } catch (e) {
+        lastError = e instanceof Error ? e.message : "Network error";
+        break; // Stop batching on network failure
+      }
+
+      if (!resp.ok) {
+        lastError = await resp.text().catch(() => `HTTP ${resp.status}`);
+        break; // Stop batching on API error
+      }
+
+      let result: { synced: number; cloudIds: Record<string, string> };
+      try {
+        result = await resp.json();
+      } catch {
+        lastError = "Invalid response from cloud API";
+        break;
+      }
+
+      totalSynced += result.synced;
+      for (const [sid, cid] of Object.entries(result.cloudIds)) {
+        allSyncedIds.set(sid, cid);
+      }
+    }
+
+    // Always persist partial progress even if a batch failed
+    if (allSyncedIds.size > 0) {
+      const updated = markSynced(store, allSyncedIds);
+      await writeInsightsStore(updated);
+    }
+
+    if (lastError) {
+      return c.json({
+        error: `Sync failed: ${lastError}`,
+        synced: totalSynced,
+        total: unsynced.length,
+      });
+    }
+
+    return c.json({
+      synced: totalSynced,
+      total: unsynced.length,
+      message: `Synced ${totalSynced} insights to cloud`,
+    });
   });
 
   app.get("/api/memory", async (c) => {
