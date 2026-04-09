@@ -978,8 +978,18 @@ export async function startServer(
     await writeInsightsStore(updated);
   };
 
-  /** Auto-sync insights to cloud if user is logged in. Fire-and-forget. */
-  const autoSyncInsights = async (): Promise<void> => {
+  /** Max insights per cloud sync request (D1 batch API, single round-trip per chunk). */
+  const INSIGHTS_SYNC_BATCH = 100;
+
+  /**
+   * Core sync logic: push unsynced insights to cloud in batches.
+   * Returns { synced, total, error? }. Persists partial progress on failure.
+   */
+  const syncInsightsToCloud = async (): Promise<{
+    synced: number;
+    total: number;
+    error?: string;
+  }> => {
     const { getUnsyncedInsights, markSynced } = await import("./insights.js");
     const {
       loadAuthToken: loadAuth,
@@ -988,43 +998,69 @@ export async function startServer(
     } = await import("./publishers/cloud.js");
 
     const auth = await loadAuth();
-    if (!auth) return; // Not logged in — skip silently
+    if (!auth) return { synced: 0, total: 0, error: "Not logged in" };
 
     const store = await readInsightsStore();
     const unsynced = getUnsyncedInsights(store);
-    if (unsynced.length === 0) return;
+    if (unsynced.length === 0) return { synced: 0, total: 0 };
 
     const apiUrl = getUrl();
     const cookieName = getCookie(apiUrl);
-    const BATCH_SIZE = 100;
+    let totalSynced = 0;
+    let lastError: string | undefined;
     const allSyncedIds = new Map<string, string>();
 
-    for (let i = 0; i < unsynced.length; i += BATCH_SIZE) {
-      const batch = unsynced.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < unsynced.length; i += INSIGHTS_SYNC_BATCH) {
+      const batch = unsynced.slice(i, i + INSIGHTS_SYNC_BATCH);
       const payload = batch.map(({ syncedAt, cloudId, ...rest }) => rest);
+
+      let resp: Response;
       try {
-        const resp = await fetch(`${apiUrl}/api/insights/sync`, {
+        resp = await fetch(`${apiUrl}/api/insights/sync`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Cookie: `${cookieName}=${auth.token}` },
           body: JSON.stringify({ insights: payload }),
           signal: AbortSignal.timeout(30_000),
         });
-        if (resp.status === 401) {
-          await clearLocalAuthSession();
-          break;
-        }
-        if (!resp.ok) break;
-        const result: { synced: number; cloudIds: Record<string, string> } = await resp.json();
-        for (const [sid, cid] of Object.entries(result.cloudIds)) allSyncedIds.set(sid, cid);
-      } catch {
+      } catch (e) {
+        lastError = e instanceof Error ? e.message : "Network error";
         break;
       }
+
+      if (resp.status === 401) {
+        await clearLocalAuthSession();
+        lastError = "Session expired";
+        break;
+      }
+      if (!resp.ok) {
+        lastError = await resp.text().catch(() => `HTTP ${resp.status}`);
+        break;
+      }
+
+      let result: { synced: number; cloudIds: Record<string, string> };
+      try {
+        result = await resp.json();
+      } catch {
+        lastError = "Invalid response from cloud API";
+        break;
+      }
+
+      totalSynced += result.synced;
+      for (const [sid, cid] of Object.entries(result.cloudIds)) allSyncedIds.set(sid, cid);
     }
 
+    // Always persist partial progress
     if (allSyncedIds.size > 0) {
       const updated = markSynced(store, allSyncedIds);
       await writeInsightsStore(updated);
     }
+
+    return { synced: totalSynced, total: unsynced.length, error: lastError };
+  };
+
+  /** Auto-sync insights to cloud if user is logged in. Fire-and-forget. */
+  const autoSyncInsights = async (): Promise<void> => {
+    await syncInsightsToCloud();
   };
 
   /** Pre-compute all insights from scan results and store in cache. */
@@ -1596,89 +1632,24 @@ export async function startServer(
   });
 
   app.post("/api/insights/sync", async (c) => {
-    const { getUnsyncedInsights, markSynced } = await import("./insights.js");
-    const { loadAuthToken, getApiUrl, getSessionCookieName } = await import(
-      "./publishers/cloud.js"
-    );
-
-    const auth = await loadAuthToken();
-    if (!auth) {
+    const result = await syncInsightsToCloud();
+    if (result.error === "Not logged in") {
       return c.json({ error: "Not logged in. Run: vibe-replay auth login" }, 401);
     }
-
-    const store = await readInsightsStore();
-    const unsynced = getUnsyncedInsights(store);
-    if (unsynced.length === 0) {
-      return c.json({ synced: 0, message: "All insights already synced" });
-    }
-
-    // Batch sync to cloud (chunks of 100)
-    const BATCH_SIZE = 100;
-    let totalSynced = 0;
-    const allSyncedIds = new Map<string, string>();
-    const apiUrl = getApiUrl();
-    const cookieName = getSessionCookieName(apiUrl);
-
-    let lastError: string | undefined;
-
-    for (let i = 0; i < unsynced.length; i += BATCH_SIZE) {
-      const batch = unsynced.slice(i, i + BATCH_SIZE);
-      // Strip local-only fields before sending
-      const payload = batch.map(({ syncedAt, cloudId, ...rest }) => rest);
-
-      let resp: Response;
-      try {
-        resp = await fetch(`${apiUrl}/api/insights/sync`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Cookie: `${cookieName}=${auth.token}`,
-          },
-          body: JSON.stringify({ insights: payload }),
-          signal: AbortSignal.timeout(30_000),
-        });
-      } catch (e) {
-        lastError = e instanceof Error ? e.message : "Network error";
-        break; // Stop batching on network failure
-      }
-
-      if (!resp.ok) {
-        lastError = await resp.text().catch(() => `HTTP ${resp.status}`);
-        break; // Stop batching on API error
-      }
-
-      let result: { synced: number; cloudIds: Record<string, string> };
-      try {
-        result = await resp.json();
-      } catch {
-        lastError = "Invalid response from cloud API";
-        break;
-      }
-
-      totalSynced += result.synced;
-      for (const [sid, cid] of Object.entries(result.cloudIds)) {
-        allSyncedIds.set(sid, cid);
-      }
-    }
-
-    // Always persist partial progress even if a batch failed
-    if (allSyncedIds.size > 0) {
-      const updated = markSynced(store, allSyncedIds);
-      await writeInsightsStore(updated);
-    }
-
-    if (lastError) {
+    if (result.error) {
       return c.json({
-        error: `Sync failed: ${lastError}`,
-        synced: totalSynced,
-        total: unsynced.length,
+        error: `Sync failed: ${result.error}`,
+        synced: result.synced,
+        total: result.total,
       });
     }
-
+    if (result.total === 0) {
+      return c.json({ synced: 0, message: "All insights already synced" });
+    }
     return c.json({
-      synced: totalSynced,
-      total: unsynced.length,
-      message: `Synced ${totalSynced} insights to cloud`,
+      synced: result.synced,
+      total: result.total,
+      message: `Synced ${result.synced} insights to cloud`,
     });
   });
 

@@ -17,6 +17,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { InsightsStore, SessionInsight } from "@vibe-replay/types";
 import { INSIGHTS_SCHEMA_VERSION } from "@vibe-replay/types";
+import { getMachineId, getMachineName } from "./machine-id.js";
 import type { SessionScanResult } from "./scanner.js";
 import { CLI_VERSION } from "./version.js";
 
@@ -40,10 +41,10 @@ export async function readInsightsStore(): Promise<InsightsStore> {
 export async function writeInsightsStore(store: InsightsStore): Promise<void> {
   try {
     await mkdir(dirname(STORE_PATH), { recursive: true });
-    store.lastUpdated = new Date().toISOString();
+    const output = { ...store, lastUpdated: new Date().toISOString() };
     // Write to temp then rename (atomic on POSIX same-filesystem)
     const tmpPath = `${STORE_PATH}.tmp`;
-    await writeFile(tmpPath, JSON.stringify(store), "utf-8");
+    await writeFile(tmpPath, JSON.stringify(output), "utf-8");
     await rename(tmpPath, STORE_PATH);
   } catch {
     // Best-effort — never break core flows
@@ -121,6 +122,8 @@ export function scanResultToInsight(scan: SessionScanResult): SessionInsight {
     firstPrompt: scan.firstPrompt,
     capturedAt: new Date().toISOString(),
     capturedByVersion: CLI_VERSION,
+    machineId: getMachineId(),
+    machineName: getMachineName(),
     dataSource: scan.dataSource,
   };
 }
@@ -147,12 +150,15 @@ export function mergeInsights(
   for (const scan of scanResults) {
     const existing = byId.get(scan.sessionId);
     if (existing) {
-      // Update with fresh data but preserve sync state and provenance
+      // Update with fresh scan data but preserve original provenance + sync state
       const updated = scanResultToInsight(scan);
-      updated.capturedAt = existing.capturedAt; // keep original capture time
+      updated.capturedAt = existing.capturedAt;
       updated.updatedAt = new Date().toISOString();
       updated.syncedAt = existing.syncedAt;
       updated.cloudId = existing.cloudId;
+      // Preserve original capture machine (session belongs to where it ran, not where it's re-scanned)
+      updated.machineId = existing.machineId ?? updated.machineId;
+      updated.machineName = existing.machineName ?? updated.machineName;
       byId.set(scan.sessionId, updated);
     } else {
       byId.set(scan.sessionId, scanResultToInsight(scan));

@@ -1041,93 +1041,119 @@ app.post("/api/insights/sync", async (c) => {
 
   const db = drizzle(c.env.DB);
   const cloudIds: Record<string, string> = {};
-  let synced = 0;
-  let failed = 0;
+  const now = new Date().toISOString().replace("T", " ").slice(0, 19);
 
-  // Pre-fetch existing records in one query to avoid N+1
-  const sessionIds = body.insights
-    .filter((i: any) => i.sessionId && i.provider)
-    .map((i: any) => String(i.sessionId));
-  const existingRows =
-    sessionIds.length > 0
-      ? await db
-          .select({ id: sessionInsights.id, sessionId: sessionInsights.sessionId })
-          .from(sessionInsights)
-          .where(
-            and(eq(sessionInsights.userId, userId), inArray(sessionInsights.sessionId, sessionIds)),
-          )
-      : [];
+  // Filter valid insights
+  const validInsights = body.insights.filter((i: any) => i.sessionId && i.provider);
+  if (validInsights.length === 0) {
+    return c.json({ synced: 0, failed: 0, total: body.insights.length, cloudIds });
+  }
+
+  // Pre-fetch existing records in one query
+  const sessionIds = validInsights.map((i: any) => String(i.sessionId));
+  const existingRows = await db
+    .select({ id: sessionInsights.id, sessionId: sessionInsights.sessionId })
+    .from(sessionInsights)
+    .where(and(eq(sessionInsights.userId, userId), inArray(sessionInsights.sessionId, sessionIds)));
   const existingMap = new Map(existingRows.map((r) => [r.sessionId, r.id]));
 
-  for (const insight of body.insights) {
-    if (!insight.sessionId || !insight.provider) continue;
-
+  // Build batch of D1 prepared statements (single round-trip)
+  const statements: D1PreparedStatement[] = [];
+  for (const insight of validInsights) {
     const metadata = JSON.stringify(insight);
     const costEst =
       insight.costEstimate != null
         ? Math.max(0, Math.min(Number(insight.costEstimate) || 0, 100_000))
         : null;
+    const existingId = existingMap.get(insight.sessionId);
 
-    try {
-      const existingId = existingMap.get(insight.sessionId);
-
-      if (existingId) {
-        await db
-          .update(sessionInsights)
-          .set({
-            title: insight.title?.slice(0, 500) || null,
-            project: insight.project?.slice(0, 500) || null,
-            model: insight.model?.slice(0, 200) || null,
-            startTime: insight.startTime || null,
-            durationMs: clamp(insight.durationMs, 0, 86_400_000),
-            promptCount: clamp(insight.promptCount, 0, 10_000),
-            toolCallCount: clamp(insight.toolCallCount, 0, 100_000),
-            editCount: clamp(insight.editCount, 0, 100_000),
-            costEstimate: costEst,
-            hasPR: insight.hasPR || false,
-            subAgentCount: clamp(insight.subAgentCount, 0, 10_000),
-            apiErrorCount: clamp(insight.apiErrorCount, 0, 10_000),
-            metadata,
-            capturedByVersion: insight.capturedByVersion?.slice(0, 50) || null,
-            updatedAt: new Date().toISOString().replace("T", " ").slice(0, 19),
-          })
-          .where(eq(sessionInsights.id, existingId));
-        cloudIds[insight.sessionId] = existingId;
-      } else {
-        const id = nanoid(12);
-        await db.insert(sessionInsights).values({
+    if (existingId) {
+      statements.push(
+        c.env.DB.prepare(
+          `UPDATE session_insights SET title=?, project=?, model=?, start_time=?, duration_ms=?,
+           prompt_count=?, tool_call_count=?, edit_count=?, cost_estimate=?, has_pr=?,
+           sub_agent_count=?, api_error_count=?, machine_id=?, machine_name=?,
+           metadata=?, captured_by_version=?, updated_at=?
+           WHERE id=?`,
+        ).bind(
+          insight.title?.slice(0, 500) || null,
+          insight.project?.slice(0, 500) || null,
+          insight.model?.slice(0, 200) || null,
+          insight.startTime || null,
+          clamp(insight.durationMs, 0, 86_400_000),
+          clamp(insight.promptCount, 0, 10_000),
+          clamp(insight.toolCallCount, 0, 100_000),
+          clamp(insight.editCount, 0, 100_000),
+          costEst,
+          insight.hasPR ? 1 : 0,
+          clamp(insight.subAgentCount, 0, 10_000),
+          clamp(insight.apiErrorCount, 0, 10_000),
+          insight.machineId?.slice(0, 64) || null,
+          insight.machineName?.slice(0, 200) || null,
+          metadata,
+          insight.capturedByVersion?.slice(0, 50) || null,
+          now,
+          existingId,
+        ),
+      );
+      cloudIds[insight.sessionId] = existingId;
+    } else {
+      const id = nanoid(12);
+      statements.push(
+        c.env.DB.prepare(
+          `INSERT INTO session_insights (id, user_id, session_id, provider, slug, title, project,
+           model, start_time, duration_ms, prompt_count, tool_call_count, edit_count, cost_estimate,
+           has_pr, sub_agent_count, api_error_count, machine_id, machine_name,
+           metadata, captured_at, captured_by_version)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).bind(
           id,
           userId,
-          sessionId: insight.sessionId,
-          provider: String(insight.provider).slice(0, 50),
-          slug: String(insight.slug || insight.sessionId.slice(0, 8)).slice(0, 50),
-          title: insight.title?.slice(0, 500) || null,
-          project: insight.project?.slice(0, 500) || null,
-          model: insight.model?.slice(0, 200) || null,
-          startTime: insight.startTime || null,
-          durationMs: clamp(insight.durationMs, 0, 86_400_000),
-          promptCount: clamp(insight.promptCount, 0, 10_000),
-          toolCallCount: clamp(insight.toolCallCount, 0, 100_000),
-          editCount: clamp(insight.editCount, 0, 100_000),
-          costEstimate: costEst,
-          hasPR: insight.hasPR || false,
-          subAgentCount: clamp(insight.subAgentCount, 0, 10_000),
-          apiErrorCount: clamp(insight.apiErrorCount, 0, 10_000),
+          insight.sessionId,
+          String(insight.provider).slice(0, 50),
+          String(insight.slug || insight.sessionId.slice(0, 8)).slice(0, 50),
+          insight.title?.slice(0, 500) || null,
+          insight.project?.slice(0, 500) || null,
+          insight.model?.slice(0, 200) || null,
+          insight.startTime || null,
+          clamp(insight.durationMs, 0, 86_400_000),
+          clamp(insight.promptCount, 0, 10_000),
+          clamp(insight.toolCallCount, 0, 100_000),
+          clamp(insight.editCount, 0, 100_000),
+          costEst,
+          insight.hasPR ? 1 : 0,
+          clamp(insight.subAgentCount, 0, 10_000),
+          clamp(insight.apiErrorCount, 0, 10_000),
+          insight.machineId?.slice(0, 64) || null,
+          insight.machineName?.slice(0, 200) || null,
           metadata,
-          capturedAt: insight.capturedAt || new Date().toISOString(),
-          capturedByVersion: insight.capturedByVersion?.slice(0, 50) || null,
-        });
-        cloudIds[insight.sessionId] = id;
-        existingMap.set(insight.sessionId, id); // track for duplicate sessionIds in batch
-      }
-      synced++;
-    } catch (e) {
-      failed++;
-      console.error(`Failed to sync insight ${insight.sessionId}:`, e);
+          insight.capturedAt || new Date().toISOString(),
+          insight.capturedByVersion?.slice(0, 50) || null,
+        ),
+      );
+      cloudIds[insight.sessionId] = id;
+      existingMap.set(insight.sessionId, id); // prevent double-INSERT for duplicate sessionIds in batch
     }
   }
 
-  return c.json({ synced, failed, total: body.insights.length, cloudIds });
+  // Execute all statements in a single D1 batch (one round-trip)
+  try {
+    await c.env.DB.batch(statements);
+  } catch (e) {
+    console.error("Batch sync failed:", e);
+    return c.json(
+      {
+        error: "Batch sync failed",
+        synced: 0,
+        failed: validInsights.length,
+        total: body.insights.length,
+        cloudIds: {},
+      },
+      500,
+    );
+  }
+
+  return c.json({ synced: validInsights.length, failed: 0, total: body.insights.length, cloudIds });
 });
 
 /** List user's synced insights (paginated) */

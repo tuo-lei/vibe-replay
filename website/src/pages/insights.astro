@@ -38,7 +38,7 @@ import Layout from "../layouts/Layout.astro";
     </nav>
 
     <!-- Main content -->
-    <main class="flex-1 max-w-6xl mx-auto w-full px-6 py-10">
+    <main class="flex-1 max-w-4xl mx-auto w-full px-4 md:px-6 py-10">
       <!-- Loading state -->
       <div id="loading" class="text-center py-20">
         <div class="text-text-muted font-mono text-sm animate-pulse">Loading...</div>
@@ -77,108 +77,146 @@ import Layout from "../layouts/Layout.astro";
       </div>
 
       <!-- Insights content -->
-      <div id="insights-content" class="hidden">
+      <div id="insights-content" class="hidden space-y-6">
         <!-- Page title -->
-        <div class="mb-8">
-          <h1 class="text-2xl font-bold text-text-primary mb-1">Insights</h1>
-          <p class="text-text-muted text-sm font-mono">Your AI coding activity across all machines</p>
+        <div class="flex items-center justify-between">
+          <h1 class="text-lg font-bold text-text-primary">Your Insights</h1>
         </div>
 
-        <!-- Summary stats -->
-        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
-          <div class="rounded-xl border border-border bg-surface-1 p-4">
-            <div class="text-[11px] font-mono text-text-muted mb-1">Sessions</div>
-            <div id="stat-sessions" class="text-xl font-bold text-text-primary font-mono">0</div>
-          </div>
-          <div class="rounded-xl border border-border bg-surface-1 p-4">
-            <div class="text-[11px] font-mono text-text-muted mb-1">Projects</div>
-            <div id="stat-projects" class="text-xl font-bold text-text-primary font-mono">0</div>
-          </div>
-          <div class="rounded-xl border border-border bg-surface-1 p-4">
-            <div class="text-[11px] font-mono text-text-muted mb-1">Total Cost</div>
-            <div id="stat-cost" class="text-xl font-bold text-accent font-mono">$0</div>
-          </div>
-          <div class="rounded-xl border border-border bg-surface-1 p-4">
-            <div class="text-[11px] font-mono text-text-muted mb-1">Duration</div>
-            <div id="stat-duration" class="text-xl font-bold text-text-primary font-mono">0h</div>
-          </div>
-          <div class="rounded-xl border border-border bg-surface-1 p-4">
-            <div class="text-[11px] font-mono text-text-muted mb-1">Prompts</div>
-            <div id="stat-prompts" class="text-xl font-bold text-text-primary font-mono">0</div>
-          </div>
-          <div class="rounded-xl border border-border bg-surface-1 p-4">
-            <div class="text-[11px] font-mono text-text-muted mb-1">Tool Calls</div>
-            <div id="stat-tools" class="text-xl font-bold text-text-primary font-mono">0</div>
-          </div>
-        </div>
+        <!-- Stats card -->
+        <div class="relative overflow-hidden rounded-2xl bg-gradient-to-br from-surface-1 via-surface to-surface-1 border border-border p-6 md:p-8">
+          <!-- Gradient glow effects -->
+          <div class="absolute -top-20 -right-20 w-64 h-64 bg-[#3fb950]/5 rounded-full blur-3xl pointer-events-none"></div>
+          <div class="absolute -bottom-20 -left-20 w-48 h-48 bg-[#79b8ff]/5 rounded-full blur-3xl pointer-events-none"></div>
 
-        <!-- Activity chart -->
-        <div class="rounded-xl border border-border bg-surface-1 p-5 mb-8">
-          <h2 class="text-sm font-semibold text-text-primary mb-4">Activity (last 90 days)</h2>
-          <div id="activity-chart" class="flex items-end gap-[2px] h-24 overflow-hidden"></div>
-          <div class="flex justify-between mt-2 text-[10px] font-mono text-text-muted">
-            <span id="chart-start"></span>
-            <span id="chart-end"></span>
-          </div>
-        </div>
-
-        <!-- Two-column: providers/models + top projects -->
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-          <!-- Provider & Model breakdown -->
-          <div class="rounded-xl border border-border bg-surface-1 p-5">
-            <h2 class="text-sm font-semibold text-text-primary mb-4">Providers & Models</h2>
-            <div class="mb-4">
-              <div class="text-[11px] font-mono text-text-muted mb-2 uppercase tracking-wider">Providers</div>
-              <div id="providers-list" class="space-y-2"></div>
+          <div class="relative z-10">
+            <!-- Stats grid: 4x2 -->
+            <div class="grid grid-cols-4 gap-x-6 gap-y-5 mb-6">
+              <div>
+                <div id="stat-sessions" class="text-2xl font-mono font-bold text-[#3fb950] tabular-nums">0</div>
+                <div class="mt-0.5 text-[10px] uppercase text-text-muted tracking-wider">Sessions</div>
+              </div>
+              <div>
+                <div id="stat-prompts" class="text-2xl font-mono font-bold text-[#3fb950] tabular-nums">0</div>
+                <div class="mt-0.5 text-[10px] uppercase text-text-muted tracking-wider">Prompts</div>
+              </div>
+              <div>
+                <div id="stat-tools" class="text-2xl font-mono font-bold text-[#d29922] tabular-nums">0</div>
+                <div class="mt-0.5 text-[10px] uppercase text-text-muted tracking-wider">Tool Calls</div>
+              </div>
+              <div>
+                <div id="stat-duration" class="text-2xl font-mono font-bold text-text-primary tabular-nums">0m</div>
+                <div class="mt-0.5 text-[10px] uppercase text-text-muted tracking-wider">Coding</div>
+              </div>
+              <div>
+                <div id="stat-cost" class="text-2xl font-mono font-bold text-[#d29922] tabular-nums">$0</div>
+                <div class="mt-0.5 text-[10px] uppercase text-text-muted tracking-wider">Spent</div>
+              </div>
+              <div>
+                <div id="stat-edits" class="text-2xl font-mono font-bold text-[#79b8ff] tabular-nums">0</div>
+                <div class="mt-0.5 text-[10px] uppercase text-text-muted tracking-wider">File Edits</div>
+              </div>
+              <div>
+                <div id="stat-projects" class="text-2xl font-mono font-bold text-[#b392f0] tabular-nums">0</div>
+                <div class="mt-0.5 text-[10px] uppercase text-text-muted tracking-wider">Projects</div>
+              </div>
+              <div></div>
             </div>
+
+            <!-- Mini heatmap (last 28 days) -->
+            <div id="mini-heatmap" class="flex gap-[3px] flex-wrap mb-4"></div>
+
+            <!-- Footer highlights -->
+            <div class="flex items-center justify-between pt-4 border-t border-border/30">
+              <div class="flex items-center gap-4">
+                <span id="card-streak" class="text-xs font-mono text-text-muted hidden"></span>
+                <span id="card-bestday" class="text-xs font-mono text-text-muted hidden"></span>
+              </div>
+              <span class="text-[10px] font-mono text-text-muted">vibe-replay.com</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Activity heatmap (52 weeks) -->
+        <div class="bg-surface-1 rounded-xl p-5">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-xs font-semibold text-text-primary uppercase tracking-wider">Activity</h3>
+            <span class="text-[9px] font-mono text-text-muted">Last 52 weeks</span>
+          </div>
+          <div id="contribution-heatmap"></div>
+        </div>
+
+        <!-- Highlight cards -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div class="bg-surface-1 rounded-xl px-4 py-3.5">
+            <div class="flex items-start gap-3">
+              <span class="text-lg leading-none mt-0.5">&#128293;</span>
+              <div class="min-w-0">
+                <div class="text-[10px] font-bold text-text-muted uppercase tracking-widest">Current Streak</div>
+                <div id="hl-streak" class="text-lg font-mono font-bold text-text-primary mt-0.5">0 days</div>
+                <div id="hl-streak-sub" class="text-[10px] font-mono text-text-muted mt-0.5"></div>
+              </div>
+            </div>
+          </div>
+          <div class="bg-surface-1 rounded-xl px-4 py-3.5">
+            <div class="flex items-start gap-3">
+              <span class="text-lg leading-none mt-0.5">&#9889;</span>
+              <div class="min-w-0">
+                <div class="text-[10px] font-bold text-text-muted uppercase tracking-widest">Avg / Active Day</div>
+                <div id="hl-avg-day" class="text-lg font-mono font-bold text-text-primary mt-0.5">0 sessions</div>
+                <div id="hl-avg-day-sub" class="text-[10px] font-mono text-text-muted mt-0.5"></div>
+              </div>
+            </div>
+          </div>
+          <div class="bg-surface-1 rounded-xl px-4 py-3.5">
+            <div class="flex items-start gap-3">
+              <span class="text-lg leading-none mt-0.5">&#128172;</span>
+              <div class="min-w-0">
+                <div class="text-[10px] font-bold text-text-muted uppercase tracking-widest">Avg / Session</div>
+                <div id="hl-avg-session" class="text-lg font-mono font-bold text-text-primary mt-0.5">0 prompts</div>
+                <div id="hl-avg-session-sub" class="text-[10px] font-mono text-text-muted mt-0.5"></div>
+              </div>
+            </div>
+          </div>
+          <div class="bg-surface-1 rounded-xl px-4 py-3.5">
+            <div class="flex items-start gap-3">
+              <span class="text-lg leading-none mt-0.5">&#127942;</span>
+              <div class="min-w-0">
+                <div class="text-[10px] font-bold text-text-muted uppercase tracking-widest">Peak Day</div>
+                <div id="hl-peak" class="text-lg font-mono font-bold text-text-primary mt-0.5">-</div>
+                <div id="hl-peak-sub" class="text-[10px] font-mono text-text-muted mt-0.5"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Charts: Weekly Trend + Day of Week -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div class="bg-surface-1 rounded-xl p-5">
+            <h3 class="text-xs font-semibold text-text-primary uppercase tracking-wider mb-4">Weekly Trend</h3>
+            <div id="weekly-trend"></div>
+          </div>
+          <div class="bg-surface-1 rounded-xl p-5">
+            <h3 class="text-xs font-semibold text-text-primary uppercase tracking-wider mb-4">Day of Week</h3>
+            <div id="day-of-week"></div>
+          </div>
+        </div>
+
+        <!-- Top Projects + Models & Providers -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div class="bg-surface-1 rounded-xl p-5">
+            <h3 class="text-xs font-semibold text-text-primary uppercase tracking-wider mb-4">Top Projects</h3>
+            <div id="top-projects"></div>
+          </div>
+          <div class="bg-surface-1 rounded-xl p-5 space-y-5">
             <div>
-              <div class="text-[11px] font-mono text-text-muted mb-2 uppercase tracking-wider">Models</div>
-              <div id="models-list" class="space-y-2"></div>
+              <h3 class="text-xs font-semibold text-text-primary uppercase tracking-wider mb-4">Models</h3>
+              <div id="models-section"></div>
             </div>
-          </div>
-
-          <!-- Time range -->
-          <div class="rounded-xl border border-border bg-surface-1 p-5">
-            <h2 class="text-sm font-semibold text-text-primary mb-4">Time Range</h2>
-            <div class="space-y-3">
-              <div>
-                <div class="text-[11px] font-mono text-text-muted mb-1">First session</div>
-                <div id="time-first" class="text-sm font-mono text-text-primary">-</div>
-              </div>
-              <div>
-                <div class="text-[11px] font-mono text-text-muted mb-1">Last session</div>
-                <div id="time-last" class="text-sm font-mono text-text-primary">-</div>
-              </div>
-              <div>
-                <div class="text-[11px] font-mono text-text-muted mb-1">Avg. cost per session</div>
-                <div id="avg-cost" class="text-sm font-mono text-accent">-</div>
-              </div>
-              <div>
-                <div class="text-[11px] font-mono text-text-muted mb-1">Avg. duration per session</div>
-                <div id="avg-duration" class="text-sm font-mono text-text-primary">-</div>
-              </div>
+            <div id="providers-section-wrapper">
+              <h3 class="text-xs font-semibold text-text-primary uppercase tracking-wider mb-4">Providers</h3>
+              <div id="providers-section"></div>
             </div>
-          </div>
-        </div>
-
-        <!-- Top projects -->
-        <div class="rounded-xl border border-border bg-surface-1 p-5 mb-8">
-          <h2 class="text-sm font-semibold text-text-primary mb-4">Top Projects</h2>
-          <div class="overflow-x-auto">
-            <table class="w-full text-sm">
-              <thead>
-                <tr class="border-b border-border text-[11px] font-mono text-text-muted uppercase tracking-wider">
-                  <th class="text-left py-2 pr-4">Project</th>
-                  <th class="text-right py-2 px-3">Sessions</th>
-                  <th class="text-right py-2 px-3">Cost</th>
-                  <th class="text-right py-2 px-3 hidden sm:table-cell">Duration</th>
-                  <th class="text-right py-2 px-3 hidden md:table-cell">Prompts</th>
-                  <th class="text-right py-2 px-3 hidden md:table-cell">Tools</th>
-                  <th class="text-right py-2 pl-3 hidden lg:table-cell">Edits</th>
-                </tr>
-              </thead>
-              <tbody id="projects-table" class="font-mono text-xs"></tbody>
-            </table>
           </div>
         </div>
       </div>
@@ -207,27 +245,43 @@ import Layout from "../layouts/Layout.astro";
     return `${days}d ${hrs % 24}h`;
   }
 
+  function formatCompactDuration(ms: number): string {
+    if (!ms) return "0m";
+    const mins = Math.round(ms / 60000);
+    if (mins < 60) return `${mins}m`;
+    const hrs = Math.floor(mins / 60);
+    const remMins = mins % 60;
+    if (hrs < 24) return remMins > 0 ? `${hrs}h ${remMins}m` : `${hrs}h`;
+    const days = Math.floor(hrs / 24);
+    const remHrs = hrs % 24;
+    return remHrs > 0 ? `${days}d ${remHrs}h` : `${days}d`;
+  }
+
   function formatCost(cost: number): string {
-    if (cost < 0.01) return "$0.00";
+    if (cost === 0) return "$0";
+    if (cost < 0.01) return "<$0.01";
     if (cost < 1) return `$${cost.toFixed(2)}`;
-    if (cost < 100) return `$${cost.toFixed(1)}`;
+    if (cost < 100) return `$${cost.toFixed(2)}`;
     return `$${Math.round(cost)}`;
   }
 
   function formatNumber(n: number): string {
-    if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-    return String(n);
+    if (n >= 10000) return `${(n / 1000).toFixed(1)}k`;
+    return n.toLocaleString();
   }
 
-  function formatDateLong(iso: string): string {
-    if (!iso) return "-";
-    const d = new Date(iso);
-    return d.toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
+  function projectName(path: string): string {
+    if (!path) return "Unknown";
+    const parts = path.replace(/\\/g, "/").split("/");
+    return parts[parts.length - 1] || parts[parts.length - 2] || path;
   }
+
+  function dateKey(d: Date): string {
+    return d.toISOString().slice(0, 10);
+  }
+
+  const DAY_MS = 86400000;
+  const DAYS_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
   interface InsightsSummary {
     totalSessions: number;
@@ -253,87 +307,499 @@ import Layout from "../layouts/Layout.astro";
     sessionsPerDay: Record<string, number>;
   }
 
-  function renderBreakdown(
-    containerId: string,
-    data: Record<string, number>,
-  ): void {
-    const container = document.getElementById(containerId)!;
-    const entries = Object.entries(data).sort((a, b) => b[1] - a[1]);
-    if (entries.length === 0) {
-      container.innerHTML = '<div class="text-text-muted text-xs font-mono">No data</div>';
+  // ─── Computation helpers ─────────────────────────────────────────
+
+  function computeStreak(sessionsPerDay: Record<string, number>): { current: number; longest: number } {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    let current = 0;
+    const d = new Date(today);
+    while (true) {
+      const key = dateKey(d);
+      if (sessionsPerDay[key] && sessionsPerDay[key] > 0) {
+        current++;
+        d.setDate(d.getDate() - 1);
+      } else if (current === 0) {
+        d.setDate(d.getDate() - 1);
+        const yKey = dateKey(d);
+        if (sessionsPerDay[yKey] && sessionsPerDay[yKey] > 0) {
+          current++;
+          d.setDate(d.getDate() - 1);
+        } else {
+          break;
+        }
+      } else {
+        break;
+      }
+    }
+
+    const sortedDates = Object.keys(sessionsPerDay)
+      .filter((k) => sessionsPerDay[k] > 0)
+      .sort();
+    let longest = 0;
+    let streakLen = 0;
+    for (let i = 0; i < sortedDates.length; i++) {
+      if (i === 0) {
+        streakLen = 1;
+      } else {
+        const prev = new Date(sortedDates[i - 1]);
+        const curr = new Date(sortedDates[i]);
+        const diff = (curr.getTime() - prev.getTime()) / DAY_MS;
+        if (diff === 1) {
+          streakLen++;
+        } else {
+          if (streakLen > longest) longest = streakLen;
+          streakLen = 1;
+        }
+      }
+    }
+    if (streakLen > longest) longest = streakLen;
+
+    return { current, longest };
+  }
+
+  function computePeakDay(sessionsPerDay: Record<string, number>): { date: string; count: number } | null {
+    let max = 0;
+    let maxDate = "";
+    for (const [k, v] of Object.entries(sessionsPerDay)) {
+      if (v > max) { max = v; maxDate = k; }
+    }
+    return max > 0 ? { date: maxDate, count: max } : null;
+  }
+
+  function computeWeeklyTrend(sessionsPerDay: Record<string, number>, weeks: number): Array<{ weekLabel: string; sessions: number; startDate: string }> {
+    const result: Array<{ weekLabel: string; sessions: number; startDate: string }> = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dayOfWeek = today.getDay();
+    const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    const currentMonday = new Date(today.getTime() - mondayOffset * DAY_MS);
+
+    for (let w = weeks - 1; w >= 0; w--) {
+      const weekStart = new Date(currentMonday.getTime() - w * 7 * DAY_MS);
+      let sessions = 0;
+      for (let d = 0; d < 7; d++) {
+        const day = new Date(weekStart.getTime() + d * DAY_MS);
+        sessions += sessionsPerDay[dateKey(day)] || 0;
+      }
+      const monthDay = weekStart.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      result.push({ weekLabel: monthDay, sessions, startDate: dateKey(weekStart) });
+    }
+    return result;
+  }
+
+  function computeDayOfWeek(sessionsPerDay: Record<string, number>): Array<{ shortDay: string; count: number }> {
+    const counts = [0, 0, 0, 0, 0, 0, 0];
+    for (const [k, v] of Object.entries(sessionsPerDay)) {
+      if (v > 0) {
+        const d = new Date(`${k}T00:00:00`);
+        counts[d.getDay()] += v;
+      }
+    }
+    return counts.map((count, i) => ({ shortDay: DAYS_SHORT[i], count }));
+  }
+
+  // ─── Mini heatmap (28 days) ─────────────────────────────────────
+
+  function renderMiniHeatmap(sessionsPerDay: Record<string, number>): void {
+    const container = document.getElementById("mini-heatmap")!;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const totalDays = 28;
+    const cells: Array<{ key: string; count: number }> = [];
+    let max = 0;
+    for (let i = totalDays - 1; i >= 0; i--) {
+      const d = new Date(today.getTime() - i * DAY_MS);
+      const key = dateKey(d);
+      const count = sessionsPerDay[key] || 0;
+      if (count > max) max = count;
+      cells.push({ key, count });
+    }
+
+    container.innerHTML = cells.map((c) => {
+      if (c.count === 0) {
+        return `<div class="w-[10px] h-[10px] rounded-[2px] bg-border/20"></div>`;
+      }
+      const r = max <= 1 ? 1 : c.count / max;
+      const opacity = r <= 0.33 ? 0.45 : r <= 0.66 ? 0.7 : 0.9;
+      return `<div class="w-[10px] h-[10px] rounded-[2px] bg-[#3fb950]" style="opacity: ${opacity}"></div>`;
+    }).join("");
+  }
+
+  // ─── Contribution heatmap (52 weeks) ────────────────────────────
+
+  function renderContributionHeatmap(sessionsPerDay: Record<string, number>): void {
+    const container = document.getElementById("contribution-heatmap")!;
+    const weeks = 52;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const dow = today.getDay();
+    const endDate = new Date(today.getTime() + (6 - dow) * DAY_MS);
+    const totalDays = weeks * 7;
+    const startDate = new Date(endDate.getTime() - (totalDays - 1) * DAY_MS);
+
+    let maxVal = 0;
+    const weekColumns: Array<Array<{ date: string; count: number }>> = [];
+    const monthByWeek = new Map<number, string>();
+    let lastMonth = -1;
+
+    for (let i = 0; i < totalDays; i++) {
+      const d = new Date(startDate.getTime() + i * DAY_MS);
+      const key = dateKey(d);
+      const count = sessionsPerDay[key] || 0;
+      const wi = Math.floor(i / 7);
+      if (count > maxVal) maxVal = count;
+      if (!weekColumns[wi]) weekColumns[wi] = [];
+      weekColumns[wi].push({ date: key, count });
+
+      const month = d.getMonth();
+      if (month !== lastMonth) {
+        monthByWeek.set(wi, d.toLocaleDateString("en-US", { month: "short" }));
+        lastMonth = month;
+      }
+    }
+
+    const cellColor = (count: number): { cls: string; style: string } => {
+      if (count === 0) return { cls: "bg-[#1a1a24]", style: "" };
+      const r = maxVal <= 1 ? 1 : count / maxVal;
+      const opacity = r <= 0.25 ? 0.4 : r <= 0.5 ? 0.6 : r <= 0.75 ? 0.8 : 1;
+      return { cls: "bg-[#3fb950]", style: `opacity: ${opacity}` };
+    };
+
+    // Month labels row
+    let monthRow = `<div class="flex items-end gap-[3px]"><div class="shrink-0 w-7"></div><div class="flex-1 flex gap-[3px] min-w-0">`;
+    for (let wi = 0; wi < weekColumns.length; wi++) {
+      const label = monthByWeek.get(wi);
+      monthRow += `<div class="flex-1 min-w-0 overflow-visible">`;
+      if (label) {
+        monthRow += `<span class="text-[9px] font-mono text-text-muted whitespace-nowrap">${escapeHtml(label)}</span>`;
+      }
+      monthRow += `</div>`;
+    }
+    monthRow += `</div></div>`;
+
+    // Day labels
+    const dayLabels = ["", "Mon", "", "Wed", "", "Fri", ""];
+
+    // Grid with day labels
+    let grid = `<div class="flex gap-[3px]">`;
+    grid += `<div class="shrink-0 w-7 flex flex-col gap-[3px]">`;
+    for (const label of dayLabels) {
+      grid += `<div class="flex-1 flex items-center text-[9px] font-mono text-text-muted leading-none">${label}</div>`;
+    }
+    grid += `</div>`;
+    grid += `<div class="flex-1 flex gap-[3px] min-w-0">`;
+
+    for (const week of weekColumns) {
+      grid += `<div class="flex-1 flex flex-col gap-[3px] min-w-0">`;
+      for (const cell of week) {
+        const title = `${cell.date}: ${cell.count} session${cell.count !== 1 ? "s" : ""}`;
+        const c = cellColor(cell.count);
+        grid += `<div class="aspect-square rounded-sm ${c.cls}" style="${c.style}" title="${title}"></div>`;
+      }
+      grid += `</div>`;
+    }
+    grid += `</div></div>`;
+
+    // Legend
+    const legend = `<div class="flex items-center justify-end gap-1.5 pt-1">
+      <span class="text-[9px] font-mono text-text-muted">Less</span>
+      <div class="w-[10px] h-[10px] rounded-sm bg-[#1a1a24]"></div>
+      <div class="w-[10px] h-[10px] rounded-sm bg-[#3fb950]" style="opacity: 0.4"></div>
+      <div class="w-[10px] h-[10px] rounded-sm bg-[#3fb950]" style="opacity: 0.6"></div>
+      <div class="w-[10px] h-[10px] rounded-sm bg-[#3fb950]" style="opacity: 0.8"></div>
+      <div class="w-[10px] h-[10px] rounded-sm bg-[#3fb950]"></div>
+      <span class="text-[9px] font-mono text-text-muted">More</span>
+    </div>`;
+
+    container.innerHTML = `<div class="space-y-1">${monthRow}${grid}${legend}</div>`;
+  }
+
+  // ─── Highlight cards ────────────────────────────────────────────
+
+  function renderHighlights(summary: InsightsSummary): void {
+    const spd = summary.sessionsPerDay || {};
+    const streak = computeStreak(spd);
+    const peak = computePeakDay(spd);
+    const activeDays = Object.values(spd).filter((v) => v > 0).length;
+    const avgPerActiveDay = activeDays > 0 ? (summary.totalSessions / activeDays).toFixed(1) : "0";
+    const avgPromptsPerSession = summary.totalSessions > 0 ? Math.round(summary.totalPrompts / summary.totalSessions) : 0;
+
+    // Card: streak
+    const cardStreak = document.getElementById("card-streak")!;
+    if (streak.current > 0) {
+      cardStreak.textContent = `${streak.current} day streak`;
+      cardStreak.classList.remove("hidden");
+    }
+
+    // Highlight: streak
+    document.getElementById("hl-streak")!.textContent = `${streak.current} day${streak.current !== 1 ? "s" : ""}`;
+    const streakSub = document.getElementById("hl-streak-sub")!;
+    if (streak.longest > streak.current) {
+      streakSub.textContent = `Best: ${streak.longest} days`;
+    } else if (streak.current > 0) {
+      streakSub.textContent = "Personal best!";
+    }
+
+    // Highlight: avg/active day
+    document.getElementById("hl-avg-day")!.textContent = `${avgPerActiveDay} sessions`;
+    document.getElementById("hl-avg-day-sub")!.textContent = `${activeDays} active day${activeDays !== 1 ? "s" : ""}`;
+
+    // Highlight: avg/session
+    document.getElementById("hl-avg-session")!.textContent = `${avgPromptsPerSession} prompts`;
+    if (summary.totalSessions > 0) {
+      document.getElementById("hl-avg-session-sub")!.textContent = `~${formatCompactDuration(summary.totalDurationMs / summary.totalSessions)} each`;
+    }
+
+    // Highlight: peak day
+    if (peak) {
+      document.getElementById("hl-peak")!.textContent = `${peak.count} sessions`;
+      document.getElementById("hl-peak-sub")!.textContent = new Date(`${peak.date}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    }
+  }
+
+  // ─── Weekly Trend chart ─────────────────────────────────────────
+
+  function renderWeeklyTrend(sessionsPerDay: Record<string, number>): void {
+    const container = document.getElementById("weekly-trend")!;
+    const data = computeWeeklyTrend(sessionsPerDay, 12);
+    const maxVal = Math.max(...data.map((d) => d.sessions), 1);
+    const hasActivity = data.some((d) => d.sessions > 0);
+
+    if (!hasActivity) {
+      container.innerHTML = `<div class="flex items-center justify-center h-28 text-text-muted text-xs font-mono">No activity to show</div>`;
       return;
     }
-    const maxCount = entries[0][1];
-    container.innerHTML = entries
-      .slice(0, 8)
-      .map(
-        ([name, count]) => `
-      <div class="flex items-center gap-3">
-        <div class="text-xs font-mono text-text-secondary w-40 truncate shrink-0" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
-        <div class="flex-1 h-4 bg-surface-2 rounded-sm overflow-hidden">
-          <div class="h-full bg-accent/30 rounded-sm" style="width: ${(count / maxCount) * 100}%"></div>
-        </div>
-        <div class="text-[11px] font-mono text-text-muted w-12 text-right shrink-0">${count}</div>
-      </div>
-    `,
-      )
-      .join("");
-  }
 
-  function renderActivityChart(sessionsPerDay: Record<string, number>): void {
-    const chart = document.getElementById("activity-chart")!;
-    const startEl = document.getElementById("chart-start")!;
-    const endEl = document.getElementById("chart-end")!;
+    // Compute trend
+    const recentWeeks = data.slice(-4);
+    const olderWeeks = data.slice(-8, -4);
+    const recentAvg = recentWeeks.reduce((a, b) => a + b.sessions, 0) / Math.max(recentWeeks.length, 1);
+    const olderAvg = olderWeeks.reduce((a, b) => a + b.sessions, 0) / Math.max(olderWeeks.length, 1);
+    const trendUp = recentAvg > olderAvg;
+    const trendFlat = Math.abs(recentAvg - olderAvg) < 0.5;
 
-    // Generate 90-day range
-    const days: string[] = [];
-    const now = new Date();
-    for (let i = 89; i >= 0; i--) {
-      const d = new Date(now);
-      d.setDate(d.getDate() - i);
-      days.push(d.toISOString().slice(0, 10));
+    let bars = `<div class="flex items-end gap-1.5 h-28">`;
+    for (const w of data) {
+      const heightPct = Math.max((w.sessions / maxVal) * 100, w.sessions > 0 ? 6 : 0);
+      const title = `${w.weekLabel}: ${w.sessions} session${w.sessions !== 1 ? "s" : ""}`;
+      bars += `<div class="flex-1 flex flex-col items-center justify-end h-full group relative" title="${title}">`;
+      bars += `<div class="w-full rounded-md bg-[#3fb950]" style="height: ${heightPct}%; min-height: ${w.sessions > 0 ? "4px" : "0"}; opacity: ${w.sessions > 0 ? 0.7 : 0}"></div>`;
+      bars += `</div>`;
     }
+    bars += `</div>`;
 
-    const maxCount = Math.max(1, ...days.map((d) => sessionsPerDay[d] || 0));
+    // X-axis labels (every 2 weeks)
+    let xAxis = `<div class="flex items-center justify-between mt-3"><div class="flex gap-1.5 overflow-hidden">`;
+    data.filter((_, i) => i % 2 === 0).forEach((w) => {
+      xAxis += `<span class="text-[9px] font-mono text-text-muted">${escapeHtml(w.weekLabel)}</span>`;
+    });
+    xAxis += `</div>`;
 
-    chart.innerHTML = days
-      .map((day) => {
-        const count = sessionsPerDay[day] || 0;
-        const height = count > 0 ? Math.max(4, (count / maxCount) * 96) : 2;
-        const bg = count > 0 ? "bg-accent/60 hover:bg-accent" : "bg-surface-2";
-        const title = `${day}: ${count} session${count !== 1 ? "s" : ""}`;
-        return `<div class="flex-1 min-w-[2px] rounded-t ${bg} transition-colors cursor-default" style="height: ${height}px" title="${title}"></div>`;
-      })
-      .join("");
+    if (!trendFlat) {
+      const color = trendUp ? "text-[#3fb950]" : "text-[#d29922]";
+      const arrow = trendUp ? "\u2191" : "\u2193";
+      const label = trendUp ? "Trending up" : "Slowing down";
+      xAxis += `<span class="text-[10px] font-mono font-bold ${color}">${arrow} ${label}</span>`;
+    }
+    xAxis += `</div>`;
 
-    startEl.textContent = days[0];
-    endEl.textContent = days[days.length - 1];
+    container.innerHTML = `<div class="space-y-0">${bars}${xAxis}</div>`;
   }
 
-  function renderProjectsTable(
-    projects: InsightsSummary["topProjects"],
-  ): void {
-    const tbody = document.getElementById("projects-table")!;
+  // ─── Day of Week chart ──────────────────────────────────────────
+
+  function renderDayOfWeek(sessionsPerDay: Record<string, number>): void {
+    const container = document.getElementById("day-of-week")!;
+    const data = computeDayOfWeek(sessionsPerDay);
+    const maxVal = Math.max(...data.map((d) => d.count), 1);
+
+    let html = `<div class="space-y-2">`;
+    for (const d of data) {
+      const pct = maxVal > 0 ? (d.count / maxVal) * 100 : 0;
+      const width = Math.max(pct, d.count > 0 ? 3 : 0);
+      html += `<div class="flex items-center gap-2">`;
+      html += `<span class="text-[10px] font-mono text-text-muted w-7 text-right shrink-0">${d.shortDay}</span>`;
+      html += `<div class="flex-1 h-4 rounded bg-surface-2 overflow-hidden">`;
+      html += `<div class="h-full rounded bg-[#3fb950]" style="width: ${width}%; opacity: 0.65"></div>`;
+      html += `</div>`;
+      html += `<span class="text-[10px] font-mono text-text-muted w-6 text-right tabular-nums shrink-0">${d.count}</span>`;
+      html += `</div>`;
+    }
+    html += `</div>`;
+    container.innerHTML = html;
+  }
+
+  // ─── Top Projects ───────────────────────────────────────────────
+
+  function renderTopProjects(projects: InsightsSummary["topProjects"]): void {
+    const container = document.getElementById("top-projects")!;
     if (projects.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="7" class="text-center py-8 text-text-muted text-xs font-mono">No projects</td></tr>';
+      container.innerHTML = `<div class="text-text-muted text-xs font-mono py-4 text-center">No project data</div>`;
       return;
     }
-    tbody.innerHTML = projects
-      .map(
-        (p) => `
-      <tr class="border-b border-border/50 hover:bg-surface-2/50 transition-colors">
-        <td class="py-2.5 pr-4 text-text-primary truncate max-w-[200px]" title="${escapeHtml(p.project)}">${escapeHtml(p.project)}</td>
-        <td class="text-right py-2.5 px-3 text-text-secondary">${p.sessions}</td>
-        <td class="text-right py-2.5 px-3 text-accent">${formatCost(p.cost)}</td>
-        <td class="text-right py-2.5 px-3 text-text-secondary hidden sm:table-cell">${formatDuration(p.durationMs)}</td>
-        <td class="text-right py-2.5 px-3 text-text-secondary hidden md:table-cell">${formatNumber(p.prompts)}</td>
-        <td class="text-right py-2.5 px-3 text-text-secondary hidden md:table-cell">${formatNumber(p.toolCalls)}</td>
-        <td class="text-right py-2.5 pl-3 text-text-secondary hidden lg:table-cell">${formatNumber(p.edits)}</td>
-      </tr>
-    `,
-      )
-      .join("");
+
+    const maxSessions = Math.max(...projects.map((p) => p.sessions), 1);
+    let html = `<div class="space-y-2">`;
+    for (const p of projects.slice(0, 8)) {
+      const name = projectName(p.project);
+      const pct = (p.sessions / maxSessions) * 100;
+      const width = Math.max(pct, 3);
+      const costStr = p.cost > 0 ? ` \u00b7 ${formatCost(p.cost)}` : "";
+      html += `<div class="space-y-1">`;
+      html += `<div class="flex items-center justify-between">`;
+      html += `<span class="text-xs font-medium text-text-primary truncate max-w-[60%]" title="${escapeHtml(p.project)}">${escapeHtml(name)}</span>`;
+      html += `<span class="text-[10px] font-mono text-text-muted tabular-nums">${p.sessions} session${p.sessions !== 1 ? "s" : ""}${costStr}</span>`;
+      html += `</div>`;
+      html += `<div class="h-1.5 rounded-full bg-surface-2 overflow-hidden">`;
+      html += `<div class="h-full rounded-full bg-gradient-to-r from-[#3fb950] to-[#79b8ff]" style="width: ${width}%; opacity: 0.65"></div>`;
+      html += `</div></div>`;
+    }
+    html += `</div>`;
+    container.innerHTML = html;
   }
+
+  // ─── Models breakdown ───────────────────────────────────────────
+
+  function shortModelName(model: string): string {
+    return model
+      .replace(/^anthropic\//, "")
+      .replace(/^openai\//, "")
+      .replace(/-\d{8}$/, "")
+      .replace(/^claude-/, "c-");
+  }
+
+  function renderModels(models: Record<string, number>): void {
+    const container = document.getElementById("models-section")!;
+
+    // Split comma-separated model labels, dedupe, and aggregate
+    const map = new Map<string, number>();
+    for (const [model, count] of Object.entries(models)) {
+      const labels = [...new Set(model.split(",").map((p) => p.trim()).filter(Boolean))];
+      for (const label of labels) {
+        const short = shortModelName(label);
+        map.set(short, (map.get(short) ?? 0) + count);
+      }
+    }
+    const entries = [...map.entries()]
+      .map(([model, count]) => ({ model, count }))
+      .sort((a, b) => b.count - a.count);
+    const total = entries.reduce((a, b) => a + b.count, 0);
+
+    if (entries.length === 0) {
+      container.innerHTML = `<div class="text-text-muted text-xs font-mono py-4 text-center">No model data</div>`;
+      return;
+    }
+
+    const colors = ["bg-[#3fb950]", "bg-[#79b8ff]", "bg-[#d29922]", "bg-[#b392f0]", "bg-[#f97583]", "bg-text-muted"];
+
+    // Stacked bar
+    let bar = `<div class="h-3 rounded-full bg-surface-2 overflow-hidden flex">`;
+    entries.forEach((e, i) => {
+      const w = (e.count / total) * 100;
+      bar += `<div class="h-full ${colors[i % colors.length]}" style="width: ${w}%; opacity: 0.7"></div>`;
+    });
+    bar += `</div>`;
+
+    // Legend
+    let legend = `<div class="grid grid-cols-2 gap-2 mt-3">`;
+    entries.forEach((e, i) => {
+      legend += `<div class="flex items-center gap-2">`;
+      legend += `<div class="w-2.5 h-2.5 rounded-sm ${colors[i % colors.length]} shrink-0" style="opacity: 0.7"></div>`;
+      legend += `<span class="text-[11px] font-mono text-text-muted truncate">${escapeHtml(e.model)}</span>`;
+      legend += `<span class="text-[10px] font-mono text-text-muted tabular-nums ml-auto shrink-0">${e.count}</span>`;
+      legend += `</div>`;
+    });
+    legend += `</div>`;
+
+    container.innerHTML = `<div class="space-y-3">${bar}${legend}</div>`;
+  }
+
+  // ─── Providers breakdown ────────────────────────────────────────
+
+  function renderProviders(providers: Record<string, number>): void {
+    const wrapper = document.getElementById("providers-section-wrapper")!;
+    const container = document.getElementById("providers-section")!;
+
+    const entries = Object.entries(providers)
+      .map(([provider, count]) => ({
+        provider,
+        label: provider === "claude-code" ? "Claude Code" : provider === "cursor" ? "Cursor" : provider,
+        count,
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    if (entries.length <= 1) {
+      wrapper.style.display = "none";
+      return;
+    }
+
+    const total = entries.reduce((a, b) => a + b.count, 0);
+    const colors: Record<string, string> = { "claude-code": "bg-[#d29922]", cursor: "bg-[#79b8ff]" };
+
+    let html = `<div class="space-y-3">`;
+    for (const e of entries) {
+      const pct = total > 0 ? (e.count / total) * 100 : 0;
+      html += `<div class="space-y-1.5">`;
+      html += `<div class="flex items-center justify-between">`;
+      html += `<span class="text-xs font-medium text-text-primary">${escapeHtml(e.label)}</span>`;
+      html += `<span class="text-xs font-mono text-text-muted tabular-nums">${e.count} (${Math.round(pct)}%)</span>`;
+      html += `</div>`;
+      html += `<div class="h-2 rounded-full bg-surface-2 overflow-hidden">`;
+      html += `<div class="h-full rounded-full ${colors[e.provider] || "bg-text-muted"}" style="width: ${pct}%; opacity: 0.7"></div>`;
+      html += `</div></div>`;
+    }
+    html += `</div>`;
+    container.innerHTML = html;
+  }
+
+  // ─── Main render ────────────────────────────────────────────────
+
+  function renderInsights(summary: InsightsSummary): void {
+    // Stats card
+    document.getElementById("stat-sessions")!.textContent = formatNumber(summary.totalSessions);
+    document.getElementById("stat-prompts")!.textContent = formatNumber(summary.totalPrompts);
+    document.getElementById("stat-tools")!.textContent = formatNumber(summary.totalToolCalls);
+    document.getElementById("stat-duration")!.textContent = formatDuration(summary.totalDurationMs);
+    document.getElementById("stat-cost")!.textContent = formatCost(summary.totalCost);
+    document.getElementById("stat-edits")!.textContent = formatNumber(summary.totalEdits);
+    document.getElementById("stat-projects")!.textContent = formatNumber(summary.totalProjects);
+
+    const spd = summary.sessionsPerDay || {};
+
+    // Mini heatmap
+    renderMiniHeatmap(spd);
+
+    // Contribution heatmap
+    renderContributionHeatmap(spd);
+
+    // Highlights
+    renderHighlights(summary);
+
+    // Best day on card
+    const dow = computeDayOfWeek(spd);
+    const bestDay = [...dow].sort((a, b) => b.count - a.count)[0];
+    if (bestDay && bestDay.count > 0) {
+      const el = document.getElementById("card-bestday")!;
+      el.textContent = `Most active: ${bestDay.shortDay === "Sun" ? "Sunday" : bestDay.shortDay === "Mon" ? "Monday" : bestDay.shortDay === "Tue" ? "Tuesday" : bestDay.shortDay === "Wed" ? "Wednesday" : bestDay.shortDay === "Thu" ? "Thursday" : bestDay.shortDay === "Fri" ? "Friday" : "Saturday"}`;
+      el.classList.remove("hidden");
+    }
+
+    // Charts
+    renderWeeklyTrend(spd);
+    renderDayOfWeek(spd);
+
+    // Projects
+    renderTopProjects(summary.topProjects || []);
+
+    // Models & Providers
+    renderModels(summary.models || {});
+    renderProviders(summary.providers || {});
+  }
+
+  // ─── Init ───────────────────────────────────────────────────────
 
   async function initInsights(): Promise<void> {
     const loading = document.getElementById("loading")!;
@@ -373,36 +839,7 @@ import Layout from "../layouts/Layout.astro";
     }
 
     content.classList.remove("hidden");
-
-    // Populate stats
-    document.getElementById("stat-sessions")!.textContent = formatNumber(summary.totalSessions);
-    document.getElementById("stat-projects")!.textContent = formatNumber(summary.totalProjects);
-    document.getElementById("stat-cost")!.textContent = formatCost(summary.totalCost);
-    document.getElementById("stat-duration")!.textContent = formatDuration(summary.totalDurationMs);
-    document.getElementById("stat-prompts")!.textContent = formatNumber(summary.totalPrompts);
-    document.getElementById("stat-tools")!.textContent = formatNumber(summary.totalToolCalls);
-
-    // Time range
-    document.getElementById("time-first")!.textContent = formatDateLong(summary.timeRange.first);
-    document.getElementById("time-last")!.textContent = formatDateLong(summary.timeRange.last);
-    document.getElementById("avg-cost")!.textContent =
-      summary.totalSessions > 0
-        ? formatCost(summary.totalCost / summary.totalSessions)
-        : "-";
-    document.getElementById("avg-duration")!.textContent =
-      summary.totalSessions > 0
-        ? formatDuration(summary.totalDurationMs / summary.totalSessions)
-        : "-";
-
-    // Breakdowns
-    renderBreakdown("providers-list", summary.providers);
-    renderBreakdown("models-list", summary.models);
-
-    // Activity chart
-    renderActivityChart(summary.sessionsPerDay);
-
-    // Projects table
-    renderProjectsTable(summary.topProjects);
+    renderInsights(summary);
   }
 
   // --- Auth UI (same pattern as profile page) ---
