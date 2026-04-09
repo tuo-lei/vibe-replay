@@ -73,7 +73,7 @@ export function getMachineId(): string {
   return cachedId;
 }
 
-/** Get a human-readable machine name (hostname, user can override via config). */
+/** Get a human-readable machine name. Note: sent to cloud unhashed (raw hostname). */
 export function getMachineName(): string {
   if (cachedName) return cachedName;
   cachedName = hostname();
