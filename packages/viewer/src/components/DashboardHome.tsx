@@ -679,7 +679,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   >("idle");
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
-  const [, setTick] = useState(0); // force re-render for relative time
+  const [tick, setTick] = useState(0);
   const syncPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const syncPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedSession = selectedSlug
@@ -897,7 +897,9 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     return () => clearInterval(timer);
   }, [lastSyncedAt]);
 
-  const syncedAgoLabel = useMemo(() => {
+  // Recomputed on every tick (via setTick) to keep relative time fresh
+  void tick;
+  const syncedAgoLabel = (() => {
     if (!lastSyncedAt) return null;
     const diffMs = Date.now() - lastSyncedAt;
     if (diffMs < 60_000) return "just now";
@@ -905,7 +907,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     if (mins < 60) return `${mins}m ago`;
     const hrs = Math.floor(mins / 60);
     return `${hrs}h ago`;
-  }, [lastSyncedAt /* tick dependency implicitly via setTick re-render */]);
+  })();
 
   if (loading && !sources.length && !replays.length) {
     return (
