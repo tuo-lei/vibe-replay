@@ -978,6 +978,51 @@ export async function startServer(
     await writeInsightsStore(updated);
   };
 
+  /** Auto-sync insights to cloud if user is logged in. Fire-and-forget. */
+  const autoSyncInsights = async (): Promise<void> => {
+    const { getUnsyncedInsights, markSynced } = await import("./insights.js");
+    const {
+      loadAuthToken: loadAuth,
+      getApiUrl: getUrl,
+      getSessionCookieName: getCookie,
+    } = await import("./publishers/cloud.js");
+
+    const auth = await loadAuth();
+    if (!auth) return; // Not logged in — skip silently
+
+    const store = await readInsightsStore();
+    const unsynced = getUnsyncedInsights(store);
+    if (unsynced.length === 0) return;
+
+    const apiUrl = getUrl();
+    const cookieName = getCookie(apiUrl);
+    const BATCH_SIZE = 100;
+    const allSyncedIds = new Map<string, string>();
+
+    for (let i = 0; i < unsynced.length; i += BATCH_SIZE) {
+      const batch = unsynced.slice(i, i + BATCH_SIZE);
+      const payload = batch.map(({ syncedAt, cloudId, ...rest }) => rest);
+      try {
+        const resp = await fetch(`${apiUrl}/api/insights/sync`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Cookie: `${cookieName}=${auth.token}` },
+          body: JSON.stringify({ insights: payload }),
+          signal: AbortSignal.timeout(30_000),
+        });
+        if (!resp.ok) break;
+        const result: { synced: number; cloudIds: Record<string, string> } = await resp.json();
+        for (const [sid, cid] of Object.entries(result.cloudIds)) allSyncedIds.set(sid, cid);
+      } catch {
+        break;
+      }
+    }
+
+    if (allSyncedIds.size > 0) {
+      const updated = markSynced(store, allSyncedIds);
+      await writeInsightsStore(updated);
+    }
+  };
+
   /** Pre-compute all insights from scan results and store in cache. */
   const precomputeInsightsCache = async (results: SessionScanResult[]): Promise<void> => {
     // User-level insights
@@ -1091,7 +1136,9 @@ export async function startServer(
         await writeFileCache(scanResultsCacheKey, results);
 
         // Persist insights to durable local store (survives source file deletion)
-        persistInsightsFromScan(results).catch(() => {});
+        persistInsightsFromScan(results)
+          .then(() => autoSyncInsights()) // Auto-sync to cloud if logged in
+          .catch(() => {});
 
         // Pre-compute insights cache in background (non-blocking)
         precomputeInsightsCache(results).catch(() => {});
@@ -1816,6 +1863,9 @@ export async function startServer(
 
               // Save auth keyed by current API environment
               await saveAuthToken({ token: data.token, user: data.user }, cloudApiBaseUrl);
+
+              // Auto-sync insights to cloud after login (fire-and-forget)
+              autoSyncInsights().catch(() => {});
             } catch {
               res.writeHead(400);
               res.end("Bad Request");
