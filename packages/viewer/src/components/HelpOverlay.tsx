@@ -65,6 +65,9 @@ export default function HelpOverlay({ open, onClose }: Props) {
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-300"
       onClick={onClose}
+      role="dialog"
+      aria-label="Keyboard shortcuts"
+      aria-modal="true"
     >
       <div
         className="w-full max-w-lg bg-terminal-bg border border-terminal-border-subtle rounded-2xl shadow-layer-xl overflow-hidden animate-in zoom-in-95 duration-200"
