@@ -1445,7 +1445,14 @@ app.post("/api/insights/profile", async (c) => {
       updates.slug = slug;
     }
 
-    await db.update(insightProfiles).set(updates).where(eq(insightProfiles.id, existing.id));
+    try {
+      await db.update(insightProfiles).set(updates).where(eq(insightProfiles.id, existing.id));
+    } catch (e: any) {
+      if (e?.message?.includes("UNIQUE")) {
+        return c.json({ error: "Slug already taken" }, 409);
+      }
+      throw e;
+    }
 
     const finalEnabled = updates.enabled ?? existing.enabled;
     const finalSlug = updates.slug || existing.slug;
@@ -1677,12 +1684,14 @@ app.get("/api/public/insights/:slug", async (c) => {
     }
   }
 
-  // Increment view count (fire-and-forget)
-  db.update(insightProfiles)
-    .set({ viewCount: sql`${insightProfiles.viewCount} + 1` })
-    .where(eq(insightProfiles.id, profile.id))
-    .execute()
-    .catch(() => {});
+  // Increment view count (fire-and-forget, but survive Worker shutdown)
+  c.executionCtx.waitUntil(
+    db
+      .update(insightProfiles)
+      .set({ viewCount: sql`${insightProfiles.viewCount} + 1` })
+      .where(eq(insightProfiles.id, profile.id))
+      .catch(() => {}),
+  );
 
   // Only expose visibility flags that are true — don't reveal what's hidden
   const visibleSections: Record<string, boolean> = {};
@@ -1695,9 +1704,7 @@ app.get("/api/public/insights/:slug", async (c) => {
     avatarUrl: profile.avatarUrl,
     config: visibleSections,
     totalSessions: agg?.totalSessions || 0,
-    totalProjects: config.showProjects
-      ? new Set(topProjects.map((p: any) => p.project)).size
-      : undefined,
+    totalProjects: config.showProjects ? Object.keys(projectsAgg).length : undefined,
     totalDurationMs: agg?.totalDurationMs || 0,
     totalPrompts: agg?.totalPrompts || 0,
     totalToolCalls: agg?.totalToolCalls || 0,
