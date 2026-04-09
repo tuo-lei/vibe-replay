@@ -94,12 +94,32 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
     return dots;
   }, [annotatedScenes, scenes.length]);
 
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "ArrowRight" || e.key === "ArrowUp") {
+        e.preventDefault();
+        onSeek(Math.min(currentIndex + 1, scenes.length - 1));
+      } else if (e.key === "ArrowLeft" || e.key === "ArrowDown") {
+        e.preventDefault();
+        onSeek(Math.max(currentIndex - 1, 0));
+      } else if (e.key === "Home") {
+        e.preventDefault();
+        onSeek(0);
+      } else if (e.key === "End") {
+        e.preventDefault();
+        onSeek(scenes.length - 1);
+      }
+    },
+    [currentIndex, scenes.length, onSeek],
+  );
+
   if (scenes.length === 0) return null;
 
   return (
     <div
       className="px-4 pt-3 pb-1 cursor-pointer"
       onClick={handleSeekClick}
+      onKeyDown={handleKeyDown}
       role="slider"
       aria-label="Scene timeline"
       aria-valuemin={0}
