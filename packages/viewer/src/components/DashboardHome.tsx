@@ -678,6 +678,8 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     "idle" | "syncing" | "done" | "error" | "needsLogin" | "awaitingLogin"
   >("idle");
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
+  const [, setTick] = useState(0); // force re-render for relative time
   const syncPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const syncPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedSession = selectedSlug
@@ -801,30 +803,31 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   const doSync = async () => {
     setSyncStatus("syncing");
     setSyncMessage(null);
-    let needsLogin = false;
     try {
       const resp = await fetch("/api/insights/sync", { method: "POST" });
       const data = await resp.json();
       if (resp.status === 401) {
         setSyncStatus("needsLogin");
         setSyncMessage(null);
-        needsLogin = true;
         return;
       }
       if (!resp.ok || data.error) {
         setSyncStatus("error");
         setSyncMessage(data.error || "Sync failed");
+        setTimeout(() => {
+          setSyncStatus((s) => (s === "error" ? "idle" : s));
+          setSyncMessage(null);
+        }, 4000);
       } else {
         setSyncStatus("done");
         setSyncMessage(data.message || `Synced ${data.synced ?? 0} insights`);
+        setLastSyncedAt(Date.now());
       }
     } catch {
       setSyncStatus("error");
       setSyncMessage("Network error");
-    }
-    if (!needsLogin) {
       setTimeout(() => {
-        setSyncStatus("idle");
+        setSyncStatus((s) => (s === "error" ? "idle" : s));
         setSyncMessage(null);
       }, 4000);
     }
@@ -886,6 +889,23 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
       if (syncPollTimeoutRef.current) clearTimeout(syncPollTimeoutRef.current);
     };
   }, []);
+
+  // Tick every 30s to update "synced X ago" relative time
+  useEffect(() => {
+    if (!lastSyncedAt) return;
+    const timer = setInterval(() => setTick((t) => t + 1), 30_000);
+    return () => clearInterval(timer);
+  }, [lastSyncedAt]);
+
+  const syncedAgoLabel = useMemo(() => {
+    if (!lastSyncedAt) return null;
+    const diffMs = Date.now() - lastSyncedAt;
+    if (diffMs < 60_000) return "just now";
+    const mins = Math.floor(diffMs / 60_000);
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    return `${hrs}h ago`;
+  }, [lastSyncedAt /* tick dependency implicitly via setTick re-render */]);
 
   if (loading && !sources.length && !replays.length) {
     return (
@@ -1031,30 +1051,45 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
             <button
               onClick={handleSyncInsights}
               disabled={syncStatus === "syncing" || syncStatus === "awaitingLogin"}
-              className="py-2.5 px-4 text-xs font-sans font-semibold rounded-lg bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover border border-terminal-border transition-all duration-200 disabled:opacity-50 disabled:cursor-wait shrink-0"
+              className={`py-2.5 px-4 text-xs font-sans font-semibold rounded-lg border transition-all duration-200 disabled:opacity-50 disabled:cursor-wait shrink-0 ${
+                syncStatus === "done"
+                  ? "bg-terminal-green/8 text-terminal-green border-terminal-green/20"
+                  : "bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover border-terminal-border"
+              }`}
             >
               {syncStatus === "syncing"
                 ? "Syncing..."
-                : syncStatus === "done"
-                  ? "\u2713 Synced"
+                : syncStatus === "done" && syncedAgoLabel
+                  ? `\u2713 Synced ${syncedAgoLabel}`
                   : syncStatus === "awaitingLogin"
                     ? "Waiting..."
                     : "\u2191 Sync to cloud"}
             </button>
           </div>
+          {/* Cloud insights link after successful sync */}
+          {syncStatus === "done" && (
+            <p className="text-[10px] font-mono mt-1.5 text-terminal-dim">
+              {syncMessage}
+              {" \u00b7 "}
+              <a
+                href="https://vibe-replay.com/insights/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-terminal-green hover:underline"
+              >
+                View on vibe-replay.com &rarr;
+              </a>
+            </p>
+          )}
           {/* Awaiting login status */}
           {syncStatus === "awaitingLogin" && (
             <p className="text-[10px] font-mono mt-1.5 text-terminal-dim animate-pulse">
               Waiting for sign in... will auto-sync after login
             </p>
           )}
-          {/* Success/error messages */}
-          {syncMessage && syncStatus !== "awaitingLogin" && syncStatus !== "needsLogin" && (
-            <p
-              className={`text-[10px] font-mono mt-1.5 ${syncStatus === "error" ? "text-red-400" : "text-terminal-dim"}`}
-            >
-              {syncMessage}
-            </p>
+          {/* Error messages */}
+          {syncMessage && syncStatus === "error" && (
+            <p className="text-[10px] font-mono mt-1.5 text-red-400">{syncMessage}</p>
           )}
         </div>
 
