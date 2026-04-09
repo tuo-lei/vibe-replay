@@ -182,6 +182,36 @@ export const cloudReplays = sqliteTable(
 );
 
 // ---------------------------------------------------------------------------
+// Insight Profiles — public sharing of aggregated insights
+// ---------------------------------------------------------------------------
+
+export const insightProfiles = sqliteTable(
+  "insight_profiles",
+  {
+    id: text("id").primaryKey(), // nanoid(12)
+    userId: text("user_id")
+      .notNull()
+      .unique()
+      .references(() => user.id, { onDelete: "cascade" }),
+    slug: text("slug").notNull().unique(), // URL-friendly identifier for /i/:slug
+    displayName: text("display_name"), // optional display name override
+    avatarUrl: text("avatar_url"), // GitHub avatar
+    enabled: integer("enabled", { mode: "boolean" }).default(true).notNull(),
+    // JSON config: which sections to show/hide
+    // { showCost, showProjects, showModels, showProviders, showHeatmap, showStreak,
+    //   showWeeklyTrend, showDayOfWeek, blurProjectNames }
+    config: text("config").notNull(),
+    viewCount: integer("view_count").default(0),
+    createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
+    updatedAt: text("updated_at").default(sql`(datetime('now'))`),
+  },
+  (table) => [
+    index("idx_insight_profiles_slug").on(table.slug),
+    index("idx_insight_profiles_user").on(table.userId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // Daily Insights — Prometheus-style time-series with (user, machine, date) labels
 // ---------------------------------------------------------------------------
 
