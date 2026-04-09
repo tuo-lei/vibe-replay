@@ -29,6 +29,13 @@
       "when": 1773912285580,
       "tag": "0003_fancy_iron_monger",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1775365329540,
+      "tag": "0004_tough_shiver_man",
+      "breakpoints": true
     }
   ]
 }

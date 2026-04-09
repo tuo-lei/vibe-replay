@@ -5,7 +5,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { nanoid } from "nanoid";
 import { type AuthEnv, createAuth, DEV_ORIGINS, PROD_ORIGINS } from "./auth";
-import { cloudReplays, replays } from "./db/schema";
+import { cloudReplays, replays, sessionInsights } from "./db/schema";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1020,6 +1020,261 @@ app.put("/api/replays", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
+// Session Insights API — synced from CLI for long-term persistence
+// ---------------------------------------------------------------------------
+
+const MAX_INSIGHTS_BATCH = 200;
+
+/** Batch upsert insights from CLI */
+app.post("/api/insights/sync", async (c) => {
+  const authResult = await requireAuth(c);
+  if (authResult instanceof Response) return authResult;
+  const { userId } = authResult;
+
+  const body = await c.req.json();
+  if (!Array.isArray(body.insights) || body.insights.length === 0) {
+    return c.json({ error: "insights array required" }, 400);
+  }
+  if (body.insights.length > MAX_INSIGHTS_BATCH) {
+    return c.json({ error: `Max ${MAX_INSIGHTS_BATCH} insights per batch` }, 400);
+  }
+
+  const db = drizzle(c.env.DB);
+  const cloudIds: Record<string, string> = {};
+  let synced = 0;
+  let failed = 0;
+
+  // Pre-fetch existing records in one query to avoid N+1
+  const sessionIds = body.insights
+    .filter((i: any) => i.sessionId && i.provider)
+    .map((i: any) => String(i.sessionId));
+  const existingRows =
+    sessionIds.length > 0
+      ? await db
+          .select({ id: sessionInsights.id, sessionId: sessionInsights.sessionId })
+          .from(sessionInsights)
+          .where(
+            and(eq(sessionInsights.userId, userId), inArray(sessionInsights.sessionId, sessionIds)),
+          )
+      : [];
+  const existingMap = new Map(existingRows.map((r) => [r.sessionId, r.id]));
+
+  for (const insight of body.insights) {
+    if (!insight.sessionId || !insight.provider) continue;
+
+    const metadata = JSON.stringify(insight);
+    const costEst =
+      insight.costEstimate != null
+        ? Math.max(0, Math.min(Number(insight.costEstimate) || 0, 100_000))
+        : null;
+
+    try {
+      const existingId = existingMap.get(insight.sessionId);
+
+      if (existingId) {
+        await db
+          .update(sessionInsights)
+          .set({
+            title: insight.title?.slice(0, 500) || null,
+            project: insight.project?.slice(0, 500) || null,
+            model: insight.model?.slice(0, 200) || null,
+            startTime: insight.startTime || null,
+            durationMs: clamp(insight.durationMs, 0, 86_400_000),
+            promptCount: clamp(insight.promptCount, 0, 10_000),
+            toolCallCount: clamp(insight.toolCallCount, 0, 100_000),
+            editCount: clamp(insight.editCount, 0, 100_000),
+            costEstimate: costEst,
+            hasPR: insight.hasPR || false,
+            subAgentCount: clamp(insight.subAgentCount, 0, 10_000),
+            apiErrorCount: clamp(insight.apiErrorCount, 0, 10_000),
+            metadata,
+            capturedByVersion: insight.capturedByVersion?.slice(0, 50) || null,
+            updatedAt: new Date().toISOString().replace("T", " ").slice(0, 19),
+          })
+          .where(eq(sessionInsights.id, existingId));
+        cloudIds[insight.sessionId] = existingId;
+      } else {
+        const id = nanoid(12);
+        await db.insert(sessionInsights).values({
+          id,
+          userId,
+          sessionId: insight.sessionId,
+          provider: String(insight.provider).slice(0, 50),
+          slug: String(insight.slug || insight.sessionId.slice(0, 8)).slice(0, 50),
+          title: insight.title?.slice(0, 500) || null,
+          project: insight.project?.slice(0, 500) || null,
+          model: insight.model?.slice(0, 200) || null,
+          startTime: insight.startTime || null,
+          durationMs: clamp(insight.durationMs, 0, 86_400_000),
+          promptCount: clamp(insight.promptCount, 0, 10_000),
+          toolCallCount: clamp(insight.toolCallCount, 0, 100_000),
+          editCount: clamp(insight.editCount, 0, 100_000),
+          costEstimate: costEst,
+          hasPR: insight.hasPR || false,
+          subAgentCount: clamp(insight.subAgentCount, 0, 10_000),
+          apiErrorCount: clamp(insight.apiErrorCount, 0, 10_000),
+          metadata,
+          capturedAt: insight.capturedAt || new Date().toISOString(),
+          capturedByVersion: insight.capturedByVersion?.slice(0, 50) || null,
+        });
+        cloudIds[insight.sessionId] = id;
+        existingMap.set(insight.sessionId, id); // track for duplicate sessionIds in batch
+      }
+      synced++;
+    } catch (e) {
+      failed++;
+      console.error(`Failed to sync insight ${insight.sessionId}:`, e);
+    }
+  }
+
+  return c.json({ synced, failed, total: body.insights.length, cloudIds });
+});
+
+/** List user's synced insights (paginated) */
+app.get("/api/insights", async (c) => {
+  const authResult = await requireAuth(c);
+  if (authResult instanceof Response) return authResult;
+  const { userId } = authResult;
+
+  const project = c.req.query("project");
+  const after = c.req.query("after");
+  const before = c.req.query("before");
+  const limit = Math.min(Number(c.req.query("limit")) || 100, 500);
+  const offset = Math.max(Number(c.req.query("offset")) || 0, 0);
+
+  const db = drizzle(c.env.DB);
+  const conditions = [eq(sessionInsights.userId, userId)];
+  if (project) conditions.push(eq(sessionInsights.project, project));
+  if (after) conditions.push(sql`${sessionInsights.startTime} >= ${after}`);
+  if (before) conditions.push(sql`${sessionInsights.startTime} <= ${before}`);
+
+  const results = await db
+    .select()
+    .from(sessionInsights)
+    .where(and(...conditions))
+    .orderBy(desc(sessionInsights.startTime))
+    .limit(limit)
+    .offset(offset);
+
+  const [countResult] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(sessionInsights)
+    .where(and(...conditions));
+
+  return c.json({
+    insights: results,
+    total: countResult?.count || 0,
+    limit,
+    offset,
+  });
+});
+
+/** Aggregated insights summary for the user */
+app.get("/api/insights/summary", async (c) => {
+  const authResult = await requireAuth(c);
+  if (authResult instanceof Response) return authResult;
+  const { userId } = authResult;
+
+  const db = drizzle(c.env.DB);
+
+  // Aggregate stats
+  const [agg] = await db
+    .select({
+      totalSessions: sql<number>`count(*)`,
+      totalProjects: sql<number>`count(distinct ${sessionInsights.project})`,
+      totalDurationMs: sql<number>`coalesce(sum(${sessionInsights.durationMs}), 0)`,
+      totalCost: sql<number>`coalesce(sum(${sessionInsights.costEstimate}), 0)`,
+      totalPrompts: sql<number>`coalesce(sum(${sessionInsights.promptCount}), 0)`,
+      totalToolCalls: sql<number>`coalesce(sum(${sessionInsights.toolCallCount}), 0)`,
+      totalEdits: sql<number>`coalesce(sum(${sessionInsights.editCount}), 0)`,
+      firstSession: sql<string>`min(${sessionInsights.startTime})`,
+      lastSession: sql<string>`max(${sessionInsights.startTime})`,
+    })
+    .from(sessionInsights)
+    .where(eq(sessionInsights.userId, userId));
+
+  // Provider breakdown
+  const providerRows = await db
+    .select({
+      provider: sessionInsights.provider,
+      count: sql<number>`count(*)`,
+    })
+    .from(sessionInsights)
+    .where(eq(sessionInsights.userId, userId))
+    .groupBy(sessionInsights.provider);
+  const providers: Record<string, number> = {};
+  for (const r of providerRows) providers[r.provider] = r.count;
+
+  // Model breakdown
+  const modelRows = await db
+    .select({
+      model: sessionInsights.model,
+      count: sql<number>`count(*)`,
+    })
+    .from(sessionInsights)
+    .where(and(eq(sessionInsights.userId, userId), sql`${sessionInsights.model} IS NOT NULL`))
+    .groupBy(sessionInsights.model);
+  const models: Record<string, number> = {};
+  for (const r of modelRows) if (r.model) models[r.model] = r.count;
+
+  // Top projects
+  const topProjects = await db
+    .select({
+      project: sessionInsights.project,
+      sessions: sql<number>`count(*)`,
+      cost: sql<number>`coalesce(sum(${sessionInsights.costEstimate}), 0)`,
+      durationMs: sql<number>`coalesce(sum(${sessionInsights.durationMs}), 0)`,
+      prompts: sql<number>`coalesce(sum(${sessionInsights.promptCount}), 0)`,
+      toolCalls: sql<number>`coalesce(sum(${sessionInsights.toolCallCount}), 0)`,
+      edits: sql<number>`coalesce(sum(${sessionInsights.editCount}), 0)`,
+      lastActivity: sql<string>`max(${sessionInsights.startTime})`,
+    })
+    .from(sessionInsights)
+    .where(eq(sessionInsights.userId, userId))
+    .groupBy(sessionInsights.project)
+    .orderBy(sql`count(*) desc`)
+    .limit(20);
+
+  // Sessions per day (last 90 days)
+  const dailyRows = await db
+    .select({
+      day: sql<string>`date(${sessionInsights.startTime})`,
+      count: sql<number>`count(*)`,
+    })
+    .from(sessionInsights)
+    .where(
+      and(
+        eq(sessionInsights.userId, userId),
+        sql`${sessionInsights.startTime} >= date('now', '-90 days')`,
+      ),
+    )
+    .groupBy(sql`date(${sessionInsights.startTime})`)
+    .orderBy(sql`date(${sessionInsights.startTime})`);
+  const sessionsPerDay: Record<string, number> = {};
+  for (const r of dailyRows) if (r.day) sessionsPerDay[r.day] = r.count;
+
+  return c.json({
+    totalSessions: agg?.totalSessions || 0,
+    totalProjects: agg?.totalProjects || 0,
+    totalDurationMs: agg?.totalDurationMs || 0,
+    totalCost: agg?.totalCost || 0,
+    totalPrompts: agg?.totalPrompts || 0,
+    totalToolCalls: agg?.totalToolCalls || 0,
+    totalEdits: agg?.totalEdits || 0,
+    providers,
+    models,
+    topProjects: topProjects.map((p) => ({
+      ...p,
+      project: p.project || "(unknown)",
+    })),
+    timeRange: {
+      first: agg?.firstSession || "",
+      last: agg?.lastSession || "",
+    },
+    sessionsPerDay,
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Short URL for cloud replays — redirect to viewer
 // ---------------------------------------------------------------------------
