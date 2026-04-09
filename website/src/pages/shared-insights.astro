@@ -1,0 +1,511 @@
+---
+import Footer from "../components/Footer.astro";
+import GitHubStar from "../components/GitHubStar.astro";
+import Layout from "../layouts/Layout.astro";
+---
+
+<Layout title="Insights - vibe-replay" description="Vibe coding insights shared via vibe-replay">
+  <div class="min-h-screen flex flex-col">
+    <!-- Header -->
+    <nav class="border-b border-border/50 px-6 py-3">
+      <div class="max-w-6xl mx-auto flex items-center justify-between">
+        <div class="flex items-center gap-4">
+          <a href="/" class="font-mono font-bold text-sm hover:opacity-80 transition-opacity bg-gradient-to-r from-accent via-emerald-400 to-cyan-400 bg-clip-text text-transparent">vibe-replay</a>
+          <span class="text-border hidden sm:inline">|</span>
+          <a href="/insights/" class="text-text-secondary hover:text-accent text-sm transition-colors hidden sm:inline underline underline-offset-4 decoration-text-muted hover:decoration-accent">Insights</a>
+        </div>
+        <div class="flex items-center gap-3">
+          <GitHubStar />
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main content -->
+    <main class="flex-1 max-w-4xl mx-auto w-full px-4 md:px-6 py-10">
+      <!-- Loading state -->
+      <div id="loading" class="text-center py-20">
+        <div class="text-text-muted font-mono text-sm animate-pulse">Loading...</div>
+      </div>
+
+      <!-- Not found state -->
+      <div id="not-found" class="hidden">
+        <div class="flex items-center justify-center py-20">
+          <div class="rounded-xl border border-border bg-surface-1 p-10 max-w-md text-center">
+            <div class="text-4xl mb-4">&#128566;</div>
+            <h2 class="text-lg font-semibold text-text-primary mb-2">Profile not found</h2>
+            <p class="text-text-muted text-sm mb-4">This insights profile doesn't exist or has been disabled.</p>
+            <a href="/" class="text-accent hover:underline text-sm">Back to home</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Insights content -->
+      <div id="insights-content" class="hidden space-y-6">
+        <!-- Profile header -->
+        <div class="flex items-center gap-4">
+          <img id="profile-avatar" class="w-12 h-12 rounded-full border-2 border-border/40 hidden" alt="" />
+          <div>
+            <h1 id="profile-name" class="text-lg font-bold text-text-primary"></h1>
+            <p class="text-xs font-mono text-text-muted">Vibe coding insights</p>
+          </div>
+        </div>
+
+        <!-- Stats card -->
+        <div class="relative overflow-hidden rounded-2xl bg-gradient-to-br from-surface-1 via-surface to-surface-1 border border-border p-6 md:p-8">
+          <div class="absolute -top-20 -right-20 w-64 h-64 bg-[#3fb950]/5 rounded-full blur-3xl pointer-events-none"></div>
+          <div class="absolute -bottom-20 -left-20 w-48 h-48 bg-[#79b8ff]/5 rounded-full blur-3xl pointer-events-none"></div>
+
+          <div class="relative z-10">
+            <div id="stats-grid" class="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-5 mb-6"></div>
+
+            <!-- Mini heatmap -->
+            <div id="mini-heatmap" class="flex gap-[3px] flex-wrap mb-4"></div>
+
+            <!-- Footer highlights -->
+            <div class="flex items-center justify-between pt-4 border-t border-border/30">
+              <div class="flex items-center gap-4">
+                <span id="card-streak" class="text-xs font-mono text-text-muted hidden"></span>
+                <span id="card-bestday" class="text-xs font-mono text-text-muted hidden"></span>
+              </div>
+              <span class="text-[10px] font-mono text-text-muted">vibe-replay.com</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Activity heatmap -->
+        <div id="heatmap-section" class="bg-surface-1 rounded-xl p-5 hidden">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-xs font-semibold text-text-primary uppercase tracking-wider">Activity</h3>
+            <span class="text-[9px] font-mono text-text-muted">Last 52 weeks</span>
+          </div>
+          <div id="contribution-heatmap"></div>
+        </div>
+
+        <!-- Highlight cards -->
+        <div id="highlights-section" class="grid grid-cols-2 md:grid-cols-4 gap-3 hidden">
+          <div class="bg-surface-1 rounded-xl px-4 py-3.5">
+            <div class="flex items-start gap-3">
+              <span class="text-lg leading-none mt-0.5">&#128293;</span>
+              <div class="min-w-0">
+                <div class="text-[10px] font-bold text-text-muted uppercase tracking-widest">Current Streak</div>
+                <div id="hl-streak" class="text-lg font-mono font-bold text-text-primary mt-0.5">0 days</div>
+                <div id="hl-streak-sub" class="text-[10px] font-mono text-text-muted mt-0.5"></div>
+              </div>
+            </div>
+          </div>
+          <div class="bg-surface-1 rounded-xl px-4 py-3.5">
+            <div class="flex items-start gap-3">
+              <span class="text-lg leading-none mt-0.5">&#9889;</span>
+              <div class="min-w-0">
+                <div class="text-[10px] font-bold text-text-muted uppercase tracking-widest">Avg / Active Day</div>
+                <div id="hl-avg-day" class="text-lg font-mono font-bold text-text-primary mt-0.5">0 sessions</div>
+                <div id="hl-avg-day-sub" class="text-[10px] font-mono text-text-muted mt-0.5"></div>
+              </div>
+            </div>
+          </div>
+          <div class="bg-surface-1 rounded-xl px-4 py-3.5">
+            <div class="flex items-start gap-3">
+              <span class="text-lg leading-none mt-0.5">&#128172;</span>
+              <div class="min-w-0">
+                <div class="text-[10px] font-bold text-text-muted uppercase tracking-widest">Avg / Session</div>
+                <div id="hl-avg-session" class="text-lg font-mono font-bold text-text-primary mt-0.5">0 prompts</div>
+                <div id="hl-avg-session-sub" class="text-[10px] font-mono text-text-muted mt-0.5"></div>
+              </div>
+            </div>
+          </div>
+          <div class="bg-surface-1 rounded-xl px-4 py-3.5">
+            <div class="flex items-start gap-3">
+              <span class="text-lg leading-none mt-0.5">&#127942;</span>
+              <div class="min-w-0">
+                <div class="text-[10px] font-bold text-text-muted uppercase tracking-widest">Peak Day</div>
+                <div id="hl-peak" class="text-lg font-mono font-bold text-text-primary mt-0.5">-</div>
+                <div id="hl-peak-sub" class="text-[10px] font-mono text-text-muted mt-0.5"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Charts: Weekly Trend + Day of Week -->
+        <div id="charts-section" class="grid grid-cols-1 md:grid-cols-2 gap-3 hidden">
+          <div id="weekly-trend-wrapper" class="bg-surface-1 rounded-xl p-5 hidden">
+            <h3 class="text-xs font-semibold text-text-primary uppercase tracking-wider mb-4">Weekly Trend</h3>
+            <div id="weekly-trend"></div>
+          </div>
+          <div id="day-of-week-wrapper" class="bg-surface-1 rounded-xl p-5 hidden">
+            <h3 class="text-xs font-semibold text-text-primary uppercase tracking-wider mb-4">Day of Week</h3>
+            <div id="day-of-week"></div>
+          </div>
+        </div>
+
+        <!-- Top Projects + Models & Providers -->
+        <div id="breakdowns-section" class="grid grid-cols-1 md:grid-cols-2 gap-3 hidden">
+          <div id="projects-wrapper" class="bg-surface-1 rounded-xl p-5 hidden">
+            <h3 class="text-xs font-semibold text-text-primary uppercase tracking-wider mb-4">Top Projects</h3>
+            <div id="top-projects"></div>
+          </div>
+          <div id="models-providers-wrapper" class="bg-surface-1 rounded-xl p-5 space-y-5 hidden">
+            <div id="models-wrapper" class="hidden">
+              <h3 class="text-xs font-semibold text-text-primary uppercase tracking-wider mb-4">Models</h3>
+              <div id="models-section"></div>
+            </div>
+            <div id="providers-wrapper" class="hidden">
+              <h3 class="text-xs font-semibold text-text-primary uppercase tracking-wider mb-4">Providers</h3>
+              <div id="providers-section"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer banner -->
+        <div id="footer-banner" class="text-center py-4 hidden">
+          <span id="footer-text" class="text-[11px] font-mono text-text-muted"></span>
+        </div>
+      </div>
+    </main>
+
+    <Footer />
+  </div>
+</Layout>
+
+<script>
+  function escapeHtml(s: string): string {
+    const div = document.createElement("div");
+    div.textContent = s;
+    return div.innerHTML;
+  }
+
+  function formatDuration(ms: number): string {
+    if (!ms) return "0m";
+    const secs = Math.floor(ms / 1000);
+    if (secs < 60) return `${secs}s`;
+    const mins = Math.floor(secs / 60);
+    if (mins < 60) return `${mins}m`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ${mins % 60}m`;
+    const days = Math.floor(hrs / 24);
+    return `${days}d ${hrs % 24}h`;
+  }
+
+  function formatCompactDuration(ms: number): string {
+    if (!ms) return "0m";
+    const mins = Math.round(ms / 60000);
+    if (mins < 60) return `${mins}m`;
+    const hrs = Math.floor(mins / 60);
+    const remMins = mins % 60;
+    if (hrs < 24) return remMins > 0 ? `${hrs}h ${remMins}m` : `${hrs}h`;
+    const days = Math.floor(hrs / 24);
+    const remHrs = hrs % 24;
+    return remHrs > 0 ? `${days}d ${remHrs}h` : `${days}d`;
+  }
+
+  function formatCost(cost: number): string {
+    if (cost === 0) return "$0";
+    if (cost < 0.01) return "<$0.01";
+    if (cost < 100) return `$${cost.toFixed(2)}`;
+    return `$${Math.round(cost)}`;
+  }
+
+  function formatNumber(n: number): string {
+    if (n >= 10000) return `${(n / 1000).toFixed(1)}k`;
+    return n.toLocaleString();
+  }
+
+  function projectName(path: string): string {
+    if (!path) return "Unknown";
+    const parts = path.replace(/\\/g, "/").split("/");
+    return parts[parts.length - 1] || parts[parts.length - 2] || path;
+  }
+
+  function dateKey(d: Date): string {
+    return d.toISOString().slice(0, 10);
+  }
+
+  const DAY_MS = 86400000;
+  const DAYS_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const DAYS_FULL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+  interface PublicInsights {
+    displayName: string;
+    avatarUrl: string | null;
+    config: Record<string, boolean>;
+    totalSessions: number;
+    totalProjects?: number;
+    totalDurationMs: number;
+    totalCost?: number;
+    totalPrompts: number;
+    totalToolCalls: number;
+    totalEdits: number;
+    timeRange: { first: string; last: string };
+    sessionsPerDay?: Record<string, number>;
+    topProjects?: Array<{ project: string; sessions: number; cost?: number }>;
+    models?: Record<string, number>;
+    providers?: Record<string, number>;
+  }
+
+  function computeStreak(spd: Record<string, number>): { current: number; longest: number } {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    let current = 0;
+    const d = new Date(today);
+    while (true) {
+      const key = dateKey(d);
+      if (spd[key] && spd[key] > 0) { current++; d.setDate(d.getDate() - 1); }
+      else if (current === 0) { d.setDate(d.getDate() - 1); if (spd[dateKey(d)] > 0) { current++; d.setDate(d.getDate() - 1); } else break; }
+      else break;
+    }
+    const sorted = Object.keys(spd).filter(k => spd[k] > 0).sort();
+    let longest = 0, len = 0;
+    for (let i = 0; i < sorted.length; i++) {
+      if (i === 0) { len = 1; }
+      else { const diff = (new Date(sorted[i]).getTime() - new Date(sorted[i-1]).getTime()) / DAY_MS; len = diff === 1 ? len + 1 : 1; }
+      if (len > longest) longest = len;
+    }
+    return { current, longest };
+  }
+
+  function computePeakDay(spd: Record<string, number>) {
+    let max = 0, maxDate = "";
+    for (const [k, v] of Object.entries(spd)) { if (v > max) { max = v; maxDate = k; } }
+    return max > 0 ? { date: maxDate, count: max } : null;
+  }
+
+  function computeWeeklyTrend(spd: Record<string, number>, weeks: number) {
+    const result: Array<{ weekLabel: string; sessions: number; startDate: string }> = [];
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const dow = today.getDay();
+    const monday = new Date(today.getTime() - ((dow === 0 ? 6 : dow - 1)) * DAY_MS);
+    for (let w = weeks - 1; w >= 0; w--) {
+      const ws = new Date(monday.getTime() - w * 7 * DAY_MS);
+      let s = 0;
+      for (let d = 0; d < 7; d++) s += spd[dateKey(new Date(ws.getTime() + d * DAY_MS))] || 0;
+      result.push({ weekLabel: ws.toLocaleDateString("en-US", { month: "short", day: "numeric" }), sessions: s, startDate: dateKey(ws) });
+    }
+    return result;
+  }
+
+  function computeDayOfWeek(spd: Record<string, number>) {
+    const counts = [0,0,0,0,0,0,0];
+    for (const [k, v] of Object.entries(spd)) { if (v > 0) counts[new Date(`${k}T00:00:00`).getDay()] += v; }
+    return counts.map((count, i) => ({ shortDay: DAYS_SHORT[i], count }));
+  }
+
+  function renderMiniHeatmap(spd: Record<string, number>): void {
+    const el = document.getElementById("mini-heatmap")!;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const cells: Array<{ count: number }> = [];
+    let max = 0;
+    for (let i = 27; i >= 0; i--) { const c = spd[dateKey(new Date(today.getTime() - i * DAY_MS))] || 0; if (c > max) max = c; cells.push({ count: c }); }
+    el.innerHTML = cells.map(c => {
+      if (c.count === 0) return `<div class="w-[10px] h-[10px] rounded-[2px] bg-border/20"></div>`;
+      const r = max <= 1 ? 1 : c.count / max;
+      return `<div class="w-[10px] h-[10px] rounded-[2px] bg-[#3fb950]" style="opacity: ${r <= 0.33 ? 0.45 : r <= 0.66 ? 0.7 : 0.9}"></div>`;
+    }).join("");
+  }
+
+  function renderContributionHeatmap(spd: Record<string, number>): void {
+    const el = document.getElementById("contribution-heatmap")!;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const endDate = new Date(today.getTime() + (6 - today.getDay()) * DAY_MS);
+    const totalDays = 52 * 7;
+    const startDate = new Date(endDate.getTime() - (totalDays - 1) * DAY_MS);
+    let maxVal = 0;
+    const cols: Array<Array<{ date: string; count: number }>> = [];
+    const months = new Map<number, string>();
+    let lastMonth = -1;
+    for (let i = 0; i < totalDays; i++) {
+      const d = new Date(startDate.getTime() + i * DAY_MS);
+      const key = dateKey(d), count = spd[key] || 0, wi = Math.floor(i / 7);
+      if (count > maxVal) maxVal = count;
+      if (!cols[wi]) cols[wi] = [];
+      cols[wi].push({ date: key, count });
+      const month = d.getMonth();
+      if (month !== lastMonth) { months.set(wi, d.toLocaleDateString("en-US", { month: "short" })); lastMonth = month; }
+    }
+    const cc = (count: number) => {
+      if (count === 0) return { cls: "bg-[#1a1a24]", style: "" };
+      const r = maxVal <= 1 ? 1 : count / maxVal;
+      return { cls: "bg-[#3fb950]", style: `opacity: ${r <= 0.25 ? 0.4 : r <= 0.5 ? 0.6 : r <= 0.75 ? 0.8 : 1}` };
+    };
+    let mr = `<div class="flex items-end gap-[3px]"><div class="shrink-0 w-7"></div><div class="flex-1 flex gap-[3px] min-w-0">`;
+    for (let wi = 0; wi < cols.length; wi++) { mr += `<div class="flex-1 min-w-0 overflow-visible">${months.has(wi) ? `<span class="text-[9px] font-mono text-text-muted whitespace-nowrap">${escapeHtml(months.get(wi)!)}</span>` : ""}</div>`; }
+    mr += `</div></div>`;
+    const dayLabels = ["", "Mon", "", "Wed", "", "Fri", ""];
+    let grid = `<div class="flex gap-[3px]"><div class="shrink-0 w-7 flex flex-col gap-[3px]">`;
+    for (const l of dayLabels) grid += `<div class="flex-1 flex items-center text-[9px] font-mono text-text-muted leading-none">${l}</div>`;
+    grid += `</div><div class="flex-1 flex gap-[3px] min-w-0">`;
+    for (const week of cols) { grid += `<div class="flex-1 flex flex-col gap-[3px] min-w-0">`; for (const cell of week) { const c = cc(cell.count); grid += `<div class="aspect-square rounded-sm ${c.cls}" style="${c.style}" title="${cell.date}: ${cell.count} session${cell.count !== 1 ? "s" : ""}"></div>`; } grid += `</div>`; }
+    grid += `</div></div>`;
+    const legend = `<div class="flex items-center justify-end gap-1.5 pt-1"><span class="text-[9px] font-mono text-text-muted">Less</span><div class="w-[10px] h-[10px] rounded-sm bg-[#1a1a24]"></div><div class="w-[10px] h-[10px] rounded-sm bg-[#3fb950]" style="opacity: 0.4"></div><div class="w-[10px] h-[10px] rounded-sm bg-[#3fb950]" style="opacity: 0.6"></div><div class="w-[10px] h-[10px] rounded-sm bg-[#3fb950]" style="opacity: 0.8"></div><div class="w-[10px] h-[10px] rounded-sm bg-[#3fb950]"></div><span class="text-[9px] font-mono text-text-muted">More</span></div>`;
+    el.innerHTML = `<div class="space-y-1">${mr}${grid}${legend}</div>`;
+  }
+
+  function renderWeeklyTrend(spd: Record<string, number>): void {
+    const el = document.getElementById("weekly-trend")!;
+    const data = computeWeeklyTrend(spd, 12);
+    const maxVal = Math.max(...data.map(d => d.sessions), 1);
+    if (!data.some(d => d.sessions > 0)) { el.innerHTML = `<div class="flex items-center justify-center h-28 text-text-muted text-xs font-mono">No activity</div>`; return; }
+    const recent = data.slice(-4), older = data.slice(-8, -4);
+    const rAvg = recent.reduce((a, b) => a + b.sessions, 0) / Math.max(recent.length, 1);
+    const oAvg = older.reduce((a, b) => a + b.sessions, 0) / Math.max(older.length, 1);
+    const up = rAvg > oAvg, flat = Math.abs(rAvg - oAvg) < 0.5;
+    let bars = `<div class="flex items-end gap-1.5 h-28">`;
+    for (const w of data) { const h = Math.max((w.sessions / maxVal) * 100, w.sessions > 0 ? 6 : 0); bars += `<div class="flex-1 flex flex-col items-center justify-end h-full" title="${w.weekLabel}: ${w.sessions} sessions"><div class="w-full rounded-md bg-[#3fb950]" style="height: ${h}%; min-height: ${w.sessions > 0 ? "4px" : "0"}; opacity: ${w.sessions > 0 ? 0.7 : 0}"></div></div>`; }
+    bars += `</div>`;
+    let x = `<div class="flex items-center justify-between mt-3"><div class="flex gap-1.5 overflow-hidden">`;
+    data.filter((_, i) => i % 2 === 0).forEach(w => { x += `<span class="text-[9px] font-mono text-text-muted">${escapeHtml(w.weekLabel)}</span>`; });
+    x += `</div>`;
+    if (!flat) x += `<span class="text-[10px] font-mono font-bold ${up ? "text-[#3fb950]" : "text-[#d29922]"}">${up ? "\u2191 Trending up" : "\u2193 Slowing down"}</span>`;
+    x += `</div>`;
+    el.innerHTML = `<div class="space-y-0">${bars}${x}</div>`;
+  }
+
+  function renderDayOfWeek(spd: Record<string, number>): void {
+    const el = document.getElementById("day-of-week")!;
+    const data = computeDayOfWeek(spd);
+    const maxVal = Math.max(...data.map(d => d.count), 1);
+    let html = `<div class="space-y-2">`;
+    for (const d of data) { const pct = maxVal > 0 ? (d.count / maxVal) * 100 : 0; html += `<div class="flex items-center gap-2"><span class="text-[10px] font-mono text-text-muted w-7 text-right shrink-0">${d.shortDay}</span><div class="flex-1 h-4 rounded bg-surface-2 overflow-hidden"><div class="h-full rounded bg-[#3fb950]" style="width: ${Math.max(pct, d.count > 0 ? 3 : 0)}%; opacity: 0.65"></div></div><span class="text-[10px] font-mono text-text-muted w-6 text-right tabular-nums shrink-0">${d.count}</span></div>`; }
+    html += `</div>`;
+    el.innerHTML = html;
+  }
+
+  function renderTopProjects(projects: PublicInsights["topProjects"], showCost: boolean): void {
+    const el = document.getElementById("top-projects")!;
+    if (!projects || projects.length === 0) { el.innerHTML = `<div class="text-text-muted text-xs font-mono py-4 text-center">No project data</div>`; return; }
+    const maxS = Math.max(...projects.map(p => p.sessions), 1);
+    let html = `<div class="space-y-2">`;
+    for (const p of projects.slice(0, 8)) {
+      const name = projectName(p.project), pct = (p.sessions / maxS) * 100;
+      const costStr = showCost && p.cost && p.cost > 0 ? ` \u00b7 ${formatCost(p.cost)}` : "";
+      html += `<div class="space-y-1"><div class="flex items-center justify-between"><span class="text-xs font-medium text-text-primary truncate max-w-[60%]" title="${escapeHtml(p.project)}">${escapeHtml(name)}</span><span class="text-[10px] font-mono text-text-muted tabular-nums">${p.sessions} session${p.sessions !== 1 ? "s" : ""}${costStr}</span></div><div class="h-1.5 rounded-full bg-surface-2 overflow-hidden"><div class="h-full rounded-full bg-gradient-to-r from-[#3fb950] to-[#79b8ff]" style="width: ${Math.max(pct, 3)}%; opacity: 0.65"></div></div></div>`;
+    }
+    html += `</div>`;
+    el.innerHTML = html;
+  }
+
+  function shortModelName(model: string): string {
+    return model.replace(/^anthropic\//, "").replace(/^openai\//, "").replace(/-\d{8}$/, "").replace(/^claude-/, "c-");
+  }
+
+  function renderModels(models: Record<string, number>): void {
+    const el = document.getElementById("models-section")!;
+    const map = new Map<string, number>();
+    for (const [m, c] of Object.entries(models)) { for (const l of [...new Set(m.split(",").map(p => p.trim()).filter(Boolean))]) { const s = shortModelName(l); map.set(s, (map.get(s) ?? 0) + c); } }
+    const entries = [...map.entries()].map(([model, count]) => ({ model, count })).sort((a, b) => b.count - a.count);
+    const total = entries.reduce((a, b) => a + b.count, 0);
+    if (entries.length === 0) { el.innerHTML = `<div class="text-text-muted text-xs font-mono py-4 text-center">No model data</div>`; return; }
+    const colors = ["bg-[#3fb950]", "bg-[#79b8ff]", "bg-[#d29922]", "bg-[#b392f0]", "bg-[#f97583]", "bg-text-muted"];
+    let bar = `<div class="h-3 rounded-full bg-surface-2 overflow-hidden flex">`;
+    entries.forEach((e, i) => { bar += `<div class="h-full ${colors[i % colors.length]}" style="width: ${(e.count / total) * 100}%; opacity: 0.7"></div>`; });
+    bar += `</div>`;
+    let legend = `<div class="grid grid-cols-2 gap-2 mt-3">`;
+    entries.forEach((e, i) => { legend += `<div class="flex items-center gap-2"><div class="w-2.5 h-2.5 rounded-sm ${colors[i % colors.length]} shrink-0" style="opacity: 0.7"></div><span class="text-[11px] font-mono text-text-muted truncate">${escapeHtml(e.model)}</span><span class="text-[10px] font-mono text-text-muted tabular-nums ml-auto shrink-0">${e.count}</span></div>`; });
+    legend += `</div>`;
+    el.innerHTML = `<div class="space-y-3">${bar}${legend}</div>`;
+  }
+
+  function renderProviders(providers: Record<string, number>): void {
+    const el = document.getElementById("providers-section")!;
+    const entries = Object.entries(providers).map(([p, c]) => ({ provider: p, label: p === "claude-code" ? "Claude Code" : p === "cursor" ? "Cursor" : p, count: c })).sort((a, b) => b.count - a.count);
+    if (entries.length <= 1) return;
+    const total = entries.reduce((a, b) => a + b.count, 0);
+    const colors: Record<string, string> = { "claude-code": "bg-[#d29922]", cursor: "bg-[#79b8ff]" };
+    let html = `<div class="space-y-3">`;
+    for (const e of entries) { const pct = total > 0 ? (e.count / total) * 100 : 0; html += `<div class="space-y-1.5"><div class="flex items-center justify-between"><span class="text-xs font-medium text-text-primary">${escapeHtml(e.label)}</span><span class="text-xs font-mono text-text-muted tabular-nums">${e.count} (${Math.round(pct)}%)</span></div><div class="h-2 rounded-full bg-surface-2 overflow-hidden"><div class="h-full rounded-full ${colors[e.provider] || "bg-text-muted"}" style="width: ${pct}%; opacity: 0.7"></div></div></div>`; }
+    html += `</div>`;
+    el.innerHTML = html;
+  }
+
+  function renderInsights(data: PublicInsights): void {
+    const cfg = data.config;
+    const spd = data.sessionsPerDay || {};
+
+    if (data.displayName) document.getElementById("profile-name")!.textContent = data.displayName;
+    if (data.avatarUrl) { const a = document.getElementById("profile-avatar") as HTMLImageElement; a.src = data.avatarUrl; a.classList.remove("hidden"); }
+    if (data.displayName) document.title = `${data.displayName}'s Insights - vibe-replay`;
+
+    // Stats grid
+    const statsGrid = document.getElementById("stats-grid")!;
+    const stats: Array<{ value: string; label: string; color: string }> = [
+      { value: formatNumber(data.totalSessions), label: "Sessions", color: "text-[#3fb950]" },
+      { value: formatNumber(data.totalPrompts), label: "Prompts", color: "text-[#3fb950]" },
+      { value: formatNumber(data.totalToolCalls), label: "Tool Calls", color: "text-[#d29922]" },
+      { value: formatDuration(data.totalDurationMs), label: "Coding", color: "text-text-primary" },
+    ];
+    if (cfg.showCost && data.totalCost !== undefined) stats.push({ value: formatCost(data.totalCost), label: "Spent", color: "text-[#d29922]" });
+    stats.push({ value: formatNumber(data.totalEdits), label: "File Edits", color: "text-[#79b8ff]" });
+    if (cfg.showProjects && data.totalProjects !== undefined) stats.push({ value: formatNumber(data.totalProjects), label: "Projects", color: "text-[#b392f0]" });
+    statsGrid.innerHTML = stats.map(s => `<div><div class="text-2xl font-mono font-bold ${s.color} tabular-nums">${s.value}</div><div class="mt-0.5 text-[10px] uppercase text-text-muted tracking-wider">${s.label}</div></div>`).join("");
+
+    // Mini heatmap
+    if (cfg.showHeatmap) renderMiniHeatmap(spd);
+    else document.getElementById("mini-heatmap")!.style.display = "none";
+
+    // Full heatmap
+    if (cfg.showHeatmap && Object.keys(spd).length > 0) { document.getElementById("heatmap-section")!.classList.remove("hidden"); renderContributionHeatmap(spd); }
+
+    // Highlights
+    if (cfg.showStreak && Object.keys(spd).length > 0) {
+      document.getElementById("highlights-section")!.classList.remove("hidden");
+      const streak = computeStreak(spd), peak = computePeakDay(spd);
+      const active = Object.values(spd).filter(v => v > 0).length;
+      if (streak.current > 0) { const el2 = document.getElementById("card-streak")!; el2.textContent = `${streak.current} day streak`; el2.classList.remove("hidden"); }
+      document.getElementById("hl-streak")!.textContent = `${streak.current} day${streak.current !== 1 ? "s" : ""}`;
+      const sub = document.getElementById("hl-streak-sub")!;
+      if (streak.longest > streak.current) sub.textContent = `Best: ${streak.longest} days`;
+      else if (streak.current > 0) sub.textContent = "Personal best!";
+      document.getElementById("hl-avg-day")!.textContent = `${active > 0 ? (data.totalSessions / active).toFixed(1) : "0"} sessions`;
+      document.getElementById("hl-avg-day-sub")!.textContent = `${active} active day${active !== 1 ? "s" : ""}`;
+      const avgP = data.totalSessions > 0 ? Math.round(data.totalPrompts / data.totalSessions) : 0;
+      document.getElementById("hl-avg-session")!.textContent = `${avgP} prompts`;
+      if (data.totalSessions > 0) document.getElementById("hl-avg-session-sub")!.textContent = `~${formatCompactDuration(data.totalDurationMs / data.totalSessions)} each`;
+      if (peak) { document.getElementById("hl-peak")!.textContent = `${peak.count} sessions`; document.getElementById("hl-peak-sub")!.textContent = new Date(`${peak.date}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); }
+      const dow = computeDayOfWeek(spd), best = [...dow].sort((a, b) => b.count - a.count)[0];
+      if (best?.count > 0) { const bd = document.getElementById("card-bestday")!; bd.textContent = `Most active: ${DAYS_FULL[DAYS_SHORT.indexOf(best.shortDay)] || best.shortDay}`; bd.classList.remove("hidden"); }
+    }
+
+    // Charts
+    const cs = document.getElementById("charts-section")!;
+    let showC = false;
+    if (cfg.showWeeklyTrend && Object.keys(spd).length > 0) { document.getElementById("weekly-trend-wrapper")!.classList.remove("hidden"); renderWeeklyTrend(spd); showC = true; }
+    if (cfg.showDayOfWeek && Object.keys(spd).length > 0) { document.getElementById("day-of-week-wrapper")!.classList.remove("hidden"); renderDayOfWeek(spd); showC = true; }
+    if (showC) cs.classList.remove("hidden");
+
+    // Breakdowns
+    const bs = document.getElementById("breakdowns-section")!;
+    let showB = false;
+    if (cfg.showProjects && data.topProjects?.length) { document.getElementById("projects-wrapper")!.classList.remove("hidden"); renderTopProjects(data.topProjects, !!cfg.showCost); showB = true; }
+    const hasModels = cfg.showModels && data.models && Object.keys(data.models).length > 0;
+    const hasProv = cfg.showProviders && data.providers && Object.keys(data.providers).length > 1;
+    if (hasModels || hasProv) { document.getElementById("models-providers-wrapper")!.classList.remove("hidden"); showB = true; if (hasModels) { document.getElementById("models-wrapper")!.classList.remove("hidden"); renderModels(data.models!); } if (hasProv) { document.getElementById("providers-wrapper")!.classList.remove("hidden"); renderProviders(data.providers!); } }
+    if (showB) bs.classList.remove("hidden");
+
+    // Footer
+    if (data.timeRange.first) { const days = Math.floor((Date.now() - new Date(data.timeRange.first).getTime()) / DAY_MS); if (days > 0) { document.getElementById("footer-banner")!.classList.remove("hidden"); document.getElementById("footer-text")!.textContent = `Vibe coding for ${days} day${days !== 1 ? "s" : ""} \u00b7 ${formatDuration(data.totalDurationMs)} total \u00b7 ${formatNumber(data.totalToolCalls)} tool calls`; } }
+  }
+
+  async function init(): Promise<void> {
+    const loading = document.getElementById("loading")!;
+    const notFound = document.getElementById("not-found")!;
+    const content = document.getElementById("insights-content")!;
+
+    const slug = new URLSearchParams(window.location.search).get("s");
+    if (!slug || !/^[a-zA-Z0-9_-]{2,40}$/.test(slug)) {
+      loading.classList.add("hidden");
+      notFound.classList.remove("hidden");
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/public/insights/${slug}`);
+      if (!res.ok) { loading.classList.add("hidden"); notFound.classList.remove("hidden"); return; }
+      const data: PublicInsights = await res.json();
+      loading.classList.add("hidden");
+      content.classList.remove("hidden");
+      renderInsights(data);
+    } catch {
+      loading.classList.add("hidden");
+      notFound.classList.remove("hidden");
+    }
+  }
+
+  init();
+</script>

@@ -277,9 +277,94 @@ import Layout from "../layouts/Layout.astro";
 
       <!-- Insights content -->
       <div id="insights-content" class="hidden space-y-6">
-        <!-- Page title -->
+        <!-- Page title + Share button -->
         <div class="flex items-center justify-between">
           <h1 class="text-lg font-bold text-text-primary">Your Insights</h1>
+          <button id="share-toggle-btn" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-surface-1 border border-border text-text-secondary hover:text-accent hover:border-accent/40 transition-colors cursor-pointer">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 1 1 0-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 1 0 5.367-2.684 3 3 0 0 0-5.367 2.684Zm0 9.316a3 3 0 1 0 5.368 2.684 3 3 0 0 0-5.368-2.684Z" /></svg>
+            Share
+          </button>
+        </div>
+
+        <!-- Share settings panel -->
+        <div id="share-panel" class="hidden rounded-xl border border-accent/30 bg-surface-1 p-5 space-y-4">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-text-primary">Share your insights</h3>
+            <button id="share-close-btn" class="text-text-muted hover:text-text-primary transition-colors cursor-pointer">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+
+          <!-- Enable toggle -->
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-xs font-medium text-text-primary">Public profile</div>
+              <div class="text-[10px] text-text-muted">Anyone with the link can view your stats</div>
+            </div>
+            <button id="share-enabled-toggle" class="relative w-10 h-5 rounded-full bg-border transition-colors cursor-pointer" role="switch" aria-checked="false">
+              <span id="share-enabled-dot" class="absolute left-0.5 top-0.5 w-4 h-4 rounded-full bg-white transition-transform"></span>
+            </button>
+          </div>
+
+          <!-- Public URL (shown when enabled) -->
+          <div id="share-url-row" class="hidden flex items-center gap-2 bg-surface-2 rounded-lg px-3 py-2">
+            <input id="share-url-input" type="text" readonly class="flex-1 bg-transparent text-xs font-mono text-text-primary outline-none select-all" />
+            <button id="share-copy-btn" class="text-[10px] font-medium text-accent hover:text-accent/80 transition-colors cursor-pointer whitespace-nowrap">Copy</button>
+          </div>
+
+          <!-- Slug editor -->
+          <div id="share-slug-row" class="hidden">
+            <label class="text-[10px] font-medium text-text-muted block mb-1">Custom URL slug</label>
+            <div class="flex items-center gap-2">
+              <span class="text-[10px] font-mono text-text-muted">/i/</span>
+              <input id="share-slug-input" type="text" class="flex-1 bg-surface-2 border border-border rounded px-2 py-1 text-xs font-mono text-text-primary outline-none focus:border-accent/50" placeholder="my-custom-slug" maxlength="40" />
+              <button id="share-slug-save" class="text-[10px] font-medium text-accent hover:text-accent/80 transition-colors cursor-pointer whitespace-nowrap">Save</button>
+            </div>
+          </div>
+
+          <!-- Visibility toggles -->
+          <div id="share-config-section" class="hidden space-y-2.5 pt-2 border-t border-border/50">
+            <div class="text-[10px] font-bold text-text-muted uppercase tracking-widest mb-2">What to show</div>
+            <label class="flex items-center justify-between cursor-pointer group">
+              <span class="text-xs text-text-secondary group-hover:text-text-primary transition-colors">Cost / spending</span>
+              <input type="checkbox" data-config="showCost" class="share-config-toggle w-4 h-4 rounded accent-[#3fb950] cursor-pointer" />
+            </label>
+            <label class="flex items-center justify-between cursor-pointer group">
+              <span class="text-xs text-text-secondary group-hover:text-text-primary transition-colors">Activity heatmap</span>
+              <input type="checkbox" data-config="showHeatmap" class="share-config-toggle w-4 h-4 rounded accent-[#3fb950] cursor-pointer" checked />
+            </label>
+            <label class="flex items-center justify-between cursor-pointer group">
+              <span class="text-xs text-text-secondary group-hover:text-text-primary transition-colors">Streak & highlights</span>
+              <input type="checkbox" data-config="showStreak" class="share-config-toggle w-4 h-4 rounded accent-[#3fb950] cursor-pointer" checked />
+            </label>
+            <label class="flex items-center justify-between cursor-pointer group">
+              <span class="text-xs text-text-secondary group-hover:text-text-primary transition-colors">Weekly trend</span>
+              <input type="checkbox" data-config="showWeeklyTrend" class="share-config-toggle w-4 h-4 rounded accent-[#3fb950] cursor-pointer" checked />
+            </label>
+            <label class="flex items-center justify-between cursor-pointer group">
+              <span class="text-xs text-text-secondary group-hover:text-text-primary transition-colors">Day of week</span>
+              <input type="checkbox" data-config="showDayOfWeek" class="share-config-toggle w-4 h-4 rounded accent-[#3fb950] cursor-pointer" checked />
+            </label>
+            <label class="flex items-center justify-between cursor-pointer group">
+              <span class="text-xs text-text-secondary group-hover:text-text-primary transition-colors">Top projects</span>
+              <input type="checkbox" data-config="showProjects" class="share-config-toggle w-4 h-4 rounded accent-[#3fb950] cursor-pointer" checked />
+            </label>
+            <label id="blur-projects-row" class="flex items-center justify-between cursor-pointer group hidden">
+              <span class="text-xs text-text-secondary group-hover:text-text-primary transition-colors pl-4">Blur project names</span>
+              <input type="checkbox" data-config="blurProjectNames" class="share-config-toggle w-4 h-4 rounded accent-[#3fb950] cursor-pointer" />
+            </label>
+            <label class="flex items-center justify-between cursor-pointer group">
+              <span class="text-xs text-text-secondary group-hover:text-text-primary transition-colors">Models breakdown</span>
+              <input type="checkbox" data-config="showModels" class="share-config-toggle w-4 h-4 rounded accent-[#3fb950] cursor-pointer" checked />
+            </label>
+            <label class="flex items-center justify-between cursor-pointer group">
+              <span class="text-xs text-text-secondary group-hover:text-text-primary transition-colors">Providers breakdown</span>
+              <input type="checkbox" data-config="showProviders" class="share-config-toggle w-4 h-4 rounded accent-[#3fb950] cursor-pointer" checked />
+            </label>
+          </div>
+
+          <!-- Status message -->
+          <div id="share-status" class="text-[10px] font-mono text-text-muted hidden"></div>
         </div>
 
         <!-- Stats card -->
@@ -1073,5 +1158,188 @@ import Layout from "../layouts/Layout.astro";
     });
   }
 
+  // --- Share panel ---
+  function initSharePanel(): void {
+    const toggleBtn = document.getElementById("share-toggle-btn")!;
+    const panel = document.getElementById("share-panel")!;
+    const closeBtn = document.getElementById("share-close-btn")!;
+    const enabledToggle = document.getElementById("share-enabled-toggle")!;
+    const enabledDot = document.getElementById("share-enabled-dot")!;
+    const urlRow = document.getElementById("share-url-row")!;
+    const urlInput = document.getElementById("share-url-input") as HTMLInputElement;
+    const copyBtn = document.getElementById("share-copy-btn")!;
+    const slugRow = document.getElementById("share-slug-row")!;
+    const slugInput = document.getElementById("share-slug-input") as HTMLInputElement;
+    const slugSave = document.getElementById("share-slug-save")!;
+    const configSection = document.getElementById("share-config-section")!;
+    const blurRow = document.getElementById("blur-projects-row")!;
+    const statusEl = document.getElementById("share-status")!;
+    const configToggles = document.querySelectorAll<HTMLInputElement>(".share-config-toggle");
+
+    let profileData: any = null;
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function showStatus(msg: string, isError = false) {
+      statusEl.textContent = msg;
+      statusEl.className = `text-[10px] font-mono ${isError ? "text-red-400" : "text-accent"}`;
+      statusEl.classList.remove("hidden");
+      setTimeout(() => statusEl.classList.add("hidden"), 3000);
+    }
+
+    function updateEnabledUI(enabled: boolean) {
+      enabledToggle.setAttribute("aria-checked", String(enabled));
+      if (enabled) {
+        enabledToggle.classList.remove("bg-border");
+        enabledToggle.classList.add("bg-[#3fb950]");
+        enabledDot.style.transform = "translateX(20px)";
+        urlRow.classList.remove("hidden");
+        slugRow.classList.remove("hidden");
+        configSection.classList.remove("hidden");
+      } else {
+        enabledToggle.classList.add("bg-border");
+        enabledToggle.classList.remove("bg-[#3fb950]");
+        enabledDot.style.transform = "translateX(0)";
+        urlRow.classList.add("hidden");
+        slugRow.classList.add("hidden");
+        configSection.classList.add("hidden");
+      }
+    }
+
+    function updateConfigUI(config: Record<string, boolean>) {
+      configToggles.forEach((toggle) => {
+        const key = toggle.dataset.config;
+        if (key && config[key] !== undefined) {
+          toggle.checked = config[key];
+        }
+      });
+      // Show blur row only when showProjects is checked
+      const projectsToggle = document.querySelector<HTMLInputElement>('[data-config="showProjects"]');
+      blurRow.classList.toggle("hidden", !projectsToggle?.checked);
+    }
+
+    function getConfigFromUI(): Record<string, boolean> {
+      const config: Record<string, boolean> = {};
+      configToggles.forEach((toggle) => {
+        const key = toggle.dataset.config;
+        if (key) config[key] = toggle.checked;
+      });
+      return config;
+    }
+
+    async function saveProfile(body: any) {
+      try {
+        const res = await fetch("/api/insights/profile", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          showStatus(data.error || "Failed to save", true);
+          return null;
+        }
+        if (data.profile?.url) {
+          urlInput.value = data.profile.url;
+        }
+        if (data.profile?.slug) {
+          slugInput.value = data.profile.slug;
+        }
+        profileData = data.profile;
+        showStatus("Saved!");
+        return data;
+      } catch {
+        showStatus("Failed to save", true);
+        return null;
+      }
+    }
+
+    // Load existing profile
+    async function loadProfile() {
+      try {
+        const res = await fetch("/api/insights/profile", { credentials: "include" });
+        const data = await res.json();
+        if (data.profile) {
+          profileData = data.profile;
+          updateEnabledUI(data.profile.enabled);
+          urlInput.value = data.profile.url || "";
+          slugInput.value = data.profile.slug || "";
+          if (data.profile.config) {
+            updateConfigUI(data.profile.config);
+          }
+          // Update button text
+          toggleBtn.innerHTML = `<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 1 1 0-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 1 0 5.367-2.684 3 3 0 0 0-5.367 2.684Zm0 9.316a3 3 0 1 0 5.368 2.684 3 3 0 0 0-5.368-2.684Z" /></svg>${data.profile.enabled ? "Shared" : "Share"}`;
+        }
+      } catch { /* ignore */ }
+    }
+
+    // Toggle panel visibility
+    let profileLoaded = false;
+    toggleBtn.addEventListener("click", () => {
+      panel.classList.toggle("hidden");
+      if (!panel.classList.contains("hidden") && !profileLoaded) {
+        profileLoaded = true;
+        loadProfile();
+      }
+    });
+    closeBtn.addEventListener("click", () => panel.classList.add("hidden"));
+
+    // Enable/disable toggle
+    enabledToggle.addEventListener("click", async () => {
+      const currentlyEnabled = enabledToggle.getAttribute("aria-checked") === "true";
+      const newEnabled = !currentlyEnabled;
+
+      if (!profileData && newEnabled) {
+        // Create new profile
+        const result = await saveProfile({ enabled: true, config: getConfigFromUI() });
+        if (result) {
+          updateEnabledUI(true);
+          toggleBtn.innerHTML = `<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 1 1 0-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 1 0 5.367-2.684 3 3 0 0 0-5.367 2.684Zm0 9.316a3 3 0 1 0 5.368 2.684 3 3 0 0 0-5.368-2.684Z" /></svg>Shared`;
+        }
+      } else if (profileData) {
+        // Update existing profile
+        updateEnabledUI(newEnabled);
+        const btnLabel = newEnabled ? "Shared" : "Share";
+        toggleBtn.innerHTML = `<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 1 1 0-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 1 0 5.367-2.684 3 3 0 0 0-5.367 2.684Zm0 9.316a3 3 0 1 0 5.368 2.684 3 3 0 0 0-5.368-2.684Z" /></svg>${btnLabel}`;
+        await saveProfile({ enabled: newEnabled, config: getConfigFromUI() });
+      }
+    });
+
+    // Copy URL
+    copyBtn.addEventListener("click", () => {
+      navigator.clipboard.writeText(urlInput.value).then(() => {
+        copyBtn.textContent = "Copied!";
+        setTimeout(() => { copyBtn.textContent = "Copy"; }, 2000);
+      });
+    });
+
+    // Save custom slug
+    slugSave.addEventListener("click", async () => {
+      const slug = slugInput.value.trim().toLowerCase();
+      if (!slug || !/^[a-zA-Z0-9_-]{2,40}$/.test(slug)) {
+        showStatus("Invalid slug (2-40 chars, letters/numbers/hyphens)", true);
+        return;
+      }
+      await saveProfile({ slug, config: getConfigFromUI() });
+    });
+
+    // Config toggles — debounced auto-save
+    configToggles.forEach((toggle) => {
+      toggle.addEventListener("change", () => {
+        // Show/hide blur row based on showProjects
+        if (toggle.dataset.config === "showProjects") {
+          blurRow.classList.toggle("hidden", !toggle.checked);
+        }
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          saveProfile({ config: getConfigFromUI() });
+        }, 500);
+      });
+    });
+
+  }
+
+  initAuth();
   initInsights();
+  initSharePanel();
 </script>

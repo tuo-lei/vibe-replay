@@ -5,7 +5,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { nanoid } from "nanoid";
 import { type AuthEnv, createAuth, DEV_ORIGINS, PROD_ORIGINS } from "./auth";
-import { cloudReplays, dailyInsights, replays, userFiles } from "./db/schema";
+import { cloudReplays, dailyInsights, insightProfiles, replays, userFiles } from "./db/schema";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1303,6 +1303,436 @@ app.get("/api/insights/summary", async (c) => {
     timeRange: { first: agg?.firstDate || "", last: agg?.lastDate || "" },
     sessionsPerDay,
   });
+});
+
+// ---------------------------------------------------------------------------
+// Insight Profiles — public sharing of aggregated insights
+// ---------------------------------------------------------------------------
+
+const SLUG_RE = /^[a-zA-Z0-9_-]{2,40}$/;
+
+const DEFAULT_PROFILE_CONFIG = {
+  showCost: false,
+  showProjects: true,
+  showModels: true,
+  showProviders: true,
+  showHeatmap: true,
+  showStreak: true,
+  showWeeklyTrend: true,
+  showDayOfWeek: true,
+  blurProjectNames: false,
+};
+
+type ProfileConfig = typeof DEFAULT_PROFILE_CONFIG;
+
+function parseProfileConfig(raw: string): ProfileConfig {
+  try {
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_PROFILE_CONFIG, ...parsed };
+  } catch {
+    return { ...DEFAULT_PROFILE_CONFIG };
+  }
+}
+
+/** Get current user's insight profile */
+app.get("/api/insights/profile", async (c) => {
+  const authResult = await requireAuth(c);
+  if (authResult instanceof Response) return authResult;
+  const { userId } = authResult;
+
+  const db = drizzle(c.env.DB);
+  const [profile] = await db
+    .select()
+    .from(insightProfiles)
+    .where(eq(insightProfiles.userId, userId))
+    .limit(1);
+
+  if (!profile) {
+    return c.json({ profile: null });
+  }
+
+  const baseUrl = getBaseUrl(c);
+  return c.json({
+    profile: {
+      id: profile.id,
+      slug: profile.slug,
+      displayName: profile.displayName,
+      avatarUrl: profile.avatarUrl,
+      enabled: profile.enabled,
+      config: parseProfileConfig(profile.config),
+      viewCount: profile.viewCount,
+      url: `${baseUrl}/i/${profile.slug}`,
+      createdAt: profile.createdAt,
+    },
+  });
+});
+
+/** Validate avatarUrl — only allow HTTPS URLs */
+function sanitizeAvatarUrl(url: unknown): string | null {
+  if (!url || typeof url !== "string") return null;
+  const trimmed = url.trim().slice(0, 500);
+  if (!trimmed.startsWith("https://")) return null;
+  return trimmed;
+}
+
+/** Create or update insight profile */
+app.post("/api/insights/profile", async (c) => {
+  const authResult = await requireAuth(c);
+  if (authResult instanceof Response) return authResult;
+  const { userId, user } = authResult;
+
+  let body: any;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const slug = body.slug ? String(body.slug).toLowerCase().trim() : null;
+  if (slug && !SLUG_RE.test(slug)) {
+    return c.json({ error: "Invalid slug (2-40 chars, alphanumeric, hyphens, underscores)" }, 400);
+  }
+
+  const config: ProfileConfig = {
+    ...DEFAULT_PROFILE_CONFIG,
+    ...(body.config && typeof body.config === "object" ? body.config : {}),
+  };
+  // Sanitize: only allow boolean values
+  for (const key of Object.keys(config) as (keyof ProfileConfig)[]) {
+    if (typeof config[key] !== "boolean") {
+      (config as any)[key] = DEFAULT_PROFILE_CONFIG[key];
+    }
+  }
+
+  const db = drizzle(c.env.DB);
+  const [existing] = await db
+    .select({
+      id: insightProfiles.id,
+      slug: insightProfiles.slug,
+      enabled: insightProfiles.enabled,
+    })
+    .from(insightProfiles)
+    .where(eq(insightProfiles.userId, userId))
+    .limit(1);
+
+  const now = new Date().toISOString().replace("T", " ").slice(0, 19);
+
+  if (existing) {
+    // Update existing profile — only change enabled if explicitly provided
+    const updates: Record<string, any> = {
+      config: JSON.stringify(config),
+      updatedAt: now,
+    };
+    if (body.enabled !== undefined) {
+      updates.enabled = !!body.enabled;
+    }
+    if (body.displayName !== undefined) {
+      updates.displayName = body.displayName ? String(body.displayName).slice(0, 100) : null;
+    }
+    if (body.avatarUrl !== undefined) {
+      updates.avatarUrl = sanitizeAvatarUrl(body.avatarUrl);
+    }
+    // Allow changing slug if provided and different
+    if (slug && slug !== existing.slug) {
+      const [conflict] = await db
+        .select({ id: insightProfiles.id })
+        .from(insightProfiles)
+        .where(eq(insightProfiles.slug, slug))
+        .limit(1);
+      if (conflict) {
+        return c.json({ error: "Slug already taken" }, 409);
+      }
+      updates.slug = slug;
+    }
+
+    try {
+      await db.update(insightProfiles).set(updates).where(eq(insightProfiles.id, existing.id));
+    } catch (e: any) {
+      if (e?.message?.includes("UNIQUE")) {
+        return c.json({ error: "Slug already taken" }, 409);
+      }
+      throw e;
+    }
+
+    const finalEnabled = updates.enabled ?? existing.enabled;
+    const finalSlug = updates.slug || existing.slug;
+    const baseUrl = getBaseUrl(c);
+    return c.json({
+      ok: true,
+      profile: {
+        id: existing.id,
+        slug: finalSlug,
+        enabled: finalEnabled,
+        config,
+        url: `${baseUrl}/i/${finalSlug}`,
+      },
+    });
+  }
+
+  // Create new profile
+  const finalSlug = slug || nanoid(8).toLowerCase();
+
+  // Always check slug uniqueness (including auto-generated)
+  const [conflict] = await db
+    .select({ id: insightProfiles.id })
+    .from(insightProfiles)
+    .where(eq(insightProfiles.slug, finalSlug))
+    .limit(1);
+  if (conflict) {
+    return c.json({ error: "Slug already taken" }, 409);
+  }
+
+  const id = nanoid(12);
+  try {
+    await db.insert(insightProfiles).values({
+      id,
+      userId,
+      slug: finalSlug,
+      displayName: body.displayName ? String(body.displayName).slice(0, 100) : user.name,
+      avatarUrl: sanitizeAvatarUrl(body.avatarUrl),
+      enabled: body.enabled !== false,
+      config: JSON.stringify(config),
+    });
+  } catch (e: any) {
+    if (e?.message?.includes("UNIQUE")) {
+      return c.json({ error: "Profile already exists" }, 409);
+    }
+    throw e;
+  }
+
+  const baseUrl = getBaseUrl(c);
+  return c.json({
+    ok: true,
+    created: true,
+    profile: {
+      id,
+      slug: finalSlug,
+      enabled: true,
+      config,
+      url: `${baseUrl}/i/${finalSlug}`,
+    },
+  });
+});
+
+/** Delete insight profile */
+app.delete("/api/insights/profile", async (c) => {
+  const authResult = await requireAuth(c);
+  if (authResult instanceof Response) return authResult;
+  const { userId } = authResult;
+
+  const db = drizzle(c.env.DB);
+  const deleted = await db
+    .delete(insightProfiles)
+    .where(eq(insightProfiles.userId, userId))
+    .returning({ id: insightProfiles.id });
+
+  return c.json({ ok: true, deleted: deleted.length > 0 });
+});
+
+/** Public insights data — unauthenticated, cached */
+app.get("/api/public/insights/:slug", async (c) => {
+  const slug = c.req.param("slug").toLowerCase();
+  if (!SLUG_RE.test(slug)) {
+    return c.json({ error: "Not found" }, 404);
+  }
+
+  const db = drizzle(c.env.DB);
+
+  // Look up profile
+  const [profile] = await db
+    .select()
+    .from(insightProfiles)
+    .where(eq(insightProfiles.slug, slug))
+    .limit(1);
+
+  if (!profile || !profile.enabled) {
+    return c.json({ error: "Not found" }, 404);
+  }
+
+  const config = parseProfileConfig(profile.config);
+  const userId = profile.userId;
+
+  // Aggregate counters
+  const [agg] = await db
+    .select({
+      totalSessions: sql<number>`coalesce(sum(${dailyInsights.sessions}), 0)`,
+      totalDurationMs: sql<number>`coalesce(sum(${dailyInsights.durationMs}), 0)`,
+      totalCost: sql<number>`coalesce(sum(${dailyInsights.cost}), 0)`,
+      totalPrompts: sql<number>`coalesce(sum(${dailyInsights.prompts}), 0)`,
+      totalToolCalls: sql<number>`coalesce(sum(${dailyInsights.toolCalls}), 0)`,
+      totalEdits: sql<number>`coalesce(sum(${dailyInsights.edits}), 0)`,
+      firstDate: sql<string>`min(${dailyInsights.date})`,
+      lastDate: sql<string>`max(${dailyInsights.date})`,
+    })
+    .from(dailyInsights)
+    .where(eq(dailyInsights.userId, userId));
+
+  // Sessions per day (for heatmap)
+  const sessionsPerDay: Record<string, number> = {};
+  if (config.showHeatmap) {
+    const dailyRows = await db
+      .select({
+        date: dailyInsights.date,
+        sessions: sql<number>`sum(${dailyInsights.sessions})`,
+      })
+      .from(dailyInsights)
+      .where(eq(dailyInsights.userId, userId))
+      .groupBy(dailyInsights.date)
+      .orderBy(dailyInsights.date);
+    for (const r of dailyRows) sessionsPerDay[r.date] = r.sessions;
+  }
+
+  // JSON breakdowns (last 365 days)
+  let topProjects: any[] = [];
+  let models: Record<string, number> = {};
+  let providers: Record<string, number> = {};
+  let projectCount = 0;
+
+  if (config.showProjects || config.showModels || config.showProviders) {
+    const cutoffDate = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const allRows = await db
+      .select({
+        projects: dailyInsights.projects,
+        models: dailyInsights.models,
+        providers: dailyInsights.providers,
+      })
+      .from(dailyInsights)
+      .where(and(eq(dailyInsights.userId, userId), gte(dailyInsights.date, cutoffDate)));
+
+    const projectsAgg: Record<
+      string,
+      {
+        sessions: number;
+        cost: number;
+        prompts: number;
+        toolCalls: number;
+        edits: number;
+        durationMs: number;
+      }
+    > = {};
+    const modelsAgg: Record<string, { sessions: number; cost: number }> = {};
+    const providersAgg: Record<string, { sessions: number; cost: number }> = {};
+
+    for (const row of allRows) {
+      if (config.showProjects && row.projects) {
+        try {
+          const p = JSON.parse(row.projects);
+          for (const [name, v] of Object.entries(p) as [string, any][]) {
+            if (!projectsAgg[name])
+              projectsAgg[name] = {
+                sessions: 0,
+                cost: 0,
+                prompts: 0,
+                toolCalls: 0,
+                edits: 0,
+                durationMs: 0,
+              };
+            projectsAgg[name].sessions += v.sessions || 0;
+            projectsAgg[name].cost += v.cost || 0;
+            projectsAgg[name].prompts += v.prompts || 0;
+            projectsAgg[name].toolCalls += v.toolCalls || 0;
+            projectsAgg[name].edits += v.edits || 0;
+            projectsAgg[name].durationMs += v.durationMs || 0;
+          }
+        } catch {
+          /* skip malformed */
+        }
+      }
+      if (config.showModels && row.models) {
+        try {
+          const m = JSON.parse(row.models);
+          for (const [name, v] of Object.entries(m) as [string, any][]) {
+            if (!modelsAgg[name]) modelsAgg[name] = { sessions: 0, cost: 0 };
+            modelsAgg[name].sessions += v.sessions || 0;
+            modelsAgg[name].cost += v.cost || 0;
+          }
+        } catch {
+          /* skip */
+        }
+      }
+      if (config.showProviders && row.providers) {
+        try {
+          const pr = JSON.parse(row.providers);
+          for (const [name, v] of Object.entries(pr) as [string, any][]) {
+            if (!providersAgg[name]) providersAgg[name] = { sessions: 0, cost: 0 };
+            providersAgg[name].sessions += v.sessions || 0;
+            providersAgg[name].cost += v.cost || 0;
+          }
+        } catch {
+          /* skip */
+        }
+      }
+    }
+
+    if (config.showProjects) {
+      projectCount = Object.keys(projectsAgg).length;
+      topProjects = Object.entries(projectsAgg)
+        .map(([project, v]) => {
+          const name = config.blurProjectNames ? project.replace(/[^/\\]/g, "*") : project;
+          return {
+            project: name,
+            sessions: v.sessions,
+            ...(config.showCost ? { cost: v.cost } : {}),
+          };
+        })
+        .sort((a, b) => b.sessions - a.sessions)
+        .slice(0, 20);
+    }
+    if (config.showModels) {
+      models = Object.fromEntries(Object.entries(modelsAgg).map(([k, v]) => [k, v.sessions]));
+    }
+    if (config.showProviders) {
+      providers = Object.fromEntries(Object.entries(providersAgg).map(([k, v]) => [k, v.sessions]));
+    }
+  }
+
+  // Increment view count (fire-and-forget, but survive Worker shutdown)
+  c.executionCtx.waitUntil(
+    db
+      .update(insightProfiles)
+      .set({ viewCount: sql`${insightProfiles.viewCount} + 1` })
+      .where(eq(insightProfiles.id, profile.id))
+      .catch(() => {}),
+  );
+
+  // Only expose visibility flags that are true — don't reveal what's hidden
+  const visibleSections: Record<string, boolean> = {};
+  for (const [k, v] of Object.entries(config)) {
+    if (v) visibleSections[k] = true;
+  }
+
+  const result: Record<string, any> = {
+    displayName: profile.displayName,
+    avatarUrl: profile.avatarUrl,
+    config: visibleSections,
+    totalSessions: agg?.totalSessions || 0,
+    totalProjects: config.showProjects ? projectCount : undefined,
+    totalDurationMs: agg?.totalDurationMs || 0,
+    totalPrompts: agg?.totalPrompts || 0,
+    totalToolCalls: agg?.totalToolCalls || 0,
+    totalEdits: agg?.totalEdits || 0,
+    timeRange: { first: agg?.firstDate || "", last: agg?.lastDate || "" },
+  };
+
+  if (config.showCost) result.totalCost = agg?.totalCost || 0;
+  if (config.showHeatmap) result.sessionsPerDay = sessionsPerDay;
+  if (config.showProjects) result.topProjects = topProjects;
+  if (config.showModels) result.models = models;
+  if (config.showProviders) result.providers = providers;
+
+  return c.json(result, 200, {
+    "Cache-Control": "public, max-age=3600, s-maxage=3600",
+  });
+});
+
+/** Short URL for public insight profiles */
+app.get("/i/:slug", (c) => {
+  const slug = c.req.param("slug").toLowerCase();
+  if (!SLUG_RE.test(slug)) {
+    return c.text("Not Found", 404);
+  }
+  const baseUrl = getBaseUrl(c);
+  return c.redirect(`${baseUrl}/shared-insights/?s=${slug}`);
 });
 
 // ---------------------------------------------------------------------------

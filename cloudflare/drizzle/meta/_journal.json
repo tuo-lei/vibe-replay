@@ -57,6 +57,13 @@
       "when": 1775800000000,
       "tag": "0007_replace_session_with_daily_insights",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1776000000000,
+      "tag": "0008_add_insight_profiles",
+      "breakpoints": true
     }
   ]
 }
