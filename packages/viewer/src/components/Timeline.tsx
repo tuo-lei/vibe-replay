@@ -97,7 +97,16 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
   if (scenes.length === 0) return null;
 
   return (
-    <div className="px-4 pt-3 pb-1 cursor-pointer" onClick={handleSeekClick}>
+    <div
+      className="px-4 pt-3 pb-1 cursor-pointer"
+      onClick={handleSeekClick}
+      role="slider"
+      aria-label="Scene timeline"
+      aria-valuemin={0}
+      aria-valuemax={scenes.length - 1}
+      aria-valuenow={currentIndex}
+      tabIndex={0}
+    >
       {/* Annotation dots above timeline */}
       {annotationDots.length > 0 && (
         <div className="relative h-2 mb-0.5">
