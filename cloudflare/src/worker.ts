@@ -1586,6 +1586,7 @@ app.get("/api/public/insights/:slug", async (c) => {
   let topProjects: any[] = [];
   let models: Record<string, number> = {};
   let providers: Record<string, number> = {};
+  let projectCount = 0;
 
   if (config.showProjects || config.showModels || config.showProviders) {
     const cutoffDate = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -1664,6 +1665,7 @@ app.get("/api/public/insights/:slug", async (c) => {
     }
 
     if (config.showProjects) {
+      projectCount = Object.keys(projectsAgg).length;
       topProjects = Object.entries(projectsAgg)
         .map(([project, v]) => {
           const name = config.blurProjectNames ? project.replace(/[^/\\]/g, "*") : project;
@@ -1704,7 +1706,7 @@ app.get("/api/public/insights/:slug", async (c) => {
     avatarUrl: profile.avatarUrl,
     config: visibleSections,
     totalSessions: agg?.totalSessions || 0,
-    totalProjects: config.showProjects ? Object.keys(projectsAgg).length : undefined,
+    totalProjects: config.showProjects ? projectCount : undefined,
     totalDurationMs: agg?.totalDurationMs || 0,
     totalPrompts: agg?.totalPrompts || 0,
     totalToolCalls: agg?.totalToolCalls || 0,
