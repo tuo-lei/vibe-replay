@@ -1,7 +1,6 @@
 // Shared types — single source of truth
 export type {
   Annotation,
-  CloudInsightsSummary,
   DataSource,
   DataSourceInfo,
   InsightsStore,

@@ -182,58 +182,42 @@ export const cloudReplays = sqliteTable(
 );
 
 // ---------------------------------------------------------------------------
-// Session Insights — synced from CLI for long-term persistence
+// Daily Insights — Prometheus-style time-series with (user, machine, date) labels
 // ---------------------------------------------------------------------------
 
-export const sessionInsights = sqliteTable(
-  "session_insights",
+export const dailyInsights = sqliteTable(
+  "daily_insights",
   {
-    id: text("id").primaryKey(), // nanoid, 12 chars
+    id: text("id").primaryKey(),
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
 
-    // Identity
-    sessionId: text("session_id").notNull(),
-    provider: text("provider").notNull(),
-    slug: text("slug").notNull(),
-
-    // Core queryable fields
-    title: text("title"),
-    project: text("project"),
-    model: text("model"),
-    startTime: text("start_time"),
-    durationMs: integer("duration_ms"),
-
-    // Stats
-    promptCount: integer("prompt_count").default(0),
-    toolCallCount: integer("tool_call_count").default(0),
-    editCount: integer("edit_count").default(0),
-    costEstimate: real("cost_estimate"),
-
-    // Flags
-    hasPR: integer("has_pr", { mode: "boolean" }).default(false),
-    subAgentCount: integer("sub_agent_count").default(0),
-    apiErrorCount: integer("api_error_count").default(0),
-
-    // Machine identity (for multi-machine aggregation)
-    machineId: text("machine_id"),
+    // Labels (dimensions for WHERE/GROUP BY)
+    machineId: text("machine_id").notNull(),
     machineName: text("machine_name"),
+    date: text("date").notNull(), // "2026-04-08"
 
-    // JSON blob for extensible fields (full SessionInsight minus queryable columns)
-    metadata: text("metadata"),
+    // Counters (aggregated metrics)
+    sessions: integer("sessions").default(0).notNull(),
+    prompts: integer("prompts").default(0).notNull(),
+    toolCalls: integer("tool_calls").default(0).notNull(),
+    edits: integer("edits").default(0).notNull(),
+    durationMs: integer("duration_ms").default(0).notNull(),
+    cost: real("cost").default(0).notNull(),
 
-    // Tracking
-    capturedAt: text("captured_at").notNull(),
-    capturedByVersion: text("captured_by_version"),
+    // JSON breakdowns (for charts, not filtering)
+    projects: text("projects"), // {"~/Code/x": {sessions, cost, prompts, toolCalls, edits, durationMs}}
+    models: text("models"), // {"claude-opus-4-6": {sessions, cost}}
+    providers: text("providers"), // {"claude-code": {sessions, cost}}
+
     createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
     updatedAt: text("updated_at").default(sql`(datetime('now'))`),
   },
   (table) => [
-    unique("uq_user_session").on(table.userId, table.sessionId),
-    index("idx_insights_user").on(table.userId),
-    index("idx_insights_project").on(table.userId, table.project),
-    index("idx_insights_start").on(table.userId, table.startTime),
-    index("idx_insights_machine").on(table.userId, table.machineId),
+    unique("uq_daily").on(table.userId, table.machineId, table.date),
+    index("idx_daily_user").on(table.userId),
+    index("idx_daily_date").on(table.userId, table.date),
+    index("idx_daily_machine").on(table.userId, table.machineId),
   ],
 );

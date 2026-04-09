@@ -978,19 +978,19 @@ export async function startServer(
     await writeInsightsStore(updated);
   };
 
-  /** Max insights per cloud sync request (D1 batch API, single round-trip per chunk). */
-  const INSIGHTS_SYNC_BATCH = 100;
+  /** Track last auto-sync date to avoid syncing more than once per day. */
+  let lastAutoSyncDate: string | null = null;
 
   /**
-   * Core sync logic: push unsynced insights to cloud in batches.
-   * Returns { synced, total, error? }. Persists partial progress on failure.
+   * Aggregate local insights by (date, machineId) and push to cloud.
+   * Each day becomes one row in cloud — Prometheus-style time series.
    */
   const syncInsightsToCloud = async (): Promise<{
     synced: number;
     total: number;
     error?: string;
   }> => {
-    const { getUnsyncedInsights, markSynced } = await import("./insights.js");
+    const { aggregateDailyInsights } = await import("./insights.js");
     const {
       loadAuthToken: loadAuth,
       getApiUrl: getUrl,
@@ -1001,66 +1001,56 @@ export async function startServer(
     if (!auth) return { synced: 0, total: 0, error: "Not logged in" };
 
     const store = await readInsightsStore();
-    const unsynced = getUnsyncedInsights(store);
-    if (unsynced.length === 0) return { synced: 0, total: 0 };
+    const daily = aggregateDailyInsights(store);
+    if (daily.days.length === 0) return { synced: 0, total: 0 };
 
     const apiUrl = getUrl();
     const cookieName = getCookie(apiUrl);
-    let totalSynced = 0;
-    let lastError: string | undefined;
-    const allSyncedIds = new Map<string, string>();
 
-    for (let i = 0; i < unsynced.length; i += INSIGHTS_SYNC_BATCH) {
-      const batch = unsynced.slice(i, i + INSIGHTS_SYNC_BATCH);
-      const payload = batch.map(({ syncedAt, cloudId, ...rest }) => rest);
-
-      let resp: Response;
-      try {
-        resp = await fetch(`${apiUrl}/api/insights/sync`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Cookie: `${cookieName}=${auth.token}` },
-          body: JSON.stringify({ insights: payload }),
-          signal: AbortSignal.timeout(30_000),
-        });
-      } catch (e) {
-        lastError = e instanceof Error ? e.message : "Network error";
-        break;
-      }
-
-      if (resp.status === 401) {
-        await clearLocalAuthSession();
-        lastError = "Session expired";
-        break;
-      }
-      if (!resp.ok) {
-        lastError = await resp.text().catch(() => `HTTP ${resp.status}`);
-        break;
-      }
-
-      let result: { synced: number; cloudIds: Record<string, string> };
-      try {
-        result = await resp.json();
-      } catch {
-        lastError = "Invalid response from cloud API";
-        break;
-      }
-
-      totalSynced += result.synced;
-      for (const [sid, cid] of Object.entries(result.cloudIds)) allSyncedIds.set(sid, cid);
+    let resp: Response;
+    try {
+      resp = await fetch(`${apiUrl}/api/insights/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: `${cookieName}=${auth.token}` },
+        body: JSON.stringify(daily),
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch (e) {
+      return {
+        synced: 0,
+        total: daily.days.length,
+        error: e instanceof Error ? e.message : "Network error",
+      };
     }
 
-    // Always persist partial progress
-    if (allSyncedIds.size > 0) {
-      const updated = markSynced(store, allSyncedIds);
-      await writeInsightsStore(updated);
+    if (resp.status === 401) {
+      await clearLocalAuthSession();
+      return { synced: 0, total: daily.days.length, error: "Session expired" };
+    }
+    if (!resp.ok) {
+      const err = await resp.text().catch(() => `HTTP ${resp.status}`);
+      return { synced: 0, total: daily.days.length, error: err };
     }
 
-    return { synced: totalSynced, total: unsynced.length, error: lastError };
+    let result: { synced: number };
+    try {
+      result = await resp.json();
+    } catch {
+      return { synced: 0, total: daily.days.length, error: "Invalid response" };
+    }
+
+    return { synced: result.synced, total: daily.days.length };
   };
 
-  /** Auto-sync insights to cloud if user is logged in. Fire-and-forget. */
+  /**
+   * Auto-sync insights to cloud if user is logged in.
+   * Runs at most once per calendar day to avoid excessive writes.
+   */
   const autoSyncInsights = async (): Promise<void> => {
-    await syncInsightsToCloud();
+    const today = new Date().toISOString().slice(0, 10);
+    if (lastAutoSyncDate === today) return; // Already synced today
+    const result = await syncInsightsToCloud();
+    if (!result.error) lastAutoSyncDate = today;
   };
 
   /** Pre-compute all insights from scan results and store in cache. */

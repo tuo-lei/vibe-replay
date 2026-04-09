@@ -5,7 +5,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { nanoid } from "nanoid";
 import { type AuthEnv, createAuth, DEV_ORIGINS, PROD_ORIGINS } from "./auth";
-import { cloudReplays, replays, sessionInsights, userFiles } from "./db/schema";
+import { cloudReplays, dailyInsights, replays, userFiles } from "./db/schema";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1034,182 +1034,114 @@ app.put("/api/replays", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// Session Insights API — synced from CLI for long-term persistence
+// Daily Insights API — Prometheus-style time-series (user × machine × date)
 // ---------------------------------------------------------------------------
 
-const MAX_INSIGHTS_BATCH = 200;
+const MAX_DAILY_BATCH = 400; // ~1 year of data per machine
 
-/** Batch upsert insights from CLI */
+/** Upsert daily insight rows from CLI */
 app.post("/api/insights/sync", async (c) => {
   const authResult = await requireAuth(c);
   if (authResult instanceof Response) return authResult;
   const { userId } = authResult;
 
   const body = await c.req.json();
-  if (!Array.isArray(body.insights) || body.insights.length === 0) {
-    return c.json({ error: "insights array required" }, 400);
+  if (!Array.isArray(body.days) || body.days.length === 0) {
+    return c.json({ error: "days array required" }, 400);
   }
-  if (body.insights.length > MAX_INSIGHTS_BATCH) {
-    return c.json({ error: `Max ${MAX_INSIGHTS_BATCH} insights per batch` }, 400);
+  if (body.days.length > MAX_DAILY_BATCH) {
+    return c.json({ error: `Max ${MAX_DAILY_BATCH} days per batch` }, 400);
   }
 
-  const db = drizzle(c.env.DB);
-  const cloudIds: Record<string, string> = {};
   const now = new Date().toISOString().replace("T", " ").slice(0, 19);
 
-  // Filter valid insights
-  const validInsights = body.insights.filter((i: any) => i.sessionId && i.provider);
-  if (validInsights.length === 0) {
-    return c.json({ synced: 0, failed: 0, total: body.insights.length, cloudIds });
-  }
+  // Pre-fetch existing rows for this user+machine combo
+  const machineId = body.machineId?.slice(0, 64);
+  if (!machineId) return c.json({ error: "machineId required" }, 400);
 
-  // Pre-fetch existing records in one query
-  const sessionIds = validInsights.map((i: any) => String(i.sessionId));
-  const existingRows = await db
-    .select({ id: sessionInsights.id, sessionId: sessionInsights.sessionId })
-    .from(sessionInsights)
-    .where(and(eq(sessionInsights.userId, userId), inArray(sessionInsights.sessionId, sessionIds)));
-  const existingMap = new Map(existingRows.map((r) => [r.sessionId, r.id]));
+  const dates = body.days.map((d: any) => String(d.date)).filter(Boolean);
+  const existingRows =
+    dates.length > 0
+      ? await c.env.DB.prepare(
+          `SELECT id, date FROM daily_insights WHERE user_id = ? AND machine_id = ? AND date IN (${dates.map(() => "?").join(",")})`,
+        )
+          .bind(userId, machineId, ...dates)
+          .all<{ id: string; date: string }>()
+      : { results: [] };
+  const existingMap = new Map((existingRows.results || []).map((r) => [r.date, r.id]));
 
-  // Build batch of D1 prepared statements (single round-trip)
+  // Build batch statements
   const statements: D1PreparedStatement[] = [];
-  for (const insight of validInsights) {
-    const metadata = JSON.stringify(insight);
-    const costEst =
-      insight.costEstimate != null
-        ? Math.max(0, Math.min(Number(insight.costEstimate) || 0, 100_000))
-        : null;
-    const existingId = existingMap.get(insight.sessionId);
+  let synced = 0;
 
+  for (const day of body.days) {
+    if (!day.date || typeof day.date !== "string") continue;
+
+    const existingId = existingMap.get(day.date);
     if (existingId) {
       statements.push(
         c.env.DB.prepare(
-          `UPDATE session_insights SET title=?, project=?, model=?, start_time=?, duration_ms=?,
-           prompt_count=?, tool_call_count=?, edit_count=?, cost_estimate=?, has_pr=?,
-           sub_agent_count=?, api_error_count=?, machine_id=?, machine_name=?,
-           metadata=?, captured_by_version=?, updated_at=?
-           WHERE id=?`,
+          `UPDATE daily_insights SET sessions=?, prompts=?, tool_calls=?, edits=?,
+           duration_ms=?, cost=?, projects=?, models=?, providers=?,
+           machine_name=?, updated_at=? WHERE id=?`,
         ).bind(
-          insight.title?.slice(0, 500) || null,
-          insight.project?.slice(0, 500) || null,
-          insight.model?.slice(0, 200) || null,
-          insight.startTime || null,
-          clamp(insight.durationMs, 0, 86_400_000),
-          clamp(insight.promptCount, 0, 10_000),
-          clamp(insight.toolCallCount, 0, 100_000),
-          clamp(insight.editCount, 0, 100_000),
-          costEst,
-          insight.hasPR ? 1 : 0,
-          clamp(insight.subAgentCount, 0, 10_000),
-          clamp(insight.apiErrorCount, 0, 10_000),
-          insight.machineId?.slice(0, 64) || null,
-          insight.machineName?.slice(0, 200) || null,
-          metadata,
-          insight.capturedByVersion?.slice(0, 50) || null,
+          clamp(day.sessions, 0, 10_000),
+          clamp(day.prompts, 0, 100_000),
+          clamp(day.toolCalls, 0, 1_000_000),
+          clamp(day.edits, 0, 1_000_000),
+          clamp(day.durationMs, 0, 86_400_000),
+          Math.max(0, Math.min(Number(day.cost) || 0, 100_000)),
+          day.projects ? String(day.projects).slice(0, 50_000) : null,
+          day.models ? String(day.models).slice(0, 10_000) : null,
+          day.providers ? String(day.providers).slice(0, 10_000) : null,
+          body.machineName?.slice(0, 200) || null,
           now,
           existingId,
         ),
       );
-      cloudIds[insight.sessionId] = existingId;
     } else {
       const id = nanoid(12);
       statements.push(
         c.env.DB.prepare(
-          `INSERT INTO session_insights (id, user_id, session_id, provider, slug, title, project,
-           model, start_time, duration_ms, prompt_count, tool_call_count, edit_count, cost_estimate,
-           has_pr, sub_agent_count, api_error_count, machine_id, machine_name,
-           metadata, captured_at, captured_by_version)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO daily_insights (id, user_id, machine_id, machine_name, date,
+           sessions, prompts, tool_calls, edits, duration_ms, cost,
+           projects, models, providers)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).bind(
           id,
           userId,
-          insight.sessionId,
-          String(insight.provider).slice(0, 50),
-          String(insight.slug || insight.sessionId.slice(0, 8)).slice(0, 50),
-          insight.title?.slice(0, 500) || null,
-          insight.project?.slice(0, 500) || null,
-          insight.model?.slice(0, 200) || null,
-          insight.startTime || null,
-          clamp(insight.durationMs, 0, 86_400_000),
-          clamp(insight.promptCount, 0, 10_000),
-          clamp(insight.toolCallCount, 0, 100_000),
-          clamp(insight.editCount, 0, 100_000),
-          costEst,
-          insight.hasPR ? 1 : 0,
-          clamp(insight.subAgentCount, 0, 10_000),
-          clamp(insight.apiErrorCount, 0, 10_000),
-          insight.machineId?.slice(0, 64) || null,
-          insight.machineName?.slice(0, 200) || null,
-          metadata,
-          insight.capturedAt || new Date().toISOString(),
-          insight.capturedByVersion?.slice(0, 50) || null,
+          machineId,
+          body.machineName?.slice(0, 200) || null,
+          day.date,
+          clamp(day.sessions, 0, 10_000),
+          clamp(day.prompts, 0, 100_000),
+          clamp(day.toolCalls, 0, 1_000_000),
+          clamp(day.edits, 0, 1_000_000),
+          clamp(day.durationMs, 0, 86_400_000),
+          Math.max(0, Math.min(Number(day.cost) || 0, 100_000)),
+          day.projects ? String(day.projects).slice(0, 50_000) : null,
+          day.models ? String(day.models).slice(0, 10_000) : null,
+          day.providers ? String(day.providers).slice(0, 10_000) : null,
         ),
       );
-      cloudIds[insight.sessionId] = id;
-      existingMap.set(insight.sessionId, id); // prevent double-INSERT for duplicate sessionIds in batch
+      existingMap.set(day.date, id);
+    }
+    synced++;
+  }
+
+  if (statements.length > 0) {
+    try {
+      await c.env.DB.batch(statements);
+    } catch (e) {
+      console.error("Daily insights batch sync failed:", e);
+      return c.json({ error: "Sync failed", synced: 0 }, 500);
     }
   }
 
-  // Execute all statements in a single D1 batch (one round-trip)
-  try {
-    await c.env.DB.batch(statements);
-  } catch (e) {
-    console.error("Batch sync failed:", e);
-    return c.json(
-      {
-        error: "Batch sync failed",
-        synced: 0,
-        failed: validInsights.length,
-        total: body.insights.length,
-        cloudIds: {},
-      },
-      500,
-    );
-  }
-
-  return c.json({ synced: validInsights.length, failed: 0, total: body.insights.length, cloudIds });
+  return c.json({ synced });
 });
 
-/** List user's synced insights (paginated) */
-app.get("/api/insights", async (c) => {
-  const authResult = await requireAuth(c);
-  if (authResult instanceof Response) return authResult;
-  const { userId } = authResult;
-
-  const project = c.req.query("project");
-  const after = c.req.query("after");
-  const before = c.req.query("before");
-  const limit = Math.min(Number(c.req.query("limit")) || 100, 500);
-  const offset = Math.max(Number(c.req.query("offset")) || 0, 0);
-
-  const db = drizzle(c.env.DB);
-  const conditions = [eq(sessionInsights.userId, userId)];
-  if (project) conditions.push(eq(sessionInsights.project, project));
-  if (after) conditions.push(sql`${sessionInsights.startTime} >= ${after}`);
-  if (before) conditions.push(sql`${sessionInsights.startTime} <= ${before}`);
-
-  const results = await db
-    .select()
-    .from(sessionInsights)
-    .where(and(...conditions))
-    .orderBy(desc(sessionInsights.startTime))
-    .limit(limit)
-    .offset(offset);
-
-  const [countResult] = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(sessionInsights)
-    .where(and(...conditions));
-
-  return c.json({
-    insights: results,
-    total: countResult?.count || 0,
-    limit,
-    offset,
-  });
-});
-
-/** Aggregated insights summary for the user */
+/** Aggregated insights summary — merges all machines' daily data */
 app.get("/api/insights/summary", async (c) => {
   const authResult = await requireAuth(c);
   if (authResult instanceof Response) return authResult;
@@ -1217,100 +1149,128 @@ app.get("/api/insights/summary", async (c) => {
 
   const db = drizzle(c.env.DB);
 
-  // Aggregate stats
+  // Aggregate counters (single query)
   const [agg] = await db
     .select({
-      totalSessions: sql<number>`count(*)`,
-      totalProjects: sql<number>`count(distinct ${sessionInsights.project})`,
-      totalDurationMs: sql<number>`coalesce(sum(${sessionInsights.durationMs}), 0)`,
-      totalCost: sql<number>`coalesce(sum(${sessionInsights.costEstimate}), 0)`,
-      totalPrompts: sql<number>`coalesce(sum(${sessionInsights.promptCount}), 0)`,
-      totalToolCalls: sql<number>`coalesce(sum(${sessionInsights.toolCallCount}), 0)`,
-      totalEdits: sql<number>`coalesce(sum(${sessionInsights.editCount}), 0)`,
-      firstSession: sql<string>`min(${sessionInsights.startTime})`,
-      lastSession: sql<string>`max(${sessionInsights.startTime})`,
+      totalSessions: sql<number>`coalesce(sum(${dailyInsights.sessions}), 0)`,
+      totalDurationMs: sql<number>`coalesce(sum(${dailyInsights.durationMs}), 0)`,
+      totalCost: sql<number>`coalesce(sum(${dailyInsights.cost}), 0)`,
+      totalPrompts: sql<number>`coalesce(sum(${dailyInsights.prompts}), 0)`,
+      totalToolCalls: sql<number>`coalesce(sum(${dailyInsights.toolCalls}), 0)`,
+      totalEdits: sql<number>`coalesce(sum(${dailyInsights.edits}), 0)`,
+      firstDate: sql<string>`min(${dailyInsights.date})`,
+      lastDate: sql<string>`max(${dailyInsights.date})`,
     })
-    .from(sessionInsights)
-    .where(eq(sessionInsights.userId, userId));
+    .from(dailyInsights)
+    .where(eq(dailyInsights.userId, userId));
 
-  // Provider breakdown
-  const providerRows = await db
-    .select({
-      provider: sessionInsights.provider,
-      count: sql<number>`count(*)`,
-    })
-    .from(sessionInsights)
-    .where(eq(sessionInsights.userId, userId))
-    .groupBy(sessionInsights.provider);
-  const providers: Record<string, number> = {};
-  for (const r of providerRows) providers[r.provider] = r.count;
-
-  // Model breakdown
-  const modelRows = await db
-    .select({
-      model: sessionInsights.model,
-      count: sql<number>`count(*)`,
-    })
-    .from(sessionInsights)
-    .where(and(eq(sessionInsights.userId, userId), sql`${sessionInsights.model} IS NOT NULL`))
-    .groupBy(sessionInsights.model);
-  const models: Record<string, number> = {};
-  for (const r of modelRows) if (r.model) models[r.model] = r.count;
-
-  // Top projects
-  const topProjects = await db
-    .select({
-      project: sessionInsights.project,
-      sessions: sql<number>`count(*)`,
-      cost: sql<number>`coalesce(sum(${sessionInsights.costEstimate}), 0)`,
-      durationMs: sql<number>`coalesce(sum(${sessionInsights.durationMs}), 0)`,
-      prompts: sql<number>`coalesce(sum(${sessionInsights.promptCount}), 0)`,
-      toolCalls: sql<number>`coalesce(sum(${sessionInsights.toolCallCount}), 0)`,
-      edits: sql<number>`coalesce(sum(${sessionInsights.editCount}), 0)`,
-      lastActivity: sql<string>`max(${sessionInsights.startTime})`,
-    })
-    .from(sessionInsights)
-    .where(eq(sessionInsights.userId, userId))
-    .groupBy(sessionInsights.project)
-    .orderBy(sql`count(*) desc`)
-    .limit(20);
-
-  // Sessions per day (last 90 days)
+  // Sessions per day (all dates — client handles windowing)
   const dailyRows = await db
     .select({
-      day: sql<string>`date(${sessionInsights.startTime})`,
-      count: sql<number>`count(*)`,
+      date: dailyInsights.date,
+      sessions: sql<number>`sum(${dailyInsights.sessions})`,
     })
-    .from(sessionInsights)
-    .where(
-      and(
-        eq(sessionInsights.userId, userId),
-        sql`${sessionInsights.startTime} >= date('now', '-90 days')`,
-      ),
-    )
-    .groupBy(sql`date(${sessionInsights.startTime})`)
-    .orderBy(sql`date(${sessionInsights.startTime})`);
+    .from(dailyInsights)
+    .where(eq(dailyInsights.userId, userId))
+    .groupBy(dailyInsights.date)
+    .orderBy(dailyInsights.date);
   const sessionsPerDay: Record<string, number> = {};
-  for (const r of dailyRows) if (r.day) sessionsPerDay[r.day] = r.count;
+  for (const r of dailyRows) sessionsPerDay[r.date] = r.sessions;
+
+  // JSON breakdowns — need to merge across all rows
+  const allRows = await db
+    .select({
+      projects: dailyInsights.projects,
+      models: dailyInsights.models,
+      providers: dailyInsights.providers,
+    })
+    .from(dailyInsights)
+    .where(eq(dailyInsights.userId, userId));
+
+  // Merge JSON breakdowns across all daily rows
+  const projectsAgg: Record<
+    string,
+    {
+      sessions: number;
+      cost: number;
+      prompts: number;
+      toolCalls: number;
+      edits: number;
+      durationMs: number;
+    }
+  > = {};
+  const modelsAgg: Record<string, { sessions: number; cost: number }> = {};
+  const providersAgg: Record<string, { sessions: number; cost: number }> = {};
+
+  for (const row of allRows) {
+    if (row.projects) {
+      try {
+        const p = JSON.parse(row.projects);
+        for (const [name, v] of Object.entries(p) as [string, any][]) {
+          if (!projectsAgg[name])
+            projectsAgg[name] = {
+              sessions: 0,
+              cost: 0,
+              prompts: 0,
+              toolCalls: 0,
+              edits: 0,
+              durationMs: 0,
+            };
+          projectsAgg[name].sessions += v.sessions || 0;
+          projectsAgg[name].cost += v.cost || 0;
+          projectsAgg[name].prompts += v.prompts || 0;
+          projectsAgg[name].toolCalls += v.toolCalls || 0;
+          projectsAgg[name].edits += v.edits || 0;
+          projectsAgg[name].durationMs += v.durationMs || 0;
+        }
+      } catch {
+        /* skip malformed */
+      }
+    }
+    if (row.models) {
+      try {
+        const m = JSON.parse(row.models);
+        for (const [name, v] of Object.entries(m) as [string, any][]) {
+          if (!modelsAgg[name]) modelsAgg[name] = { sessions: 0, cost: 0 };
+          modelsAgg[name].sessions += v.sessions || 0;
+          modelsAgg[name].cost += v.cost || 0;
+        }
+      } catch {
+        /* skip */
+      }
+    }
+    if (row.providers) {
+      try {
+        const pr = JSON.parse(row.providers);
+        for (const [name, v] of Object.entries(pr) as [string, any][]) {
+          if (!providersAgg[name]) providersAgg[name] = { sessions: 0, cost: 0 };
+          providersAgg[name].sessions += v.sessions || 0;
+          providersAgg[name].cost += v.cost || 0;
+        }
+      } catch {
+        /* skip */
+      }
+    }
+  }
+
+  // Sort top projects by sessions desc
+  const topProjects = Object.entries(projectsAgg)
+    .map(([project, v]) => ({ project, ...v }))
+    .sort((a, b) => b.sessions - a.sessions)
+    .slice(0, 20);
 
   return c.json({
     totalSessions: agg?.totalSessions || 0,
-    totalProjects: agg?.totalProjects || 0,
+    totalProjects: Object.keys(projectsAgg).length,
     totalDurationMs: agg?.totalDurationMs || 0,
     totalCost: agg?.totalCost || 0,
     totalPrompts: agg?.totalPrompts || 0,
     totalToolCalls: agg?.totalToolCalls || 0,
     totalEdits: agg?.totalEdits || 0,
-    providers,
-    models,
-    topProjects: topProjects.map((p) => ({
-      ...p,
-      project: p.project || "(unknown)",
-    })),
-    timeRange: {
-      first: agg?.firstSession || "",
-      last: agg?.lastSession || "",
-    },
+    providers: Object.fromEntries(Object.entries(providersAgg).map(([k, v]) => [k, v.sessions])),
+    models: Object.fromEntries(Object.entries(modelsAgg).map(([k, v]) => [k, v.sessions])),
+    topProjects,
+    timeRange: { first: agg?.firstDate || "", last: agg?.lastDate || "" },
     sessionsPerDay,
   });
 });
