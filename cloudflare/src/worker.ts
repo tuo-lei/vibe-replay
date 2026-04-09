@@ -1075,7 +1075,7 @@ app.post("/api/insights/sync", async (c) => {
   let synced = 0;
 
   for (const day of body.days) {
-    if (!day.date || typeof day.date !== "string") continue;
+    if (!day.date || !/^\d{4}-\d{2}-\d{2}$/.test(day.date)) continue;
 
     const existingId = existingMap.get(day.date);
     if (existingId) {
@@ -1141,7 +1141,6 @@ app.post("/api/insights/sync", async (c) => {
   return c.json({ synced });
 });
 
-/** Aggregated insights summary — merges all machines' daily data */
 /** Return dates already synced for a given machine (for delta sync). */
 app.get("/api/insights/dates", async (c) => {
   const authResult = await requireAuth(c);

@@ -150,12 +150,10 @@ export function mergeInsights(
   for (const scan of scanResults) {
     const existing = byId.get(scan.sessionId);
     if (existing) {
-      // Update with fresh scan data but preserve original provenance + sync state
+      // Update with fresh scan data but preserve original provenance
       const updated = scanResultToInsight(scan);
       updated.capturedAt = existing.capturedAt;
       updated.updatedAt = new Date().toISOString();
-      updated.syncedAt = existing.syncedAt;
-      updated.cloudId = existing.cloudId;
       // Preserve original capture machine (session belongs to where it ran, not where it's re-scanned)
       updated.machineId = existing.machineId ?? updated.machineId;
       updated.machineName = existing.machineName ?? updated.machineName;

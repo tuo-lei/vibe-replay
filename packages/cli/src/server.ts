@@ -1017,7 +1017,9 @@ export async function startServer(
       if (datesResp.ok) {
         const { dates } = (await datesResp.json()) as { dates: string[] };
         const existing = new Set(dates);
-        daily.days = daily.days.filter((d) => !existing.has(d.date));
+        const today = new Date().toISOString().slice(0, 10);
+        // Always re-sync today (may have new sessions since last sync)
+        daily.days = daily.days.filter((d) => !existing.has(d.date) || d.date === today);
         if (daily.days.length === 0) return { synced: 0, total: 0 };
       }
     } catch {
