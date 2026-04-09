@@ -674,6 +674,8 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   const [generatingSlug, setGeneratingSlug] = useState<string | null>(null);
   const [generateErrorSlug, setGenerateErrorSlug] = useState<string | null>(null);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "done" | "error">("idle");
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const selectedSession = selectedSlug
     ? (sources.find((s) => s.slug === selectedSlug) ?? null)
     : null;
@@ -790,6 +792,29 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     } catch {
       // ignore
     }
+  };
+
+  const handleSyncInsights = async () => {
+    setSyncStatus("syncing");
+    setSyncMessage(null);
+    try {
+      const resp = await fetch("/api/insights/sync", { method: "POST" });
+      const data = await resp.json();
+      if (!resp.ok || data.error) {
+        setSyncStatus("error");
+        setSyncMessage(data.error || "Sync failed");
+      } else {
+        setSyncStatus("done");
+        setSyncMessage(data.message || `Synced ${data.synced ?? 0} insights`);
+      }
+    } catch {
+      setSyncStatus("error");
+      setSyncMessage("Network error");
+    }
+    setTimeout(() => {
+      setSyncStatus("idle");
+      setSyncMessage(null);
+    }, 4000);
   };
 
   if (loading && !sources.length && !replays.length) {
@@ -925,13 +950,35 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           {/* Heatmap */}
           <ContributionHeatmap sessionsPerDay={displaySessionsPerDay} weeks={52} />
 
-          {/* CTA link */}
-          <button
-            onClick={() => onNavigate("insights")}
-            className="w-full py-2.5 mt-3 text-xs font-sans font-semibold rounded-lg bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200"
-          >
-            View personal insights &rarr;
-          </button>
+          {/* CTA buttons */}
+          <div className="flex gap-2 mt-3">
+            <button
+              onClick={() => onNavigate("insights")}
+              className="flex-1 py-2.5 text-xs font-sans font-semibold rounded-lg bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200"
+            >
+              View personal insights &rarr;
+            </button>
+            <button
+              onClick={handleSyncInsights}
+              disabled={syncStatus === "syncing"}
+              className="py-2.5 px-4 text-xs font-sans font-semibold rounded-lg bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover border border-terminal-border transition-all duration-200 disabled:opacity-50 disabled:cursor-wait shrink-0"
+            >
+              {syncStatus === "syncing"
+                ? "Syncing..."
+                : syncStatus === "done"
+                  ? "\u2713 Synced"
+                  : syncStatus === "error"
+                    ? "Failed"
+                    : "\u2191 Sync to cloud"}
+            </button>
+          </div>
+          {syncMessage && (
+            <p
+              className={`text-[10px] font-mono mt-1.5 ${syncStatus === "error" ? "text-red-400" : "text-terminal-dim"}`}
+            >
+              {syncMessage}
+            </p>
+          )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-stretch">
