@@ -1054,43 +1054,33 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
               className={`py-2.5 px-4 text-xs font-sans font-semibold rounded-lg border transition-all duration-200 disabled:opacity-50 disabled:cursor-wait shrink-0 ${
                 syncStatus === "done"
                   ? "bg-terminal-green/8 text-terminal-green border-terminal-green/20"
-                  : "bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover border-terminal-border"
+                  : syncStatus === "error"
+                    ? "bg-red-400/8 text-red-400 border-red-400/20"
+                    : "bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover border-terminal-border"
               }`}
+              title={syncMessage || undefined}
             >
               {syncStatus === "syncing"
                 ? "Syncing..."
                 : syncStatus === "done" && syncedAgoLabel
                   ? `\u2713 Synced ${syncedAgoLabel}`
-                  : syncStatus === "awaitingLogin"
-                    ? "Waiting..."
-                    : "\u2191 Sync to cloud"}
+                  : syncStatus === "error"
+                    ? "Sync failed"
+                    : syncStatus === "awaitingLogin"
+                      ? "Waiting..."
+                      : "\u2191 Sync to cloud"}
             </button>
-          </div>
-          {/* Cloud insights link after successful sync */}
-          {syncStatus === "done" && (
-            <p className="text-[10px] font-mono mt-1.5 text-terminal-dim">
-              {syncMessage}
-              {" \u00b7 "}
+            {syncStatus === "done" && (
               <a
                 href="https://vibe-replay.com/insights/"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-terminal-green hover:underline"
+                className="py-2.5 px-3 text-[11px] font-mono text-terminal-dim hover:text-terminal-green transition-colors shrink-0"
               >
-                View on vibe-replay.com &rarr;
+                View online &rarr;
               </a>
-            </p>
-          )}
-          {/* Awaiting login status */}
-          {syncStatus === "awaitingLogin" && (
-            <p className="text-[10px] font-mono mt-1.5 text-terminal-dim animate-pulse">
-              Waiting for sign in... will auto-sync after login
-            </p>
-          )}
-          {/* Error messages */}
-          {syncMessage && syncStatus === "error" && (
-            <p className="text-[10px] font-mono mt-1.5 text-red-400">{syncMessage}</p>
-          )}
+            )}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-stretch">
