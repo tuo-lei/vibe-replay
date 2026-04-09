@@ -18,8 +18,9 @@ import { cloudReplays, dailyInsights, insightProfiles, replays, userFiles } from
 const CLOUD_REPLAY_ID_RE = /^[a-zA-Z0-9_-]{10,16}$/;
 const GIST_ID_RE = /^[a-f0-9]{20,40}$/;
 const VALID_VISIBILITY = new Set(["public", "unlisted", "private"]);
-// D1 starts failing once this lookup goes past ~100 bound params (user + machine + dates),
-// so keep all sync DB work comfortably below that ceiling.
+// D1 starts failing once the user+machine+dates lookup goes past ~100 bound params.
+// Reuse the same conservative chunk size for both query and write paths so older clients
+// that still send large sync payloads stay under the database ceiling server-side too.
 const SAFE_DAILY_SYNC_DB_CHUNK = 90;
 
 function chunkItems<T>(items: T[], maxItems: number): T[][] {
@@ -1155,13 +1156,15 @@ app.post("/api/insights/sync", async (c) => {
   }
 
   if (statements.length > 0) {
+    let committedSynced = 0;
     try {
       for (const statementChunk of chunkItems(statements, SAFE_DAILY_SYNC_DB_CHUNK)) {
         await c.env.DB.batch(statementChunk);
+        committedSynced += statementChunk.length;
       }
     } catch (e) {
       console.error("Daily insights batch sync failed:", e);
-      return c.json({ error: "Sync failed", synced: 0 }, 500);
+      return c.json({ error: "Sync failed", synced: committedSynced }, 500);
     }
   }
 
