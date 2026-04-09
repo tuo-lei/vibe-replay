@@ -1009,6 +1009,10 @@ export async function startServer(
           body: JSON.stringify({ insights: payload }),
           signal: AbortSignal.timeout(30_000),
         });
+        if (resp.status === 401) {
+          await clearLocalAuthSession();
+          break;
+        }
         if (!resp.ok) break;
         const result: { synced: number; cloudIds: Record<string, string> } = await resp.json();
         for (const [sid, cid] of Object.entries(result.cloudIds)) allSyncedIds.set(sid, cid);
@@ -1755,6 +1759,7 @@ export async function startServer(
     for (const entry of loadAllAuthTokens()) {
       await removeAuthToken(entry.origin);
     }
+    invalidateAuthCache();
   }
 
   /** Build an ordered list of (token, apiUrl) pairs to try.
@@ -1785,21 +1790,67 @@ export async function startServer(
       const response = await fetch(`${candidate.apiUrl}${path}`, { ...init, headers });
       if (response.status !== 401) return { unauthorized: false as const, response };
     }
+    // All candidates returned 401 — token expired, clear it
+    await clearLocalAuthSession();
     return { unauthorized: true as const };
+  }
+
+  // Track validated auth state so we don't hit the cloud on every request.
+  // Invalidated on 401 from any cloud call or on explicit logout.
+  let validatedAuth: { valid: boolean; checkedAt: number } | null = null;
+  const AUTH_CHECK_TTL = 5 * 60 * 1000; // Re-validate every 5 minutes
+
+  /** Validate the local token against the cloud. Caches result. */
+  async function isAuthValid(): Promise<boolean> {
+    const now = Date.now();
+    if (validatedAuth && now - validatedAuth.checkedAt < AUTH_CHECK_TTL) {
+      return validatedAuth.valid;
+    }
+    const auth = readLocalAuthSession();
+    if (!auth) {
+      validatedAuth = { valid: false, checkedAt: now };
+      return false;
+    }
+    try {
+      const cookieName = getSessionCookieName(auth.targetApi);
+      const resp = await fetch(`${auth.targetApi}/api/auth/get-session`, {
+        headers: { Cookie: `${cookieName}=${auth.token}` },
+        signal: AbortSignal.timeout(5_000),
+      });
+      const data = await resp.json();
+      const valid = !!(data && data.session && data.user);
+      if (!valid) {
+        // Token expired — clear it so UI shows logged out
+        await clearLocalAuthSession();
+      }
+      validatedAuth = { valid, checkedAt: now };
+      return valid;
+    } catch {
+      // Network error — assume still valid (offline-friendly)
+      validatedAuth = { valid: true, checkedAt: now };
+      return true;
+    }
+  }
+
+  /** Invalidate cached auth state (call on 401 or logout). */
+  function invalidateAuthCache() {
+    validatedAuth = null;
   }
 
   app.get("/api/auth/status", async (c) => {
     const auth = readLocalAuthSession();
     if (!auth) return c.json({ authenticated: false, user: null });
+    const valid = await isAuthValid();
+    if (!valid) return c.json({ authenticated: false, user: null });
     return c.json({ authenticated: true, user: auth.user || null });
   });
 
   // Better Auth-shaped local session endpoint for editor mode parity.
-  // Trusts local auth.json — actual token validation happens lazily when
-  // BFF-proxied cloud calls return 401 (which clears stale auth).
   app.get("/api/auth/get-session", async (c) => {
     const auth = readLocalAuthSession();
     if (!auth) return c.json({ session: null, user: null });
+    const valid = await isAuthValid();
+    if (!valid) return c.json({ session: null, user: null });
     return c.json({
       session: { token: auth.token },
       user: auth.user,
