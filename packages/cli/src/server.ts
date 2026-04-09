@@ -981,6 +981,9 @@ export async function startServer(
   /** Track last auto-sync date to avoid syncing more than once per day. */
   let lastAutoSyncDate: string | null = null;
 
+  /** Simple mutex to prevent concurrent sync operations on the insights store. */
+  let syncLock: Promise<unknown> = Promise.resolve();
+
   /**
    * Aggregate local insights by (date, machineId) and push to cloud.
    * Each day becomes one row in cloud — Prometheus-style time series.
@@ -1065,11 +1068,17 @@ export async function startServer(
    * Auto-sync insights to cloud if user is logged in.
    * Runs at most once per calendar day to avoid excessive writes.
    */
-  const autoSyncInsights = async (): Promise<void> => {
+  const autoSyncInsights = (): Promise<void> => {
     const today = new Date().toISOString().slice(0, 10);
-    if (lastAutoSyncDate === today) return; // Already synced today
-    const result = await syncInsightsToCloud();
-    if (!result.error) lastAutoSyncDate = today;
+    if (lastAutoSyncDate === today) return Promise.resolve();
+    // Serialize through syncLock to prevent concurrent read-modify-write on the store
+    const job = syncLock.then(async () => {
+      if (lastAutoSyncDate === today) return; // Re-check after acquiring lock
+      const result = await syncInsightsToCloud();
+      if (!result.error) lastAutoSyncDate = today;
+    });
+    syncLock = job.catch(() => {});
+    return job;
   };
 
   /** Pre-compute all insights from scan results and store in cache. */
@@ -1797,6 +1806,17 @@ export async function startServer(
         headers: { Cookie: `${cookieName}=${auth.token}` },
         signal: AbortSignal.timeout(5_000),
       });
+      if (!resp.ok) {
+        if (resp.status === 401 || resp.status === 403) {
+          // Auth rejected — clear session so UI shows logged out
+          await clearLocalAuthSession();
+          validatedAuth = { valid: false, checkedAt: now };
+          return false;
+        }
+        // 5xx / other non-2xx — treat like network error (offline-friendly)
+        validatedAuth = { valid: true, checkedAt: now };
+        return true;
+      }
       const data = await resp.json();
       const valid = !!(data && data.session && data.user);
       if (!valid) {
@@ -1806,7 +1826,7 @@ export async function startServer(
       validatedAuth = { valid, checkedAt: now };
       return valid;
     } catch {
-      // Network error — assume still valid (offline-friendly)
+      // Network/timeout error — assume still valid (offline-friendly)
       validatedAuth = { valid: true, checkedAt: now };
       return true;
     }

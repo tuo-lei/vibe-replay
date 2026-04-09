@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
 import { Hono } from "hono";
@@ -481,6 +481,16 @@ app.post("/api/cloud-replays", async (c) => {
     // D1 insert failed — clean up R2 object to prevent orphaning
     await c.env.REPLAY_BUCKET.delete(r2Key).catch(() => {});
     throw e;
+  }
+
+  // Post-insert quota re-check to guard against concurrent uploads
+  const postInsertUsed = await getUserR2Storage(db, userId);
+  if (postInsertUsed > MAX_TOTAL_STORAGE) {
+    await Promise.all([
+      db.delete(cloudReplays).where(eq(cloudReplays.id, id)),
+      c.env.REPLAY_BUCKET.delete(r2Key),
+    ]).catch(() => {});
+    return c.json({ error: "Storage quota exceeded (max 20MB)" }, 413);
   }
 
   const baseUrl = getBaseUrl(c);
@@ -1196,7 +1206,8 @@ app.get("/api/insights/summary", async (c) => {
   const sessionsPerDay: Record<string, number> = {};
   for (const r of dailyRows) sessionsPerDay[r.date] = r.sessions;
 
-  // JSON breakdowns — need to merge across all rows
+  // JSON breakdowns — merge across rows (bounded to last 365 days to avoid unbounded queries)
+  const cutoffDate = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const allRows = await db
     .select({
       projects: dailyInsights.projects,
@@ -1204,7 +1215,7 @@ app.get("/api/insights/summary", async (c) => {
       providers: dailyInsights.providers,
     })
     .from(dailyInsights)
-    .where(eq(dailyInsights.userId, userId));
+    .where(and(eq(dailyInsights.userId, userId), gte(dailyInsights.date, cutoffDate)));
 
   // Merge JSON breakdowns across all daily rows
   const projectsAgg: Record<
@@ -1388,6 +1399,16 @@ app.post("/api/files", async (c) => {
     throw e;
   }
 
+  // Post-insert quota re-check to guard against concurrent uploads
+  const postInsertUsed = await getUserR2Storage(db, userId);
+  if (postInsertUsed > MAX_TOTAL_STORAGE) {
+    await Promise.all([
+      db.delete(userFiles).where(eq(userFiles.id, id)),
+      c.env.REPLAY_BUCKET.delete(r2Key),
+    ]).catch(() => {});
+    return c.json({ error: "Storage quota exceeded (max 20MB)" }, 413);
+  }
+
   const baseUrl = getBaseUrl(c);
   return c.json({ id, url: `${baseUrl}/f/${id}`, expiresAt, sizeBytes });
 });
@@ -1488,11 +1509,14 @@ app.get("/f/:idRaw", async (c) => {
   const obj = await c.env.REPLAY_BUCKET.get(`files/${id}.${ext}`);
   if (!obj) return c.text("Not Found", 404);
 
-  // Increment view count (fire-and-forget)
-  db.update(userFiles)
-    .set({ viewCount: sql`${userFiles.viewCount} + 1` })
-    .where(eq(userFiles.id, id))
-    .catch(() => {});
+  // Increment view count (non-blocking but guaranteed via waitUntil)
+  c.executionCtx.waitUntil(
+    db
+      .update(userFiles)
+      .set({ viewCount: sql`${userFiles.viewCount} + 1` })
+      .where(eq(userFiles.id, id))
+      .catch(() => {}),
+  );
 
   const headers: Record<string, string> = {
     "Content-Type": record.contentType,

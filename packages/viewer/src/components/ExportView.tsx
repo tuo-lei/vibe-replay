@@ -480,7 +480,11 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
         // For SVG, encode text to base64; GIF content is already base64
         const base64 =
           type === "svg"
-            ? btoa(String.fromCharCode(...new TextEncoder().encode(content)))
+            ? btoa(
+                Array.from(new TextEncoder().encode(content), (b) => String.fromCharCode(b)).join(
+                  "",
+                ),
+              )
             : content;
         const contentType = type === "gif" ? "image/gif" : "image/svg+xml";
         const filename = `session-preview.${type}`;
