@@ -104,6 +104,13 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
       });
   }, [isEditor]);
 
+  // Abort in-flight studio operations on unmount
+  useEffect(() => {
+    return () => {
+      if (abortRef.current) abortRef.current.abort();
+    };
+  }, []);
+
   // Detect tools
   useEffect(() => {
     if (!isEditor) return;

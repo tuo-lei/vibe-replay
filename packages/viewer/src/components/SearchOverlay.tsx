@@ -107,9 +107,6 @@ export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) 
     return matches;
   }, [scenes, query]);
 
-  // Reset selection when results change
-  useEffect(() => setSelectedIdx(0), []);
-
   // Scroll selected into view
   useEffect(() => {
     if (!listRef.current) return;
@@ -152,6 +149,9 @@ export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) 
     <div
       className="fixed inset-0 z-50 flex items-start justify-center pt-[8vh] sm:pt-[15vh]"
       onClick={onClose}
+      role="dialog"
+      aria-label="Search scenes"
+      aria-modal="true"
     >
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
       <div
@@ -166,8 +166,12 @@ export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) 
             ref={inputRef}
             type="text"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setSelectedIdx(0);
+            }}
             placeholder="Search scenes..."
+            aria-label="Search scenes"
             className="flex-1 bg-transparent text-sm font-sans font-medium text-terminal-text placeholder-terminal-dim outline-none"
           />
           <kbd className="text-[10px] font-mono text-terminal-dimmer bg-terminal-surface px-2 py-0.5 rounded-md">
