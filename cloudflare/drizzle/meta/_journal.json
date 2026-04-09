@@ -43,6 +43,13 @@
       "when": 1775714783542,
       "tag": "0005_dry_bill_hollister",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1775716199077,
+      "tag": "0006_material_vindicator",
+      "breakpoints": true
     }
   ]
 }
