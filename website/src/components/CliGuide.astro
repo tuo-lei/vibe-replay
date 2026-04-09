@@ -1,0 +1,101 @@
+---
+/**
+ * CliGuide — reusable step-by-step guide for getting started with vibe-replay CLI.
+ *
+ * Props:
+ *   heading    – title above the steps (default: "Get Started")
+ *   subheading – optional subtitle
+ *   variant    – "full" (install + scan + dashboard + sync) | "sync" (dashboard + sync only)
+ *                Defaults to "full". Use "sync" when the user is logged in but has no data.
+ */
+interface Props {
+  heading?: string;
+  subheading?: string;
+  variant?: "full" | "sync";
+}
+
+const { heading = "Get Started", subheading, variant = "full" } = Astro.props;
+
+const fullSteps = [
+  {
+    num: "1",
+    title: "Run the CLI",
+    desc: "Scans your local Claude Code & Cursor sessions automatically.",
+    code: "npx vibe-replay",
+  },
+  {
+    num: "2",
+    title: "Open Dashboard",
+    desc: "Browse sessions, view replays, and explore local insights.",
+    code: "npx vibe-replay -d",
+  },
+  {
+    num: "3",
+    title: "Sync to Cloud",
+    desc: 'Click "Sync Insights" in the dashboard to push your data here.',
+    code: null,
+  },
+];
+
+const syncSteps = [
+  {
+    num: "1",
+    title: "Open Dashboard",
+    desc: "Launch the local dashboard to see all your sessions.",
+    code: "npx vibe-replay -d",
+  },
+  {
+    num: "2",
+    title: "Sync Insights",
+    desc: 'Click the "Sync Insights" button — your data appears here instantly.',
+    code: null,
+  },
+];
+
+const steps = variant === "sync" ? syncSteps : fullSteps;
+---
+
+<div class="max-w-lg mx-auto">
+  <div class="text-center mb-6">
+    <h2 class="text-lg font-bold text-text-primary mb-1">{heading}</h2>
+    {subheading && <p class="text-text-muted text-sm">{subheading}</p>}
+  </div>
+
+  <div class="space-y-4">
+    {steps.map((step) => (
+      <div class="flex gap-4 items-start">
+        <div class="shrink-0 w-7 h-7 rounded-full bg-accent/15 flex items-center justify-center">
+          <span class="text-xs font-bold font-mono text-accent">{step.num}</span>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="text-sm font-semibold text-text-primary">{step.title}</div>
+          <p class="text-text-muted text-xs mt-0.5">{step.desc}</p>
+          {step.code && (
+            <div class="mt-2 bg-surface-2 rounded-lg px-3 py-2 font-mono text-xs flex items-center gap-2 border border-border/50">
+              <span class="text-accent select-none">$</span>
+              <span class="text-text-secondary">{step.code}</span>
+            </div>
+          )}
+        </div>
+      </div>
+    ))}
+  </div>
+
+  <!-- What you get -->
+  <div class="mt-6 pt-5 border-t border-border/30">
+    <div class="grid grid-cols-3 gap-3 text-center">
+      <div>
+        <div class="text-sm font-bold text-[#3fb950] font-mono">Sessions</div>
+        <div class="text-[10px] text-text-muted mt-0.5">Activity heatmap &amp; streaks</div>
+      </div>
+      <div>
+        <div class="text-sm font-bold text-[#d29922] font-mono">Costs</div>
+        <div class="text-[10px] text-text-muted mt-0.5">Spending trends by model</div>
+      </div>
+      <div>
+        <div class="text-sm font-bold text-[#79b8ff] font-mono">Projects</div>
+        <div class="text-[10px] text-text-muted mt-0.5">Per-project breakdowns</div>
+      </div>
+    </div>
+  </div>
+</div>

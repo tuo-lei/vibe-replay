@@ -1818,7 +1818,7 @@ export async function startServer(
         return true;
       }
       const data = await resp.json();
-      const valid = !!(data && data.session && data.user);
+      const valid = !!(data?.session && data.user);
       if (!valid) {
         // Token expired — clear it so UI shows logged out
         await clearLocalAuthSession();

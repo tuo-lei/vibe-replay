@@ -1,41 +1,13 @@
 ---
+import CliGuide from "../components/CliGuide.astro";
 import Footer from "../components/Footer.astro";
-import GitHubStar from "../components/GitHubStar.astro";
+import Nav from "../components/Nav.astro";
 import Layout from "../layouts/Layout.astro";
 ---
 
 <Layout title="Insights - vibe-replay" description="Track your AI coding sessions across all machines. View cost, productivity trends, and project analytics.">
   <div class="min-h-screen flex flex-col">
-    <!-- Header -->
-    <nav class="border-b border-border/50 px-6 py-3">
-      <div class="max-w-6xl mx-auto flex items-center justify-between">
-        <div class="flex items-center gap-4">
-          <a href="/" class="font-mono font-bold text-sm hover:opacity-80 transition-opacity bg-gradient-to-r from-accent via-emerald-400 to-cyan-400 bg-clip-text text-transparent">vibe-replay</a>
-          <span class="text-border hidden sm:inline">|</span>
-          <a href="/blog" class="text-text-secondary hover:text-accent text-sm transition-colors hidden sm:inline underline underline-offset-4 decoration-text-muted hover:decoration-accent">Blog</a>
-          <span class="text-text-secondary text-sm hidden sm:inline">Insights</span>
-        </div>
-        <div class="flex items-center gap-3">
-          <GitHubStar />
-          <div id="auth-container" style="display:none">
-            <button id="auth-login" style="display:none" class="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-[#24292f] hover:bg-[#32383f] text-white text-xs font-medium transition-colors cursor-pointer border border-white/10">
-              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-              Sign in
-            </button>
-            <div id="auth-user" style="display:none" class="relative">
-              <button id="auth-avatar-btn" class="flex items-center justify-center w-8 h-8 rounded-full border border-border/60 hover:border-accent/70 transition-all cursor-pointer overflow-hidden">
-                <img id="auth-avatar" class="w-full h-full rounded-full object-cover" alt="" />
-              </button>
-              <div id="auth-dropdown" class="hidden absolute right-0 top-full mt-2 min-w-[160px] bg-surface-1 border border-border rounded-lg shadow-lg py-1 z-50">
-                <a id="auth-username" href="/profile" class="block px-3 py-2 text-xs text-text-secondary border-b border-border truncate hover:text-accent transition-colors"></a>
-                <a href="/profile" class="block px-3 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-surface-2 transition-colors">Profile</a>
-                <button id="auth-logout" class="w-full text-left px-3 py-2 text-sm text-text-secondary hover:text-red-400 hover:bg-surface-2 transition-colors cursor-pointer">Logout</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </nav>
+    <Nav active="insights" />
 
     <!-- Main content -->
     <main class="flex-1 max-w-4xl mx-auto w-full px-4 md:px-6 py-10">
@@ -44,33 +16,260 @@ import Layout from "../layouts/Layout.astro";
         <div class="text-text-muted font-mono text-sm animate-pulse">Loading...</div>
       </div>
 
-      <!-- Not logged in state -->
+      <!-- Not logged in state — skeleton with fake data -->
       <div id="signed-out" class="hidden">
-        <div class="flex items-center justify-center py-20">
-          <div class="rounded-xl border border-border bg-surface-1 p-10 max-w-md text-center">
-            <div class="text-4xl mb-4">&#128202;</div>
-            <h2 class="text-lg font-semibold text-text-primary mb-2">Sign in to view Insights</h2>
-            <p class="text-text-muted text-sm mb-4">Track your AI coding sessions across all machines. Sync insights from the CLI to view cost trends, project analytics, and more.</p>
-            <p class="text-text-muted text-xs font-mono mb-6">npx vibe-replay &rarr; Dashboard &rarr; Sync Insights</p>
-            <button id="signin-btn" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#24292f] hover:bg-[#32383f] text-white text-sm font-medium transition-colors cursor-pointer border border-white/10">
-              <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-              Sign in with GitHub
-            </button>
+        <div class="relative">
+          <!-- Sign-in overlay -->
+          <div class="absolute inset-0 z-20 flex items-start justify-center pt-12 md:pt-20">
+            <div class="rounded-2xl border border-border bg-surface/95 backdrop-blur-sm p-8 shadow-2xl shadow-black/30">
+              <CliGuide heading="Your AI Coding Dashboard" subheading="Track sessions, costs, and productivity across all your machines." variant="full" />
+              <div class="mt-6 text-center">
+                <button id="signin-btn" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#24292f] hover:bg-[#32383f] text-white text-sm font-medium transition-colors cursor-pointer border border-white/10">
+                  <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+                  Sign in with GitHub
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Blurred skeleton dashboard -->
+          <div class="space-y-6 select-none pointer-events-none blur-[6px] opacity-70" aria-hidden="true">
+            <!-- Title -->
+            <div class="flex items-center justify-between">
+              <h1 class="text-lg font-bold text-text-primary">Your Insights</h1>
+            </div>
+
+            <!-- Stats card -->
+            <div class="relative overflow-hidden rounded-2xl bg-gradient-to-br from-surface-1 via-surface to-surface-1 border border-border p-6 md:p-8">
+              <div class="absolute -top-20 -right-20 w-64 h-64 bg-[#3fb950]/5 rounded-full blur-3xl"></div>
+              <div class="absolute -bottom-20 -left-20 w-48 h-48 bg-[#79b8ff]/5 rounded-full blur-3xl"></div>
+              <div class="relative z-10">
+                <div class="grid grid-cols-4 gap-x-6 gap-y-5 mb-6">
+                  <div>
+                    <div class="text-2xl font-mono font-bold text-[#3fb950] tabular-nums">247</div>
+                    <div class="mt-0.5 text-[10px] uppercase text-text-muted tracking-wider">Sessions</div>
+                  </div>
+                  <div>
+                    <div class="text-2xl font-mono font-bold text-[#3fb950] tabular-nums">1,842</div>
+                    <div class="mt-0.5 text-[10px] uppercase text-text-muted tracking-wider">Prompts</div>
+                  </div>
+                  <div>
+                    <div class="text-2xl font-mono font-bold text-[#d29922] tabular-nums">5,621</div>
+                    <div class="mt-0.5 text-[10px] uppercase text-text-muted tracking-wider">Tool Calls</div>
+                  </div>
+                  <div>
+                    <div class="text-2xl font-mono font-bold text-text-primary tabular-nums">38h</div>
+                    <div class="mt-0.5 text-[10px] uppercase text-text-muted tracking-wider">Coding</div>
+                  </div>
+                  <div>
+                    <div class="text-2xl font-mono font-bold text-[#d29922] tabular-nums">$42.17</div>
+                    <div class="mt-0.5 text-[10px] uppercase text-text-muted tracking-wider">Spent</div>
+                  </div>
+                  <div>
+                    <div class="text-2xl font-mono font-bold text-[#79b8ff] tabular-nums">892</div>
+                    <div class="mt-0.5 text-[10px] uppercase text-text-muted tracking-wider">File Edits</div>
+                  </div>
+                  <div>
+                    <div class="text-2xl font-mono font-bold text-[#b392f0] tabular-nums">12</div>
+                    <div class="mt-0.5 text-[10px] uppercase text-text-muted tracking-wider">Projects</div>
+                  </div>
+                  <div></div>
+                </div>
+                <!-- Fake mini heatmap -->
+                <div class="flex gap-[3px] flex-wrap mb-4" id="skeleton-mini-heatmap"></div>
+                <div class="flex items-center justify-between pt-4 border-t border-border/30">
+                  <div class="flex items-center gap-4">
+                    <span class="text-xs font-mono text-text-muted">7 day streak</span>
+                    <span class="text-xs font-mono text-text-muted">Most active: Tuesday</span>
+                  </div>
+                  <span class="text-[10px] font-mono text-text-muted">vibe-replay.com</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Highlight cards -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div class="bg-surface-1 rounded-xl px-4 py-3.5">
+                <div class="flex items-start gap-3">
+                  <span class="text-lg leading-none mt-0.5">&#128293;</span>
+                  <div class="min-w-0">
+                    <div class="text-[10px] font-bold text-text-muted uppercase tracking-widest">Current Streak</div>
+                    <div class="text-lg font-mono font-bold text-text-primary mt-0.5">7 days</div>
+                    <div class="text-[10px] font-mono text-text-muted mt-0.5">Best: 14 days</div>
+                  </div>
+                </div>
+              </div>
+              <div class="bg-surface-1 rounded-xl px-4 py-3.5">
+                <div class="flex items-start gap-3">
+                  <span class="text-lg leading-none mt-0.5">&#9889;</span>
+                  <div class="min-w-0">
+                    <div class="text-[10px] font-bold text-text-muted uppercase tracking-widest">Avg / Active Day</div>
+                    <div class="text-lg font-mono font-bold text-text-primary mt-0.5">3.2 sessions</div>
+                    <div class="text-[10px] font-mono text-text-muted mt-0.5">78 active days</div>
+                  </div>
+                </div>
+              </div>
+              <div class="bg-surface-1 rounded-xl px-4 py-3.5">
+                <div class="flex items-start gap-3">
+                  <span class="text-lg leading-none mt-0.5">&#128172;</span>
+                  <div class="min-w-0">
+                    <div class="text-[10px] font-bold text-text-muted uppercase tracking-widest">Avg / Session</div>
+                    <div class="text-lg font-mono font-bold text-text-primary mt-0.5">7 prompts</div>
+                    <div class="text-[10px] font-mono text-text-muted mt-0.5">~9m each</div>
+                  </div>
+                </div>
+              </div>
+              <div class="bg-surface-1 rounded-xl px-4 py-3.5">
+                <div class="flex items-start gap-3">
+                  <span class="text-lg leading-none mt-0.5">&#127942;</span>
+                  <div class="min-w-0">
+                    <div class="text-[10px] font-bold text-text-muted uppercase tracking-widest">Peak Day</div>
+                    <div class="text-lg font-mono font-bold text-text-primary mt-0.5">11 sessions</div>
+                    <div class="text-[10px] font-mono text-text-muted mt-0.5">Mar 12, 2025</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Charts -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <!-- Weekly trend -->
+              <div class="bg-surface-1 rounded-xl p-5">
+                <h3 class="text-xs font-semibold text-text-primary uppercase tracking-wider mb-4">Weekly Trend</h3>
+                <div class="flex items-end gap-1.5 h-28">
+                  <div class="flex-1 flex justify-center items-end h-full"><div class="w-full rounded-md bg-[#3fb950]" style="height: 35%; opacity: 0.7"></div></div>
+                  <div class="flex-1 flex justify-center items-end h-full"><div class="w-full rounded-md bg-[#3fb950]" style="height: 52%; opacity: 0.7"></div></div>
+                  <div class="flex-1 flex justify-center items-end h-full"><div class="w-full rounded-md bg-[#3fb950]" style="height: 28%; opacity: 0.7"></div></div>
+                  <div class="flex-1 flex justify-center items-end h-full"><div class="w-full rounded-md bg-[#3fb950]" style="height: 65%; opacity: 0.7"></div></div>
+                  <div class="flex-1 flex justify-center items-end h-full"><div class="w-full rounded-md bg-[#3fb950]" style="height: 78%; opacity: 0.7"></div></div>
+                  <div class="flex-1 flex justify-center items-end h-full"><div class="w-full rounded-md bg-[#3fb950]" style="height: 45%; opacity: 0.7"></div></div>
+                  <div class="flex-1 flex justify-center items-end h-full"><div class="w-full rounded-md bg-[#3fb950]" style="height: 82%; opacity: 0.7"></div></div>
+                  <div class="flex-1 flex justify-center items-end h-full"><div class="w-full rounded-md bg-[#3fb950]" style="height: 60%; opacity: 0.7"></div></div>
+                  <div class="flex-1 flex justify-center items-end h-full"><div class="w-full rounded-md bg-[#3fb950]" style="height: 90%; opacity: 0.7"></div></div>
+                  <div class="flex-1 flex justify-center items-end h-full"><div class="w-full rounded-md bg-[#3fb950]" style="height: 72%; opacity: 0.7"></div></div>
+                  <div class="flex-1 flex justify-center items-end h-full"><div class="w-full rounded-md bg-[#3fb950]" style="height: 100%; opacity: 0.7"></div></div>
+                  <div class="flex-1 flex justify-center items-end h-full"><div class="w-full rounded-md bg-[#3fb950]" style="height: 55%; opacity: 0.7"></div></div>
+                </div>
+              </div>
+              <!-- Day of week -->
+              <div class="bg-surface-1 rounded-xl p-5">
+                <h3 class="text-xs font-semibold text-text-primary uppercase tracking-wider mb-4">Day of Week</h3>
+                <div class="space-y-2">
+                  <div class="flex items-center gap-2"><span class="text-[10px] font-mono text-text-muted w-7 text-right shrink-0">Sun</span><div class="flex-1 h-4 rounded bg-surface-2 overflow-hidden"><div class="h-full rounded bg-[#3fb950]" style="width: 20%; opacity: 0.65"></div></div><span class="text-[10px] font-mono text-text-muted w-6 text-right tabular-nums shrink-0">18</span></div>
+                  <div class="flex items-center gap-2"><span class="text-[10px] font-mono text-text-muted w-7 text-right shrink-0">Mon</span><div class="flex-1 h-4 rounded bg-surface-2 overflow-hidden"><div class="h-full rounded bg-[#3fb950]" style="width: 85%; opacity: 0.65"></div></div><span class="text-[10px] font-mono text-text-muted w-6 text-right tabular-nums shrink-0">62</span></div>
+                  <div class="flex items-center gap-2"><span class="text-[10px] font-mono text-text-muted w-7 text-right shrink-0">Tue</span><div class="flex-1 h-4 rounded bg-surface-2 overflow-hidden"><div class="h-full rounded bg-[#3fb950]" style="width: 100%; opacity: 0.65"></div></div><span class="text-[10px] font-mono text-text-muted w-6 text-right tabular-nums shrink-0">71</span></div>
+                  <div class="flex items-center gap-2"><span class="text-[10px] font-mono text-text-muted w-7 text-right shrink-0">Wed</span><div class="flex-1 h-4 rounded bg-surface-2 overflow-hidden"><div class="h-full rounded bg-[#3fb950]" style="width: 70%; opacity: 0.65"></div></div><span class="text-[10px] font-mono text-text-muted w-6 text-right tabular-nums shrink-0">48</span></div>
+                  <div class="flex items-center gap-2"><span class="text-[10px] font-mono text-text-muted w-7 text-right shrink-0">Thu</span><div class="flex-1 h-4 rounded bg-surface-2 overflow-hidden"><div class="h-full rounded bg-[#3fb950]" style="width: 55%; opacity: 0.65"></div></div><span class="text-[10px] font-mono text-text-muted w-6 text-right tabular-nums shrink-0">38</span></div>
+                  <div class="flex items-center gap-2"><span class="text-[10px] font-mono text-text-muted w-7 text-right shrink-0">Fri</span><div class="flex-1 h-4 rounded bg-surface-2 overflow-hidden"><div class="h-full rounded bg-[#3fb950]" style="width: 40%; opacity: 0.65"></div></div><span class="text-[10px] font-mono text-text-muted w-6 text-right tabular-nums shrink-0">28</span></div>
+                  <div class="flex items-center gap-2"><span class="text-[10px] font-mono text-text-muted w-7 text-right shrink-0">Sat</span><div class="flex-1 h-4 rounded bg-surface-2 overflow-hidden"><div class="h-full rounded bg-[#3fb950]" style="width: 12%; opacity: 0.65"></div></div><span class="text-[10px] font-mono text-text-muted w-6 text-right tabular-nums shrink-0">9</span></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Top Projects + Models -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div class="bg-surface-1 rounded-xl p-5">
+                <h3 class="text-xs font-semibold text-text-primary uppercase tracking-wider mb-4">Top Projects</h3>
+                <div class="space-y-2">
+                  <div class="space-y-1">
+                    <div class="flex items-center justify-between"><span class="text-xs font-medium text-text-primary">vibe-replay</span><span class="text-[10px] font-mono text-text-muted tabular-nums">89 sessions &middot; $15.20</span></div>
+                    <div class="h-1.5 rounded-full bg-surface-2 overflow-hidden"><div class="h-full rounded-full bg-gradient-to-r from-[#3fb950] to-[#79b8ff]" style="width: 100%; opacity: 0.65"></div></div>
+                  </div>
+                  <div class="space-y-1">
+                    <div class="flex items-center justify-between"><span class="text-xs font-medium text-text-primary">my-saas-app</span><span class="text-[10px] font-mono text-text-muted tabular-nums">64 sessions &middot; $11.30</span></div>
+                    <div class="h-1.5 rounded-full bg-surface-2 overflow-hidden"><div class="h-full rounded-full bg-gradient-to-r from-[#3fb950] to-[#79b8ff]" style="width: 72%; opacity: 0.65"></div></div>
+                  </div>
+                  <div class="space-y-1">
+                    <div class="flex items-center justify-between"><span class="text-xs font-medium text-text-primary">dotfiles</span><span class="text-[10px] font-mono text-text-muted tabular-nums">35 sessions &middot; $5.80</span></div>
+                    <div class="h-1.5 rounded-full bg-surface-2 overflow-hidden"><div class="h-full rounded-full bg-gradient-to-r from-[#3fb950] to-[#79b8ff]" style="width: 39%; opacity: 0.65"></div></div>
+                  </div>
+                  <div class="space-y-1">
+                    <div class="flex items-center justify-between"><span class="text-xs font-medium text-text-primary">blog</span><span class="text-[10px] font-mono text-text-muted tabular-nums">22 sessions &middot; $3.40</span></div>
+                    <div class="h-1.5 rounded-full bg-surface-2 overflow-hidden"><div class="h-full rounded-full bg-gradient-to-r from-[#3fb950] to-[#79b8ff]" style="width: 25%; opacity: 0.65"></div></div>
+                  </div>
+                </div>
+              </div>
+              <div class="bg-surface-1 rounded-xl p-5">
+                <h3 class="text-xs font-semibold text-text-primary uppercase tracking-wider mb-4">Models</h3>
+                <div class="h-3 rounded-full bg-surface-2 overflow-hidden flex">
+                  <div class="h-full bg-[#3fb950]" style="width: 55%; opacity: 0.7"></div>
+                  <div class="h-full bg-[#79b8ff]" style="width: 30%; opacity: 0.7"></div>
+                  <div class="h-full bg-[#d29922]" style="width: 15%; opacity: 0.7"></div>
+                </div>
+                <div class="grid grid-cols-2 gap-2 mt-3">
+                  <div class="flex items-center gap-2"><div class="w-2.5 h-2.5 rounded-sm bg-[#3fb950] shrink-0" style="opacity: 0.7"></div><span class="text-[11px] font-mono text-text-muted truncate">c-sonnet-4</span><span class="text-[10px] font-mono text-text-muted tabular-nums ml-auto shrink-0">136</span></div>
+                  <div class="flex items-center gap-2"><div class="w-2.5 h-2.5 rounded-sm bg-[#79b8ff] shrink-0" style="opacity: 0.7"></div><span class="text-[11px] font-mono text-text-muted truncate">c-opus-4</span><span class="text-[10px] font-mono text-text-muted tabular-nums ml-auto shrink-0">74</span></div>
+                  <div class="flex items-center gap-2"><div class="w-2.5 h-2.5 rounded-sm bg-[#d29922] shrink-0" style="opacity: 0.7"></div><span class="text-[11px] font-mono text-text-muted truncate">c-haiku-4</span><span class="text-[10px] font-mono text-text-muted tabular-nums ml-auto shrink-0">37</span></div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- No data state -->
+      <!-- No data state — skeleton + getting started guide -->
       <div id="no-data" class="hidden">
-        <div class="flex items-center justify-center py-20">
-          <div class="rounded-xl border border-border bg-surface-1 p-10 max-w-md text-center">
-            <div class="text-4xl mb-4">&#128640;</div>
-            <h2 class="text-lg font-semibold text-text-primary mb-2">No insights synced yet</h2>
-            <p class="text-text-muted text-sm mb-4">Sync your local session insights from the CLI dashboard to see them here.</p>
-            <div class="bg-surface-2 rounded-lg p-4 text-left">
-              <p class="text-text-muted text-xs font-mono mb-1"># In the CLI dashboard, click "Sync Insights"</p>
-              <p class="text-text-muted text-xs font-mono mb-1"># Or use the API endpoint:</p>
-              <p class="text-accent text-xs font-mono">npx vibe-replay -d</p>
+        <div class="relative">
+          <!-- Guide overlay -->
+          <div class="absolute inset-0 z-20 flex items-start justify-center pt-16 md:pt-24">
+            <div class="rounded-2xl border border-border bg-surface/95 backdrop-blur-sm p-8 shadow-2xl shadow-black/30">
+              <CliGuide heading="Sync Your Insights" subheading="You're signed in — just sync from the CLI to see your dashboard." variant="sync" />
+            </div>
+          </div>
+
+          <!-- Blurred skeleton (same as signed-out) -->
+          <div class="space-y-6 select-none pointer-events-none blur-[6px] opacity-70" aria-hidden="true">
+            <div class="flex items-center justify-between">
+              <h1 class="text-lg font-bold text-text-primary">Your Insights</h1>
+            </div>
+            <div class="relative overflow-hidden rounded-2xl bg-gradient-to-br from-surface-1 via-surface to-surface-1 border border-border p-6 md:p-8">
+              <div class="absolute -top-20 -right-20 w-64 h-64 bg-[#3fb950]/5 rounded-full blur-3xl"></div>
+              <div class="absolute -bottom-20 -left-20 w-48 h-48 bg-[#79b8ff]/5 rounded-full blur-3xl"></div>
+              <div class="relative z-10">
+                <div class="grid grid-cols-4 gap-x-6 gap-y-5 mb-6">
+                  <div><div class="text-2xl font-mono font-bold text-[#3fb950] tabular-nums">247</div><div class="mt-0.5 text-[10px] uppercase text-text-muted tracking-wider">Sessions</div></div>
+                  <div><div class="text-2xl font-mono font-bold text-[#3fb950] tabular-nums">1,842</div><div class="mt-0.5 text-[10px] uppercase text-text-muted tracking-wider">Prompts</div></div>
+                  <div><div class="text-2xl font-mono font-bold text-[#d29922] tabular-nums">5,621</div><div class="mt-0.5 text-[10px] uppercase text-text-muted tracking-wider">Tool Calls</div></div>
+                  <div><div class="text-2xl font-mono font-bold text-text-primary tabular-nums">38h</div><div class="mt-0.5 text-[10px] uppercase text-text-muted tracking-wider">Coding</div></div>
+                  <div><div class="text-2xl font-mono font-bold text-[#d29922] tabular-nums">$42.17</div><div class="mt-0.5 text-[10px] uppercase text-text-muted tracking-wider">Spent</div></div>
+                  <div><div class="text-2xl font-mono font-bold text-[#79b8ff] tabular-nums">892</div><div class="mt-0.5 text-[10px] uppercase text-text-muted tracking-wider">File Edits</div></div>
+                  <div><div class="text-2xl font-mono font-bold text-[#b392f0] tabular-nums">12</div><div class="mt-0.5 text-[10px] uppercase text-text-muted tracking-wider">Projects</div></div>
+                  <div></div>
+                </div>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div class="bg-surface-1 rounded-xl px-4 py-3.5"><div class="flex items-start gap-3"><span class="text-lg leading-none mt-0.5">&#128293;</span><div><div class="text-[10px] font-bold text-text-muted uppercase tracking-widest">Current Streak</div><div class="text-lg font-mono font-bold text-text-primary mt-0.5">7 days</div></div></div></div>
+              <div class="bg-surface-1 rounded-xl px-4 py-3.5"><div class="flex items-start gap-3"><span class="text-lg leading-none mt-0.5">&#9889;</span><div><div class="text-[10px] font-bold text-text-muted uppercase tracking-widest">Avg / Active Day</div><div class="text-lg font-mono font-bold text-text-primary mt-0.5">3.2 sessions</div></div></div></div>
+              <div class="bg-surface-1 rounded-xl px-4 py-3.5"><div class="flex items-start gap-3"><span class="text-lg leading-none mt-0.5">&#128172;</span><div><div class="text-[10px] font-bold text-text-muted uppercase tracking-widest">Avg / Session</div><div class="text-lg font-mono font-bold text-text-primary mt-0.5">7 prompts</div></div></div></div>
+              <div class="bg-surface-1 rounded-xl px-4 py-3.5"><div class="flex items-start gap-3"><span class="text-lg leading-none mt-0.5">&#127942;</span><div><div class="text-[10px] font-bold text-text-muted uppercase tracking-widest">Peak Day</div><div class="text-lg font-mono font-bold text-text-primary mt-0.5">11 sessions</div></div></div></div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div class="bg-surface-1 rounded-xl p-5">
+                <h3 class="text-xs font-semibold text-text-primary uppercase tracking-wider mb-4">Weekly Trend</h3>
+                <div class="flex items-end gap-1.5 h-28">
+                  <div class="flex-1 flex justify-center items-end h-full"><div class="w-full rounded-md bg-[#3fb950]" style="height: 35%; opacity: 0.7"></div></div>
+                  <div class="flex-1 flex justify-center items-end h-full"><div class="w-full rounded-md bg-[#3fb950]" style="height: 52%; opacity: 0.7"></div></div>
+                  <div class="flex-1 flex justify-center items-end h-full"><div class="w-full rounded-md bg-[#3fb950]" style="height: 65%; opacity: 0.7"></div></div>
+                  <div class="flex-1 flex justify-center items-end h-full"><div class="w-full rounded-md bg-[#3fb950]" style="height: 78%; opacity: 0.7"></div></div>
+                  <div class="flex-1 flex justify-center items-end h-full"><div class="w-full rounded-md bg-[#3fb950]" style="height: 45%; opacity: 0.7"></div></div>
+                  <div class="flex-1 flex justify-center items-end h-full"><div class="w-full rounded-md bg-[#3fb950]" style="height: 82%; opacity: 0.7"></div></div>
+                  <div class="flex-1 flex justify-center items-end h-full"><div class="w-full rounded-md bg-[#3fb950]" style="height: 90%; opacity: 0.7"></div></div>
+                  <div class="flex-1 flex justify-center items-end h-full"><div class="w-full rounded-md bg-[#3fb950]" style="height: 72%; opacity: 0.7"></div></div>
+                  <div class="flex-1 flex justify-center items-end h-full"><div class="w-full rounded-md bg-[#3fb950]" style="height: 100%; opacity: 0.7"></div></div>
+                  <div class="flex-1 flex justify-center items-end h-full"><div class="w-full rounded-md bg-[#3fb950]" style="height: 55%; opacity: 0.7"></div></div>
+                </div>
+              </div>
+              <div class="bg-surface-1 rounded-xl p-5">
+                <h3 class="text-xs font-semibold text-text-primary uppercase tracking-wider mb-4">Day of Week</h3>
+                <div class="space-y-2">
+                  <div class="flex items-center gap-2"><span class="text-[10px] font-mono text-text-muted w-7 text-right shrink-0">Mon</span><div class="flex-1 h-4 rounded bg-surface-2 overflow-hidden"><div class="h-full rounded bg-[#3fb950]" style="width: 85%; opacity: 0.65"></div></div></div>
+                  <div class="flex items-center gap-2"><span class="text-[10px] font-mono text-text-muted w-7 text-right shrink-0">Tue</span><div class="flex-1 h-4 rounded bg-surface-2 overflow-hidden"><div class="h-full rounded bg-[#3fb950]" style="width: 100%; opacity: 0.65"></div></div></div>
+                  <div class="flex items-center gap-2"><span class="text-[10px] font-mono text-text-muted w-7 text-right shrink-0">Wed</span><div class="flex-1 h-4 rounded bg-surface-2 overflow-hidden"><div class="h-full rounded bg-[#3fb950]" style="width: 70%; opacity: 0.65"></div></div></div>
+                  <div class="flex items-center gap-2"><span class="text-[10px] font-mono text-text-muted w-7 text-right shrink-0">Thu</span><div class="flex-1 h-4 rounded bg-surface-2 overflow-hidden"><div class="h-full rounded bg-[#3fb950]" style="width: 55%; opacity: 0.65"></div></div></div>
+                  <div class="flex items-center gap-2"><span class="text-[10px] font-mono text-text-muted w-7 text-right shrink-0">Fri</span><div class="flex-1 h-4 rounded bg-surface-2 overflow-hidden"><div class="h-full rounded bg-[#3fb950]" style="width: 40%; opacity: 0.65"></div></div></div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -841,38 +1040,24 @@ import Layout from "../layouts/Layout.astro";
     renderInsights(summary);
   }
 
-  // --- Auth UI (same pattern as profile page) ---
-  function initAuth(): void {
-    const container = document.getElementById("auth-container")!;
-    const loginBtn = document.getElementById("auth-login")!;
-    const userEl = document.getElementById("auth-user")!;
-    const avatarBtn = document.getElementById("auth-avatar-btn")!;
-    const avatar = document.getElementById("auth-avatar") as HTMLImageElement;
-    const dropdown = document.getElementById("auth-dropdown")!;
-    const username = document.getElementById("auth-username")!;
-    const logoutBtn = document.getElementById("auth-logout")!;
-    const signinBtn = document.getElementById("signin-btn");
+  // Auth is handled by Nav component
 
-    container.style.display = "";
+  // Render skeleton mini heatmap (28 fake cells)
+  const skeletonHeatmap = document.getElementById("skeleton-mini-heatmap");
+  if (skeletonHeatmap) {
+    const pattern = [0,1,0,2,3,1,0,0,2,1,3,2,0,1,0,3,2,1,0,0,1,2,3,1,2,0,1,3];
+    const opacities = [0, 0.45, 0.6, 0.9];
+    skeletonHeatmap.innerHTML = pattern.map((v) =>
+      v === 0
+        ? `<div class="w-[10px] h-[10px] rounded-[2px] bg-border/20"></div>`
+        : `<div class="w-[10px] h-[10px] rounded-[2px] bg-[#3fb950]" style="opacity: ${opacities[v]}"></div>`
+    ).join("");
+  }
 
-    fetch("/api/auth/get-session", { credentials: "include" })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data?.session && data?.user) {
-          loginBtn.style.display = "none";
-          userEl.style.display = "";
-          if (data.user.image) avatar.src = data.user.image;
-          username.textContent = data.user.name || data.user.email || "User";
-        } else {
-          loginBtn.style.display = "";
-          userEl.style.display = "none";
-        }
-      })
-      .catch(() => {
-        loginBtn.style.display = "";
-      });
-
-    const doLogin = async () => {
+  // Sign-in button in the centered card
+  const signinBtn = document.getElementById("signin-btn");
+  if (signinBtn) {
+    signinBtn.addEventListener("click", async () => {
       try {
         const res = await fetch("/api/auth/sign-in/social", {
           method: "POST",
@@ -883,32 +1068,10 @@ import Layout from "../layouts/Layout.astro";
         const data = await res.json();
         if (data?.url) window.location.href = data.url;
       } catch {
-        // Fallback to redirect-based login
         window.location.href = "/auth/login?callback=/insights";
       }
-    };
-    loginBtn.addEventListener("click", doLogin);
-    signinBtn?.addEventListener("click", doLogin);
-
-    avatarBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      dropdown.classList.toggle("hidden");
-    });
-    document.addEventListener("click", () => dropdown.classList.add("hidden"));
-
-    logoutBtn.addEventListener("click", async () => {
-      try {
-        await fetch("/api/auth/sign-out", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: "{}",
-        });
-      } catch { /* ignore */ }
-      window.location.reload();
     });
   }
 
-  initAuth();
   initInsights();
 </script>

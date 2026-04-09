@@ -674,6 +674,14 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   const [generatingSlug, setGeneratingSlug] = useState<string | null>(null);
   const [generateErrorSlug, setGenerateErrorSlug] = useState<string | null>(null);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<
+    "idle" | "syncing" | "done" | "error" | "needsLogin" | "awaitingLogin"
+  >("idle");
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
+  const [tick, setTick] = useState(0);
+  const syncPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const syncPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedSession = selectedSlug
     ? (sources.find((s) => s.slug === selectedSlug) ?? null)
     : null;
@@ -791,6 +799,115 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
       // ignore
     }
   };
+
+  const doSync = async () => {
+    setSyncStatus("syncing");
+    setSyncMessage(null);
+    try {
+      const resp = await fetch("/api/insights/sync", { method: "POST" });
+      const data = await resp.json();
+      if (resp.status === 401) {
+        setSyncStatus("needsLogin");
+        setSyncMessage(null);
+        return;
+      }
+      if (!resp.ok || data.error) {
+        setSyncStatus("error");
+        setSyncMessage(data.error || "Sync failed");
+        setTimeout(() => {
+          setSyncStatus((s) => (s === "error" ? "idle" : s));
+          setSyncMessage(null);
+        }, 4000);
+      } else {
+        setSyncStatus("done");
+        setSyncMessage(data.message || `Synced ${data.synced ?? 0} insights`);
+        setLastSyncedAt(Date.now());
+      }
+    } catch {
+      setSyncStatus("error");
+      setSyncMessage("Network error");
+      setTimeout(() => {
+        setSyncStatus((s) => (s === "error" ? "idle" : s));
+        setSyncMessage(null);
+      }, 4000);
+    }
+  };
+
+  const handleSyncInsights = () => {
+    doSync();
+  };
+
+  const handleLoginThenSync = async () => {
+    setSyncStatus("awaitingLogin");
+    setSyncMessage("Waiting for sign in...");
+    try {
+      const res = await fetch("/api/auth/login", { method: "POST" });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.url) {
+        window.open(data.url, "_blank");
+      }
+    } catch {
+      // fall through — poll will handle it
+    }
+    // Poll for login completion, then auto-sync
+    if (syncPollRef.current) clearInterval(syncPollRef.current);
+    if (syncPollTimeoutRef.current) clearTimeout(syncPollTimeoutRef.current);
+    syncPollRef.current = setInterval(async () => {
+      try {
+        const r = await fetch("/api/auth/get-session");
+        const s = await r.json();
+        if (s?.session) {
+          if (syncPollRef.current) {
+            clearInterval(syncPollRef.current);
+            syncPollRef.current = null;
+          }
+          if (syncPollTimeoutRef.current) {
+            clearTimeout(syncPollTimeoutRef.current);
+            syncPollTimeoutRef.current = null;
+          }
+          window.dispatchEvent(new Event("vibe-auth-change"));
+          doSync();
+        }
+      } catch {}
+    }, 2000);
+    syncPollTimeoutRef.current = setTimeout(
+      () => {
+        if (syncPollRef.current) {
+          clearInterval(syncPollRef.current);
+          syncPollRef.current = null;
+        }
+        setSyncStatus("idle");
+        setSyncMessage(null);
+      },
+      3 * 60 * 1000,
+    );
+  };
+
+  useEffect(() => {
+    return () => {
+      if (syncPollRef.current) clearInterval(syncPollRef.current);
+      if (syncPollTimeoutRef.current) clearTimeout(syncPollTimeoutRef.current);
+    };
+  }, []);
+
+  // Tick every 30s to update "synced X ago" relative time
+  useEffect(() => {
+    if (!lastSyncedAt) return;
+    const timer = setInterval(() => setTick((t) => t + 1), 30_000);
+    return () => clearInterval(timer);
+  }, [lastSyncedAt]);
+
+  // Recomputed on every tick (via setTick) to keep relative time fresh
+  void tick;
+  const syncedAgoLabel = (() => {
+    if (!lastSyncedAt) return null;
+    const diffMs = Date.now() - lastSyncedAt;
+    if (diffMs < 60_000) return "just now";
+    const mins = Math.floor(diffMs / 60_000);
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    return `${hrs}h ago`;
+  })();
 
   if (loading && !sources.length && !replays.length) {
     return (
@@ -925,13 +1042,58 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           {/* Heatmap */}
           <ContributionHeatmap sessionsPerDay={displaySessionsPerDay} weeks={52} />
 
-          {/* CTA link */}
-          <button
-            onClick={() => onNavigate("insights")}
-            className="w-full py-2.5 mt-3 text-xs font-sans font-semibold rounded-lg bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200"
-          >
-            View personal insights &rarr;
-          </button>
+          {/* CTA buttons */}
+          <div className="flex gap-2 mt-3">
+            <button
+              onClick={() => onNavigate("insights")}
+              className="flex-1 py-2.5 text-xs font-sans font-semibold rounded-lg bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200"
+            >
+              View personal insights &rarr;
+            </button>
+            <button
+              onClick={handleSyncInsights}
+              disabled={syncStatus === "syncing" || syncStatus === "awaitingLogin"}
+              className={`py-2.5 px-4 text-xs font-sans font-semibold rounded-lg border transition-all duration-200 disabled:opacity-50 disabled:cursor-wait shrink-0 ${
+                syncStatus === "done"
+                  ? "bg-terminal-green/8 text-terminal-green border-terminal-green/20"
+                  : syncStatus === "error"
+                    ? "bg-red-400/8 text-red-400 border-red-400/20"
+                    : "bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover border-terminal-border"
+              }`}
+              title={syncMessage || undefined}
+            >
+              {syncStatus === "syncing"
+                ? "Syncing..."
+                : syncStatus === "done" && syncedAgoLabel
+                  ? `\u2713 Synced ${syncedAgoLabel}`
+                  : syncStatus === "error"
+                    ? "Sync failed"
+                    : syncStatus === "awaitingLogin"
+                      ? "Waiting..."
+                      : "\u2191 Sync to cloud"}
+            </button>
+            <a
+              href="https://vibe-replay.com/insights/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center w-9 h-9 rounded-lg text-terminal-dim hover:text-terminal-green hover:bg-terminal-surface-hover transition-colors shrink-0"
+              title="View insights on vibe-replay.com"
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
+                />
+              </svg>
+            </a>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-stretch">
@@ -1056,6 +1218,111 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           isGenerating={generatingSlug === selectedSession.slug}
           isArchived={false}
         />
+      )}
+
+      {/* Sync login modal */}
+      {(syncStatus === "needsLogin" || syncStatus === "awaitingLogin") && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && syncStatus === "needsLogin") {
+              setSyncStatus("idle");
+            }
+          }}
+        >
+          <div className="relative bg-terminal-surface border border-terminal-border rounded-2xl shadow-2xl max-w-md w-full mx-4 p-6">
+            {/* Close button */}
+            {syncStatus === "needsLogin" && (
+              <button
+                onClick={() => setSyncStatus("idle")}
+                className="absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded-md text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors cursor-pointer"
+              >
+                &times;
+              </button>
+            )}
+
+            {syncStatus === "needsLogin" ? (
+              <>
+                <h3 className="text-base font-bold text-terminal-text mb-1">
+                  Sync Insights to the Cloud
+                </h3>
+                <p className="text-xs text-terminal-dim mb-5">
+                  Sign in with GitHub to unlock your online dashboard.
+                </p>
+
+                {/* Value props */}
+                <div className="space-y-3 mb-6">
+                  <div className="flex items-start gap-3">
+                    <span className="shrink-0 w-7 h-7 rounded-full bg-terminal-green/10 flex items-center justify-center text-xs font-bold font-mono text-terminal-green">
+                      1
+                    </span>
+                    <div>
+                      <div className="text-sm font-semibold text-terminal-text">
+                        Cross-machine dashboard
+                      </div>
+                      <p className="text-[11px] text-terminal-dim mt-0.5">
+                        See all your sessions, costs, and streaks in one place — from any browser.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <span className="shrink-0 w-7 h-7 rounded-full bg-terminal-orange/10 flex items-center justify-center text-xs font-bold font-mono text-terminal-orange">
+                      2
+                    </span>
+                    <div>
+                      <div className="text-sm font-semibold text-terminal-text">
+                        Cost tracking &amp; trends
+                      </div>
+                      <p className="text-[11px] text-terminal-dim mt-0.5">
+                        Track spending by model, spot weekly patterns, and monitor project
+                        breakdowns.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <span className="shrink-0 w-7 h-7 rounded-full bg-terminal-blue/10 flex items-center justify-center text-xs font-bold font-mono text-terminal-blue">
+                      3
+                    </span>
+                    <div>
+                      <div className="text-sm font-semibold text-terminal-text">
+                        Share your coding card
+                      </div>
+                      <p className="text-[11px] text-terminal-dim mt-0.5">
+                        Activity heatmaps, streak badges, and project stats — shareable at a glance.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* CTA */}
+                <button
+                  onClick={handleLoginThenSync}
+                  className="w-full inline-flex items-center justify-center gap-2 h-10 rounded-lg bg-[#24292f] hover:bg-[#32383f] text-white text-sm font-semibold transition-colors cursor-pointer border border-white/10"
+                >
+                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+                  </svg>
+                  Sign in with GitHub
+                </button>
+                <p className="text-[10px] text-terminal-dim text-center mt-3">
+                  We&apos;ll auto-sync your insights right after sign in.
+                </p>
+              </>
+            ) : (
+              /* Awaiting login state */
+              <div className="text-center py-4">
+                <div className="text-2xl mb-3 animate-pulse">&uarr;</div>
+                <h3 className="text-base font-bold text-terminal-text mb-1">
+                  Waiting for sign in...
+                </h3>
+                <p className="text-xs text-terminal-dim">
+                  Complete GitHub sign in in the browser tab. We&apos;ll auto-sync once you&apos;re
+                  in.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
