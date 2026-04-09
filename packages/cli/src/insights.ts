@@ -150,12 +150,10 @@ export function mergeInsights(
   for (const scan of scanResults) {
     const existing = byId.get(scan.sessionId);
     if (existing) {
-      // Update with fresh scan data but preserve original provenance + sync state
+      // Update with fresh scan data but preserve original provenance
       const updated = scanResultToInsight(scan);
       updated.capturedAt = existing.capturedAt;
       updated.updatedAt = new Date().toISOString();
-      updated.syncedAt = existing.syncedAt;
-      updated.cloudId = existing.cloudId;
       // Preserve original capture machine (session belongs to where it ran, not where it's re-scanned)
       updated.machineId = existing.machineId ?? updated.machineId;
       updated.machineName = existing.machineName ?? updated.machineName;
@@ -173,32 +171,139 @@ export function mergeInsights(
 }
 
 // ---------------------------------------------------------------------------
-// Sync helpers
+// Daily aggregation for cloud sync
 // ---------------------------------------------------------------------------
 
-/** Get insights that need syncing (never synced or updated since last sync) */
-export function getUnsyncedInsights(store: InsightsStore): SessionInsight[] {
-  return store.sessions.filter((s) => {
-    if (!s.syncedAt) return true;
-    if (s.updatedAt && s.updatedAt > s.syncedAt) return true;
-    return false;
-  });
+interface DailyBreakdown {
+  sessions: number;
+  cost: number;
+  prompts: number;
+  toolCalls: number;
+  edits: number;
+  durationMs: number;
 }
 
-/** Mark sessions as synced after successful cloud upload */
-export function markSynced(
-  store: InsightsStore,
-  syncedIds: Map<string, string>, // sessionId → cloudId
-): InsightsStore {
-  const now = new Date().toISOString();
-  const sessions = store.sessions.map((s) => {
-    const cloudId = syncedIds.get(s.sessionId);
-    if (cloudId !== undefined) {
-      return { ...s, syncedAt: now, cloudId };
+interface DailyRow {
+  date: string;
+  sessions: number;
+  prompts: number;
+  toolCalls: number;
+  edits: number;
+  durationMs: number;
+  cost: number;
+  projects: string; // JSON
+  models: string; // JSON
+  providers: string; // JSON
+}
+
+/**
+ * Aggregate local session insights into daily rows for cloud sync.
+ * Groups by date, computes JSON breakdowns for project/model/provider.
+ */
+export function aggregateDailyInsights(store: InsightsStore): {
+  machineId: string;
+  machineName: string;
+  days: DailyRow[];
+} {
+  const byDate = new Map<
+    string,
+    {
+      sessions: number;
+      prompts: number;
+      toolCalls: number;
+      edits: number;
+      durationMs: number;
+      cost: number;
+      projects: Record<string, DailyBreakdown>;
+      models: Record<string, { sessions: number; cost: number }>;
+      providers: Record<string, { sessions: number; cost: number }>;
     }
-    return s;
-  });
-  return { ...store, sessions, lastUpdated: now };
+  >();
+
+  for (const s of store.sessions) {
+    const date = s.startTime?.slice(0, 10);
+    if (!date) continue;
+
+    let day = byDate.get(date);
+    if (!day) {
+      day = {
+        sessions: 0,
+        prompts: 0,
+        toolCalls: 0,
+        edits: 0,
+        durationMs: 0,
+        cost: 0,
+        projects: {},
+        models: {},
+        providers: {},
+      };
+      byDate.set(date, day);
+    }
+
+    day.sessions++;
+    day.prompts += s.promptCount;
+    day.toolCalls += s.toolCallCount;
+    day.edits += s.editCount;
+    day.durationMs += s.durationMs || 0;
+    day.cost += s.costEstimate || 0;
+
+    // Project breakdown
+    const proj = s.project;
+    if (proj) {
+      if (!day.projects[proj])
+        day.projects[proj] = {
+          sessions: 0,
+          cost: 0,
+          prompts: 0,
+          toolCalls: 0,
+          edits: 0,
+          durationMs: 0,
+        };
+      day.projects[proj].sessions++;
+      day.projects[proj].cost += s.costEstimate || 0;
+      day.projects[proj].prompts += s.promptCount;
+      day.projects[proj].toolCalls += s.toolCallCount;
+      day.projects[proj].edits += s.editCount;
+      day.projects[proj].durationMs += s.durationMs || 0;
+    }
+
+    // Model breakdown
+    const model = s.model;
+    if (model) {
+      if (!day.models[model]) day.models[model] = { sessions: 0, cost: 0 };
+      day.models[model].sessions++;
+      day.models[model].cost += s.costEstimate || 0;
+    }
+
+    // Provider breakdown
+    const prov = s.provider;
+    if (prov) {
+      if (!day.providers[prov]) day.providers[prov] = { sessions: 0, cost: 0 };
+      day.providers[prov].sessions++;
+      day.providers[prov].cost += s.costEstimate || 0;
+    }
+  }
+
+  const days: DailyRow[] = [...byDate.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, d]) => ({
+      date,
+      sessions: d.sessions,
+      prompts: d.prompts,
+      toolCalls: d.toolCalls,
+      edits: d.edits,
+      durationMs: d.durationMs,
+      cost: d.cost,
+      projects: JSON.stringify(d.projects),
+      models: JSON.stringify(d.models),
+      providers: JSON.stringify(d.providers),
+    }));
+
+  return {
+    machineId: getMachineId(),
+    machineName: getMachineName(),
+    days,
+  };
 }
 
 /** Get store file path (for display/debugging) */
@@ -209,23 +314,17 @@ export function getInsightsStorePath(): string {
 /** Get store stats */
 export function getInsightsStats(store: InsightsStore): {
   total: number;
-  synced: number;
-  unsynced: number;
   providers: Record<string, number>;
   projects: number;
 } {
-  let synced = 0;
   const providers: Record<string, number> = {};
   const projects = new Set<string>();
   for (const s of store.sessions) {
-    if (s.syncedAt) synced++;
     providers[s.provider] = (providers[s.provider] || 0) + 1;
     projects.add(s.project);
   }
   return {
     total: store.sessions.length,
-    synced,
-    unsynced: store.sessions.length - synced,
     providers,
     projects: projects.size,
   };

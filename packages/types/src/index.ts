@@ -183,10 +183,6 @@ export interface SessionInsight {
   // Machine identity (for multi-machine aggregation)
   machineId?: string;
   machineName?: string;
-
-  // Sync state (local-only, not sent to cloud)
-  syncedAt?: string;
-  cloudId?: string;
 }
 
 /** The on-disk structure for ~/.vibe-replay/insights/store.json */
@@ -194,31 +190,6 @@ export interface InsightsStore {
   schemaVersion: number;
   lastUpdated: string;
   sessions: SessionInsight[];
-}
-
-/** Summary returned by the cloud insights API */
-export interface CloudInsightsSummary {
-  totalSessions: number;
-  totalProjects: number;
-  totalDurationMs: number;
-  totalCost: number;
-  totalPrompts: number;
-  totalToolCalls: number;
-  totalEdits: number;
-  providers: Record<string, number>;
-  models: Record<string, number>;
-  topProjects: Array<{
-    project: string;
-    sessions: number;
-    cost: number;
-    durationMs: number;
-    prompts: number;
-    toolCalls: number;
-    edits: number;
-    lastActivity: string;
-  }>;
-  timeRange: { first: string; last: string };
-  sessionsPerDay: Record<string, number>;
 }
 
 export interface ReplaySession {
