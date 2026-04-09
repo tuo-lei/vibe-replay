@@ -12,6 +12,7 @@ import { AnimatedValue } from "../hooks/useAnimatedNumber";
 import type { SessionSummary, SourceSession } from "../types";
 import { DataQualityIndicator } from "./DataQualityIndicator";
 import {
+  formatCompactAge,
   formatCompactDuration,
   parseCachedList,
   projectName,
@@ -1180,18 +1181,14 @@ export default function InsightsPage() {
 
       const spd = userInsights.sessionsPerDay || {};
       const filtered = filterSessionsByRange(spd, range);
-      // Merge scanner totals with homepage counts — use the higher value for each
-      // so that insights always shows >= homepage numbers.
-      const mergedTotals = {
+      const scanSnapshotTotals = {
         ...userInsights,
-        totalSessions: Math.max(userInsights.totalSessions, homePageCounts?.sessions ?? 0),
+        // Replays come from generated artifacts rather than the scan snapshot, so
+        // keep using the homepage cache here while the rest of the stats stay on
+        // the single insights-scan timeline.
         totalReplays: homePageCounts?.replays ?? 0,
-        totalPrompts: Math.max(userInsights.totalPrompts, homePageCounts?.prompts ?? 0),
-        totalToolCalls: Math.max(userInsights.totalToolCalls, homePageCounts?.toolCalls ?? 0),
-        totalDurationMs: Math.max(userInsights.totalDurationMs, homePageCounts?.duration ?? 0),
-        totalProjects: Math.max(userInsights.totalProjects, homePageCounts?.projects ?? 0),
       };
-      const s = computeStats(filtered, mergedTotals, range);
+      const s = computeStats(filtered, scanSnapshotTotals, range);
       const sk = computeStreak(spd); // always compute streak from all data
       const dow = computeDayOfWeek(filtered);
       const best = [...dow].sort((a, b) => b.count - a.count)[0] || null;
@@ -1230,6 +1227,14 @@ export default function InsightsPage() {
   const daysSinceFirst = firstSessionDate
     ? Math.floor((Date.now() - new Date(firstSessionDate).getTime()) / DAY_MS)
     : 0;
+  const currentSourceSessionCount = homePageCounts?.sessions ?? userInsights.totalSessions;
+  const pendingSessionDelta = Math.max(0, currentSourceSessionCount - userInsights.totalSessions);
+  const showSnapshotNotice = Boolean(scanStatus?.running && scanStatus?.hasCachedResults);
+  const snapshotAge = scanStatus?.cachedAt ? formatCompactAge(scanStatus.cachedAt) : "";
+  const refreshProgress =
+    scanStatus?.total && scanStatus.total > 0
+      ? `${Math.min(scanStatus.scanned, scanStatus.total)}/${scanStatus.total}`
+      : undefined;
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -1253,6 +1258,34 @@ export default function InsightsPage() {
             ))}
           </div>
         </div>
+
+        {showSnapshotNotice && (
+          <div className="rounded-xl border border-terminal-blue/30 bg-terminal-blue/10 px-4 py-3">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-terminal-blue" />
+              <div className="space-y-1">
+                <div className="text-xs font-sans font-semibold text-terminal-text">
+                  Showing cached insights snapshot while the background refresh runs
+                </div>
+                <div className="text-xs font-mono text-terminal-dim">
+                  {snapshotAge
+                    ? `Snapshot from ${snapshotAge} ago.`
+                    : "Using the latest cached scan."}{" "}
+                  {refreshProgress
+                    ? `Refreshing ${refreshProgress} sessions now.`
+                    : "Refreshing now."}
+                </div>
+                {pendingSessionDelta > 0 && (
+                  <div className="text-xs font-mono text-terminal-dim">
+                    Insights currently cover {userInsights.totalSessions} scanned sessions;{" "}
+                    {pendingSessionDelta} additional session
+                    {pendingSessionDelta === 1 ? "" : "s"} will appear after the refresh completes.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Share Card */}
         <ShareCard
