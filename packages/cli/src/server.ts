@@ -1807,10 +1807,15 @@ export async function startServer(
         signal: AbortSignal.timeout(5_000),
       });
       if (!resp.ok) {
-        // Non-2xx (401, 500, etc.) — treat as invalid
-        await clearLocalAuthSession();
-        validatedAuth = { valid: false, checkedAt: now };
-        return false;
+        if (resp.status === 401 || resp.status === 403) {
+          // Auth rejected — clear session so UI shows logged out
+          await clearLocalAuthSession();
+          validatedAuth = { valid: false, checkedAt: now };
+          return false;
+        }
+        // 5xx / other non-2xx — treat like network error (offline-friendly)
+        validatedAuth = { valid: true, checkedAt: now };
+        return true;
       }
       const data = await resp.json();
       const valid = !!(data && data.session && data.user);
