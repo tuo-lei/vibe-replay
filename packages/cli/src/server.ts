@@ -978,6 +978,9 @@ export async function startServer(
     await writeInsightsStore(updated);
   };
 
+  /** Max insights per cloud sync request (D1 batch API, single round-trip per chunk). */
+  const INSIGHTS_SYNC_BATCH = 100;
+
   /** Auto-sync insights to cloud if user is logged in. Fire-and-forget. */
   const autoSyncInsights = async (): Promise<void> => {
     const { getUnsyncedInsights, markSynced } = await import("./insights.js");
@@ -996,7 +999,7 @@ export async function startServer(
 
     const apiUrl = getUrl();
     const cookieName = getCookie(apiUrl);
-    const BATCH_SIZE = 100;
+    const BATCH_SIZE = INSIGHTS_SYNC_BATCH;
     const allSyncedIds = new Map<string, string>();
 
     for (let i = 0; i < unsynced.length; i += BATCH_SIZE) {
@@ -1613,7 +1616,7 @@ export async function startServer(
     }
 
     // Batch sync to cloud (D1 batch API, single round-trip per chunk)
-    const BATCH_SIZE = 100;
+    const BATCH_SIZE = INSIGHTS_SYNC_BATCH;
     let totalSynced = 0;
     const allSyncedIds = new Map<string, string>();
     const apiUrl = getApiUrl();

@@ -461,11 +461,11 @@ import Layout from "../layouts/Layout.astro";
       }
     }
 
-    const cellColor = (count: number): string => {
-      if (count === 0) return `bg-[#1a1a24]`;
+    const cellColor = (count: number): { cls: string; style: string } => {
+      if (count === 0) return { cls: "bg-[#1a1a24]", style: "" };
       const r = maxVal <= 1 ? 1 : count / maxVal;
       const opacity = r <= 0.25 ? 0.4 : r <= 0.5 ? 0.6 : r <= 0.75 ? 0.8 : 1;
-      return `bg-[#3fb950]" style="opacity: ${opacity}`;
+      return { cls: "bg-[#3fb950]", style: `opacity: ${opacity}` };
     };
 
     // Month labels row
@@ -496,7 +496,8 @@ import Layout from "../layouts/Layout.astro";
       grid += `<div class="flex-1 flex flex-col gap-[3px] min-w-0">`;
       for (const cell of week) {
         const title = `${cell.date}: ${cell.count} session${cell.count !== 1 ? "s" : ""}`;
-        grid += `<div class="aspect-square rounded-sm ${cellColor(cell.count)}" title="${title}"></div>`;
+        const c = cellColor(cell.count);
+        grid += `<div class="aspect-square rounded-sm ${c.cls}" style="${c.style}" title="${title}"></div>`;
       }
       grid += `</div>`;
     }

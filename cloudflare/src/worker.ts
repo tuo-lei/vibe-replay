@@ -1126,6 +1126,7 @@ app.post("/api/insights/sync", async (c) => {
         ),
       );
       cloudIds[insight.sessionId] = id;
+      existingMap.set(insight.sessionId, id); // prevent double-INSERT for duplicate sessionIds in batch
     }
   }
 
