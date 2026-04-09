@@ -21,38 +21,38 @@ npx vibe-replay
 
 ## What You Get
 
-### Interactive Replay with Session Landing
+### All your sessions, one place
 
-Every replay opens with a session overview — first prompt, key stats, and one-click access to the full replay or insights panel.
+Launch with `npx vibe-replay -d` and see every Claude Code and Cursor session across all projects — with activity heatmaps, cost totals, and project analytics.
+
+<p align="center">
+  <img src="docs/screenshots/dashboard.png" alt="Local dashboard — browse sessions, activity heatmap, project analytics" width="800" />
+</p>
+
+### Watch the full replay
+
+Pick a session and step through every prompt, thinking block, tool call, and code diff with animated playback. Three view modes — All, Compact, and Custom.
 
 <p align="center">
   <a href="https://vibe-replay.com/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba">
-    <img src="docs/screenshots/session-landing.png" alt="Session landing page — overview with stats, first prompt, and quick actions" width="800" />
+    <img src="docs/screenshots/compact-mode.png" alt="Animated replay — syntax-highlighted diffs, tool calls, and thinking blocks" width="800" />
   </a>
 </p>
 
-### Session Insights
+### Deep insights for every session
 
-Auto-generated analytics for every session: token burn & cost over time, context window usage, cache hit rates, tool call distribution, and per-turn breakdowns.
+Auto-generated analytics: token burn & cost over time, context window usage, cache hit rates, tool call distribution, model breakdown, and per-turn breakdowns.
 
 <p align="center">
   <img src="docs/screenshots/insights.png" alt="Session insights — token usage, cost tracking, tool distribution, and context window charts" width="800" />
 </p>
 
-### Local Dashboard
+### Your AI coding wrapped
 
-Browse, search, and manage all your sessions across projects. See activity heatmaps, cost totals, and project-level analytics at a glance. Launch with `npx vibe-replay -d`.
-
-<p align="center">
-  <img src="docs/screenshots/dashboard.png" alt="Local dashboard — browse sessions, view activity, and manage replays across projects" width="800" />
-</p>
-
-### Animated Playback
-
-Step through prompts, thinking blocks, tool calls, and diffs with animated playback. Three view modes — All (full detail), Compact (condensed), and Custom (your filters). Navigate with the outline sidebar or timeline controls.
+GitHub-style activity heatmap, streaks, weekly trends, top projects, model usage, and cost tracking across all your sessions. See how your coding patterns evolve over time.
 
 <p align="center">
-  <img src="docs/screenshots/compact-mode.png" alt="Compact view mode — condensed replay with outline navigation" width="800" />
+  <img src="docs/screenshots/personal-insights.png" alt="Personal insights — GitHub-style heatmap, streaks, session stats, and cost tracking" width="800" />
 </p>
 
 ## Features
@@ -60,18 +60,9 @@ Step through prompts, thinking blocks, tool calls, and diffs with animated playb
 - **Zero config** — one command, no setup, no account. Works instantly with existing sessions
 - **Single HTML file** — self-contained, works offline, zero external requests. Drop it in Slack, email it, open it anywhere
 - **Claude Code + Cursor** — both providers auto-discovered, including multi-file and resumed sessions
-- **Session insights** — token usage, cost tracking, cache hit rates, context window charts, tool call breakdown per session
-- **Local dashboard** — browse all sessions across projects, activity heatmaps, project-level analytics (`-d` flag)
-- **Animated playback** — step through prompts, thinking, tool calls, and diffs at your own pace. Three view modes (All / Compact / Custom)
+- **Share & export** — GitHub Gist, animated SVG, GIF, markdown summary, or cloud upload. Secret redaction built in
 - **Sub-agent visualization** — see delegated tool calls and sub-agent trees rendered inline
-- **Add comments** — leave notes on any scene. Comments persist in the HTML and travel with the replay
-- **Share & export** — publish to GitHub Gist for a shareable link, or export as markdown summary + animated SVG for PRs
-- **Secret redaction** — API keys, tokens, and common patterns are detected and masked before sharing
-- **Rich rendering** — syntax-highlighted diffs, terminal output, thinking blocks, tool call durations, color-coded timeline
-
-<p align="center">
-  <img src="docs/screenshots/session-preview-demo.svg" alt="Animated SVG export — embeddable session preview for PRs and READMEs" width="800" />
-</p>
+- **Comments** — leave notes on any scene. Comments persist in the HTML and travel with the replay
 
 ## Supported Providers
 
