@@ -22,7 +22,7 @@
             <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-accent/10 to-cyan-400/5 flex items-center justify-center text-accent font-mono text-sm font-bold">1</span>
             <h3 class="text-xl font-semibold">All your sessions, one place</h3>
           </div>
-          <p class="text-text-secondary leading-relaxed">A local dashboard shows every session across <span class="text-[#D97706] font-medium">Claude Code</span> and <span class="text-[#0096FF] font-medium">Cursor</span> &mdash; with activity heatmaps, project-level analytics, cost estimates, and data-quality hints when local provider data is partial. Runs entirely on your machine.</p>
+          <p class="text-text-secondary leading-relaxed">A local dashboard shows every session across <span class="text-[#D97706] font-medium">Claude Code</span> and <span class="text-[#0096FF] font-medium">Cursor</span> &mdash; with activity heatmaps, project-level analytics, and cost estimates. Runs entirely on your machine.</p>
           <p class="text-text-muted text-sm mt-3 font-mono">$ npx vibe-replay -d</p>
         </div>
         <div class="md:w-3/5">
@@ -32,44 +32,21 @@
               alt="vibe-replay dashboard — activity heatmap, project analytics, session overview"
               class="w-full block"
               loading="lazy"
-              width="1372"
-              height="878"
+              width="1440"
+              height="900"
             />
           </div>
         </div>
       </div>
 
-      <!-- Step 2: Insights -->
+      <!-- Step 2: Interactive replay -->
       <div class="flex flex-col md:flex-row-reverse items-center gap-10">
         <div class="md:w-2/5">
           <div class="flex items-center gap-3 mb-4">
             <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-accent/10 to-cyan-400/5 flex items-center justify-center text-accent font-mono text-sm font-bold">2</span>
-            <h3 class="text-xl font-semibold">Deep insights for every session</h3>
-          </div>
-          <p class="text-text-secondary leading-relaxed">Auto-generated analytics: token burn &amp; cost per turn, context window usage, cache hit rates, tool call distribution, sub-agent delegation, and file impact tracking. When Cursor only exposes partial local data, vibe-replay shows estimates and tells you where the gaps are.</p>
-        </div>
-        <div class="md:w-3/5">
-          <div class="rounded-xl border border-border/50 overflow-hidden shadow-lg shadow-accent/5">
-            <img
-              src="/screenshots/insights.png"
-              alt="Session insights — token burn charts, cache hit rates, context window usage, tool call breakdown"
-              class="w-full block"
-              loading="lazy"
-              width="1372"
-              height="878"
-            />
-          </div>
-        </div>
-      </div>
-
-      <!-- Step 3: Interactive replay -->
-      <div class="flex flex-col md:flex-row items-center gap-10">
-        <div class="md:w-2/5">
-          <div class="flex items-center gap-3 mb-4">
-            <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-accent/10 to-cyan-400/5 flex items-center justify-center text-accent font-mono text-sm font-bold">3</span>
             <h3 class="text-xl font-semibold">Watch the full replay</h3>
           </div>
-          <p class="text-text-secondary leading-relaxed">Step through every prompt, thinking block, tool call, and code diff. Three view modes &mdash; <strong>All</strong> (full detail), <strong>Compact</strong> (condensed), and <strong>Custom</strong> (your filters). Navigate with the outline sidebar, search, or playback controls.</p>
+          <p class="text-text-secondary leading-relaxed">Pick a session and step through every prompt, thinking block, tool call, and code diff. Three view modes &mdash; <strong>All</strong> (full detail), <strong>Compact</strong> (condensed), and <strong>Custom</strong> (your filters). Navigate with the outline sidebar, search, or playback controls.</p>
         </div>
         <div class="md:w-3/5">
           <div class="rounded-xl border border-border/50 overflow-hidden shadow-lg shadow-accent/5">
@@ -78,18 +55,64 @@
               alt="Interactive replay — syntax-highlighted diffs, tool calls, thinking blocks with outline navigation"
               class="w-full block"
               loading="lazy"
-              width="1372"
-              height="878"
+              width="1440"
+              height="900"
             />
           </div>
         </div>
       </div>
 
-      <!-- Step 4: Export & Share -->
+      <!-- Step 3: Session Insights -->
+      <div class="flex flex-col md:flex-row items-center gap-10">
+        <div class="md:w-2/5">
+          <div class="flex items-center gap-3 mb-4">
+            <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-accent/10 to-cyan-400/5 flex items-center justify-center text-accent font-mono text-sm font-bold">3</span>
+            <h3 class="text-xl font-semibold">Deep insights for every session</h3>
+          </div>
+          <p class="text-text-secondary leading-relaxed">Drill into any session for auto-generated analytics: token burn &amp; cost per turn, context window usage, cache hit rates, tool call distribution, model breakdown, and per-turn breakdowns.</p>
+        </div>
+        <div class="md:w-3/5">
+          <div class="rounded-xl border border-border/50 overflow-hidden shadow-lg shadow-accent/5">
+            <img
+              src="/screenshots/insights.png"
+              alt="Session insights — token burn charts, cache hit rates, context window usage, tool call breakdown"
+              class="w-full block"
+              loading="lazy"
+              width="1440"
+              height="900"
+            />
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 4: Personal Insights -->
       <div class="flex flex-col md:flex-row-reverse items-center gap-10">
         <div class="md:w-2/5">
           <div class="flex items-center gap-3 mb-4">
             <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-accent/10 to-cyan-400/5 flex items-center justify-center text-accent font-mono text-sm font-bold">4</span>
+            <h3 class="text-xl font-semibold">Your AI coding wrapped</h3>
+          </div>
+          <p class="text-text-secondary leading-relaxed">See the big picture &mdash; GitHub-style activity heatmap, streaks, weekly trends, top projects, model usage, provider breakdown, and cost tracking across all your sessions. Filter by time range to see how your coding evolves.</p>
+        </div>
+        <div class="md:w-3/5">
+          <div class="rounded-xl border border-border/50 overflow-hidden shadow-lg shadow-accent/5">
+            <img
+              src="/screenshots/personal-insights.png"
+              alt="Personal insights — GitHub-style heatmap, streaks, session stats, weekly trends, cost tracking"
+              class="w-full block"
+              loading="lazy"
+              width="1440"
+              height="900"
+            />
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 5: Export & Share -->
+      <div class="flex flex-col md:flex-row items-center gap-10">
+        <div class="md:w-2/5">
+          <div class="flex items-center gap-3 mb-4">
+            <span class="w-8 h-8 rounded-lg bg-gradient-to-br from-accent/10 to-cyan-400/5 flex items-center justify-center text-accent font-mono text-sm font-bold">5</span>
             <h3 class="text-xl font-semibold">Share anywhere</h3>
           </div>
           <p class="text-text-secondary leading-relaxed">Export as a self-contained HTML file, animated SVG, GIF, or markdown summary. Publish to GitHub Gist for a shareable link on <a href="/explore" class="text-accent hover:underline">vibe-replay.com</a>, or upload to the cloud. Everything works offline &mdash; zero external requests.</p>
