@@ -1070,16 +1070,27 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
                       ? "Waiting..."
                       : "\u2191 Sync to cloud"}
             </button>
-            {syncStatus === "done" && (
-              <a
-                href="https://vibe-replay.com/insights/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="py-2.5 px-3 text-[11px] font-mono text-terminal-dim hover:text-terminal-green transition-colors shrink-0"
+            <a
+              href="https://vibe-replay.com/insights/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center w-9 h-9 rounded-lg text-terminal-dim hover:text-terminal-green hover:bg-terminal-surface-hover transition-colors shrink-0"
+              title="View insights on vibe-replay.com"
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                strokeWidth={2}
               >
-                View online &rarr;
-              </a>
-            )}
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
+                />
+              </svg>
+            </a>
           </div>
         </div>
 
