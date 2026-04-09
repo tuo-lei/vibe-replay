@@ -14,11 +14,7 @@ interface Props {
   variant?: "full" | "sync";
 }
 
-const {
-  heading = "Get Started",
-  subheading,
-  variant = "full",
-} = Astro.props;
+const { heading = "Get Started", subheading, variant = "full" } = Astro.props;
 
 const fullSteps = [
   {
