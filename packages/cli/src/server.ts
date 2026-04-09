@@ -1006,12 +1006,29 @@ export async function startServer(
 
     const apiUrl = getUrl();
     const cookieName = getCookie(apiUrl);
+    const headers = { "Content-Type": "application/json", Cookie: `${cookieName}=${auth.token}` };
+
+    // Delta sync: fetch dates already on cloud, skip them
+    try {
+      const datesResp = await fetch(
+        `${apiUrl}/api/insights/dates?machineId=${encodeURIComponent(daily.machineId)}`,
+        { headers, signal: AbortSignal.timeout(10_000) },
+      );
+      if (datesResp.ok) {
+        const { dates } = (await datesResp.json()) as { dates: string[] };
+        const existing = new Set(dates);
+        daily.days = daily.days.filter((d) => !existing.has(d.date));
+        if (daily.days.length === 0) return { synced: 0, total: 0 };
+      }
+    } catch {
+      // Failed to fetch dates — fall back to full sync (cloud will upsert)
+    }
 
     let resp: Response;
     try {
       resp = await fetch(`${apiUrl}/api/insights/sync`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Cookie: `${cookieName}=${auth.token}` },
+        headers,
         body: JSON.stringify(daily),
         signal: AbortSignal.timeout(30_000),
       });

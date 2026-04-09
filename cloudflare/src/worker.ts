@@ -1142,6 +1142,26 @@ app.post("/api/insights/sync", async (c) => {
 });
 
 /** Aggregated insights summary — merges all machines' daily data */
+/** Return dates already synced for a given machine (for delta sync). */
+app.get("/api/insights/dates", async (c) => {
+  const authResult = await requireAuth(c);
+  if (authResult instanceof Response) return authResult;
+  const { userId } = authResult;
+
+  const machineId = c.req.query("machineId");
+  if (!machineId) return c.json({ error: "machineId required" }, 400);
+
+  const db = drizzle(c.env.DB);
+  const rows = await db
+    .select({ date: dailyInsights.date })
+    .from(dailyInsights)
+    .where(and(eq(dailyInsights.userId, userId), eq(dailyInsights.machineId, machineId)))
+    .orderBy(dailyInsights.date);
+
+  return c.json({ dates: rows.map((r) => r.date) });
+});
+
+/** Aggregated insights summary — merges all machines' daily data */
 app.get("/api/insights/summary", async (c) => {
   const authResult = await requireAuth(c);
   if (authResult instanceof Response) return authResult;
