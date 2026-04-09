@@ -1183,6 +1183,9 @@ export default function InsightsPage() {
       const filtered = filterSessionsByRange(spd, range);
       const scanSnapshotTotals = {
         ...userInsights,
+        // Replays come from generated artifacts rather than the scan snapshot, so
+        // keep using the homepage cache here while the rest of the stats stay on
+        // the single insights-scan timeline.
         totalReplays: homePageCounts?.replays ?? 0,
       };
       const s = computeStats(filtered, scanSnapshotTotals, range);
@@ -1230,7 +1233,7 @@ export default function InsightsPage() {
   const snapshotAge = scanStatus?.cachedAt ? formatCompactAge(scanStatus.cachedAt) : "";
   const refreshProgress =
     scanStatus?.total && scanStatus.total > 0
-      ? `${scanStatus.scanned}/${scanStatus.total}`
+      ? `${Math.min(scanStatus.scanned, scanStatus.total)}/${scanStatus.total}`
       : undefined;
 
   return (
@@ -1275,8 +1278,8 @@ export default function InsightsPage() {
                 {pendingSessionDelta > 0 && (
                   <div className="text-xs font-mono text-terminal-dim">
                     Insights currently cover {userInsights.totalSessions} scanned sessions;{" "}
-                    {pendingSessionDelta} newer session{pendingSessionDelta === 1 ? "" : "s"} will
-                    appear after the refresh completes.
+                    {pendingSessionDelta} additional session
+                    {pendingSessionDelta === 1 ? "" : "s"} will appear after the refresh completes.
                   </div>
                 )}
               </div>
