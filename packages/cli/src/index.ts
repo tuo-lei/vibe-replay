@@ -81,6 +81,11 @@ program
     "Custom title for the replay (shown on landing page & shared links)",
   )
   .option("-d, --dashboard", "Open Dashboard directly (skip session picker)")
+  .option("--open", "After generation, open in browser and exit (non-interactive)")
+  .option(
+    "--github",
+    "Generate GitHub export (markdown + animated GIF + SVG) and exit (non-interactive)",
+  )
   .action(async (opts) => {
     console.log(chalk.bold.cyan("\n  vibe-replay") + chalk.dim(` v${CLI_VERSION}\n`));
 
@@ -384,6 +389,10 @@ program
     if (opts.title) {
       const normalizedCliTitle = normalizeTitle(opts.title);
       if (normalizedCliTitle) replay.meta.title = normalizedCliTitle;
+    } else if (opts.open || opts.github) {
+      // Non-interactive: use auto-detected title
+      const autoTitle = suggestedReplayTitle(replay.meta.title, replay.meta.slug, sessionInfo);
+      replay.meta.title = autoTitle;
     } else {
       const { input } = await import("@inquirer/prompts");
       const defaultTitle = suggestedReplayTitle(replay.meta.title, replay.meta.slug, sessionInfo);
@@ -424,16 +433,87 @@ program
       }
       console.log();
 
-      const { confirm } = await import("@inquirer/prompts");
-      const ok = await confirm({
-        message: "These may be false alarms (e.g. example keys in docs). Continue anyway?",
-        default: false,
-      });
-      if (!ok) {
-        console.log(chalk.red("\n  Aborted — review the session and re-run.\n"));
-        process.exit(1);
+      if (opts.open || opts.github) {
+        console.log(
+          chalk.yellow(
+            "  ⚠ Non-interactive mode: continuing despite potential secrets. Review the output.\n",
+          ),
+        );
+      } else {
+        const { confirm } = await import("@inquirer/prompts");
+        const ok = await confirm({
+          message: "These may be false alarms (e.g. example keys in docs). Continue anyway?",
+          default: false,
+        });
+        if (!ok) {
+          console.log(chalk.red("\n  Aborted — review the session and re-run.\n"));
+          process.exit(1);
+        }
+        console.log(chalk.dim("  Continuing — user confirmed findings are safe.\n"));
       }
-      console.log(chalk.dim("  Continuing — user confirmed findings are safe.\n"));
+    }
+
+    // --open: auto-open in browser and exit (non-interactive mode)
+    if (opts.open) {
+      await publishLocal(outputPath);
+      console.log();
+      console.log(chalk.bold.green("  ✓ Done!"));
+      console.log(chalk.dim("  File: ") + chalk.white(outputPath));
+      console.log();
+      return;
+    }
+
+    // --github: generate GitHub export artifacts and exit (non-interactive)
+    if (opts.github) {
+      const { mkdir, writeFile } = await import("node:fs/promises");
+      await mkdir(outputDir, { recursive: true });
+
+      // Auto-detect replay URL from previously published gist
+      const savedGist = await loadSavedGistInfo(outputDir);
+      const replayUrl = savedGist?.viewerUrl;
+
+      // Generate animated SVG
+      const svgSpinner2 = ora("Generating animated SVG...").start();
+      const svgContent = generateGitHubSvg(replay, { replayUrl });
+      const svgFilePath = join(outputDir, "session-preview.svg");
+      await writeFile(svgFilePath, svgContent, "utf-8");
+      svgSpinner2.succeed(`SVG: ${svgFilePath}`);
+
+      // Generate animated GIF
+      let gifGenerated = false;
+      const gifSpinner = ora("Generating animated GIF...").start();
+      try {
+        const gifBuffer = await generateGitHubGif(replay, { replayUrl });
+        const gifFilePath = join(outputDir, "session-preview.gif");
+        await writeFile(gifFilePath, gifBuffer);
+        const gifSizeKB = Math.round(gifBuffer.length / 1024);
+        gifSpinner.succeed(`GIF: ${gifFilePath} (${gifSizeKB} KB)`);
+        gifGenerated = true;
+      } catch (err) {
+        gifSpinner.fail(
+          `GIF generation failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+
+      // Generate markdown (prefer GIF for universal GitHub support)
+      const mdSpinner = ora("Generating GitHub markdown...").start();
+      const markdown = generateGitHubMarkdown(replay, {
+        replayUrl,
+        svgPath: "./session-preview.svg",
+        gifPath: gifGenerated ? "./session-preview.gif" : undefined,
+      });
+      const mdFilePath = join(outputDir, "github-summary.md");
+      await writeFile(mdFilePath, markdown, "utf-8");
+      mdSpinner.succeed(`Markdown: ${mdFilePath}`);
+
+      // Print the markdown to stdout for easy piping
+      console.log();
+      console.log(markdown);
+      console.log();
+      console.log(chalk.bold.green("  Done!"));
+      console.log(chalk.dim("  Files: ") + chalk.white(outputDir));
+      console.log();
+      return;
     }
 
     // Check publish availability (requires vibe-replay auth login)
