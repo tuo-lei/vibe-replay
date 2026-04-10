@@ -1474,16 +1474,23 @@ function mergeCursorParseResults(
   enrichment: ProviderParseResult,
 ): ProviderParseResult {
   const mergedModel = chooseMergedCursorModel(primary.model, enrichment.model);
-  const mergedTurnStats = mergeTurnStats(primary.turnStats, enrichment.turnStats);
+  const preferEnrichmentDuration =
+    enrichment.dataSource === "global-state" &&
+    (enrichment.totalDurationMs !== undefined ||
+      enrichment.turnStats?.some((stat) => stat.durationMs !== undefined) === true);
+  const mergedTurnStats = mergeTurnStats(primary.turnStats, enrichment.turnStats, {
+    preferEnrichmentDuration,
+  });
   const mergedTokenUsage = primary.tokenUsage || enrichment.tokenUsage;
   const mergedTokenUsageByModel = primary.tokenUsageByModel || enrichment.tokenUsageByModel;
   const mergedTotalDurationMs =
+    (preferEnrichmentDuration ? enrichment.totalDurationMs : undefined) ||
     primary.totalDurationMs ||
-    enrichment.totalDurationMs ||
+    (!preferEnrichmentDuration ? enrichment.totalDurationMs : undefined) ||
     (mergedTurnStats && mergedTurnStats.length > 0
       ? mergedTurnStats.reduce((sum, stat) => sum + (stat.durationMs || 0), 0) || undefined
       : undefined);
-  const mergedDuration = mergedTotalDurationMs !== undefined && !primary.totalDurationMs;
+  const mergedDuration = mergedTotalDurationMs !== primary.totalDurationMs;
   const mergedTokens =
     (!primary.tokenUsage && !!enrichment.tokenUsage) ||
     (!primary.tokenUsageByModel && !!enrichment.tokenUsageByModel);
@@ -1506,7 +1513,12 @@ function mergeCursorParseResults(
   const primaryNotes = (primary.dataSourceInfo?.notes || []).filter(
     (note) =>
       !(mergedTokens && /token usage is unavailable/i.test(note)) &&
-      !(mergedDuration && /per-turn duration metrics are unavailable/i.test(note)),
+      !(
+        mergedDuration &&
+        /per-turn duration metrics are unavailable|per-turn duration is estimated from cursor tool execution metadata|duration is estimated from cursor thinking and tool execution timing/i.test(
+          note,
+        )
+      ),
   );
   const notes = mergeUniqueStrings(
     primaryNotes,
@@ -1601,6 +1613,7 @@ function chooseMergedCursorModel(
 function mergeTurnStats(
   primary: TurnStat[] | undefined,
   enrichment: TurnStat[] | undefined,
+  options?: { preferEnrichmentDuration?: boolean },
 ): TurnStat[] | undefined {
   if (!primary?.length) return enrichment;
   if (!enrichment?.length) return primary;
@@ -1629,11 +1642,13 @@ function mergeTurnStats(
     merged.push({
       ...current,
       ...(current.model ? {} : extra.model ? { model: extra.model } : {}),
-      ...(current.durationMs !== undefined
-        ? {}
-        : extra.durationMs !== undefined
-          ? { durationMs: extra.durationMs }
-          : {}),
+      ...(options?.preferEnrichmentDuration && extra.durationMs !== undefined
+        ? { durationMs: extra.durationMs }
+        : current.durationMs !== undefined
+          ? {}
+          : extra.durationMs !== undefined
+            ? { durationMs: extra.durationMs }
+            : {}),
       ...(current.tokenUsage ? {} : extra.tokenUsage ? { tokenUsage: extra.tokenUsage } : {}),
       ...(current.contextTokens !== undefined
         ? {}
@@ -1671,6 +1686,77 @@ function extractBubbleDurationMs(bubble: Record<string, any>): number | undefine
   const toolMs = extractToolExecutionTimeMs((bubble.toolFormerData as any)?.result);
   if (thinkingMs !== undefined && toolMs !== undefined) return thinkingMs + toolMs;
   return thinkingMs ?? toolMs;
+}
+
+function timestampToMs(value: unknown): number | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : undefined;
+}
+
+function applyGlobalStateWallClockDurations(
+  entries: GlobalStateTurnEntry[],
+  turnStats: TurnStat[],
+): { turnStats: TurnStat[]; totalDurationMs?: number; usedWallClock: boolean } {
+  if (entries.length === 0 || turnStats.length === 0) {
+    return { turnStats, usedWallClock: false };
+  }
+
+  const durationsByTurn = new Map<number, number>();
+  let currentTurnIndex = -1;
+  let currentUserAt: number | undefined;
+  let currentAssistantAt: number | undefined;
+
+  const finalizeTurn = () => {
+    if (
+      currentTurnIndex >= 0 &&
+      currentUserAt !== undefined &&
+      currentAssistantAt !== undefined &&
+      currentAssistantAt > currentUserAt
+    ) {
+      durationsByTurn.set(currentTurnIndex, currentAssistantAt - currentUserAt);
+    }
+  };
+
+  for (const entry of entries) {
+    const bubbleTimestamp =
+      timestampToMs(entry.turn.timestamp) ||
+      timestampToMs(entry.bubble.createdAt) ||
+      timestampToMs(entry.bubble.lastUpdatedAt);
+    if (entry.turn.role === "user") {
+      finalizeTurn();
+      currentTurnIndex++;
+      currentUserAt = bubbleTimestamp;
+      currentAssistantAt = undefined;
+      continue;
+    }
+    if (currentTurnIndex < 0 || bubbleTimestamp === undefined) continue;
+    if (currentAssistantAt === undefined || bubbleTimestamp > currentAssistantAt) {
+      currentAssistantAt = bubbleTimestamp;
+    }
+  }
+  finalizeTurn();
+
+  if (durationsByTurn.size === 0) {
+    return {
+      turnStats,
+      totalDurationMs:
+        turnStats.reduce((sum, stat) => sum + (stat.durationMs || 0), 0) || undefined,
+      usedWallClock: false,
+    };
+  }
+
+  const mergedTurnStats = turnStats.map((stat) => {
+    const wallClockDuration = durationsByTurn.get(stat.turnIndex);
+    return wallClockDuration !== undefined ? { ...stat, durationMs: wallClockDuration } : stat;
+  });
+
+  return {
+    turnStats: mergedTurnStats,
+    totalDurationMs:
+      mergedTurnStats.reduce((sum, stat) => sum + (stat.durationMs || 0), 0) || undefined,
+    usedWallClock: true,
+  };
 }
 
 function buildGlobalStateMetrics(
@@ -1746,10 +1832,10 @@ function buildGlobalStateMetrics(
     }
   }
 
-  const totalDurationMs =
-    turnStats.length > 0
-      ? turnStats.reduce((sum, stat) => sum + (stat.durationMs || 0), 0) || undefined
-      : undefined;
+  const { turnStats: durationTurnStats, totalDurationMs } = applyGlobalStateWallClockDurations(
+    entries,
+    turnStats,
+  );
 
   const totalTokens =
     sessionTokenUsage && hasAnyTokens(sessionTokenUsage) ? sessionTokenUsage : totals;
@@ -1757,7 +1843,7 @@ function buildGlobalStateMetrics(
   return {
     ...(hasAnyTokens(totalTokens) ? { tokenUsage: totalTokens } : {}),
     ...(Object.keys(byModel).length > 0 ? { tokenUsageByModel: byModel } : {}),
-    ...(turnStats.length > 0 ? { turnStats } : {}),
+    ...(durationTurnStats.length > 0 ? { turnStats: durationTurnStats } : {}),
     ...(totalDurationMs !== undefined ? { totalDurationMs } : {}),
   };
 }
@@ -1882,7 +1968,9 @@ async function parseCursorGlobalStateDb(
       notes.push("Token usage is estimated from Cursor token snapshots.");
     }
     if (metrics.totalDurationMs !== undefined) {
-      notes.push("Duration is estimated from Cursor thinking and tool execution timing.");
+      notes.push(
+        "Per-turn duration is inferred from Cursor bubble timestamps (user prompt to final assistant bubble).",
+      );
     } else {
       notes.push("Duration is unavailable for this Cursor global-state session.");
     }
@@ -2462,6 +2550,7 @@ function extractModel(msg: CursorMessage): string | undefined {
 }
 
 export const __testables = {
+  applyGlobalStateWallClockDurations,
   buildGlobalStateMetrics,
   buildStoreTurnStats,
   createRetryableInit,
