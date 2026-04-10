@@ -47,6 +47,20 @@ interface ProjectMemory {
   claudeMd?: string;
 }
 
+interface TurnDurationBucket {
+  label: string;
+  minMs: number;
+  maxMs: number;
+  count: number;
+  pct: number;
+}
+
+interface TurnDurationHistogram {
+  buckets: TurnDurationBucket[];
+  percentiles: { p50Ms: number; p75Ms: number; p90Ms: number };
+  totalTurns: number;
+}
+
 interface ProjectInsights {
   project: string;
   sessionCount: number;
@@ -63,6 +77,14 @@ interface ProjectInsights {
   timeRange: { first: string; last: string };
   sessionsPerDay: Record<string, number>;
   avgSessionDurationMs: number;
+  medianTurnDurationMs?: number;
+  tokenBreakdown?: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheCreation: number;
+  };
+  turnDurationHistogram?: TurnDurationHistogram;
   memory?: ProjectMemory;
   dataQuality?: {
     notes: string[];
@@ -98,6 +120,14 @@ interface UserInsights {
   subAgentTotal: number;
   apiErrorTotal: number;
   avgSessionDurationMs: number;
+  medianTurnDurationMs?: number;
+  tokenBreakdown?: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheCreation: number;
+  };
+  turnDurationHistogram?: TurnDurationHistogram;
   dataQuality?: {
     notes: string[];
   };
