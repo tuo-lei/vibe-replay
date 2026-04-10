@@ -1,0 +1,13 @@
+{
+  "name": "vibe-replay",
+  "version": "1.0.0",
+  "description": "Generate interactive HTML replays of AI coding sessions. Record, share, and replay your Claude Code, Cursor, and Codex sessions.",
+  "author": {
+    "name": "vibe-replay",
+    "url": "https://github.com/tuo-lei/vibe-replay"
+  },
+  "homepage": "https://vibe-replay.com",
+  "repository": "https://github.com/tuo-lei/vibe-replay-skill",
+  "license": "MIT",
+  "keywords": ["replay", "session", "recording", "sharing", "vibe-coding", "documentation"]
+}
