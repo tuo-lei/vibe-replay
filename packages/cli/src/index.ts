@@ -123,6 +123,12 @@ program
       return;
     }
 
+    // --open/--github require --session (non-interactive modes need an explicit session path)
+    if ((opts.open || opts.github) && !opts.session) {
+      console.log(chalk.red("  --open and --github require --session <path>\n"));
+      process.exit(1);
+    }
+
     let sessionInfo: SessionInfo | undefined;
     let sessionPaths: string | string[];
     let providerName: string;
@@ -465,19 +471,18 @@ program
 
     // --github: generate GitHub export artifacts and exit (non-interactive)
     if (opts.github) {
-      const { mkdir, writeFile } = await import("node:fs/promises");
-      await mkdir(outputDir, { recursive: true });
-
       // Auto-detect replay URL from previously published gist
       const savedGist = await loadSavedGistInfo(outputDir);
       const replayUrl = savedGist?.viewerUrl;
 
+      const { writeFile } = await import("node:fs/promises");
+
       // Generate animated SVG
-      const svgSpinner2 = ora("Generating animated SVG...").start();
+      const svgSpinner = ora("Generating animated SVG...").start();
       const svgContent = generateGitHubSvg(replay, { replayUrl });
       const svgFilePath = join(outputDir, "session-preview.svg");
       await writeFile(svgFilePath, svgContent, "utf-8");
-      svgSpinner2.succeed(`SVG: ${svgFilePath}`);
+      svgSpinner.succeed(`SVG: ${svgFilePath}`);
 
       // Generate animated GIF
       let gifGenerated = false;
@@ -509,10 +514,9 @@ program
       // Print the markdown to stdout for easy piping
       console.log();
       console.log(markdown);
-      console.log();
-      console.log(chalk.bold.green("  Done!"));
-      console.log(chalk.dim("  Files: ") + chalk.white(outputDir));
-      console.log();
+      // Status messages go to stderr so they don't pollute piped output
+      process.stderr.write(`\n${chalk.bold.green("  Done!")}\n`);
+      process.stderr.write(`${chalk.dim("  Files: ")}${chalk.white(outputDir)}\n\n`);
       return;
     }
 
