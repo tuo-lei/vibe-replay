@@ -432,7 +432,7 @@ import Layout from "../layouts/Layout.astro";
     ];
     if (cfg.showCost && data.totalCost !== undefined) stats.push({ value: formatCost(data.totalCost), label: "Spent", color: "text-[#d29922]" });
     stats.push({ value: formatNumber(data.totalEdits), label: "File Edits", color: "text-[#79b8ff]" });
-    if (cfg.showProjects && data.totalProjects !== undefined) stats.push({ value: formatNumber(data.totalProjects), label: "Projects", color: "text-[#b392f0]" });
+    if (data.totalProjects !== undefined) stats.push({ value: formatNumber(data.totalProjects), label: "Projects", color: "text-[#b392f0]" });
     statsGrid.innerHTML = stats.map(s => `<div><div class="text-2xl font-mono font-bold ${s.color} tabular-nums">${s.value}</div><div class="mt-0.5 text-[10px] uppercase text-text-muted tracking-wider">${s.label}</div></div>`).join("");
 
     // Mini heatmap
