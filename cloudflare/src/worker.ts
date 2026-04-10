@@ -18,6 +18,19 @@ import { cloudReplays, dailyInsights, insightProfiles, replays, userFiles } from
 const CLOUD_REPLAY_ID_RE = /^[a-zA-Z0-9_-]{10,16}$/;
 const GIST_ID_RE = /^[a-f0-9]{20,40}$/;
 const VALID_VISIBILITY = new Set(["public", "unlisted", "private"]);
+// D1 starts failing once the user+machine+dates lookup goes past ~100 bound params.
+// Reuse the same conservative chunk size for both query and write paths so older clients
+// that still send large sync payloads stay under the database ceiling server-side too.
+const SAFE_DAILY_SYNC_DB_CHUNK = 90;
+
+function chunkItems<T>(items: T[], maxItems: number): T[][] {
+  if (maxItems <= 0) return [items.slice()];
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += maxItems) {
+    chunks.push(items.slice(i, i + maxItems));
+  }
+  return chunks;
+}
 
 function isDev(env: { BETTER_AUTH_URL?: string }): boolean {
   return !!env.BETTER_AUTH_URL?.startsWith("http://localhost");
@@ -1070,15 +1083,18 @@ app.post("/api/insights/sync", async (c) => {
   if (!machineId) return c.json({ error: "machineId required" }, 400);
 
   const dates = body.days.map((d: any) => String(d.date)).filter(Boolean);
-  const existingRows =
-    dates.length > 0
-      ? await c.env.DB.prepare(
-          `SELECT id, date FROM daily_insights WHERE user_id = ? AND machine_id = ? AND date IN (${dates.map(() => "?").join(",")})`,
-        )
-          .bind(userId, machineId, ...dates)
-          .all<{ id: string; date: string }>()
-      : { results: [] };
-  const existingMap = new Map((existingRows.results || []).map((r) => [r.date, r.id]));
+  const existingMap = new Map<string, string>();
+  for (const dateChunk of chunkItems(dates, SAFE_DAILY_SYNC_DB_CHUNK)) {
+    if (dateChunk.length === 0) continue;
+    const existingRows = await c.env.DB.prepare(
+      `SELECT id, date FROM daily_insights WHERE user_id = ? AND machine_id = ? AND date IN (${dateChunk.map(() => "?").join(",")})`,
+    )
+      .bind(userId, machineId, ...dateChunk)
+      .all<{ id: string; date: string }>();
+    for (const row of existingRows.results || []) {
+      existingMap.set(row.date, row.id);
+    }
+  }
 
   // Build batch statements
   const statements: D1PreparedStatement[] = [];
@@ -1140,11 +1156,15 @@ app.post("/api/insights/sync", async (c) => {
   }
 
   if (statements.length > 0) {
+    let committedSynced = 0;
     try {
-      await c.env.DB.batch(statements);
+      for (const statementChunk of chunkItems(statements, SAFE_DAILY_SYNC_DB_CHUNK)) {
+        await c.env.DB.batch(statementChunk);
+        committedSynced += statementChunk.length;
+      }
     } catch (e) {
       console.error("Daily insights batch sync failed:", e);
-      return c.json({ error: "Sync failed", synced: 0 }, 500);
+      return c.json({ error: "Sync failed", synced: committedSynced }, 500);
     }
   }
 

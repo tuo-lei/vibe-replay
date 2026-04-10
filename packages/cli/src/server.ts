@@ -92,6 +92,29 @@ function normalizeProjectPath(project: string): string {
   return project.startsWith(home) ? `~${project.slice(home.length)}` : project;
 }
 
+// Keep cloud sync requests comfortably below the current D1 bind / batch ceiling.
+const MAX_INSIGHTS_SYNC_DAYS_PER_REQUEST = 90;
+
+function chunkItems<T>(items: T[], maxItems: number): T[][] {
+  if (maxItems <= 0) return [items.slice()];
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += maxItems) {
+    chunks.push(items.slice(i, i + maxItems));
+  }
+  return chunks;
+}
+
+function buildInsightsSyncBatches<T extends { date: string }>(
+  days: T[],
+  existingDates: Iterable<string>,
+  today: string,
+  maxDaysPerBatch = MAX_INSIGHTS_SYNC_DAYS_PER_REQUEST,
+): T[][] {
+  const existing = new Set(existingDates);
+  const pending = days.filter((day) => !existing.has(day.date) || day.date === today);
+  return chunkItems(pending, maxDaysPerBatch);
+}
+
 interface GenerateRequestBody {
   provider: string;
   filePaths?: unknown;
@@ -1010,6 +1033,8 @@ export async function startServer(
     const apiUrl = getUrl();
     const cookieName = getCookie(apiUrl);
     const headers = { "Content-Type": "application/json", Cookie: `${cookieName}=${auth.token}` };
+    const today = new Date().toISOString().slice(0, 10);
+    let existingDates = new Set<string>();
 
     // Delta sync: fetch dates already on cloud, skip them
     try {
@@ -1019,49 +1044,54 @@ export async function startServer(
       );
       if (datesResp.ok) {
         const { dates } = (await datesResp.json()) as { dates: string[] };
-        const existing = new Set(dates);
-        const today = new Date().toISOString().slice(0, 10);
-        // Always re-sync today (may have new sessions since last sync)
-        daily.days = daily.days.filter((d) => !existing.has(d.date) || d.date === today);
-        if (daily.days.length === 0) return { synced: 0, total: 0 };
+        existingDates = new Set(dates);
       }
     } catch {
       // Failed to fetch dates — fall back to full sync (cloud will upsert)
     }
 
-    let resp: Response;
-    try {
-      resp = await fetch(`${apiUrl}/api/insights/sync`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(daily),
-        signal: AbortSignal.timeout(30_000),
-      });
-    } catch (e) {
-      return {
-        synced: 0,
-        total: daily.days.length,
-        error: e instanceof Error ? e.message : "Network error",
-      };
+    const batches = buildInsightsSyncBatches(daily.days, existingDates, today);
+    const totalDays = batches.reduce((sum, batch) => sum + batch.length, 0);
+    if (totalDays === 0) return { synced: 0, total: 0 };
+
+    let synced = 0;
+    for (const batch of batches) {
+      let resp: Response;
+      try {
+        resp = await fetch(`${apiUrl}/api/insights/sync`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ ...daily, days: batch }),
+          signal: AbortSignal.timeout(30_000),
+        });
+      } catch (e) {
+        return {
+          synced,
+          total: totalDays,
+          error: e instanceof Error ? e.message : "Network error",
+        };
+      }
+
+      if (resp.status === 401) {
+        await clearLocalAuthSession();
+        return { synced, total: totalDays, error: "Session expired" };
+      }
+      if (!resp.ok) {
+        const err = await resp.text().catch(() => `HTTP ${resp.status}`);
+        return { synced, total: totalDays, error: err };
+      }
+
+      let result: { synced: number };
+      try {
+        result = await resp.json();
+      } catch {
+        return { synced, total: totalDays, error: "Invalid response" };
+      }
+
+      synced += result.synced;
     }
 
-    if (resp.status === 401) {
-      await clearLocalAuthSession();
-      return { synced: 0, total: daily.days.length, error: "Session expired" };
-    }
-    if (!resp.ok) {
-      const err = await resp.text().catch(() => `HTTP ${resp.status}`);
-      return { synced: 0, total: daily.days.length, error: err };
-    }
-
-    let result: { synced: number };
-    try {
-      result = await resp.json();
-    } catch {
-      return { synced: 0, total: daily.days.length, error: "Invalid response" };
-    }
-
-    return { synced: result.synced, total: daily.days.length };
+    return { synced, total: totalDays };
   };
 
   /**
@@ -2850,6 +2880,7 @@ export async function startDashboard(
 }
 
 export const __testables = {
+  buildInsightsSyncBatches,
   countSessionStats,
   pickSourceRecordForSession,
   selectCursorEnrichmentCandidates,
