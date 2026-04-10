@@ -6,14 +6,17 @@
   "scripts": {
     "dev": "bash ./scripts/run-with-required-node.sh dev",
     "build": "bash ./scripts/run-with-required-node.sh build",
-    "preview": "bash ./scripts/run-with-required-node.sh preview"
+    "preview": "bash ./scripts/run-with-required-node.sh preview",
+    "check": "astro check"
   },
   "devDependencies": {
+    "@astrojs/check": "^0.9.8",
     "@astrojs/rss": "^4.0.17",
     "@astrojs/sitemap": "^3.7.1",
     "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.2.1",
     "astro": "^6.0.3",
-    "tailwindcss": "^4.2.1"
+    "tailwindcss": "^4.2.1",
+    "typescript": "^5.9.3"
   }
 }
