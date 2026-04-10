@@ -181,13 +181,6 @@ export interface UserInsights {
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
-function median(values: number[]): number | undefined {
-  if (values.length === 0) return undefined;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
-}
-
 function percentile(sorted: number[], p: number): number {
   const idx = (p / 100) * (sorted.length - 1);
   const lo = Math.floor(idx);
@@ -224,16 +217,19 @@ function buildTurnDurationHistogram(durations: number[]): TurnDurationHistogram 
   const sorted = [...durations].sort((a, b) => a - b);
   const total = sorted.length;
 
-  const buckets: TurnDurationBucket[] = DURATION_BUCKETS.map((b) => {
-    const count = sorted.filter((d) => d >= b.minMs && d < b.maxMs).length;
-    return {
-      label: b.label,
-      minMs: b.minMs,
-      maxMs: b.maxMs === Number.POSITIVE_INFINITY ? -1 : b.maxMs,
-      count,
-      pct: Math.round((count / total) * 1000) / 10, // one decimal
-    };
-  });
+  // Single O(n) pass to count buckets
+  const counts = new Array<number>(DURATION_BUCKETS.length).fill(0);
+  for (const d of sorted) {
+    const i = DURATION_BUCKETS.findIndex((b) => d < b.maxMs);
+    if (i >= 0) counts[i]++;
+  }
+  const buckets: TurnDurationBucket[] = DURATION_BUCKETS.map((b, i) => ({
+    label: b.label,
+    minMs: b.minMs,
+    maxMs: b.maxMs === Number.POSITIVE_INFINITY ? -1 : b.maxMs,
+    count: counts[i],
+    pct: Math.round((counts[i] / total) * 1000) / 10,
+  }));
 
   return {
     buckets,
@@ -1016,6 +1012,7 @@ export function aggregateProjectInsights(
     .slice(0, 20);
 
   const hasTokens = totalInputTokens + totalOutputTokens + totalCacheRead + totalCacheCreation > 0;
+  const histogram = buildTurnDurationHistogram(allTurnDurations);
 
   return {
     project,
@@ -1034,7 +1031,7 @@ export function aggregateProjectInsights(
     sessionsPerDay,
     avgSessionDurationMs:
       sessionsWithDuration > 0 ? Math.round(totalDurationMs / sessionsWithDuration) : 0,
-    medianTurnDurationMs: median(allTurnDurations),
+    medianTurnDurationMs: histogram?.percentiles.p50Ms,
     tokenBreakdown: hasTokens
       ? {
           input: totalInputTokens,
@@ -1043,7 +1040,7 @@ export function aggregateProjectInsights(
           cacheCreation: totalCacheCreation,
         }
       : undefined,
-    turnDurationHistogram: buildTurnDurationHistogram(allTurnDurations),
+    turnDurationHistogram: histogram,
     memory,
     dataQuality: buildAggregateDataQuality(projectScans),
   };
@@ -1161,6 +1158,7 @@ export function aggregateUserInsights(scans: SessionScanResult[]): UserInsights 
 
   const uniqueProjects = new Set(scans.map((s) => s.project));
   const hasTokens = totalInputTokens + totalOutputTokens + totalCacheRead + totalCacheCreation > 0;
+  const histogram = buildTurnDurationHistogram(allTurnDurations);
 
   return {
     totalSessions: scans.length,
@@ -1179,7 +1177,7 @@ export function aggregateUserInsights(scans: SessionScanResult[]): UserInsights 
     apiErrorTotal,
     avgSessionDurationMs:
       sessionsWithDuration > 0 ? Math.round(totalDurationMs / sessionsWithDuration) : 0,
-    medianTurnDurationMs: median(allTurnDurations),
+    medianTurnDurationMs: histogram?.percentiles.p50Ms,
     tokenBreakdown: hasTokens
       ? {
           input: totalInputTokens,
@@ -1188,7 +1186,7 @@ export function aggregateUserInsights(scans: SessionScanResult[]): UserInsights 
           cacheCreation: totalCacheCreation,
         }
       : undefined,
-    turnDurationHistogram: buildTurnDurationHistogram(allTurnDurations),
+    turnDurationHistogram: histogram,
     dataQuality: buildAggregateDataQuality(scans),
   };
 }
