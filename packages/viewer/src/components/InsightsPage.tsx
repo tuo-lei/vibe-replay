@@ -268,6 +268,12 @@ function formatCompactNum(n: number): string {
   return n.toLocaleString();
 }
 
+function fmtTokenCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${Math.floor(n / 1_000)}k`;
+  return n.toString();
+}
+
 function buildAggregateMetricQuality(notes: string[] | undefined): {
   overall?: string;
   duration?: string;
@@ -675,6 +681,176 @@ function HighlightCard({
 }
 
 // ─── Weekly Trend Chart ─────────────────────────────────────────────
+
+function formatDurationShort(ms: number): string {
+  if (ms < 1000) return "<1s";
+  const totalSec = Math.round(ms / 1000);
+  if (totalSec < 60) return `${totalSec}s`;
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  if (min < 60) return sec > 0 ? `${min}m ${sec}s` : `${min}m`;
+  const hr = Math.floor(min / 60);
+  const remMin = min % 60;
+  return remMin > 0 ? `${hr}h ${remMin}m` : `${hr}h`;
+}
+
+function TurnDurationChart({
+  histogram,
+}: {
+  histogram: {
+    buckets: Array<{ label: string; count: number; pct: number }>;
+    percentiles: { p50Ms: number; p75Ms: number; p90Ms: number };
+    totalTurns: number;
+  };
+}) {
+  const maxPct = Math.max(...histogram.buckets.map((b) => b.pct), 1);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-end gap-2 h-32">
+        {histogram.buckets.map((bucket) => {
+          const heightPct = Math.max((bucket.pct / maxPct) * 100, bucket.count > 0 ? 6 : 0);
+          return (
+            <div
+              key={bucket.label}
+              className="flex-1 flex flex-col items-center justify-end h-full group relative"
+            >
+              {/* Tooltip */}
+              <div className="absolute bottom-full mb-1 hidden group-hover:block z-10">
+                <div className="bg-terminal-surface-2 border border-terminal-border-subtle rounded-lg px-2 py-1 shadow-layer-md whitespace-nowrap">
+                  <div className="text-[10px] font-mono text-terminal-dim">{bucket.label}</div>
+                  <div className="text-[10px] font-mono text-terminal-green font-bold">
+                    {bucket.count} turn{bucket.count !== 1 ? "s" : ""} ({bucket.pct}%)
+                  </div>
+                </div>
+              </div>
+              {/* Percentage label above bar */}
+              {bucket.pct > 0 && (
+                <div className="text-[9px] font-mono text-terminal-dimmer tabular-nums mb-1">
+                  {bucket.pct >= 10 ? Math.round(bucket.pct) : bucket.pct.toFixed(1)}%
+                </div>
+              )}
+              <div
+                className="w-full rounded-md bg-terminal-green hover:opacity-90 transition-all"
+                style={{
+                  height: `${heightPct}%`,
+                  minHeight: bucket.count > 0 ? "4px" : "0",
+                  opacity: bucket.count > 0 ? 0.7 : 0.1,
+                }}
+              />
+            </div>
+          );
+        })}
+      </div>
+      {/* X-axis labels */}
+      <div className="flex gap-2">
+        {histogram.buckets.map((b) => (
+          <div
+            key={b.label}
+            className="flex-1 text-center text-[9px] font-mono text-terminal-dimmer"
+          >
+            {b.label}
+          </div>
+        ))}
+      </div>
+      {/* Percentiles + total */}
+      <div className="flex items-center justify-between pt-2 border-t border-terminal-border/20">
+        <div className="flex items-center gap-3 text-[10px] font-mono text-terminal-dim">
+          <span>
+            P50{" "}
+            <span className="text-terminal-text font-bold">
+              {formatDurationShort(histogram.percentiles.p50Ms)}
+            </span>
+          </span>
+          <span className="text-terminal-dimmer">{"\u00b7"}</span>
+          <span>
+            P75{" "}
+            <span className="text-terminal-text font-bold">
+              {formatDurationShort(histogram.percentiles.p75Ms)}
+            </span>
+          </span>
+          <span className="text-terminal-dimmer">{"\u00b7"}</span>
+          <span>
+            P90{" "}
+            <span className="text-terminal-text font-bold">
+              {formatDurationShort(histogram.percentiles.p90Ms)}
+            </span>
+          </span>
+        </div>
+        <span className="text-[10px] font-mono text-terminal-dimmer">
+          {histogram.totalTurns.toLocaleString()} turns
+        </span>
+      </div>
+    </div>
+  );
+}
+
+const TOKEN_COLORS = [
+  { key: "cacheRead", label: "Cache Read", color: "bg-terminal-purple" },
+  { key: "cacheCreation", label: "Cache Write", color: "bg-terminal-orange" },
+  { key: "output", label: "Output", color: "bg-terminal-green" },
+  { key: "input", label: "Input", color: "bg-terminal-blue" },
+] as const;
+
+function TokenBreakdownChart({
+  breakdown,
+}: {
+  breakdown: { input: number; output: number; cacheRead: number; cacheCreation: number };
+}) {
+  const total = breakdown.input + breakdown.output + breakdown.cacheRead + breakdown.cacheCreation;
+  if (total === 0) return null;
+
+  const items = TOKEN_COLORS.map((t) => ({
+    ...t,
+    value: breakdown[t.key],
+    pct: (breakdown[t.key] / total) * 100,
+  })).filter((t) => t.value > 0);
+
+  return (
+    <div className="space-y-4">
+      {/* Stacked bar */}
+      <div className="h-4 rounded-full bg-terminal-surface-2 overflow-hidden flex">
+        {items.map((item) => (
+          <div
+            key={item.key}
+            className={`h-full ${item.color} transition-all duration-500`}
+            style={{ width: `${item.pct}%`, opacity: 0.7 }}
+          />
+        ))}
+      </div>
+      {/* Legend rows */}
+      <div className="space-y-2">
+        {items.map((item) => (
+          <div key={item.key} className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className={`w-2.5 h-2.5 rounded-sm ${item.color}`} style={{ opacity: 0.7 }} />
+              <span className="text-[11px] font-mono text-terminal-dim">{item.label}</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-[11px] font-mono text-terminal-text tabular-nums">
+                {fmtTokenCount(item.value)}
+              </span>
+              <span className="text-[10px] font-mono text-terminal-dimmer tabular-nums w-10 text-right">
+                {item.pct < 0.1
+                  ? "<0.1%"
+                  : item.pct < 1
+                    ? `${item.pct.toFixed(1)}%`
+                    : `${Math.round(item.pct)}%`}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+      {/* Total */}
+      <div className="flex items-center justify-between pt-2 border-t border-terminal-border/20">
+        <span className="text-[10px] font-mono text-terminal-dimmer">Total</span>
+        <span className="text-[11px] font-mono text-terminal-text font-bold tabular-nums">
+          {fmtTokenCount(total)}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 function WeeklyTrendChart({ data }: { data: WeeklyData[] }) {
   const maxVal = Math.max(...data.map((d) => d.sessions), 1);
@@ -1369,6 +1545,28 @@ export default function InsightsPage() {
             />
           )}
         </div>
+
+        {/* Turn Duration Distribution + Token Breakdown */}
+        {(userInsights.turnDurationHistogram || userInsights.tokenBreakdown) && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {userInsights.turnDurationHistogram && (
+              <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm">
+                <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider mb-4">
+                  Turn Duration Distribution
+                </h3>
+                <TurnDurationChart histogram={userInsights.turnDurationHistogram} />
+              </div>
+            )}
+            {userInsights.tokenBreakdown && (
+              <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm">
+                <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider mb-4">
+                  Token Usage
+                </h3>
+                <TokenBreakdownChart breakdown={userInsights.tokenBreakdown} />
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Two-column: Weekly Trend + Day of Week */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

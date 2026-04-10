@@ -74,6 +74,15 @@ export default function StatsPanel({ session }: Props) {
       tokenUsage: meta.stats.tokenUsage,
       costEstimate: meta.stats.costEstimate,
       compactions: meta.compactions,
+      medianTurnDurationMs: (() => {
+        const durations = meta.stats.turnStats
+          ?.map((t) => t.durationMs)
+          .filter((d): d is number => d != null && d > 0);
+        if (!durations?.length) return undefined;
+        const sorted = [...durations].sort((a, b) => a - b);
+        const mid = Math.floor(sorted.length / 2);
+        return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+      })(),
     };
   }, [session]);
 
@@ -227,6 +236,14 @@ export default function StatsPanel({ session }: Props) {
               created
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Efficiency metrics */}
+      {stats.medianTurnDurationMs != null && (
+        <div className="text-terminal-dim">
+          Median TTI:{" "}
+          <span className="text-terminal-text">{formatDuration(stats.medianTurnDurationMs)}</span>
         </div>
       )}
 

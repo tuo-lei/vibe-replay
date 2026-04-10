@@ -23,7 +23,7 @@ import type { DataSource, PrLink, SessionInfo, TokenUsage } from "./types.js";
 import { extractToolFilePath, shortenPath } from "./utils.js";
 
 // Bump this when we extract new fields — forces re-scan of all sessions.
-const SCANNER_VERSION = 6;
+const SCANNER_VERSION = 7;
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -75,6 +75,8 @@ export interface SessionScanResult {
   dataSource?: DataSource;
   dataQualityNotes?: string[];
   turnStatCount?: number;
+  /** Per-turn durations in ms — used for median time-to-intervention */
+  turnDurations?: number[];
 }
 
 export interface ScanCacheEntry {
@@ -105,6 +107,14 @@ export interface ProjectInsights {
   timeRange: { first: string; last: string };
   sessionsPerDay: Record<string, number>; // YYYY-MM-DD → count
   avgSessionDurationMs: number;
+  medianTurnDurationMs?: number;
+  tokenBreakdown?: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheCreation: number;
+  };
+  turnDurationHistogram?: TurnDurationHistogram;
   memory?: ProjectMemory;
   dataQuality?: {
     notes: string[];
@@ -156,8 +166,79 @@ export interface UserInsights {
   subAgentTotal: number;
   apiErrorTotal: number;
   avgSessionDurationMs: number;
+  medianTurnDurationMs?: number;
+  tokenBreakdown?: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheCreation: number;
+  };
+  turnDurationHistogram?: TurnDurationHistogram;
   dataQuality?: {
     notes: string[];
+  };
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────
+
+function percentile(sorted: number[], p: number): number {
+  const idx = (p / 100) * (sorted.length - 1);
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return sorted[lo];
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+}
+
+export interface TurnDurationBucket {
+  label: string;
+  minMs: number;
+  maxMs: number; // Infinity for last bucket (serialized as -1)
+  count: number;
+  pct: number; // 0-100
+}
+
+export interface TurnDurationHistogram {
+  buckets: TurnDurationBucket[];
+  percentiles: { p50Ms: number; p75Ms: number; p90Ms: number };
+  totalTurns: number;
+}
+
+const DURATION_BUCKETS: Array<{ label: string; minMs: number; maxMs: number }> = [
+  { label: "<30s", minMs: 0, maxMs: 30_000 },
+  { label: "30s-1m", minMs: 30_000, maxMs: 60_000 },
+  { label: "1-2m", minMs: 60_000, maxMs: 120_000 },
+  { label: "2-5m", minMs: 120_000, maxMs: 300_000 },
+  { label: "5-10m", minMs: 300_000, maxMs: 600_000 },
+  { label: "10m+", minMs: 600_000, maxMs: Number.POSITIVE_INFINITY },
+];
+
+function buildTurnDurationHistogram(durations: number[]): TurnDurationHistogram | undefined {
+  if (durations.length === 0) return undefined;
+  const sorted = [...durations].sort((a, b) => a - b);
+  const total = sorted.length;
+
+  // Single O(n) pass to count buckets
+  const counts = new Array<number>(DURATION_BUCKETS.length).fill(0);
+  for (const d of sorted) {
+    const i = DURATION_BUCKETS.findIndex((b) => d < b.maxMs);
+    if (i >= 0) counts[i]++;
+  }
+  const buckets: TurnDurationBucket[] = DURATION_BUCKETS.map((b, i) => ({
+    label: b.label,
+    minMs: b.minMs,
+    maxMs: b.maxMs === Number.POSITIVE_INFINITY ? -1 : b.maxMs,
+    count: counts[i],
+    pct: Math.round((counts[i] / total) * 1000) / 10,
+  }));
+
+  return {
+    buckets,
+    percentiles: {
+      p50Ms: Math.round(percentile(sorted, 50)),
+      p75Ms: Math.round(percentile(sorted, 75)),
+      p90Ms: Math.round(percentile(sorted, 90)),
+    },
+    totalTurns: total,
   };
 }
 
@@ -218,6 +299,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
   let compactionCount = 0;
   let apiErrorCount = 0;
   let totalDurationMs = 0;
+  const turnDurations: number[] = [];
   const allTimestamps: string[] = [];
 
   // Token usage tracking (deduplicate by message ID)
@@ -299,6 +381,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
       if (obj.type === "system") {
         if (obj.subtype === "turn_duration" && typeof obj.durationMs === "number") {
           totalDurationMs += obj.durationMs;
+          turnDurations.push(obj.durationMs);
         }
         if (obj.subtype === "compact_boundary") compactionCount++;
         if (obj.subtype === "api_error") apiErrorCount++;
@@ -517,6 +600,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
     permissionMode,
     skillsUsed: skillsUsed.size > 0 ? [...skillsUsed].sort() : undefined,
     mcpServersUsed: mcpServersUsed.size > 0 ? [...mcpServersUsed].sort() : undefined,
+    turnDurations: turnDurations.length > 0 ? turnDurations : undefined,
   };
 }
 
@@ -658,6 +742,9 @@ function buildScanResultFromParsed(
     dataSource: parsed.dataSource,
     dataQualityNotes: parsed.dataSourceInfo?.notes,
     turnStatCount: parsed.turnStats?.length,
+    turnDurations: parsed.turnStats
+      ?.map((t) => t.durationMs)
+      .filter((d): d is number => d != null && d > 0),
   };
 }
 
@@ -834,6 +921,11 @@ export function aggregateProjectInsights(
   let totalEdits = 0;
   let subAgentTotal = 0;
   let apiErrorTotal = 0;
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let totalCacheRead = 0;
+  let totalCacheCreation = 0;
+  const allTurnDurations: number[] = [];
   const models: Record<string, number> = {};
   const branchMap = new Map<string, { sessionIds: string[]; prLinks: PrLink[] }>();
   const fileEditCounts = new Map<string, { edits: number; sessions: Set<string> }>();
@@ -851,6 +943,13 @@ export function aggregateProjectInsights(
     totalEdits += s.editCount;
     subAgentTotal += s.subAgentCount;
     apiErrorTotal += s.apiErrorCount;
+    if (s.tokenUsage) {
+      totalInputTokens += s.tokenUsage.inputTokens;
+      totalOutputTokens += s.tokenUsage.outputTokens;
+      totalCacheRead += s.tokenUsage.cacheReadTokens;
+      totalCacheCreation += s.tokenUsage.cacheCreationTokens;
+    }
+    if (s.turnDurations) allTurnDurations.push(...s.turnDurations);
 
     if (s.model) models[s.model] = (models[s.model] || 0) + 1;
 
@@ -912,6 +1011,9 @@ export function aggregateProjectInsights(
     .sort((a, b) => b.editCount - a.editCount)
     .slice(0, 20);
 
+  const hasTokens = totalInputTokens + totalOutputTokens + totalCacheRead + totalCacheCreation > 0;
+  const histogram = buildTurnDurationHistogram(allTurnDurations);
+
   return {
     project,
     sessionCount: projectScans.length,
@@ -929,6 +1031,16 @@ export function aggregateProjectInsights(
     sessionsPerDay,
     avgSessionDurationMs:
       sessionsWithDuration > 0 ? Math.round(totalDurationMs / sessionsWithDuration) : 0,
+    medianTurnDurationMs: histogram?.percentiles.p50Ms,
+    tokenBreakdown: hasTokens
+      ? {
+          input: totalInputTokens,
+          output: totalOutputTokens,
+          cacheRead: totalCacheRead,
+          cacheCreation: totalCacheCreation,
+        }
+      : undefined,
+    turnDurationHistogram: histogram,
     memory,
     dataQuality: buildAggregateDataQuality(projectScans),
   };
@@ -942,6 +1054,11 @@ export function aggregateUserInsights(scans: SessionScanResult[]): UserInsights 
   let totalEdits = 0;
   let subAgentTotal = 0;
   let apiErrorTotal = 0;
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let totalCacheRead = 0;
+  let totalCacheCreation = 0;
+  const allTurnDurations: number[] = [];
   const providers: Record<string, number> = {};
   const models: Record<string, number> = {};
   const projectStats = new Map<
@@ -973,6 +1090,13 @@ export function aggregateUserInsights(scans: SessionScanResult[]): UserInsights 
     totalEdits += s.editCount;
     subAgentTotal += s.subAgentCount;
     apiErrorTotal += s.apiErrorCount;
+    if (s.tokenUsage) {
+      totalInputTokens += s.tokenUsage.inputTokens;
+      totalOutputTokens += s.tokenUsage.outputTokens;
+      totalCacheRead += s.tokenUsage.cacheReadTokens;
+      totalCacheCreation += s.tokenUsage.cacheCreationTokens;
+    }
+    if (s.turnDurations) allTurnDurations.push(...s.turnDurations);
 
     providers[s.provider] = (providers[s.provider] || 0) + 1;
     if (s.model) models[s.model] = (models[s.model] || 0) + 1;
@@ -1033,6 +1157,8 @@ export function aggregateUserInsights(scans: SessionScanResult[]): UserInsights 
     .sort((a, b) => b.sessions - a.sessions);
 
   const uniqueProjects = new Set(scans.map((s) => s.project));
+  const hasTokens = totalInputTokens + totalOutputTokens + totalCacheRead + totalCacheCreation > 0;
+  const histogram = buildTurnDurationHistogram(allTurnDurations);
 
   return {
     totalSessions: scans.length,
@@ -1051,6 +1177,16 @@ export function aggregateUserInsights(scans: SessionScanResult[]): UserInsights 
     apiErrorTotal,
     avgSessionDurationMs:
       sessionsWithDuration > 0 ? Math.round(totalDurationMs / sessionsWithDuration) : 0,
+    medianTurnDurationMs: histogram?.percentiles.p50Ms,
+    tokenBreakdown: hasTokens
+      ? {
+          input: totalInputTokens,
+          output: totalOutputTokens,
+          cacheRead: totalCacheRead,
+          cacheCreation: totalCacheCreation,
+        }
+      : undefined,
+    turnDurationHistogram: histogram,
     dataQuality: buildAggregateDataQuality(scans),
   };
 }
