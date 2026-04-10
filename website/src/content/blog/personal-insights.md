@@ -55,7 +55,7 @@ The streak cards below the heatmap add context: **9-day current streak**, best o
 
 ![Weekly trend bar chart showing acceleration through March, and day-of-week distribution showing Thursday as the most active day](/blog/personal-insights/insights-trends.png)
 
-The weekly trend chart tells a story the heatmap compresses. You can see activity building through February and peaking in mid-March. The "Slowing down" label is auto-generated — it compares recent weeks against your historical average.
+The weekly trend chart tells a story the heatmap compresses. You can see activity building through February and peaking in mid-March. The "Slowing down" label is auto-generated — it compares the last two weeks against your 90-day average.
 
 The day-of-week breakdown confirms what I suspected: weekdays are roughly equal (138–173 sessions), but **Saturday drops to a third of Thursday's volume**. Sunday is even lower. Vibe coding is, for me at least, a weekday activity.
 
@@ -91,7 +91,7 @@ Personal Insights operates in three layers:
 
 Every user gets a shareable URL: `vibe-replay.com/shared-insights/?s=your-slug` (or the short form `vibe-replay.com/i/your-slug`).
 
-The privacy defaults are conservative — cost is hidden, projects are visible but can be blurred, and you can toggle every section independently. Think of it as a GitHub contribution graph, but for AI-assisted coding.
+The privacy defaults are conservative — dollar amounts are hidden (model names and session counts are still visible), projects are visible but can be blurred, and you can toggle every section independently. Think of it as a GitHub contribution graph, but for AI-assisted coding.
 
 ---
 
