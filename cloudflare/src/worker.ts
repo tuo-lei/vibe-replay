@@ -1608,7 +1608,8 @@ app.get("/api/public/insights/:slug", async (c) => {
   let providers: Record<string, number> = {};
   let projectCount = 0;
 
-  if (config.showProjects || config.showModels || config.showProviders) {
+  // Always fetch breakdowns — project count is always shown even when topProjects list is hidden
+  {
     const cutoffDate = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const allRows = await db
       .select({
@@ -1634,7 +1635,7 @@ app.get("/api/public/insights/:slug", async (c) => {
     const providersAgg: Record<string, { sessions: number; cost: number }> = {};
 
     for (const row of allRows) {
-      if (config.showProjects && row.projects) {
+      if (row.projects) {
         try {
           const p = JSON.parse(row.projects);
           for (const [name, v] of Object.entries(p) as [string, any][]) {
@@ -1684,8 +1685,8 @@ app.get("/api/public/insights/:slug", async (c) => {
       }
     }
 
+    projectCount = Object.keys(projectsAgg).length;
     if (config.showProjects) {
-      projectCount = Object.keys(projectsAgg).length;
       topProjects = Object.entries(projectsAgg)
         .map(([project, v]) => {
           const name = config.blurProjectNames ? project.replace(/[^/\\]/g, "*") : project;
@@ -1726,7 +1727,7 @@ app.get("/api/public/insights/:slug", async (c) => {
     avatarUrl: profile.avatarUrl,
     config: visibleSections,
     totalSessions: agg?.totalSessions || 0,
-    totalProjects: config.showProjects ? projectCount : undefined,
+    totalProjects: projectCount,
     totalDurationMs: agg?.totalDurationMs || 0,
     totalPrompts: agg?.totalPrompts || 0,
     totalToolCalls: agg?.totalToolCalls || 0,

@@ -488,14 +488,7 @@ function countSessionStats(turns: ParsedTurn[]): {
           block.type === "text" && typeof block.text === "string" && block.text.trim().length > 0,
       );
       const hasImages = turn.blocks.some(
-        (block) =>
-          typeof block === "object" &&
-          block !== null &&
-          "type" in block &&
-          (block as { type?: unknown }).type === "_user_images" &&
-          "images" in block &&
-          Array.isArray((block as { images?: unknown }).images) &&
-          (block as { images: unknown[] }).images.length > 0,
+        (block) => block.type === "_user_images" && block.images.length > 0,
       );
       if (hasText || hasImages) promptCount++;
     }

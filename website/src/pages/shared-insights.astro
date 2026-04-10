@@ -1,24 +1,12 @@
 ---
 import Footer from "../components/Footer.astro";
-import GitHubStar from "../components/GitHubStar.astro";
+import Nav from "../components/Nav.astro";
 import Layout from "../layouts/Layout.astro";
 ---
 
 <Layout title="Insights - vibe-replay" description="Vibe coding insights shared via vibe-replay">
   <div class="min-h-screen flex flex-col">
-    <!-- Header -->
-    <nav class="border-b border-border/50 px-6 py-3">
-      <div class="max-w-6xl mx-auto flex items-center justify-between">
-        <div class="flex items-center gap-4">
-          <a href="/" class="font-mono font-bold text-sm hover:opacity-80 transition-opacity bg-gradient-to-r from-accent via-emerald-400 to-cyan-400 bg-clip-text text-transparent">vibe-replay</a>
-          <span class="text-border hidden sm:inline">|</span>
-          <a href="/insights/" class="text-text-secondary hover:text-accent text-sm transition-colors hidden sm:inline underline underline-offset-4 decoration-text-muted hover:decoration-accent">Insights</a>
-        </div>
-        <div class="flex items-center gap-3">
-          <GitHubStar />
-        </div>
-      </div>
-    </nav>
+    <Nav active="insights" />
 
     <!-- Main content -->
     <main class="flex-1 max-w-4xl mx-auto w-full px-4 md:px-6 py-10">
@@ -432,7 +420,7 @@ import Layout from "../layouts/Layout.astro";
     ];
     if (cfg.showCost && data.totalCost !== undefined) stats.push({ value: formatCost(data.totalCost), label: "Spent", color: "text-[#d29922]" });
     stats.push({ value: formatNumber(data.totalEdits), label: "File Edits", color: "text-[#79b8ff]" });
-    if (cfg.showProjects && data.totalProjects !== undefined) stats.push({ value: formatNumber(data.totalProjects), label: "Projects", color: "text-[#b392f0]" });
+    if (data.totalProjects !== undefined) stats.push({ value: formatNumber(data.totalProjects), label: "Projects", color: "text-[#b392f0]" });
     statsGrid.innerHTML = stats.map(s => `<div><div class="text-2xl font-mono font-bold ${s.color} tabular-nums">${s.value}</div><div class="mt-0.5 text-[10px] uppercase text-text-muted tracking-wider">${s.label}</div></div>`).join("");
 
     // Mini heatmap
