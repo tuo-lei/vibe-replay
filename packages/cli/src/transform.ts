@@ -1,7 +1,15 @@
 import { homedir } from "node:os";
 import { estimateCost, estimateCostSimple, getModelContextLimit } from "./pricing.js";
 import type { ProviderParseResult } from "./providers/types.js";
-import type { ReplaySession, Scene, SubAgent } from "./types.js";
+import type {
+  ContentBlock,
+  EnrichedToolUseBlock,
+  ReplaySession,
+  Scene,
+  SubAgent,
+} from "./types.js";
+
+type ToolCallScene = Extract<Scene, { type: "tool-call" }>;
 
 const HOME = homedir();
 
@@ -27,9 +35,13 @@ export function transformToReplay(
 
   for (const turn of parsed.turns) {
     if (turn.role === "user") {
-      const textBlocks = turn.blocks.filter((b) => b.type === "text");
-      const content = textBlocks.map((b) => (b as any).text || "").join("\n");
-      const imageBlock = turn.blocks.find((b) => (b as any).type === "_user_images") as any;
+      const textBlocks = turn.blocks.filter(
+        (b): b is Extract<ContentBlock, { type: "text" }> => b.type === "text",
+      );
+      const content = textBlocks.map((b) => b.text || "").join("\n");
+      const imageBlock = turn.blocks.find(
+        (b): b is Extract<ContentBlock, { type: "_user_images" }> => b.type === "_user_images",
+      );
       const images: string[] | undefined = imageBlock?.images;
       if (content.trim() || (images && images.length > 0)) {
         if (turn.subtype === "compaction-summary") {
@@ -60,7 +72,7 @@ export function transformToReplay(
 
     for (const block of turn.blocks) {
       if (block.type === "thinking") {
-        const thinking = (block as any).thinking || "";
+        const thinking = block.thinking || "";
         if (thinking.trim()) {
           scenes.push({
             type: "thinking",
@@ -70,7 +82,7 @@ export function transformToReplay(
           thinkingBlocks++;
         }
       } else if (block.type === "text") {
-        const text = (block as any).text || "";
+        const text = block.text || "";
         if (text.trim()) {
           scenes.push({
             type: "text-response",
@@ -80,20 +92,20 @@ export function transformToReplay(
           });
         }
       } else if (block.type === "tool_use") {
-        const toolBlock = block as any;
+        const toolBlock = block as EnrichedToolUseBlock;
         const scene = buildToolScene(
           toolBlock.name,
           toolBlock.input || {},
           toolBlock._result || "",
           toolBlock._images,
         );
-        (scene as any).timestamp = turn.timestamp;
-        (scene as any).isError = !!toolBlock._isError;
-        if (toolBlock._durationMs) (scene as any).durationMs = toolBlock._durationMs;
+        scene.timestamp = turn.timestamp;
+        scene.isError = !!toolBlock._isError;
+        if (toolBlock._durationMs) scene.durationMs = toolBlock._durationMs;
         // Attach subagent data for Agent tool calls
         if (toolBlock.name === "Agent" && toolBlock._subAgent) {
           const sa = toolBlock._subAgent;
-          (scene as any).subAgent = {
+          scene.subAgent = {
             agentId: sa.agentId,
             agentType: sa.agentType,
             description: sa.description,
@@ -103,12 +115,12 @@ export function transformToReplay(
             textResponses: sa.textResponses,
             tokenUsage: sa.tokenUsage,
             model: sa.model,
-            scenes: (sa.scenes || []).map((s: any) => redactSubAgentScene(s)),
+            scenes: (sa.scenes || []).map((s: Scene) => redactSubAgentScene(s)),
           } satisfies SubAgent;
         } else if (provider === "cursor" && toolBlock.name === "Agent") {
           const minimal = buildMinimalCursorSubAgent(toolBlock);
           if (minimal) {
-            (scene as any).subAgent = minimal;
+            scene.subAgent = minimal;
             syntheticSubAgentSummary.push({
               agentId: minimal.agentId,
               agentType: minimal.agentType,
@@ -197,8 +209,8 @@ function buildToolScene(
   input: Record<string, any>,
   result: string,
   images?: string[],
-): Scene {
-  const scene: Scene = {
+): ToolCallScene {
+  const scene: ToolCallScene = {
     type: "tool-call",
     toolName,
     input: sanitizeInput(input),
@@ -207,25 +219,25 @@ function buildToolScene(
   };
 
   if (toolName === "Edit" && input.file_path) {
-    (scene as any).diff = {
+    scene.diff = {
       filePath: redactPath(input.file_path),
       oldContent: input.old_string ?? "",
       newContent: input.new_string ?? "",
     };
   } else if (toolName === "Write" && input.file_path) {
-    (scene as any).diff = {
+    scene.diff = {
       filePath: redactPath(input.file_path),
       oldContent: "",
       newContent: truncate(input.content || "", 3000),
     };
   } else if (toolName === "Delete" && input.file_path) {
-    (scene as any).diff = {
+    scene.diff = {
       filePath: redactPath(input.file_path),
       oldContent: input.old_string ?? "(file deleted)",
       newContent: "",
     };
   } else if (toolName === "Bash" && input.command) {
-    (scene as any).bashOutput = {
+    scene.bashOutput = {
       command: redactSecrets(redactPath(input.command)),
       stdout: truncate(redactPath(result), 3000),
     };
@@ -266,8 +278,8 @@ function truncate(s: string, max: number): string {
   return `${redacted.slice(0, max)}\n... (truncated, ${redacted.length} chars total)`;
 }
 
-function buildMinimalCursorSubAgent(toolBlock: any): SubAgent | null {
-  const input = toolBlock?.input;
+function buildMinimalCursorSubAgent(toolBlock: EnrichedToolUseBlock): SubAgent | null {
+  const input = toolBlock.input;
   if (!input || typeof input !== "object") return null;
   const rawAgentType =
     typeof input.subagent_type === "string" && input.subagent_type.trim()
@@ -276,10 +288,7 @@ function buildMinimalCursorSubAgent(toolBlock: any): SubAgent | null {
   if (!rawAgentType) return null;
   const agentType = normalizeCursorAgentType(rawAgentType);
   return {
-    agentId:
-      typeof toolBlock.id === "string" && toolBlock.id.trim()
-        ? toolBlock.id
-        : `cursor-agent-${agentType}`,
+    agentId: toolBlock.id.trim() || `cursor-agent-${agentType}`,
     agentType,
     ...(typeof input.description === "string" && input.description.trim()
       ? { description: input.description.trim() }
@@ -288,7 +297,6 @@ function buildMinimalCursorSubAgent(toolBlock: any): SubAgent | null {
     toolCalls: 0,
     thinkingBlocks: 0,
     textResponses: 0,
-    model: typeof toolBlock.model === "string" ? toolBlock.model : undefined,
     scenes: [],
   };
 }
@@ -375,11 +383,11 @@ const SECRET_PATTERNS = [
   /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
 ];
 
-function redactSubAgentScene(s: any): Scene {
+function redactSubAgentScene(s: Scene): Scene {
   if (s.type === "tool-call") {
     const toolName = s.toolName || "";
     const input = s.input || {};
-    const scene: Scene = {
+    const scene: ToolCallScene = {
       type: "tool-call",
       toolName,
       input: s.input ? sanitizeInput(s.input) : {},
@@ -390,19 +398,19 @@ function redactSubAgentScene(s: any): Scene {
 
     // Preserve diff for file-modifying tools (same logic as buildToolScene)
     if (toolName === "Edit" && input.file_path) {
-      (scene as any).diff = {
+      scene.diff = {
         filePath: redactPath(input.file_path),
         oldContent: input.old_string ?? "",
         newContent: input.new_string ?? "",
       };
     } else if (toolName === "Write" && input.file_path) {
-      (scene as any).diff = {
+      scene.diff = {
         filePath: redactPath(input.file_path),
         oldContent: "",
         newContent: truncate(input.content || "", 3000),
       };
     } else if (toolName === "Delete" && input.file_path) {
-      (scene as any).diff = {
+      scene.diff = {
         filePath: redactPath(input.file_path),
         oldContent: input.old_string ?? "(file deleted)",
         newContent: "",
@@ -412,7 +420,7 @@ function redactSubAgentScene(s: any): Scene {
     return scene;
   }
   return {
-    type: s.type || "text-response",
+    type: s.type,
     content: truncate(redactSecrets(redactPath(s.content || "")), 1000),
     timestamp: s.timestamp,
   } as Scene;

@@ -115,7 +115,8 @@ describe("checkCleanupWarnings", () => {
         filePath: "/path/b.jsonl",
       }),
       makeSession({
-        timestamp: new Date(Date.now() - 29 * 24 * 60 * 60 * 1000).toISOString(),
+        // subtract 1 minute buffer to avoid Math.floor boundary flake from ms drift between Date.now() calls
+        timestamp: new Date(Date.now() - (29 * 24 * 60 * 60 * 1000 - 60_000)).toISOString(),
         filePath: "/path/c.jsonl",
       }),
     ];

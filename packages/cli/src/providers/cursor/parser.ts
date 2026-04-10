@@ -502,10 +502,8 @@ function mergeJsonlUserImagesIntoCursorTurns(
     const mergedImages = [...new Set([...existingImages, ...candidateImages])];
     if (mergedImages.length === existingImages.length) continue;
 
-    const nonImageBlocks = (targetTurn.blocks as any[]).filter(
-      (block) => block?.type !== "_user_images",
-    );
-    targetTurn.blocks = [...nonImageBlocks, { type: "_user_images", images: mergedImages }] as any;
+    const nonImageBlocks = targetTurn.blocks.filter((block) => block?.type !== "_user_images");
+    targetTurn.blocks = [...nonImageBlocks, { type: "_user_images", images: mergedImages }];
   }
 
   return merged;
