@@ -565,7 +565,7 @@ function buildScanResultFromParsed(
           block.type === "text" && typeof block.text === "string" && block.text.trim().length > 0,
       );
       const hasImages = turn.blocks.some(
-        (block) => block.type === "_user_images" && block.images?.length > 0,
+        (block) => block.type === "_user_images" && block.images.length > 0,
       );
       if (hasText || hasImages) promptCount++;
     }

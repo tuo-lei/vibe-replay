@@ -136,6 +136,6 @@ export interface EnrichedToolUseBlock {
   _result: string;
   _images?: string[];
   _isError?: boolean;
-  _subAgent?: import("@vibe-replay/types").SubAgent;
+  _subAgent?: SubAgent;
   _durationMs?: number;
 }
