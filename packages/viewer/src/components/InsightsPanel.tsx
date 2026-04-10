@@ -84,6 +84,7 @@ interface ProjectInsights {
     cacheRead: number;
     cacheCreation: number;
   };
+  // TODO: render in project-level panel (currently only rendered in user-level InsightsPage)
   turnDurationHistogram?: TurnDurationHistogram;
   memory?: ProjectMemory;
   dataQuality?: {
