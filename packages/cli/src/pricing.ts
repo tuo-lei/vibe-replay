@@ -98,14 +98,15 @@ const MODEL_CONTEXT_LIMITS: Record<string, number> = {
 
 /**
  * Resolve context window limit for a model ID string.
- * Source: https://docs.anthropic.com/en/docs/about-claude/models/overview
+ * This returns the default context limit for the runtime environment (e.g. Claude Code
+ * uses 200K even for models that support up to 1M via the API).
  * Returns undefined if model is unknown.
  */
 export function getModelContextLimit(model: string): number | undefined {
   const lower = model.toLowerCase();
-  // Opus 4.6 and Sonnet 4.6: 1M context window
-  if (lower.includes("opus-4-6") || lower.includes("sonnet-4-6")) return 1_000_000;
-  // All other Claude models (Opus 4.5/4.1/4, Sonnet 4.5/4/3.x, Haiku): 200K
+  // Claude Code uses 200K context windows for all Claude models.
+  // The model capability may be higher (e.g. Opus 4.6 supports 1M via the API),
+  // but in practice sessions compact around 200K.
   if (lower.includes("opus") || lower.includes("sonnet") || lower.includes("haiku")) {
     return 200_000;
   }
