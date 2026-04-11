@@ -715,6 +715,9 @@ export default function SummaryView({ session }: Props) {
           <div>
             <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
               Top Tools
+              <span className="text-terminal-dimmer ml-2 normal-case tracking-normal font-mono">
+                {stats.totalTools} total
+              </span>
             </div>
             <div className="space-y-1.5">
               {stats.topTools.map(([name, count]) => (
@@ -731,8 +734,11 @@ export default function SummaryView({ session }: Props) {
                       style={{ width: `${(count / stats.topTools[0][1]) * 100}%` }}
                     />
                   </div>
-                  <span className="text-terminal-dim shrink-0 w-6 text-right tabular-nums">
-                    {count}
+                  <span className="text-terminal-dim shrink-0 w-16 text-right tabular-nums">
+                    {count}{" "}
+                    <span className="text-terminal-dimmer">
+                      ({Math.round((count / stats.totalTools) * 100)}%)
+                    </span>
                   </span>
                 </div>
               ))}
@@ -1096,7 +1102,20 @@ function ContextWindowChart({
   if (!contextSizes.some((c) => c > 0)) return null;
 
   const peak = Math.max(...contextSizes);
-  const max = peak;
+
+  // Infer ceiling from compaction data and peak
+  let compactionPeak = 0;
+  for (let i = 0; i < contextSizes.length - 1; i++) {
+    if (
+      contextSizes[i] > 0 &&
+      contextSizes[i + 1] > 0 &&
+      contextSizes[i + 1] < contextSizes[i] * 0.5
+    ) {
+      compactionPeak = Math.max(compactionPeak, contextSizes[i]);
+    }
+  }
+  const effectiveLimit = compactionPeak > 200_000 || peak > 200_000 ? 1_000_000 : 200_000;
+  const max = effectiveLimit > peak ? effectiveLimit : peak;
   const h = 60;
   const w = 100;
 
@@ -1118,10 +1137,14 @@ function ContextWindowChart({
 
   const hoveredX = hovered !== null ? (n === 1 ? 0.5 : hovered / (n - 1)) : 0;
 
+  // Context limit Y position for the limit line
+  const limitY = effectiveLimit ? h - (effectiveLimit / max) * (h - 6) - 3 : undefined;
+
   return (
     <div>
-      <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-1">
-        Context Window Usage
+      <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-1 flex items-center gap-2">
+        <span>Context Window Usage</span>
+        <span className="font-mono text-terminal-cyan">peak {fmtNum(peak)}</span>
       </div>
       <div className="relative">
         <svg
@@ -1132,6 +1155,20 @@ function ContextWindowChart({
           onMouseMove={onMouseMove}
           onMouseLeave={onMouseLeave}
         >
+          {/* Context limit line (100% mark) */}
+          {limitY !== undefined && (
+            <line
+              x1="0"
+              y1={limitY}
+              x2={w}
+              y2={limitY}
+              style={{ stroke: "var(--dim)" }}
+              strokeWidth="0.5"
+              strokeDasharray="3,2"
+              vectorEffect="non-scaling-stroke"
+              opacity="0.4"
+            />
+          )}
           <polygon
             points={`0,${h} ${points.join(" ")} ${w},${h}`}
             style={{ fill: "var(--cyan-subtle)" }}
@@ -1193,7 +1230,7 @@ function ContextWindowChart({
       </div>
       <div className="flex justify-between text-[10px] font-mono text-terminal-dimmer mt-0.5">
         <span>Turn 1</span>
-        <span>peak {fmtNum(peak)}</span>
+        <span>{effectiveLimit ? `limit ${fmtNum(effectiveLimit)}` : `peak ${fmtNum(peak)}`}</span>
         <span>Turn {n}</span>
       </div>
       {compactionTurns.length > 0 && (

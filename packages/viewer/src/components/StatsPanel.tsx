@@ -74,6 +74,11 @@ export default function StatsPanel({ session }: Props) {
       tokenUsage: meta.stats.tokenUsage,
       costEstimate: meta.stats.costEstimate,
       compactions: meta.compactions,
+      peakContextTokens: (() => {
+        if (!meta.stats.turnStats?.length) return undefined;
+        const peak = Math.max(...meta.stats.turnStats.map((t) => t.contextTokens || 0));
+        return peak > 0 ? peak : undefined;
+      })(),
       medianTurnDurationMs: (() => {
         const durations = meta.stats.turnStats
           ?.map((t) => t.durationMs)
@@ -239,6 +244,15 @@ export default function StatsPanel({ session }: Props) {
         </div>
       )}
 
+      {/* Peak context */}
+      {stats.peakContextTokens !== undefined && (
+        <div className="text-terminal-dim">
+          Peak context:{" "}
+          <span className="text-terminal-cyan">{fmtNum(stats.peakContextTokens)}</span>
+          <span className="text-terminal-dimmer"> tokens</span>
+        </div>
+      )}
+
       {/* Efficiency metrics */}
       {stats.medianTurnDurationMs != null && (
         <div className="text-terminal-dim">
@@ -334,7 +348,10 @@ export default function StatsPanel({ session }: Props) {
           </div>
           <div className="space-y-1">
             {stats.compactions.map((c, i) => (
-              <div key={i} className="text-terminal-dim text-xs flex items-baseline gap-1.5">
+              <div
+                key={i}
+                className="text-terminal-dim text-xs flex items-baseline gap-1.5 flex-wrap"
+              >
                 <span className="text-terminal-orange">●</span>
                 <span>{c.trigger}</span>
                 {c.preTokens && (
