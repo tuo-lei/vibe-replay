@@ -12,6 +12,8 @@ Turn Claude Code and Cursor sessions into shareable, interactive replays.
 npx vibe-replay
 ```
 
+> Also available as a [Claude Code plugin](#claude-code-plugin) — your agent generates replays automatically during PR creation.
+
 > **[Watch a live demo &rarr;](https://vibe-replay.com/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba)**
 
 <p align="center">
