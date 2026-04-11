@@ -31,10 +31,6 @@ interface TurnGroup {
   turnNumber?: number;
 }
 
-function fmtTokens(n: number): string {
-  return `${fmtNum(n)} tokens`;
-}
-
 function formatTime(iso?: string): string {
   if (!iso) return "";
   try {
@@ -592,9 +588,9 @@ const GroupCard = memo(function GroupCard({
           )}
           {compactionTokens && (
             <span className="text-[10px] font-mono text-terminal-green">
-              {fmtTokens(compactionTokens.before)} → {fmtTokens(compactionTokens.after)}
+              {fmtNum(compactionTokens.before)} → {fmtNum(compactionTokens.after)}
               <span className="text-terminal-green/70 ml-1">
-                (-{fmtTokens(compactionTokens.freed)})
+                (-{fmtNum(compactionTokens.freed)} freed)
               </span>
             </span>
           )}
