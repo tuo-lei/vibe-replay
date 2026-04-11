@@ -1768,6 +1768,7 @@ function buildGlobalStateMetrics(
   tokenUsageByModel?: Record<string, TokenUsage>;
   turnStats?: TurnStat[];
   totalDurationMs?: number;
+  usedWallClock?: boolean;
 } {
   if (entries.length === 0) return {};
 
@@ -1832,10 +1833,11 @@ function buildGlobalStateMetrics(
     }
   }
 
-  const { turnStats: durationTurnStats, totalDurationMs } = applyGlobalStateWallClockDurations(
-    entries,
-    turnStats,
-  );
+  const {
+    turnStats: durationTurnStats,
+    totalDurationMs,
+    usedWallClock,
+  } = applyGlobalStateWallClockDurations(entries, turnStats);
 
   const totalTokens =
     sessionTokenUsage && hasAnyTokens(sessionTokenUsage) ? sessionTokenUsage : totals;
@@ -1845,6 +1847,7 @@ function buildGlobalStateMetrics(
     ...(Object.keys(byModel).length > 0 ? { tokenUsageByModel: byModel } : {}),
     ...(durationTurnStats.length > 0 ? { turnStats: durationTurnStats } : {}),
     ...(totalDurationMs !== undefined ? { totalDurationMs } : {}),
+    ...(totalDurationMs !== undefined ? { usedWallClock } : {}),
   };
 }
 
@@ -1969,7 +1972,9 @@ async function parseCursorGlobalStateDb(
     }
     if (metrics.totalDurationMs !== undefined) {
       notes.push(
-        "Per-turn duration is inferred from Cursor bubble timestamps (user prompt to final assistant bubble).",
+        metrics.usedWallClock
+          ? "Per-turn duration is inferred from Cursor bubble timestamps (user prompt to final assistant bubble)."
+          : "Duration is estimated from Cursor thinking and tool execution timing.",
       );
     } else {
       notes.push("Duration is unavailable for this Cursor global-state session.");

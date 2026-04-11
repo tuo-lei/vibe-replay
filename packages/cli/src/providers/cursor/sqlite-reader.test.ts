@@ -132,6 +132,30 @@ describe("cursor sqlite metrics helpers", () => {
     expect(metrics.turnStats?.[1]?.tokenUsage).toBeUndefined();
   });
 
+  it("falls back to bubble-duration estimation when global-state timestamps are unavailable", () => {
+    const metrics = __testables.buildGlobalStateMetrics(
+      [
+        {
+          turn: { role: "user", blocks: [{ type: "text", text: "prompt" }] },
+          bubble: { type: 1, tokenCount: { inputTokens: 0, outputTokens: 0 } },
+        },
+        {
+          turn: { role: "assistant", blocks: [{ type: "text", text: "reply" }] },
+          bubble: {
+            type: 2,
+            tokenCount: { inputTokens: 500, outputTokens: 30 },
+            thinkingDurationMs: 2000,
+          },
+        },
+      ] as any,
+      undefined,
+    );
+
+    expect(metrics.turnStats?.[0]?.durationMs).toBe(2000);
+    expect(metrics.totalDurationMs).toBe(2000);
+    expect(metrics.usedWallClock).toBe(false);
+  });
+
   it("extracts Cursor branch metadata from composer payload", () => {
     const branchMeta = __testables.extractCursorBranchMetadata({
       createdOnBranch: "feature/start",
