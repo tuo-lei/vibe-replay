@@ -55,6 +55,47 @@ GitHub-style activity heatmap, streaks, weekly trends, top projects, model usage
   <img src="docs/screenshots/personal-insights.png" alt="Personal insights — GitHub-style heatmap, streaks, session stats, and cost tracking" width="800" />
 </p>
 
+## Claude Code Plugin
+
+vibe-replay is also available as a [Claude Code plugin](https://code.claude.com/docs/en/plugins). Once installed, your agent learns how to generate replays autonomously — it can find the current session, produce GitHub-ready artifacts, and embed them in PRs, all without you running any CLI commands.
+
+### What the plugin gives your agent
+
+- **Auto-discover sessions** — finds the current session's JSONL file via `$CLAUDE_SESSION_ID`
+- **Generate PR artifacts** — markdown summary + animated GIF + SVG, ready for PR descriptions
+- **Generate HTML replays** — self-contained interactive replay files
+- **PR workflow integration** — agent automatically embeds replay context when you create PRs
+
+### Install (recommended)
+
+```bash
+/install-plugin from github:tuo-lei/vibe-replay
+```
+
+### Manual install (single file)
+
+If you prefer not to install the full plugin:
+
+```bash
+mkdir -p ~/.claude/skills/replay
+curl -o ~/.claude/skills/replay/SKILL.md \
+  https://raw.githubusercontent.com/tuo-lei/vibe-replay/main/skills/replay/SKILL.md
+```
+
+### Usage examples
+
+```
+# Slash command — generate a replay of the current session
+/vibe-replay:replay
+
+# Natural language — agent auto-triggers during PR creation
+"Create a PR with session replay"
+"Create a PR for this change, include an animated GIF of the session"
+
+# Direct replay
+"Generate an interactive replay of this session and open it"
+```
+
 ## Features
 
 - **Zero config** — one command, no setup, no account. Works instantly with existing sessions

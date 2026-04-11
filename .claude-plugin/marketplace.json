@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "name": "vibe-replay",
+  "description": "Plugins for AI session replay — recording, sharing, and PR integration",
+  "plugins": [
+    {
+      "name": "vibe-replay",
+      "version": "1.0.0",
+      "description": "Generate interactive HTML replays and GitHub PR artifacts from AI coding sessions",
+      "author": "Tuo Lei",
+      "path": ".",
+      "homepage": "https://vibe-replay.com",
+      "repository": "https://github.com/tuo-lei/vibe-replay",
+      "license": "MIT"
+    }
+  ]
+}
