@@ -48,7 +48,7 @@ The agent generates artifacts, copies the GIF into the repo (e.g., `.github/sess
 
 ### Quick HTML replay
 
-> `/replay`
+> `/vibe-replay:replay`
 
 Generates a self-contained HTML file and opens it in the browser.
 
