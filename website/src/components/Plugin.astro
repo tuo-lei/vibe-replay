@@ -64,6 +64,7 @@ const capabilities = [
           <div class="group relative mb-6">
             <button
               id="plugin-copy-btn"
+              aria-label="Copy install command"
               class="w-full flex items-center gap-3 px-4 py-3 bg-surface/80 border border-border/60 rounded-lg font-mono text-sm hover:border-accent/40 transition-all cursor-pointer text-left"
             >
               <span class="text-text-muted select-none">&gt;</span>
@@ -103,7 +104,7 @@ const capabilities = [
             <svg class="w-4 h-4 text-accent/60" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
               <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
             </svg>
-            <span>Built on the open <a href="https://agentskills.io" target="_blank" rel="noopener" class="text-accent/80 hover:text-accent hover:underline transition-colors">Agent Skills</a> standard</span>
+            <span>Built on the open <a href="https://agentskills.io" target="_blank" rel="noopener noreferrer" class="text-accent/80 hover:text-accent hover:underline transition-colors">Agent Skills</a> standard</span>
           </div>
         </div>
       </div>
@@ -127,10 +128,12 @@ const capabilities = [
       }
     }).catch(() => {
       const input = document.createElement("input");
+      input.style.position = "fixed";
+      input.style.top = "-9999px";
       input.value = "/install-plugin from github:tuo-lei/vibe-replay";
       document.body.appendChild(input);
       input.select();
-      document.execCommand("copy");
+      try { document.execCommand("copy"); } catch (_) {}
       document.body.removeChild(input);
       const copyIcon = document.getElementById("plugin-copy-icon");
       const checkIcon = document.getElementById("plugin-check-icon");
