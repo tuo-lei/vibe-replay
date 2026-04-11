@@ -24,13 +24,17 @@ npx vibe-replay --session <PATH> --github
 ```
 
 This generates three files in `~/.vibe-replay/<slug>/`:
-- `github-summary.md` — ready-to-paste markdown with stats, tool breakdown, and session details
-- `session-preview.gif` — animated GIF showing the session flow (typically 30-60 KB)
-- `session-preview.svg` — animated SVG (CSS keyframes, renders natively on GitHub)
+- `github-summary.md` — markdown with stats, tool breakdown, and session details
+- `session-preview.gif` — animated GIF showing the session flow
+- `session-preview.svg` — animated SVG (CSS keyframes)
 
 The markdown is also printed to stdout.
 
-**To use in a PR**: read `github-summary.md` and include its content in the PR body. If the GIF needs to be visible on GitHub, copy `session-preview.gif` into the repo (e.g., `.github/`) and adjust the image path in the markdown.
+**To use in a PR**: read `github-summary.md` and include its **text content** in the PR body. Skip the first line (image reference) — do NOT commit the GIF to the repo, as binary files bloat repository size. The text summary (stats, prompts, tool breakdown) is the valuable part for PR reviewers.
+
+If the user explicitly asks to include the GIF image, mention that it requires either:
+- Uploading to an image hosting service
+- Publishing a gist first (`npx vibe-replay` interactive mode → Publish to Gist), then referencing the gist viewer URL
 
 ### 2. Interactive HTML Replay
 
@@ -73,14 +77,8 @@ When creating a PR and the user wants session replay context:
 1. Find the session file (see above)
 2. Run `npx vibe-replay --session <PATH> --github` to generate artifacts
 3. Read the generated `github-summary.md`
-4. Include the markdown content in the PR description (e.g., under a `## Session Replay` section)
-5. Optionally copy the GIF into the repo for inline display
-
-The markdown output includes:
-- Session stats (duration, model, file count)
-- Tool usage breakdown
-- Collapsible per-prompt details with assistant responses
-- Animated preview image (GIF)
+4. Strip the first line (image reference `![AI Session: ...](...)`), then include the rest in the PR description under a `## Session Replay` heading
+5. The text content alone provides full value: stats, tool breakdown, per-prompt details
 
 ## Optional Flags
 
