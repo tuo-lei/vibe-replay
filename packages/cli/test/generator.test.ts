@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { escapeHtml, escapeJsonForScript, injectDataScript } from "../src/generator.js";
+import {
+  escapeHtml,
+  escapeJsonForScript,
+  injectDataScript,
+  loadViewerHtml,
+} from "../src/generator.js";
 
 // ---------------------------------------------------------------------------
 // escapeHtml
@@ -323,5 +328,31 @@ describe("generator integration: escape + inject", () => {
     // JSON.parse handles \/ correctly — it's a valid escape in JSON
     const parsed = JSON.parse(escaped);
     expect(parsed).toEqual(original);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// loadViewerHtml
+// ---------------------------------------------------------------------------
+
+describe("loadViewerHtml", () => {
+  it("loads the pre-built viewer.html and returns HTML with a </head> tag", async () => {
+    // Requires `pnpm build` (or at least viewer build + copy) to have run first
+    // so that packages/cli/assets/viewer.html exists. The repo-level `pnpm test`
+    // flow runs after a build, matching how users exercise the CLI.
+    const html = await loadViewerHtml();
+    expect(typeof html).toBe("string");
+    expect(html.length).toBeGreaterThan(0);
+    expect(html.lastIndexOf("</head>")).toBeGreaterThan(-1);
+  });
+
+  it("returns content compatible with injectDataScript", async () => {
+    const html = await loadViewerHtml();
+    const flag = `<script>window.__VIBE_REPLAY_EDITOR__ = true;</script>`;
+    const result = injectDataScript(html, flag);
+    const flagIdx = result.indexOf(flag);
+    const lastHeadIdx = result.lastIndexOf("</head>");
+    expect(flagIdx).toBeGreaterThan(-1);
+    expect(flagIdx).toBeLessThan(lastHeadIdx);
   });
 });
