@@ -440,10 +440,8 @@ program
       console.log();
 
       if (opts.open || opts.github) {
-        console.log(
-          chalk.yellow(
-            "  ⚠ Non-interactive mode: continuing despite potential secrets. Review the output.\n",
-          ),
+        process.stderr.write(
+          `${chalk.yellow("  ⚠ Non-interactive mode: continuing despite potential secrets. Review the output.")}\n\n`,
         );
       } else {
         const { confirm } = await import("@inquirer/prompts");
@@ -613,19 +611,18 @@ program
         }
       }
     } else if (target === "github") {
-      const { mkdir, writeFile } = await import("node:fs/promises");
-      await mkdir(outputDir, { recursive: true });
+      const { writeFile } = await import("node:fs/promises");
 
       // Auto-detect replay URL from previously published gist
       const savedGist = await loadSavedGistInfo(outputDir);
       const replayUrl = savedGist?.viewerUrl;
 
       // Generate animated SVG
-      const svgSpinner2 = ora("Generating animated SVG...").start();
+      const svgSpinner = ora("Generating animated SVG...").start();
       const svgContent = generateGitHubSvg(replay, { replayUrl });
       const svgFilePath = join(outputDir, "session-preview.svg");
       await writeFile(svgFilePath, svgContent, "utf-8");
-      svgSpinner2.succeed(`SVG: ${svgFilePath}`);
+      svgSpinner.succeed(`SVG: ${svgFilePath}`);
 
       // Generate animated GIF
       let gifGenerated = false;
