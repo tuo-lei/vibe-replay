@@ -1721,7 +1721,13 @@ function TurnRow({
                     : "—"
               }
               ratio={r.contextRatio}
-              color={r.contextPct !== undefined && r.contextPct >= 90 ? "--red" : "--cyan"}
+              color={
+                r.contextPct !== undefined && r.contextPct >= 90
+                  ? "--red"
+                  : r.contextPct !== undefined && r.contextPct >= 70
+                    ? "--orange"
+                    : "--cyan"
+              }
             />
           </td>
         )}

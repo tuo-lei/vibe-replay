@@ -523,11 +523,13 @@ const GroupCard = memo(function GroupCard({
     const scene = visibleScenes[0]?.scene;
     if (!scene || scene.type !== "compaction-summary") return null;
 
-    // Find compaction token impact from turnStats (context drop > 50%)
+    // Find compaction token impact from turnStats (context drop > 50%) near this group's position
     const compactionTokens = (() => {
-      if (!turnStats || turnStats.length < 2) return undefined;
-      // Find the turn pair where context dropped significantly around this scene
-      for (let i = 0; i < turnStats.length - 1; i++) {
+      if (!turnStats || turnStats.length < 2 || group.turnNumber === undefined) return undefined;
+      const center = group.turnNumber - 1;
+      const start = Math.max(0, center - 2);
+      const end = Math.min(turnStats.length - 1, center + 2);
+      for (let i = start; i < end; i++) {
         const cur = turnStats[i]?.contextTokens || 0;
         const next = turnStats[i + 1]?.contextTokens || 0;
         if (cur > 0 && next > 0 && next < cur * 0.5) {
