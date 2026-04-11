@@ -96,18 +96,14 @@ const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   deepseek: 128_000,
 };
 
-// Known context window tiers (sorted ascending) for snapping inferred limits.
-const CONTEXT_TIERS = [8_192, 128_000, 200_000, 1_000_000];
-
 /**
- * Resolve the model's maximum context window capability.
- * Source: https://docs.anthropic.com/en/docs/about-claude/models/overview
+ * Resolve context window limit for a model ID string.
+ * Returns 200K for all Claude models as a baseline. The viewer dynamically
+ * switches to 1M if any turn's token usage exceeds 200K.
+ * Returns undefined if model is unknown.
  */
 export function getModelContextLimit(model: string): number | undefined {
   const lower = model.toLowerCase();
-  // Opus 4.6, Sonnet 4.6: 1M
-  if (lower.includes("opus-4-6") || lower.includes("sonnet-4-6")) return 1_000_000;
-  // All other Claude models: 200K
   if (lower.includes("opus") || lower.includes("sonnet") || lower.includes("haiku")) {
     return 200_000;
   }
@@ -115,27 +111,6 @@ export function getModelContextLimit(model: string): number | undefined {
     if (lower.includes(key)) return limit;
   }
   return undefined;
-}
-
-/**
- * Infer the effective context limit from session data.
- * If compaction data exists, the preTokens value reveals the actual limit
- * (e.g. compacting at ~170K means the limit is 200K, not the model's max of 1M).
- * Falls back to the model's maximum capability.
- */
-export function inferContextLimit(
-  model: string,
-  compactions?: Array<{ preTokens?: number }>,
-): number | undefined {
-  const modelMax = getModelContextLimit(model);
-  if (!compactions?.length || !modelMax) return modelMax;
-  // Find the highest preTokens — snap to the nearest known tier above it
-  const maxPre = Math.max(...compactions.map((c) => c.preTokens || 0));
-  if (maxPre <= 0) return modelMax;
-  for (const tier of CONTEXT_TIERS) {
-    if (maxPre < tier) return tier;
-  }
-  return modelMax;
 }
 
 /** Calculate cost in USD for a single token usage bucket at a given pricing. */

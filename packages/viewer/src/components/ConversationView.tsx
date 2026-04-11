@@ -446,26 +446,29 @@ const GroupCard = memo(function GroupCard({
             </span>
           )}
         </div>
-        {/* Context fill indicator */}
+        {/* Context token indicator */}
         {(() => {
-          if (!contextLimit || !turnStats || group.turnNumber === undefined) return null;
+          if (!turnStats || group.turnNumber === undefined) return null;
           const ts = turnStats[group.turnNumber - 1];
           if (!ts?.contextTokens) return null;
-          const pct = Math.min((ts.contextTokens / contextLimit) * 100, 100);
-          const color =
-            pct >= 90 ? "bg-terminal-red" : pct >= 70 ? "bg-terminal-orange" : "bg-terminal-cyan";
+          // Default 200K, auto-switch to 1M if any turn exceeds 200K
+          const effectiveLimit =
+            contextLimit && contextLimit > 200_000
+              ? contextLimit
+              : ts.contextTokens > 200_000
+                ? 1_000_000
+                : 200_000;
+          const pct = Math.min((ts.contextTokens / effectiveLimit) * 100, 100);
           return (
             <div className="mb-2 flex items-center gap-2">
               <div className="flex-1 h-1 rounded-full bg-terminal-surface overflow-hidden">
                 <div
-                  className={`h-full rounded-full ${color} transition-all duration-300`}
+                  className="h-full rounded-full bg-terminal-cyan transition-all duration-300"
                   style={{ width: `${pct}%` }}
                 />
               </div>
-              <span
-                className={`text-[9px] font-mono tabular-nums ${pct >= 90 ? "text-terminal-red" : pct >= 70 ? "text-terminal-orange" : "text-terminal-dimmer"}`}
-              >
-                {fmtNum(ts.contextTokens)} ({Math.round(pct)}%)
+              <span className="text-[9px] font-mono tabular-nums text-terminal-dimmer">
+                {fmtNum(ts.contextTokens)}
               </span>
             </div>
           );

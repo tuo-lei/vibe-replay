@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { estimateCost, estimateCostSimple, inferContextLimit } from "./pricing.js";
+import { estimateCost, estimateCostSimple, getModelContextLimit } from "./pricing.js";
 import type { ProviderParseResult } from "./providers/types.js";
 import type {
   ContentBlock,
@@ -174,9 +174,7 @@ export function transformToReplay(
         costEstimate,
         ...(parsed.turnStats ? { turnStats: parsed.turnStats } : {}),
       },
-      ...(parsed.model
-        ? { contextLimit: inferContextLimit(parsed.model, parsed.compactions) }
-        : {}),
+      ...(parsed.model ? { contextLimit: getModelContextLimit(parsed.model) } : {}),
       ...(parsed.tokenUsageByModel ? { tokenUsageByModel: parsed.tokenUsageByModel } : {}),
       ...(parsed.prLinks && parsed.prLinks.length > 0 ? { prLinks: parsed.prLinks } : {}),
       compactions: parsed.compactions,

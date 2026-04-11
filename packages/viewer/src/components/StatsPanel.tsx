@@ -74,10 +74,10 @@ export default function StatsPanel({ session }: Props) {
       tokenUsage: meta.stats.tokenUsage,
       costEstimate: meta.stats.costEstimate,
       compactions: meta.compactions,
-      peakContextPct: (() => {
-        if (!meta.contextLimit || !meta.stats.turnStats?.length) return undefined;
+      peakContextTokens: (() => {
+        if (!meta.stats.turnStats?.length) return undefined;
         const peak = Math.max(...meta.stats.turnStats.map((t) => t.contextTokens || 0));
-        return peak > 0 ? Math.round((peak / meta.contextLimit) * 100) : undefined;
+        return peak > 0 ? peak : undefined;
       })(),
       medianTurnDurationMs: (() => {
         const durations = meta.stats.turnStats
@@ -244,26 +244,12 @@ export default function StatsPanel({ session }: Props) {
         </div>
       )}
 
-      {/* Context window fill */}
-      {stats.peakContextPct !== undefined && (
-        <div>
-          <div className="text-terminal-dimmer mb-2 text-[10px] font-sans font-semibold uppercase tracking-widest">
-            Context Window
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="flex-1 h-2 rounded-full bg-terminal-surface overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all ${stats.peakContextPct >= 90 ? "bg-terminal-red" : stats.peakContextPct >= 70 ? "bg-terminal-orange" : "bg-terminal-cyan"}`}
-                style={{ width: `${Math.min(stats.peakContextPct, 100)}%` }}
-              />
-            </div>
-            <span
-              className={`text-xs font-mono font-bold tabular-nums ${stats.peakContextPct >= 90 ? "text-terminal-red" : stats.peakContextPct >= 70 ? "text-terminal-orange" : "text-terminal-cyan"}`}
-            >
-              {stats.peakContextPct}%
-            </span>
-          </div>
-          <div className="text-terminal-dimmer text-[10px] mt-0.5">peak fill</div>
+      {/* Peak context */}
+      {stats.peakContextTokens !== undefined && (
+        <div className="text-terminal-dim">
+          Peak context:{" "}
+          <span className="text-terminal-cyan">{fmtNum(stats.peakContextTokens)}</span>
+          <span className="text-terminal-dimmer"> tokens</span>
         </div>
       )}
 
@@ -369,15 +355,7 @@ export default function StatsPanel({ session }: Props) {
                 <span className="text-terminal-orange">●</span>
                 <span>{c.trigger}</span>
                 {c.preTokens && (
-                  <span className="text-terminal-text">
-                    {fmtNum(c.preTokens)} tokens
-                    {meta.contextLimit && (
-                      <span className="text-terminal-dimmer">
-                        {" "}
-                        ({Math.round((c.preTokens / meta.contextLimit) * 100)}% full)
-                      </span>
-                    )}
-                  </span>
+                  <span className="text-terminal-text">{fmtNum(c.preTokens)} tokens</span>
                 )}
               </div>
             ))}
