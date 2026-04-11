@@ -22,7 +22,6 @@ interface Props {
   state?: string;
   overlayActions?: OverlayActions;
   turnStats?: TurnStat[];
-  contextLimit?: number;
 }
 
 interface TurnGroup {
@@ -64,7 +63,6 @@ export default function ConversationView({
   state,
   overlayActions,
   turnStats,
-  contextLimit,
 }: Props & { onSeek?: (index: number) => void }) {
   // Pre-compute ALL groups once — stable across playback ticks
   const allGroups = useMemo(() => {
@@ -174,7 +172,6 @@ export default function ConversationView({
             onComment={onComment}
             overlayActions={overlayActions}
             turnStats={turnStats}
-            contextLimit={contextLimit}
           />
         </LazyGroup>
       ))}
@@ -349,7 +346,6 @@ const GroupCard = memo(function GroupCard({
   onComment,
   overlayActions,
   turnStats,
-  contextLimit,
 }: {
   group: TurnGroup;
   currentIndex: number;
@@ -361,7 +357,6 @@ const GroupCard = memo(function GroupCard({
   onComment?: (sceneIndex: number) => void;
   overlayActions?: OverlayActions;
   turnStats?: TurnStat[];
-  contextLimit?: number;
 }) {
   const [hovered, setHovered] = useState(false);
 

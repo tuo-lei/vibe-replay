@@ -762,7 +762,6 @@ export default function Player({
                     state={state}
                     overlayActions={overlayActions}
                     turnStats={session.meta.stats.turnStats}
-                    contextLimit={session.meta.contextLimit}
                     onComment={
                       isReadOnly
                         ? undefined

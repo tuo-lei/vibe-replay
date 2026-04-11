@@ -548,11 +548,7 @@ export default function SummaryView({ session }: Props) {
               costEstimate={meta.stats.costEstimate}
               turnLabels={turnLabels}
             />
-            <ContextWindowChart
-              turnStats={meta.stats.turnStats!}
-              turnLabels={turnLabels}
-              contextLimit={meta.contextLimit}
-            />
+            <ContextWindowChart turnStats={meta.stats.turnStats!} turnLabels={turnLabels} />
             {stats.turns.length >= 2 && (
               <ToolActivityChart turns={stats.turns} turnLabels={turnLabels} />
             )}
@@ -1095,11 +1091,9 @@ function CacheEfficiencyLine({ turnStats }: { turnStats: TurnStat[] }) {
 function ContextWindowChart({
   turnStats,
   turnLabels,
-  contextLimit,
 }: {
   turnStats: TurnStat[];
   turnLabels?: string[];
-  contextLimit?: number;
 }) {
   const contextSizes = turnStats.map((t) => t.contextTokens || 0);
   const n = contextSizes.length;
