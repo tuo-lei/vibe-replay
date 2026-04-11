@@ -95,11 +95,19 @@ describe("cursor sqlite metrics helpers", () => {
     const metrics = __testables.buildGlobalStateMetrics(
       [
         {
-          turn: { role: "user", blocks: [{ type: "text", text: "first prompt" }] },
+          turn: {
+            role: "user",
+            timestamp: "2026-01-01T00:00:00.000Z",
+            blocks: [{ type: "text", text: "first prompt" }],
+          },
           bubble: { type: 1, tokenCount: { inputTokens: 0, outputTokens: 0 } },
         },
         {
-          turn: { role: "assistant", blocks: [{ type: "text", text: "first reply" }] },
+          turn: {
+            role: "assistant",
+            timestamp: "2026-01-01T00:00:12.000Z",
+            blocks: [{ type: "text", text: "first reply" }],
+          },
           bubble: {
             type: 2,
             tokenCount: { inputTokens: 1000, outputTokens: 80 },
@@ -107,7 +115,11 @@ describe("cursor sqlite metrics helpers", () => {
           },
         },
         {
-          turn: { role: "user", blocks: [{ type: "text", text: "second prompt" }] },
+          turn: {
+            role: "user",
+            timestamp: "2026-01-01T00:00:20.000Z",
+            blocks: [{ type: "text", text: "second prompt" }],
+          },
           bubble: { type: 1, tokenCount: { inputTokens: 0, outputTokens: 0 } },
         },
       ] as any,
@@ -115,8 +127,33 @@ describe("cursor sqlite metrics helpers", () => {
     );
 
     expect(metrics.turnStats).toHaveLength(2);
+    expect(metrics.turnStats?.[0]?.durationMs).toBe(12_000);
     expect(metrics.turnStats?.[0]?.tokenUsage?.outputTokens).toBe(80);
     expect(metrics.turnStats?.[1]?.tokenUsage).toBeUndefined();
+  });
+
+  it("falls back to bubble-duration estimation when global-state timestamps are unavailable", () => {
+    const metrics = __testables.buildGlobalStateMetrics(
+      [
+        {
+          turn: { role: "user", blocks: [{ type: "text", text: "prompt" }] },
+          bubble: { type: 1, tokenCount: { inputTokens: 0, outputTokens: 0 } },
+        },
+        {
+          turn: { role: "assistant", blocks: [{ type: "text", text: "reply" }] },
+          bubble: {
+            type: 2,
+            tokenCount: { inputTokens: 500, outputTokens: 30 },
+            thinkingDurationMs: 2000,
+          },
+        },
+      ] as any,
+      undefined,
+    );
+
+    expect(metrics.turnStats?.[0]?.durationMs).toBe(2000);
+    expect(metrics.totalDurationMs).toBe(2000);
+    expect(metrics.usedWallClock).toBe(false);
   });
 
   it("extracts Cursor branch metadata from composer payload", () => {
@@ -585,6 +622,32 @@ describe("cursor sqlite metrics helpers", () => {
       hasWorkspaceRules: true,
     });
     expect(merged.dataSourceInfo?.supplements).toContain("cursor/user/globalStorage/state.vscdb");
+  });
+
+  it("prefers global-state wall-clock duration over store tool runtime when merging", () => {
+    const merged = __testables.mergeCursorParseResults(
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "",
+        turns: [{ role: "user", blocks: [{ type: "text", text: "prompt" }] }],
+        dataSource: "sqlite",
+        totalDurationMs: 1200,
+        turnStats: [{ turnIndex: 0, durationMs: 1200 }],
+      },
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "/workspace/project",
+        turns: [{ role: "assistant", blocks: [{ type: "text", text: "reply" }] }],
+        dataSource: "global-state",
+        totalDurationMs: 4200,
+        turnStats: [{ turnIndex: 0, durationMs: 4200 }],
+      },
+    );
+
+    expect(merged.totalDurationMs).toBe(4200);
+    expect(merged.turnStats?.[0]?.durationMs).toBe(4200);
   });
 
   it("does not add enrichment notes when primary metadata already exists", () => {

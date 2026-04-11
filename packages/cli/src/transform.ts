@@ -145,8 +145,8 @@ export function transformToReplay(
     costEstimate = estimateCostSimple(parsed.tokenUsage, parsed.model || "");
   }
 
-  // Duration: parser now provides totalDurationMs from turn_duration events
-  // or active-duration estimation — no wall-clock fallback needed.
+  // Duration comes from provider-specific parsing. For Cursor this can be
+  // prompt-to-turn-end wall time inferred from local bubble timestamps.
   const durationMs =
     parsed.totalDurationMs && parsed.totalDurationMs > 0 ? parsed.totalDurationMs : undefined;
 
