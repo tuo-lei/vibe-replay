@@ -9,23 +9,7 @@ export async function generateOutput(session: ReplaySession, outputDir: string):
   await mkdir(outputDir, { recursive: true });
 
   // Load the pre-built viewer HTML
-  let viewerHtml: string | undefined;
-  const assetsPaths = [
-    join(__dirname, "..", "assets", "viewer.html"),
-    join(__dirname, "assets", "viewer.html"),
-    join(__dirname, "..", "..", "assets", "viewer.html"),
-  ];
-
-  for (const p of assetsPaths) {
-    try {
-      viewerHtml = await readFile(p, "utf-8");
-      break;
-    } catch {}
-  }
-
-  if (!viewerHtml) {
-    throw new Error("Could not find viewer.html. Run `pnpm build` first.");
-  }
+  const viewerHtml = await loadViewerHtml();
 
   // Inject session data — escape </ to prevent browser from closing the script tag
   const jsonData = escapeJsonForScript(JSON.stringify(session));
@@ -49,6 +33,33 @@ export async function generateOutput(session: ReplaySession, outputDir: string):
   await writeFile(jsonPath, JSON.stringify(session), "utf-8");
 
   return outputPath;
+}
+
+/**
+ * Load the pre-built viewer HTML from the CLI's bundled assets.
+ * Searches several candidate paths to handle both the published npm package
+ * layout and the local monorepo layout.
+ *
+ * Throws a descriptive error if no `viewer.html` can be found (typically
+ * because `pnpm build` has not been run yet).
+ */
+export async function loadViewerHtml(): Promise<string> {
+  const assetsPaths = [
+    join(__dirname, "..", "assets", "viewer.html"),
+    join(__dirname, "assets", "viewer.html"),
+    join(__dirname, "..", "..", "assets", "viewer.html"),
+  ];
+
+  for (const p of assetsPaths) {
+    try {
+      return await readFile(p, "utf-8");
+    } catch (err: unknown) {
+      if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code !== "ENOENT")
+        throw err;
+    }
+  }
+
+  throw new Error("Could not find viewer.html. Run `pnpm build` first.");
 }
 
 /**

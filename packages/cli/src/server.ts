@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { serve } from "@hono/node-server";
 import chalk from "chalk";
@@ -22,7 +21,7 @@ import {
 } from "./feedback.js";
 import { generateGitHubGif } from "./formatters/gif.js";
 import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.js";
-import { generateOutput } from "./generator.js";
+import { generateOutput, injectDataScript, loadViewerHtml } from "./generator.js";
 import { mergeInsights, readInsightsStore, writeInsightsStore } from "./insights.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
 import {
@@ -64,8 +63,6 @@ import type {
 } from "./types.js";
 import { normalizeTitle } from "./utils.js";
 import { CLI_VERSION } from "./version.js";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /** Sanitize slug to prevent path traversal — rejects anything that isn't a simple name */
 function safeSlug(raw: string | undefined): string | null {
@@ -225,20 +222,6 @@ async function unarchiveSlug(baseDir: string, slug: string): Promise<void> {
   } catch {
     /* already gone */
   }
-}
-
-async function loadViewerHtml(): Promise<string> {
-  const assetsPaths = [
-    join(__dirname, "..", "assets", "viewer.html"),
-    join(__dirname, "assets", "viewer.html"),
-    join(__dirname, "..", "..", "assets", "viewer.html"),
-  ];
-  for (const p of assetsPaths) {
-    try {
-      return await readFile(p, "utf-8");
-    } catch {}
-  }
-  throw new Error("Could not find viewer.html. Run `pnpm build` first.");
 }
 
 /** Scan replay.json files from a single directory */
@@ -1249,8 +1232,11 @@ export async function startServer(
       return c.redirect(viteUrl.toString(), 302);
     }
     const flag = `<script>window.__VIBE_REPLAY_EDITOR__ = true;</script>`;
-    const headIdx = viewerHtml.lastIndexOf("</head>");
-    const html = `${viewerHtml.slice(0, headIdx) + flag}\n${viewerHtml.slice(headIdx)}`;
+    // Reuse injectDataScript so we get the same `lastIndexOf("</head>")` handling
+    // (minified JS in the viewer bundle may contain the literal string `</head>`)
+    // plus a clear error if the build is corrupted, instead of silently producing
+    // broken HTML.
+    const html = injectDataScript(viewerHtml, flag);
     return c.html(html);
   });
 
