@@ -86,6 +86,11 @@ const ogImage = ogImageProp
       }
     })} />
 
+    <!-- Preload hero LCP image (homepage only) -->
+    {Astro.url.pathname === "/" && (
+      <link rel="preload" as="image" type="image/webp" href="/screenshots/dashboard.webp" fetchpriority="high" />
+    )}
+
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
