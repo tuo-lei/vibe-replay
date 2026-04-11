@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   escapeHtml,
@@ -5,6 +8,14 @@ import {
   injectDataScript,
   loadViewerHtml,
 } from "../src/generator.js";
+
+// `loadViewerHtml` reads packages/cli/assets/viewer.html, which is produced
+// by `pnpm build` (viewer → copy → CLI) and is NOT checked into git. The
+// root-level `test` CI job runs `pnpm test` without a prior build, so these
+// integration-style assertions must be gated on the artifact existing.
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const VIEWER_HTML_PATH = join(__dirname, "..", "assets", "viewer.html");
+const VIEWER_HTML_AVAILABLE = existsSync(VIEWER_HTML_PATH);
 
 // ---------------------------------------------------------------------------
 // escapeHtml
@@ -336,17 +347,17 @@ describe("generator integration: escape + inject", () => {
 // ---------------------------------------------------------------------------
 
 describe("loadViewerHtml", () => {
-  it("loads the pre-built viewer.html and returns HTML with a </head> tag", async () => {
-    // Requires `pnpm build` (or at least viewer build + copy) to have run first
-    // so that packages/cli/assets/viewer.html exists. The repo-level `pnpm test`
-    // flow runs after a build, matching how users exercise the CLI.
-    const html = await loadViewerHtml();
-    expect(typeof html).toBe("string");
-    expect(html.length).toBeGreaterThan(0);
-    expect(html.lastIndexOf("</head>")).toBeGreaterThan(-1);
-  });
+  it.runIf(VIEWER_HTML_AVAILABLE)(
+    "loads the pre-built viewer.html and returns HTML with a </head> tag",
+    async () => {
+      const html = await loadViewerHtml();
+      expect(typeof html).toBe("string");
+      expect(html.length).toBeGreaterThan(0);
+      expect(html.lastIndexOf("</head>")).toBeGreaterThan(-1);
+    },
+  );
 
-  it("returns content compatible with injectDataScript", async () => {
+  it.runIf(VIEWER_HTML_AVAILABLE)("returns content compatible with injectDataScript", async () => {
     const html = await loadViewerHtml();
     const flag = `<script>window.__VIBE_REPLAY_EDITOR__ = true;</script>`;
     const result = injectDataScript(html, flag);
@@ -355,4 +366,11 @@ describe("loadViewerHtml", () => {
     expect(flagIdx).toBeGreaterThan(-1);
     expect(flagIdx).toBeLessThan(lastHeadIdx);
   });
+
+  it.skipIf(VIEWER_HTML_AVAILABLE)(
+    "throws a descriptive error when viewer.html is missing",
+    async () => {
+      await expect(loadViewerHtml()).rejects.toThrow(/Could not find viewer\.html/);
+    },
+  );
 });
