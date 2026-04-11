@@ -465,7 +465,7 @@ const GroupCard = memo(function GroupCard({
               <span
                 className={`text-[9px] font-mono tabular-nums ${pct >= 90 ? "text-terminal-red" : pct >= 70 ? "text-terminal-orange" : "text-terminal-dimmer"}`}
               >
-                {Math.round(pct)}%
+                {fmtNum(ts.contextTokens)} ({Math.round(pct)}%)
               </span>
             </div>
           );

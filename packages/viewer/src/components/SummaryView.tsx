@@ -1615,7 +1615,7 @@ function TurnTable({
               {hasDuration && (
                 <th className="px-2 py-1.5 font-semibold text-right w-16">Duration</th>
               )}
-              {hasContext && <th className="px-2 py-1.5 font-semibold text-right w-16">Context</th>}
+              {hasContext && <th className="px-2 py-1.5 font-semibold text-right w-28">Context</th>}
               {hasTokens && <th className="px-2 py-1.5 font-semibold text-right w-14">Output</th>}
             </tr>
           </thead>
@@ -1714,8 +1714,8 @@ function TurnRow({
           <td className="px-2 py-1 text-right tabular-nums">
             <HeatCell
               value={
-                r.contextPct !== undefined
-                  ? `${r.contextPct}%`
+                r.contextPct !== undefined && r.contextTokens
+                  ? `${fmtNum(r.contextTokens)} (${r.contextPct}%)`
                   : r.contextTokens
                     ? fmtNum(r.contextTokens)
                     : "—"

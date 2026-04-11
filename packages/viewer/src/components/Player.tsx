@@ -739,7 +739,7 @@ export default function Player({
                                 </span>
                               </div>
                               <div className="text-[9px] text-terminal-dimmer mt-0.5">
-                                peak context
+                                peak {fmtNum(peak)} / {fmtNum(meta.contextLimit)}
                               </div>
                             </div>
                           );
