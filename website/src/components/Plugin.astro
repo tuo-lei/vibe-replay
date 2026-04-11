@@ -1,0 +1,147 @@
+---
+const capabilities = [
+  {
+    title: "Auto-discover sessions",
+    desc: "Finds your current session automatically — no file paths, no flags.",
+    icon: `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" /></svg>`,
+  },
+  {
+    title: "PR-ready artifacts",
+    desc: "Generates markdown summary + animated GIF, embeds them in your PR description.",
+    icon: `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 3.75H6A2.25 2.25 0 003.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0120.25 6v1.5m0 9V18A2.25 2.25 0 0118 20.25h-1.5m-9 0H6A2.25 2.25 0 013.75 18v-1.5M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>`,
+  },
+  {
+    title: "Natural language",
+    desc: 'Just say "create a PR with session replay" and the agent handles everything.',
+    icon: `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" /></svg>`,
+  },
+  {
+    title: "Works across agents",
+    desc: "Built on the open Agent Skills standard — works in Claude Code, Cursor, Codex, and more.",
+    icon: `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" /></svg>`,
+  },
+];
+---
+
+<section id="plugin" class="relative py-16 md:py-32 px-6">
+  <!-- Gradient divider -->
+  <div class="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-px bg-gradient-to-r from-transparent via-border to-transparent"></div>
+
+  <div class="max-w-5xl mx-auto">
+    <div class="flex flex-col md:flex-row items-start gap-12 md:gap-16">
+
+      <!-- Left: text + capabilities -->
+      <div class="md:w-1/2">
+        <span class="block text-accent/70 font-mono text-sm font-medium tracking-wider uppercase mb-3">Claude Code Plugin</span>
+        <h2 class="text-3xl sm:text-4xl font-bold tracking-tight mb-4">
+          Let your agent do it
+        </h2>
+        <p class="text-text-secondary leading-relaxed mb-8">
+          Install vibe-replay as a plugin and your AI agent learns to generate replays on its own &mdash; during PR creation, session review, or on command. No context switching, no manual steps.
+        </p>
+
+        <!-- Capabilities -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {capabilities.map((cap) => (
+            <div class="flex items-start gap-3">
+              <div class="w-8 h-8 shrink-0 rounded-lg bg-gradient-to-br from-accent/10 to-cyan-400/5 flex items-center justify-center text-accent">
+                <Fragment set:html={cap.icon} />
+              </div>
+              <div>
+                <h4 class="text-sm font-semibold mb-0.5">{cap.title}</h4>
+                <p class="text-text-muted text-xs leading-relaxed">{cap.desc}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <!-- Right: install card -->
+      <div class="md:w-1/2 w-full">
+        <div class="rounded-2xl border border-border/50 bg-surface-1/40 p-6 md:p-8">
+          <!-- Install command -->
+          <p class="text-text-muted text-xs font-mono uppercase tracking-wider mb-3">Install</p>
+          <div class="group relative mb-6">
+            <button
+              id="plugin-copy-btn"
+              aria-label="Copy install command"
+              class="w-full flex items-center gap-3 px-4 py-3 bg-surface/80 border border-border/60 rounded-lg font-mono text-sm hover:border-accent/40 transition-all cursor-pointer text-left"
+            >
+              <span class="text-text-muted select-none">&gt;</span>
+              <span class="text-text-primary">/install-plugin from github:tuo-lei/vibe-replay</span>
+              <svg id="plugin-copy-icon" class="w-4 h-4 text-text-muted hover:text-accent transition-colors ml-auto shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" stroke-width="2"/>
+                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" stroke-width="2"/>
+              </svg>
+              <svg id="plugin-check-icon" class="w-4 h-4 text-accent ml-auto shrink-0 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <polyline points="20 6 9 17 4 12" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Usage examples -->
+          <p class="text-text-muted text-xs font-mono uppercase tracking-wider mb-3">Then use it</p>
+          <div class="space-y-2.5 text-sm font-mono">
+            <div class="flex items-start gap-2 text-text-secondary">
+              <span class="text-accent shrink-0">&gt;</span>
+              <span>/vibe-replay:replay</span>
+            </div>
+            <div class="flex items-start gap-2 text-text-secondary">
+              <span class="text-accent shrink-0">&gt;</span>
+              <span class="text-text-muted italic">"Create a PR with session replay"</span>
+            </div>
+            <div class="flex items-start gap-2 text-text-secondary">
+              <span class="text-accent shrink-0">&gt;</span>
+              <span class="text-text-muted italic">"Generate a replay and open it"</span>
+            </div>
+          </div>
+
+          <!-- Divider -->
+          <div class="my-6 h-px bg-border/30"></div>
+
+          <!-- Agent Skills badge -->
+          <div class="flex items-center gap-2 text-text-muted text-xs">
+            <svg class="w-4 h-4 text-accent/60" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+            </svg>
+            <span>Built on the open <a href="https://agentskills.io" target="_blank" rel="noopener noreferrer" class="text-accent/80 hover:text-accent hover:underline transition-colors">Agent Skills</a> standard</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<script>
+  document.getElementById("plugin-copy-btn")?.addEventListener("click", () => {
+    navigator.clipboard.writeText("/install-plugin from github:tuo-lei/vibe-replay").then(() => {
+      const copyIcon = document.getElementById("plugin-copy-icon");
+      const checkIcon = document.getElementById("plugin-check-icon");
+      if (copyIcon && checkIcon) {
+        copyIcon.classList.add("hidden");
+        checkIcon.classList.remove("hidden");
+        setTimeout(() => {
+          copyIcon.classList.remove("hidden");
+          checkIcon.classList.add("hidden");
+        }, 2000);
+      }
+    }).catch(() => {
+      const input = document.createElement("input");
+      input.style.position = "fixed";
+      input.style.top = "-9999px";
+      input.value = "/install-plugin from github:tuo-lei/vibe-replay";
+      document.body.appendChild(input);
+      input.select();
+      try { document.execCommand("copy"); } catch (_) {}
+      document.body.removeChild(input);
+      const copyIcon = document.getElementById("plugin-copy-icon");
+      const checkIcon = document.getElementById("plugin-check-icon");
+      if (copyIcon && checkIcon) {
+        copyIcon.classList.add("hidden");
+        checkIcon.classList.remove("hidden");
+        setTimeout(() => { copyIcon.classList.remove("hidden"); checkIcon.classList.add("hidden"); }, 2000);
+      }
+    });
+  });
+</script>
