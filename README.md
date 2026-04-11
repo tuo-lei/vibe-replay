@@ -150,9 +150,9 @@ The CLI auto-discovers sessions on your machine, parses conversation data from a
 
 ## Security & Privacy
 
-- **Zero network requests** — generated HTML files make zero external requests. Everything is inlined. Open them on an airplane, behind a firewall, wherever
+- **Self-contained HTML** — generated replay files embed all assets inline. When opened from disk they make zero external requests — works offline, behind firewalls, on an airplane. (Gist/cloud-backed replays fetch data from GitHub or vibe-replay API on load)
 - **Secret redaction** — API keys, tokens, PEM keys, and sensitive paths are automatically detected and redacted before generation
-- **Your data stays local** — vibe-replay reads session files from your machine and generates a local HTML file. Nothing leaves your machine unless you explicitly publish (Gist or cloud upload)
+- **Local by default** — vibe-replay reads session files from your machine and generates a local HTML file. Data only leaves your machine when you explicitly publish (Gist or cloud upload), or if you log in — in which case aggregated session insights (counts, durations, costs — no conversation content) sync daily to the cloud
 - **No wrappers, no proxies** — vibe-replay does not modify, intercept, or wrap Claude Code or Cursor. It reads existing session logs after the fact
 
 ## Development
