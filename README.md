@@ -6,7 +6,13 @@
 
 Turn Claude Code and Cursor sessions into shareable, interactive replays.
 
-**PR diffs show _what_ changed. vibe-replay shows _why_** — every prompt, every thought, every tool call, in one shareable file.
+### The problem
+
+AI agents write code in long, complex sessions — dozens of tool calls, hundreds of file edits, thousands of lines of reasoning. When the session ends, all that context disappears. Your PR diff shows _what_ changed, but reviewers can't see _why_. Teammates can't learn from your prompting. You can't even replay your own session next week.
+
+### The fix
+
+One command. One self-contained HTML file. Every prompt, every thought, every tool call — animated and interactive.
 
 ```bash
 npx vibe-replay
@@ -141,6 +147,13 @@ The CLI auto-discovers sessions on your machine, parses conversation data from a
 - **PR context** — attach a replay link to PRs so reviewers understand the reasoning behind changes
 - **Teaching & onboarding** — create replayable walkthroughs of real coding sessions for documentation or training
 - **Cost tracking** — see exactly how many tokens each session burns, track costs across projects
+
+## Security & Privacy
+
+- **Self-contained HTML** — generated replay files embed all assets inline. When opened from disk they make zero external requests — works offline, behind firewalls, on an airplane. (Gist/cloud-backed replays fetch data from GitHub or vibe-replay API on load)
+- **Secret redaction** — API keys, tokens, PEM keys, and sensitive paths are automatically detected and redacted before generation
+- **Local by default** — vibe-replay reads session files from your machine and generates a local HTML file. Data only leaves your machine when you explicitly publish (Gist or cloud upload), or if you log in — in which case aggregated session insights (counts, durations, costs — no conversation content) sync daily to the cloud
+- **No wrappers, no proxies** — vibe-replay does not modify, intercept, or wrap Claude Code or Cursor. It reads existing session logs after the fact
 
 ## Development
 
