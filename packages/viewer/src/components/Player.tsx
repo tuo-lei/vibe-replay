@@ -704,6 +704,46 @@ export default function Player({
                             {fmtNum(meta.stats.tokenUsage.outputTokens)} out
                           </div>
                         )}
+                        {(() => {
+                          if (!meta.contextLimit || !meta.stats.turnStats?.length) return null;
+                          const peak = Math.max(
+                            ...meta.stats.turnStats.map((t) => t.contextTokens || 0),
+                          );
+                          if (peak <= 0) return null;
+                          const pct = Math.round((peak / meta.contextLimit) * 100);
+                          const color =
+                            pct >= 90
+                              ? "bg-terminal-red"
+                              : pct >= 70
+                                ? "bg-terminal-orange"
+                                : "bg-terminal-cyan";
+                          const textColor =
+                            pct >= 90
+                              ? "text-terminal-red"
+                              : pct >= 70
+                                ? "text-terminal-orange"
+                                : "text-terminal-cyan";
+                          return (
+                            <div className="mt-1">
+                              <div className="flex items-center gap-1.5">
+                                <div className="flex-1 h-1.5 rounded-full bg-terminal-surface overflow-hidden">
+                                  <div
+                                    className={`h-full rounded-full ${color}`}
+                                    style={{ width: `${Math.min(pct, 100)}%` }}
+                                  />
+                                </div>
+                                <span
+                                  className={`text-[10px] font-mono font-bold tabular-nums ${textColor}`}
+                                >
+                                  {pct}%
+                                </span>
+                              </div>
+                              <div className="text-[9px] text-terminal-dimmer mt-0.5">
+                                peak context
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                   </div>
