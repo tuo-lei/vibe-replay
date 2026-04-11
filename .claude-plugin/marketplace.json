@@ -4,7 +4,7 @@
   "description": "Turn AI coding sessions into animated, interactive web replays",
   "owner": {
     "name": "Tuo Lei",
-    "url": "https://github.com/tuo-lei"
+    "email": "hi@vibe-replay.com"
   },
   "plugins": [
     {
@@ -12,10 +12,9 @@
       "description": "Generate interactive HTML replays and GitHub PR artifacts from AI coding sessions",
       "version": "1.0.0",
       "author": {
-        "name": "Tuo Lei",
-        "url": "https://github.com/tuo-lei"
+        "name": "Tuo Lei"
       },
-      "source": ".",
+      "source": "./",
       "category": "productivity",
       "homepage": "https://vibe-replay.com",
       "tags": ["replay", "session-recording", "visualization", "sharing"]
