@@ -461,13 +461,13 @@ const GroupCard = memo(function GroupCard({
           const pct = Math.min((ts.contextTokens / effectiveLimit) * 100, 100);
           return (
             <div className="mb-2 flex items-center gap-2">
-              <div className="flex-1 h-1 rounded-full bg-terminal-surface overflow-hidden">
+              <div className="flex-1 h-2 rounded-full bg-terminal-surface overflow-hidden">
                 <div
-                  className="h-full rounded-full bg-terminal-cyan transition-all duration-300"
+                  className="h-full rounded-full bg-terminal-green transition-all duration-300"
                   style={{ width: `${pct}%` }}
                 />
               </div>
-              <span className="text-[9px] font-mono tabular-nums text-terminal-dimmer">
+              <span className="text-[9px] font-mono tabular-nums text-terminal-dim">
                 {fmtNum(ts.contextTokens)}
               </span>
             </div>
