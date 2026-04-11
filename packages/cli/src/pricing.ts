@@ -96,17 +96,18 @@ const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   deepseek: 128_000,
 };
 
+// Known context window tiers (sorted ascending) for snapping inferred limits.
+const CONTEXT_TIERS = [8_192, 128_000, 200_000, 1_000_000];
+
 /**
- * Resolve context window limit for a model ID string.
- * This returns the default context limit for the runtime environment (e.g. Claude Code
- * uses 200K even for models that support up to 1M via the API).
- * Returns undefined if model is unknown.
+ * Resolve the model's maximum context window capability.
+ * Source: https://docs.anthropic.com/en/docs/about-claude/models/overview
  */
 export function getModelContextLimit(model: string): number | undefined {
   const lower = model.toLowerCase();
-  // Claude Code uses 200K context windows for all Claude models.
-  // The model capability may be higher (e.g. Opus 4.6 supports 1M via the API),
-  // but in practice sessions compact around 200K.
+  // Opus 4.6, Sonnet 4.6: 1M
+  if (lower.includes("opus-4-6") || lower.includes("sonnet-4-6")) return 1_000_000;
+  // All other Claude models: 200K
   if (lower.includes("opus") || lower.includes("sonnet") || lower.includes("haiku")) {
     return 200_000;
   }
@@ -114,6 +115,27 @@ export function getModelContextLimit(model: string): number | undefined {
     if (lower.includes(key)) return limit;
   }
   return undefined;
+}
+
+/**
+ * Infer the effective context limit from session data.
+ * If compaction data exists, the preTokens value reveals the actual limit
+ * (e.g. compacting at ~170K means the limit is 200K, not the model's max of 1M).
+ * Falls back to the model's maximum capability.
+ */
+export function inferContextLimit(
+  model: string,
+  compactions?: Array<{ preTokens?: number }>,
+): number | undefined {
+  const modelMax = getModelContextLimit(model);
+  if (!compactions?.length || !modelMax) return modelMax;
+  // Find the highest preTokens — snap to the nearest known tier above it
+  const maxPre = Math.max(...compactions.map((c) => c.preTokens || 0));
+  if (maxPre <= 0) return modelMax;
+  for (const tier of CONTEXT_TIERS) {
+    if (maxPre < tier) return tier;
+  }
+  return modelMax;
 }
 
 /** Calculate cost in USD for a single token usage bucket at a given pricing. */
