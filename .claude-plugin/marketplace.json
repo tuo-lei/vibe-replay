@@ -1,17 +1,24 @@
 {
-  "schemaVersion": 1,
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "vibe-replay",
-  "description": "Plugins for AI session replay — recording, sharing, and PR integration",
+  "description": "Turn AI coding sessions into animated, interactive web replays",
+  "owner": {
+    "name": "Tuo Lei",
+    "url": "https://github.com/tuo-lei"
+  },
   "plugins": [
     {
       "name": "vibe-replay",
-      "version": "1.0.0",
       "description": "Generate interactive HTML replays and GitHub PR artifacts from AI coding sessions",
-      "author": "Tuo Lei",
-      "path": ".",
+      "version": "1.0.0",
+      "author": {
+        "name": "Tuo Lei",
+        "url": "https://github.com/tuo-lei"
+      },
+      "source": ".",
+      "category": "productivity",
       "homepage": "https://vibe-replay.com",
-      "repository": "https://github.com/tuo-lei/vibe-replay",
-      "license": "MIT"
+      "tags": ["replay", "session-recording", "visualization", "sharing"]
     }
   ]
 }
