@@ -59,21 +59,36 @@ const capabilities = [
       <!-- Right: install card -->
       <div class="md:w-1/2 w-full">
         <div class="rounded-2xl border border-border/50 bg-surface-1/40 p-6 md:p-8">
-          <!-- Install command -->
+          <!-- Install commands -->
           <p class="text-text-muted text-xs font-mono uppercase tracking-wider mb-3">Install</p>
-          <div class="group relative mb-6">
+          <div class="space-y-2 mb-6">
             <button
-              id="plugin-copy-btn"
-              aria-label="Copy install command"
-              class="w-full flex items-center gap-3 px-4 py-3 bg-surface/80 border border-border/60 rounded-lg font-mono text-sm hover:border-accent/40 transition-all cursor-pointer text-left"
+              data-copy="/plugin marketplace add tuo-lei/vibe-replay"
+              aria-label="Copy marketplace add command"
+              class="plugin-copy-btn w-full flex items-center gap-3 px-4 py-3 bg-surface/80 border border-border/60 rounded-lg font-mono text-sm hover:border-accent/40 transition-all cursor-pointer text-left"
             >
               <span class="text-text-muted select-none">&gt;</span>
-              <span class="text-text-primary">/install-plugin from github:tuo-lei/vibe-replay</span>
-              <svg id="plugin-copy-icon" class="w-4 h-4 text-text-muted hover:text-accent transition-colors ml-auto shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <span class="text-text-primary">/plugin marketplace add tuo-lei/vibe-replay</span>
+              <svg class="copy-icon w-4 h-4 text-text-muted hover:text-accent transition-colors ml-auto shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2" stroke-width="2"/>
                 <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" stroke-width="2"/>
               </svg>
-              <svg id="plugin-check-icon" class="w-4 h-4 text-accent ml-auto shrink-0 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg class="check-icon w-4 h-4 text-accent ml-auto shrink-0 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <polyline points="20 6 9 17 4 12" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <button
+              data-copy="/plugin install vibe-replay@vibe-replay"
+              aria-label="Copy plugin install command"
+              class="plugin-copy-btn w-full flex items-center gap-3 px-4 py-3 bg-surface/80 border border-border/60 rounded-lg font-mono text-sm hover:border-accent/40 transition-all cursor-pointer text-left"
+            >
+              <span class="text-text-muted select-none">&gt;</span>
+              <span class="text-text-primary">/plugin install vibe-replay@vibe-replay</span>
+              <svg class="copy-icon w-4 h-4 text-text-muted hover:text-accent transition-colors ml-auto shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" stroke-width="2"/>
+                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" stroke-width="2"/>
+              </svg>
+              <svg class="check-icon w-4 h-4 text-accent ml-auto shrink-0 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <polyline points="20 6 9 17 4 12" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
             </button>
@@ -114,34 +129,29 @@ const capabilities = [
 </section>
 
 <script>
-  document.getElementById("plugin-copy-btn")?.addEventListener("click", () => {
-    navigator.clipboard.writeText("/install-plugin from github:tuo-lei/vibe-replay").then(() => {
-      const copyIcon = document.getElementById("plugin-copy-icon");
-      const checkIcon = document.getElementById("plugin-check-icon");
-      if (copyIcon && checkIcon) {
-        copyIcon.classList.add("hidden");
-        checkIcon.classList.remove("hidden");
-        setTimeout(() => {
-          copyIcon.classList.remove("hidden");
-          checkIcon.classList.add("hidden");
-        }, 2000);
-      }
-    }).catch(() => {
-      const input = document.createElement("input");
-      input.style.position = "fixed";
-      input.style.top = "-9999px";
-      input.value = "/install-plugin from github:tuo-lei/vibe-replay";
-      document.body.appendChild(input);
-      input.select();
-      try { document.execCommand("copy"); } catch (_) {}
-      document.body.removeChild(input);
-      const copyIcon = document.getElementById("plugin-copy-icon");
-      const checkIcon = document.getElementById("plugin-check-icon");
-      if (copyIcon && checkIcon) {
-        copyIcon.classList.add("hidden");
-        checkIcon.classList.remove("hidden");
-        setTimeout(() => { copyIcon.classList.remove("hidden"); checkIcon.classList.add("hidden"); }, 2000);
-      }
+  document.querySelectorAll(".plugin-copy-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const text = btn.getAttribute("data-copy") || "";
+      const copyIcon = btn.querySelector(".copy-icon");
+      const checkIcon = btn.querySelector(".check-icon");
+      const showCheck = () => {
+        if (copyIcon && checkIcon) {
+          copyIcon.classList.add("hidden");
+          checkIcon.classList.remove("hidden");
+          setTimeout(() => { copyIcon.classList.remove("hidden"); checkIcon.classList.add("hidden"); }, 2000);
+        }
+      };
+      navigator.clipboard.writeText(text).then(showCheck).catch(() => {
+        const input = document.createElement("input");
+        input.style.position = "fixed";
+        input.style.top = "-9999px";
+        input.value = text;
+        document.body.appendChild(input);
+        input.select();
+        try { document.execCommand("copy"); } catch (_) {}
+        document.body.removeChild(input);
+        showCheck();
+      });
     });
   });
 </script>
