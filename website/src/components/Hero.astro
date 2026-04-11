@@ -5,22 +5,22 @@ const DEMO_URL = "/view/?gist=c40137e4c224dc883fe2eaa668e2d8ba";
 
 const slides = [
   {
-    src: "/screenshots/dashboard.png",
+    src: "/screenshots/dashboard.webp",
     label: "All your sessions, one place",
     alt: "Dashboard — activity heatmap, project analytics, session overview",
   },
   {
-    src: "/screenshots/tool-calls.png",
+    src: "/screenshots/tool-calls.webp",
     label: "Watch the full replay",
     alt: "Replay viewer — syntax-highlighted diffs, tool calls, and thinking blocks",
   },
   {
-    src: "/screenshots/insights.png",
+    src: "/screenshots/insights.webp",
     label: "Deep session analytics",
     alt: "Session insights — token burn, cache hit rates, context window, tool call breakdown",
   },
   {
-    src: "/screenshots/personal-insights.png",
+    src: "/screenshots/personal-insights.webp",
     label: "Your AI coding wrapped",
     alt: "Personal insights — GitHub-style heatmap, streaks, session stats, cost tracking",
   },
@@ -92,7 +92,8 @@ const slides = [
             class="hero-slide absolute inset-0 w-full h-full object-cover object-top transition-opacity duration-700"
             style="opacity: 0;"
             data-index={i}
-            loading="eager"
+            loading={i === 0 ? "eager" : "lazy"}
+            fetchpriority={i === 0 ? "high" : undefined}
           />
         ))}
       </div>
@@ -227,7 +228,7 @@ const slides = [
     for (let i = 0; i < text.length; i++) {
       if (aborted) return;
       typed.textContent = text.slice(0, i + 1);
-      await new Promise((r) => setTimeout(r, 60 + Math.random() * 40));
+      await new Promise((r) => setTimeout(r, 45 + Math.random() * 30));
     }
   }
 
@@ -242,13 +243,13 @@ const slides = [
 
     // Phase 1: type command
     await typeText("npx vibe-replay");
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 300));
     if (aborted) return;
 
     // Show output
     if (cursor) cursor.style.display = "none";
     if (output) output.classList.remove("hidden");
-    await new Promise((r) => setTimeout(r, 2000));
+    await new Promise((r) => setTimeout(r, 1200));
     if (aborted) return;
 
     // Phase 2: transition to screenshots
