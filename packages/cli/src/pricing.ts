@@ -98,12 +98,15 @@ const MODEL_CONTEXT_LIMITS: Record<string, number> = {
 
 /**
  * Resolve context window limit for a model ID string.
+ * Source: https://docs.anthropic.com/en/docs/about-claude/models/overview
  * Returns undefined if model is unknown.
  */
 export function getModelContextLimit(model: string): number | undefined {
   const lower = model.toLowerCase();
+  // Opus 4.6 and Sonnet 4.6: 1M context window
+  if (lower.includes("opus-4-6") || lower.includes("sonnet-4-6")) return 1_000_000;
+  // All other Claude models (Opus 4.5/4.1/4, Sonnet 4.5/4/3.x, Haiku): 200K
   if (lower.includes("opus") || lower.includes("sonnet") || lower.includes("haiku")) {
-    // All Claude models: 200K
     return 200_000;
   }
   for (const [key, limit] of Object.entries(MODEL_CONTEXT_LIMITS)) {
