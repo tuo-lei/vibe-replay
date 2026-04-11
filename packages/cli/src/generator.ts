@@ -53,7 +53,10 @@ export async function loadViewerHtml(): Promise<string> {
   for (const p of assetsPaths) {
     try {
       return await readFile(p, "utf-8");
-    } catch {}
+    } catch (err: unknown) {
+      if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code !== "ENOENT")
+        throw err;
+    }
   }
 
   throw new Error("Could not find viewer.html. Run `pnpm build` first.");

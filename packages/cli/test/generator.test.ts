@@ -361,7 +361,7 @@ describe("loadViewerHtml", () => {
     const html = await loadViewerHtml();
     const flag = `<script>window.__VIBE_REPLAY_EDITOR__ = true;</script>`;
     const result = injectDataScript(html, flag);
-    const flagIdx = result.indexOf(flag);
+    const flagIdx = result.lastIndexOf(flag);
     const lastHeadIdx = result.lastIndexOf("</head>");
     expect(flagIdx).toBeGreaterThan(-1);
     expect(flagIdx).toBeLessThan(lastHeadIdx);
