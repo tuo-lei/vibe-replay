@@ -57,22 +57,44 @@ GitHub-style activity heatmap, streaks, weekly trends, top projects, model usage
 
 ## Claude Code Plugin
 
-vibe-replay is also a [Claude Code plugin](https://code.claude.com/docs/en/plugins). Install it once and your agent can generate replays automatically — during PR creation, session review, or whenever you type `/vibe-replay:replay`.
+vibe-replay is also available as a [Claude Code plugin](https://code.claude.com/docs/en/plugins). Once installed, your agent learns how to generate replays autonomously — it can find the current session, produce GitHub-ready artifacts, and embed them in PRs, all without you running any CLI commands.
 
-### Install
+### What the plugin gives your agent
+
+- **Auto-discover sessions** — finds the current session's JSONL file via `$CLAUDE_SESSION_ID`
+- **Generate PR artifacts** — markdown summary + animated GIF + SVG, ready for PR descriptions
+- **Generate HTML replays** — self-contained interactive replay files
+- **PR workflow integration** — agent automatically embeds replay context when you create PRs
+
+### Install (recommended)
 
 ```bash
 /install-plugin from github:tuo-lei/vibe-replay
 ```
 
-### Usage
+### Manual install (single file)
 
-| Trigger | Example |
-|---------|---------|
-| Slash command | `/vibe-replay:replay` |
-| In PR workflow | "Create a PR with session replay" |
+If you prefer not to install the full plugin:
 
-The agent auto-discovers your current session, generates GitHub artifacts (markdown + animated GIF), and embeds them in the PR description. See [`skills/replay/README.md`](./skills/replay/README.md) for details.
+```bash
+mkdir -p ~/.claude/skills/replay
+curl -o ~/.claude/skills/replay/SKILL.md \
+  https://raw.githubusercontent.com/tuo-lei/vibe-replay/main/skills/replay/SKILL.md
+```
+
+### Usage examples
+
+```
+# Slash command — generate a replay of the current session
+/vibe-replay:replay
+
+# Natural language — agent auto-triggers during PR creation
+"Create a PR with session replay"
+"Create a PR for this change, include an animated GIF of the session"
+
+# Direct replay
+"Generate an interactive replay of this session and open it"
+```
 
 ## Features
 
