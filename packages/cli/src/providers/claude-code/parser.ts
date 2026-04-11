@@ -275,10 +275,10 @@ export async function parseClaudeCodeSession(
             toolImages.set(block.tool_use_id, images);
           }
         } else if (block.type === "text") {
-          textParts.push((block as any).text || "");
+          textParts.push(block.text || "");
         } else if (block.type === "image") {
           // User-pasted screenshot
-          const src = (block as any).source;
+          const src = block.source;
           if (src?.data) {
             const mediaType = src.media_type || "image/png";
             userImages.push(`data:${mediaType};base64,${src.data}`);
@@ -527,7 +527,7 @@ function extractMessageText(content: string | any[]): string {
 
 function extractImages(block: ContentBlock): string[] {
   if (block.type !== "tool_result") return [];
-  const content = (block as any).content;
+  const content = block.content;
   if (!Array.isArray(content)) return [];
 
   const images: string[] = [];
@@ -543,7 +543,7 @@ function extractImages(block: ContentBlock): string[] {
 function extractToolResultText(block: ContentBlock): string {
   if (block.type !== "tool_result") return "";
 
-  const content = (block as any).content;
+  const content = block.content;
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
     return content
@@ -851,13 +851,13 @@ async function readSubagents(
       const ts = saAssistantTimestamps.get(msgId);
       for (const block of blocks) {
         if (block.type === "thinking") {
-          const thinking = (block as any).thinking || "";
+          const thinking = block.thinking || "";
           if (thinking.trim()) {
             scenes.push({ type: "thinking", content: thinking.slice(0, 500), timestamp: ts });
             thinkingBlocks++;
           }
         } else if (block.type === "text") {
-          const text = (block as any).text || "";
+          const text = block.text || "";
           if (text.trim()) {
             scenes.push({ type: "text-response", content: text.slice(0, 1000), timestamp: ts });
             textResponses++;

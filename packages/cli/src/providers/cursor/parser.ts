@@ -1,7 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, extname, join } from "node:path";
-import type { ContentBlock, ParsedTurn, SessionInfo } from "../../types.js";
+import type { ContentBlock, EnrichedToolUseBlock, ParsedTurn, SessionInfo } from "../../types.js";
 import type { DataSourceInfo, ProviderParseResult } from "../types.js";
 import { sanitizeCursorAssistantText } from "./sanitize.js";
 import { isSystemContextText, parseCursorSqlite } from "./sqlite-reader.js";
@@ -175,7 +175,7 @@ async function parseCursorJsonl(
           for (const imagePath of extracted.paths) imageFilePaths.add(imagePath);
           if (text) textParts.push(text);
         } else if (block.type === "image") {
-          const source = (block as any).source;
+          const source = block.source;
           if (source?.data) {
             const mediaType = source.media_type || "image/png";
             userImages.push(`data:${mediaType};base64,${source.data}`);
@@ -339,33 +339,35 @@ async function readImageFileAsDataUrl(pathValue: string): Promise<string | null>
 
 function collectThinkingTexts(turn: ParsedTurn): string[] {
   const texts: string[] = [];
-  for (const block of turn.blocks as any[]) {
-    if (block?.type !== "thinking") continue;
-    const text = typeof block.thinking === "string" ? block.thinking.trim() : "";
+  for (const block of turn.blocks) {
+    if (block.type !== "thinking") continue;
+    const text = block.thinking.trim();
     if (text) texts.push(text);
   }
   return texts;
 }
 
-function buildThinkingBlocks(texts: string[]): any[] {
-  return texts.map((thinking) => ({ type: "thinking", thinking }));
+function buildThinkingBlocks(texts: string[]): ContentBlock[] {
+  return texts.map((thinking) => ({ type: "thinking" as const, thinking }));
 }
 
 function countThinkingBlocks(turns: ParsedTurn[]): number {
   let count = 0;
   for (const turn of turns) {
-    for (const block of turn.blocks as any[]) {
-      if (block?.type === "thinking") count++;
+    for (const block of turn.blocks) {
+      if (block.type === "thinking") count++;
     }
   }
   return count;
 }
 
 function collectUserImages(turn: ParsedTurn): string[] {
-  const imageBlocks = (turn.blocks as any[]).filter((block) => block?.type === "_user_images");
+  const imageBlocks = turn.blocks.filter(
+    (block): block is Extract<ContentBlock, { type: "_user_images" }> =>
+      block.type === "_user_images",
+  );
   const images: string[] = [];
   for (const block of imageBlocks) {
-    if (!Array.isArray(block.images)) continue;
     for (const image of block.images) {
       if (typeof image === "string" && image.trim()) images.push(image);
     }
@@ -415,8 +417,9 @@ function attachToolResults(
 ): void {
   for (const turn of turns) {
     if (turn.role !== "assistant") continue;
-    for (const block of turn.blocks as any[]) {
-      if (block?.type !== "tool_use" || typeof block.id !== "string") continue;
+    for (const rawBlock of turn.blocks) {
+      if (rawBlock.type !== "tool_use") continue;
+      const block = rawBlock as EnrichedToolUseBlock;
       const result = toolResults.get(block.id);
       if (result !== undefined) block._result = result;
       const images = toolImages.get(block.id);
@@ -457,7 +460,7 @@ export function mergeJsonlThinkingIntoCursorTurns(
     const missingThinking = candidateThinking.filter((text) => !existingThinking.has(text));
     if (missingThinking.length === 0) continue;
 
-    targetTurn.blocks = [...buildThinkingBlocks(missingThinking), ...targetTurn.blocks] as any;
+    targetTurn.blocks = [...buildThinkingBlocks(missingThinking), ...targetTurn.blocks];
   }
 
   // If JSONL has extra assistant thinking turns (common with marker-only lines),
@@ -468,7 +471,7 @@ export function mergeJsonlThinkingIntoCursorTurns(
     merged.push({
       role: "assistant",
       timestamp: jsonlAssistantTurns[i].timestamp,
-      blocks: buildThinkingBlocks(extraThinking) as any,
+      blocks: buildThinkingBlocks(extraThinking),
     });
   }
 
@@ -690,11 +693,11 @@ function attachToolEvents(turns: ParsedTurn[], tools: ToolEvent[]): void {
   // Unpaired markers → convert to thinking (they're just status text, not tool calls)
   for (let i = paired; i < markerBlocks.length; i++) {
     const { turn, blockIndex, block } = markerBlocks[i];
-    const thinkingBlock = {
+    const thinkingBlock: ContentBlock = {
       type: "thinking",
       thinking: block.name || block.input?.marker || "",
     };
-    (turn.blocks as any[])[blockIndex] = thinkingBlock;
+    turn.blocks[blockIndex] = thinkingBlock;
   }
 
   // Extra tool outputs with no matching marker → append as real tool calls
@@ -703,12 +706,12 @@ function attachToolEvents(turns: ParsedTurn[], tools: ToolEvent[]): void {
     turns.push({
       role: "assistant",
       timestamp: tool.timestamp,
-      blocks: [toToolUseBlock(tool) as any],
+      blocks: [toToolUseBlock(tool)],
     });
   }
 }
 
-function toToolUseBlock(tool: ToolEvent) {
+function toToolUseBlock(tool: ToolEvent): EnrichedToolUseBlock {
   return {
     type: "tool_use",
     id: tool.id,

@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type { CursorSidecars, PrLink, TokenUsage, TurnStat } from "@vibe-replay/types";
 import { readFileCache, writeFileCache } from "../../cache.js";
-import type { ContentBlock, ParsedTurn, SessionInfo } from "../../types.js";
+import type { ContentBlock, EnrichedToolUseBlock, ParsedTurn, SessionInfo } from "../../types.js";
 import { shortenPath } from "../../utils.js";
 import type { ProviderParseResult } from "../types.js";
 import { sanitizeCursorAssistantText, sanitizeCursorReasoningText } from "./sanitize.js";
@@ -1067,7 +1067,7 @@ function extractToolExecutionTimeMs(value: unknown): number | undefined {
 function parseToolFormerBlock(
   bubbleId: string,
   toolFormerData: Record<string, any>,
-): ContentBlock | null {
+): EnrichedToolUseBlock | null {
   const name = typeof toolFormerData.name === "string" ? toolFormerData.name : "";
   if (!name) return null;
 
@@ -1084,7 +1084,7 @@ function parseToolFormerBlock(
     input: mapToolArgs(name, paramsRaw, result),
     _result: result,
     ...(hasToolError(toolFormerData.result) ? { _isError: true } : {}),
-  } as any;
+  };
 }
 
 interface GlobalStateTurnEntry {
@@ -2156,7 +2156,7 @@ function parseAssistantContent(
       if (text) blocks.push({ type: "text", text });
     } else if (b.type === "tool-call" && b.toolCallId && b.toolName) {
       const result = toolResults.get(b.toolCallId);
-      const toolBlock: any = {
+      const toolBlock: EnrichedToolUseBlock = {
         type: "tool_use",
         id: b.toolCallId,
         name: mapCursorToolName(b.toolName),
@@ -2186,8 +2186,9 @@ function buildStoreTurnStats(turns: ParsedTurn[]): TurnStat[] {
     const current = turnStats[currentTurnIndex];
     if (!current.model && turn.model) current.model = turn.model;
 
-    for (const block of turn.blocks as any[]) {
-      if (block?.type !== "tool_use") continue;
+    for (const rawBlock of turn.blocks) {
+      if (rawBlock.type !== "tool_use") continue;
+      const block = rawBlock as EnrichedToolUseBlock;
       const ms = toPositiveMs(block._durationMs);
       if (ms !== undefined) {
         current.durationMs = (current.durationMs || 0) + ms;

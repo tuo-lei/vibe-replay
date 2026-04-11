@@ -19,7 +19,7 @@ import { estimateCost, estimateCostSimple } from "./pricing.js";
 import { parseCursorSession } from "./providers/cursor/parser.js";
 import { getCursorSessionCachePaths } from "./providers/cursor/sqlite-reader.js";
 import type { ProviderParseResult } from "./providers/types.js";
-import type { DataSource, PrLink, SessionInfo, TokenUsage } from "./types.js";
+import type { DataSource, EnrichedToolUseBlock, PrLink, SessionInfo, TokenUsage } from "./types.js";
 import { extractToolFilePath, shortenPath } from "./utils.js";
 
 // Bump this when we extract new fields — forces re-scan of all sessions.
@@ -654,8 +654,9 @@ function buildScanResultFromParsed(
       if (hasText || hasImages) promptCount++;
     }
 
-    for (const block of turn.blocks as any[]) {
-      if (block?.type !== "tool_use") continue;
+    for (const rawBlock of turn.blocks) {
+      if (rawBlock.type !== "tool_use") continue;
+      const block = rawBlock as EnrichedToolUseBlock;
       toolCallCount++;
 
       if (
