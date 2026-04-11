@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
 import { Hono } from "hono";
@@ -197,6 +197,12 @@ app.get("/auth/success", async (c) => {
   const tokenMatch = cookies.match(/(?:__Secure-)?better-auth\.session_token=([^;]+)/);
   const token = tokenMatch ? tokenMatch[1] : "";
 
+  // Build list of trusted opener origins for postMessage (avoid wildcard '*')
+  const dev = isDev(c.env);
+  const trustedOpenerOrigins = [...PROD_ORIGINS];
+  if (dev) trustedOpenerOrigins.push(...DEV_ORIGINS);
+  const originsJson = JSON.stringify(trustedOpenerOrigins);
+
   return c.html(`<!DOCTYPE html>
 <html><head><title>vibe-replay - Logged in</title>
 <style>
@@ -217,8 +223,8 @@ body{background:#0a0a0f;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFo
 <p class="countdown" id="cd"></p>
 </div>
 <script>
-// Post auth result to opener (CLI dashboard on localhost)
-if(window.opener){try{window.opener.postMessage({type:'vibe-replay-auth',user:${userJson},token:'${token}'},'*');}catch(e){}}
+// Post auth result to opener — try each trusted origin (mismatches are silently ignored)
+if(window.opener){var msg={type:'vibe-replay-auth',user:${userJson},token:${JSON.stringify(token)}};${originsJson}.forEach(function(o){try{window.opener.postMessage(msg,o);}catch(e){}});}
 var s=3;
 var cd=document.getElementById('cd');
 cd.textContent='Auto-closing in '+s+'s...';
@@ -799,8 +805,17 @@ app.patch("/api/gists/:gistId", async (c) => {
   }
 
   const body = await c.req.json();
-  if (!body.filename || !body.content) {
-    return c.json({ error: "filename and content required" }, 400);
+  if (!body.filename || typeof body.filename !== "string" || body.filename.length > 255) {
+    return c.json({ error: "filename required (max 255 chars)" }, 400);
+  }
+  if (/[/\\]/.test(body.filename)) {
+    return c.json({ error: "Invalid filename" }, 400);
+  }
+  if (!body.content || typeof body.content !== "string") {
+    return c.json({ error: "content required" }, 400);
+  }
+  if (new TextEncoder().encode(body.content).byteLength > MAX_GIST_CONTENT) {
+    return c.json({ error: "Content too large" }, 413);
   }
 
   const auth = createAuth(c.env);
@@ -1038,10 +1053,14 @@ app.post("/api/cloud-replays/view-gist/:gistId", async (c) => {
     return c.json({ ok: false }, 400);
   }
   const db = drizzle(c.env.DB);
-  await db
+  const result = await db
     .update(cloudReplays)
     .set({ viewCount: sql`${cloudReplays.viewCount} + 1` })
-    .where(eq(cloudReplays.gistId, gistId));
+    .where(and(eq(cloudReplays.gistId, gistId), ne(cloudReplays.visibility, "private")));
+  // D1 meta.changes is 0 if the gist doesn't exist or is private
+  if (!result.meta.changes) {
+    return c.json({ ok: false }, 404);
+  }
   return c.json({ ok: true });
 });
 
