@@ -7,8 +7,9 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { serve } from "@hono/node-server";
 import chalk from "chalk";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
+import type { StatusCode } from "hono/utils/http-status";
 import open from "open";
 import { readFileCache, writeFileCache } from "./cache.js";
 import { cleanPromptText } from "./clean-prompt.js";
@@ -1862,7 +1863,7 @@ export async function startServer(
 
   /** Shared response handler for cloud API proxy routes (BFF mode). */
   async function proxyCloudResponse(
-    c: Parameters<Parameters<typeof app.get>[1]>[0],
+    c: Context,
     cloudPath: string,
     errorLabel: string,
     init?: RequestInit,
@@ -1871,7 +1872,7 @@ export async function startServer(
       const proxied = await fetchCloudApiWithLocalAuth(cloudPath, init);
       if (proxied.unauthorized) return c.json({ error: "Unauthorized" }, 401);
       const contentType = proxied.response.headers.get("content-type") || "";
-      const status = proxied.response.status as import("hono/utils/http-status").StatusCode;
+      const status = proxied.response.status as StatusCode;
       if (!contentType.includes("application/json")) {
         const text = await proxied.response.text();
         return c.body(text, status, { "Content-Type": contentType || "text/plain" });
