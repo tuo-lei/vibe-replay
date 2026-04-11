@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
 import { Hono } from "hono";
@@ -224,7 +224,7 @@ body{background:#0a0a0f;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFo
 </div>
 <script>
 // Post auth result to opener — try each trusted origin (mismatches are silently ignored)
-if(window.opener){var msg={type:'vibe-replay-auth',user:${userJson},token:'${token}'};${originsJson}.forEach(function(o){try{window.opener.postMessage(msg,o);}catch(e){}});}
+if(window.opener){var msg={type:'vibe-replay-auth',user:${userJson},token:${JSON.stringify(token)}};${originsJson}.forEach(function(o){try{window.opener.postMessage(msg,o);}catch(e){}});}
 var s=3;
 var cd=document.getElementById('cd');
 cd.textContent='Auto-closing in '+s+'s...';
@@ -1056,7 +1056,7 @@ app.post("/api/cloud-replays/view-gist/:gistId", async (c) => {
   const result = await db
     .update(cloudReplays)
     .set({ viewCount: sql`${cloudReplays.viewCount} + 1` })
-    .where(and(eq(cloudReplays.gistId, gistId), sql`${cloudReplays.visibility} != 'private'`));
+    .where(and(eq(cloudReplays.gistId, gistId), ne(cloudReplays.visibility, "private")));
   // D1 meta.changes is 0 if the gist doesn't exist or is private
   if (!result.meta.changes) {
     return c.json({ ok: false }, 404);
