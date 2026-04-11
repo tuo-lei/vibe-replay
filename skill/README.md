@@ -14,24 +14,16 @@ The skill is both user-invocable (`/replay`) and model-invoked (agent auto-trigg
 
 ## Install
 
-### From GitHub
-
 ```bash
-# Add the marketplace
-/plugin marketplace add tuo-lei/vibe-replay-skill
-
-# Install the plugin
-/plugin install vibe-replay@tuo-lei-vibe-replay-skill
+/plugin install from github:tuo-lei/vibe-replay
 ```
 
-### Manual install
-
-Copy the `skills/replay/` directory to `~/.claude/skills/replay/`:
+Or manually copy a single file:
 
 ```bash
 mkdir -p ~/.claude/skills/replay
 curl -o ~/.claude/skills/replay/SKILL.md \
-  https://raw.githubusercontent.com/tuo-lei/vibe-replay-skill/main/skills/replay/SKILL.md
+  https://raw.githubusercontent.com/tuo-lei/vibe-replay/main/skill/skills/replay/SKILL.md
 ```
 
 ## Usage
