@@ -32,6 +32,26 @@ Produces a self-contained HTML file and opens it in the browser.
 npx vibe-replay --session <path> --open
 ```
 
+## Use cases
+
+### PR with text-only replay summary (default)
+
+> "Create a PR with session replay"
+
+The agent generates GitHub artifacts and embeds the **text summary** (stats, tool breakdown, per-prompt details) in the PR description. No binary files committed.
+
+### PR with animated GIF
+
+> "Create a PR with session replay, include the GIF"
+
+The agent generates artifacts, copies the GIF into the repo (e.g., `.github/session-preview.gif`), and includes the image reference in the PR markdown. The GIF is typically 30-300 KB.
+
+### Quick HTML replay
+
+> `/replay`
+
+Generates a self-contained HTML file and opens it in the browser.
+
 ## Invocation modes
 
 | Mode | Trigger | Example |

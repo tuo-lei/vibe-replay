@@ -30,11 +30,14 @@ This generates three files in `~/.vibe-replay/<slug>/`:
 
 The markdown is also printed to stdout.
 
-**To use in a PR**: read `github-summary.md` and include its **text content** in the PR body. Skip the first line (image reference) — do NOT commit the GIF to the repo, as binary files bloat repository size. The text summary (stats, prompts, tool breakdown) is the valuable part for PR reviewers.
+**To use in a PR**: read `github-summary.md` and include its content in the PR body. By default, **skip the first line** (image reference `![AI Session: ...](...)`), since committing a binary GIF to the repo bloats repository size. The text summary alone provides full value for reviewers.
 
-If the user explicitly asks to include the GIF image, mention that it requires either:
-- Uploading to an image hosting service
-- Publishing a gist first (`npx vibe-replay` interactive mode → Publish to Gist), then referencing the gist viewer URL
+**If the user explicitly asks for the GIF** in the PR, include it by:
+1. Copying the GIF into the repo (e.g., `.github/session-preview.gif`)
+2. Updating the image path in the markdown to match
+3. Committing both the GIF and the markdown
+
+Let the user know the GIF is typically 30-300 KB and will be part of git history permanently.
 
 ### 2. Interactive HTML Replay
 
@@ -77,8 +80,8 @@ When creating a PR and the user wants session replay context:
 1. Find the session file (see above)
 2. Run `npx vibe-replay --session <PATH> --github` to generate artifacts
 3. Read the generated `github-summary.md`
-4. Strip the first line (image reference `![AI Session: ...](...)`), then include the rest in the PR description under a `## Session Replay` heading
-5. The text content alone provides full value: stats, tool breakdown, per-prompt details
+4. By default, strip the first line (image reference) and include the text in the PR description under a `## Session Replay` heading
+5. If the user asked for the GIF, copy `session-preview.gif` into the repo and keep the image reference in the markdown
 
 ## Optional Flags
 
