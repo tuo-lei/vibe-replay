@@ -4,7 +4,7 @@ import type { EffectivePrefs } from "../hooks/useViewPrefs";
 import type { Scene, TurnStat } from "../types";
 import { displayToolName } from "../utils/toolName";
 import CompactionSummaryBlock from "./CompactionSummaryBlock";
-import { formatDuration } from "./StatsPanel";
+import { fmtNum, formatDuration } from "./StatsPanel";
 import TextResponseBlock from "./TextResponseBlock";
 import ThinkingBlock from "./ThinkingBlock";
 import ToolCallBlock from "./ToolCallBlock";
@@ -22,6 +22,7 @@ interface Props {
   state?: string;
   overlayActions?: OverlayActions;
   turnStats?: TurnStat[];
+  contextLimit?: number;
 }
 
 interface TurnGroup {
@@ -29,6 +30,10 @@ interface TurnGroup {
   timestamp?: string;
   scenes: { scene: Scene; index: number }[];
   turnNumber?: number;
+}
+
+function fmtTokens(n: number): string {
+  return `${fmtNum(n)} tokens`;
 }
 
 function formatTime(iso?: string): string {
@@ -59,6 +64,7 @@ export default function ConversationView({
   state,
   overlayActions,
   turnStats,
+  contextLimit,
 }: Props & { onSeek?: (index: number) => void }) {
   // Pre-compute ALL groups once — stable across playback ticks
   const allGroups = useMemo(() => {
@@ -168,6 +174,7 @@ export default function ConversationView({
             onComment={onComment}
             overlayActions={overlayActions}
             turnStats={turnStats}
+            contextLimit={contextLimit}
           />
         </LazyGroup>
       ))}
@@ -342,6 +349,7 @@ const GroupCard = memo(function GroupCard({
   onComment,
   overlayActions,
   turnStats,
+  contextLimit,
 }: {
   group: TurnGroup;
   currentIndex: number;
@@ -353,6 +361,7 @@ const GroupCard = memo(function GroupCard({
   onComment?: (sceneIndex: number) => void;
   overlayActions?: OverlayActions;
   turnStats?: TurnStat[];
+  contextLimit?: number;
 }) {
   const [hovered, setHovered] = useState(false);
 
@@ -437,6 +446,30 @@ const GroupCard = memo(function GroupCard({
             </span>
           )}
         </div>
+        {/* Context fill indicator */}
+        {(() => {
+          if (!contextLimit || !turnStats || group.turnNumber === undefined) return null;
+          const ts = turnStats[group.turnNumber - 1];
+          if (!ts?.contextTokens) return null;
+          const pct = Math.min((ts.contextTokens / contextLimit) * 100, 100);
+          const color =
+            pct >= 90 ? "bg-terminal-red" : pct >= 70 ? "bg-terminal-orange" : "bg-terminal-cyan";
+          return (
+            <div className="mb-2 flex items-center gap-2">
+              <div className="flex-1 h-1 rounded-full bg-terminal-surface overflow-hidden">
+                <div
+                  className={`h-full rounded-full ${color} transition-all duration-300`}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              <span
+                className={`text-[9px] font-mono tabular-nums ${pct >= 90 ? "text-terminal-red" : pct >= 70 ? "text-terminal-orange" : "text-terminal-dimmer"}`}
+              >
+                {Math.round(pct)}%
+              </span>
+            </div>
+          );
+        })()}
         <div className="text-left">
           {visibleScenes.map(({ scene, index }) => {
             const sceneOverlays = overlayActions?.getOverlays(index) ?? [];
@@ -489,6 +522,21 @@ const GroupCard = memo(function GroupCard({
   if (group.type === "compaction") {
     const scene = visibleScenes[0]?.scene;
     if (!scene || scene.type !== "compaction-summary") return null;
+
+    // Find compaction token impact from turnStats (context drop > 50%)
+    const compactionTokens = (() => {
+      if (!turnStats || turnStats.length < 2) return undefined;
+      // Find the turn pair where context dropped significantly around this scene
+      for (let i = 0; i < turnStats.length - 1; i++) {
+        const cur = turnStats[i]?.contextTokens || 0;
+        const next = turnStats[i + 1]?.contextTokens || 0;
+        if (cur > 0 && next > 0 && next < cur * 0.5) {
+          return { before: cur, after: next, freed: cur - next };
+        }
+      }
+      return undefined;
+    })();
+
     return (
       <div
         id={`scene-${firstIndex}`}
@@ -508,6 +556,14 @@ const GroupCard = memo(function GroupCard({
           {group.timestamp && (
             <span className="text-xs font-mono text-terminal-dimmer">
               {formatTime(group.timestamp)}
+            </span>
+          )}
+          {compactionTokens && (
+            <span className="text-[10px] font-mono text-terminal-green">
+              {fmtTokens(compactionTokens.before)} → {fmtTokens(compactionTokens.after)}
+              <span className="text-terminal-green/70 ml-1">
+                (-{fmtTokens(compactionTokens.freed)})
+              </span>
             </span>
           )}
         </div>

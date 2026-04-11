@@ -548,7 +548,11 @@ export default function SummaryView({ session }: Props) {
               costEstimate={meta.stats.costEstimate}
               turnLabels={turnLabels}
             />
-            <ContextWindowChart turnStats={meta.stats.turnStats!} turnLabels={turnLabels} />
+            <ContextWindowChart
+              turnStats={meta.stats.turnStats!}
+              turnLabels={turnLabels}
+              contextLimit={meta.contextLimit}
+            />
             {stats.turns.length >= 2 && (
               <ToolActivityChart turns={stats.turns} turnLabels={turnLabels} />
             )}
@@ -675,7 +679,11 @@ export default function SummaryView({ session }: Props) {
 
         {/* Per-Turn Breakdown Table */}
         {stats.turns.length > 0 && (
-          <TurnTable turns={stats.turns} turnStats={meta.stats.turnStats} />
+          <TurnTable
+            turns={stats.turns}
+            turnStats={meta.stats.turnStats}
+            contextLimit={meta.contextLimit}
+          />
         )}
 
         {/* File Activity Heatmap */}
@@ -715,6 +723,9 @@ export default function SummaryView({ session }: Props) {
           <div>
             <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
               Top Tools
+              <span className="text-terminal-dimmer ml-2 normal-case tracking-normal font-mono">
+                {stats.totalTools} total
+              </span>
             </div>
             <div className="space-y-1.5">
               {stats.topTools.map(([name, count]) => (
@@ -731,8 +742,11 @@ export default function SummaryView({ session }: Props) {
                       style={{ width: `${(count / stats.topTools[0][1]) * 100}%` }}
                     />
                   </div>
-                  <span className="text-terminal-dim shrink-0 w-6 text-right tabular-nums">
-                    {count}
+                  <span className="text-terminal-dim shrink-0 w-16 text-right tabular-nums">
+                    {count}{" "}
+                    <span className="text-terminal-dimmer">
+                      ({Math.round((count / stats.totalTools) * 100)}%)
+                    </span>
                   </span>
                 </div>
               ))}
@@ -1085,9 +1099,11 @@ function CacheEfficiencyLine({ turnStats }: { turnStats: TurnStat[] }) {
 function ContextWindowChart({
   turnStats,
   turnLabels,
+  contextLimit,
 }: {
   turnStats: TurnStat[];
   turnLabels?: string[];
+  contextLimit?: number;
 }) {
   const contextSizes = turnStats.map((t) => t.contextTokens || 0);
   const n = contextSizes.length;
@@ -1096,7 +1112,9 @@ function ContextWindowChart({
   if (!contextSizes.some((c) => c > 0)) return null;
 
   const peak = Math.max(...contextSizes);
-  const max = peak;
+  // Use contextLimit as the Y-axis max if available (so the chart shows fill %)
+  const max = contextLimit && contextLimit > peak ? contextLimit : peak;
+  const peakPct = contextLimit ? Math.round((peak / contextLimit) * 100) : undefined;
   const h = 60;
   const w = 100;
 
@@ -1118,10 +1136,20 @@ function ContextWindowChart({
 
   const hoveredX = hovered !== null ? (n === 1 ? 0.5 : hovered / (n - 1)) : 0;
 
+  // Context limit Y position for the limit line
+  const limitY = contextLimit ? h - (contextLimit / max) * (h - 6) - 3 : undefined;
+
   return (
     <div>
-      <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-1">
-        Context Window Usage
+      <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-1 flex items-center gap-2">
+        <span>Context Window Usage</span>
+        {peakPct !== undefined && (
+          <span
+            className={`font-mono ${peakPct >= 90 ? "text-terminal-red" : peakPct >= 70 ? "text-terminal-orange" : "text-terminal-cyan"}`}
+          >
+            peak {peakPct}%
+          </span>
+        )}
       </div>
       <div className="relative">
         <svg
@@ -1132,6 +1160,20 @@ function ContextWindowChart({
           onMouseMove={onMouseMove}
           onMouseLeave={onMouseLeave}
         >
+          {/* Context limit line (100% mark) */}
+          {limitY !== undefined && (
+            <line
+              x1="0"
+              y1={limitY}
+              x2={w}
+              y2={limitY}
+              style={{ stroke: "var(--dim)" }}
+              strokeWidth="0.5"
+              strokeDasharray="3,2"
+              vectorEffect="non-scaling-stroke"
+              opacity="0.4"
+            />
+          )}
           <polygon
             points={`0,${h} ${points.join(" ")} ${w},${h}`}
             style={{ fill: "var(--cyan-subtle)" }}
@@ -1186,14 +1228,22 @@ function ContextWindowChart({
                   {turnLabels[hovered]}
                 </div>
               )}
-              <div>{fmtNum(contextSizes[hovered])} tokens</div>
+              <div>
+                {fmtNum(contextSizes[hovered])} tokens
+                {contextLimit && contextSizes[hovered] > 0 && (
+                  <span className="text-terminal-dimmer">
+                    {" "}
+                    ({Math.round((contextSizes[hovered] / contextLimit) * 100)}%)
+                  </span>
+                )}
+              </div>
             </>
           )}
         </ChartTooltip>
       </div>
       <div className="flex justify-between text-[10px] font-mono text-terminal-dimmer mt-0.5">
         <span>Turn 1</span>
-        <span>peak {fmtNum(peak)}</span>
+        <span>{contextLimit ? `limit ${fmtNum(contextLimit)}` : `peak ${fmtNum(peak)}`}</span>
         <span>Turn {n}</span>
       </div>
       {compactionTurns.length > 0 && (
@@ -1486,7 +1536,15 @@ function FileActivityHeatmap({
 
 const TURN_TABLE_COLLAPSE = 20;
 
-function TurnTable({ turns, turnStats }: { turns: TurnInfo[]; turnStats?: TurnStat[] }) {
+function TurnTable({
+  turns,
+  turnStats,
+  contextLimit,
+}: {
+  turns: TurnInfo[];
+  turnStats?: TurnStat[];
+  contextLimit?: number;
+}) {
   const [expanded, setExpanded] = useState(false);
 
   // Merge turn info with turnStats by index
@@ -1513,20 +1571,25 @@ function TurnTable({ turns, turnStats }: { turns: TurnInfo[]; turnStats?: TurnSt
 
     const mapped = turns.map((t, i) => {
       const ts = turnStats?.[i];
+      const ctxTokens = ts?.contextTokens || 0;
+      // When contextLimit is available, ratio = fill % of limit; otherwise relative to peak
+      const ctxRatio = contextLimit ? ctxTokens / contextLimit : ctxTokens / maxContext;
       return {
         ...t,
         durationMs: ts?.durationMs,
         contextTokens: ts?.contextTokens,
+        contextPct:
+          contextLimit && ctxTokens > 0 ? Math.round((ctxTokens / contextLimit) * 100) : undefined,
         outputTokens: ts?.tokenUsage?.outputTokens,
         toolRatio: t.toolCount / maxTools,
         durationRatio: (ts?.durationMs || 0) / maxDuration,
-        contextRatio: (ts?.contextTokens || 0) / maxContext,
+        contextRatio: ctxRatio,
         outputRatio: (ts?.tokenUsage?.outputTokens || 0) / maxOutput,
       };
     });
 
     return { rows: mapped, compactionAfter: compSet };
-  }, [turns, turnStats]);
+  }, [turns, turnStats, contextLimit]);
 
   const hasStats = turnStats && turnStats.length > 0;
   const hasDuration = hasStats && turnStats.some((t) => t.durationMs);
@@ -1608,6 +1671,7 @@ function TurnRow({
     errorCount: number;
     durationMs?: number;
     contextTokens?: number;
+    contextPct?: number;
     outputTokens?: number;
     toolRatio: number;
     durationRatio: number;
@@ -1649,9 +1713,15 @@ function TurnRow({
         {hasContext && (
           <td className="px-2 py-1 text-right tabular-nums">
             <HeatCell
-              value={r.contextTokens ? fmtNum(r.contextTokens) : "—"}
+              value={
+                r.contextPct !== undefined
+                  ? `${r.contextPct}%`
+                  : r.contextTokens
+                    ? fmtNum(r.contextTokens)
+                    : "—"
+              }
               ratio={r.contextRatio}
-              color="--cyan"
+              color={r.contextPct !== undefined && r.contextPct >= 90 ? "--red" : "--cyan"}
             />
           </td>
         )}
