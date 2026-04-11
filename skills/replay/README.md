@@ -64,7 +64,8 @@ Generates a self-contained HTML file and opens it in the browser.
 ### As a Claude Code plugin (recommended)
 
 ```
-/install-plugin from github:tuo-lei/vibe-replay
+/plugin marketplace add tuo-lei/vibe-replay
+/plugin install vibe-replay@vibe-replay
 ```
 
 ### Manual (single file)
