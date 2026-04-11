@@ -1,4 +1,4 @@
-# /replay skill
+# /vibe-replay:replay skill
 
 This skill teaches AI agents how to generate session replays from [vibe-replay](https://github.com/tuo-lei/vibe-replay).
 
@@ -56,15 +56,15 @@ Generates a self-contained HTML file and opens it in the browser.
 
 | Mode | Trigger | Example |
 |------|---------|---------|
-| Slash command | User types `/replay` | `/replay` |
+| Slash command | User types `/vibe-replay:replay` | `/vibe-replay:replay` |
 | Model-invoked | User mentions replay when creating a PR | "Create a PR with session replay" |
 
 ## Install
 
-### As a Claude Code plugin (from the main repo)
+### As a Claude Code plugin (recommended)
 
 ```
-/plugin install from github:tuo-lei/vibe-replay
+/install-plugin from github:tuo-lei/vibe-replay
 ```
 
 ### Manual (single file)
@@ -72,12 +72,12 @@ Generates a self-contained HTML file and opens it in the browser.
 ```bash
 mkdir -p ~/.claude/skills/replay
 curl -o ~/.claude/skills/replay/SKILL.md \
-  https://raw.githubusercontent.com/tuo-lei/vibe-replay/main/skill/skills/replay/SKILL.md
+  https://raw.githubusercontent.com/tuo-lei/vibe-replay/main/skills/replay/SKILL.md
 ```
 
 ### For vibe-replay contributors
 
-The project has a symlink at `.claude/skills/replay` → `skill/skills/replay/`, so the skill is always loaded from source when working in this repo.
+The project has a symlink at `.claude/skills/replay` → `skills/replay/`, so the skill is always loaded from source when working in this repo.
 
 ## CLI flags used by the skill
 

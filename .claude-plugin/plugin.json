@@ -10,5 +10,5 @@
   "repository": "https://github.com/tuo-lei/vibe-replay",
   "license": "MIT",
   "keywords": ["replay", "session", "recording", "sharing", "vibe-coding", "documentation"],
-  "skills": "./skill/skills/"
+  "skills": "./skills/"
 }
