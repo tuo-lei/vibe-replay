@@ -21,6 +21,7 @@ packages/cli/assets/viewer.html
 plan/
 .claude/*
 !.claude/settings.json
+!.claude/skills
 
 # Editor
 .vscode/
