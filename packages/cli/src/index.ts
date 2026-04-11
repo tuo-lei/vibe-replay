@@ -26,9 +26,69 @@ import { publishLocal } from "./publishers/local.js";
 import { scanForSecrets } from "./scan.js";
 import { startDashboard, startServer } from "./server.js";
 import { transformToReplay } from "./transform.js";
-import type { SessionInfo } from "./types.js";
+import type { ReplaySession, SessionInfo } from "./types.js";
 import { normalizeTitle } from "./utils.js";
 import { CLI_VERSION } from "./version.js";
+
+interface GitHubExportResult {
+  markdown: string;
+  outputDir: string;
+  svgPath: string;
+  gifPath?: string;
+  mdPath: string;
+}
+
+async function runGitHubExport(
+  replay: ReplaySession,
+  outputDir: string,
+): Promise<GitHubExportResult> {
+  const { join } = await import("node:path");
+  const { writeFile } = await import("node:fs/promises");
+
+  // Auto-detect replay URL from previously published gist
+  const savedGist = await loadSavedGistInfo(outputDir);
+  const replayUrl = savedGist?.viewerUrl;
+
+  // Generate animated SVG
+  const svgSpinner = ora("Generating animated SVG...").start();
+  const svgContent = generateGitHubSvg(replay, { replayUrl });
+  const svgFilePath = join(outputDir, "session-preview.svg");
+  await writeFile(svgFilePath, svgContent, "utf-8");
+  svgSpinner.succeed(`SVG: ${svgFilePath}`);
+
+  // Generate animated GIF
+  let gifGenerated = false;
+  const gifSpinner = ora("Generating animated GIF...").start();
+  try {
+    const gifBuffer = await generateGitHubGif(replay, { replayUrl });
+    const gifFilePath = join(outputDir, "session-preview.gif");
+    await writeFile(gifFilePath, gifBuffer);
+    const gifSizeKB = Math.round(gifBuffer.length / 1024);
+    gifSpinner.succeed(`GIF: ${gifFilePath} (${gifSizeKB} KB)`);
+    gifGenerated = true;
+  } catch (err) {
+    gifSpinner.fail(`GIF generation failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // Generate markdown (prefer GIF for universal GitHub support)
+  const mdSpinner = ora("Generating GitHub markdown...").start();
+  const markdown = generateGitHubMarkdown(replay, {
+    replayUrl,
+    svgPath: "./session-preview.svg",
+    gifPath: gifGenerated ? "./session-preview.gif" : undefined,
+  });
+  const mdFilePath = join(outputDir, "github-summary.md");
+  await writeFile(mdFilePath, markdown, "utf-8");
+  mdSpinner.succeed(`Markdown: ${mdFilePath}`);
+
+  return {
+    markdown,
+    outputDir,
+    svgPath: svgFilePath,
+    gifPath: gifGenerated ? join(outputDir, "session-preview.gif") : undefined,
+    mdPath: mdFilePath,
+  };
+}
 
 const DEV_MENU_ENABLED = process.env.VIBE_REPLAY_DEV_MENU === "1";
 const SESSION_DISCOVERY_CACHE_KEY = "session-discovery-v1";
@@ -469,49 +529,10 @@ program
 
     // --github: generate GitHub export artifacts and exit (non-interactive)
     if (opts.github) {
-      // Auto-detect replay URL from previously published gist
-      const savedGist = await loadSavedGistInfo(outputDir);
-      const replayUrl = savedGist?.viewerUrl;
-
-      const { writeFile } = await import("node:fs/promises");
-
-      // Generate animated SVG
-      const svgSpinner = ora("Generating animated SVG...").start();
-      const svgContent = generateGitHubSvg(replay, { replayUrl });
-      const svgFilePath = join(outputDir, "session-preview.svg");
-      await writeFile(svgFilePath, svgContent, "utf-8");
-      svgSpinner.succeed(`SVG: ${svgFilePath}`);
-
-      // Generate animated GIF
-      let gifGenerated = false;
-      const gifSpinner = ora("Generating animated GIF...").start();
-      try {
-        const gifBuffer = await generateGitHubGif(replay, { replayUrl });
-        const gifFilePath = join(outputDir, "session-preview.gif");
-        await writeFile(gifFilePath, gifBuffer);
-        const gifSizeKB = Math.round(gifBuffer.length / 1024);
-        gifSpinner.succeed(`GIF: ${gifFilePath} (${gifSizeKB} KB)`);
-        gifGenerated = true;
-      } catch (err) {
-        gifSpinner.fail(
-          `GIF generation failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-
-      // Generate markdown (prefer GIF for universal GitHub support)
-      const mdSpinner = ora("Generating GitHub markdown...").start();
-      const markdown = generateGitHubMarkdown(replay, {
-        replayUrl,
-        svgPath: "./session-preview.svg",
-        gifPath: gifGenerated ? "./session-preview.gif" : undefined,
-      });
-      const mdFilePath = join(outputDir, "github-summary.md");
-      await writeFile(mdFilePath, markdown, "utf-8");
-      mdSpinner.succeed(`Markdown: ${mdFilePath}`);
-
+      const result = await runGitHubExport(replay, outputDir);
       // Print the markdown to stdout for easy piping
       console.log();
-      console.log(markdown);
+      console.log(result.markdown);
       // Status messages go to stderr so they don't pollute piped output
       process.stderr.write(`\n${chalk.bold.green("  Done!")}\n`);
       process.stderr.write(`${chalk.dim("  Files: ")}${chalk.white(outputDir)}\n\n`);
@@ -611,51 +632,11 @@ program
         }
       }
     } else if (target === "github") {
-      const { writeFile } = await import("node:fs/promises");
-
-      // Auto-detect replay URL from previously published gist
-      const savedGist = await loadSavedGistInfo(outputDir);
-      const replayUrl = savedGist?.viewerUrl;
-
-      // Generate animated SVG
-      const svgSpinner = ora("Generating animated SVG...").start();
-      const svgContent = generateGitHubSvg(replay, { replayUrl });
-      const svgFilePath = join(outputDir, "session-preview.svg");
-      await writeFile(svgFilePath, svgContent, "utf-8");
-      svgSpinner.succeed(`SVG: ${svgFilePath}`);
-
-      // Generate animated GIF
-      let gifGenerated = false;
-      const gifSpinner = ora("Generating animated GIF...").start();
-      try {
-        const gifBuffer = await generateGitHubGif(replay, { replayUrl });
-        const gifFilePath = join(outputDir, "session-preview.gif");
-        await writeFile(gifFilePath, gifBuffer);
-        const gifSizeKB = Math.round(gifBuffer.length / 1024);
-        gifSpinner.succeed(`GIF: ${gifFilePath} (${gifSizeKB} KB)`);
-        gifGenerated = true;
-      } catch (err) {
-        gifSpinner.fail(
-          `GIF generation failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-
-      // Generate markdown (prefer GIF for universal GitHub support)
-      const mdSpinner = ora("Generating GitHub markdown...").start();
-      const markdown = generateGitHubMarkdown(replay, {
-        replayUrl,
-        svgPath: "./session-preview.svg",
-        gifPath: gifGenerated ? "./session-preview.gif" : undefined,
-      });
-      const mdFilePath = join(outputDir, "github-summary.md");
-      await writeFile(mdFilePath, markdown, "utf-8");
-      mdSpinner.succeed(`Markdown: ${mdFilePath}`);
-
-      // Print preview
+      const result = await runGitHubExport(replay, outputDir);
       console.log();
       console.log(chalk.dim("  ─── Preview ───"));
       console.log();
-      console.log(markdown);
+      console.log(result.markdown);
       console.log();
       console.log(chalk.bold.green("  Done!"));
       console.log(chalk.dim("  Files: ") + chalk.white(outputDir));
