@@ -365,6 +365,29 @@ const GroupCard = memo(function GroupCard({
 }) {
   const [hovered, setHovered] = useState(false);
 
+  // Infer the effective context ceiling from peak tokens and compaction drops.
+  // If compaction is detected (>50% context drop), the pre-drop peak reveals the limit.
+  // Otherwise default to 200K, or 1M if any turn exceeds 200K.
+  const contextCeiling = useMemo(() => {
+    if (!turnStats?.length) return 200_000;
+    const peak = Math.max(...turnStats.map((t) => t.contextTokens || 0));
+    // Detect compaction: find the highest context value right before a >50% drop
+    let compactionPeak = 0;
+    for (let i = 0; i < turnStats.length - 1; i++) {
+      const cur = turnStats[i]?.contextTokens || 0;
+      const next = turnStats[i + 1]?.contextTokens || 0;
+      if (cur > 0 && next > 0 && next < cur * 0.5 && cur > compactionPeak) {
+        compactionPeak = cur;
+      }
+    }
+    if (compactionPeak > 0) {
+      // Compaction at ~170K → ceiling ~200K; at ~850K → ceiling ~1M
+      return compactionPeak > 200_000 ? 1_000_000 : 200_000;
+    }
+    // No compaction: if peak > 200K, must be 1M window
+    return peak > 200_000 ? 1_000_000 : 200_000;
+  }, [turnStats]);
+
   // Only include scenes that are visible so far
   const visibleScenes = useMemo(
     () => group.scenes.filter((s) => s.index < visibleCount),
@@ -447,32 +470,41 @@ const GroupCard = memo(function GroupCard({
           )}
         </div>
         {/* Context token indicator */}
-        {(() => {
-          if (!turnStats || group.turnNumber === undefined) return null;
-          const ts = turnStats[group.turnNumber - 1];
-          if (!ts?.contextTokens) return null;
-          // Default 200K, auto-switch to 1M if any turn exceeds 200K
-          const effectiveLimit =
-            contextLimit && contextLimit > 200_000
-              ? contextLimit
-              : ts.contextTokens > 200_000
-                ? 1_000_000
-                : 200_000;
-          const pct = Math.min((ts.contextTokens / effectiveLimit) * 100, 100);
-          return (
-            <div className="mb-2 flex items-center gap-2">
-              <div className="flex-1 h-2 rounded-full bg-terminal-surface overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-terminal-green transition-all duration-300"
-                  style={{ width: `${pct}%` }}
-                />
+        {group.turnNumber !== undefined &&
+          turnStats &&
+          (() => {
+            const ts = turnStats[group.turnNumber! - 1];
+            if (!ts?.contextTokens) return null;
+            const pct = Math.min((ts.contextTokens / contextCeiling) * 100, 100);
+            const ratio = ts.contextTokens / contextCeiling;
+            const barColor =
+              ratio >= 0.85
+                ? "bg-terminal-red"
+                : ratio >= 0.7
+                  ? "bg-terminal-orange"
+                  : ratio >= 0.5
+                    ? "bg-yellow-400"
+                    : "bg-terminal-green";
+            const textColor =
+              ratio >= 0.85
+                ? "text-terminal-red"
+                : ratio >= 0.7
+                  ? "text-terminal-orange"
+                  : "text-terminal-dim";
+            return (
+              <div className="mb-2 flex items-center gap-2">
+                <div className="flex-1 h-2 rounded-full bg-terminal-surface overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${barColor} transition-all duration-300`}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                <span className={`text-[9px] font-mono tabular-nums ${textColor}`}>
+                  {fmtNum(ts.contextTokens)}
+                </span>
               </div>
-              <span className="text-[9px] font-mono tabular-nums text-terminal-dim">
-                {fmtNum(ts.contextTokens)}
-              </span>
-            </div>
-          );
-        })()}
+            );
+          })()}
         <div className="text-left">
           {visibleScenes.map(({ scene, index }) => {
             const sceneOverlays = overlayActions?.getOverlays(index) ?? [];

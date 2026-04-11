@@ -1108,10 +1108,20 @@ function ContextWindowChart({
   if (!contextSizes.some((c) => c > 0)) return null;
 
   const peak = Math.max(...contextSizes);
-  // Default 200K limit; auto-switch to 1M if any turn exceeds 200K
-  const effectiveLimit =
-    contextLimit && peak > 200_000 ? Math.max(contextLimit, 1_000_000) : contextLimit;
-  const max = effectiveLimit && effectiveLimit > peak ? effectiveLimit : peak;
+
+  // Infer ceiling from compaction data and peak
+  let compactionPeak = 0;
+  for (let i = 0; i < contextSizes.length - 1; i++) {
+    if (
+      contextSizes[i] > 0 &&
+      contextSizes[i + 1] > 0 &&
+      contextSizes[i + 1] < contextSizes[i] * 0.5
+    ) {
+      compactionPeak = Math.max(compactionPeak, contextSizes[i]);
+    }
+  }
+  const effectiveLimit = compactionPeak > 200_000 || peak > 200_000 ? 1_000_000 : 200_000;
+  const max = effectiveLimit > peak ? effectiveLimit : peak;
   const h = 60;
   const w = 100;
 
