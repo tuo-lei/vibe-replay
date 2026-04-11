@@ -7,8 +7,9 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { serve } from "@hono/node-server";
 import chalk from "chalk";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
+import type { StatusCode } from "hono/utils/http-status";
 import open from "open";
 import { readFileCache, writeFileCache } from "./cache.js";
 import { cleanPromptText } from "./clean-prompt.js";
@@ -1860,6 +1861,29 @@ export async function startServer(
     validatedAuth = null;
   }
 
+  /** Shared response handler for cloud API proxy routes (BFF mode). */
+  async function proxyCloudResponse(
+    c: Context,
+    cloudPath: string,
+    errorLabel: string,
+    init?: RequestInit,
+  ) {
+    try {
+      const proxied = await fetchCloudApiWithLocalAuth(cloudPath, init);
+      if (proxied.unauthorized) return c.json({ error: "Unauthorized" }, 401);
+      const contentType = proxied.response.headers.get("content-type") || "";
+      const status = proxied.response.status as StatusCode;
+      if (!contentType.includes("application/json")) {
+        const text = await proxied.response.text();
+        return c.body(text, status, { "Content-Type": contentType || "text/plain" });
+      }
+      const data = await proxied.response.json().catch(() => ({}));
+      return c.json(data, status);
+    } catch (err) {
+      return c.json({ error: `${errorLabel}: ${getErrorMessage(err)}` }, 502);
+    }
+  }
+
   app.get("/api/auth/status", async (c) => {
     const auth = readLocalAuthSession();
     if (!auth) return c.json({ authenticated: false, user: null });
@@ -1971,44 +1995,16 @@ export async function startServer(
   // Proxy cloud APIs via local auth session (BFF mode for editor)
   // This keeps pnpm dev/start/npx behavior consistent and avoids cross-site cookie issues.
   app.get("/api/cloud-replays", async (c) => {
-    try {
-      const proxied = await fetchCloudApiWithLocalAuth("/api/cloud-replays");
-      if (proxied.unauthorized) return c.json({ error: "Unauthorized" }, 401);
-      const contentType = proxied.response.headers.get("content-type") || "";
-      if (!contentType.includes("application/json")) {
-        const text = await proxied.response.text();
-        return c.body(text, proxied.response.status as any, {
-          "Content-Type": contentType || "text/plain",
-        });
-      }
-      const data = await proxied.response.json().catch(() => ({}));
-      return c.json(data, proxied.response.status as any);
-    } catch (err) {
-      return c.json({ error: `Cloud API unavailable: ${getErrorMessage(err)}` }, 502);
-    }
+    return proxyCloudResponse(c, "/api/cloud-replays", "Cloud API unavailable");
   });
 
   app.post("/api/cloud-replays", async (c) => {
-    try {
-      const body = await c.req.text();
-      const proxied = await fetchCloudApiWithLocalAuth("/api/cloud-replays", {
-        method: "POST",
-        headers: { "Content-Type": c.req.header("content-type") || "application/json" },
-        body,
-      });
-      if (proxied.unauthorized) return c.json({ error: "Unauthorized" }, 401);
-      const contentType = proxied.response.headers.get("content-type") || "";
-      if (!contentType.includes("application/json")) {
-        const text = await proxied.response.text();
-        return c.body(text, proxied.response.status as any, {
-          "Content-Type": contentType || "text/plain",
-        });
-      }
-      const data = await proxied.response.json().catch(() => ({}));
-      return c.json(data, proxied.response.status as any);
-    } catch (err) {
-      return c.json({ error: `Cloud upload failed: ${getErrorMessage(err)}` }, 502);
-    }
+    const body = await c.req.text();
+    return proxyCloudResponse(c, "/api/cloud-replays", "Cloud upload failed", {
+      method: "POST",
+      headers: { "Content-Type": c.req.header("content-type") || "application/json" },
+      body,
+    });
   });
 
   app.delete("/api/cloud-replays/:id", async (c) => {
@@ -2016,65 +2012,23 @@ export async function startServer(
     if (!/^[a-zA-Z0-9_-]{10,16}$/.test(id)) {
       return c.json({ error: "Invalid replay ID" }, 400);
     }
-    try {
-      const proxied = await fetchCloudApiWithLocalAuth(`/api/cloud-replays/${id}`, {
-        method: "DELETE",
-      });
-      if (proxied.unauthorized) return c.json({ error: "Unauthorized" }, 401);
-      const contentType = proxied.response.headers.get("content-type") || "";
-      if (!contentType.includes("application/json")) {
-        const text = await proxied.response.text();
-        return c.body(text, proxied.response.status as any, {
-          "Content-Type": contentType || "text/plain",
-        });
-      }
-      const data = await proxied.response.json().catch(() => ({}));
-      return c.json(data, proxied.response.status as any);
-    } catch (err) {
-      return c.json({ error: `Cloud delete failed: ${getErrorMessage(err)}` }, 502);
-    }
+    return proxyCloudResponse(c, `/api/cloud-replays/${id}`, "Cloud delete failed", {
+      method: "DELETE",
+    });
   });
 
   // Proxy user file APIs via local auth session (BFF mode for editor)
   app.post("/api/files", async (c) => {
-    try {
-      const body = await c.req.text();
-      const proxied = await fetchCloudApiWithLocalAuth("/api/files", {
-        method: "POST",
-        headers: { "Content-Type": c.req.header("content-type") || "application/json" },
-        body,
-      });
-      if (proxied.unauthorized) return c.json({ error: "Unauthorized" }, 401);
-      const contentType = proxied.response.headers.get("content-type") || "";
-      if (!contentType.includes("application/json")) {
-        const text = await proxied.response.text();
-        return c.body(text, proxied.response.status as any, {
-          "Content-Type": contentType || "text/plain",
-        });
-      }
-      const data = await proxied.response.json().catch(() => ({}));
-      return c.json(data, proxied.response.status as any);
-    } catch (err) {
-      return c.json({ error: `File upload failed: ${getErrorMessage(err)}` }, 502);
-    }
+    const body = await c.req.text();
+    return proxyCloudResponse(c, "/api/files", "File upload failed", {
+      method: "POST",
+      headers: { "Content-Type": c.req.header("content-type") || "application/json" },
+      body,
+    });
   });
 
   app.get("/api/files", async (c) => {
-    try {
-      const proxied = await fetchCloudApiWithLocalAuth("/api/files");
-      if (proxied.unauthorized) return c.json({ error: "Unauthorized" }, 401);
-      const contentType = proxied.response.headers.get("content-type") || "";
-      if (!contentType.includes("application/json")) {
-        const text = await proxied.response.text();
-        return c.body(text, proxied.response.status as any, {
-          "Content-Type": contentType || "text/plain",
-        });
-      }
-      const data = await proxied.response.json().catch(() => ({}));
-      return c.json(data, proxied.response.status as any);
-    } catch (err) {
-      return c.json({ error: `File list failed: ${getErrorMessage(err)}` }, 502);
-    }
+    return proxyCloudResponse(c, "/api/files", "File list failed");
   });
 
   app.delete("/api/files/:id", async (c) => {
@@ -2082,46 +2036,18 @@ export async function startServer(
     if (!/^[a-zA-Z0-9_-]{10,16}$/.test(id)) {
       return c.json({ error: "Invalid file ID" }, 400);
     }
-    try {
-      const proxied = await fetchCloudApiWithLocalAuth(`/api/files/${id}`, {
-        method: "DELETE",
-      });
-      if (proxied.unauthorized) return c.json({ error: "Unauthorized" }, 401);
-      const contentType = proxied.response.headers.get("content-type") || "";
-      if (!contentType.includes("application/json")) {
-        const text = await proxied.response.text();
-        return c.body(text, proxied.response.status as any, {
-          "Content-Type": contentType || "text/plain",
-        });
-      }
-      const data = await proxied.response.json().catch(() => ({}));
-      return c.json(data, proxied.response.status as any);
-    } catch (err) {
-      return c.json({ error: `File delete failed: ${getErrorMessage(err)}` }, 502);
-    }
+    return proxyCloudResponse(c, `/api/files/${id}`, "File delete failed", {
+      method: "DELETE",
+    });
   });
 
   app.post("/api/gists", async (c) => {
-    try {
-      const body = await c.req.text();
-      const proxied = await fetchCloudApiWithLocalAuth("/api/gists", {
-        method: "POST",
-        headers: { "Content-Type": c.req.header("content-type") || "application/json" },
-        body,
-      });
-      if (proxied.unauthorized) return c.json({ error: "Unauthorized" }, 401);
-      const contentType = proxied.response.headers.get("content-type") || "";
-      if (!contentType.includes("application/json")) {
-        const text = await proxied.response.text();
-        return c.body(text, proxied.response.status as any, {
-          "Content-Type": contentType || "text/plain",
-        });
-      }
-      const data = await proxied.response.json().catch(() => ({}));
-      return c.json(data, proxied.response.status as any);
-    } catch (err) {
-      return c.json({ error: `Gist publish failed: ${getErrorMessage(err)}` }, 502);
-    }
+    const body = await c.req.text();
+    return proxyCloudResponse(c, "/api/gists", "Gist publish failed", {
+      method: "POST",
+      headers: { "Content-Type": c.req.header("content-type") || "application/json" },
+      body,
+    });
   });
 
   app.patch("/api/gists/:gistId", async (c) => {
@@ -2129,26 +2055,12 @@ export async function startServer(
     if (!/^[a-f0-9]{20,40}$/.test(gistId)) {
       return c.json({ error: "Invalid gist ID" }, 400);
     }
-    try {
-      const body = await c.req.text();
-      const proxied = await fetchCloudApiWithLocalAuth(`/api/gists/${gistId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": c.req.header("content-type") || "application/json" },
-        body,
-      });
-      if (proxied.unauthorized) return c.json({ error: "Unauthorized" }, 401);
-      const contentType = proxied.response.headers.get("content-type") || "";
-      if (!contentType.includes("application/json")) {
-        const text = await proxied.response.text();
-        return c.body(text, proxied.response.status as any, {
-          "Content-Type": contentType || "text/plain",
-        });
-      }
-      const data = await proxied.response.json().catch(() => ({}));
-      return c.json(data, proxied.response.status as any);
-    } catch (err) {
-      return c.json({ error: `Gist update failed: ${getErrorMessage(err)}` }, 502);
-    }
+    const body = await c.req.text();
+    return proxyCloudResponse(c, `/api/gists/${gistId}`, "Gist update failed", {
+      method: "PATCH",
+      headers: { "Content-Type": c.req.header("content-type") || "application/json" },
+      body,
+    });
   });
 
   // System checks — detect available tools for publishing & AI feedback
