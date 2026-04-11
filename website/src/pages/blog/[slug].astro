@@ -1,6 +1,7 @@
 ---
 import { type CollectionEntry, getCollection, render } from "astro:content";
 import Footer from "../../components/Footer.astro";
+import Giscus from "../../components/Giscus.astro";
 import Nav from "../../components/Nav.astro";
 import Layout from "../../layouts/Layout.astro";
 import { formatDate } from "../../utils/date";
@@ -93,6 +94,9 @@ const blogPostJsonLd = {
                   prose-hr:border-border">
         <Content />
       </div>
+
+      <!-- Comments -->
+      <Giscus />
 
       <!-- Back link -->
       <div class="mt-16 pt-8 border-t border-border">
