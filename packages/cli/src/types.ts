@@ -4,16 +4,22 @@ export type {
   DataSource,
   DataSourceInfo,
   InsightsStore,
+  OverlaySource,
   PrLink,
   ReplaySession,
   Scene,
+  SceneOverlay,
   SessionInsight,
+  SessionOverlays,
   SubAgent,
   TokenUsage,
   TurnStat,
 } from "@vibe-replay/types";
 
 export { INSIGHTS_SCHEMA_VERSION } from "@vibe-replay/types";
+
+// Re-import SubAgent for local use in this file (re-export above doesn't add to local scope)
+import type { SubAgent } from "@vibe-replay/types";
 
 // CLI-only types below
 

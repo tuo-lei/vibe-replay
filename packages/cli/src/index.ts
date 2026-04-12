@@ -21,7 +21,12 @@ import {
   removeAuthTokenSync,
   saveAuthTokenSync,
 } from "./publishers/cloud.js";
-import { checkPublishStatus, loadSavedGistInfo, publishGist } from "./publishers/gist.js";
+import {
+  checkPublishStatus,
+  loadSavedGistInfo,
+  publishGist,
+  type SavedGistInfo,
+} from "./publishers/gist.js";
 import { publishLocal } from "./publishers/local.js";
 import { scanForSecrets } from "./scan.js";
 import { startDashboard, startServer } from "./server.js";
@@ -599,7 +604,7 @@ program
           const title = replay.meta.title || slug;
           const savedGist = await loadSavedGistInfo(outputDir);
           let shouldPublish = true;
-          let overwriteGist: string | undefined;
+          let overwriteGist: SavedGistInfo | undefined;
           if (savedGist) {
             const publishMode = await select<"overwrite" | "create" | "cancel">({
               message: `Previous gist found (${savedGist.gistId}). How to publish this replay?`,

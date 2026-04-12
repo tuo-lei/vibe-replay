@@ -8,7 +8,7 @@ import { serve } from "@hono/node-server";
 import chalk from "chalk";
 import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import type { StatusCode } from "hono/utils/http-status";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import open from "open";
 import { readFileCache, writeFileCache } from "./cache.js";
 import { cleanPromptText } from "./clean-prompt.js";
@@ -1858,7 +1858,7 @@ export async function startServer(
       const proxied = await fetchCloudApiWithLocalAuth(cloudPath, init);
       if (proxied.unauthorized) return c.json({ error: "Unauthorized" }, 401);
       const contentType = proxied.response.headers.get("content-type") || "";
-      const status = proxied.response.status as StatusCode;
+      const status = proxied.response.status as ContentfulStatusCode;
       if (!contentType.includes("application/json")) {
         const text = await proxied.response.text();
         return c.body(text, status, { "Content-Type": contentType || "text/plain" });
@@ -2479,7 +2479,9 @@ export async function startServer(
     if ("error" in result) return c.json({ error: result.error }, 400);
 
     try {
-      const body = await c.req.json<{ toolName?: string }>().catch(() => ({}));
+      const body: { toolName?: string } = await c.req
+        .json<{ toolName?: string }>()
+        .catch(() => ({}));
       const requestedToolName = typeof body.toolName === "string" ? body.toolName : undefined;
       const detected = await detectFeedbackTools();
       if (detected.tools.length === 0) {
@@ -2604,7 +2606,7 @@ export async function startServer(
     if ("error" in result) return c.json({ error: result.error }, 400);
 
     try {
-      const body = await c.req
+      const body: { toolName?: string; targetLang?: string; sourceLang?: string } = await c.req
         .json<{ toolName?: string; targetLang?: string; sourceLang?: string }>()
         .catch(() => ({}));
       const detected = await detectFeedbackTools();
@@ -2660,7 +2662,9 @@ export async function startServer(
     if ("error" in result) return c.json({ error: result.error }, 400);
 
     try {
-      const body = await c.req.json<{ toolName?: string; style?: string }>().catch(() => ({}));
+      const body: { toolName?: string; style?: string } = await c.req
+        .json<{ toolName?: string; style?: string }>()
+        .catch(() => ({}));
       const detected = await detectFeedbackTools();
       if (detected.tools.length === 0) {
         return c.json({ error: "No AI CLI tool available (claude, agent, or opencode)" }, 400);

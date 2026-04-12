@@ -533,7 +533,7 @@ export function parseFeedbackResponse(
 
   let frictionPoints: FrictionPoint[] | undefined;
   if (Array.isArray(parsed.frictionPoints) && parsed.frictionPoints.length > 0) {
-    frictionPoints = parsed.frictionPoints
+    const filtered: FrictionPoint[] = parsed.frictionPoints
       .filter(
         (f: any) =>
           f &&
@@ -543,7 +543,7 @@ export function parseFeedbackResponse(
           typeof f.turn === "number",
       )
       .map((f: any) => ({ type: f.type, description: f.description, turn: f.turn }));
-    if (frictionPoints.length === 0) frictionPoints = undefined;
+    frictionPoints = filtered.length > 0 ? filtered : undefined;
   }
 
   let aiPerformance: FeedbackResult["aiPerformance"];
