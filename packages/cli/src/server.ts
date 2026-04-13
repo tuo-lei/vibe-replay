@@ -225,8 +225,8 @@ async function unarchiveSlug(baseDir: string, slug: string): Promise<void> {
 }
 
 /** Scan replay.json files from a single directory */
-async function scanSessionsFromDir(baseDir: string): Promise<any[]> {
-  const results: any[] = [];
+async function scanSessionsFromDir(baseDir: string): Promise<ReplaySummary[]> {
+  const results: ReplaySummary[] = [];
   let entries: string[];
   try {
     entries = await readdir(baseDir);
@@ -325,7 +325,7 @@ async function scanSessionsFromDir(baseDir: string): Promise<any[]> {
 }
 
 /** Scan replay.json from primary dir (~/.vibe-replay/) + optional CWD fallback (./vibe-replay/) */
-async function scanSessions(baseDir: string): Promise<any[]> {
+async function scanSessions(baseDir: string): Promise<ReplaySummary[]> {
   const dirs = [baseDir];
   // Also scan ./vibe-replay/ in CWD for backwards compatibility
   const cwdLocal = resolve("./vibe-replay");
@@ -333,7 +333,7 @@ async function scanSessions(baseDir: string): Promise<any[]> {
     dirs.push(cwdLocal);
   }
 
-  const allResults: any[] = [];
+  const allResults: ReplaySummary[] = [];
   const seen = new Set<string>();
   for (const dir of dirs) {
     const results = await scanSessionsFromDir(dir);
@@ -390,6 +390,45 @@ interface SourceSummaryRecord {
   hasSqlite?: boolean;
   timestamp: string;
   [key: string]: unknown;
+}
+
+/** Summary of a generated replay, returned by scanSessionsFromDir / scanSessions */
+interface ReplaySummary {
+  slug: string;
+  baseDir: string;
+  sessionId: string;
+  title?: string;
+  provider: string;
+  model?: string;
+  project: string;
+  startTime: string;
+  endTime?: string;
+  stats: ReplaySession["meta"]["stats"];
+  replaySize: number;
+  generatorVersion?: string;
+  replayOutdated: boolean;
+  hasAnnotations: boolean;
+  annotationCount: number;
+  firstMessage?: string;
+  messages?: string[];
+  gist?: {
+    gistId?: string;
+    viewerUrl?: string;
+    updatedAt?: string;
+    outdated: boolean;
+  };
+  cloud?: {
+    id: string;
+    url: string;
+    expiresAt?: string;
+    updatedAt?: string;
+  };
+}
+
+/** SourceSummaryRecord enriched with replay info for the sources cache */
+interface CachedSourceRecord extends SourceSummaryRecord {
+  existingReplay?: string | null;
+  replay?: Omit<ReplaySummary, "baseDir" | "generatorVersion" | "replayOutdated">;
 }
 
 interface SourcesEnrichmentStatus {
@@ -506,14 +545,14 @@ function looksLikeCursorDisplayNoise(value: unknown): boolean {
 }
 
 /** Build dual lookup maps for replays — match by slug or sessionId */
-function buildReplayMaps(replays: any[]): {
-  bySlug: Map<string, any>;
-  bySessionId: Map<string, any>;
+function buildReplayMaps(replays: ReplaySummary[]): {
+  bySlug: Map<string, ReplaySummary>;
+  bySessionId: Map<string, ReplaySummary>;
 } {
-  const bySlug = new Map<string, any>();
-  const bySessionId = new Map<string, any>();
+  const bySlug = new Map<string, ReplaySummary>();
+  const bySessionId = new Map<string, ReplaySummary>();
   for (const r of replays) {
-    bySlug.set(r.slug as string, r);
+    bySlug.set(r.slug, r);
     if (r.sessionId) bySessionId.set(r.sessionId, r);
   }
   return { bySlug, bySessionId };
@@ -756,16 +795,17 @@ export async function startServer(
   };
 
   /** After replays change, sync the sources cache so existingReplay / replay stay consistent */
-  const syncSourcesCacheWithReplays = async (replays: any[]): Promise<void> => {
+  const syncSourcesCacheWithReplays = async (replays: ReplaySummary[]): Promise<void> => {
     try {
-      const cached = await readFileCache<any[]>(sourcesCacheKey);
+      const cached = await readFileCache<CachedSourceRecord[]>(sourcesCacheKey);
       if (!cached?.data?.length) return;
 
       const { bySlug, bySessionId } = buildReplayMaps(replays);
 
       let changed = false;
-      const updated = cached.data.map((s: any) => {
-        const replay = bySlug.get(s.slug) || bySessionId.get(s.sessionId);
+      const updated = cached.data.map((s) => {
+        const replay =
+          bySlug.get(s.slug) || (s.sessionId ? bySessionId.get(s.sessionId) : undefined);
         const hadReplay = !!s.existingReplay;
         const hasReplay = !!replay;
         if (
