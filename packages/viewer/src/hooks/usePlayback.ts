@@ -70,6 +70,8 @@ export function usePlayback(scenes: Scene[], prefs: EffectivePrefs, enabled = tr
   const play = useCallback(() => {
     if (scenes.length === 0) return;
 
+    clearTimer();
+
     if (stateRef.current === "ended") {
       setCurrentIndex(-1);
       setVisibleCount(0);
@@ -92,7 +94,7 @@ export function usePlayback(scenes: Scene[], prefs: EffectivePrefs, enabled = tr
         }
       }
     }, 50);
-  }, [scenes, advanceScene]);
+  }, [scenes, advanceScene, clearTimer]);
 
   const pause = useCallback(() => {
     clearTimer();
@@ -160,7 +162,7 @@ export function usePlayback(scenes: Scene[], prefs: EffectivePrefs, enabled = tr
       // Do not hijack keys while user is typing in search/input controls.
       if (isEditableTarget(e.target)) return;
       // Space — play/pause
-      if (e.key === " " || e.key === "k") {
+      if (e.key === " ") {
         e.preventDefault();
         togglePlayPause();
       }
