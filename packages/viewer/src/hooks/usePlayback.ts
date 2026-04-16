@@ -80,6 +80,9 @@ export function usePlayback(scenes: Scene[], prefs: EffectivePrefs, enabled = tr
     setState("playing");
     // Store bootstrap timer in ref so rapid play() calls cannot stack multiple bootstraps
     timerRef.current = setTimeout(() => {
+      // Bail out if no longer playing (e.g. user paused during the 50ms delay)
+      if (stateRef.current !== "playing") return;
+
       if (indexRef.current < 0) {
         // Starting fresh — check if first scene starts a batch
         const endIdx = findBatchEnd(scenes, 0);
@@ -174,7 +177,7 @@ export function usePlayback(scenes: Scene[], prefs: EffectivePrefs, enabled = tr
         const nextIdx = computeNextIndex(scenes, indexRef.current, prefsRef.current);
         if (nextIdx !== -1) seekTo(nextIdx);
       }
-      // Arrow Up / k — prev scene
+      // Arrow Up / k — prev scene (vim convention)
       else if (e.key === "ArrowUp" || e.key === "k") {
         if (stateRef.current === "playing") pause();
         e.preventDefault();
