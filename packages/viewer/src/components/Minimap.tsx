@@ -105,7 +105,7 @@ export default function Minimap({
         const isActive = i === activeIdx;
         const isPast = i < activeIdx;
 
-        if (item.kind === "compaction" || item.kind === "injection") {
+        if (item.kind !== "turn") {
           const label = item.kind === "injection" ? "System context" : "Context compacted";
           const icon = item.kind === "injection" ? "⚡" : "⟳";
           return (

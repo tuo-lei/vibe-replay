@@ -9,6 +9,7 @@ export type {
   Scene,
   SceneOverlay,
   SessionOverlays,
+  SubAgent,
   TokenUsage,
   TurnStat,
 } from "@vibe-replay/types";
