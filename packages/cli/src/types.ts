@@ -124,7 +124,18 @@ export interface RawMessage {
 export type ContentBlock =
   | { type: "thinking"; thinking: string; signature?: string }
   | { type: "text"; text: string }
-  | { type: "tool_use"; id: string; name: string; input: Record<string, any> }
+  | {
+      type: "tool_use";
+      id: string;
+      name: string;
+      input: Record<string, any>;
+      _result?: string;
+      _images?: string[];
+      _isError?: boolean;
+      _subAgent?: SubAgent;
+      _durationMs?: number;
+      _isPendingMarker?: boolean;
+    }
   | { type: "tool_result"; tool_use_id: string; content: string | ToolResultContent[] }
   | { type: "image"; source: { type: string; media_type: string; data: string } }
   | { type: "_user_images"; images: string[] };
@@ -133,16 +144,3 @@ export type ToolResultContent =
   | { type: "text"; text: string }
   | { type: "tool_result"; tool_use_id: string; content: string }
   | { type: "image"; source: { type: string; media_type: string; data: string } };
-
-/** tool_use block enriched by parsers with matched result, images, and metadata */
-export interface EnrichedToolUseBlock {
-  type: "tool_use";
-  id: string;
-  name: string;
-  input: Record<string, any>;
-  _result: string;
-  _images?: string[];
-  _isError?: boolean;
-  _subAgent?: SubAgent;
-  _durationMs?: number;
-}

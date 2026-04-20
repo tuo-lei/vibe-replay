@@ -2186,8 +2186,8 @@ function buildStoreTurnStats(turns: ParsedTurn[]): TurnStat[] {
     const current = turnStats[currentTurnIndex];
     if (!current.model && turn.model) current.model = turn.model;
 
-    for (const block of turn.blocks as any[]) {
-      if (block?.type !== "tool_use") continue;
+    for (const block of turn.blocks) {
+      if (block.type !== "tool_use") continue;
       const ms = toPositiveMs(block._durationMs);
       if (ms !== undefined) {
         current.durationMs = (current.durationMs || 0) + ms;

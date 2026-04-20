@@ -175,10 +175,9 @@ async function parseCursorJsonl(
           for (const imagePath of extracted.paths) imageFilePaths.add(imagePath);
           if (text) textParts.push(text);
         } else if (block.type === "image") {
-          const source = (block as any).source;
-          if (source?.data) {
-            const mediaType = source.media_type || "image/png";
-            userImages.push(`data:${mediaType};base64,${source.data}`);
+          if (block.source?.data) {
+            const mediaType = block.source.media_type || "image/png";
+            userImages.push(`data:${mediaType};base64,${block.source.data}`);
           }
         }
       }
@@ -191,7 +190,7 @@ async function parseCursorJsonl(
       if (role === "user" && textParts.length === 0 && userImages.length === 0) continue;
 
       if (role === "user") {
-        const blocks: any[] = [];
+        const blocks: ContentBlock[] = [];
         const fullText = textParts.join("\n");
         if (fullText) blocks.push({ type: "text", text: fullText });
         const dedupedImages = [...new Set(userImages)];
@@ -205,7 +204,7 @@ async function parseCursorJsonl(
       }
 
       const hasInlineToolUse = contentBlocks.some((block) => block?.type === "tool_use");
-      const blocks: any[] = [];
+      const blocks: ContentBlock[] = [];
       for (const block of contentBlocks as ContentBlock[]) {
         if (block.type === "text" && block.text) {
           const cleanedText = sanitizeAssistantTextForReplay(block.text, hasInlineToolUse);
@@ -261,10 +260,8 @@ async function parseCursorJsonl(
 
   // Try to extract a meaningful title from first user prompt
   const firstUser = allTurns.find((t) => t.role === "user");
-  const firstText =
-    firstUser?.blocks[0]?.type === "text"
-      ? (firstUser.blocks[0] as any).text?.slice(0, 80)
-      : undefined;
+  const firstBlock = firstUser?.blocks[0];
+  const firstText = firstBlock?.type === "text" ? firstBlock.text?.slice(0, 80) : undefined;
 
   const hasToolData = toolPaths.length > 0;
   return {
@@ -339,33 +336,32 @@ async function readImageFileAsDataUrl(pathValue: string): Promise<string | null>
 
 function collectThinkingTexts(turn: ParsedTurn): string[] {
   const texts: string[] = [];
-  for (const block of turn.blocks as any[]) {
-    if (block?.type !== "thinking") continue;
-    const text = typeof block.thinking === "string" ? block.thinking.trim() : "";
+  for (const block of turn.blocks) {
+    if (block.type !== "thinking") continue;
+    const text = block.thinking.trim();
     if (text) texts.push(text);
   }
   return texts;
 }
 
-function buildThinkingBlocks(texts: string[]): any[] {
-  return texts.map((thinking) => ({ type: "thinking", thinking }));
+function buildThinkingBlocks(texts: string[]): ContentBlock[] {
+  return texts.map((thinking) => ({ type: "thinking" as const, thinking }));
 }
 
 function countThinkingBlocks(turns: ParsedTurn[]): number {
   let count = 0;
   for (const turn of turns) {
-    for (const block of turn.blocks as any[]) {
-      if (block?.type === "thinking") count++;
+    for (const block of turn.blocks) {
+      if (block.type === "thinking") count++;
     }
   }
   return count;
 }
 
 function collectUserImages(turn: ParsedTurn): string[] {
-  const imageBlocks = (turn.blocks as any[]).filter((block) => block?.type === "_user_images");
   const images: string[] = [];
-  for (const block of imageBlocks) {
-    if (!Array.isArray(block.images)) continue;
+  for (const block of turn.blocks) {
+    if (block.type !== "_user_images") continue;
     for (const image of block.images) {
       if (typeof image === "string" && image.trim()) images.push(image);
     }
@@ -386,9 +382,8 @@ function extractToolResultText(block: Extract<ContentBlock, { type: "tool_result
   if (!Array.isArray(block.content)) return "";
   return block.content
     .map((item) => {
-      if (!item || typeof item !== "object") return "";
-      if (typeof (item as any).text === "string") return (item as any).text;
-      if (typeof (item as any).content === "string") return (item as any).content;
+      if (item.type === "text") return item.text;
+      if (item.type === "tool_result") return item.content;
       return "";
     })
     .filter(Boolean)
@@ -415,8 +410,8 @@ function attachToolResults(
 ): void {
   for (const turn of turns) {
     if (turn.role !== "assistant") continue;
-    for (const block of turn.blocks as any[]) {
-      if (block?.type !== "tool_use" || typeof block.id !== "string") continue;
+    for (const block of turn.blocks) {
+      if (block.type !== "tool_use" || typeof block.id !== "string") continue;
       const result = toolResults.get(block.id);
       if (result !== undefined) block._result = result;
       const images = toolImages.get(block.id);
@@ -457,7 +452,7 @@ export function mergeJsonlThinkingIntoCursorTurns(
     const missingThinking = candidateThinking.filter((text) => !existingThinking.has(text));
     if (missingThinking.length === 0) continue;
 
-    targetTurn.blocks = [...buildThinkingBlocks(missingThinking), ...targetTurn.blocks] as any;
+    targetTurn.blocks = [...buildThinkingBlocks(missingThinking), ...targetTurn.blocks];
   }
 
   // If JSONL has extra assistant thinking turns (common with marker-only lines),
@@ -468,7 +463,7 @@ export function mergeJsonlThinkingIntoCursorTurns(
     merged.push({
       role: "assistant",
       timestamp: jsonlAssistantTurns[i].timestamp,
-      blocks: buildThinkingBlocks(extraThinking) as any,
+      blocks: buildThinkingBlocks(extraThinking),
     });
   }
 
@@ -658,13 +653,15 @@ function inferToolName(result: string): string {
   return "ToolOutput";
 }
 
+type ToolUseBlock = Extract<ContentBlock, { type: "tool_use" }>;
+
 function attachToolEvents(turns: ParsedTurn[], tools: ToolEvent[]): void {
-  const markerBlocks: Array<{ block: any; turn: ParsedTurn; blockIndex: number }> = [];
+  const markerBlocks: Array<{ block: ToolUseBlock; turn: ParsedTurn; blockIndex: number }> = [];
   for (const turn of turns) {
     if (turn.role !== "assistant") continue;
     for (let bi = 0; bi < turn.blocks.length; bi++) {
-      const block = turn.blocks[bi] as any;
-      if (block?._isPendingMarker) {
+      const block = turn.blocks[bi];
+      if (block.type === "tool_use" && block._isPendingMarker) {
         markerBlocks.push({ block, turn, blockIndex: bi });
       }
     }
@@ -681,7 +678,7 @@ function attachToolEvents(turns: ParsedTurn[], tools: ToolEvent[]): void {
       ...(tool.input || {}),
     };
     marker.block._result = tool.result;
-    delete marker.block._isPendingMarker;
+    marker.block._isPendingMarker = undefined;
     if (!marker.turn.timestamp && tool.timestamp) {
       marker.turn.timestamp = tool.timestamp;
     }
@@ -690,11 +687,12 @@ function attachToolEvents(turns: ParsedTurn[], tools: ToolEvent[]): void {
   // Unpaired markers → convert to thinking (they're just status text, not tool calls)
   for (let i = paired; i < markerBlocks.length; i++) {
     const { turn, blockIndex, block } = markerBlocks[i];
-    const thinkingBlock = {
+    const markerText = typeof block.input?.marker === "string" ? block.input.marker : "";
+    const thinkingBlock: ContentBlock = {
       type: "thinking",
-      thinking: block.name || block.input?.marker || "",
+      thinking: block.name || markerText,
     };
-    (turn.blocks as any[])[blockIndex] = thinkingBlock;
+    turn.blocks[blockIndex] = thinkingBlock;
   }
 
   // Extra tool outputs with no matching marker → append as real tool calls
@@ -703,12 +701,12 @@ function attachToolEvents(turns: ParsedTurn[], tools: ToolEvent[]): void {
     turns.push({
       role: "assistant",
       timestamp: tool.timestamp,
-      blocks: [toToolUseBlock(tool) as any],
+      blocks: [toToolUseBlock(tool)],
     });
   }
 }
 
-function toToolUseBlock(tool: ToolEvent) {
+function toToolUseBlock(tool: ToolEvent): ContentBlock {
   return {
     type: "tool_use",
     id: tool.id,
