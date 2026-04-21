@@ -7,7 +7,9 @@ declare module "sql.js" {
   interface Statement {
     bind(params?: any[]): boolean;
     step(): boolean;
+    get(): any[];
     getAsObject(): Record<string, any>;
+    reset(): void;
     free(): void;
   }
 
