@@ -205,8 +205,9 @@ function shortToolName(name: string): string {
 /** Find the last meaningful text-response in a list of scenes */
 function findLastTextResponse(scenes: Scene[]): string | null {
   for (let i = scenes.length - 1; i >= 0; i--) {
-    if (scenes[i].type === "text-response") {
-      const text = scenes[i].content.trim();
+    const scene = scenes[i];
+    if (scene.type === "text-response") {
+      const text = scene.content.trim();
       if (text.length > 10) return text;
     }
   }

@@ -704,6 +704,18 @@ export default function Player({
                             {fmtNum(meta.stats.tokenUsage.outputTokens)} out
                           </div>
                         )}
+                        {(() => {
+                          if (!meta.stats.turnStats?.length) return null;
+                          const peak = Math.max(
+                            ...meta.stats.turnStats.map((t) => t.contextTokens || 0),
+                          );
+                          if (peak <= 0) return null;
+                          return (
+                            <div className="text-terminal-dim mt-0.5">
+                              peak ctx: <span className="text-terminal-cyan">{fmtNum(peak)}</span>
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                   </div>

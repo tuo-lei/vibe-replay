@@ -654,8 +654,8 @@ function buildScanResultFromParsed(
       if (hasText || hasImages) promptCount++;
     }
 
-    for (const block of turn.blocks as any[]) {
-      if (block?.type !== "tool_use") continue;
+    for (const block of turn.blocks) {
+      if (block.type !== "tool_use") continue;
       toolCallCount++;
 
       if (

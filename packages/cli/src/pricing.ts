@@ -98,12 +98,13 @@ const MODEL_CONTEXT_LIMITS: Record<string, number> = {
 
 /**
  * Resolve context window limit for a model ID string.
+ * Returns 200K for all Claude models as a baseline. The viewer dynamically
+ * switches to 1M if any turn's token usage exceeds 200K.
  * Returns undefined if model is unknown.
  */
 export function getModelContextLimit(model: string): number | undefined {
   const lower = model.toLowerCase();
   if (lower.includes("opus") || lower.includes("sonnet") || lower.includes("haiku")) {
-    // All Claude models: 200K
     return 200_000;
   }
   for (const [key, limit] of Object.entries(MODEL_CONTEXT_LIMITS)) {
