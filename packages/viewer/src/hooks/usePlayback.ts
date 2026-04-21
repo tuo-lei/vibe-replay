@@ -78,7 +78,8 @@ export function usePlayback(scenes: Scene[], prefs: EffectivePrefs, enabled = tr
     }
 
     setState("playing");
-    setTimeout(() => {
+    // Store bootstrap timer in ref so rapid play() calls cannot stack multiple bootstraps
+    timerRef.current = setTimeout(() => {
       if (indexRef.current < 0) {
         // Starting fresh — check if first scene starts a batch
         const endIdx = findBatchEnd(scenes, 0);
