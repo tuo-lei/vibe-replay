@@ -1,4 +1,8 @@
 // Shared types — single source of truth
+// SubAgent is imported separately so it can be referenced locally in this file;
+// a `export type { ... } from` re-export alone does not add names to local scope.
+import type { SubAgent } from "@vibe-replay/types";
+
 export type {
   Annotation,
   DataSource,
@@ -17,9 +21,6 @@ export type {
 } from "@vibe-replay/types";
 
 export { INSIGHTS_SCHEMA_VERSION } from "@vibe-replay/types";
-
-// Re-import SubAgent for local use in this file (re-export above doesn't add to local scope)
-import type { SubAgent } from "@vibe-replay/types";
 
 // CLI-only types below
 
