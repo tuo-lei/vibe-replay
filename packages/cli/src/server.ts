@@ -1951,6 +1951,13 @@ export async function startServer(
 
     // Start a temporary localhost server to receive the OAuth callback
     return new Promise<Response>((resolveResponse) => {
+      let responded = false;
+      const respond = (r: Response) => {
+        if (responded) return;
+        responded = true;
+        resolveResponse(r);
+      };
+
       const server = http.createServer((req, res) => {
         if (req.method === "OPTIONS") {
           res.writeHead(200, {
@@ -1963,20 +1970,24 @@ export async function startServer(
         }
         if (req.method === "POST" && req.url === "/callback") {
           let body = "";
+          let destroyed = false;
           req.on("data", (chunk: string) => {
             body += chunk;
             if (body.length > 1_000_000) {
+              destroyed = true;
               res.writeHead(413);
               res.end();
               req.destroy();
             }
           });
           req.on("end", async () => {
+            if (destroyed) return;
             try {
               const data = JSON.parse(body);
               if (data.nonce !== nonce) {
                 res.writeHead(403);
                 res.end("Forbidden");
+                server.close();
                 return;
               }
               res.writeHead(200, {
@@ -2002,10 +2013,25 @@ export async function startServer(
         res.end();
       });
 
+      server.on("error", (err) => {
+        respond(c.json({ error: `OAuth server failed: ${err.message}` }, 500));
+        // Close the server so a post-listen error doesn't leak until the 5-minute timeout
+        try {
+          server.close();
+        } catch {
+          /* already closed */
+        }
+      });
+
       server.listen(0, "127.0.0.1", () => {
-        const addr = server.address() as { port: number };
+        const addr = server.address();
+        if (!addr || typeof addr === "string") {
+          server.close();
+          respond(c.json({ error: "Failed to get server address" }, 500));
+          return;
+        }
         const loginUrl = `${apiUrl}/auth/cli-login?port=${addr.port}&nonce=${nonce}`;
-        resolveResponse(c.json({ url: loginUrl }));
+        respond(c.json({ url: loginUrl }));
       });
 
       // Timeout after 5 minutes
