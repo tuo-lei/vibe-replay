@@ -59,8 +59,14 @@ const capabilities = [
       <!-- Right: install card -->
       <div class="md:w-1/2 w-full">
         <div class="rounded-2xl border border-border/50 bg-surface-1/40 p-6 md:p-8">
-          <!-- Install commands -->
-          <p class="text-text-muted text-xs font-mono uppercase tracking-wider mb-3">Install</p>
+          <!-- Install: Discover (recommended) -->
+          <p class="text-text-muted text-xs font-mono uppercase tracking-wider mb-3">Install <span class="text-accent/70 normal-case tracking-normal">&middot; recommended</span></p>
+          <div class="px-4 py-3 mb-2 bg-surface/80 border border-accent/30 rounded-lg text-sm leading-relaxed">
+            In Claude Code, run <code class="font-mono text-accent">/plugin</code>, open the <span class="font-semibold text-text-primary">Discover</span> tab, search <span class="font-mono text-text-primary">vibe-replay</span>, and install.
+          </div>
+
+          <!-- Install: CLI (alternative) -->
+          <p class="text-text-muted text-xs font-mono uppercase tracking-wider mt-5 mb-3">Or via CLI</p>
           <div class="space-y-2 mb-6">
             <button
               data-copy="/plugin marketplace add tuo-lei/vibe-replay"
