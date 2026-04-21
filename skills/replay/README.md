@@ -63,6 +63,10 @@ Generates a self-contained HTML file and opens it in the browser.
 
 ### As a Claude Code plugin (recommended)
 
+Open Claude Code, run `/plugin`, then search **vibe-replay** in the **Discover** tab and install.
+
+Or via CLI:
+
 ```
 /plugin marketplace add tuo-lei/vibe-replay
 /plugin install vibe-replay@vibe-replay

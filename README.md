@@ -76,6 +76,10 @@ vibe-replay is also available as a [Claude Code plugin](https://code.claude.com/
 
 ### Install (recommended)
 
+Open Claude Code, run `/plugin`, then search **vibe-replay** in the **Discover** tab and install.
+
+Or install via CLI:
+
 ```bash
 /plugin marketplace add tuo-lei/vibe-replay
 /plugin install vibe-replay@vibe-replay
