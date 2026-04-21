@@ -1,13 +1,7 @@
 import { homedir } from "node:os";
 import { estimateCost, estimateCostSimple, getModelContextLimit } from "./pricing.js";
 import type { ProviderParseResult } from "./providers/types.js";
-import type {
-  ContentBlock,
-  EnrichedToolUseBlock,
-  ReplaySession,
-  Scene,
-  SubAgent,
-} from "./types.js";
+import type { ContentBlock, ReplaySession, Scene, SubAgent } from "./types.js";
 
 type ToolCallScene = Extract<Scene, { type: "tool-call" }>;
 
@@ -92,19 +86,18 @@ export function transformToReplay(
           });
         }
       } else if (block.type === "tool_use") {
-        const toolBlock = block as EnrichedToolUseBlock;
         const scene = buildToolScene(
-          toolBlock.name,
-          toolBlock.input || {},
-          toolBlock._result || "",
-          toolBlock._images,
+          block.name,
+          block.input || {},
+          block._result || "",
+          block._images,
         );
         scene.timestamp = turn.timestamp;
-        scene.isError = !!toolBlock._isError;
-        if (toolBlock._durationMs) scene.durationMs = toolBlock._durationMs;
+        scene.isError = !!block._isError;
+        if (block._durationMs) scene.durationMs = block._durationMs;
         // Attach subagent data for Agent tool calls
-        if (toolBlock.name === "Agent" && toolBlock._subAgent) {
-          const sa = toolBlock._subAgent;
+        if (block.name === "Agent" && block._subAgent) {
+          const sa = block._subAgent;
           scene.subAgent = {
             agentId: sa.agentId,
             agentType: sa.agentType,
@@ -117,8 +110,8 @@ export function transformToReplay(
             model: sa.model,
             scenes: (sa.scenes || []).map((s: Scene) => redactSubAgentScene(s)),
           } satisfies SubAgent;
-        } else if (provider === "cursor" && toolBlock.name === "Agent") {
-          const minimal = buildMinimalCursorSubAgent(toolBlock);
+        } else if (provider === "cursor" && block.name === "Agent") {
+          const minimal = buildMinimalCursorSubAgent(block);
           if (minimal) {
             scene.subAgent = minimal;
             syntheticSubAgentSummary.push({
@@ -278,7 +271,9 @@ function truncate(s: string, max: number): string {
   return `${redacted.slice(0, max)}\n... (truncated, ${redacted.length} chars total)`;
 }
 
-function buildMinimalCursorSubAgent(toolBlock: EnrichedToolUseBlock): SubAgent | null {
+function buildMinimalCursorSubAgent(
+  toolBlock: Extract<ContentBlock, { type: "tool_use" }>,
+): SubAgent | null {
   const input = toolBlock.input;
   if (!input || typeof input !== "object") return null;
   const rawAgentType =

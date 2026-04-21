@@ -19,7 +19,7 @@ import { estimateCost, estimateCostSimple } from "./pricing.js";
 import { parseCursorSession } from "./providers/cursor/parser.js";
 import { getCursorSessionCachePaths } from "./providers/cursor/sqlite-reader.js";
 import type { ProviderParseResult } from "./providers/types.js";
-import type { DataSource, EnrichedToolUseBlock, PrLink, SessionInfo, TokenUsage } from "./types.js";
+import type { DataSource, PrLink, SessionInfo, TokenUsage } from "./types.js";
 import { extractToolFilePath, shortenPath } from "./utils.js";
 
 // Bump this when we extract new fields — forces re-scan of all sessions.
@@ -656,21 +656,20 @@ function buildScanResultFromParsed(
 
     for (const block of turn.blocks) {
       if (block.type !== "tool_use") continue;
-      const toolBlock = block as EnrichedToolUseBlock;
       toolCallCount++;
 
       if (
         parsedSubAgentCount === 0 &&
-        toolBlock.name === "Agent" &&
-        toolBlock.input &&
-        typeof toolBlock.input.subagent_type === "string"
+        block.name === "Agent" &&
+        block.input &&
+        typeof block.input.subagent_type === "string"
       ) {
         derivedSubAgentCount++;
       }
 
       // Count file modifications from sub-agent scenes
-      if (toolBlock.name === "Agent" && toolBlock._subAgent?.scenes) {
-        for (const saScene of toolBlock._subAgent.scenes) {
+      if (block.name === "Agent" && block._subAgent?.scenes) {
+        for (const saScene of block._subAgent.scenes) {
           if (saScene.type !== "tool-call") continue;
           const saTool = saScene.toolName;
           if (
@@ -690,15 +689,15 @@ function buildScanResultFromParsed(
       }
 
       if (
-        toolBlock.name !== "Edit" &&
-        toolBlock.name !== "Write" &&
-        toolBlock.name !== "NotebookEdit" &&
-        toolBlock.name !== "Delete"
+        block.name !== "Edit" &&
+        block.name !== "Write" &&
+        block.name !== "NotebookEdit" &&
+        block.name !== "Delete"
       ) {
         continue;
       }
 
-      const rawPath = extractToolFilePath(toolBlock.input);
+      const rawPath = extractToolFilePath(block.input);
       if (!rawPath) continue;
       editCount++;
       const short = shortenPath(rawPath);

@@ -1,6 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { PrLink, TurnStat } from "@vibe-replay/types";
+import type { PrLink, SubAgent, TurnStat } from "@vibe-replay/types";
 import { isSystemGeneratedMessage } from "../../clean-prompt.js";
 import { estimateActiveDuration } from "../../duration.js";
 import type { ContentBlock, ParsedTurn, RawMessage } from "../../types.js";
@@ -387,7 +387,9 @@ export async function parseClaudeCodeSession(
           _result: result,
           _images: images,
           ...(isError ? { _isError: true } : {}),
-          ...(subAgent ? { _subAgent: subAgent } : {}),
+          // SubAgentParsed.scenes widens Scene.type to string during parsing;
+          // the final attached shape matches SubAgent after scanSubAgent post-processing.
+          ...(subAgent ? { _subAgent: subAgent as unknown as SubAgent } : {}),
           ...(toolDurationMs ? { _durationMs: toolDurationMs } : {}),
         };
       }
