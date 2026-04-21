@@ -4,16 +4,22 @@ export type {
   DataSource,
   DataSourceInfo,
   InsightsStore,
+  OverlaySource,
   PrLink,
   ReplaySession,
   Scene,
+  SceneOverlay,
   SessionInsight,
+  SessionOverlays,
   SubAgent,
   TokenUsage,
   TurnStat,
 } from "@vibe-replay/types";
 
 export { INSIGHTS_SCHEMA_VERSION } from "@vibe-replay/types";
+
+// Re-import SubAgent locally so it can be used in CLI-only interfaces below
+import type { SubAgent as _SubAgent } from "@vibe-replay/types";
 
 // CLI-only types below
 
@@ -136,6 +142,6 @@ export interface EnrichedToolUseBlock {
   _result: string;
   _images?: string[];
   _isError?: boolean;
-  _subAgent?: SubAgent;
+  _subAgent?: _SubAgent;
   _durationMs?: number;
 }
