@@ -1,13 +1,20 @@
 // Shared types — single source of truth
+// SubAgent is imported separately so it can be referenced locally in this file;
+// a `export type { ... } from` re-export alone does not add names to local scope.
+import type { SubAgent } from "@vibe-replay/types";
+
 export type {
   Annotation,
   DataSource,
   DataSourceInfo,
   InsightsStore,
+  OverlaySource,
   PrLink,
   ReplaySession,
   Scene,
+  SceneOverlay,
   SessionInsight,
+  SessionOverlays,
   SubAgent,
   TokenUsage,
   TurnStat,
