@@ -1137,18 +1137,21 @@ function ContextWindowChart({
 
   const points = contextSizes.map((v, i) => `${toX(i)},${toY(v)}`);
 
-  // Stacked layer polygons (only when breakdown data exists)
-  const stackedPolygons = hasBreakdown
-    ? (() => {
-        const cacheReadPts = layers.map((l, i) => `${toX(i)},${toY(l.cacheRead)}`);
-        const uncachedTopPts = layers.map((l, i) => `${toX(i)},${toY(l.cacheRead + l.uncached)}`);
-        return {
-          cacheRead: `0,${h} ${cacheReadPts.join(" ")} ${w},${h}`,
-          uncached: `${cacheReadPts[n - 1]} ${[...uncachedTopPts].reverse().join(" ")} ${cacheReadPts[0]}`,
-          total: `0,${h} ${points.join(" ")} ${w},${h}`,
-        };
-      })()
-    : null;
+  // Stacked layer polygons (only when breakdown data exists).
+  // Each band is a ribbon bounded by two curves: trace the bottom curve L→R, then the top curve R→L.
+  let stackedPolygons: { cacheRead: string; uncached: string; total: string } | null = null;
+  if (hasBreakdown) {
+    const cacheReadPts = layers.map((l, i) => `${toX(i)},${toY(l.cacheRead)}`);
+    const uncachedTopPts = layers.map((l, i) => `${toX(i)},${toY(l.cacheRead + l.uncached)}`);
+    stackedPolygons = {
+      // cacheRead: from baseline up to the cacheRead curve
+      cacheRead: `0,${h} ${cacheReadPts.join(" ")} ${w},${h}`,
+      // uncached: ribbon between cacheRead curve (bottom) and uncachedTop curve (top)
+      uncached: `${cacheReadPts.join(" ")} ${[...uncachedTopPts].reverse().join(" ")}`,
+      // total: from baseline up to the total context curve (cache-create sits on top)
+      total: `0,${h} ${points.join(" ")} ${w},${h}`,
+    };
+  }
 
   // Detect compaction points
   const compactionTurns: number[] = [];

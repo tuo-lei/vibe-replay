@@ -151,6 +151,9 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
           {compactionDots.map((pct, i) => (
             <div
               key={`c-${i}`}
+              role="img"
+              aria-label="Compaction"
+              title="Compaction"
               className="absolute w-1.5 h-1.5 rounded-sm bg-terminal-red shadow-layer-sm"
               style={{
                 left: `${pct}%`,
