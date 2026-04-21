@@ -482,6 +482,8 @@ const GroupCard = memo(function GroupCard({
                 : ratio >= 0.7
                   ? "text-terminal-orange"
                   : "text-terminal-dim";
+            // cacheRead / total-context (not (cacheRead+cacheCreate) / total) —
+            // the share of context that was already warm when this turn ran.
             const cacheRate =
               ts.tokenUsage && ts.contextTokens
                 ? ((ts.tokenUsage.cacheReadTokens || 0) / ts.contextTokens) * 100
