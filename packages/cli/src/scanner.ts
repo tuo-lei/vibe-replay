@@ -655,7 +655,7 @@ function buildScanResultFromParsed(
     }
 
     for (const block of turn.blocks) {
-      if (block?.type !== "tool_use") continue;
+      if (block.type !== "tool_use") continue;
       toolCallCount++;
 
       if (
