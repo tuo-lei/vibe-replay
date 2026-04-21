@@ -94,6 +94,17 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
     return dots;
   }, [annotatedScenes, scenes.length]);
 
+  // Compute compaction marker positions
+  const compactionDots = useMemo(() => {
+    const dots: number[] = [];
+    for (let i = 0; i < scenes.length; i++) {
+      if (scenes[i].type === "compaction-summary") {
+        dots.push(((i + 0.5) / scenes.length) * 100);
+      }
+    }
+    return dots;
+  }, [scenes]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "ArrowRight" || e.key === "ArrowUp") {
@@ -127,14 +138,25 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
       aria-valuenow={currentIndex}
       tabIndex={0}
     >
-      {/* Annotation dots above timeline */}
-      {annotationDots.length > 0 && (
+      {/* Annotation + compaction dots above timeline */}
+      {(annotationDots.length > 0 || compactionDots.length > 0) && (
         <div className="relative h-2 mb-0.5">
           {annotationDots.map((pct, i) => (
             <div
-              key={i}
+              key={`a-${i}`}
               className="absolute w-1.5 h-1.5 rounded-full bg-terminal-blue shadow-layer-sm"
               style={{ left: `${pct}%`, top: "50%", transform: "translate(-50%, -50%)" }}
+            />
+          ))}
+          {compactionDots.map((pct, i) => (
+            <div
+              key={`c-${i}`}
+              className="absolute w-1.5 h-1.5 rounded-sm bg-terminal-red shadow-layer-sm"
+              style={{
+                left: `${pct}%`,
+                top: "50%",
+                transform: "translate(-50%, -50%) rotate(45deg)",
+              }}
             />
           ))}
         </div>
@@ -151,6 +173,14 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
               backgroundColor: sceneColor(seg.type),
               opacity: seg.startIndex <= currentIndex ? 1 : 0.15,
             }}
+          />
+        ))}
+        {/* Compaction lines on timeline bar */}
+        {compactionDots.map((pct, i) => (
+          <div
+            key={`cl-${i}`}
+            className="absolute top-0 bottom-0 w-px bg-terminal-red/60"
+            style={{ left: `${pct}%` }}
           />
         ))}
         {/* Playhead */}

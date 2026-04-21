@@ -1103,6 +1103,18 @@ function ContextWindowChart({
 
   const peak = Math.max(...contextSizes);
 
+  // Per-turn token breakdown: cache-read, uncached input, cache-creation
+  const hasBreakdown = turnStats.some((t) => t.tokenUsage);
+  const layers = turnStats.map((t) => {
+    const ctx = t.contextTokens || 0;
+    if (!t.tokenUsage || ctx === 0)
+      return { cacheRead: 0, uncached: 0, cacheCreate: 0, total: ctx };
+    const cr = t.tokenUsage.cacheReadTokens || 0;
+    const cc = t.tokenUsage.cacheCreationTokens || 0;
+    const inp = t.tokenUsage.inputTokens || 0;
+    return { cacheRead: cr, uncached: inp, cacheCreate: cc, total: ctx };
+  });
+
   // Infer ceiling from compaction data and peak
   let compactionPeak = 0;
   for (let i = 0; i < contextSizes.length - 1; i++) {
@@ -1119,11 +1131,24 @@ function ContextWindowChart({
   const h = 60;
   const w = 100;
 
-  const points = contextSizes.map((v, i) => {
-    const x = n === 1 ? w / 2 : (i / (n - 1)) * w;
-    const y = h - (v / max) * (h - 6) - 3;
-    return `${x},${y}`;
-  });
+  // Helper: compute SVG Y from token value
+  const toY = (v: number) => h - (v / max) * (h - 6) - 3;
+  const toX = (i: number) => (n === 1 ? w / 2 : (i / (n - 1)) * w);
+
+  const points = contextSizes.map((v, i) => `${toX(i)},${toY(v)}`);
+
+  // Stacked layer polygons (only when breakdown data exists)
+  const stackedPolygons = hasBreakdown
+    ? (() => {
+        const cacheReadPts = layers.map((l, i) => `${toX(i)},${toY(l.cacheRead)}`);
+        const uncachedTopPts = layers.map((l, i) => `${toX(i)},${toY(l.cacheRead + l.uncached)}`);
+        return {
+          cacheRead: `0,${h} ${cacheReadPts.join(" ")} ${w},${h}`,
+          uncached: `${cacheReadPts[n - 1]} ${[...uncachedTopPts].reverse().join(" ")} ${cacheReadPts[0]}`,
+          total: `0,${h} ${points.join(" ")} ${w},${h}`,
+        };
+      })()
+    : null;
 
   // Detect compaction points
   const compactionTurns: number[] = [];
@@ -1135,10 +1160,21 @@ function ContextWindowChart({
     }
   }
 
+  // Cache efficiency (overall)
+  const totalCacheRead = layers.reduce((a, l) => a + l.cacheRead, 0);
+  const totalContext = layers.reduce((a, l) => a + l.total, 0);
+  const cacheHitRate = totalContext > 0 ? (totalCacheRead / totalContext) * 100 : 0;
+
   const hoveredX = hovered !== null ? (n === 1 ? 0.5 : hovered / (n - 1)) : 0;
 
   // Context limit Y position for the limit line
-  const limitY = effectiveLimit ? h - (effectiveLimit / max) * (h - 6) - 3 : undefined;
+  const limitY = effectiveLimit ? toY(effectiveLimit) : undefined;
+
+  // Hovered turn cache hit rate
+  const hoveredCacheRate =
+    hovered !== null && layers[hovered].total > 0
+      ? (layers[hovered].cacheRead / layers[hovered].total) * 100
+      : 0;
 
   return (
     <div>
@@ -1169,14 +1205,27 @@ function ContextWindowChart({
               opacity="0.4"
             />
           )}
-          <polygon
-            points={`0,${h} ${points.join(" ")} ${w},${h}`}
-            style={{ fill: "var(--cyan-subtle)" }}
-          />
+          {/* Stacked layers when breakdown data is available */}
+          {stackedPolygons ? (
+            <>
+              {/* Top: total context fill (cache-create portion) */}
+              <polygon points={stackedPolygons.total} style={{ fill: "var(--orange-subtle)" }} />
+              {/* Middle: uncached input tokens */}
+              <polygon points={stackedPolygons.uncached} style={{ fill: "var(--purple-subtle)" }} />
+              {/* Bottom: cache read tokens (most efficient) */}
+              <polygon points={stackedPolygons.cacheRead} style={{ fill: "var(--green-subtle)" }} />
+            </>
+          ) : (
+            <polygon
+              points={`0,${h} ${points.join(" ")} ${w},${h}`}
+              style={{ fill: "var(--cyan-subtle)" }}
+            />
+          )}
+          {/* Top line: total context */}
           <polyline
             points={points.join(" ")}
             fill="none"
-            style={{ stroke: "var(--cyan)" }}
+            style={{ stroke: stackedPolygons ? "var(--orange)" : "var(--cyan)" }}
             strokeWidth="1.5"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -1184,7 +1233,7 @@ function ContextWindowChart({
           />
           {/* Compaction markers */}
           {compactionTurns.map((ti) => {
-            const x = n === 1 ? w / 2 : (ti / (n - 1)) * w;
+            const x = toX(ti);
             return (
               <line
                 key={ti}
@@ -1224,6 +1273,32 @@ function ContextWindowChart({
                 </div>
               )}
               <div>{fmtNum(contextSizes[hovered])} tokens</div>
+              {hasBreakdown && layers[hovered].total > 0 && (
+                <div className="mt-0.5 border-t border-terminal-border-subtle pt-0.5 space-y-px">
+                  <div className="flex items-center gap-1">
+                    <span
+                      className="inline-block w-1.5 h-1.5 rounded-sm"
+                      style={{ background: "var(--green)" }}
+                    />
+                    <span>cache read {fmtNum(layers[hovered].cacheRead)}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span
+                      className="inline-block w-1.5 h-1.5 rounded-sm"
+                      style={{ background: "var(--purple)" }}
+                    />
+                    <span>uncached {fmtNum(layers[hovered].uncached)}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span
+                      className="inline-block w-1.5 h-1.5 rounded-sm"
+                      style={{ background: "var(--orange)" }}
+                    />
+                    <span>cache write {fmtNum(layers[hovered].cacheCreate)}</span>
+                  </div>
+                  <div className="text-terminal-dim">{hoveredCacheRate.toFixed(0)}% cache hit</div>
+                </div>
+              )}
             </>
           )}
         </ChartTooltip>
@@ -1233,17 +1308,47 @@ function ContextWindowChart({
         <span>{effectiveLimit ? `limit ${fmtNum(effectiveLimit)}` : `peak ${fmtNum(peak)}`}</span>
         <span>Turn {n}</span>
       </div>
-      {compactionTurns.length > 0 && (
-        <div className="flex items-center gap-2 mt-1">
-          <span
-            className="inline-block w-3 border-t border-dashed"
-            style={{ borderColor: "var(--red)" }}
-          />
-          <span className="text-[10px] font-mono text-terminal-dimmer">
-            {compactionTurns.length} compaction{compactionTurns.length !== 1 ? "s" : ""}
-          </span>
-        </div>
-      )}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
+        {compactionTurns.length > 0 && (
+          <div className="flex items-center gap-1">
+            <span
+              className="inline-block w-3 border-t border-dashed"
+              style={{ borderColor: "var(--red)" }}
+            />
+            <span className="text-[10px] font-mono text-terminal-dimmer">
+              {compactionTurns.length} compaction{compactionTurns.length !== 1 ? "s" : ""}
+            </span>
+          </div>
+        )}
+        {hasBreakdown && totalContext > 0 && (
+          <>
+            <div className="flex items-center gap-1">
+              <span
+                className="inline-block w-1.5 h-1.5 rounded-sm"
+                style={{ background: "var(--green)" }}
+              />
+              <span className="text-[10px] font-mono text-terminal-dimmer">cache read</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span
+                className="inline-block w-1.5 h-1.5 rounded-sm"
+                style={{ background: "var(--purple)" }}
+              />
+              <span className="text-[10px] font-mono text-terminal-dimmer">uncached</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span
+                className="inline-block w-1.5 h-1.5 rounded-sm"
+                style={{ background: "var(--orange)" }}
+              />
+              <span className="text-[10px] font-mono text-terminal-dimmer">cache write</span>
+            </div>
+            <span className="text-[10px] font-mono text-terminal-cyan">
+              {cacheHitRate.toFixed(0)}% cache hit
+            </span>
+          </>
+        )}
+      </div>
     </div>
   );
 }

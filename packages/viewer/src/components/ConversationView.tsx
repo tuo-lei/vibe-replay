@@ -482,6 +482,10 @@ const GroupCard = memo(function GroupCard({
                 : ratio >= 0.7
                   ? "text-terminal-orange"
                   : "text-terminal-dim";
+            const cacheRate =
+              ts.tokenUsage && ts.contextTokens
+                ? ((ts.tokenUsage.cacheReadTokens || 0) / ts.contextTokens) * 100
+                : 0;
             return (
               <div className="mb-2 flex items-center gap-2">
                 <div className="flex-1 h-2 rounded-full bg-terminal-surface overflow-hidden">
@@ -492,6 +496,9 @@ const GroupCard = memo(function GroupCard({
                 </div>
                 <span className={`text-[9px] font-mono tabular-nums ${textColor}`}>
                   {fmtNum(ts.contextTokens)}
+                  <span className="text-terminal-dimmer ml-1">
+                    {Math.round(pct)}%{cacheRate > 0 && ` · ${Math.round(cacheRate)}% cached`}
+                  </span>
                 </span>
               </div>
             );
