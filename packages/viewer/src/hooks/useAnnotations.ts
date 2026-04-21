@@ -119,7 +119,9 @@ export function useAnnotations(
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(annotations),
         })
-          .then(() => {
+          .then((res) => {
+            // fetch() only rejects on network failure, not HTTP errors — guard explicitly
+            if (!res.ok) return;
             setSavedSnapshot(annotations);
           })
           .catch(() => {

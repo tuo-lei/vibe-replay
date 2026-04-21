@@ -1749,8 +1749,8 @@ export async function startServer(
     }
     try {
       await saveAnnotations(baseDir, result.slug, body);
-    } catch {
-      /* ignore */
+    } catch (err) {
+      return c.json({ error: `Failed to save annotations: ${getErrorMessage(err)}` }, 500);
     }
     return c.json({ ok: true });
   });
@@ -2591,8 +2591,8 @@ export async function startServer(
     }
     try {
       await saveOverlays(baseDir, result.slug, body);
-    } catch {
-      /* ignore */
+    } catch (err) {
+      return c.json({ error: `Failed to save overlays: ${getErrorMessage(err)}` }, 500);
     }
     return c.json({ ok: true });
   });
