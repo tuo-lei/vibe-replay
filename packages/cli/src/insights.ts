@@ -19,6 +19,7 @@ import type { InsightsStore, SessionInsight } from "@vibe-replay/types";
 import { INSIGHTS_SCHEMA_VERSION } from "@vibe-replay/types";
 import { getMachineId, getMachineName } from "./machine-id.js";
 import type { SessionScanResult } from "./scanner.js";
+import { localDayKey } from "./utils.js";
 import { CLI_VERSION } from "./version.js";
 
 const INSIGHTS_DIR = join(homedir(), ".vibe-replay", "insights");
@@ -221,7 +222,7 @@ export function aggregateDailyInsights(store: InsightsStore): {
   >();
 
   for (const s of store.sessions) {
-    const date = s.startTime?.slice(0, 10);
+    const date = localDayKey(s.startTime);
     if (!date) continue;
 
     let day = byDate.get(date);

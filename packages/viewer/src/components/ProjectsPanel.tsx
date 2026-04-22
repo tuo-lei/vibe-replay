@@ -3,6 +3,7 @@
  */
 
 import { useMemo, useState } from "react";
+import { localDayKey } from "../utils/date";
 import { navigateTo } from "./dashboard-utils";
 import { useScanInsightsContext } from "./InsightsPanel";
 import { formatDuration } from "./StatsPanel";
@@ -21,7 +22,7 @@ function MiniSparkline({ sessionsPerDay }: { sessionsPerDay: Record<string, numb
     const result: number[] = [];
     const cursor = new Date(start);
     while (cursor <= end) {
-      const key = cursor.toISOString().slice(0, 10);
+      const key = localDayKey(cursor)!;
       result.push(sessionsPerDay[key] || 0);
       cursor.setDate(cursor.getDate() + 1);
     }

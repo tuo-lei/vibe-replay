@@ -61,7 +61,7 @@ import type {
   SessionInfo,
   SessionOverlays,
 } from "./types.js";
-import { normalizeTitle } from "./utils.js";
+import { localDayKey, normalizeTitle } from "./utils.js";
 import { CLI_VERSION } from "./version.js";
 
 /** Sanitize slug to prevent path traversal — rejects anything that isn't a simple name */
@@ -1050,7 +1050,7 @@ export async function startServer(
     const apiUrl = getUrl();
     const cookieName = getCookie(apiUrl);
     const headers = { "Content-Type": "application/json", Cookie: `${cookieName}=${auth.token}` };
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localDayKey(new Date()) || "";
     let existingDates = new Set<string>();
 
     // Delta sync: fetch dates already on cloud, skip them
@@ -1116,7 +1116,7 @@ export async function startServer(
    * Runs at most once per calendar day to avoid excessive writes.
    */
   const autoSyncInsights = (): Promise<void> => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localDayKey(new Date()) || "";
     if (lastAutoSyncDate === today) return Promise.resolve();
     // Serialize through syncLock to prevent concurrent read-modify-write on the store
     const job = syncLock.then(async () => {
