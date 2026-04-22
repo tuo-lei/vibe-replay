@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from "react";
+import { computeCacheHitRate, computeContextLayers, turnCacheHitRate } from "../engine";
 import type { ReplaySession, TurnStat } from "../types";
 import {
   DataQualityIndicator,
@@ -1046,12 +1047,15 @@ function TokenBurnCurve({
 }
 
 function CacheEfficiencyLine({ turnStats }: { turnStats: TurnStat[] }) {
-  const ratios = turnStats.map((ts) => {
-    const u = ts.tokenUsage;
-    if (!u) return 0;
-    const total = (u.cacheReadTokens || 0) + (u.inputTokens || 0);
-    return total > 0 ? u.cacheReadTokens / total : 0;
-  });
+  // Use the same helpers as ContextWindowChart so the per-turn sparkline and
+  // its "avg" label stay consistent with the main "% cache hit" readout.
+  // The sparkline itself still plots per-turn ratios (arithmetic), but the
+  // summary number is token-weighted so large turns dominate — matching
+  // users' intuition that "avg cache hit rate" = total cache reads / total
+  // prompt tokens, not the unweighted mean of percentages.
+  const layers = computeContextLayers(turnStats);
+  const ratios = layers.map((l) => turnCacheHitRate(l) / 100);
+  const avgRatio = computeCacheHitRate(layers) / 100;
 
   const h = 24;
   const w = 100;
@@ -1060,8 +1064,6 @@ function CacheEfficiencyLine({ turnStats }: { turnStats: TurnStat[] }) {
     const y = h - v * (h - 4) - 2;
     return `${x},${y}`;
   });
-
-  const avgRatio = ratios.reduce((a, b) => a + b, 0) / ratios.length;
 
   return (
     <div className="mt-1">
@@ -1103,6 +1105,11 @@ function ContextWindowChart({
 
   const peak = Math.max(...contextSizes);
 
+  // Per-turn breakdown: pure layer math lives in ../engine/context-chart.ts
+  // where it's unit-tested. See computeContextLayers for the scaling rules.
+  const hasBreakdown = turnStats.some((t) => t.tokenUsage);
+  const layers = computeContextLayers(turnStats);
+
   // Infer ceiling from compaction data and peak
   let compactionPeak = 0;
   for (let i = 0; i < contextSizes.length - 1; i++) {
@@ -1119,11 +1126,52 @@ function ContextWindowChart({
   const h = 60;
   const w = 100;
 
-  const points = contextSizes.map((v, i) => {
-    const x = n === 1 ? w / 2 : (i / (n - 1)) * w;
-    const y = h - (v / max) * (h - 6) - 3;
-    return `${x},${y}`;
-  });
+  // Helper: compute SVG Y from token value
+  const toY = (v: number) => h - (v / max) * (h - 6) - 3;
+  const toX = (i: number) => (n === 1 ? w / 2 : (i / (n - 1)) * w);
+
+  const points = contextSizes.map((v, i) => `${toX(i)},${toY(v)}`);
+
+  // Stacked layer polygons (only when breakdown data exists).
+  // Each band is a ribbon bounded by two curves: trace the bottom curve L→R, then the top curve R→L.
+  //
+  // For the orange "total" fill we use each turn's per-turn total (0 for
+  // no-data turns) instead of the full context curve — otherwise no-data
+  // turns would render as pure cache-write (misleading). The continuous
+  // context line is still drawn separately from `points`.
+  let stackedPolygons: { cacheRead: string; uncached: string; total: string } | null = null;
+  if (hasBreakdown) {
+    const cacheReadPts = layers.map((l, i) => `${toX(i)},${toY(l.cacheRead)}`);
+    const uncachedTopPts = layers.map((l, i) => `${toX(i)},${toY(l.cacheRead + l.uncached)}`);
+    const totalPts = layers.map((l, i) => `${toX(i)},${toY(l.total)}`);
+    stackedPolygons = {
+      // cacheRead: from baseline up to the cacheRead curve
+      cacheRead: `0,${h} ${cacheReadPts.join(" ")} ${w},${h}`,
+      // uncached: ribbon between cacheRead curve (bottom) and uncachedTop curve (top)
+      uncached: `${cacheReadPts.join(" ")} ${[...uncachedTopPts].reverse().join(" ")}`,
+      // total: from baseline up to the per-turn total (drops to 0 at no-data turns)
+      total: `0,${h} ${totalPts.join(" ")} ${w},${h}`,
+    };
+  }
+
+  // "No breakdown" polygon: rectangular column for each turn that lacks
+  // tokenUsage, rising to contextTokens. Rendered in a neutral cyan so
+  // users can tell those spans are "no breakdown" rather than "100% cache-write".
+  const noDataPolygons: string[] = [];
+  if (hasBreakdown) {
+    const halfW = n > 1 ? w / (n - 1) / 2 : w / 2;
+    for (let i = 0; i < layers.length; i++) {
+      if (layers[i].hasData) continue;
+      const ctx = contextSizes[i];
+      if (ctx <= 0) continue;
+      const x = toX(i);
+      const y = toY(ctx);
+      const left = Math.max(0, x - halfW);
+      const right = Math.min(w, x + halfW);
+      noDataPolygons.push(`${left},${h} ${left},${y} ${right},${y} ${right},${h}`);
+    }
+  }
+  const hasNoDataTurns = noDataPolygons.length > 0;
 
   // Detect compaction points
   const compactionTurns: number[] = [];
@@ -1135,10 +1183,16 @@ function ContextWindowChart({
     }
   }
 
+  // Cache efficiency (overall): delegated to the tested engine helper.
+  const cacheHitRate = computeCacheHitRate(layers);
+  const totalRawSum = layers.reduce((a, l) => a + l.rawSum, 0);
+
   const hoveredX = hovered !== null ? (n === 1 ? 0.5 : hovered / (n - 1)) : 0;
 
   // Context limit Y position for the limit line
-  const limitY = effectiveLimit ? h - (effectiveLimit / max) * (h - 6) - 3 : undefined;
+  const limitY = effectiveLimit ? toY(effectiveLimit) : undefined;
+
+  const hoveredCacheRate = hovered !== null ? turnCacheHitRate(layers[hovered]) : 0;
 
   return (
     <div>
@@ -1169,14 +1223,36 @@ function ContextWindowChart({
               opacity="0.4"
             />
           )}
-          <polygon
-            points={`0,${h} ${points.join(" ")} ${w},${h}`}
-            style={{ fill: "var(--cyan-subtle)" }}
-          />
+          {/* Stacked layers when breakdown data is available */}
+          {stackedPolygons ? (
+            <>
+              {/* Neutral fill for turns without tokenUsage (hidden if all turns have it) */}
+              {noDataPolygons.map((poly, i) => (
+                <polygon
+                  key={`nd-${i}`}
+                  points={poly}
+                  style={{ fill: "var(--cyan-subtle)" }}
+                  opacity="0.6"
+                />
+              ))}
+              {/* Top: total context fill (cache-create portion) */}
+              <polygon points={stackedPolygons.total} style={{ fill: "var(--orange-subtle)" }} />
+              {/* Middle: uncached input tokens */}
+              <polygon points={stackedPolygons.uncached} style={{ fill: "var(--purple-subtle)" }} />
+              {/* Bottom: cache read tokens (most efficient) */}
+              <polygon points={stackedPolygons.cacheRead} style={{ fill: "var(--green-subtle)" }} />
+            </>
+          ) : (
+            <polygon
+              points={`0,${h} ${points.join(" ")} ${w},${h}`}
+              style={{ fill: "var(--cyan-subtle)" }}
+            />
+          )}
+          {/* Top line: total context */}
           <polyline
             points={points.join(" ")}
             fill="none"
-            style={{ stroke: "var(--cyan)" }}
+            style={{ stroke: stackedPolygons ? "var(--orange)" : "var(--cyan)" }}
             strokeWidth="1.5"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -1184,7 +1260,7 @@ function ContextWindowChart({
           />
           {/* Compaction markers */}
           {compactionTurns.map((ti) => {
-            const x = n === 1 ? w / 2 : (ti / (n - 1)) * w;
+            const x = toX(ti);
             return (
               <line
                 key={ti}
@@ -1224,6 +1300,41 @@ function ContextWindowChart({
                 </div>
               )}
               <div>{fmtNum(contextSizes[hovered])} tokens</div>
+              {hasBreakdown && layers[hovered].rawSum > 0 && (
+                <div className="mt-0.5 border-t border-terminal-border-subtle pt-0.5 space-y-px">
+                  <div className="flex items-center gap-1">
+                    <span
+                      className="inline-block w-1.5 h-1.5 rounded-sm"
+                      style={{ background: "var(--green)" }}
+                    />
+                    <span>cache read {fmtNum(layers[hovered].rawCr)}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span
+                      className="inline-block w-1.5 h-1.5 rounded-sm"
+                      style={{ background: "var(--purple)" }}
+                    />
+                    <span>
+                      uncached{" "}
+                      {fmtNum(
+                        layers[hovered].rawSum -
+                          layers[hovered].rawCr -
+                          (turnStats[hovered].tokenUsage?.cacheCreationTokens || 0),
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span
+                      className="inline-block w-1.5 h-1.5 rounded-sm"
+                      style={{ background: "var(--orange)" }}
+                    />
+                    <span>
+                      cache write {fmtNum(turnStats[hovered].tokenUsage?.cacheCreationTokens || 0)}
+                    </span>
+                  </div>
+                  <div className="text-terminal-dim">{hoveredCacheRate.toFixed(0)}% cache hit</div>
+                </div>
+              )}
             </>
           )}
         </ChartTooltip>
@@ -1233,17 +1344,56 @@ function ContextWindowChart({
         <span>{effectiveLimit ? `limit ${fmtNum(effectiveLimit)}` : `peak ${fmtNum(peak)}`}</span>
         <span>Turn {n}</span>
       </div>
-      {compactionTurns.length > 0 && (
-        <div className="flex items-center gap-2 mt-1">
-          <span
-            className="inline-block w-3 border-t border-dashed"
-            style={{ borderColor: "var(--red)" }}
-          />
-          <span className="text-[10px] font-mono text-terminal-dimmer">
-            {compactionTurns.length} compaction{compactionTurns.length !== 1 ? "s" : ""}
-          </span>
-        </div>
-      )}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
+        {compactionTurns.length > 0 && (
+          <div className="flex items-center gap-1">
+            <span
+              className="inline-block w-3 border-t border-dashed"
+              style={{ borderColor: "var(--red)" }}
+            />
+            <span className="text-[10px] font-mono text-terminal-dimmer">
+              {compactionTurns.length} compaction{compactionTurns.length !== 1 ? "s" : ""}
+            </span>
+          </div>
+        )}
+        {hasBreakdown && totalRawSum > 0 && (
+          <>
+            <div className="flex items-center gap-1">
+              <span
+                className="inline-block w-1.5 h-1.5 rounded-sm"
+                style={{ background: "var(--green)" }}
+              />
+              <span className="text-[10px] font-mono text-terminal-dimmer">cache read</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span
+                className="inline-block w-1.5 h-1.5 rounded-sm"
+                style={{ background: "var(--purple)" }}
+              />
+              <span className="text-[10px] font-mono text-terminal-dimmer">uncached</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span
+                className="inline-block w-1.5 h-1.5 rounded-sm"
+                style={{ background: "var(--orange)" }}
+              />
+              <span className="text-[10px] font-mono text-terminal-dimmer">cache write</span>
+            </div>
+            {hasNoDataTurns && (
+              <div className="flex items-center gap-1">
+                <span
+                  className="inline-block w-1.5 h-1.5 rounded-sm"
+                  style={{ background: "var(--cyan-subtle)", opacity: 0.6 }}
+                />
+                <span className="text-[10px] font-mono text-terminal-dimmer">no breakdown</span>
+              </div>
+            )}
+            <span className="text-[10px] font-mono text-terminal-cyan">
+              {cacheHitRate.toFixed(0)}% cache hit
+            </span>
+          </>
+        )}
+      </div>
     </div>
   );
 }

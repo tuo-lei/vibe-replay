@@ -492,6 +492,7 @@ const GroupCard = memo(function GroupCard({
                 </div>
                 <span className={`text-[9px] font-mono tabular-nums ${textColor}`}>
                   {fmtNum(ts.contextTokens)}
+                  <span className="text-terminal-dimmer ml-1">context window</span>
                 </span>
               </div>
             );

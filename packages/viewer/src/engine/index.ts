@@ -6,7 +6,12 @@ export {
   removeAnnotation,
   updateAnnotation,
 } from "./annotation-store";
-
+export {
+  type ContextLayer,
+  computeCacheHitRate,
+  computeContextLayers,
+  turnCacheHitRate,
+} from "./context-chart";
 export {
   computeNextIndex,
   computePrevIndex,
