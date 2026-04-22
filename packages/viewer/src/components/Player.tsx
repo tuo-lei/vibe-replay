@@ -228,7 +228,7 @@ export default function Player({
   }, [userPromptIndices, currentIndex, seekFromNavigation]);
 
   const seekToPrevPromptWithFeedback = useCallback(() => {
-    const prev = [...userPromptIndices].reverse().find((i) => i < currentIndex);
+    const prev = [...userPromptIndices].toReversed().find((i) => i < currentIndex);
     if (prev !== undefined) {
       seekFromNavigation(prev);
     }

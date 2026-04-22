@@ -160,7 +160,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
     } catch {
       return "";
     }
-  }, [isEditor]);
+  }, [isEditor, cloudApiUrl]);
   const cloudFetch = useCallback(
     (path: string, init: RequestInit = {}) => {
       const url = `${cloudApiBase}${path}`;
@@ -203,8 +203,9 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
   const cloudTooBig = replaySize > CLOUD_MAX;
   const gistTooBig = replaySize > GIST_MAX;
 
-  // Auth + cloud data check — extracted so it can re-run on login events
-  // biome-ignore lint/correctness/useExhaustiveDependencies: session is stable after initial load; including it would cause infinite re-fetches
+  // Auth + cloud data check — extracted so it can re-run on login events.
+  // `session` is intentionally omitted from deps: it's stable after initial load,
+  // and re-running this on session identity changes would cause infinite re-fetches.
   const refreshAuthAndCloudData = useCallback(() => {
     if (!isEditor) return;
     cloudFetch("/api/auth/get-session")
@@ -258,10 +259,10 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
         }
       })
       .catch(() => setGhAvailable(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEditor, cloudFetch]);
 
   // Fetch publish status, gist info, and existing export files
-  // biome-ignore lint/correctness/useExhaustiveDependencies: session is stable after initial load; including it would cause infinite re-fetches
   useEffect(() => {
     if (!isEditor) return;
     if (publishGist) {

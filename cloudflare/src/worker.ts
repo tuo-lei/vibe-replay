@@ -1324,7 +1324,7 @@ app.get("/api/insights/summary", async (c) => {
 
   // Sort top projects by sessions desc
   const topProjects = Object.entries(projectsAgg)
-    .map(([project, v]) => ({ project, ...v }))
+    .map(([project, v]) => Object.assign({ project }, v))
     .sort((a, b) => b.sessions - a.sessions)
     .slice(0, 20);
 
@@ -1709,11 +1709,10 @@ app.get("/api/public/insights/:slug", async (c) => {
       topProjects = Object.entries(projectsAgg)
         .map(([project, v]) => {
           const name = config.blurProjectNames ? project.replace(/[^/\\]/g, "*") : project;
-          return {
-            project: name,
-            sessions: v.sessions,
-            ...(config.showCost ? { cost: v.cost } : {}),
-          };
+          return Object.assign(
+            { project: name, sessions: v.sessions },
+            config.showCost ? { cost: v.cost } : {},
+          );
         })
         .sort((a, b) => b.sessions - a.sessions)
         .slice(0, 20);

@@ -388,7 +388,11 @@ export async function toggleArchiveSlug(
   const isArchived = archivedSlugs.has(slug);
   setArchivedSlugs((prev) => {
     const next = new Set(prev);
-    isArchived ? next.delete(slug) : next.add(slug);
+    if (isArchived) {
+      next.delete(slug);
+    } else {
+      next.add(slug);
+    }
     return next;
   });
   try {
@@ -398,7 +402,11 @@ export async function toggleArchiveSlug(
     console.error("Archive toggle failed:", getErrorMessage(err));
     setArchivedSlugs((prev) => {
       const next = new Set(prev);
-      isArchived ? next.add(slug) : next.delete(slug);
+      if (isArchived) {
+        next.add(slug);
+      } else {
+        next.delete(slug);
+      }
       return next;
     });
   }

@@ -170,7 +170,7 @@ const slides = [
 
   let currentSlide = -1; // -1 = terminal phase
   let autoTimer: ReturnType<typeof setTimeout> | null = null;
-  let aborted = false;
+  const aborted = false;
 
   // Reduced motion check
   const prefersReduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;

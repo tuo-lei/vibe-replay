@@ -218,7 +218,7 @@ function buildTurnDurationHistogram(durations: number[]): TurnDurationHistogram 
   const total = sorted.length;
 
   // Single O(n) pass to count buckets
-  const counts = new Array<number>(DURATION_BUCKETS.length).fill(0);
+  const counts: number[] = Array.from({ length: DURATION_BUCKETS.length }, () => 0);
   for (const d of sorted) {
     const i = DURATION_BUCKETS.findIndex((b) => d < b.maxMs);
     if (i >= 0) counts[i]++;
@@ -830,7 +830,7 @@ export async function runBackgroundScan(
   onProgress?: (progress: ScanProgress) => void,
 ): Promise<SessionScanResult[]> {
   const cache = (await readScanCache()) || { scannerVersion: SCANNER_VERSION, entries: {} };
-  const results = new Array<SessionScanResult | undefined>(sessions.length);
+  const results: (SessionScanResult | undefined)[] = Array.from({ length: sessions.length });
   let completed = 0;
   let nextIndex = 0;
   let writeChain: Promise<void> = Promise.resolve();

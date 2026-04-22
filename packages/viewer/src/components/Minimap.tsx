@@ -90,7 +90,7 @@ export default function Minimap({
     });
     if (current) result.push(current);
     return result;
-  }, [scenes, overlayActions?.getEffectiveContent]);
+  }, [scenes, overlayActions]);
 
   const activeIdx = useMemo(() => {
     for (let i = items.length - 1; i >= 0; i--) {

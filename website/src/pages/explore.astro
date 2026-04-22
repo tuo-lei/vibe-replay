@@ -94,7 +94,7 @@ import Layout from "../layouts/Layout.astro";
   }
 
   function formatDate(iso: string): string {
-    const d = new Date(iso + "Z");
+    const d = new Date(`${iso  }Z`);
     const now = new Date();
     const diff = now.getTime() - d.getTime();
     const hours = Math.floor(diff / 3600000);

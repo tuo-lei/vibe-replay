@@ -1,6 +1,10 @@
 pre-commit:
   commands:
     lint:
-      glob: "*.{ts,tsx,js,jsx,json,css}"
-      run: pnpm biome check --write {staged_files}
+      glob: "*.{ts,tsx,js,jsx}"
+      run: pnpm exec oxlint --fix {staged_files}
+      stage_fixed: true
+    fmt:
+      glob: "*.{ts,tsx,js,jsx,json,jsonc}"
+      run: pnpm exec oxfmt {staged_files}
       stage_fixed: true

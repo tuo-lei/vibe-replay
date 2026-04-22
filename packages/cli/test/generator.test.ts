@@ -261,7 +261,7 @@ describe("injectDataScript", () => {
     // The script tag should be right before the last </head>
     const lines = result.split("\n");
     const lastHeadLineIdx =
-      lines.length - 1 - [...lines].reverse().findIndex((l) => l.includes("</head>"));
+      lines.length - 1 - [...lines].toReversed().findIndex((l) => l.includes("</head>"));
     const scriptLineIdx = lines.findIndex((l) => l.includes(scriptTag));
     expect(scriptLineIdx).toBeLessThan(lastHeadLineIdx);
   });
