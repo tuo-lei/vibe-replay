@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from "react";
+import { computeCacheHitRate, computeContextLayers, turnCacheHitRate } from "../engine";
 import type { ReplaySession, TurnStat } from "../types";
 import {
   DataQualityIndicator,
@@ -1046,11 +1047,16 @@ function TokenBurnCurve({
 }
 
 function CacheEfficiencyLine({ turnStats }: { turnStats: TurnStat[] }) {
+  // Match the formula used by ContextWindowChart: cacheRead divided by the full
+  // set of prompt tokens (cacheRead + cacheCreation + input). Previously this
+  // line omitted cacheCreationTokens from the denominator, so it disagreed
+  // with the "% cache hit" shown in the main chart for turns with cache writes.
   const ratios = turnStats.map((ts) => {
     const u = ts.tokenUsage;
     if (!u) return 0;
-    const total = (u.cacheReadTokens || 0) + (u.inputTokens || 0);
-    return total > 0 ? u.cacheReadTokens / total : 0;
+    const cr = u.cacheReadTokens || 0;
+    const total = cr + (u.cacheCreationTokens || 0) + (u.inputTokens || 0);
+    return total > 0 ? cr / total : 0;
   });
 
   const h = 24;
@@ -1103,33 +1109,10 @@ function ContextWindowChart({
 
   const peak = Math.max(...contextSizes);
 
-  // Per-turn token breakdown: cache-read, uncached input, cache-creation.
-  // tokenUsage fields are summed across all sub-calls in a turn, while
-  // contextTokens is the max single-call prompt — different scales. To keep the
-  // stacked areas comparable to the context curve, we scale the three layers
-  // proportionally so they sum to contextTokens (preserves the mix, not the
-  // absolute counts). Each layer also carries the raw token sum used for tooltip
-  // numbers and the overall cache-hit computation.
+  // Per-turn breakdown: pure layer math lives in ../engine/context-chart.ts
+  // where it's unit-tested. See computeContextLayers for the scaling rules.
   const hasBreakdown = turnStats.some((t) => t.tokenUsage);
-  const layers = turnStats.map((t) => {
-    const ctx = t.contextTokens || 0;
-    const cr = t.tokenUsage?.cacheReadTokens || 0;
-    const cc = t.tokenUsage?.cacheCreationTokens || 0;
-    const inp = t.tokenUsage?.inputTokens || 0;
-    const rawSum = cr + cc + inp;
-    if (!t.tokenUsage || ctx === 0 || rawSum === 0) {
-      return { cacheRead: 0, uncached: 0, cacheCreate: 0, total: ctx, rawCr: cr, rawSum };
-    }
-    const scale = ctx / rawSum;
-    return {
-      cacheRead: cr * scale,
-      uncached: inp * scale,
-      cacheCreate: cc * scale,
-      total: ctx,
-      rawCr: cr,
-      rawSum,
-    };
-  });
+  const layers = computeContextLayers(turnStats);
 
   // Infer ceiling from compaction data and peak
   let compactionPeak = 0;
@@ -1155,19 +1138,44 @@ function ContextWindowChart({
 
   // Stacked layer polygons (only when breakdown data exists).
   // Each band is a ribbon bounded by two curves: trace the bottom curve L→R, then the top curve R→L.
+  //
+  // For the orange "total" fill we use each turn's per-turn total (0 for
+  // no-data turns) instead of the full context curve — otherwise no-data
+  // turns would render as pure cache-write (misleading). The continuous
+  // context line is still drawn separately from `points`.
   let stackedPolygons: { cacheRead: string; uncached: string; total: string } | null = null;
   if (hasBreakdown) {
     const cacheReadPts = layers.map((l, i) => `${toX(i)},${toY(l.cacheRead)}`);
     const uncachedTopPts = layers.map((l, i) => `${toX(i)},${toY(l.cacheRead + l.uncached)}`);
+    const totalPts = layers.map((l, i) => `${toX(i)},${toY(l.total)}`);
     stackedPolygons = {
       // cacheRead: from baseline up to the cacheRead curve
       cacheRead: `0,${h} ${cacheReadPts.join(" ")} ${w},${h}`,
       // uncached: ribbon between cacheRead curve (bottom) and uncachedTop curve (top)
       uncached: `${cacheReadPts.join(" ")} ${[...uncachedTopPts].reverse().join(" ")}`,
-      // total: from baseline up to the total context curve (cache-create sits on top)
-      total: `0,${h} ${points.join(" ")} ${w},${h}`,
+      // total: from baseline up to the per-turn total (drops to 0 at no-data turns)
+      total: `0,${h} ${totalPts.join(" ")} ${w},${h}`,
     };
   }
+
+  // "No breakdown" polygon: rectangular column for each turn that lacks
+  // tokenUsage, rising to contextTokens. Rendered in a neutral cyan so
+  // users can tell those spans are "no breakdown" rather than "100% cache-write".
+  const noDataPolygons: string[] = [];
+  if (hasBreakdown) {
+    const halfW = n > 1 ? w / (n - 1) / 2 : w / 2;
+    for (let i = 0; i < layers.length; i++) {
+      if (layers[i].hasData) continue;
+      const ctx = contextSizes[i];
+      if (ctx <= 0) continue;
+      const x = toX(i);
+      const y = toY(ctx);
+      const left = Math.max(0, x - halfW);
+      const right = Math.min(w, x + halfW);
+      noDataPolygons.push(`${left},${h} ${left},${y} ${right},${y} ${right},${h}`);
+    }
+  }
+  const hasNoDataTurns = noDataPolygons.length > 0;
 
   // Detect compaction points
   const compactionTurns: number[] = [];
@@ -1179,23 +1187,16 @@ function ContextWindowChart({
     }
   }
 
-  // Cache efficiency (overall): raw cacheRead across all turns divided by
-  // raw total prompt tokens across all turns. Uses raw token counts (not the
-  // context-scaled layer values) so the ratio reflects real API behavior.
-  const totalRawCr = layers.reduce((a, l) => a + l.rawCr, 0);
+  // Cache efficiency (overall): delegated to the tested engine helper.
+  const cacheHitRate = computeCacheHitRate(layers);
   const totalRawSum = layers.reduce((a, l) => a + l.rawSum, 0);
-  const cacheHitRate = totalRawSum > 0 ? (totalRawCr / totalRawSum) * 100 : 0;
 
   const hoveredX = hovered !== null ? (n === 1 ? 0.5 : hovered / (n - 1)) : 0;
 
   // Context limit Y position for the limit line
   const limitY = effectiveLimit ? toY(effectiveLimit) : undefined;
 
-  // Hovered turn cache hit rate — also uses raw token counts
-  const hoveredCacheRate =
-    hovered !== null && layers[hovered].rawSum > 0
-      ? (layers[hovered].rawCr / layers[hovered].rawSum) * 100
-      : 0;
+  const hoveredCacheRate = hovered !== null ? turnCacheHitRate(layers[hovered]) : 0;
 
   return (
     <div>
@@ -1229,6 +1230,15 @@ function ContextWindowChart({
           {/* Stacked layers when breakdown data is available */}
           {stackedPolygons ? (
             <>
+              {/* Neutral fill for turns without tokenUsage (hidden if all turns have it) */}
+              {noDataPolygons.map((poly, i) => (
+                <polygon
+                  key={`nd-${i}`}
+                  points={poly}
+                  style={{ fill: "var(--cyan-subtle)" }}
+                  opacity="0.6"
+                />
+              ))}
               {/* Top: total context fill (cache-create portion) */}
               <polygon points={stackedPolygons.total} style={{ fill: "var(--orange-subtle)" }} />
               {/* Middle: uncached input tokens */}
@@ -1373,6 +1383,15 @@ function ContextWindowChart({
               />
               <span className="text-[10px] font-mono text-terminal-dimmer">cache write</span>
             </div>
+            {hasNoDataTurns && (
+              <div className="flex items-center gap-1">
+                <span
+                  className="inline-block w-1.5 h-1.5 rounded-sm"
+                  style={{ background: "var(--cyan-subtle)", opacity: 0.6 }}
+                />
+                <span className="text-[10px] font-mono text-terminal-dimmer">no breakdown</span>
+              </div>
+            )}
             <span className="text-[10px] font-mono text-terminal-cyan">
               {cacheHitRate.toFixed(0)}% cache hit
             </span>
