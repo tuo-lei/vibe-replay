@@ -119,6 +119,25 @@ export interface RawMessage {
   data?: any;
   title?: string;
   durationMs?: number;
+  entrypoint?: string;
+  permissionMode?: string;
+  customTitle?: string;
+  snapshot?: {
+    timestamp?: string;
+    trackedFileBackups?: Record<string, unknown>;
+  };
+  parentToolUseID?: string;
+  compactMetadata?: {
+    trigger?: string;
+    preTokens?: number;
+  };
+  error?: {
+    status?: number;
+    error?: { error?: { type?: string }; type?: string };
+    message?: string;
+  };
+  statusCode?: number;
+  retryAttempt?: number;
 }
 
 export type ContentBlock =
@@ -136,7 +155,12 @@ export type ContentBlock =
       _durationMs?: number;
       _isPendingMarker?: boolean;
     }
-  | { type: "tool_result"; tool_use_id: string; content: string | ToolResultContent[] }
+  | {
+      type: "tool_result";
+      tool_use_id: string;
+      content: string | ToolResultContent[];
+      is_error?: boolean;
+    }
   | { type: "image"; source: { type: string; media_type: string; data: string } }
   | { type: "_user_images"; images: string[] };
 
