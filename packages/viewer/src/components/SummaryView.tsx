@@ -1047,17 +1047,15 @@ function TokenBurnCurve({
 }
 
 function CacheEfficiencyLine({ turnStats }: { turnStats: TurnStat[] }) {
-  // Match the formula used by ContextWindowChart: cacheRead divided by the full
-  // set of prompt tokens (cacheRead + cacheCreation + input). Previously this
-  // line omitted cacheCreationTokens from the denominator, so it disagreed
-  // with the "% cache hit" shown in the main chart for turns with cache writes.
-  const ratios = turnStats.map((ts) => {
-    const u = ts.tokenUsage;
-    if (!u) return 0;
-    const cr = u.cacheReadTokens || 0;
-    const total = cr + (u.cacheCreationTokens || 0) + (u.inputTokens || 0);
-    return total > 0 ? cr / total : 0;
-  });
+  // Use the same helpers as ContextWindowChart so the per-turn sparkline and
+  // its "avg" label stay consistent with the main "% cache hit" readout.
+  // The sparkline itself still plots per-turn ratios (arithmetic), but the
+  // summary number is token-weighted so large turns dominate — matching
+  // users' intuition that "avg cache hit rate" = total cache reads / total
+  // prompt tokens, not the unweighted mean of percentages.
+  const layers = computeContextLayers(turnStats);
+  const ratios = layers.map((l) => turnCacheHitRate(l) / 100);
+  const avgRatio = computeCacheHitRate(layers) / 100;
 
   const h = 24;
   const w = 100;
@@ -1066,8 +1064,6 @@ function CacheEfficiencyLine({ turnStats }: { turnStats: TurnStat[] }) {
     const y = h - v * (h - 4) - 2;
     return `${x},${y}`;
   });
-
-  const avgRatio = ratios.reduce((a, b) => a + b, 0) / ratios.length;
 
   return (
     <div className="mt-1">
