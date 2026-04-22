@@ -482,17 +482,6 @@ const GroupCard = memo(function GroupCard({
                 : ratio >= 0.7
                   ? "text-terminal-orange"
                   : "text-terminal-dim";
-            // Cache hit rate across this turn's API calls: cacheRead divided by
-            // total prompt tokens (input + cacheRead + cacheCreation). Can't use
-            // contextTokens as the denominator because tokenUsage is summed over
-            // sub-calls while contextTokens is the max single-call prompt.
-            const cacheRate = (() => {
-              const u = ts.tokenUsage;
-              if (!u) return 0;
-              const cr = u.cacheReadTokens || 0;
-              const sum = cr + (u.cacheCreationTokens || 0) + (u.inputTokens || 0);
-              return sum > 0 ? (cr / sum) * 100 : 0;
-            })();
             return (
               <div className="mb-2 flex items-center gap-2">
                 <div className="flex-1 h-2 rounded-full bg-terminal-surface overflow-hidden">
@@ -503,9 +492,7 @@ const GroupCard = memo(function GroupCard({
                 </div>
                 <span className={`text-[9px] font-mono tabular-nums ${textColor}`}>
                   {fmtNum(ts.contextTokens)}
-                  <span className="text-terminal-dimmer ml-1">
-                    {Math.round(pct)}%{cacheRate > 0 && ` · ${Math.round(cacheRate)}% cached`}
-                  </span>
+                  <span className="text-terminal-dimmer ml-1">context window</span>
                 </span>
               </div>
             );
