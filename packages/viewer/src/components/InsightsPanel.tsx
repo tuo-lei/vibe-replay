@@ -17,6 +17,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { localDayKey } from "../utils/date";
 import { DataQualityIndicator } from "./DataQualityIndicator";
 import { CACHE_REFRESH_TTL_MS, isCacheFresh, shortModelName } from "./dashboard-utils";
 import { formatDuration } from "./StatsPanel";
@@ -402,7 +403,7 @@ function ActivitySparkline({ sessionsPerDay }: { sessionsPerDay: Record<string, 
     const result: { day: string; count: number }[] = [];
     const cursor = new Date(start);
     while (cursor <= end) {
-      const key = cursor.toISOString().slice(0, 10);
+      const key = localDayKey(cursor)!;
       result.push({ day: key, count: sessionsPerDay[key] || 0 });
       cursor.setDate(cursor.getDate() + 1);
     }
@@ -951,7 +952,7 @@ export function TitleInsightsHeader({
               const bars: { day: string; count: number }[] = [];
               const cursor = new Date(start);
               while (cursor <= end) {
-                const key = cursor.toISOString().slice(0, 10);
+                const key = localDayKey(cursor)!;
                 bars.push({ day: key, count: sessionsPerDay[key] || 0 });
                 cursor.setDate(cursor.getDate() + 1);
               }

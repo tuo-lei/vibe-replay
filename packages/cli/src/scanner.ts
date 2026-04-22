@@ -20,7 +20,7 @@ import { parseCursorSession } from "./providers/cursor/parser.js";
 import { getCursorSessionCachePaths } from "./providers/cursor/sqlite-reader.js";
 import type { ProviderParseResult } from "./providers/types.js";
 import type { DataSource, PrLink, SessionInfo, TokenUsage } from "./types.js";
-import { extractToolFilePath, shortenPath } from "./utils.js";
+import { extractToolFilePath, localDayKey, shortenPath } from "./utils.js";
 
 // Bump this when we extract new fields — forces re-scan of all sessions.
 const SCANNER_VERSION = 7;
@@ -987,9 +987,9 @@ export function aggregateProjectInsights(
     if (ts && (!first || ts < first)) first = ts;
     if (ts && (!last || ts > last)) last = ts;
 
-    // Sessions per day
-    if (ts) {
-      const day = ts.slice(0, 10);
+    // Sessions per day (local timezone — UTC bucketing misses evening sessions west of UTC)
+    const day = localDayKey(ts);
+    if (day) {
       sessionsPerDay[day] = (sessionsPerDay[day] || 0) + 1;
     }
   }
@@ -1132,8 +1132,8 @@ export function aggregateUserInsights(scans: SessionScanResult[]): UserInsights 
     if (ts && (!first || ts < first)) first = ts;
     if (ts && (!last || ts > last)) last = ts;
 
-    if (ts) {
-      const day = ts.slice(0, 10);
+    const day = localDayKey(ts);
+    if (day) {
       ps.sessionsPerDay[day] = (ps.sessionsPerDay[day] || 0) + 1;
       sessionsPerDay[day] = (sessionsPerDay[day] || 0) + 1;
     }

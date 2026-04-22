@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatedValue } from "../hooks/useAnimatedNumber";
 import type { SessionSummary, SourceSession } from "../types";
+import { localDayKey } from "../utils/date";
 import { DataQualityIndicator } from "./DataQualityIndicator";
 import {
   formatCompactAge,
@@ -61,8 +62,10 @@ const DAY_MS = 86400000;
 const DAYS_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const DAYS_FULL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+// `dateKey` is a viewer-local alias that delegates to the shared helper.
+// Keeps callsites terse while guaranteeing a string return (Date input is always valid).
 function dateKey(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  return localDayKey(d)!;
 }
 
 function rangeDays(range: TimeRange): number {

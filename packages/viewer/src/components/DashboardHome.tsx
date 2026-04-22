@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatedValue } from "../hooks/useAnimatedNumber";
 import type { SessionSummary, SourceSession } from "../types";
+import { localDayKey } from "../utils/date";
 import { SessionDetailPopup } from "./Dashboard";
 import {
   formatCompactDuration,
@@ -279,7 +280,7 @@ function computeInsights(sources: SourceSession[], replays: SessionSummary[]): I
   // even while richer scan insights are still refreshing in the background.
   const sessionsPerDay: Record<string, number> = {};
   for (const s of sources) {
-    const day = s.timestamp?.slice(0, 10);
+    const day = localDayKey(s.timestamp);
     if (!day) continue;
     sessionsPerDay[day] = (sessionsPerDay[day] || 0) + 1;
   }
