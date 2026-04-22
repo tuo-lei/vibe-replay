@@ -1103,16 +1103,32 @@ function ContextWindowChart({
 
   const peak = Math.max(...contextSizes);
 
-  // Per-turn token breakdown: cache-read, uncached input, cache-creation
+  // Per-turn token breakdown: cache-read, uncached input, cache-creation.
+  // tokenUsage fields are summed across all sub-calls in a turn, while
+  // contextTokens is the max single-call prompt — different scales. To keep the
+  // stacked areas comparable to the context curve, we scale the three layers
+  // proportionally so they sum to contextTokens (preserves the mix, not the
+  // absolute counts). Each layer also carries the raw token sum used for tooltip
+  // numbers and the overall cache-hit computation.
   const hasBreakdown = turnStats.some((t) => t.tokenUsage);
   const layers = turnStats.map((t) => {
     const ctx = t.contextTokens || 0;
-    if (!t.tokenUsage || ctx === 0)
-      return { cacheRead: 0, uncached: 0, cacheCreate: 0, total: ctx };
-    const cr = t.tokenUsage.cacheReadTokens || 0;
-    const cc = t.tokenUsage.cacheCreationTokens || 0;
-    const inp = t.tokenUsage.inputTokens || 0;
-    return { cacheRead: cr, uncached: inp, cacheCreate: cc, total: ctx };
+    const cr = t.tokenUsage?.cacheReadTokens || 0;
+    const cc = t.tokenUsage?.cacheCreationTokens || 0;
+    const inp = t.tokenUsage?.inputTokens || 0;
+    const rawSum = cr + cc + inp;
+    if (!t.tokenUsage || ctx === 0 || rawSum === 0) {
+      return { cacheRead: 0, uncached: 0, cacheCreate: 0, total: ctx, rawCr: cr, rawSum };
+    }
+    const scale = ctx / rawSum;
+    return {
+      cacheRead: cr * scale,
+      uncached: inp * scale,
+      cacheCreate: cc * scale,
+      total: ctx,
+      rawCr: cr,
+      rawSum,
+    };
   });
 
   // Infer ceiling from compaction data and peak
@@ -1163,20 +1179,22 @@ function ContextWindowChart({
     }
   }
 
-  // Cache efficiency (overall)
-  const totalCacheRead = layers.reduce((a, l) => a + l.cacheRead, 0);
-  const totalContext = layers.reduce((a, l) => a + l.total, 0);
-  const cacheHitRate = totalContext > 0 ? (totalCacheRead / totalContext) * 100 : 0;
+  // Cache efficiency (overall): raw cacheRead across all turns divided by
+  // raw total prompt tokens across all turns. Uses raw token counts (not the
+  // context-scaled layer values) so the ratio reflects real API behavior.
+  const totalRawCr = layers.reduce((a, l) => a + l.rawCr, 0);
+  const totalRawSum = layers.reduce((a, l) => a + l.rawSum, 0);
+  const cacheHitRate = totalRawSum > 0 ? (totalRawCr / totalRawSum) * 100 : 0;
 
   const hoveredX = hovered !== null ? (n === 1 ? 0.5 : hovered / (n - 1)) : 0;
 
   // Context limit Y position for the limit line
   const limitY = effectiveLimit ? toY(effectiveLimit) : undefined;
 
-  // Hovered turn cache hit rate
+  // Hovered turn cache hit rate — also uses raw token counts
   const hoveredCacheRate =
-    hovered !== null && layers[hovered].total > 0
-      ? (layers[hovered].cacheRead / layers[hovered].total) * 100
+    hovered !== null && layers[hovered].rawSum > 0
+      ? (layers[hovered].rawCr / layers[hovered].rawSum) * 100
       : 0;
 
   return (
@@ -1276,28 +1294,37 @@ function ContextWindowChart({
                 </div>
               )}
               <div>{fmtNum(contextSizes[hovered])} tokens</div>
-              {hasBreakdown && layers[hovered].total > 0 && (
+              {hasBreakdown && layers[hovered].rawSum > 0 && (
                 <div className="mt-0.5 border-t border-terminal-border-subtle pt-0.5 space-y-px">
                   <div className="flex items-center gap-1">
                     <span
                       className="inline-block w-1.5 h-1.5 rounded-sm"
                       style={{ background: "var(--green)" }}
                     />
-                    <span>cache read {fmtNum(layers[hovered].cacheRead)}</span>
+                    <span>cache read {fmtNum(layers[hovered].rawCr)}</span>
                   </div>
                   <div className="flex items-center gap-1">
                     <span
                       className="inline-block w-1.5 h-1.5 rounded-sm"
                       style={{ background: "var(--purple)" }}
                     />
-                    <span>uncached {fmtNum(layers[hovered].uncached)}</span>
+                    <span>
+                      uncached{" "}
+                      {fmtNum(
+                        layers[hovered].rawSum -
+                          layers[hovered].rawCr -
+                          (turnStats[hovered].tokenUsage?.cacheCreationTokens || 0),
+                      )}
+                    </span>
                   </div>
                   <div className="flex items-center gap-1">
                     <span
                       className="inline-block w-1.5 h-1.5 rounded-sm"
                       style={{ background: "var(--orange)" }}
                     />
-                    <span>cache write {fmtNum(layers[hovered].cacheCreate)}</span>
+                    <span>
+                      cache write {fmtNum(turnStats[hovered].tokenUsage?.cacheCreationTokens || 0)}
+                    </span>
                   </div>
                   <div className="text-terminal-dim">{hoveredCacheRate.toFixed(0)}% cache hit</div>
                 </div>
@@ -1323,7 +1350,7 @@ function ContextWindowChart({
             </span>
           </div>
         )}
-        {hasBreakdown && totalContext > 0 && (
+        {hasBreakdown && totalRawSum > 0 && (
           <>
             <div className="flex items-center gap-1">
               <span
