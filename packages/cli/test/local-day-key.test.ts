@@ -7,12 +7,15 @@ import { localDayKey } from "../src/utils.js";
 const tzOffsetMin = new Date().getTimezoneOffset();
 
 describe("localDayKey", () => {
-  it("buckets late-evening PST activity into the local day, not the UTC next-day", () => {
-    // 2026-03-04 04:28 UTC is 2026-03-03 20:28 PST. Slicing the ISO string gave 2026-03-04;
-    // the helper must return the local day when running in a negative-offset zone.
-    if (tzOffsetMin <= 0) return;
-    expect(localDayKey("2026-03-04T04:28:17.516Z")).toBe("2026-03-03");
-  });
+  // 2026-03-04 04:28 UTC is 2026-03-03 20:28 PST. Slicing the ISO string gave 2026-03-04;
+  // the helper must return the local day when running in a negative-offset zone.
+  // `skipIf` rather than early-return so the reporter shows an explicit skip in UTC CI.
+  it.skipIf(tzOffsetMin <= 0)(
+    "buckets late-evening PST activity into the local day, not the UTC next-day",
+    () => {
+      expect(localDayKey("2026-03-04T04:28:17.516Z")).toBe("2026-03-03");
+    },
+  );
 
   it("accepts a Date instance", () => {
     const d = new Date(2026, 2, 3, 20, 28); // Mar 3 2026 20:28 local
