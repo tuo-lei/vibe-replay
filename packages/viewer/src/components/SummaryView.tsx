@@ -1148,7 +1148,7 @@ function ContextWindowChart({
       // cacheRead: from baseline up to the cacheRead curve
       cacheRead: `0,${h} ${cacheReadPts.join(" ")} ${w},${h}`,
       // uncached: ribbon between cacheRead curve (bottom) and uncachedTop curve (top)
-      uncached: `${cacheReadPts.join(" ")} ${[...uncachedTopPts].reverse().join(" ")}`,
+      uncached: `${cacheReadPts.join(" ")} ${[...uncachedTopPts].toReversed().join(" ")}`,
       // total: from baseline up to the per-turn total (drops to 0 at no-data turns)
       total: `0,${h} ${totalPts.join(" ")} ${w},${h}`,
     };

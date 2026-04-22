@@ -132,7 +132,9 @@ export const userFiles = sqliteTable(
     visibility: text("visibility").default("unlisted").notNull(), // "public" | "unlisted" | "private"
     parentReplayId: text("parent_replay_id"), // optional link to cloud_replays.id
     viewCount: integer("view_count").default(0),
-    createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
+    createdAt: text("created_at")
+      .default(sql`(datetime('now'))`)
+      .notNull(),
     expiresAt: text("expires_at"), // nullable — 7 days for free tier
   },
   (table) => [
@@ -170,7 +172,9 @@ export const cloudReplays = sqliteTable(
     sizeBytes: integer("size_bytes").default(0).notNull(), // 0 for gist entries
     visibility: text("visibility").default("unlisted").notNull(), // "public" | "unlisted" | "private"
     viewCount: integer("view_count").default(0),
-    createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
+    createdAt: text("created_at")
+      .default(sql`(datetime('now'))`)
+      .notNull(),
     expiresAt: text("expires_at"), // nullable — gists don't expire
   },
   (table) => [
@@ -202,7 +206,9 @@ export const insightProfiles = sqliteTable(
     //   showWeeklyTrend, showDayOfWeek, blurProjectNames }
     config: text("config").notNull(),
     viewCount: integer("view_count").default(0),
-    createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
+    createdAt: text("created_at")
+      .default(sql`(datetime('now'))`)
+      .notNull(),
     updatedAt: text("updated_at").default(sql`(datetime('now'))`),
   },
   (table) => [
@@ -241,7 +247,9 @@ export const dailyInsights = sqliteTable(
     models: text("models"), // {"claude-opus-4-6": {sessions, cost}}
     providers: text("providers"), // {"claude-code": {sessions, cost}}
 
-    createdAt: text("created_at").default(sql`(datetime('now'))`).notNull(),
+    createdAt: text("created_at")
+      .default(sql`(datetime('now'))`)
+      .notNull(),
     updatedAt: text("updated_at").default(sql`(datetime('now'))`),
   },
   (table) => [

@@ -674,8 +674,8 @@ function attachToolEvents(turns: ParsedTurn[], tools: ToolEvent[]): void {
     const tool = tools[i];
     marker.block.name = tool.name;
     marker.block.input = {
-      ...(marker.block.input || {}),
-      ...(tool.input || {}),
+      ...marker.block.input,
+      ...tool.input,
     };
     marker.block._result = tool.result;
     marker.block._isPendingMarker = undefined;

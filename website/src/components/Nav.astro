@@ -129,7 +129,7 @@ const mobileLinkClass = (page: string) =>
         const data = await res.json();
         if (data?.url) window.location.href = data.url;
       } catch {
-        window.location.href = "/auth/login?callback=" + window.location.pathname;
+        window.location.href = `/auth/login?callback=${  window.location.pathname}`;
       }
     };
 

@@ -1,0 +1,55 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc", "react", "jsx-a11y"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn",
+    "perf": "warn"
+  },
+  "rules": {
+    "eqeqeq": ["error", "smart"],
+    "no-debugger": "error",
+    "no-var": "error",
+    "prefer-const": "off",
+    "prefer-template": "warn",
+    "no-unmodified-loop-condition": "off",
+    "@typescript-eslint/consistent-type-imports": "off",
+    "@typescript-eslint/triple-slash-reference": "off",
+    "unicorn/prefer-node-protocol": "warn",
+    "unicorn/prefer-array-find": "off",
+    "oxc/no-map-spread": "off",
+    "no-unused-vars": "off",
+    "@typescript-eslint/no-unused-vars": [
+      "warn",
+      { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }
+    ],
+    "react-hooks/rules-of-hooks": "error",
+    "react/jsx-key": "error",
+    "react/react-in-jsx-scope": "off",
+    "react/no-array-index-key": "off",
+    "jsx-a11y/alt-text": "off",
+    "jsx-a11y/click-events-have-key-events": "off",
+    "jsx-a11y/no-static-element-interactions": "off",
+    "no-console": "off",
+    "no-explicit-any": "off",
+    "no-await-in-loop": "off",
+    "no-shadow": "off",
+    "unicorn/consistent-function-scoping": "off",
+    "unicorn/prefer-add-event-listener": "off",
+    "unicorn/no-array-sort": "off"
+  },
+  "ignorePatterns": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/.astro/**",
+    "**/build/**",
+    "packages/cli/assets/**",
+    "website/public/**",
+    "cloudflare/drizzle/**",
+    "cloudflare/worker-configuration.d.ts",
+    "awesome-claude-skills-1/**",
+    "plan/**",
+    "**/*.astro"
+  ],
+  "overrides": []
+}

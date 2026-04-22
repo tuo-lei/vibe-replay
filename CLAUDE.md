@@ -61,7 +61,7 @@ pnpm db:migrate:remote    # Apply to production D1 (requires auth)
 
 - **Always use pnpm** — never npm/yarn
 - **TypeScript strict mode**, ESM throughout
-- **Biome** for linting + formatting — runs automatically via PostToolUse hook and pre-commit hook
+- **oxlint** for linting, **oxfmt** for formatting — both run automatically via PostToolUse hook and pre-commit hook
 - **Before commit**: run `pnpm lint:check` and fix any errors. Do NOT commit code that fails lint.
 - **Before commit**: security review — check for leaked secrets, API keys, tokens, credentials, .env files
 - **Never bump versions or publish** without explicit user confirmation

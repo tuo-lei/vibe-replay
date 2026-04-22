@@ -19,8 +19,4 @@ export {
   findNextUserPrompt,
   findPrevUserPrompt,
 } from "./scene-navigation";
-export {
-  findBatchEnd,
-  isBatchable,
-  sceneDuration,
-} from "./scene-timing";
+export { findBatchEnd, isBatchable, sceneDuration } from "./scene-timing";

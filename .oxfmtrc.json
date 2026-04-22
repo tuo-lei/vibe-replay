@@ -1,0 +1,27 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "useTabs": false,
+  "tabWidth": 2,
+  "printWidth": 100,
+  "singleQuote": false,
+  "jsxSingleQuote": false,
+  "quoteProps": "as-needed",
+  "trailingComma": "all",
+  "semi": true,
+  "arrowParens": "always",
+  "bracketSameLine": false,
+  "bracketSpacing": true,
+  "ignorePatterns": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/.astro/**",
+    "**/build/**",
+    "packages/cli/assets/**",
+    "website/public/**",
+    "cloudflare/drizzle/**",
+    "cloudflare/worker-configuration.d.ts",
+    "awesome-claude-skills-1/**",
+    "plan/**",
+    "**/*.md"
+  ]
+}

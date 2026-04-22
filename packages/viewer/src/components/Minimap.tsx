@@ -90,6 +90,10 @@ export default function Minimap({
     });
     if (current) result.push(current);
     return result;
+    // `useOverlays` returns a fresh object each render; depending on
+    // `overlayActions` would invalidate this memo on every render. The
+    // method itself is `useCallback`-stable, so tracking just it is correct.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scenes, overlayActions?.getEffectiveContent]);
 
   const activeIdx = useMemo(() => {

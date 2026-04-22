@@ -8,7 +8,7 @@ dist/
 vibe-replay/*/
 packages/cli/vibe-replay/
 
-# Temp files (Biome, etc.)
+# Temp files
 _tmp_*
 
 # Playwright CLI cache

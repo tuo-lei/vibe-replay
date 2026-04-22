@@ -376,7 +376,7 @@ import Layout from "../layouts/Layout.astro";
   function renderModels(models: Record<string, number>): void {
     const el = document.getElementById("models-section")!;
     const map = new Map<string, number>();
-    for (const [m, c] of Object.entries(models)) { for (const l of [...new Set(m.split(",").map(p => p.trim()).filter(Boolean))]) { const s = shortModelName(l); map.set(s, (map.get(s) ?? 0) + c); } }
+    for (const [m, c] of Object.entries(models)) { for (const l of new Set(m.split(",").map(p => p.trim()).filter(Boolean))) { const s = shortModelName(l); map.set(s, (map.get(s) ?? 0) + c); } }
     const entries = [...map.entries()].map(([model, count]) => ({ model, count })).sort((a, b) => b.count - a.count);
     const total = entries.reduce((a, b) => a + b.count, 0);
     if (entries.length === 0) { el.innerHTML = `<div class="text-text-muted text-xs font-mono py-4 text-center">No model data</div>`; return; }
