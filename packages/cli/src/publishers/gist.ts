@@ -88,7 +88,7 @@ export async function publishGist(
     });
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({ error: resp.statusText }));
-      if ((resp.status as number) === 401) {
+      if (resp.status === 401) {
         throw new Error("Session expired. Run `vibe-replay auth login` to re-authenticate.");
       }
       throw new Error(
