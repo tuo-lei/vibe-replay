@@ -1,0 +1,7 @@
+{"type": "system", "subtype": "init", "sessionId": "desktop-cli-session-001", "slug": "desktop-test-session", "cwd": "/Users/test/desktop-project", "version": "2.5.0", "gitBranch": "main", "timestamp": "2025-06-15T09:00:00Z"}
+{"type": "file-history-snapshot", "snapshot": {"timestamp": "2025-06-15T09:00:00Z"}}
+{"type": "user", "message": {"role": "user", "content": "Add a new feature to support desktop sessions"}, "sessionId": "desktop-cli-session-001", "slug": "desktop-test-session", "cwd": "/Users/test/desktop-project", "timestamp": "2025-06-15T09:00:05Z"}
+{"type": "assistant", "message": {"role": "assistant", "model": "claude-opus-4-7", "content": [{"type": "text", "text": "I'll add desktop session support."}]}, "timestamp": "2025-06-15T09:00:10Z"}
+{"type": "user", "message": {"role": "user", "content": "Also add tests for the new feature"}, "sessionId": "desktop-cli-session-001", "timestamp": "2025-06-15T09:02:00Z"}
+{"type": "assistant", "message": {"role": "assistant", "model": "claude-opus-4-7", "content": [{"type": "text", "text": "I'll write the tests now."}]}, "timestamp": "2025-06-15T09:02:15Z"}
+{"type": "system", "subtype": "turn_duration", "durationMs": 15000, "timestamp": "2025-06-15T09:02:30Z"}

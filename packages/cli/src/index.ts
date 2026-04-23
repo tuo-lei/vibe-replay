@@ -131,8 +131,28 @@ async function discoverAllSessions(): Promise<SessionInfo[]> {
     const sessions = await provider.discover();
     allSessions.push(...sessions);
   }
-  allSessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-  return allSessions;
+
+  // Deduplicate by sessionId — prefer providers in order: claude-desktop > claude-code > cursor.
+  // Desktop sessions share the same sessionId (cliSessionId) as their backing JSONL, so without
+  // this step a session discovered by both claude-desktop and claude-code would appear twice.
+  const PROVIDER_PRIORITY = ["claude-desktop", "claude-code", "cursor"];
+  const seen = new Map<string, SessionInfo>();
+  for (const session of allSessions) {
+    const existing = seen.get(session.sessionId);
+    if (!existing) {
+      seen.set(session.sessionId, session);
+    } else {
+      const existingPrio = PROVIDER_PRIORITY.indexOf(existing.provider);
+      const newPrio = PROVIDER_PRIORITY.indexOf(session.provider);
+      if (newPrio !== -1 && (existingPrio === -1 || newPrio < existingPrio)) {
+        seen.set(session.sessionId, session);
+      }
+    }
+  }
+
+  const deduped = Array.from(seen.values());
+  deduped.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  return deduped;
 }
 
 program
