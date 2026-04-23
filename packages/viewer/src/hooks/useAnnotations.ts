@@ -8,6 +8,7 @@ import {
   updateAnnotation,
 } from "../engine";
 import type { Annotation, ReplaySession } from "../types";
+import { apiUrl } from "../utils/api";
 import type { ViewerMode } from "./useSessionLoader";
 
 export interface AnnotationActions {
@@ -64,14 +65,6 @@ const LS_PREFIX = "vibe-replay-annotations-";
 
 function storageKey(sessionId: string): string {
   return LS_PREFIX + sessionId;
-}
-
-/** Build API URL with slug query param when viewing a different session */
-function apiUrl(path: string): string {
-  const slug = new URLSearchParams(window.location.search).get("session");
-  if (!slug) return path;
-  const sep = path.includes("?") ? "&" : "?";
-  return `${path}${sep}slug=${encodeURIComponent(slug)}`;
 }
 
 export function useAnnotations(

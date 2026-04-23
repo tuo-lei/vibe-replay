@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReplaySession, SceneOverlay, SessionOverlays } from "../types";
+import { apiUrl } from "../utils/api";
 import type { ViewerMode } from "./useSessionLoader";
 
 export interface OverlayActions {
@@ -59,14 +60,6 @@ export interface OverlayActions {
 }
 
 const EMPTY_OVERLAYS: SessionOverlays = { version: 1, overlays: [] };
-
-/** Build API URL with slug query param */
-function apiUrl(path: string): string {
-  const slug = new URLSearchParams(window.location.search).get("session");
-  if (!slug) return path;
-  const sep = path.includes("?") ? "&" : "?";
-  return `${path}${sep}slug=${encodeURIComponent(slug)}`;
-}
 
 export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded"): OverlayActions {
   const isEditor = mode === "editor";
