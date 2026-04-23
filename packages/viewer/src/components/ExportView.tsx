@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AnnotationActions } from "../hooks/useAnnotations";
 import type { ViewerMode } from "../hooks/useSessionLoader";
 import type { ReplaySession } from "../types";
+import { apiUrl } from "../utils/api";
 import { sanitizeHtml, sanitizeSvg } from "../utils/sanitize";
 
 // Sync with MAX_EXPORT_TURNS in packages/cli/src/formatters/github.ts
@@ -37,13 +38,6 @@ interface GhExportResult {
 }
 
 type Status = { type: "success" | "error"; text: string } | null;
-
-function apiUrl(path: string): string {
-  const slug = new URLSearchParams(window.location.search).get("session");
-  if (!slug) return path;
-  const sep = path.includes("?") ? "&" : "?";
-  return `${path}${sep}slug=${encodeURIComponent(slug)}`;
-}
 
 function SectionHeader({ title, color }: { title: string; color: string }) {
   return (
