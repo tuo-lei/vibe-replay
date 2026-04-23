@@ -116,27 +116,24 @@ export async function parseClaudeCodeSession(
     if (!sessionId && obj.sessionId) sessionId = obj.sessionId;
     if (!slug && obj.slug) slug = obj.slug;
     if (!cwd && obj.cwd) cwd = obj.cwd;
-    if ((obj as any).gitBranch) {
-      const b = (obj as any).gitBranch as string;
+    if (obj.gitBranch) {
+      const b = obj.gitBranch;
       if (gitBranches.length === 0 || gitBranches[gitBranches.length - 1] !== b) {
         gitBranches.push(b);
       }
     }
-    if (!entrypoint && (obj as any).entrypoint) entrypoint = (obj as any).entrypoint;
-    if (!permissionMode && (obj as any).permissionMode)
-      permissionMode = (obj as any).permissionMode;
+    if (!entrypoint && obj.entrypoint) entrypoint = obj.entrypoint;
+    if (!permissionMode && obj.permissionMode) permissionMode = obj.permissionMode;
 
     if (obj.type === "custom-title") {
-      // Real JSONL uses `customTitle`; support `title` as fallback for compatibility
-      title = (obj as any).customTitle || (obj as any).title || title;
+      title = obj.customTitle || obj.title || title;
     }
 
     if (obj.type === "file-history-snapshot") {
-      if (!startTime && (obj as any).snapshot?.timestamp) {
-        startTime = (obj as any).snapshot.timestamp;
+      if (!startTime && obj.snapshot?.timestamp) {
+        startTime = obj.snapshot.timestamp;
       }
-      // Extract tracked file paths
-      const backups = (obj as any).snapshot?.trackedFileBackups;
+      const backups = obj.snapshot?.trackedFileBackups;
       if (backups && typeof backups === "object") {
         for (const fp of Object.keys(backups)) {
           trackedFiles.add(fp);
@@ -147,16 +144,16 @@ export async function parseClaudeCodeSession(
 
     // Progress lines: extract agent mapping before skipping
     if (obj.type === "progress") {
-      const data = (obj as any).data;
-      if (data?.type === "agent_progress" && data?.agentId && (obj as any).parentToolUseID) {
-        agentMapping.set((obj as any).parentToolUseID as string, data.agentId as string);
+      const data = obj.data;
+      if (data?.type === "agent_progress" && data?.agentId && obj.parentToolUseID) {
+        agentMapping.set(obj.parentToolUseID, data.agentId as string);
       }
       continue;
     }
 
     // PR link events (deduplicate by URL)
     if (obj.type === "pr-link") {
-      const d = obj.data || (obj as any);
+      const d = obj.data || obj;
       if (d.prNumber && d.prUrl && !prLinks.some((p) => p.prUrl === d.prUrl)) {
         prLinks.push({
           prNumber: d.prNumber,
@@ -176,20 +173,18 @@ export async function parseClaudeCodeSession(
         }
       }
       if (obj.subtype === "compact_boundary" && obj.timestamp) {
-        const cm = (obj as any).compactMetadata;
         compactions.push({
           timestamp: obj.timestamp,
-          trigger: cm?.trigger || "unknown",
-          preTokens: cm?.preTokens,
+          trigger: obj.compactMetadata?.trigger || "unknown",
+          preTokens: obj.compactMetadata?.preTokens,
         });
       }
       if (obj.subtype === "api_error" && obj.timestamp) {
-        const err = (obj as any).error;
         apiErrors.push({
           timestamp: obj.timestamp,
-          statusCode: err?.status || (obj as any).statusCode,
-          errorType: err?.error?.error?.type || err?.error?.type,
-          retryAttempt: (obj as any).retryAttempt,
+          statusCode: obj.error?.status || obj.statusCode,
+          errorType: obj.error?.error?.error?.type || obj.error?.error?.type,
+          retryAttempt: obj.retryAttempt,
         });
       }
       continue;
@@ -255,7 +250,7 @@ export async function parseClaudeCodeSession(
     if (role === "user" && Array.isArray(msgContent)) {
       // ToolSearch automated responses have sourceToolAssistantUUID on the raw object.
       // Process tool_result blocks for result matching, but skip emitting a user turn.
-      const isToolSearchResponse = !!(obj as any).sourceToolAssistantUUID;
+      const isToolSearchResponse = !!obj.sourceToolAssistantUUID;
 
       const textParts: string[] = [];
       const userImages: string[] = [];
@@ -264,10 +259,8 @@ export async function parseClaudeCodeSession(
         if (block.type === "tool_result") {
           const resultText = extractToolResultText(block);
           toolResults.set(block.tool_use_id, resultText);
-          // Capture timestamp for duration calculation
           if (obj.timestamp) toolResultTimestamps.set(block.tool_use_id, obj.timestamp);
-          // Capture is_error flag
-          if ((block as any).is_error) {
+          if (block.is_error) {
             toolErrors.set(block.tool_use_id, true);
           }
           const images = extractImages(block);
@@ -275,10 +268,9 @@ export async function parseClaudeCodeSession(
             toolImages.set(block.tool_use_id, images);
           }
         } else if (block.type === "text") {
-          textParts.push((block as any).text || "");
+          textParts.push(block.text || "");
         } else if (block.type === "image") {
-          // User-pasted screenshot
-          const src = (block as any).source;
+          const src = block.source;
           if (src?.data) {
             const mediaType = src.media_type || "image/png";
             userImages.push(`data:${mediaType};base64,${src.data}`);
@@ -515,13 +507,12 @@ export async function parseClaudeCodeSession(
   };
 }
 
-/** Extract plain text from a message content field (string or array of content blocks). */
-function extractMessageText(content: string | any[]): string {
+function extractMessageText(content: string | ContentBlock[]): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
     return content
-      .filter((b: any) => b.type === "text")
-      .map((b: any) => b.text || "")
+      .filter((b): b is ContentBlock & { type: "text" } => b.type === "text")
+      .map((b) => b.text || "")
       .join("\n");
   }
   return "";
@@ -529,7 +520,7 @@ function extractMessageText(content: string | any[]): string {
 
 function extractImages(block: ContentBlock): string[] {
   if (block.type !== "tool_result") return [];
-  const content = (block as any).content;
+  const { content } = block;
   if (!Array.isArray(content)) return [];
 
   const images: string[] = [];
@@ -545,12 +536,11 @@ function extractImages(block: ContentBlock): string[] {
 function extractToolResultText(block: ContentBlock): string {
   if (block.type !== "tool_result") return "";
 
-  const content = (block as any).content;
+  const { content } = block;
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
     return content
-      .map((c: any) => {
-        if (typeof c === "string") return c;
+      .map((c) => {
         if (c.type === "text") return c.text;
         return JSON.stringify(c);
       })
@@ -853,15 +843,17 @@ async function readSubagents(
       const ts = saAssistantTimestamps.get(msgId);
       for (const block of blocks) {
         if (block.type === "thinking") {
-          const thinking = (block as any).thinking || "";
-          if (thinking.trim()) {
-            scenes.push({ type: "thinking", content: thinking.slice(0, 500), timestamp: ts });
+          if (block.thinking.trim()) {
+            scenes.push({ type: "thinking", content: block.thinking.slice(0, 500), timestamp: ts });
             thinkingBlocks++;
           }
         } else if (block.type === "text") {
-          const text = (block as any).text || "";
-          if (text.trim()) {
-            scenes.push({ type: "text-response", content: text.slice(0, 1000), timestamp: ts });
+          if (block.text.trim()) {
+            scenes.push({
+              type: "text-response",
+              content: block.text.slice(0, 1000),
+              timestamp: ts,
+            });
             textResponses++;
           }
         } else if (block.type === "tool_use") {
