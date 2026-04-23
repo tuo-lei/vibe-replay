@@ -131,6 +131,8 @@ export interface RawMessage {
     trigger?: string;
     preTokens?: number;
   };
+  // Anthropic API error envelope: outer = HTTP envelope, inner = error object,
+  // innermost = error detail. The triple nesting mirrors the on-wire shape.
   error?: {
     status?: number;
     error?: { error?: { type?: string }; type?: string };

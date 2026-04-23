@@ -154,7 +154,7 @@ export async function parseClaudeCodeSession(
     // PR link events (deduplicate by URL)
     if (obj.type === "pr-link") {
       const d = obj.data || obj;
-      if (d.prNumber && d.prUrl && !prLinks.some((p: PrLink) => p.prUrl === d.prUrl)) {
+      if (d.prNumber && d.prUrl && !prLinks.some((p) => p.prUrl === d.prUrl)) {
         prLinks.push({
           prNumber: d.prNumber,
           prUrl: d.prUrl,
