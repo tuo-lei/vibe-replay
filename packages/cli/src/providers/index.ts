@@ -26,10 +26,13 @@ export function getProvider(name: string): Provider | undefined {
 }
 
 /**
- * Deduplicate sessions by sessionId, preferring claude-desktop > claude-code > cursor.
+ * Deduplicate sessions by sessionId, preferring
+ * claude-cowork > claude-desktop > claude-code > cursor.
  * Desktop sessions share the same sessionId (cliSessionId) as their backing JSONL, so
  * without deduplication a session discovered by both claude-desktop and claude-code
- * would appear twice in the picker.
+ * would appear twice in the picker. Cowork sessions are self-contained and should
+ * not collide with the other providers, but ranking them first keeps the contract
+ * explicit.
  */
 export function deduplicateSessionsByProvider(sessions: SessionInfo[]): SessionInfo[] {
   const seen = new Map<string, SessionInfo>();

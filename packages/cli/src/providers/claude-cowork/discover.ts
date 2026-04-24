@@ -110,28 +110,36 @@ export async function extractCoworkSessionInfo(jsonPath: string): Promise<Sessio
   // Audit.jsonl is co-located inside the local_{id}/ directory next to this JSON.
   const dir = jsonPath.replace(/\.json$/, "");
   const auditPath = join(dir, "audit.jsonl");
-  const auditStat = await stat(auditPath).catch(() => null);
-  if (!auditStat || auditStat.size === 0) return null;
+
+  // Read the audit transcript once and share the content across every downstream
+  // scan (prompt extraction, line count, tool-call count). Also use it as the
+  // existence check — an unreadable or empty file means there's nothing to replay.
+  let auditContent: string;
+  try {
+    auditContent = await readFile(auditPath, "utf-8");
+  } catch {
+    return null;
+  }
+  if (!auditContent.trim()) return null;
 
   // Derive SessionInfo.sessionId from cliSessionId when available so that
   // if the same session is discovered by multiple sources it dedupes correctly.
   // Fall back to the local_{id} when the Cowork JSON lacks cliSessionId.
   const sessionId = meta.cliSessionId || meta.sessionId.replace(/^local_/, "");
 
+  const lines = auditContent.split("\n").filter((l) => l.trim());
+
   // Pull first meaningful user prompts for the picker preview. Cheapest source:
-  // meta.initialMessage. Supplement by scanning audit.jsonl if needed.
-  const prompts = await collectPrompts(auditPath, meta.initialMessage);
+  // meta.initialMessage. Supplement by scanning audit.jsonl lines if needed.
+  const prompts = collectPromptsFromLines(lines, meta.initialMessage);
   if (prompts.length === 0) return null;
 
   const timestamp = meta.lastActivityAt
     ? new Date(meta.lastActivityAt).toISOString()
     : meta.createdAt
       ? new Date(meta.createdAt).toISOString()
-      : auditStat.mtime.toISOString();
+      : new Date().toISOString();
 
-  // Count lines (lightweight — audit.jsonl rarely exceeds 1MB).
-  const auditContent = await readFile(auditPath, "utf-8").catch(() => "");
-  const lines = auditContent.split("\n").filter((l) => l.trim());
   const lineCount = lines.length;
   // Lightweight tool-call count reused from claude-code discover heuristic.
   const toolUseRe = /"type"\s*:\s*"tool_use"/g;
@@ -145,6 +153,8 @@ export async function extractCoworkSessionInfo(jsonPath: string): Promise<Sessio
       (line.includes('"type":"user"') || line.includes('"type": "user"')) &&
       !line.includes('"tool_result"'),
   ).length;
+
+  const fileSize = Buffer.byteLength(auditContent, "utf-8");
 
   // Normalize model: strip Cowork-style suffixes (e.g. "claude-opus-4-6[1m]").
   const model = meta.model ? meta.model.replace(/\[[^\]]*\]$/, "") : undefined;
@@ -164,7 +174,7 @@ export async function extractCoworkSessionInfo(jsonPath: string): Promise<Sessio
     version: "",
     timestamp,
     lineCount,
-    fileSize: auditStat.size,
+    fileSize,
     filePath: auditPath,
     filePaths: [auditPath],
     firstPrompt: prompts[0],
@@ -178,33 +188,29 @@ export async function extractCoworkSessionInfo(jsonPath: string): Promise<Sessio
 /**
  * Return up to 2 cleaned user prompts for the picker preview.
  * The Cowork metadata JSON already carries `initialMessage`; use it first and
- * only crack open audit.jsonl for additional prompts if needed.
+ * then fall back to the first real user messages in the audit transcript.
+ * Duplicates are dropped so `initialMessage` + the identical first audit line
+ * don't produce `[x, x]`.
  */
-async function collectPrompts(auditPath: string, initialMessage?: string): Promise<string[]> {
+function collectPromptsFromLines(lines: string[], initialMessage?: string): string[] {
   const prompts: string[] = [];
   const MAX = 2;
 
   const pushCleaned = (text: string | undefined): void => {
     if (!text) return;
     if (isSystemGeneratedMessage(text)) return;
-    const cleaned = cleanPromptText(text);
-    if (cleaned.length >= 10) prompts.push(cleaned.slice(0, 200));
+    const cleaned = cleanPromptText(text).slice(0, 200);
+    if (cleaned.length < 10) return;
+    if (prompts.includes(cleaned)) return;
+    prompts.push(cleaned);
   };
 
   pushCleaned(initialMessage);
   if (prompts.length >= MAX) return prompts;
 
-  let content: string;
-  try {
-    content = await readFile(auditPath, "utf-8");
-  } catch {
-    return prompts;
-  }
-
-  const lines = content.split("\n");
   const scanLimit = Math.min(lines.length, 200);
   for (let i = 0; i < scanLimit && prompts.length < MAX; i++) {
-    const line = lines[i].trim();
+    const line = lines[i];
     if (!line) continue;
     try {
       const obj = JSON.parse(line);

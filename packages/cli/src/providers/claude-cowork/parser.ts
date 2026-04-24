@@ -26,9 +26,11 @@ export function normalizeCoworkLine(line: string): string | null {
 
   if (typeof obj.session_id === "string" && !obj.sessionId) {
     obj.sessionId = obj.session_id;
+    delete obj.session_id;
   }
   if ("parent_tool_use_id" in obj && !("parentToolUseID" in obj)) {
     obj.parentToolUseID = obj.parent_tool_use_id;
+    delete obj.parent_tool_use_id;
   }
   if (!obj.timestamp && typeof obj._audit_timestamp === "string") {
     obj.timestamp = obj._audit_timestamp;
@@ -58,6 +60,8 @@ export async function parseClaudeCoworkSession(
     }
   }
 
+  // Cowork transcripts are self-contained — no sibling `agents/` directory, so
+  // subagentsSourcePath is intentionally omitted (parser will use an empty map).
   const result = await parseClaudeCodeLines(normalized);
 
   // Overlay metadata that audit.jsonl does not carry but the sibling JSON does.

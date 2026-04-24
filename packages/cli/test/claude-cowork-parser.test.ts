@@ -9,7 +9,7 @@ import type { SessionInfo } from "../src/types.js";
 const AUDIT_FIXTURE = join(__dirname, "fixtures", "claude-cowork-audit.jsonl");
 
 describe("normalizeCoworkLine", () => {
-  it("renames session_id to sessionId", () => {
+  it("renames session_id to sessionId and drops the original", () => {
     const out = normalizeCoworkLine(
       JSON.stringify({
         type: "user",
@@ -19,14 +19,16 @@ describe("normalizeCoworkLine", () => {
     );
     const obj = JSON.parse(out!);
     expect(obj.sessionId).toBe("abc-123");
+    expect("session_id" in obj).toBe(false);
   });
 
-  it("renames parent_tool_use_id to parentToolUseID", () => {
+  it("renames parent_tool_use_id to parentToolUseID and drops the original", () => {
     const out = normalizeCoworkLine(
       JSON.stringify({ type: "user", parent_tool_use_id: "tool-42", message: {} }),
     );
     const obj = JSON.parse(out!);
     expect(obj.parentToolUseID).toBe("tool-42");
+    expect("parent_tool_use_id" in obj).toBe(false);
   });
 
   it("uses _audit_timestamp as a fallback when timestamp is missing", () => {
