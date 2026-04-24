@@ -1,6 +1,8 @@
+import { createReadStream } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
 import { cleanPromptText, isSystemGeneratedMessage } from "../../clean-prompt.js";
 import type { SessionInfo } from "../../types.js";
 
@@ -111,50 +113,64 @@ export async function extractCoworkSessionInfo(jsonPath: string): Promise<Sessio
   const dir = jsonPath.replace(/\.json$/, "");
   const auditPath = join(dir, "audit.jsonl");
 
-  // Read the audit transcript once and share the content across every downstream
-  // scan (prompt extraction, line count, tool-call count). Also use it as the
-  // existence check — an unreadable or empty file means there's nothing to replay.
-  let auditContent: string;
-  try {
-    auditContent = await readFile(auditPath, "utf-8");
-  } catch {
-    return null;
-  }
-  if (!auditContent.trim()) return null;
+  // Stream audit.jsonl line-by-line rather than slurping the whole file into
+  // memory. Holding a full 6MB+ audit string + its split-array across every
+  // Cowork session during discovery piles up heap fast — V8 keeps the backing
+  // buffer alive as long as any substring view is reachable. Streaming caps
+  // peak memory at roughly one line per session.
+  const auditStat = await stat(auditPath).catch(() => null);
+  if (!auditStat || auditStat.size === 0) return null;
 
   // Derive SessionInfo.sessionId from cliSessionId when available so that
   // if the same session is discovered by multiple sources it dedupes correctly.
   // Fall back to the local_{id} when the Cowork JSON lacks cliSessionId.
   const sessionId = meta.cliSessionId || meta.sessionId.replace(/^local_/, "");
 
-  const lines = auditContent.split("\n").filter((l) => l.trim());
+  const toolUseRe = /"type"\s*:\s*"tool_use"/g;
+  const PROMPT_SCAN_LINES = 200;
+  let lineCount = 0;
+  let toolCallCount = 0;
+  let promptCount = 0;
+  const earlyLines: string[] = [];
+
+  let rl: ReturnType<typeof createInterface> | undefined;
+  try {
+    const input = createReadStream(auditPath, { encoding: "utf-8" });
+    rl = createInterface({ input, crlfDelay: Number.POSITIVE_INFINITY });
+    for await (const raw of rl) {
+      const line = raw.trim();
+      if (!line) continue;
+      lineCount++;
+      if (earlyLines.length < PROMPT_SCAN_LINES) earlyLines.push(line);
+      const m = line.match(toolUseRe);
+      if (m) toolCallCount += m.length;
+      if (
+        (line.includes('"type":"user"') || line.includes('"type": "user"')) &&
+        !line.includes('"tool_result"')
+      ) {
+        promptCount++;
+      }
+    }
+  } catch {
+    return null;
+  } finally {
+    rl?.close();
+  }
+
+  if (lineCount === 0) return null;
 
   // Pull first meaningful user prompts for the picker preview. Cheapest source:
-  // meta.initialMessage. Supplement by scanning audit.jsonl lines if needed.
-  const prompts = collectPromptsFromLines(lines, meta.initialMessage);
+  // meta.initialMessage. Supplement by scanning the early audit lines if needed.
+  const prompts = collectPromptsFromLines(earlyLines, meta.initialMessage);
   if (prompts.length === 0) return null;
 
   const timestamp = meta.lastActivityAt
     ? new Date(meta.lastActivityAt).toISOString()
     : meta.createdAt
       ? new Date(meta.createdAt).toISOString()
-      : new Date().toISOString();
+      : auditStat.mtime.toISOString();
 
-  const lineCount = lines.length;
-  // Lightweight tool-call count reused from claude-code discover heuristic.
-  const toolUseRe = /"type"\s*:\s*"tool_use"/g;
-  let toolCallCount = 0;
-  for (const line of lines) {
-    const m = line.match(toolUseRe);
-    if (m) toolCallCount += m.length;
-  }
-  const promptCount = lines.filter(
-    (line) =>
-      (line.includes('"type":"user"') || line.includes('"type": "user"')) &&
-      !line.includes('"tool_result"'),
-  ).length;
-
-  const fileSize = Buffer.byteLength(auditContent, "utf-8");
+  const fileSize = auditStat.size;
 
   // Normalize model: strip Cowork-style suffixes (e.g. "claude-opus-4-6[1m]").
   const model = meta.model ? meta.model.replace(/\[[^\]]*\]$/, "") : undefined;
