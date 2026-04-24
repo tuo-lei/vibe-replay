@@ -266,7 +266,12 @@ function computeInsights(sources: SourceSession[], replays: SessionSummary[]): I
   for (const s of sources) {
     providerCounts.set(s.provider, (providerCounts.get(s.provider) || 0) + 1);
   }
-  const providerLabels: Record<string, string> = { "claude-code": "Claude Code", cursor: "Cursor" };
+  const providerLabels: Record<string, string> = {
+    "claude-code": "Claude Code",
+    "claude-desktop": "Claude Desktop",
+    "claude-cowork": "Claude Cowork",
+    cursor: "Cursor",
+  };
   const providerBreakdown = [...providerCounts.entries()]
     .map(([provider, count]) => ({ provider, count, label: providerLabels[provider] || provider }))
     .sort((a, b) => b.count - a.count);

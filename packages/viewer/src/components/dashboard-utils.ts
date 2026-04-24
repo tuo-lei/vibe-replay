@@ -364,13 +364,24 @@ export function navigateTo(
 
 // ─── Shared UI helpers ────────────────────────────────────────────────
 
+// All Claude sources (CLI, Desktop Code tab, Desktop Cowork) share the same
+// orange tint so they read as one family. Labels differentiate the sub-kind.
 export const PROVIDER_BADGE_COLORS: Record<string, string> = {
   "claude-code": "bg-terminal-orange-subtle text-terminal-orange",
+  "claude-desktop": "bg-terminal-orange-subtle text-terminal-orange",
+  "claude-cowork": "bg-terminal-orange-subtle text-terminal-orange",
   cursor: "bg-terminal-blue-subtle text-terminal-blue",
 };
 
+const PROVIDER_BADGE_LABELS: Record<string, string> = {
+  "claude-code": "Claude",
+  "claude-desktop": "Desktop",
+  "claude-cowork": "Cowork",
+  cursor: "Cursor",
+};
+
 export function providerBadgeLabel(provider: string): string {
-  return provider === "claude-code" ? "Claude" : provider === "cursor" ? "Cursor" : provider;
+  return PROVIDER_BADGE_LABELS[provider] || provider;
 }
 
 export function providerBadgeClass(provider: string): string {
