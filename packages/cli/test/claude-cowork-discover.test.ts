@@ -59,8 +59,22 @@ describe("extractCoworkSessionInfo", () => {
 
     expect(info).not.toBeNull();
     expect(info?.provider).toBe("claude-cowork");
-    expect(info?.sessionId).toBe("cowork-cli-session-002");
+    // sessionId must equal metadata.sessionId minus the `local_` prefix so that
+    // it matches audit.jsonl's outer-wrapper `session_id` — the parser uses that
+    // value, and any mismatch silently breaks replay-to-source linking.
+    expect(info?.sessionId).toBe("cowork-session-002");
     expect(info?.title).toBe("Research Cowork session storage");
+  });
+
+  it("does NOT use metadata.cliSessionId as SessionInfo.sessionId", async () => {
+    // cliSessionId is the inner Claude Code subprocess UUID and does not appear
+    // on audit.jsonl's outer-wrapper records the parser reads first. If discover
+    // returned it, buildReplayMaps would never match generated replays back to
+    // sources and the UI would keep showing "+ Generate" forever.
+    const { jsonPath } = await buildCoworkLayout();
+    const info = await extractCoworkSessionInfo(jsonPath);
+
+    expect(info?.sessionId).not.toBe("inner-cli-subprocess-id-distinct-from-audit");
   });
 
   it("strips [1m]-style suffixes from model", async () => {
@@ -128,7 +142,7 @@ describe("discoverCoworkFromDir", () => {
 
     expect(sessions).toHaveLength(1);
     expect(sessions[0].provider).toBe("claude-cowork");
-    expect(sessions[0].sessionId).toBe("cowork-cli-session-002");
+    expect(sessions[0].sessionId).toBe("cowork-session-002");
   });
 
   it("returns [] when the Cowork directory does not exist", async () => {
@@ -156,7 +170,7 @@ describe("discoverCoworkFromDir", () => {
 
     const sessions = await discoverCoworkFromDir(root);
     expect(sessions).toHaveLength(1);
-    expect(sessions[0].sessionId).toBe("cowork-cli-session-002");
+    expect(sessions[0].sessionId).toBe("cowork-session-002");
   });
 
   it("ignores non-local_*.json entries in the org directory", async () => {

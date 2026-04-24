@@ -121,10 +121,14 @@ export async function extractCoworkSessionInfo(jsonPath: string): Promise<Sessio
   const auditStat = await stat(auditPath).catch(() => null);
   if (!auditStat || auditStat.size === 0) return null;
 
-  // Derive SessionInfo.sessionId from cliSessionId when available so that
-  // if the same session is discovered by multiple sources it dedupes correctly.
-  // Fall back to the local_{id} when the Cowork JSON lacks cliSessionId.
-  const sessionId = meta.cliSessionId || meta.sessionId.replace(/^local_/, "");
+  // SessionInfo.sessionId must match what the parser extracts from audit.jsonl
+  // so that post-generation replay-to-source linking in buildReplayMaps works.
+  // audit.jsonl's outer-wrapper records carry `session_id` = metadata.sessionId
+  // (minus the "local_" prefix). metadata.cliSessionId is a DIFFERENT UUID — it
+  // identifies the inner Claude Code subprocess running inside the Cowork
+  // sandbox — and does NOT appear on the outer records the parser reads first,
+  // so using it here would permanently break replay linking for Cowork.
+  const sessionId = meta.sessionId.replace(/^local_/, "");
 
   const toolUseRe = /"type"\s*:\s*"tool_use"/g;
   const PROMPT_SCAN_LINES = 200;

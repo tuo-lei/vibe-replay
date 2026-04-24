@@ -1,7 +1,7 @@
 {
-  "sessionId": "local_cowork-session-xyz789",
+  "sessionId": "local_cowork-session-002",
   "processName": "magical-laughing-wright",
-  "cliSessionId": "cowork-cli-session-002",
+  "cliSessionId": "inner-cli-subprocess-id-distinct-from-audit",
   "cwd": "/sessions/magical-laughing-wright/mnt/outputs",
   "createdAt": 1750000000000,
   "lastActivityAt": 1750000200000,

@@ -96,9 +96,10 @@ async function runGitHubExport(
 }
 
 const DEV_MENU_ENABLED = process.env.VIBE_REPLAY_DEV_MENU === "1";
-// Bumped v1 → v2 when the Cowork provider was added so picker caches populated
-// before Cowork existed don't silently hide the new sessions.
-const SESSION_DISCOVERY_CACHE_KEY = "session-discovery-v2";
+// Bumped v2 → v3 alongside the Cowork sessionId fix (see server.ts
+// sourcesCacheKey comment). Old caches carry the wrong Cowork identity and
+// must be thrown out so the next discovery sweep writes a correct one.
+const SESSION_DISCOVERY_CACHE_KEY = "session-discovery-v3";
 
 function normalizePromptTitle(value?: string): string {
   return normalizeTitle(cleanPromptText(value || "")) || "";
