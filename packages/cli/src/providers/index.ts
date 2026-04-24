@@ -28,11 +28,18 @@ export function getProvider(name: string): Provider | undefined {
 /**
  * Deduplicate sessions by sessionId, preferring
  * claude-cowork > claude-desktop > claude-code > cursor.
- * Desktop sessions share the same sessionId (cliSessionId) as their backing JSONL, so
- * without deduplication a session discovered by both claude-desktop and claude-code
- * would appear twice in the picker. Cowork sessions are self-contained and should
- * not collide with the other providers, but ranking them first keeps the contract
- * explicit.
+ *
+ * Each provider derives sessionId from a different source, so it's worth being
+ * explicit about which IDs can actually collide:
+ *   - claude-desktop uses metadata.cliSessionId, which is *the same UUID* as
+ *     the backing ~/.claude/projects/ JSONL. So the same session shows up
+ *     under both claude-desktop AND claude-code — dedup-by-sessionId collapses
+ *     them and the priority ordering keeps the richer Desktop metadata.
+ *   - claude-cowork uses metadata.sessionId (minus `local_`) — deliberately
+ *     NOT cliSessionId. Cowork transcripts live in a separate directory and
+ *     do not overlap with the other providers; ranking Cowork first here is
+ *     purely defensive (and makes the contract explicit).
+ *   - cursor uses its own IDs which never overlap with the Claude family.
  */
 export function deduplicateSessionsByProvider(sessions: SessionInfo[]): SessionInfo[] {
   const seen = new Map<string, SessionInfo>();
