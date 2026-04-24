@@ -6,6 +6,8 @@ import {
   discoverFromDir,
   extractDesktopSessionInfo,
 } from "../src/providers/claude-desktop/discover.js";
+import { deduplicateSessionsByProvider } from "../src/providers/index.js";
+import type { SessionInfo } from "../src/types.js";
 
 const fixture = (name: string) => join(__dirname, "fixtures", name);
 
@@ -188,5 +190,71 @@ describe("discoverFromDir", () => {
     const sessions = await discoverFromDir(desktopDir2, claudeProjectsDir);
 
     expect(sessions).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// deduplicateSessionsByProvider
+// ---------------------------------------------------------------------------
+
+function makeSession(sessionId: string, provider: string): SessionInfo {
+  return {
+    provider,
+    sessionId,
+    slug: sessionId,
+    project: "/test/project",
+    cwd: "/test/project",
+    version: "1.0.0",
+    timestamp: "2025-06-15T09:00:00.000Z",
+    lineCount: 10,
+    fileSize: 1000,
+    filePath: "/test/project/session.jsonl",
+    filePaths: ["/test/project/session.jsonl"],
+    firstPrompt: "test prompt",
+  };
+}
+
+describe("deduplicateSessionsByProvider", () => {
+  it("prefers claude-desktop over claude-code for the same sessionId", () => {
+    const desktop = makeSession("shared-id", "claude-desktop");
+    const cli = makeSession("shared-id", "claude-code");
+
+    const result = deduplicateSessionsByProvider([cli, desktop]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].provider).toBe("claude-desktop");
+  });
+
+  it("prefers claude-desktop over claude-code regardless of input order", () => {
+    const desktop = makeSession("shared-id", "claude-desktop");
+    const cli = makeSession("shared-id", "claude-code");
+
+    const result = deduplicateSessionsByProvider([desktop, cli]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].provider).toBe("claude-desktop");
+  });
+
+  it("prefers claude-code over cursor for the same sessionId", () => {
+    const cli = makeSession("shared-id", "claude-code");
+    const cursor = makeSession("shared-id", "cursor");
+
+    const result = deduplicateSessionsByProvider([cursor, cli]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].provider).toBe("claude-code");
+  });
+
+  it("keeps sessions with different sessionIds", () => {
+    const desktop = makeSession("id-a", "claude-desktop");
+    const cli = makeSession("id-b", "claude-code");
+
+    const result = deduplicateSessionsByProvider([desktop, cli]);
+
+    expect(result).toHaveLength(2);
+  });
+
+  it("returns empty array for empty input", () => {
+    expect(deduplicateSessionsByProvider([])).toHaveLength(0);
   });
 });

@@ -14,7 +14,7 @@ import {
 import { generateGitHubGif } from "./formatters/gif.js";
 import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.js";
 import { generateOutput } from "./generator.js";
-import { getAllProviders, getProvider } from "./providers/index.js";
+import { deduplicateSessionsByProvider, getAllProviders, getProvider } from "./providers/index.js";
 import {
   getAuthFilePath,
   loadAuthToken,
@@ -132,25 +132,7 @@ async function discoverAllSessions(): Promise<SessionInfo[]> {
     allSessions.push(...sessions);
   }
 
-  // Deduplicate by sessionId — prefer providers in order: claude-desktop > claude-code > cursor.
-  // Desktop sessions share the same sessionId (cliSessionId) as their backing JSONL, so without
-  // this step a session discovered by both claude-desktop and claude-code would appear twice.
-  const PROVIDER_PRIORITY = ["claude-desktop", "claude-code", "cursor"];
-  const seen = new Map<string, SessionInfo>();
-  for (const session of allSessions) {
-    const existing = seen.get(session.sessionId);
-    if (!existing) {
-      seen.set(session.sessionId, session);
-    } else {
-      const existingPrio = PROVIDER_PRIORITY.indexOf(existing.provider);
-      const newPrio = PROVIDER_PRIORITY.indexOf(session.provider);
-      if (newPrio !== -1 && (existingPrio === -1 || newPrio < existingPrio)) {
-        seen.set(session.sessionId, session);
-      }
-    }
-  }
-
-  const deduped = Array.from(seen.values());
+  const deduped = deduplicateSessionsByProvider(allSessions);
   deduped.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   return deduped;
 }
@@ -278,9 +260,11 @@ program
               const providerBadge =
                 provider === "claude-code"
                   ? chalk.hex("#D97706")("claude")
-                  : provider === "cursor"
-                    ? chalk.hex("#0096FF")("cursor")
-                    : chalk.yellow(provider);
+                  : provider === "claude-desktop"
+                    ? chalk.hex("#C084FC")("desktop")
+                    : provider === "cursor"
+                      ? chalk.hex("#0096FF")("cursor")
+                      : chalk.yellow(provider);
               replayEntries.push({
                 name: `${providerBadge} ${chalk.dim(`[${time}]`)} ${chalk.white(title)} ${chalk.dim(`(${scenes} scenes)`)}`,
                 value: slug,
@@ -895,22 +879,24 @@ function formatSessionChoices(sessions: SessionInfo[], cleanupPeriodDays?: numbe
       const sizeKB = Math.round(s.fileSize / 1024);
       const prompt = s.firstPrompt.replace(/\n/g, " ").slice(0, 50);
 
-      // Claude: orange-brown (#D97706), Cursor: blue (#0096FF)
+      // Claude: orange-brown (#D97706), Desktop: purple (#C084FC), Cursor: blue (#0096FF)
       const providerBadge =
         s.provider === "claude-code"
           ? chalk.hex("#D97706")("claude")
-          : s.provider === "cursor"
-            ? chalk.hex("#0096FF")("cursor")
-            : chalk.yellow(s.provider);
+          : s.provider === "claude-desktop"
+            ? chalk.hex("#C084FC")("desktop")
+            : s.provider === "cursor"
+              ? chalk.hex("#0096FF")("cursor")
+              : chalk.yellow(s.provider);
 
       const titleStr = s.title ? chalk.white(` "${s.title}"`) : "";
 
       const fileCount = s.filePaths.length > 1 ? chalk.dim(` [${s.filePaths.length} parts]`) : "";
       const sqliteBadge = s.hasSqlite ? chalk.green(" db") : "";
 
-      // Cleanup expiry badge for Claude Code sessions
+      // Cleanup expiry badge for Claude Code / Desktop sessions (both share the same JSONL files)
       let expiryBadge = "";
-      if (cleanupPeriodDays && s.provider === "claude-code") {
+      if (cleanupPeriodDays && (s.provider === "claude-code" || s.provider === "claude-desktop")) {
         const daysLeft = computeDaysUntilCleanup(s.timestamp, cleanupPeriodDays);
         if (daysLeft != null && daysLeft <= WARNING_THRESHOLD_DAYS) {
           const label = daysLeft === 0 ? "today" : `${daysLeft}d`;

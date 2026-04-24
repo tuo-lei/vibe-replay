@@ -34,6 +34,7 @@ interface DesktopSessionJson {
 }
 
 export async function discoverClaudeDesktopSessions(): Promise<SessionInfo[]> {
+  // Claude Desktop stores sessions in ~/Library/Application Support (macOS-only path)
   if (process.platform !== "darwin") return [];
   return discoverFromDir(DESKTOP_DIR, DEFAULT_CLAUDE_PROJECTS_DIR);
 }
@@ -99,7 +100,11 @@ export async function extractDesktopSessionInfo(
 
     if (!desktop.cliSessionId || !desktop.cwd) return null;
 
-    const encodedCwd = desktop.cwd.replace(/\//g, "-");
+    // Encoding is identical to Claude Code's own project-dir scheme: replace every "/"
+    // with "-". This is inherently lossy for paths containing literal hyphens (e.g.
+    // "/Users/me/my-project" and "/Users/me/my/project" both encode to the same string),
+    // but it is the scheme Claude Code itself uses so we must match it exactly.
+    const encodedCwd = desktop.cwd.replace(/\/+$/, "").replace(/\//g, "-");
     const jsonlPath = join(claudeProjectsDir, encodedCwd, `${desktop.cliSessionId}.jsonl`);
 
     const jsonlStat = await stat(jsonlPath).catch(() => null);
