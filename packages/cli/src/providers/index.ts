@@ -1,13 +1,21 @@
 import { claudeCodeProvider } from "./claude-code/index.js";
+import { claudeCoworkProvider } from "./claude-cowork/index.js";
 import { claudeDesktopProvider } from "./claude-desktop/index.js";
 import { cursorProvider } from "./cursor/index.js";
 import type { Provider } from "./types.js";
 import type { SessionInfo } from "../types.js";
 
-const providers: Provider[] = [claudeDesktopProvider, claudeCodeProvider, cursorProvider];
+const providers: Provider[] = [
+  claudeCoworkProvider,
+  claudeDesktopProvider,
+  claudeCodeProvider,
+  cursorProvider,
+];
 
-// Priority order for deduplication — lower index = higher priority
-const PROVIDER_PRIORITY = ["claude-desktop", "claude-code", "cursor"];
+// Priority order for deduplication — lower index = higher priority.
+// Cowork ranks first because its audit.jsonl is self-contained and the only
+// source of truth for agent-mode sessions (no other provider can discover them).
+const PROVIDER_PRIORITY = ["claude-cowork", "claude-desktop", "claude-code", "cursor"];
 
 export function getAllProviders(): Provider[] {
   return providers;

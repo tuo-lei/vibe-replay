@@ -262,9 +262,11 @@ program
                   ? chalk.hex("#D97706")("claude")
                   : provider === "claude-desktop"
                     ? chalk.hex("#C084FC")("desktop")
-                    : provider === "cursor"
-                      ? chalk.hex("#0096FF")("cursor")
-                      : chalk.yellow(provider);
+                    : provider === "claude-cowork"
+                      ? chalk.hex("#F472B6")("cowork")
+                      : provider === "cursor"
+                        ? chalk.hex("#0096FF")("cursor")
+                        : chalk.yellow(provider);
               replayEntries.push({
                 name: `${providerBadge} ${chalk.dim(`[${time}]`)} ${chalk.white(title)} ${chalk.dim(`(${scenes} scenes)`)}`,
                 value: slug,
@@ -879,15 +881,18 @@ function formatSessionChoices(sessions: SessionInfo[], cleanupPeriodDays?: numbe
       const sizeKB = Math.round(s.fileSize / 1024);
       const prompt = s.firstPrompt.replace(/\n/g, " ").slice(0, 50);
 
-      // Claude: orange-brown (#D97706), Desktop: purple (#C084FC), Cursor: blue (#0096FF)
+      // Claude: orange-brown (#D97706), Desktop: purple (#C084FC),
+      // Cowork: pink (#F472B6), Cursor: blue (#0096FF)
       const providerBadge =
         s.provider === "claude-code"
           ? chalk.hex("#D97706")("claude")
           : s.provider === "claude-desktop"
             ? chalk.hex("#C084FC")("desktop")
-            : s.provider === "cursor"
-              ? chalk.hex("#0096FF")("cursor")
-              : chalk.yellow(s.provider);
+            : s.provider === "claude-cowork"
+              ? chalk.hex("#F472B6")("cowork")
+              : s.provider === "cursor"
+                ? chalk.hex("#0096FF")("cursor")
+                : chalk.yellow(s.provider);
 
       const titleStr = s.title ? chalk.white(` "${s.title}"`) : "";
 

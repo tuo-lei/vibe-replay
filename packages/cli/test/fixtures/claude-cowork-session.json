@@ -1,0 +1,12 @@
+{
+  "sessionId": "local_cowork-session-xyz789",
+  "processName": "magical-laughing-wright",
+  "cliSessionId": "cowork-cli-session-002",
+  "cwd": "/sessions/magical-laughing-wright/mnt/outputs",
+  "createdAt": 1750000000000,
+  "lastActivityAt": 1750000200000,
+  "model": "claude-opus-4-6[1m]",
+  "isArchived": false,
+  "title": "Research Cowork session storage",
+  "initialMessage": "Please investigate how Cowork stores session data locally and summarize the format for me."
+}
