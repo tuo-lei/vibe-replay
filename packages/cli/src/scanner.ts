@@ -20,7 +20,7 @@ import { parseCursorSession } from "./providers/cursor/parser.js";
 import { getCursorSessionCachePaths } from "./providers/cursor/sqlite-reader.js";
 import type { ProviderParseResult } from "./providers/types.js";
 import type { DataSource, PrLink, SessionInfo, TokenUsage } from "./types.js";
-import { extractToolFilePath, localDayKey, shortenPath } from "./utils.js";
+import { FILE_EDIT_TOOLS, extractToolFilePath, localDayKey, shortenPath } from "./utils.js";
 
 // Bump this when we extract new fields — forces re-scan of all sessions.
 const SCANNER_VERSION = 7;
@@ -449,12 +449,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
               if (server) mcpServersUsed.add(server);
             }
             // Track file modifications
-            if (
-              block.name === "Edit" ||
-              block.name === "Write" ||
-              block.name === "NotebookEdit" ||
-              block.name === "Delete"
-            ) {
+            if (FILE_EDIT_TOOLS.has(block.name)) {
               const fp = extractToolFilePath(block.input);
               if (fp) {
                 editCount++;
@@ -499,12 +494,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
           if (saMsg?.role !== "assistant" || !Array.isArray(saMsg.content)) continue;
           for (const block of saMsg.content) {
             if (block.type !== "tool_use") continue;
-            if (
-              block.name === "Edit" ||
-              block.name === "Write" ||
-              block.name === "NotebookEdit" ||
-              block.name === "Delete"
-            ) {
+            if (FILE_EDIT_TOOLS.has(block.name)) {
               const fp = extractToolFilePath(block.input);
               if (fp) {
                 editCount++;
@@ -672,14 +662,7 @@ function buildScanResultFromParsed(
         for (const saScene of block._subAgent.scenes) {
           if (saScene.type !== "tool-call") continue;
           const saTool = saScene.toolName;
-          if (
-            saTool !== "Edit" &&
-            saTool !== "Write" &&
-            saTool !== "NotebookEdit" &&
-            saTool !== "Delete"
-          ) {
-            continue;
-          }
+          if (!FILE_EDIT_TOOLS.has(saTool)) continue;
           const saPath = extractToolFilePath(saScene.input);
           if (!saPath) continue;
           editCount++;
@@ -688,14 +671,7 @@ function buildScanResultFromParsed(
         }
       }
 
-      if (
-        block.name !== "Edit" &&
-        block.name !== "Write" &&
-        block.name !== "NotebookEdit" &&
-        block.name !== "Delete"
-      ) {
-        continue;
-      }
+      if (!FILE_EDIT_TOOLS.has(block.name)) continue;
 
       const rawPath = extractToolFilePath(block.input);
       if (!rawPath) continue;

@@ -15,6 +15,14 @@ export function normalizeTitle(value?: string): string | undefined {
   return cleaned || undefined;
 }
 
+/** Tool names that modify files on disk. Used to count edits and track modified files. */
+export const FILE_EDIT_TOOLS: ReadonlySet<string> = new Set([
+  "Edit",
+  "Write",
+  "NotebookEdit",
+  "Delete",
+]);
+
 /** Extract file path from tool input, handling different provider field names. */
 export function extractToolFilePath(
   input: Record<string, unknown> | undefined,
