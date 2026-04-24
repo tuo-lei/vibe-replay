@@ -12,6 +12,8 @@ import {
   projectName,
   providerBadgeClass,
   providerBadgeLabel,
+  providerDisplayName,
+  providerFamily,
   replaySuggestedTitle,
   type SourcesEnrichmentStatus,
   sourceSuggestedTitle,
@@ -266,14 +268,8 @@ function computeInsights(sources: SourceSession[], replays: SessionSummary[]): I
   for (const s of sources) {
     providerCounts.set(s.provider, (providerCounts.get(s.provider) || 0) + 1);
   }
-  const providerLabels: Record<string, string> = {
-    "claude-code": "Claude Code",
-    "claude-desktop": "Claude Desktop",
-    "claude-cowork": "Claude Cowork",
-    cursor: "Cursor",
-  };
   const providerBreakdown = [...providerCounts.entries()]
-    .map(([provider, count]) => ({ provider, count, label: providerLabels[provider] || provider }))
+    .map(([provider, count]) => ({ provider, count, label: providerDisplayName(provider) }))
     .sort((a, b) => b.count - a.count);
 
   // Projects
@@ -703,12 +699,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           .map(([provider, count]) => ({
             provider,
             count,
-            label:
-              provider === "claude-code"
-                ? "Claude Code"
-                : provider === "cursor"
-                  ? "Cursor"
-                  : provider,
+            label: providerDisplayName(provider),
           }))
           .sort((a, b) => b.count - a.count);
   const displaySessionsPerDay =
@@ -1022,26 +1013,46 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
               </div>
             </div>
             <div className="flex flex-col items-end gap-1 shrink-0">
-              {displayProviderBreakdown.map((b) => (
-                <div
-                  key={b.provider}
-                  className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md ${b.provider === "claude-code" ? "bg-terminal-orange/8" : b.provider === "cursor" ? "bg-terminal-blue/8" : "bg-terminal-dim/8"}`}
-                >
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full ${b.provider === "claude-code" ? "bg-terminal-orange" : b.provider === "cursor" ? "bg-terminal-blue" : "bg-terminal-dim"}`}
-                  />
-                  <span
-                    className={`text-[10px] font-mono tabular-nums ${b.provider === "claude-code" ? "text-terminal-orange/80" : b.provider === "cursor" ? "text-terminal-blue/80" : "text-terminal-dim"}`}
+              {displayProviderBreakdown.map((b) => {
+                // Literal class strings (not templated) so Tailwind's content
+                // scanner emits them. All Claude sub-providers share the
+                // orange family so the home chip matches the insights bars.
+                const family = providerFamily(b.provider);
+                const chip = {
+                  orange: {
+                    bg: "bg-terminal-orange/8",
+                    dot: "bg-terminal-orange",
+                    label: "text-terminal-orange/80",
+                    value: "text-terminal-orange",
+                  },
+                  blue: {
+                    bg: "bg-terminal-blue/8",
+                    dot: "bg-terminal-blue",
+                    label: "text-terminal-blue/80",
+                    value: "text-terminal-blue",
+                  },
+                  dim: {
+                    bg: "bg-terminal-dim/8",
+                    dot: "bg-terminal-dim",
+                    label: "text-terminal-dim",
+                    value: "text-terminal-dim",
+                  },
+                }[family];
+                return (
+                  <div
+                    key={b.provider}
+                    className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md ${chip.bg}`}
                   >
-                    {b.label}
-                  </span>
-                  <span
-                    className={`text-[10px] font-mono font-bold tabular-nums ${b.provider === "claude-code" ? "text-terminal-orange" : b.provider === "cursor" ? "text-terminal-blue" : "text-terminal-dim"}`}
-                  >
-                    {b.count}
-                  </span>
-                </div>
-              ))}
+                    <span className={`w-1.5 h-1.5 rounded-full ${chip.dot}`} />
+                    <span className={`text-[10px] font-mono tabular-nums ${chip.label}`}>
+                      {b.label}
+                    </span>
+                    <span className={`text-[10px] font-mono font-bold tabular-nums ${chip.value}`}>
+                      {b.count}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           </div>
 

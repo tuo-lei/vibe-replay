@@ -17,6 +17,8 @@ import {
   formatCompactDuration,
   parseCachedList,
   projectName,
+  providerBarClass,
+  providerDisplayName,
   shortModelName,
 } from "./dashboard-utils";
 import { useScanInsightsContext } from "./InsightsPanel";
@@ -516,11 +518,7 @@ function ShareCard({
     const entries = Object.entries(providers);
     if (entries.length === 0) return "";
     entries.sort((a, b) => b[1] - a[1]);
-    const labels: Record<string, string> = {
-      "claude-code": "Claude Code",
-      cursor: "Cursor",
-    };
-    return entries.map(([k]) => labels[k] || k).join(" + ");
+    return entries.map(([k]) => providerDisplayName(k)).join(" + ");
   }, [providers]);
   const metricQuality = useMemo(
     () => buildAggregateMetricQuality(dataQualityNotes),
@@ -1085,12 +1083,7 @@ function ProviderBreakdown({ providers }: { providers: Record<string, number> })
       Object.entries(providers)
         .map(([provider, count]) => ({
           provider,
-          label:
-            provider === "claude-code"
-              ? "Claude Code"
-              : provider === "cursor"
-                ? "Cursor"
-                : provider,
+          label: providerDisplayName(provider),
           count,
         }))
         .sort((a, b) => b.count - a.count),
@@ -1099,11 +1092,6 @@ function ProviderBreakdown({ providers }: { providers: Record<string, number> })
   const total = entries.reduce((a, b) => a + b.count, 0);
 
   if (entries.length === 0) return null;
-
-  const colors: Record<string, string> = {
-    "claude-code": "bg-terminal-orange",
-    cursor: "bg-terminal-blue",
-  };
 
   return (
     <div className="space-y-3">
@@ -1119,7 +1107,7 @@ function ProviderBreakdown({ providers }: { providers: Record<string, number> })
             </div>
             <div className="h-2 rounded-full bg-terminal-surface-2 overflow-hidden">
               <div
-                className={`h-full rounded-full ${colors[e.provider] || "bg-terminal-dim"} transition-all duration-500`}
+                className={`h-full rounded-full ${providerBarClass(e.provider)} transition-all duration-500`}
                 style={{ width: `${pct}%`, opacity: 0.7 }}
               />
             </div>

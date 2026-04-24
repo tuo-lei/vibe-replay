@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { ReplaySession } from "../types";
+import { providerDisplayName } from "./dashboard-utils";
 import { formatDuration } from "./StatsPanel";
 
 interface Props {
@@ -8,11 +9,7 @@ interface Props {
   onViewInsights?: () => void;
 }
 
-function formatProviderLabel(provider: string): string {
-  if (provider === "claude-code") return "Claude Code";
-  if (provider === "cursor") return "Cursor";
-  return provider;
-}
+const formatProviderLabel = providerDisplayName;
 
 export default function LandingHero({ session, onStart, onViewInsights }: Props) {
   const { meta, scenes } = session;
