@@ -96,7 +96,9 @@ async function runGitHubExport(
 }
 
 const DEV_MENU_ENABLED = process.env.VIBE_REPLAY_DEV_MENU === "1";
-const SESSION_DISCOVERY_CACHE_KEY = "session-discovery-v1";
+// Bumped v1 → v2 when the Cowork provider was added so picker caches populated
+// before Cowork existed don't silently hide the new sessions.
+const SESSION_DISCOVERY_CACHE_KEY = "session-discovery-v2";
 
 function normalizePromptTitle(value?: string): string {
   return normalizeTitle(cleanPromptText(value || "")) || "";

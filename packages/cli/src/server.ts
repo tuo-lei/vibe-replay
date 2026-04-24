@@ -778,7 +778,10 @@ export async function startServer(
   // Read once at startup — changes to ~/.claude/settings.json require server restart
   const cleanupPeriodDays = await getClaudeCodeCleanupPeriod();
   const cacheKeySuffix = createHash("sha1").update(baseDir).digest("hex").slice(0, 12);
-  const sourcesCacheKey = `dashboard-sources-v1-${cacheKeySuffix}`;
+  // Bumped v1 → v2 when the Cowork provider was added: old caches omit
+  // Cowork sessions entirely and `isCacheFresh` would skip rediscovery,
+  // so the dashboard would keep serving a provider-incomplete list.
+  const sourcesCacheKey = `dashboard-sources-v2-${cacheKeySuffix}`;
   const replaysCacheKey = `dashboard-replays-v1-${cacheKeySuffix}`;
   const scanResultsCacheKey = `dashboard-scan-results-v1-${cacheKeySuffix}`;
   const insightsCacheKey = `dashboard-insights-v1-${cacheKeySuffix}`;
