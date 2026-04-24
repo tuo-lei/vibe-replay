@@ -18,8 +18,23 @@ export async function parseClaudeCodeSession(
     allLines.push(...content.split("\n").filter((l) => l.trim()));
   }
 
-  const lines = allLines;
+  return parseClaudeCodeLines(allLines, { subagentsSourcePath: paths[0] });
+}
 
+/** Options for parseClaudeCodeLines. */
+export interface ParseClaudeCodeLinesOptions {
+  /**
+   * JSONL file path used to locate the sibling `agents/` directory that stores
+   * subagent transcripts. Only Claude Code's project-dir layout exposes this;
+   * omit it for sources (e.g. Cowork audit.jsonl) that don't have subagent files.
+   */
+  subagentsSourcePath?: string;
+}
+
+export async function parseClaudeCodeLines(
+  lines: string[],
+  options: ParseClaudeCodeLinesOptions = {},
+): Promise<ProviderParseResult> {
   let sessionId = "";
   let slug = "";
   let cwd = "";
@@ -348,7 +363,9 @@ export async function parseClaudeCodeSession(
 
   // Read subagent JSONL files: extract full conversations + token usage.
   // Must happen before enrichment so subAgentData is available.
-  const subAgentData = await readSubagents(paths[0], usageByMsgId);
+  const subAgentData = options.subagentsSourcePath
+    ? await readSubagents(options.subagentsSourcePath, usageByMsgId)
+    : new Map<string, SubAgentParsed>();
 
   // Build assistant turns with enriched blocks
   const assistantTurns: { turn: ParsedTurn; timestamp: string }[] = [];

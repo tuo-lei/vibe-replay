@@ -1,0 +1,12 @@
+{
+  "sessionId": "local_desktop-session-abc123",
+  "cliSessionId": "desktop-cli-session-001",
+  "cwd": "/Users/test/desktop-project",
+  "originCwd": "/Users/test/desktop-project",
+  "createdAt": 1750000000000,
+  "lastActivityAt": 1750000150000,
+  "model": "claude-opus-4-7",
+  "isArchived": false,
+  "title": "Add desktop session support feature",
+  "permissionMode": "default"
+}

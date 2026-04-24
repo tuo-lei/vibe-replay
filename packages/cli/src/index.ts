@@ -14,7 +14,7 @@ import {
 import { generateGitHubGif } from "./formatters/gif.js";
 import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.js";
 import { generateOutput } from "./generator.js";
-import { getAllProviders, getProvider } from "./providers/index.js";
+import { deduplicateSessionsByProvider, getAllProviders, getProvider } from "./providers/index.js";
 import {
   getAuthFilePath,
   loadAuthToken,
@@ -96,7 +96,10 @@ async function runGitHubExport(
 }
 
 const DEV_MENU_ENABLED = process.env.VIBE_REPLAY_DEV_MENU === "1";
-const SESSION_DISCOVERY_CACHE_KEY = "session-discovery-v1";
+// Bumped v2 → v3 alongside the Cowork sessionId fix (see server.ts
+// sourcesCacheKey comment). Old caches carry the wrong Cowork identity and
+// must be thrown out so the next discovery sweep writes a correct one.
+const SESSION_DISCOVERY_CACHE_KEY = "session-discovery-v3";
 
 function normalizePromptTitle(value?: string): string {
   return normalizeTitle(cleanPromptText(value || "")) || "";
@@ -131,8 +134,10 @@ async function discoverAllSessions(): Promise<SessionInfo[]> {
     const sessions = await provider.discover();
     allSessions.push(...sessions);
   }
-  allSessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-  return allSessions;
+
+  const deduped = deduplicateSessionsByProvider(allSessions);
+  deduped.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  return deduped;
 }
 
 program
@@ -258,9 +263,13 @@ program
               const providerBadge =
                 provider === "claude-code"
                   ? chalk.hex("#D97706")("claude")
-                  : provider === "cursor"
-                    ? chalk.hex("#0096FF")("cursor")
-                    : chalk.yellow(provider);
+                  : provider === "claude-desktop"
+                    ? chalk.hex("#C084FC")("desktop")
+                    : provider === "claude-cowork"
+                      ? chalk.hex("#F472B6")("cowork")
+                      : provider === "cursor"
+                        ? chalk.hex("#0096FF")("cursor")
+                        : chalk.yellow(provider);
               replayEntries.push({
                 name: `${providerBadge} ${chalk.dim(`[${time}]`)} ${chalk.white(title)} ${chalk.dim(`(${scenes} scenes)`)}`,
                 value: slug,
@@ -875,22 +884,27 @@ function formatSessionChoices(sessions: SessionInfo[], cleanupPeriodDays?: numbe
       const sizeKB = Math.round(s.fileSize / 1024);
       const prompt = s.firstPrompt.replace(/\n/g, " ").slice(0, 50);
 
-      // Claude: orange-brown (#D97706), Cursor: blue (#0096FF)
+      // Claude: orange-brown (#D97706), Desktop: purple (#C084FC),
+      // Cowork: pink (#F472B6), Cursor: blue (#0096FF)
       const providerBadge =
         s.provider === "claude-code"
           ? chalk.hex("#D97706")("claude")
-          : s.provider === "cursor"
-            ? chalk.hex("#0096FF")("cursor")
-            : chalk.yellow(s.provider);
+          : s.provider === "claude-desktop"
+            ? chalk.hex("#C084FC")("desktop")
+            : s.provider === "claude-cowork"
+              ? chalk.hex("#F472B6")("cowork")
+              : s.provider === "cursor"
+                ? chalk.hex("#0096FF")("cursor")
+                : chalk.yellow(s.provider);
 
       const titleStr = s.title ? chalk.white(` "${s.title}"`) : "";
 
       const fileCount = s.filePaths.length > 1 ? chalk.dim(` [${s.filePaths.length} parts]`) : "";
       const sqliteBadge = s.hasSqlite ? chalk.green(" db") : "";
 
-      // Cleanup expiry badge for Claude Code sessions
+      // Cleanup expiry badge for Claude Code / Desktop sessions (both share the same JSONL files)
       let expiryBadge = "";
-      if (cleanupPeriodDays && s.provider === "claude-code") {
+      if (cleanupPeriodDays && (s.provider === "claude-code" || s.provider === "claude-desktop")) {
         const daysLeft = computeDaysUntilCleanup(s.timestamp, cleanupPeriodDays);
         if (daysLeft != null && daysLeft <= WARNING_THRESHOLD_DAYS) {
           const label = daysLeft === 0 ? "today" : `${daysLeft}d`;

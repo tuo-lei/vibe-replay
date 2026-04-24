@@ -364,17 +364,68 @@ export function navigateTo(
 
 // ─── Shared UI helpers ────────────────────────────────────────────────
 
+// All Claude sources (CLI, Desktop Code tab, Desktop Cowork) share the same
+// orange tint so they read as one family. Labels differentiate the sub-kind.
 export const PROVIDER_BADGE_COLORS: Record<string, string> = {
   "claude-code": "bg-terminal-orange-subtle text-terminal-orange",
+  "claude-desktop": "bg-terminal-orange-subtle text-terminal-orange",
+  "claude-cowork": "bg-terminal-orange-subtle text-terminal-orange",
   cursor: "bg-terminal-blue-subtle text-terminal-blue",
 };
 
+const PROVIDER_BADGE_LABELS: Record<string, string> = {
+  "claude-code": "Claude",
+  "claude-desktop": "Desktop",
+  "claude-cowork": "Cowork",
+  cursor: "Cursor",
+};
+
+// Full names for contexts where the short pill label is too terse — insights
+// page header, provider breakdown rows, landing hero byline.
+const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
+  "claude-code": "Claude Code",
+  "claude-desktop": "Claude Desktop",
+  "claude-cowork": "Claude Cowork",
+  cursor: "Cursor",
+};
+
+// Solid (non-subtle) bar colors used by the provider breakdown bar chart.
+// Keep the Claude family on the orange family so it reads as one group.
+const PROVIDER_BAR_COLORS: Record<string, string> = {
+  "claude-code": "bg-terminal-orange",
+  "claude-desktop": "bg-terminal-orange",
+  "claude-cowork": "bg-terminal-orange",
+  cursor: "bg-terminal-blue",
+};
+
+// Provider "color family" for home-page chip UI that composes several tint
+// variants together (bg/8, text/80, text, dot). Returning the token name keeps
+// Tailwind's static-class extraction happy and avoids template-string bugs.
+const PROVIDER_FAMILY: Record<string, "orange" | "blue" | "dim"> = {
+  "claude-code": "orange",
+  "claude-desktop": "orange",
+  "claude-cowork": "orange",
+  cursor: "blue",
+};
+
+export function providerFamily(provider: string): "orange" | "blue" | "dim" {
+  return PROVIDER_FAMILY[provider] || "dim";
+}
+
 export function providerBadgeLabel(provider: string): string {
-  return provider === "claude-code" ? "Claude" : provider === "cursor" ? "Cursor" : provider;
+  return PROVIDER_BADGE_LABELS[provider] || provider;
 }
 
 export function providerBadgeClass(provider: string): string {
   return PROVIDER_BADGE_COLORS[provider] || "bg-terminal-surface text-terminal-dim";
+}
+
+export function providerDisplayName(provider: string): string {
+  return PROVIDER_DISPLAY_NAMES[provider] || provider;
+}
+
+export function providerBarClass(provider: string): string {
+  return PROVIDER_BAR_COLORS[provider] || "bg-terminal-dim";
 }
 
 // ─── Archive helpers ────────────────────────────────────────────────

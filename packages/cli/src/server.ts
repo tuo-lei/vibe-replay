@@ -778,7 +778,11 @@ export async function startServer(
   // Read once at startup — changes to ~/.claude/settings.json require server restart
   const cleanupPeriodDays = await getClaudeCodeCleanupPeriod();
   const cacheKeySuffix = createHash("sha1").update(baseDir).digest("hex").slice(0, 12);
-  const sourcesCacheKey = `dashboard-sources-v1-${cacheKeySuffix}`;
+  // Bumped v2 → v3 after fixing the Cowork sessionId derivation: earlier v2
+  // caches stored cliSessionId (inner-subprocess UUID) as the Cowork session's
+  // identity, which never matches what the parser reads from audit.jsonl and
+  // permanently broke replay-to-source linking. Bumping discards those caches.
+  const sourcesCacheKey = `dashboard-sources-v3-${cacheKeySuffix}`;
   const replaysCacheKey = `dashboard-replays-v1-${cacheKeySuffix}`;
   const scanResultsCacheKey = `dashboard-scan-results-v1-${cacheKeySuffix}`;
   const insightsCacheKey = `dashboard-insights-v1-${cacheKeySuffix}`;
