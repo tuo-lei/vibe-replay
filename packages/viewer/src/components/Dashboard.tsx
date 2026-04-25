@@ -1487,23 +1487,14 @@ function SessionsPanel() {
   const visibleSources = showArchived ? sources : sources.filter((s) => !archivedSlugs.has(s.slug));
 
   // Group by project, rolling up auto-created Claude agent worktrees under
-  // their parent project so the sidebar isn't drowned by sandbox dirs.
-  // Track distinct worktree paths (not session count) per parent so the
-  // `+N wt` badge reads as "N sandboxes" rather than "N sessions".
+  // their parent project so the sidebar isn't drowned by sandbox dirs. The
+  // per-session WORKTREE pill in the right pane already conveys which sessions
+  // ran in a sandbox, so we don't surface a parent-level count here.
   const byProject = new Map<string, SourceSession[]>();
-  const worktreePathsByProject = new Map<string, Set<string>>();
   for (const s of visibleSources) {
     const key = rollupProject(s.project);
     if (!byProject.has(key)) byProject.set(key, []);
     byProject.get(key)?.push(s);
-    if (key !== s.project) {
-      let paths = worktreePathsByProject.get(key);
-      if (!paths) {
-        paths = new Set();
-        worktreePathsByProject.set(key, paths);
-      }
-      paths.add(s.project);
-    }
   }
   const projectEntries = [...byProject.entries()].sort((a, b) => {
     const aTime = a[1][0]?.timestamp || "";
@@ -1636,7 +1627,6 @@ function SessionsPanel() {
           {/* Per-project items */}
           {projectEntries.map(([project, sessions]) => {
             const replayCount = sessions.filter((s) => s.existingReplay).length;
-            const worktreeCount = worktreePathsByProject.get(project)?.size ?? 0;
             const isActive = selectedProjectKey === project;
             const label = projectLabels.get(project) || projectName(project);
             // After worktree rollup, sessions[0] may be from a deleted worktree;
@@ -1701,14 +1691,6 @@ function SessionsPanel() {
                       className={`text-xs font-mono ${isActive ? "text-terminal-green" : "text-terminal-dimmer"}`}
                     >
                       {replayCount} {replayCount === 1 ? "replay" : "replays"}
-                    </span>
-                  )}
-                  {worktreeCount > 0 && (
-                    <span
-                      className={`text-xs font-mono ${isActive ? "text-terminal-dim" : "text-terminal-dimmer"}`}
-                      title={`${worktreeCount} agent worktree${worktreeCount === 1 ? "" : "s"} merged in (sandboxes Claude opened against this project)`}
-                    >
-                      +{worktreeCount} wt
                     </span>
                   )}
                 </div>
@@ -2317,21 +2299,11 @@ function ReplaysPanel() {
     : sessions.filter((s) => !archivedSlugs.has(s.slug));
 
   // Group by project, rolling up Claude agent worktrees under their parent.
-  // Count distinct worktree paths so `+N wt` reads as "N sandboxes".
   const byProject = new Map<string, SessionSummary[]>();
-  const worktreePathsByProject = new Map<string, Set<string>>();
   for (const s of visibleSessions) {
     const key = rollupProject(s.project);
     if (!byProject.has(key)) byProject.set(key, []);
     byProject.get(key)?.push(s);
-    if (key !== s.project) {
-      let paths = worktreePathsByProject.get(key);
-      if (!paths) {
-        paths = new Set();
-        worktreePathsByProject.set(key, paths);
-      }
-      paths.add(s.project);
-    }
   }
   const projectEntries = [...byProject.entries()].sort((a, b) => {
     const aTime = a[1][0]?.startTime || "";
@@ -2430,7 +2402,6 @@ function ReplaysPanel() {
             const isActive = selectedProjectKey === project;
             const label = projectLabels.get(project) || projectName(project);
             const publishedCount = replays.filter((s) => s.gist?.gistId).length;
-            const worktreeCount = worktreePathsByProject.get(project)?.size ?? 0;
             return (
               <button
                 key={project}
@@ -2473,14 +2444,6 @@ function ReplaysPanel() {
                       className={`text-xs font-mono ${isActive ? "text-terminal-purple" : "text-terminal-dimmer"}`}
                     >
                       {publishedCount} published
-                    </span>
-                  )}
-                  {worktreeCount > 0 && (
-                    <span
-                      className={`text-xs font-mono ${isActive ? "text-terminal-dim" : "text-terminal-dimmer"}`}
-                      title={`${worktreeCount} agent worktree${worktreeCount === 1 ? "" : "s"} merged in (sandboxes Claude opened against this project)`}
-                    >
-                      +{worktreeCount} wt
                     </span>
                   )}
                 </div>

@@ -517,6 +517,64 @@ export function rollupProject(project: string): string {
   return agentWorktreeParent(project) ?? project;
 }
 
+export interface TopProjectEntry {
+  project: string;
+  sessions: number;
+  cost: number;
+  prompts: number;
+  durationMs: number;
+  toolCalls: number;
+  edits: number;
+  branchCount: number;
+  prCount: number;
+  memoryFileCount: number;
+  lastActivity: string;
+  sessionsPerDay: Record<string, number>;
+}
+
+/**
+ * Roll up Claude agent worktree entries under their parent project. Sums
+ * additive metrics (`branchCount`/`prCount` may double-count when a worktree
+ * shares the parent's branch — accepted as an inherent approximation since
+ * the scanner counts per-path), takes the max of `lastActivity` and
+ * `memoryFileCount` (parent typically owns the memory files), and merges
+ * `sessionsPerDay` by day key. The resulting entry's `project` is the
+ * parent path.
+ */
+export function rollupTopProjects(projects: readonly TopProjectEntry[]): TopProjectEntry[] {
+  const byParent = new Map<string, TopProjectEntry>();
+
+  for (const p of projects) {
+    const key = rollupProject(p.project);
+    const existing = byParent.get(key);
+    if (existing) {
+      existing.sessions += p.sessions;
+      existing.cost += p.cost;
+      existing.prompts += p.prompts;
+      existing.durationMs += p.durationMs;
+      existing.toolCalls += p.toolCalls;
+      existing.edits += p.edits;
+      existing.branchCount += p.branchCount;
+      existing.prCount += p.prCount;
+      existing.memoryFileCount = Math.max(existing.memoryFileCount, p.memoryFileCount);
+      if ((p.lastActivity || "") > (existing.lastActivity || "")) {
+        existing.lastActivity = p.lastActivity;
+      }
+      for (const [day, count] of Object.entries(p.sessionsPerDay)) {
+        existing.sessionsPerDay[day] = (existing.sessionsPerDay[day] || 0) + count;
+      }
+    } else {
+      byParent.set(key, {
+        ...p,
+        project: key,
+        sessionsPerDay: { ...p.sessionsPerDay },
+      });
+    }
+  }
+
+  return [...byParent.values()];
+}
+
 function specialProjectLabel(project: string): string | null {
   const normalized = project.replace(/\/$/, "");
   if (!normalized) return null;

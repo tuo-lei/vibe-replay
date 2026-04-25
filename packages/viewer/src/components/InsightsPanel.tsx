@@ -19,7 +19,12 @@ import {
 } from "react";
 import { localDayKey } from "../utils/date";
 import { DataQualityIndicator } from "./DataQualityIndicator";
-import { CACHE_REFRESH_TTL_MS, isCacheFresh, shortModelName } from "./dashboard-utils";
+import {
+  CACHE_REFRESH_TTL_MS,
+  isCacheFresh,
+  rollupTopProjects,
+  shortModelName,
+} from "./dashboard-utils";
 import { formatDuration } from "./StatsPanel";
 
 // ─── Types (mirror the server scanner types) ────────────────────────
@@ -653,6 +658,13 @@ export function ProjectInsightsPanel({ insights }: { insights: ProjectInsights }
 
 export function UserInsightsPanel({ insights }: { insights: UserInsights }) {
   const [expanded, setExpanded] = useState(false);
+  const rolledTopProjects = useMemo(
+    () =>
+      [...rollupTopProjects(insights.topProjects)]
+        .sort((a, b) => b.sessions - a.sessions)
+        .slice(0, 8),
+    [insights.topProjects],
+  );
 
   if (insights.totalSessions === 0) return null;
 
@@ -716,7 +728,7 @@ export function UserInsightsPanel({ insights }: { insights: UserInsights }) {
                 Top projects
               </div>
               <div className="space-y-1.5">
-                {insights.topProjects.slice(0, 8).map((p) => {
+                {rolledTopProjects.map((p) => {
                   const name = p.project.split("/").pop() || p.project;
                   return (
                     <div key={p.project} className="flex items-center gap-2 text-xs">
@@ -843,6 +855,15 @@ export function TitleInsightsHeader({
 
   const title = pi ? pi.project.split("/").pop() || pi.project : "All Projects";
   const subtitle = pi ? pi.project : `${ui?.totalProjects ?? 0} projects`;
+
+  const uiTopProjects = ui?.topProjects;
+  const rolledTopProjects = useMemo(
+    () =>
+      uiTopProjects
+        ? [...rollupTopProjects(uiTopProjects)].sort((a, b) => b.sessions - a.sessions).slice(0, 8)
+        : [],
+    [uiTopProjects],
+  );
 
   if (sessionCount === 0) return null;
 
@@ -1081,7 +1102,7 @@ export function TitleInsightsHeader({
                 Top projects
               </div>
               <div className="space-y-1">
-                {ui.topProjects.slice(0, 8).map((p) => {
+                {rolledTopProjects.map((p) => {
                   const name = p.project.split("/").pop() || p.project;
                   return (
                     <div key={p.project} className="flex items-center gap-2 text-xs">
