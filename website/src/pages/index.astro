@@ -7,9 +7,56 @@ import Hero from "../components/Hero.astro";
 import HowItWorks from "../components/HowItWorks.astro";
 import Plugin from "../components/Plugin.astro";
 import Layout from "../layouts/Layout.astro";
+
+const siteBase = import.meta.env.SITE;
+const homeJsonLd = [
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": "vibe-replay",
+    "url": siteBase,
+    "description":
+      "Replay, analyze, and share your Claude Code and Cursor AI coding sessions as interactive web replays.",
+    "publisher": {
+      "@type": "Organization",
+      "name": "vibe-replay",
+      "url": siteBase,
+      "logo": {
+        "@type": "ImageObject",
+        "url": new URL("/logo.png", siteBase).href,
+      },
+    },
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "vibe-replay",
+    "url": siteBase,
+    "description":
+      "Replay, analyze, and share your Claude Code and Cursor AI coding sessions as interactive web replays. One command, one self-contained HTML file. Free and open source.",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "macOS, Linux, Windows",
+    "downloadUrl": "https://www.npmjs.com/package/vibe-replay",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD",
+    },
+    "creator": {
+      "@type": "Organization",
+      "name": "vibe-replay",
+      "url": siteBase,
+    },
+    "license": "https://github.com/tuo-lei/vibe-replay/blob/main/LICENSE",
+  },
+];
 ---
 
-<Layout title="vibe-replay - Turn AI coding sessions into shareable replays" description="Replay, analyze, and share your Claude Code and Cursor AI coding sessions as interactive web replays. One command, one self-contained HTML file. Free and open source.">
+<Layout
+  title="vibe-replay - Turn AI coding sessions into shareable replays"
+  description="Replay, analyze, and share your Claude Code and Cursor AI coding sessions as interactive web replays. One command, one self-contained HTML file. Free and open source."
+  jsonLd={homeJsonLd}
+>
   <main>
     <Hero />
     <HowItWorks />

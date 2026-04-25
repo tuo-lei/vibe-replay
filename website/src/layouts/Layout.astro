@@ -11,7 +11,8 @@ interface Props {
     publishedTime: string;
     author: string;
   };
-  jsonLd?: Record<string, unknown>;
+  jsonLd?: Record<string, unknown> | Record<string, unknown>[];
+  noindex?: boolean;
 }
 
 const {
@@ -22,6 +23,7 @@ const {
   ogType = "website",
   article,
   jsonLd: jsonLdProp,
+  noindex = false,
 } = Astro.props;
 
 const siteBase = import.meta.env.SITE;
@@ -40,6 +42,7 @@ const ogImage = ogImageProp
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content={description} />
     <meta name="theme-color" content="#00e5a0" />
+    {noindex && <meta name="robots" content="noindex, follow" />}
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="canonical" href={canonicalURL} />
     <link rel="alternate" type="application/rss+xml" title="vibe-replay blog" href="/rss.xml" />
@@ -66,25 +69,33 @@ const ogImage = ogImageProp
     <meta name="twitter:image:alt" content="vibe-replay — AI coding session replays" />
 
     <!-- Structured Data -->
-    <script type="application/ld+json" set:html={JSON.stringify(jsonLdProp ?? {
-      "@context": "https://schema.org",
-      "@type": "WebApplication",
-      "name": "vibe-replay",
-      "url": siteBase,
-      "description": description,
-      "applicationCategory": "DeveloperApplication",
-      "operatingSystem": "Any",
-      "offers": {
-        "@type": "Offer",
-        "price": "0",
-        "priceCurrency": "USD"
-      },
-      "creator": {
-        "@type": "Organization",
+    {(() => {
+      const defaultJsonLd = {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
         "name": "vibe-replay",
-        "url": siteBase
-      }
-    })} />
+        "url": siteBase,
+        "description": description,
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Any",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD",
+        },
+        "creator": {
+          "@type": "Organization",
+          "name": "vibe-replay",
+          "url": siteBase,
+        },
+      };
+      const blocks = jsonLdProp
+        ? (Array.isArray(jsonLdProp) ? jsonLdProp : [jsonLdProp])
+        : [defaultJsonLd];
+      return blocks.map((b) => (
+        <script type="application/ld+json" set:html={JSON.stringify(b)} />
+      ));
+    })()}
 
     <!-- Preload hero LCP image (homepage only) -->
     {Astro.url.pathname === "/" && (
