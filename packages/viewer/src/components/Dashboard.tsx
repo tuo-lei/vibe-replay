@@ -901,6 +901,9 @@ function ReplayCard({
   }, []);
   useOutsideClick(menuRef, closeMenu, menuOpen);
 
+  const displayProject = rollupProject(s.project);
+  const isWorktreeReplay = displayProject !== s.project;
+
   return (
     <div
       onClick={onOpen}
@@ -1184,7 +1187,15 @@ function ReplayCard({
       {/* Row 4: identity */}
       <div className="flex items-center gap-2 text-xs font-mono text-terminal-dimmer flex-wrap">
         <ProviderBadge provider={s.provider} />
-        <span>{s.project}</span>
+        <span title={isWorktreeReplay ? s.project : undefined}>{displayProject}</span>
+        {isWorktreeReplay && (
+          <span
+            className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple uppercase tracking-wider"
+            title={`Claude agent worktree: ${s.project}`}
+          >
+            worktree
+          </span>
+        )}
         <span className="text-terminal-border">&middot;</span>
         <span>{formatDate(s.startTime)}</span>
         {s.model && (
