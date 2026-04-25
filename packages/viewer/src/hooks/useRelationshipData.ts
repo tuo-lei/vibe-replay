@@ -1,30 +1,14 @@
 /**
  * Hook that fetches per-session scan results for relationship visualizations.
- * Uses /api/scan/results to get SessionScanResult[] with startTime, endTime,
- * filesModified, etc. — data not available in the aggregated InsightsPanel context.
+ * Uses /api/scan/results which returns SessionScanResult shape (defined in
+ * packages/cli/src/scanner.ts) — the wire-format subset is canonicalized as
+ * SessionScanWireData in @vibe-replay/types.
  */
 
+import type { SessionScanWireData } from "@vibe-replay/types";
 import { useEffect, useState } from "react";
 
-export interface ScanResultSession {
-  sessionId: string;
-  provider: string;
-  project: string;
-  slug: string;
-  title?: string;
-  firstPrompt?: string;
-  startTime?: string;
-  endTime?: string;
-  durationMs?: number;
-  gitBranch?: string;
-  model?: string;
-  promptCount: number;
-  toolCallCount: number;
-  editCount: number;
-  filesModified: Array<{ file: string; count: number }>;
-  costEstimate?: number;
-  subAgentCount: number;
-}
+export type ScanResultSession = SessionScanWireData;
 
 export interface RelationshipData {
   sessions: ScanResultSession[];

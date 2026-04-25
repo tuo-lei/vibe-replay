@@ -8,23 +8,9 @@
 
 import { useMemo, useState } from "react";
 import { type ScanResultSession, useRelationshipData } from "../hooks/useRelationshipData";
+import { shortName, timeAgo } from "../utils/format";
 
 // ─── Shared helpers ──────────────────────────────────────────────────
-
-function shortName(project: string): string {
-  return project.split("/").pop() || project;
-}
-
-function timeAgo(iso?: string): string {
-  if (!iso) return "";
-  const ms = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(ms / 60000);
-  if (mins < 1) return "now";
-  if (mins < 60) return `${mins}m`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h`;
-  return `${Math.floor(hours / 24)}d`;
-}
 
 function fmtDate(iso?: string): string {
   if (!iso) return "";
@@ -503,6 +489,12 @@ interface DispatchNode {
   depth: number;
 }
 
+// Grace window for the heuristic: a child session may continue a few minutes
+// past the parent's recorded endTime due to async shutdown / clock skew between
+// parent and sub-agent JSONL writes. Wide enough to catch real children, small
+// enough to avoid pulling in unrelated later sessions.
+const DISPATCH_END_GRACE_MS = 5 * 60 * 1000;
+
 function buildDispatchTree(sessions: ScanResultSession[]): DispatchNode[] {
   // Claude Code sub-agent detection: sessions with subAgentCount > 0 are parents.
   // Without explicit parent-child IDs in the scan results, we infer relationships
@@ -529,7 +521,7 @@ function buildDispatchTree(sessions: ScanResultSession[]): DispatchNode[] {
       const childEnd = child.endTime
         ? new Date(child.endTime).getTime()
         : childStart + (child.durationMs ?? 0);
-      if (childStart >= parentStart && childEnd <= parentEnd + 300000) {
+      if (childStart >= parentStart && childEnd <= parentEnd + DISPATCH_END_GRACE_MS) {
         children.push({ session: child, children: [], depth: 1 });
         usedIds.add(child.sessionId);
       }
