@@ -5,7 +5,7 @@
 import { useMemo, useState } from "react";
 import { localDayKey } from "../utils/date";
 import { timeAgo } from "../utils/format";
-import { navigateTo, rollupTopProjects } from "./dashboard-utils";
+import { navigateTo, projectName, rollupTopProjects } from "./dashboard-utils";
 import { useScanInsightsContext } from "./InsightsPanel";
 import SessionRelationshipsView from "./SessionRelationshipsView";
 import { formatDuration } from "./StatsPanel";
@@ -19,7 +19,7 @@ type PanelMode = "list" | "timeline" | "files";
 const PROJECT_VIEW_TABS: { id: PanelMode; label: string }[] = [
   { id: "list", label: "List" },
   { id: "timeline", label: "Timeline" },
-  { id: "files", label: "Files" },
+  { id: "files", label: "Hot Files" },
 ];
 
 // ─── Activity sparkline (compact) ───────────────────────────────────
@@ -63,6 +63,10 @@ function fmtNum(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
+}
+
+function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
+  return count === 1 ? singular : pluralForm;
 }
 
 // ─── Main Component ─────────────────────────────────────────────────
@@ -112,8 +116,12 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
   };
 
   return (
-    <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden">
-      <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 space-y-4">
+    <div className="relative flex-1 min-w-0 overflow-y-auto overflow-x-hidden">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute inset-x-0 top-0 h-56 bg-gradient-to-b from-terminal-green-subtle via-transparent to-transparent opacity-70" />
+        <div className="absolute inset-0 bg-dot-grid opacity-40" />
+      </div>
+      <div className="relative max-w-6xl mx-auto px-4 md:px-6 py-6 space-y-4">
         {/* Header */}
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -121,16 +129,19 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
               All Projects
               <span className="ml-2 text-terminal-dimmer font-normal">({projects.length})</span>
             </h2>
+            <p className="mt-1 text-xs font-mono text-terminal-dimmer">
+              Recent work, timelines, and hotspots across your AI sessions.
+            </p>
           </div>
-          <div className="flex flex-wrap items-center gap-1 text-[10px] font-sans">
+          <div className="inline-flex w-fit items-center rounded-xl bg-terminal-surface/80 p-0.5 shadow-layer-sm backdrop-blur-sm">
             {PROJECT_VIEW_TABS.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setMode(tab.id)}
-                className={`px-2.5 py-1.5 rounded-lg transition-colors ${
+                className={`rounded-lg px-3.5 py-1.5 text-xs font-sans font-semibold transition-all duration-200 ease-material ${
                   mode === tab.id
-                    ? "bg-terminal-green-subtle text-terminal-green"
-                    : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-2"
+                    ? "bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
+                    : "text-terminal-dim hover:text-terminal-text"
                 }`}
               >
                 {tab.label}
@@ -155,13 +166,15 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
         {mode === "list" && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {projects.map((p) => {
-              const name = p.project.split("/").pop() || p.project;
+              const name = projectName(p.project);
               return (
                 <button
                   key={p.project}
                   onClick={() => handleProjectClick(p.project)}
-                  className="text-left bg-terminal-surface rounded-xl p-4 shadow-layer-sm hover:bg-terminal-surface-hover transition-all duration-200 group border-l-2 border-terminal-green/40 hover:border-terminal-green"
+                  className="hover-lift group relative overflow-hidden rounded-xl bg-gradient-to-br from-terminal-surface via-terminal-surface to-terminal-bg/70 p-4 text-left shadow-layer-sm transition-all duration-200 ease-material hover:bg-terminal-surface-hover"
                 >
+                  <span className="absolute inset-y-3 left-0 w-0.5 rounded-r-full bg-gradient-to-b from-terminal-green to-terminal-blue opacity-50 transition-opacity group-hover:opacity-100" />
+                  <span className="pointer-events-none absolute -right-10 -top-12 h-28 w-28 rounded-full bg-terminal-green/5 blur-2xl opacity-0 transition-opacity group-hover:opacity-100" />
                   {/* Project name + last activity */}
                   <div className="flex items-start justify-between gap-2 mb-3">
                     <div className="min-w-0">
@@ -183,9 +196,7 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
                   <div className="flex items-center gap-3 text-xs font-mono flex-wrap mb-3">
                     <span className="text-terminal-text tabular-nums">
                       {p.sessions}{" "}
-                      <span className="text-terminal-dimmer">
-                        session{p.sessions !== 1 ? "s" : ""}
-                      </span>
+                      <span className="text-terminal-dimmer">{plural(p.sessions, "session")}</span>
                     </span>
                     {p.durationMs > 0 && (
                       <span className="text-terminal-blue tabular-nums">
@@ -198,27 +209,36 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
                       </span>
                     )}
                     <span className="text-terminal-green tabular-nums">
-                      {fmtNum(p.prompts)} <span className="text-terminal-dimmer">prompts</span>
+                      {fmtNum(p.prompts)}{" "}
+                      <span className="text-terminal-dimmer">{plural(p.prompts, "prompt")}</span>
                     </span>
                   </div>
 
                   {/* Secondary stats */}
                   <div className="flex items-center gap-3 text-[10px] font-mono text-terminal-dimmer flex-wrap mb-2">
-                    {p.toolCalls > 0 && <span>{fmtNum(p.toolCalls)} tools</span>}
-                    {p.edits > 0 && <span>{fmtNum(p.edits)} edits</span>}
+                    {p.toolCalls > 0 && (
+                      <span>
+                        {fmtNum(p.toolCalls)} {plural(p.toolCalls, "tool")}
+                      </span>
+                    )}
+                    {p.edits > 0 && (
+                      <span>
+                        {fmtNum(p.edits)} {plural(p.edits, "edit")}
+                      </span>
+                    )}
                     {p.branchCount > 0 && (
                       <span>
-                        {p.branchCount} branch{p.branchCount !== 1 ? "es" : ""}
+                        {p.branchCount} {plural(p.branchCount, "branch", "branches")}
                       </span>
                     )}
                     {p.prCount > 0 && (
                       <span>
-                        {p.prCount} PR{p.prCount !== 1 ? "s" : ""}
+                        {p.prCount} {plural(p.prCount, "PR")}
                       </span>
                     )}
                     {p.memoryFileCount > 0 && (
                       <span>
-                        {p.memoryFileCount} memory file{p.memoryFileCount !== 1 ? "s" : ""}
+                        {p.memoryFileCount} Claude {p.memoryFileCount !== 1 ? "memories" : "memory"}
                       </span>
                     )}
                   </div>

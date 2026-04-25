@@ -218,6 +218,8 @@ export interface SessionScanWireData {
   subAgentCount: number;
   entrypoint?: string;
   prLinks?: PrLink[];
+  dataSource?: DataSource;
+  dataQualityNotes?: string[];
 }
 
 export interface ReplaySession {

@@ -6,9 +6,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { type ScanResultSession, useRelationshipData } from "../hooks/useRelationshipData";
-import { shortName } from "../utils/format";
 import { isAutomated, sessionScore } from "../utils/sessionSignals";
-import { rollupProject } from "./dashboard-utils";
+import {
+  cleanPrompt,
+  formatDataSourceLabel,
+  navigateTo,
+  normalizeTitleText,
+  projectName,
+  providerBadgeLabel,
+  rollupProject,
+} from "./dashboard-utils";
 
 // ─── Shared helpers ──────────────────────────────────────────────────
 
@@ -33,7 +40,46 @@ function fmtDuration(ms?: number): string {
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }
 
-// Stable project color palette — maps project index to a color class
+function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
+  return count === 1 ? singular : pluralForm;
+}
+
+function sessionTitle(s: ScanResultSession): string {
+  const title = normalizeTitleText(cleanPrompt(s.title || ""));
+  if (title) return title;
+  const firstPrompt = normalizeTitleText(cleanPrompt(s.firstPrompt || ""));
+  return firstPrompt || s.slug;
+}
+
+function sessionHasEstimatedTime(s: ScanResultSession): boolean {
+  if (s.durationMs == null) return true;
+  return (s.dataQualityNotes || []).some((note) =>
+    /duration is inferred|duration.*estimated|missing duration/i.test(note),
+  );
+}
+
+function sessionBadges(s: ScanResultSession): string[] {
+  const badges = [providerBadgeLabel(s.provider)];
+  const source = s.dataSource ? formatDataSourceLabel(false, s.dataSource) : "";
+  if (source) badges.push(source);
+  if (sessionHasEstimatedTime(s)) badges.push("estimated time");
+  return badges;
+}
+
+function rangeEmptyLabel(range: TimelineRange): string {
+  switch (range) {
+    case "1d":
+      return "the last 24 hours";
+    case "7d":
+      return "the last 7 days";
+    case "30d":
+      return "the last 30 days";
+    case "all":
+      return "this scan";
+  }
+}
+
+// Stable project palette using the same semantic accents as the rest of the dashboard.
 const PROJECT_COLORS = [
   {
     bg: "bg-terminal-green/20",
@@ -59,15 +105,12 @@ const PROJECT_COLORS = [
     text: "text-terminal-orange",
     solid: "#f97316",
   },
-  { bg: "bg-pink-500/20", border: "border-pink-500", text: "text-pink-500", solid: "#ec4899" },
-  { bg: "bg-cyan-500/20", border: "border-cyan-500", text: "text-cyan-500", solid: "#06b6d4" },
   {
-    bg: "bg-yellow-500/20",
-    border: "border-yellow-500",
-    text: "text-yellow-500",
-    solid: "#eab308",
+    bg: "bg-terminal-cyan/20",
+    border: "border-terminal-cyan",
+    text: "text-terminal-cyan",
+    solid: "#56d4dd",
   },
-  { bg: "bg-red-500/20", border: "border-red-500", text: "text-red-500", solid: "#ef4444" },
 ];
 
 function colorFor(idx: number) {
@@ -99,13 +142,23 @@ function groupByProject(
   const groups: ProjectGroup[] = [];
   let idx = 0;
   for (const [project, sess] of map) {
-    const sorted = [...sess].sort((a, b) => (b.startTime ?? "").localeCompare(a.startTime ?? ""));
+    const sorted = [...sess].sort((a, b) => {
+      const aStart = a.startTime ? new Date(a.startTime).getTime() : 0;
+      const bStart = b.startTime ? new Date(b.startTime).getTime() : 0;
+      return bStart - aStart;
+    });
+    const lastActivityMs = sorted.reduce((max, s) => {
+      if (!s.startTime) return max;
+      const startMs = new Date(s.startTime).getTime();
+      return Math.max(max, activeEndMs(startMs, s));
+    }, 0);
     groups.push({
       project,
       sessions: sorted,
       totalDurationMs: sorted.reduce((s, x) => s + (x.durationMs ?? 0), 0),
       totalCost: sorted.reduce((s, x) => s + (x.costEstimate ?? 0), 0),
-      lastActivity: sorted[0]?.endTime ?? sorted[0]?.startTime,
+      lastActivity:
+        lastActivityMs > 0 ? new Date(lastActivityMs).toISOString() : sorted[0]?.startTime,
       colorIdx: idx++,
     });
   }
@@ -114,39 +167,18 @@ function groupByProject(
 
 // ─── 1. Timeline View ────────────────────────────────────────────────
 //
-// One row per project. Sessions within a project are lane-packed (no overlap),
-// each at a uniform LANE_HEIGHT so labels are always readable. Importance is
-// encoded in three independent visual channels:
-//
-//   minWidthPx  — important short sessions get widened so labels fit
-//   fillIntensity — bg opacity (low score = ghosted outline, high score = solid)
-//   accentBar  — top-decile sessions get a 3px solid left rim
-//
-// Automated / scheduled sessions are hidden by default and surfaced via a toggle.
-// Per-project lane count is capped; overflow is rolled up into a "+N more" hint.
-
-// Bars are *bottom-aligned* within their lane so the lane tops form a skyline
-// — height encodes importance alongside width and fill. The 12x height ratio
-// (8 → 96) makes top-tier sessions visibly tower over routine ones, and tall
-// bars wrap their title onto multiple lines so the extra real-estate is useful.
-//
-// Per-lane height is *adaptive* — each lane sizes to its tallest bar (capped
-// at MAX_BAR_HEIGHT_PX) instead of every lane reserving the global maximum,
-// which previously left huge dead zones in lanes that only held short bars.
+// One row per project. X position and the bottom wick express active time;
+// project color identifies the row. Visual height and min-width make larger
+// sessions easier to inspect without also piling on heavy fill/accent channels.
 const LANE_GAP_PX = 4;
 const MAX_LANES_PER_PROJECT = 5;
-const MIN_BAR_HEIGHT_PX = 8; // floor — low-score sessions are short ticks
-const MAX_BAR_HEIGHT_PX = 96; // cap — top-tier sessions tower at this height
-const LABEL_VISIBLE_MIN_HEIGHT_PX = 14; // below this, render bar without label
-// Line metrics for the dynamic line-clamp calculation. text-[10px] with
-// leading-tight resolves to ~12px line-height; we reserve 6px of vertical
-// padding inside the bar so a 14px bar still fits one line.
+const MIN_BAR_HEIGHT_PX = 10;
+const MAX_BAR_HEIGHT_PX = 72;
+const LABEL_VISIBLE_MIN_HEIGHT_PX = 14;
 const LABEL_LINE_HEIGHT_PX = 12;
 const LABEL_VERTICAL_PADDING_PX = 6;
-
-const MIN_BAR_MIN_WIDTH_PX = 6; // floor for low-importance sessions
-const MAX_BAR_MIN_WIDTH_PX = 160; // cap for the "important short session" widening
-const TOP_ACCENT_SCORE_THRESHOLD = 60; // score >= this gets the left accent rim
+const MIN_BAR_MIN_WIDTH_PX = 8;
+const MAX_BAR_MIN_WIDTH_PX = 140;
 // Approximate width of the time-axis area (px) used to convert minWidthPx into
 // a visual end-time for lane packing. Real container is responsive; this is the
 // floor we design for. Slightly underestimating makes lanes pack more loosely
@@ -160,16 +192,9 @@ interface TimelineSession {
   lane: number;
   score: number;
   minWidthPx: number;
-  heightPx: number; // bar height (importance)
-  fillAlpha: number; // 0-1 background alpha applied to color.solid
-  showAccent: boolean;
+  heightPx: number;
+  fillAlpha: number;
   opacity: number;
-  /**
-   * Fraction of the rendered bar (0–1) that the *actual* session duration
-   * occupies. When < 1, the bar was widened by the min-width-by-importance
-   * floor; the remainder is visual padding. Drives the K-line "wick" strip
-   * along the bottom that recovers true-duration intuition.
-   */
   realDurationFraction: number;
 }
 
@@ -184,14 +209,11 @@ interface TimelineProject {
   totalRowHeightPx: number;
   hiddenInLanesCount: number; // sessions dropped because they exceeded MAX_LANES_PER_PROJECT
   colorIdx: number;
-  importance: number;
+  lastActivity?: string;
 }
 
 function fillAlphaFor(score: number): number {
-  // low = ghost, mid = soft, high = solid
-  if (score >= 60) return 0.45;
-  if (score >= 30) return 0.28;
-  return 0.12;
+  return score >= 60 ? 0.24 : 0.16;
 }
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -203,34 +225,28 @@ function hexToRgba(hex: string, alpha: number): string {
 }
 
 function opacityFor(score: number): number {
-  // map score 0–100 → 0.55–1.0
-  return 0.55 + Math.min(1, score / 100) * 0.45;
+  return score >= 60 ? 0.95 : 0.78;
 }
 
 function minWidthFor(score: number): number {
-  // sqrt curve so mid-importance sessions still get meaningful width
   const t = Math.sqrt(Math.max(0, Math.min(100, score)) / 100);
   return MIN_BAR_MIN_WIDTH_PX + t * (MAX_BAR_MIN_WIDTH_PX - MIN_BAR_MIN_WIDTH_PX);
 }
 
 function heightFor(score: number): number {
-  // Linear (not sqrt) so importance maps proportionally to height — the whole
-  // point of this channel is to make important sessions visibly larger.
   const t = Math.max(0, Math.min(100, score)) / 100;
   return MIN_BAR_HEIGHT_PX + t * (MAX_BAR_HEIGHT_PX - MIN_BAR_HEIGHT_PX);
 }
 
 /**
- * Lane packing biased to importance: highest-scoring sessions claim the top
- * lane first, so the most interesting work isn't pushed below the fold.
- *
- * Returns: per-session lane index, total lane count, and the number of sessions
- * that couldn't fit within MAX_LANES_PER_PROJECT (rolled up as "+N hidden").
+ * Lane packing keeps sessions from overlapping visually while preserving time
+ * order. Returns per-session lane index, total lane count, and the number of
+ * sessions that couldn't fit within MAX_LANES_PER_PROJECT.
  */
-function packLanesByImportance(
+function packTimelineLanes(
   sessions: { startMs: number; endMs: number; score: number; original: ScanResultSession }[],
 ): { laneAssignments: Map<string, number>; laneCount: number; dropped: number } {
-  const ordered = [...sessions].sort((a, b) => b.score - a.score);
+  const ordered = [...sessions].sort((a, b) => a.startMs - b.startMs || b.score - a.score);
   const laneIntervals: Array<Array<{ startMs: number; endMs: number }>> = [];
   const laneAssignments = new Map<string, number>();
   let dropped = 0;
@@ -312,7 +328,7 @@ function buildTimeline(
     }
   }
 
-  if (!isFinite(minMs) || !isFinite(maxMs) || maxMs <= minMs) {
+  if (!Number.isFinite(minMs) || !Number.isFinite(maxMs) || maxMs <= minMs) {
     return {
       projects: [],
       ticks: [],
@@ -358,11 +374,8 @@ function buildTimeline(
 
     if (filtered.length === 0) continue;
 
-    // Build interval list for lane packing. Crucially, the "interval" we hand
-    // to the packer is the VISUAL extent (max of duration and min-width
-    // converted back to time), not just the raw duration — otherwise widened
-    // short sessions overlap their neighbours visually even though the packer
-    // thought they were disjoint.
+    // Build interval list for lane packing. The only visual floor is a small
+    // hit target for very short sessions; width otherwise tracks active time.
     const minMsPerPx = rangeMs / APPROX_TIMELINE_WIDTH_PX;
     const intervals = filtered.map((s) => {
       const startMs = new Date(s.startTime!).getTime();
@@ -378,7 +391,7 @@ function buildTimeline(
       };
     });
 
-    const { laneAssignments, laneCount, dropped } = packLanesByImportance(intervals);
+    const { laneAssignments, laneCount, dropped } = packTimelineLanes(intervals);
 
     const tSessions: TimelineSession[] = [];
     for (const it of intervals) {
@@ -406,20 +419,14 @@ function buildTimeline(
         minWidthPx,
         heightPx: heightFor(it.score),
         fillAlpha: fillAlphaFor(it.score),
-        showAccent: it.score >= TOP_ACCENT_SCORE_THRESHOLD,
         opacity: opacityFor(it.score),
         realDurationFraction,
       });
     }
 
     if (tSessions.length > 0) {
-      // Render high-score sessions last so their accent rim sits on top of overlaps
-      tSessions.sort((a, b) => a.score - b.score);
+      tSessions.sort((a, b) => a.leftPct - b.leftPct || b.score - a.score);
 
-      // Per-lane heights: each lane sizes to its tallest bar (importance-biased
-      // packing means lane 0 holds the highest scores and is naturally the
-      // tallest). This avoids the dead vertical space when only the top lane
-      // has tall bars and lower lanes hold short routine sessions.
       const laneHeightsPx: number[] = Array.from({ length: laneCount }, () => MIN_BAR_HEIGHT_PX);
       for (const ts of tSessions) {
         if (ts.heightPx > laneHeightsPx[ts.lane]) {
@@ -427,12 +434,12 @@ function buildTimeline(
         }
       }
       const laneTopsPx: number[] = [];
-      let cursor = 3;
+      let cursor = 4;
       for (const h of laneHeightsPx) {
         laneTopsPx.push(cursor);
         cursor += h + LANE_GAP_PX;
       }
-      const totalRowHeightPx = cursor + 3;
+      const totalRowHeightPx = cursor + 4;
 
       projects.push({
         project: g.project,
@@ -443,14 +450,13 @@ function buildTimeline(
         totalRowHeightPx,
         hiddenInLanesCount: dropped,
         colorIdx: g.colorIdx,
-        importance: tSessions.reduce((sum, t) => sum + t.score, 0),
+        lastActivity: g.lastActivity,
       });
       totalSessions += tSessions.length;
     }
   }
 
-  // Order project lanes by total importance (most active first)
-  projects.sort((a, b) => b.importance - a.importance);
+  projects.sort((a, b) => (b.lastActivity ?? "").localeCompare(a.lastActivity ?? ""));
 
   // Build time axis ticks (6-8 ticks)
   const tickCount = 7;
@@ -507,21 +513,39 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
     () => buildTimeline(groups, start, end, showAutomated),
     [groups, start, end, showAutomated],
   );
+  const timelineSessions = useMemo(
+    () =>
+      projects.flatMap((project) =>
+        project.sessions.map((session) => ({
+          ...session,
+          project: project.project,
+          colorIdx: project.colorIdx,
+        })),
+      ),
+    [projects],
+  );
+  const topSessions = useMemo(
+    () => [...timelineSessions].sort((a, b) => b.score - a.score).slice(0, 6),
+    [timelineSessions],
+  );
+  const estimatedTimingCount = useMemo(
+    () => timelineSessions.filter((ts) => sessionHasEstimatedTime(ts.session)).length,
+    [timelineSessions],
+  );
 
   const LABEL_WIDTH = 140;
 
   return (
-    <div className="p-4 space-y-3 select-none">
+    <div className="space-y-4 p-4 select-none">
       {/* Range selector + automated toggle */}
-      <div className="flex flex-col gap-2 pl-1 lg:flex-row lg:items-center lg:justify-between">
-        <div className="text-[11px] font-mono text-terminal-dimmer flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span>
-            {totalSessions} <span className="opacity-60">sessions</span>
-          </span>
-          <span className="opacity-50">·</span>
-          <span className="opacity-70">
-            row = project · height + width + fill = importance · time → x-axis
-          </span>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="space-y-1">
+          <div className="text-sm font-sans font-semibold text-terminal-text">Work Timeline</div>
+          <div className="text-xs font-mono text-terminal-dimmer">
+            {totalSessions} {plural(totalSessions, "session")} · rows are projects · bar position
+            and width show active time
+            {estimatedTimingCount > 0 ? ` · ${estimatedTimingCount} estimated` : ""}
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[10px] font-mono">
           {hiddenAutomatedCount > 0 && !showAutomated && (
@@ -541,15 +565,14 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
               hide automated
             </button>
           )}
-          <div className="flex items-center gap-1">
-            <span className="text-terminal-dimmer mr-1">Range:</span>
+          <div className="inline-flex items-center rounded-xl bg-terminal-surface p-0.5 shadow-layer-sm">
             {RANGE_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
                 onClick={() => setRange(opt.value)}
-                className={`px-2 py-1 rounded-md transition-colors ${
+                className={`rounded-lg px-2.5 py-1 text-xs font-sans font-semibold transition-all duration-200 ease-material ${
                   range === opt.value
-                    ? "bg-terminal-green-subtle text-terminal-green"
+                    ? "bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
                     : "text-terminal-dim hover:text-terminal-text"
                 }`}
               >
@@ -562,7 +585,7 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
 
       {projects.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-40 gap-2 text-terminal-dimmer text-sm font-mono">
-          <div>No sessions in the last {RANGE_OPTIONS.find((o) => o.value === range)?.label}.</div>
+          <div>No sessions in {rangeEmptyLabel(range)}.</div>
           {range !== "all" && (
             <button
               onClick={() => setRange("all")}
@@ -573,208 +596,245 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
           )}
         </div>
       ) : (
-        <div className="overflow-x-auto pb-2">
-          <div className="min-w-[760px]">
-            {/* Time axis header */}
-            <div className="flex" style={{ paddingLeft: LABEL_WIDTH }}>
-              <div className="relative flex-1 h-6 border-b border-terminal-border/40">
-                {ticks.map((t, i) => (
-                  <div
-                    key={i}
-                    className="absolute flex flex-col items-center"
-                    style={{ left: `${t.leftPct}%`, transform: "translateX(-50%)" }}
-                  >
-                    <span className="text-[9px] font-mono text-terminal-dimmer whitespace-nowrap">
-                      {t.label}
-                    </span>
-                    <div className="w-px h-1.5 bg-terminal-border/40 mt-0.5" />
-                  </div>
-                ))}
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
+          <div className="overflow-x-auto rounded-2xl bg-terminal-bg/35 p-3 shadow-inner">
+            <div className="min-w-[760px]">
+              {/* Time axis header */}
+              <div className="flex" style={{ paddingLeft: LABEL_WIDTH }}>
+                <div className="relative flex-1 h-6">
+                  {ticks.map((t, i) => (
+                    <div
+                      key={i}
+                      className="absolute flex flex-col items-center"
+                      style={{ left: `${t.leftPct}%`, transform: "translateX(-50%)" }}
+                    >
+                      <span className="text-[9px] font-mono text-terminal-dimmer whitespace-nowrap">
+                        {t.label}
+                      </span>
+                      <div className="w-px h-1.5 bg-terminal-border/20 mt-0.5" />
+                    </div>
+                  ))}
+                  <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-terminal-border/25 to-transparent" />
+                </div>
               </div>
-            </div>
 
-            {/* Project rows — lane-packed, bottom-aligned skyline.
-              Per-bar HEIGHT, WIDTH (min-width by score), FILL alpha, and an
-              optional left ACCENT RIM all encode importance — important sessions
-              are visibly larger and more saturated, low-importance ones are
-              short ghosted ticks but still labeled and clickable. */}
-            {projects.map((p) => {
-              const color = colorFor(p.colorIdx);
-              const rowHeight = p.totalRowHeightPx;
-              const accentColor = color.solid;
-              return (
-                <div
-                  key={p.project}
-                  className="flex items-stretch border-b border-terminal-border/20 group"
-                >
-                  {/* Project label */}
-                  <div
-                    className="flex flex-col justify-center shrink-0 py-1 pr-3 overflow-hidden"
-                    style={{ width: LABEL_WIDTH, height: rowHeight }}
-                  >
-                    <div className={`text-xs font-sans font-medium truncate ${color.text}`}>
-                      {shortName(p.project)}
-                    </div>
-                    <div className="text-[9px] font-mono text-terminal-dimmer truncate">
-                      {p.sessions.length} session{p.sessions.length !== 1 ? "s" : ""}
-                      {p.hiddenInLanesCount > 0 && (
-                        <span className="text-terminal-orange/70">
-                          {" "}
-                          · +{p.hiddenInLanesCount} hidden
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Lane area */}
-                  <div
-                    className="relative flex-1 overflow-hidden bg-terminal-surface/20 group-hover:bg-terminal-surface/30 transition-colors"
-                    style={{ height: rowHeight }}
-                  >
-                    {/* Grid lines */}
-                    {ticks.map((t, i) => (
+              {/* Project rows: time stays on x-axis; project color identifies the lane. */}
+              <div className="space-y-1.5">
+                {projects.map((p) => {
+                  const color = colorFor(p.colorIdx);
+                  const rowHeight = p.totalRowHeightPx;
+                  const accentColor = color.solid;
+                  return (
+                    <div key={p.project} className="flex items-stretch rounded-xl group">
+                      {/* Project label */}
                       <div
-                        key={i}
-                        className="absolute top-0 bottom-0 w-px bg-terminal-border/10"
-                        style={{ left: `${t.leftPct}%` }}
-                      />
-                    ))}
-
-                    {/* Session blocks — variable height (importance), bottom-aligned within lane */}
-                    {p.sessions.map((ts) => {
-                      const automated = isAutomated(ts.session);
-                      // Adaptive lanes: each lane's row height = its tallest bar.
-                      // Bars are bottom-aligned within their lane.
-                      const laneTop = p.laneTopsPx[ts.lane];
-                      const laneH = p.laneHeightsPx[ts.lane];
-                      const top = laneTop + (laneH - ts.heightPx);
-                      const opacity = automated ? 0.4 : ts.opacity;
-                      // Multi-line label support: clamp to whatever number of
-                      // lines actually fits in the bar's height, so we use the
-                      // full vertical real estate without growing the bar.
-                      const lineClamp = Math.max(
-                        1,
-                        Math.floor(
-                          (ts.heightPx - LABEL_VERTICAL_PADDING_PX) / LABEL_LINE_HEIGHT_PX,
-                        ),
-                      );
-                      // K-line "wick": when the bar is widened by min-width, mark
-                      // the actual session duration as a thin strip along the
-                      // bottom so true duration is still readable.
-                      const showWick = ts.realDurationFraction < 0.85;
-                      return (
-                        <div
-                          key={ts.session.sessionId}
-                          className={`absolute overflow-hidden rounded-sm cursor-pointer hover:brightness-125 hover:z-10 transition-all border ${color.border} border-opacity-50`}
-                          style={{
-                            left: `${ts.leftPct}%`,
-                            width: `max(${ts.widthPct}%, ${ts.minWidthPx}px)`,
-                            top,
-                            height: ts.heightPx,
-                            opacity,
-                            zIndex: Math.round(ts.score),
-                            backgroundColor: hexToRgba(accentColor, ts.fillAlpha),
-                            ...(ts.showAccent
-                              ? {
-                                  boxShadow: `inset 3px 0 0 ${accentColor}`,
-                                }
-                              : {}),
-                          }}
-                          onMouseEnter={(e) => {
-                            setTooltip({
-                              session: ts.session,
-                              x: e.clientX,
-                              y: e.clientY,
-                            });
-                          }}
-                          onMouseLeave={() => setTooltip(null)}
-                        >
-                          {ts.heightPx >= LABEL_VISIBLE_MIN_HEIGHT_PX && (
-                            <div
-                              className={`relative h-full flex text-[10px] font-mono leading-tight ${color.text} pointer-events-none ${
-                                lineClamp === 1 ? "items-center" : "items-start pt-1"
-                              }`}
-                              style={{
-                                paddingLeft: ts.showAccent ? 7 : 4,
-                                paddingRight: 4,
-                                minWidth: 0,
-                              }}
-                            >
-                              <span
-                                className={
-                                  lineClamp === 1
-                                    ? "block truncate min-w-0 flex-1"
-                                    : "block min-w-0 flex-1 overflow-hidden"
-                                }
-                                style={
-                                  lineClamp === 1
-                                    ? undefined
-                                    : {
-                                        display: "-webkit-box",
-                                        WebkitBoxOrient: "vertical",
-                                        WebkitLineClamp: lineClamp,
-                                      }
-                                }
-                              >
-                                {ts.session.title ?? ts.session.firstPrompt ?? ""}
-                              </span>
-                            </div>
-                          )}
-                          {showWick && (
-                            <>
-                              {/* K-line wick: bright strip along the bottom marks
-                                the actual session duration within the widened
-                                bar. Uses a near-white color so it contrasts
-                                against the bar's saturated fill. */}
-                              <div
-                                className="absolute bottom-0 left-0 pointer-events-none"
-                                style={{
-                                  width: `${ts.realDurationFraction * 100}%`,
-                                  height: 3,
-                                  backgroundColor: "rgba(255, 255, 255, 0.85)",
-                                }}
-                                title="actual duration"
-                              />
-                              {/* End-of-real-time tick: a 2px-wide × 7px-tall mark
-                                at the wick's right edge so the end-position
-                                stays visible even when the wick itself is just
-                                a few pixels wide. */}
-                              <div
-                                className="absolute bottom-0 pointer-events-none"
-                                style={{
-                                  left: `calc(${ts.realDurationFraction * 100}% - 2px)`,
-                                  width: 2,
-                                  height: 7,
-                                  backgroundColor: "rgba(255, 255, 255, 0.95)",
-                                }}
-                              />
-                            </>
+                        className="flex flex-col justify-center shrink-0 py-1 pr-3 overflow-hidden"
+                        style={{ width: LABEL_WIDTH, height: rowHeight }}
+                      >
+                        <div className={`text-xs font-sans font-medium truncate ${color.text}`}>
+                          {projectName(p.project)}
+                        </div>
+                        <div className="text-[9px] font-mono text-terminal-dimmer truncate">
+                          {p.sessions.length} {plural(p.sessions.length, "session")}
+                          {p.hiddenInLanesCount > 0 && (
+                            <span className="text-terminal-orange/70">
+                              {" "}
+                              · +{p.hiddenInLanesCount} hidden
+                            </span>
                           )}
                         </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
+                      </div>
+
+                      {/* Lane area */}
+                      <div
+                        className="relative flex-1 overflow-hidden rounded-xl bg-terminal-surface/45 shadow-layer-sm transition-colors group-hover:bg-terminal-surface-hover/70"
+                        style={{ height: rowHeight }}
+                      >
+                        {/* Grid lines */}
+                        {ticks.map((t, i) => (
+                          <div
+                            key={i}
+                            className="absolute top-0 bottom-0 w-px bg-terminal-border/[0.06]"
+                            style={{ left: `${t.leftPct}%` }}
+                          />
+                        ))}
+
+                        {/* Session blocks */}
+                        {p.sessions.map((ts) => {
+                          const automated = isAutomated(ts.session);
+                          const laneTop = p.laneTopsPx[ts.lane];
+                          const laneH = p.laneHeightsPx[ts.lane];
+                          const top = laneTop + (laneH - ts.heightPx);
+                          const opacity = automated ? 0.4 : ts.opacity;
+                          const lineClamp = Math.max(
+                            1,
+                            Math.floor(
+                              (ts.heightPx - LABEL_VERTICAL_PADDING_PX) / LABEL_LINE_HEIGHT_PX,
+                            ),
+                          );
+                          const showWick = ts.realDurationFraction < 0.85;
+                          return (
+                            <button
+                              type="button"
+                              key={ts.session.sessionId}
+                              className="absolute overflow-hidden rounded-md text-left shadow-layer-sm transition-all duration-200 ease-material hover:z-10 hover:shadow-layer-md"
+                              style={{
+                                left: `${ts.leftPct}%`,
+                                width: `max(${ts.widthPct}%, ${ts.minWidthPx}px)`,
+                                top,
+                                height: ts.heightPx,
+                                opacity,
+                                zIndex: automated ? 1 : 2,
+                                backgroundColor: hexToRgba(accentColor, ts.fillAlpha),
+                              }}
+                              aria-label={`Open ${sessionTitle(ts.session)}`}
+                              onClick={() => navigateTo({ view: null, session: ts.session.slug })}
+                              onMouseEnter={(e) => {
+                                setTooltip({
+                                  session: ts.session,
+                                  x: e.clientX,
+                                  y: e.clientY,
+                                });
+                              }}
+                              onMouseLeave={() => setTooltip(null)}
+                            >
+                              {ts.heightPx >= LABEL_VISIBLE_MIN_HEIGHT_PX && (
+                                <span
+                                  className={`pointer-events-none block min-w-0 px-1.5 text-[10px] font-mono leading-tight ${color.text} ${
+                                    lineClamp === 1
+                                      ? "truncate leading-[18px]"
+                                      : "overflow-hidden pt-1"
+                                  }`}
+                                  style={
+                                    lineClamp === 1
+                                      ? undefined
+                                      : {
+                                          display: "-webkit-box",
+                                          WebkitBoxOrient: "vertical",
+                                          WebkitLineClamp: lineClamp,
+                                        }
+                                  }
+                                >
+                                  {sessionTitle(ts.session)}
+                                </span>
+                              )}
+                              {showWick && (
+                                <>
+                                  <span
+                                    className="pointer-events-none absolute bottom-0 left-0 h-0.5 rounded-r-full bg-terminal-text/70"
+                                    style={{ width: `${ts.realDurationFraction * 100}%` }}
+                                    title="actual duration"
+                                  />
+                                  <span
+                                    className="pointer-events-none absolute bottom-0 h-1.5 w-px bg-terminal-text/80"
+                                    style={{
+                                      left: `calc(${ts.realDurationFraction * 100}% - 1px)`,
+                                    }}
+                                  />
+                                </>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
+
+          <aside className="relative overflow-hidden rounded-2xl bg-terminal-surface p-4 shadow-layer-lg">
+            <div className="pointer-events-none absolute -right-16 -top-16 h-36 w-36 rounded-full bg-terminal-blue/5 blur-3xl" />
+            <div className="pointer-events-none absolute -bottom-16 -left-16 h-36 w-36 rounded-full bg-terminal-green/5 blur-3xl" />
+            <div className="relative">
+              <div className="mb-3">
+                <div className="text-sm font-sans font-semibold text-terminal-text">
+                  Top Sessions
+                </div>
+                <div className="mt-0.5 text-[10px] font-mono text-terminal-dimmer">
+                  Ranked by activity signals. Badges show provider and Cursor data source.
+                </div>
+              </div>
+              <div className="space-y-2">
+                {topSessions.map((ts) => {
+                  const color = colorFor(ts.colorIdx);
+                  return (
+                    <button
+                      type="button"
+                      key={ts.session.sessionId}
+                      onClick={() => navigateTo({ view: null, session: ts.session.slug })}
+                      className="w-full rounded-xl bg-terminal-bg/45 p-2.5 text-left shadow-layer-sm transition-all duration-200 ease-material hover:bg-terminal-surface-hover hover:shadow-layer-md"
+                    >
+                      <div className="flex items-start gap-2">
+                        <span
+                          className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: color.solid }}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-xs font-sans font-medium text-terminal-text">
+                            {sessionTitle(ts.session)}
+                          </div>
+                          <div className="mt-0.5 truncate text-[10px] font-mono text-terminal-dimmer">
+                            {projectName(ts.project)}
+                          </div>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] font-mono">
+                            <span className="rounded-md bg-terminal-green-subtle px-1.5 py-0.5 text-terminal-green">
+                              score {Math.round(ts.score)}
+                            </span>
+                            {sessionBadges(ts.session).map((badge) => (
+                              <span
+                                key={badge}
+                                className="rounded-md bg-terminal-surface-2 px-1.5 py-0.5 text-terminal-dim"
+                              >
+                                {badge}
+                              </span>
+                            ))}
+                            {ts.session.durationMs ? (
+                              <span className="text-terminal-blue">
+                                {fmtDuration(ts.session.durationMs)}
+                              </span>
+                            ) : null}
+                            {ts.session.editCount > 0 ? (
+                              <span className="text-terminal-dimmer">
+                                {ts.session.editCount} {plural(ts.session.editCount, "edit")}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </aside>
         </div>
       )}
 
       {/* Tooltip */}
       {tooltip && (
         <div
-          className="fixed pointer-events-none bg-terminal-surface border border-terminal-border rounded-lg shadow-xl p-3 text-xs font-mono w-80"
+          className="fixed pointer-events-none w-80 rounded-xl border border-terminal-border bg-terminal-surface p-3 text-xs font-mono shadow-layer-xl"
           style={{
-            // Bars use zIndex up to 100 (score-based), so the tooltip needs to
-            // stay well above that — z-50 was actually below high-score bars.
+            // Keep the tooltip above hovered timeline bars.
             zIndex: 1000,
             left: Math.min(tooltip.x + 12, window.innerWidth - 336),
             top: Math.max(8, Math.min(tooltip.y - 8, window.innerHeight - 200)),
           }}
         >
           <div className="text-terminal-text font-medium mb-1.5 break-words leading-snug">
-            {tooltip.session.title ?? tooltip.session.firstPrompt ?? tooltip.session.slug}
+            {sessionTitle(tooltip.session)}
+          </div>
+          <div className="mb-2 flex flex-wrap gap-1">
+            {sessionBadges(tooltip.session).map((badge) => (
+              <span
+                key={badge}
+                className="rounded-md bg-terminal-surface-2 px-1.5 py-0.5 text-[10px] text-terminal-dim"
+              >
+                {badge}
+              </span>
+            ))}
           </div>
           <div className="text-terminal-dimmer space-y-0.5">
             {tooltip.session.startTime &&
@@ -801,8 +861,9 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
               <div className="text-terminal-blue">{fmtDuration(tooltip.session.durationMs)}</div>
             )}
             <div>
-              {tooltip.session.promptCount}p · {tooltip.session.editCount} edits ·{" "}
-              {tooltip.session.toolCallCount} tools
+              {tooltip.session.promptCount}p · {tooltip.session.editCount}{" "}
+              {plural(tooltip.session.editCount, "edit")} · {tooltip.session.toolCallCount}{" "}
+              {plural(tooltip.session.toolCallCount, "tool")}
             </div>
             {tooltip.session.gitBranch && (
               <div className="text-terminal-purple">{tooltip.session.gitBranch}</div>
@@ -865,12 +926,13 @@ function buildProjectFileGroups(groups: ProjectGroup[]): ProjectFileGroup[] {
     const files: FileCluster[] = [];
     for (const [file, sessions] of fileMap) {
       const uniqueSessions = [...new Map(sessions.map((s) => [s.session.sessionId, s])).values()];
-      if (uniqueSessions.length < 2) continue;
+      const totalEdits = uniqueSessions.reduce((sum, s) => sum + s.editCount, 0);
+      if (uniqueSessions.length < 2 && totalEdits < 3) continue;
       files.push({
         file,
         displayName: displayFileName(file, g.project),
         sessions: uniqueSessions.sort((a, b) => b.editCount - a.editCount),
-        totalEdits: uniqueSessions.reduce((sum, s) => sum + s.editCount, 0),
+        totalEdits,
       });
     }
 
@@ -910,9 +972,9 @@ function FileConnectionsView({ groups }: { groups: ProjectGroup[] }) {
   if (projectFileGroups.length === 0) {
     return (
       <div className="p-8 text-center space-y-2">
-        <div className="text-terminal-dimmer text-sm font-mono">No shared files found.</div>
+        <div className="text-terminal-dimmer text-sm font-mono">No hot files found.</div>
         <div className="text-terminal-dimmer/60 text-xs font-mono">
-          Files edited by multiple sessions will appear here.
+          Cursor sessions without file edits are still shown in List and Timeline.
         </div>
       </div>
     );
@@ -923,18 +985,19 @@ function FileConnectionsView({ groups }: { groups: ProjectGroup[] }) {
   const selected = selectedFile
     ? selectedProjectGroup.files.find((c) => c.file === selectedFile)
     : null;
-  const selectedProjectColor = colorFor(selectedProjectGroup.colorIdx);
 
   return (
     <div className="flex h-full min-w-0 flex-col gap-4 p-4 lg:flex-row">
       {/* Project list */}
-      <div className="w-full shrink-0 space-y-1 overflow-y-auto lg:w-64">
-        <div className="text-[10px] font-mono text-terminal-dimmer mb-2 px-2">
-          {projectFileGroups.length} projects with shared files
+      <div className="w-full shrink-0 space-y-2 overflow-y-auto lg:w-64">
+        <div className="px-1">
+          <div className="text-sm font-sans font-semibold text-terminal-text">Hot Files</div>
+          <div className="mt-0.5 text-[10px] font-mono text-terminal-dimmer">
+            {projectFileGroups.length} {plural(projectFileGroups.length, "project")} with hot files
+          </div>
         </div>
         {projectFileGroups.map((group) => {
           const isSelected = selectedProjectGroup.project === group.project;
-          const color = colorFor(group.colorIdx);
           return (
             <button
               key={group.project}
@@ -942,16 +1005,21 @@ function FileConnectionsView({ groups }: { groups: ProjectGroup[] }) {
                 setSelectedProject(group.project);
                 setSelectedFile(null);
               }}
-              className={`w-full text-left px-3 py-2 rounded-lg text-xs font-mono transition-colors ${
+              className={`w-full rounded-lg border px-3 py-2.5 text-left transition-all duration-200 ease-material ${
                 isSelected
-                  ? `${color.bg} border ${color.border} ${color.text}`
-                  : "hover:bg-terminal-surface-2 text-terminal-text border border-transparent"
+                  ? "border-transparent bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
+                  : "border-transparent bg-terminal-bg/35 text-terminal-text shadow-layer-sm hover:bg-terminal-surface-hover hover:shadow-layer-md"
               }`}
             >
-              <div className="truncate font-semibold">{shortName(group.project)}</div>
-              <div className="text-[9px] text-terminal-dimmer truncate">{group.project}</div>
-              <div className="mt-1 text-[9px] text-terminal-dimmer">
-                {group.files.length} files · {group.totalEdits.toLocaleString()} edits
+              <div className="truncate text-xs font-sans font-semibold">
+                {projectName(group.project)}
+              </div>
+              <div className="mt-0.5 truncate text-[10px] font-mono text-terminal-dimmer">
+                {group.project}
+              </div>
+              <div className="mt-1 text-[10px] font-mono text-terminal-dimmer">
+                {group.files.length} {plural(group.files.length, "file")} ·{" "}
+                {group.totalEdits.toLocaleString()} {plural(group.totalEdits, "edit")}
               </div>
             </button>
           );
@@ -960,12 +1028,29 @@ function FileConnectionsView({ groups }: { groups: ProjectGroup[] }) {
 
       {/* Project files + detail panel */}
       <div className="min-w-0 flex-1 space-y-4 overflow-y-auto">
-        <div>
-          <div className={`text-sm font-sans font-semibold ${selectedProjectColor.text}`}>
-            {shortName(selectedProjectGroup.project)}
-          </div>
-          <div className="mt-0.5 truncate text-xs font-mono text-terminal-dimmer">
-            {selectedProjectGroup.project}
+        <div className="relative overflow-hidden rounded-2xl bg-terminal-bg/35 p-4 shadow-inner">
+          <div className="pointer-events-none absolute -right-12 -top-12 h-28 w-28 rounded-full bg-terminal-green/5 blur-2xl" />
+          <div className="relative">
+            <div className="text-sm font-sans font-semibold text-terminal-text">
+              {projectName(selectedProjectGroup.project)}
+            </div>
+            <div className="mt-0.5 truncate text-xs font-mono text-terminal-dimmer">
+              {selectedProjectGroup.project}
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] font-mono text-terminal-dimmer">
+              <span className="rounded-md bg-terminal-green-subtle px-1.5 py-0.5 text-terminal-green">
+                {selectedProjectGroup.files.length}{" "}
+                {plural(selectedProjectGroup.files.length, "hot file")}
+              </span>
+              <span>
+                {selectedProjectGroup.totalEdits.toLocaleString()}{" "}
+                {plural(selectedProjectGroup.totalEdits, "edit")}
+              </span>
+              <span>
+                {selectedProjectGroup.totalSessions.toLocaleString()}{" "}
+                {plural(selectedProjectGroup.totalSessions, "session")}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -976,18 +1061,21 @@ function FileConnectionsView({ groups }: { groups: ProjectGroup[] }) {
               <button
                 key={cluster.file}
                 onClick={() => setSelectedFile(isSelected ? null : cluster.file)}
-                className={`w-full text-left px-3 py-2 rounded-lg text-xs font-mono transition-colors ${
+                className={`w-full rounded-xl px-3 py-2.5 text-left transition-all duration-200 ease-material ${
                   isSelected
-                    ? "bg-terminal-green/20 border border-terminal-green text-terminal-green"
-                    : "hover:bg-terminal-surface-2 text-terminal-text border border-terminal-border/30"
+                    ? "bg-terminal-green-subtle text-terminal-green shadow-layer-md"
+                    : "bg-terminal-bg/40 text-terminal-text shadow-layer-sm hover:bg-terminal-surface-hover hover:shadow-layer-md"
                 }`}
               >
-                <div className="truncate">{cluster.displayName.split("/").pop()}</div>
-                <div className="text-[9px] text-terminal-dimmer truncate">
+                <div className="truncate text-xs font-mono">
+                  {cluster.displayName.split("/").pop()}
+                </div>
+                <div className="mt-0.5 truncate text-[10px] font-mono text-terminal-dimmer">
                   {cluster.displayName}
                 </div>
-                <div className="mt-1 text-[9px] text-terminal-dimmer">
-                  {cluster.totalEdits.toLocaleString()} edits · {cluster.sessions.length} sessions
+                <div className="mt-1 text-[10px] font-mono text-terminal-dimmer">
+                  {cluster.totalEdits.toLocaleString()} {plural(cluster.totalEdits, "edit")} ·{" "}
+                  {cluster.sessions.length} {plural(cluster.sessions.length, "session")}
                 </div>
               </button>
             );
@@ -996,16 +1084,16 @@ function FileConnectionsView({ groups }: { groups: ProjectGroup[] }) {
 
         {selected ? (
           <div className="space-y-3">
-            <div className="border-t border-terminal-border/30 pt-4">
-              <div className="text-sm font-mono text-terminal-text font-medium truncate">
+            <div className="rounded-2xl bg-terminal-surface p-4 shadow-layer-sm">
+              <div className="text-sm font-sans font-semibold text-terminal-text truncate">
                 {selected.displayName.split("/").pop()}
               </div>
               <div className="text-xs font-mono text-terminal-dimmer mt-0.5 break-all">
                 {selected.file}
               </div>
               <div className="text-xs font-mono text-terminal-dimmer mt-1">
-                {selected.totalEdits.toLocaleString()} edits across {selected.sessions.length}{" "}
-                sessions
+                {selected.totalEdits.toLocaleString()} {plural(selected.totalEdits, "edit")} across{" "}
+                {selected.sessions.length} {plural(selected.sessions.length, "session")}
               </div>
             </div>
 
@@ -1014,33 +1102,35 @@ function FileConnectionsView({ groups }: { groups: ProjectGroup[] }) {
               {selected.sessions.map((s) => {
                 const color = colorFor(s.colorIdx);
                 return (
-                  <div
+                  <button
+                    type="button"
                     key={s.session.sessionId}
-                    className={`flex flex-col gap-2 p-3 rounded-lg border sm:flex-row sm:items-start sm:gap-3 ${color.bg} ${color.border}/40`}
+                    onClick={() => navigateTo({ view: null, session: s.session.slug })}
+                    className="flex w-full flex-col gap-2 rounded-xl bg-terminal-bg/45 p-3 text-left shadow-layer-sm transition-all duration-200 ease-material hover:bg-terminal-surface-hover hover:shadow-layer-md sm:flex-row sm:items-start sm:gap-3"
                   >
                     <div
                       className="hidden w-2 h-2 rounded-full mt-1.5 shrink-0 sm:block"
                       style={{ backgroundColor: color.solid }}
                     />
                     <div className="flex-1 min-w-0">
-                      <div className={`text-xs font-mono ${color.text} truncate`}>
-                        {s.session.title ?? s.session.firstPrompt ?? s.session.slug}
+                      <div className="text-xs font-sans font-medium text-terminal-text truncate">
+                        {sessionTitle(s.session)}
                       </div>
                       <div className="text-[9px] font-mono text-terminal-dimmer mt-0.5">
-                        {shortName(s.session.project)} · {fmtDate(s.session.startTime)}
+                        {projectName(s.session.project)} · {fmtDate(s.session.startTime)}
                       </div>
                     </div>
                     <div className="shrink-0 text-xs font-mono text-terminal-orange">
-                      {s.editCount} edit{s.editCount !== 1 ? "s" : ""}
+                      {s.editCount} {plural(s.editCount, "edit")}
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>
           </div>
         ) : (
           <div className="flex items-center justify-center h-40 text-terminal-dimmer text-xs font-mono">
-            Select a file in {shortName(selectedProjectGroup.project)} to see the sessions that
+            Select a file in {projectName(selectedProjectGroup.project)} to see the sessions that
             modified it
           </div>
         )}
@@ -1063,13 +1153,53 @@ export default function SessionRelationshipsView({ view }: SessionRelationshipsV
   // Collapse agent worktrees back to the project the user recognizes. The
   // session rows still expose the original path when it matters.
   const groups = useMemo(() => groupByProject(sessions, { collapseWorktrees: true }), [sessions]);
+  const providerSummary = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const s of sessions) {
+      const label = providerBadgeLabel(s.provider);
+      counts.set(label, (counts.get(label) || 0) + 1);
+    }
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([label, count]) => `${label} ${count}`)
+      .join(" · ");
+  }, [sessions]);
+  const estimatedTimingCount = useMemo(
+    () => sessions.filter((session) => sessionHasEstimatedTime(session)).length,
+    [sessions],
+  );
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="flex items-center gap-2 text-terminal-dim text-sm font-mono">
-          <span className="w-1.5 h-1.5 rounded-full bg-terminal-green animate-pulse" />
-          Loading session data...
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-terminal-surface via-terminal-bg to-terminal-surface p-4 shadow-layer-xl">
+        <div className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-terminal-green/5 blur-3xl" />
+        <div className="relative space-y-4 animate-pulse">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="h-3 w-20 rounded bg-terminal-surface-2" />
+            <div className="h-3 w-24 rounded bg-terminal-surface-2 opacity-70" />
+            <div className="h-3 w-32 rounded bg-terminal-surface-2 opacity-50" />
+          </div>
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
+            <div className="rounded-2xl bg-terminal-bg/35 p-3 shadow-inner">
+              <div className="space-y-2">
+                {Array.from({ length: 5 }, (_, i) => (
+                  <div key={i} className="flex items-center gap-3">
+                    <div className="h-8 w-32 rounded bg-terminal-surface-2 opacity-60" />
+                    <div className="h-9 flex-1 rounded-xl bg-terminal-surface/60 shadow-layer-sm" />
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="rounded-2xl bg-terminal-surface p-4 shadow-layer-lg">
+              <div className="mb-3 h-4 w-24 rounded bg-terminal-surface-2" />
+              <div className="space-y-2">
+                {Array.from({ length: 4 }, (_, i) => (
+                  <div key={i} className="h-16 rounded-xl bg-terminal-bg/45 shadow-layer-sm" />
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -1089,15 +1219,24 @@ export default function SessionRelationshipsView({ view }: SessionRelationshipsV
   }
 
   return (
-    <div className="flex min-w-0 flex-col overflow-hidden rounded-lg border border-terminal-border/30 bg-terminal-surface/20">
+    <div className="relative flex min-w-0 flex-col overflow-hidden rounded-2xl bg-gradient-to-br from-terminal-surface via-terminal-bg to-terminal-surface shadow-layer-xl">
+      <div className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-terminal-green/5 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-24 -left-24 h-56 w-56 rounded-full bg-terminal-blue/5 blur-3xl" />
       {/* Stats bar */}
-      <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-terminal-border/20 px-4 py-2 text-[10px] font-mono text-terminal-dimmer md:px-6">
+      <div className="relative z-10 flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-[10px] font-mono text-terminal-dimmer md:px-6">
         <span>
-          <span className="text-terminal-text">{sessions.length}</span> sessions
+          <span className="text-terminal-text">{sessions.length}</span>{" "}
+          {plural(sessions.length, "session")}
         </span>
         <span>
-          <span className="text-terminal-text">{groups.length}</span> projects
+          <span className="text-terminal-text">{groups.length}</span>{" "}
+          {plural(groups.length, "project")}
         </span>
+        {providerSummary && (
+          <span>
+            <span className="text-terminal-purple">{providerSummary}</span>
+          </span>
+        )}
         <span>
           <span className="text-terminal-blue">
             {fmtDuration(sessions.reduce((s, x) => s + (x.durationMs ?? 0), 0))}
@@ -1114,12 +1253,20 @@ export default function SessionRelationshipsView({ view }: SessionRelationshipsV
           <span className="text-terminal-green">
             {sessions.reduce((s, x) => s + x.editCount, 0).toLocaleString()}
           </span>{" "}
-          edits
+          {plural(
+            sessions.reduce((s, x) => s + x.editCount, 0),
+            "edit",
+          )}
         </span>
+        {estimatedTimingCount > 0 && (
+          <span>
+            <span className="text-terminal-dimmer">{estimatedTimingCount}</span> estimated timing
+          </span>
+        )}
       </div>
 
       {/* View content */}
-      <div className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
+      <div className="relative z-10 min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
         {view === "timeline" && <TimelineSwimlaneView groups={groups} />}
         {view === "files" && <FileConnectionsView groups={groups} />}
       </div>

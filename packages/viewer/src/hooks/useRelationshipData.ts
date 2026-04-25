@@ -16,10 +16,13 @@ export interface RelationshipData {
   error: string | null;
 }
 
+let cachedSessions: ScanResultSession[] | null = null;
+let cachedError: string | null = null;
+
 export function useRelationshipData(): RelationshipData {
-  const [sessions, setSessions] = useState<ScanResultSession[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<ScanResultSession[]>(cachedSessions ?? []);
+  const [loading, setLoading] = useState(cachedSessions === null && cachedError === null);
+  const [error, setError] = useState<string | null>(cachedError);
 
   useEffect(() => {
     let cancelled = false;
@@ -29,13 +32,16 @@ export function useRelationshipData(): RelationshipData {
         const resp = await fetch("/api/scan/results");
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = (await resp.json()) as { results: ScanResultSession[] };
+        cachedSessions = data.results ?? [];
+        cachedError = null;
         if (!cancelled) {
-          setSessions(data.results ?? []);
+          setSessions(cachedSessions);
           setError(null);
         }
       } catch (e) {
+        cachedError = e instanceof Error ? e.message : "Failed to load";
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : "Failed to load");
+          setError(cachedError);
         }
       } finally {
         if (!cancelled) setLoading(false);
