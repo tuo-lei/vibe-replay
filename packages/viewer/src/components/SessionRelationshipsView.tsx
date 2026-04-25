@@ -9,6 +9,7 @@
 import { useMemo, useState } from "react";
 import { type ScanResultSession, useRelationshipData } from "../hooks/useRelationshipData";
 import { shortName, timeAgo } from "../utils/format";
+import { collapseWorktree, isAutomated, sessionScore } from "../utils/sessionSignals";
 
 // ─── Shared helpers ──────────────────────────────────────────────────
 
@@ -85,11 +86,15 @@ interface ProjectGroup {
   colorIdx: number;
 }
 
-function groupByProject(sessions: ScanResultSession[]): ProjectGroup[] {
+function groupByProject(
+  sessions: ScanResultSession[],
+  options: { collapseWorktrees?: boolean } = {},
+): ProjectGroup[] {
   const map = new Map<string, ScanResultSession[]>();
   for (const s of sessions) {
-    if (!map.has(s.project)) map.set(s.project, []);
-    map.get(s.project)!.push(s);
+    const key = options.collapseWorktrees ? collapseWorktree(s.project) : s.project;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(s);
   }
 
   const groups: ProjectGroup[] = [];
@@ -207,49 +212,150 @@ function ProjectGroupingView({ groups }: { groups: ProjectGroup[] }) {
   );
 }
 
-// ─── 2. Timeline Swimlane View ───────────────────────────────────────
+// ─── 2. Timeline View ────────────────────────────────────────────────
+//
+// One row per project. Sessions within a project are lane-packed (no overlap),
+// each at a uniform LANE_HEIGHT so labels are always readable. Importance is
+// encoded in three independent visual channels:
+//
+//   minWidthPx  — important short sessions get widened so labels fit
+//   fillIntensity — bg opacity (low score = ghosted outline, high score = solid)
+//   accentBar  — top-decile sessions get a 3px solid left rim
+//
+// Automated / scheduled sessions are hidden by default and surfaced via a toggle.
+// Per-project lane count is capped; overflow is rolled up into a "+N more" hint.
 
-interface Lane {
-  start: number;
-  end: number;
-}
+// Each lane reserves LANE_TOTAL_HEIGHT_PX of vertical space. Within a lane,
+// bars are *bottom-aligned* so their tops form a skyline — height encodes
+// importance in addition to width and fill. The 6x height ratio (8 → 48)
+// makes top-tier sessions visibly tower over routine ones.
+const LANE_TOTAL_HEIGHT_PX = 48;
+const LANE_GAP_PX = 4;
+const MAX_LANES_PER_PROJECT = 5;
+const MIN_BAR_HEIGHT_PX = 8; // floor — low-score sessions are short ticks
+const MAX_BAR_HEIGHT_PX = LANE_TOTAL_HEIGHT_PX; // cap — top-tier sessions fill the lane
+const LABEL_VISIBLE_MIN_HEIGHT_PX = 14; // below this, render bar without label
 
-/** Simple lane packing: return the lane index for a session */
-function assignLane(lanes: Lane[], startMs: number, endMs: number): number {
-  for (let i = 0; i < lanes.length; i++) {
-    if (startMs >= lanes[i].end) {
-      lanes[i] = { start: startMs, end: endMs };
-      return i;
-    }
-  }
-  lanes.push({ start: startMs, end: endMs });
-  return lanes.length - 1;
-}
-
-const LANE_HEIGHT_PX = 20;
-const LANE_GAP_PX = 2;
+const MIN_BAR_MIN_WIDTH_PX = 6; // floor for low-importance sessions
+const MAX_BAR_MIN_WIDTH_PX = 160; // cap for the "important short session" widening
+const TOP_ACCENT_SCORE_THRESHOLD = 60; // score >= this gets the left accent rim
+// Approximate width of the time-axis area (px) used to convert minWidthPx into
+// a visual end-time for lane packing. Real container is responsive; this is the
+// floor we design for. Slightly underestimating makes lanes pack more loosely
+// at narrow viewports — better than visual overlap.
+const APPROX_TIMELINE_WIDTH_PX = 1100;
 
 interface TimelineSession {
   session: ScanResultSession;
   leftPct: number;
   widthPct: number;
   lane: number;
+  score: number;
+  minWidthPx: number;
+  heightPx: number; // bar height (importance)
+  fillAlpha: number; // 0-1 background alpha applied to color.solid
+  showAccent: boolean;
+  opacity: number;
 }
 
 interface TimelineProject {
   project: string;
   sessions: TimelineSession[];
   laneCount: number;
+  hiddenInLanesCount: number; // sessions dropped because they exceeded MAX_LANES_PER_PROJECT
   colorIdx: number;
+  importance: number;
 }
 
-function buildTimeline(groups: ProjectGroup[]): {
+function fillAlphaFor(score: number): number {
+  // low = ghost, mid = soft, high = solid
+  if (score >= 60) return 0.45;
+  if (score >= 30) return 0.28;
+  return 0.12;
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const m = hex.replace("#", "");
+  const r = parseInt(m.slice(0, 2), 16);
+  const g = parseInt(m.slice(2, 4), 16);
+  const b = parseInt(m.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function opacityFor(score: number): number {
+  // map score 0–100 → 0.55–1.0
+  return 0.55 + Math.min(1, score / 100) * 0.45;
+}
+
+function minWidthFor(score: number): number {
+  // sqrt curve so mid-importance sessions still get meaningful width
+  const t = Math.sqrt(Math.max(0, Math.min(100, score)) / 100);
+  return MIN_BAR_MIN_WIDTH_PX + t * (MAX_BAR_MIN_WIDTH_PX - MIN_BAR_MIN_WIDTH_PX);
+}
+
+function heightFor(score: number): number {
+  // Linear (not sqrt) so importance maps proportionally to height — the whole
+  // point of this channel is to make important sessions visibly larger.
+  const t = Math.max(0, Math.min(100, score)) / 100;
+  return MIN_BAR_HEIGHT_PX + t * (MAX_BAR_HEIGHT_PX - MIN_BAR_HEIGHT_PX);
+}
+
+/**
+ * Lane packing biased to importance: highest-scoring sessions claim the top
+ * lane first, so the most interesting work isn't pushed below the fold.
+ *
+ * Returns: per-session lane index, total lane count, and the number of sessions
+ * that couldn't fit within MAX_LANES_PER_PROJECT (rolled up as "+N hidden").
+ */
+function packLanesByImportance(
+  sessions: { startMs: number; endMs: number; score: number; original: ScanResultSession }[],
+): { laneAssignments: Map<string, number>; laneCount: number; dropped: number } {
+  const ordered = [...sessions].sort((a, b) => b.score - a.score);
+  const laneIntervals: Array<Array<{ startMs: number; endMs: number }>> = [];
+  const laneAssignments = new Map<string, number>();
+  let dropped = 0;
+
+  for (const s of ordered) {
+    let placed = -1;
+    for (let i = 0; i < laneIntervals.length; i++) {
+      const overlap = laneIntervals[i].some((iv) => s.startMs < iv.endMs && s.endMs > iv.startMs);
+      if (!overlap) {
+        placed = i;
+        break;
+      }
+    }
+
+    if (placed === -1) {
+      if (laneIntervals.length >= MAX_LANES_PER_PROJECT) {
+        dropped++;
+        continue;
+      }
+      placed = laneIntervals.length;
+      laneIntervals.push([]);
+    }
+
+    laneIntervals[placed].push({ startMs: s.startMs, endMs: s.endMs });
+    laneAssignments.set(s.original.sessionId, placed);
+  }
+
+  return { laneAssignments, laneCount: laneIntervals.length, dropped };
+}
+
+function buildTimeline(
+  groups: ProjectGroup[],
+  windowStart?: number,
+  windowEnd?: number,
+  includeAutomated = false,
+): {
   projects: TimelineProject[];
   ticks: { leftPct: number; label: string }[];
   minMs: number;
   maxMs: number;
+  totalSessions: number;
+  hiddenAutomatedCount: number;
 } {
-  // Determine time bounds from sessions with valid times
+  // Determine time bounds. If an explicit window is provided (range selector),
+  // use it. Otherwise fall back to min/max across all sessions ("All" view).
   let minMs = Infinity;
   let maxMs = -Infinity;
   for (const g of groups) {
@@ -265,44 +371,115 @@ function buildTimeline(groups: ProjectGroup[]): {
   }
 
   if (!isFinite(minMs) || !isFinite(maxMs) || maxMs <= minMs) {
-    return { projects: [], ticks: [], minMs: 0, maxMs: 0 };
+    return {
+      projects: [],
+      ticks: [],
+      minMs: 0,
+      maxMs: 0,
+      totalSessions: 0,
+      hiddenAutomatedCount: 0,
+    };
   }
 
-  const totalMs = maxMs - minMs;
-  const paddingMs = totalMs * 0.01;
-  const rangeStart = minMs - paddingMs;
-  const rangeEnd = maxMs + paddingMs;
+  let rangeStart: number;
+  let rangeEnd: number;
+  if (windowStart != null && windowEnd != null) {
+    rangeStart = windowStart;
+    rangeEnd = windowEnd;
+  } else {
+    const totalMs = maxMs - minMs;
+    const paddingMs = totalMs * 0.01;
+    rangeStart = minMs - paddingMs;
+    rangeEnd = maxMs + paddingMs;
+  }
   const rangeMs = rangeEnd - rangeStart;
 
   const projects: TimelineProject[] = [];
+  let totalSessions = 0;
+  let hiddenAutomatedCount = 0;
 
   for (const g of groups) {
-    const lanes: Lane[] = [];
-    const tSessions: TimelineSession[] = [];
+    // Filter to window + automated policy
+    const filtered = g.sessions.filter((s) => {
+      if (!s.startTime) return false;
+      const startMs = new Date(s.startTime).getTime();
+      const endMs = s.endTime ? new Date(s.endTime).getTime() : startMs + (s.durationMs ?? 0);
+      if (endMs < rangeStart || startMs > rangeEnd) return false;
+      if (!includeAutomated && isAutomated(s)) {
+        hiddenAutomatedCount++;
+        return false;
+      }
+      return true;
+    });
 
-    // Sort by start time for lane packing
-    const sorted = [...g.sessions]
-      .filter((s) => s.startTime)
-      .sort((a, b) => new Date(a.startTime!).getTime() - new Date(b.startTime!).getTime());
+    if (filtered.length === 0) continue;
 
-    for (const s of sorted) {
+    // Build interval list for lane packing. Crucially, the "interval" we hand
+    // to the packer is the VISUAL extent (max of duration and min-width
+    // converted back to time), not just the raw duration — otherwise widened
+    // short sessions overlap their neighbours visually even though the packer
+    // thought they were disjoint.
+    const minMsPerPx = rangeMs / APPROX_TIMELINE_WIDTH_PX;
+    const intervals = filtered.map((s) => {
       const startMs = new Date(s.startTime!).getTime();
-      const endMs = s.endTime ? new Date(s.endTime).getTime() : startMs + (s.durationMs ?? 60000);
-      const leftPct = ((startMs - rangeStart) / rangeMs) * 100;
-      const widthPct = Math.max(((endMs - startMs) / rangeMs) * 100, 0.3);
-      const lane = assignLane(lanes, startMs, endMs);
-      tSessions.push({ session: s, leftPct, widthPct, lane });
+      const realEndMs = s.endTime
+        ? new Date(s.endTime).getTime()
+        : startMs + (s.durationMs ?? 60000);
+      const score = sessionScore(s);
+      const visualWidthMs = Math.max(realEndMs - startMs, minWidthFor(score) * minMsPerPx);
+      return {
+        startMs,
+        endMs: startMs + visualWidthMs, // visual end for packing
+        realEndMs, // for tooltip / display
+        score,
+        original: s,
+      };
+    });
+
+    const { laneAssignments, laneCount, dropped } = packLanesByImportance(intervals);
+
+    const tSessions: TimelineSession[] = [];
+    for (const it of intervals) {
+      const lane = laneAssignments.get(it.original.sessionId);
+      if (lane == null) continue; // dropped due to lane cap
+      // Clip to viewport: if the bar starts before the visible window, push the
+      // left edge to 0 and shorten the width. Avoids "mid-string truncation"
+      // where the visible portion starts at some arbitrary character of the title.
+      const rawLeftPct = ((it.startMs - rangeStart) / rangeMs) * 100;
+      const rawRightPct = ((it.realEndMs - rangeStart) / rangeMs) * 100;
+      const leftPct = Math.max(0, rawLeftPct);
+      const widthPct = Math.max(0, rawRightPct - leftPct);
+      tSessions.push({
+        session: it.original,
+        leftPct,
+        widthPct,
+        lane,
+        score: it.score,
+        minWidthPx: minWidthFor(it.score),
+        heightPx: heightFor(it.score),
+        fillAlpha: fillAlphaFor(it.score),
+        showAccent: it.score >= TOP_ACCENT_SCORE_THRESHOLD,
+        opacity: opacityFor(it.score),
+      });
     }
 
     if (tSessions.length > 0) {
+      // Render high-score sessions last so their accent rim sits on top of overlaps
+      tSessions.sort((a, b) => a.score - b.score);
       projects.push({
         project: g.project,
         sessions: tSessions,
-        laneCount: tSessions.reduce((max, s) => Math.max(max, s.lane), 0) + 1,
+        laneCount,
+        hiddenInLanesCount: dropped,
         colorIdx: g.colorIdx,
+        importance: tSessions.reduce((sum, t) => sum + t.score, 0),
       });
+      totalSessions += tSessions.length;
     }
   }
+
+  // Order project lanes by total importance (most active first)
+  projects.sort((a, b) => b.importance - a.importance);
 
   // Build time axis ticks (6-8 ticks)
   const tickCount = 7;
@@ -324,7 +501,24 @@ function buildTimeline(groups: ProjectGroup[]): {
     ticks.push({ leftPct, label });
   }
 
-  return { projects, ticks, minMs, maxMs };
+  return { projects, ticks, minMs, maxMs, totalSessions, hiddenAutomatedCount };
+}
+
+type TimelineRange = "1d" | "7d" | "30d" | "all";
+
+const RANGE_OPTIONS: { value: TimelineRange; label: string; days?: number }[] = [
+  { value: "1d", label: "1D", days: 1 },
+  { value: "7d", label: "7D", days: 7 },
+  { value: "30d", label: "30D", days: 30 },
+  { value: "all", label: "All" },
+];
+
+function rangeWindow(range: TimelineRange): { start?: number; end?: number } {
+  const opt = RANGE_OPTIONS.find((o) => o.value === range);
+  if (!opt || opt.days == null) return {};
+  const end = Date.now();
+  const start = end - opt.days * 86400000;
+  return { start, end };
 }
 
 interface TooltipInfo {
@@ -334,122 +528,218 @@ interface TooltipInfo {
 }
 
 function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
-  const { projects, ticks } = useMemo(() => buildTimeline(groups), [groups]);
+  const [range, setRange] = useState<TimelineRange>("7d");
+  const [showAutomated, setShowAutomated] = useState(false);
   const [tooltip, setTooltip] = useState<TooltipInfo | null>(null);
-
-  if (projects.length === 0) {
-    return (
-      <div className="flex items-center justify-center h-40 text-terminal-dimmer text-sm font-mono">
-        No sessions with timing data available.
-      </div>
-    );
-  }
+  const { start, end } = useMemo(() => rangeWindow(range), [range]);
+  const { projects, ticks, totalSessions, hiddenAutomatedCount } = useMemo(
+    () => buildTimeline(groups, start, end, showAutomated),
+    [groups, start, end, showAutomated],
+  );
 
   const LABEL_WIDTH = 140;
 
   return (
     <div className="p-4 space-y-0 select-none">
-      {/* Time axis header */}
-      <div className="flex" style={{ paddingLeft: LABEL_WIDTH }}>
-        <div className="relative flex-1 h-6 border-b border-terminal-border/40">
-          {ticks.map((t, i) => (
-            <div
-              key={i}
-              className="absolute flex flex-col items-center"
-              style={{ left: `${t.leftPct}%`, transform: "translateX(-50%)" }}
+      {/* Range selector + automated toggle */}
+      <div className="flex items-center justify-between mb-3 pl-1">
+        <div className="text-[11px] font-mono text-terminal-dimmer flex items-center gap-3">
+          <span>
+            {totalSessions} <span className="opacity-60">sessions</span>
+          </span>
+          <span className="opacity-50">·</span>
+          <span className="opacity-70">
+            row = project · height + width + fill = importance · time → x-axis
+          </span>
+        </div>
+        <div className="flex items-center gap-3 text-[10px] font-mono">
+          {hiddenAutomatedCount > 0 && !showAutomated && (
+            <button
+              onClick={() => setShowAutomated(true)}
+              className="text-terminal-dimmer hover:text-terminal-text transition-colors"
+              title="Scheduled / automated sessions are hidden by default"
             >
-              <span className="text-[9px] font-mono text-terminal-dimmer whitespace-nowrap">
-                {t.label}
-              </span>
-              <div className="w-px h-1.5 bg-terminal-border/40 mt-0.5" />
-            </div>
-          ))}
+              + {hiddenAutomatedCount} automated hidden ▸
+            </button>
+          )}
+          {showAutomated && (
+            <button
+              onClick={() => setShowAutomated(false)}
+              className="text-terminal-purple hover:underline"
+            >
+              hide automated
+            </button>
+          )}
+          <div className="flex items-center gap-1">
+            <span className="text-terminal-dimmer mr-1">Range:</span>
+            {RANGE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setRange(opt.value)}
+                className={`px-2 py-1 rounded-md transition-colors ${
+                  range === opt.value
+                    ? "bg-terminal-green-subtle text-terminal-green"
+                    : "text-terminal-dim hover:text-terminal-text"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* Swimlanes */}
-      {projects.map((p) => {
-        const color = colorFor(p.colorIdx);
-        const rowHeight = p.laneCount * (LANE_HEIGHT_PX + LANE_GAP_PX) + 8;
-        return (
-          <div
-            key={p.project}
-            className="flex items-stretch border-b border-terminal-border/20 group"
-          >
-            {/* Project label */}
-            <div
-              className="flex flex-col justify-center shrink-0 py-1 pr-3"
-              style={{ width: LABEL_WIDTH }}
+      {projects.length === 0 ? (
+        <div className="flex flex-col items-center justify-center h-40 gap-2 text-terminal-dimmer text-sm font-mono">
+          <div>No sessions in the last {RANGE_OPTIONS.find((o) => o.value === range)?.label}.</div>
+          {range !== "all" && (
+            <button
+              onClick={() => setRange("all")}
+              className="text-terminal-green hover:underline text-xs"
             >
-              <div className={`text-xs font-sans font-medium truncate ${color.text}`}>
-                {shortName(p.project)}
-              </div>
-              <div className="text-[9px] font-mono text-terminal-dimmer">
-                {p.sessions.length} sessions
-              </div>
-            </div>
-
-            {/* Lane area */}
-            <div
-              className="relative flex-1 bg-terminal-surface/20 group-hover:bg-terminal-surface/30 transition-colors"
-              style={{ height: rowHeight }}
-            >
-              {/* Grid lines */}
+              Show all sessions →
+            </button>
+          )}
+        </div>
+      ) : (
+        <>
+          {/* Time axis header */}
+          <div className="flex" style={{ paddingLeft: LABEL_WIDTH }}>
+            <div className="relative flex-1 h-6 border-b border-terminal-border/40">
               {ticks.map((t, i) => (
                 <div
                   key={i}
-                  className="absolute top-0 bottom-0 w-px bg-terminal-border/10"
-                  style={{ left: `${t.leftPct}%` }}
-                />
+                  className="absolute flex flex-col items-center"
+                  style={{ left: `${t.leftPct}%`, transform: "translateX(-50%)" }}
+                >
+                  <span className="text-[9px] font-mono text-terminal-dimmer whitespace-nowrap">
+                    {t.label}
+                  </span>
+                  <div className="w-px h-1.5 bg-terminal-border/40 mt-0.5" />
+                </div>
               ))}
+            </div>
+          </div>
 
-              {/* Session blocks */}
-              {p.sessions.map((ts) => {
-                const top = 4 + ts.lane * (LANE_HEIGHT_PX + LANE_GAP_PX);
-                return (
-                  <div
-                    key={ts.session.sessionId}
-                    className={`absolute rounded cursor-pointer hover:brightness-110 transition-all ${color.bg} border ${color.border} border-opacity-60`}
-                    style={{
-                      left: `${ts.leftPct}%`,
-                      width: `max(${ts.widthPct}%, 4px)`,
-                      top,
-                      height: LANE_HEIGHT_PX,
-                    }}
-                    onMouseEnter={(e) => {
-                      setTooltip({
-                        session: ts.session,
-                        x: e.clientX,
-                        y: e.clientY,
-                      });
-                    }}
-                    onMouseLeave={() => setTooltip(null)}
-                  >
-                    {ts.widthPct > 3 && (
-                      <span
-                        className={`absolute inset-0 flex items-center px-1 text-[8px] font-mono ${color.text} truncate opacity-80`}
-                      >
-                        {ts.session.title ?? ts.session.firstPrompt ?? ""}
+          {/* Project rows — lane-packed, bottom-aligned skyline.
+              Per-bar HEIGHT, WIDTH (min-width by score), FILL alpha, and an
+              optional left ACCENT RIM all encode importance — important sessions
+              are visibly larger and more saturated, low-importance ones are
+              short ghosted ticks but still labeled and clickable. */}
+          {projects.map((p) => {
+            const color = colorFor(p.colorIdx);
+            const rowHeight = p.laneCount * (LANE_TOTAL_HEIGHT_PX + LANE_GAP_PX) + 6;
+            const accentColor = color.solid;
+            return (
+              <div
+                key={p.project}
+                className="flex items-stretch border-b border-terminal-border/20 group"
+              >
+                {/* Project label */}
+                <div
+                  className="flex flex-col justify-center shrink-0 py-1 pr-3 overflow-hidden"
+                  style={{ width: LABEL_WIDTH, height: rowHeight }}
+                >
+                  <div className={`text-xs font-sans font-medium truncate ${color.text}`}>
+                    {shortName(p.project)}
+                  </div>
+                  <div className="text-[9px] font-mono text-terminal-dimmer truncate">
+                    {p.sessions.length} session{p.sessions.length !== 1 ? "s" : ""}
+                    {p.hiddenInLanesCount > 0 && (
+                      <span className="text-terminal-orange/70">
+                        {" "}
+                        · +{p.hiddenInLanesCount} hidden
                       </span>
                     )}
                   </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })}
+                </div>
+
+                {/* Lane area */}
+                <div
+                  className="relative flex-1 overflow-hidden bg-terminal-surface/20 group-hover:bg-terminal-surface/30 transition-colors"
+                  style={{ height: rowHeight }}
+                >
+                  {/* Grid lines */}
+                  {ticks.map((t, i) => (
+                    <div
+                      key={i}
+                      className="absolute top-0 bottom-0 w-px bg-terminal-border/10"
+                      style={{ left: `${t.leftPct}%` }}
+                    />
+                  ))}
+
+                  {/* Session blocks — variable height (importance), bottom-aligned within lane */}
+                  {p.sessions.map((ts) => {
+                    const automated = isAutomated(ts.session);
+                    // Lane row spans LANE_TOTAL_HEIGHT_PX. Bar bottom aligns to
+                    // the lane's bottom; height varies up to that ceiling.
+                    const laneTop = 3 + ts.lane * (LANE_TOTAL_HEIGHT_PX + LANE_GAP_PX);
+                    const top = laneTop + (LANE_TOTAL_HEIGHT_PX - ts.heightPx);
+                    const opacity = automated ? 0.4 : ts.opacity;
+                    return (
+                      <div
+                        key={ts.session.sessionId}
+                        className={`absolute overflow-hidden rounded-sm cursor-pointer hover:brightness-125 hover:z-10 transition-all border ${color.border} border-opacity-50`}
+                        style={{
+                          left: `${ts.leftPct}%`,
+                          width: `max(${ts.widthPct}%, ${ts.minWidthPx}px)`,
+                          top,
+                          height: ts.heightPx,
+                          opacity,
+                          zIndex: Math.round(ts.score),
+                          backgroundColor: hexToRgba(accentColor, ts.fillAlpha),
+                          ...(ts.showAccent
+                            ? {
+                                boxShadow: `inset 3px 0 0 ${accentColor}`,
+                              }
+                            : {}),
+                        }}
+                        onMouseEnter={(e) => {
+                          setTooltip({
+                            session: ts.session,
+                            x: e.clientX,
+                            y: e.clientY,
+                          });
+                        }}
+                        onMouseLeave={() => setTooltip(null)}
+                      >
+                        {ts.heightPx >= LABEL_VISIBLE_MIN_HEIGHT_PX && (
+                          <div
+                            className={`relative h-full flex items-center text-[10px] font-mono ${color.text} pointer-events-none`}
+                            style={{
+                              paddingLeft: ts.showAccent ? 7 : 4,
+                              paddingRight: 4,
+                              minWidth: 0,
+                            }}
+                          >
+                            <span className="block truncate min-w-0 flex-1">
+                              {ts.session.title ?? ts.session.firstPrompt ?? ""}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
 
       {/* Tooltip */}
       {tooltip && (
         <div
-          className="fixed z-50 pointer-events-none bg-terminal-surface border border-terminal-border rounded-lg shadow-xl p-3 text-xs font-mono max-w-xs"
+          className="fixed pointer-events-none bg-terminal-surface border border-terminal-border rounded-lg shadow-xl p-3 text-xs font-mono w-80"
           style={{
-            left: Math.min(tooltip.x + 12, window.innerWidth - 280),
-            top: Math.max(8, Math.min(tooltip.y - 8, window.innerHeight - 160)),
+            // Bars use zIndex up to 100 (score-based), so the tooltip needs to
+            // stay well above that — z-50 was actually below high-score bars.
+            zIndex: 1000,
+            left: Math.min(tooltip.x + 12, window.innerWidth - 336),
+            top: Math.max(8, Math.min(tooltip.y - 8, window.innerHeight - 200)),
           }}
         >
-          <div className="text-terminal-text font-medium mb-1 truncate">
+          <div className="text-terminal-text font-medium mb-1.5 break-words leading-snug">
             {tooltip.session.title ?? tooltip.session.firstPrompt ?? tooltip.session.slug}
           </div>
           <div className="text-terminal-dimmer space-y-0.5">
@@ -815,6 +1105,12 @@ export default function SessionRelationshipsView({ onBack }: SessionRelationship
   const [activeView, setActiveView] = useState<RelView>("timeline");
 
   const groups = useMemo(() => groupByProject(sessions), [sessions]);
+  // Timeline collapses worktree paths back to their parent repo so the lanes
+  // reflect "real" projects instead of being polluted by every worktree.
+  const timelineGroups = useMemo(
+    () => groupByProject(sessions, { collapseWorktrees: true }),
+    [sessions],
+  );
 
   if (loading) {
     return (
@@ -911,7 +1207,7 @@ export default function SessionRelationshipsView({ onBack }: SessionRelationship
 
       {/* View content */}
       <div className="flex-1 overflow-y-auto">
-        {activeView === "timeline" && <TimelineSwimlaneView groups={groups} />}
+        {activeView === "timeline" && <TimelineSwimlaneView groups={timelineGroups} />}
         {activeView === "group" && <ProjectGroupingView groups={groups} />}
         {activeView === "tree" && <DispatchTreeView groups={groups} />}
         {activeView === "files" && <FileConnectionsView groups={groups} />}

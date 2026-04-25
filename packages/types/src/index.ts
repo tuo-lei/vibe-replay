@@ -216,6 +216,8 @@ export interface SessionScanWireData {
   filesModified: Array<{ file: string; count: number }>;
   costEstimate?: number;
   subAgentCount: number;
+  entrypoint?: string;
+  prLinks?: PrLink[];
 }
 
 export interface ReplaySession {
