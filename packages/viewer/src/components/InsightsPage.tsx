@@ -1377,6 +1377,11 @@ export default function InsightsPage() {
       };
     }, [userInsights, range, homePageCounts]);
 
+  const rolledTopProjects = useMemo(
+    () => rollupTopProjects(userInsights?.topProjects || []),
+    [userInsights?.topProjects],
+  );
+
   if (!userInsights && (loading || isInitialScan || scanStatus?.phase === "discovering")) {
     return (
       <InsightsLoadingState
@@ -1583,7 +1588,7 @@ export default function InsightsPage() {
               Top Projects
             </h3>
             <TopProjectsList
-              projects={rollupTopProjects(userInsights.topProjects || []).map((p) => ({
+              projects={rolledTopProjects.map((p) => ({
                 project: p.project,
                 sessions: p.sessions,
                 cost: p.cost,

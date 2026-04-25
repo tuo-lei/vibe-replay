@@ -534,12 +534,15 @@ export interface TopProjectEntry {
 
 /**
  * Roll up Claude agent worktree entries under their parent project. Sums
- * additive metrics, takes the max of `lastActivity` and `memoryFileCount`
- * (parent typically owns the memory files), and merges `sessionsPerDay` by
- * day key. The resulting entry's `project` is the parent path.
+ * additive metrics (`branchCount`/`prCount` may double-count when a worktree
+ * shares the parent's branch — accepted as an inherent approximation since
+ * the scanner counts per-path), takes the max of `lastActivity` and
+ * `memoryFileCount` (parent typically owns the memory files), and merges
+ * `sessionsPerDay` by day key. The resulting entry's `project` is the
+ * parent path.
  */
-export function rollupTopProjects<T extends TopProjectEntry>(projects: readonly T[]): T[] {
-  const byParent = new Map<string, T>();
+export function rollupTopProjects(projects: readonly TopProjectEntry[]): TopProjectEntry[] {
+  const byParent = new Map<string, TopProjectEntry>();
 
   for (const p of projects) {
     const key = rollupProject(p.project);

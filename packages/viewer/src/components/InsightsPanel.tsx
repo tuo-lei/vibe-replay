@@ -658,6 +658,13 @@ export function ProjectInsightsPanel({ insights }: { insights: ProjectInsights }
 
 export function UserInsightsPanel({ insights }: { insights: UserInsights }) {
   const [expanded, setExpanded] = useState(false);
+  const rolledTopProjects = useMemo(
+    () =>
+      [...rollupTopProjects(insights.topProjects)]
+        .sort((a, b) => b.sessions - a.sessions)
+        .slice(0, 8),
+    [insights.topProjects],
+  );
 
   if (insights.totalSessions === 0) return null;
 
@@ -721,33 +728,30 @@ export function UserInsightsPanel({ insights }: { insights: UserInsights }) {
                 Top projects
               </div>
               <div className="space-y-1.5">
-                {rollupTopProjects(insights.topProjects)
-                  .sort((a, b) => b.sessions - a.sessions)
-                  .slice(0, 8)
-                  .map((p) => {
-                    const name = p.project.split("/").pop() || p.project;
-                    return (
-                      <div key={p.project} className="flex items-center gap-2 text-xs">
-                        <span
-                          className="font-mono text-terminal-text truncate flex-1"
-                          title={p.project}
-                        >
-                          {name}
+                {rolledTopProjects.map((p) => {
+                  const name = p.project.split("/").pop() || p.project;
+                  return (
+                    <div key={p.project} className="flex items-center gap-2 text-xs">
+                      <span
+                        className="font-mono text-terminal-text truncate flex-1"
+                        title={p.project}
+                      >
+                        {name}
+                      </span>
+                      <span className="text-terminal-dimmer tabular-nums shrink-0">
+                        {p.sessions} session{p.sessions > 1 ? "s" : ""}
+                      </span>
+                      <span className="text-terminal-green tabular-nums shrink-0">
+                        {p.prompts} prompts
+                      </span>
+                      {p.cost > 0 && (
+                        <span className="text-terminal-orange tabular-nums shrink-0">
+                          ${p.cost.toFixed(2)}
                         </span>
-                        <span className="text-terminal-dimmer tabular-nums shrink-0">
-                          {p.sessions} session{p.sessions > 1 ? "s" : ""}
-                        </span>
-                        <span className="text-terminal-green tabular-nums shrink-0">
-                          {p.prompts} prompts
-                        </span>
-                        {p.cost > 0 && (
-                          <span className="text-terminal-orange tabular-nums shrink-0">
-                            ${p.cost.toFixed(2)}
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -851,6 +855,15 @@ export function TitleInsightsHeader({
 
   const title = pi ? pi.project.split("/").pop() || pi.project : "All Projects";
   const subtitle = pi ? pi.project : `${ui?.totalProjects ?? 0} projects`;
+
+  const uiTopProjects = ui?.topProjects;
+  const rolledTopProjects = useMemo(
+    () =>
+      uiTopProjects
+        ? [...rollupTopProjects(uiTopProjects)].sort((a, b) => b.sessions - a.sessions).slice(0, 8)
+        : [],
+    [uiTopProjects],
+  );
 
   if (sessionCount === 0) return null;
 
@@ -1089,48 +1102,45 @@ export function TitleInsightsHeader({
                 Top projects
               </div>
               <div className="space-y-1">
-                {rollupTopProjects(ui.topProjects)
-                  .sort((a, b) => b.sessions - a.sessions)
-                  .slice(0, 8)
-                  .map((p) => {
-                    const name = p.project.split("/").pop() || p.project;
-                    return (
-                      <div key={p.project} className="flex items-center gap-2 text-xs">
-                        <span
-                          className="font-mono text-terminal-text truncate flex-1"
-                          title={p.project}
-                        >
-                          {name}
+                {rolledTopProjects.map((p) => {
+                  const name = p.project.split("/").pop() || p.project;
+                  return (
+                    <div key={p.project} className="flex items-center gap-2 text-xs">
+                      <span
+                        className="font-mono text-terminal-text truncate flex-1"
+                        title={p.project}
+                      >
+                        {name}
+                      </span>
+                      <span className="text-terminal-dimmer tabular-nums shrink-0">
+                        {p.sessions}s
+                      </span>
+                      {p.durationMs > 0 && (
+                        <span className="text-terminal-blue tabular-nums shrink-0">
+                          {formatDuration(p.durationMs)}
                         </span>
-                        <span className="text-terminal-dimmer tabular-nums shrink-0">
-                          {p.sessions}s
+                      )}
+                      <span className="text-terminal-green tabular-nums shrink-0">
+                        {p.prompts}p
+                      </span>
+                      {p.edits > 0 && (
+                        <span className="text-terminal-purple tabular-nums shrink-0">
+                          {p.edits}e
                         </span>
-                        {p.durationMs > 0 && (
-                          <span className="text-terminal-blue tabular-nums shrink-0">
-                            {formatDuration(p.durationMs)}
-                          </span>
-                        )}
-                        <span className="text-terminal-green tabular-nums shrink-0">
-                          {p.prompts}p
+                      )}
+                      {p.prCount > 0 && (
+                        <span className="text-terminal-blue tabular-nums shrink-0">
+                          {p.prCount}pr
                         </span>
-                        {p.edits > 0 && (
-                          <span className="text-terminal-purple tabular-nums shrink-0">
-                            {p.edits}e
-                          </span>
-                        )}
-                        {p.prCount > 0 && (
-                          <span className="text-terminal-blue tabular-nums shrink-0">
-                            {p.prCount}pr
-                          </span>
-                        )}
-                        {p.cost > 0 && (
-                          <span className="text-terminal-orange tabular-nums shrink-0">
-                            ${p.cost.toFixed(2)}
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
+                      )}
+                      {p.cost > 0 && (
+                        <span className="text-terminal-orange tabular-nums shrink-0">
+                          ${p.cost.toFixed(2)}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
