@@ -500,6 +500,23 @@ export function formatDataSourceLabel(hasSqlite?: boolean, dataSource?: string):
   return hasSqlite ? "SQLite + JSONL" : "JSONL";
 }
 
+/**
+ * Claude Code's agent isolation creates worktrees under
+ * `<project>/.claude/worktrees/<docker-style-name>/`. These are auto-generated
+ * sandboxes the user has no awareness of and may be cleaned up at any time, so
+ * we roll their sessions up under the parent project for display.
+ */
+const AGENT_WORKTREE_RE = /^(.+?)\/\.claude\/worktrees\/[^/]+(?:\/.*)?$/;
+
+export function agentWorktreeParent(project: string): string | null {
+  const m = project.replace(/\/$/, "").match(AGENT_WORKTREE_RE);
+  return m ? m[1] : null;
+}
+
+export function rollupProject(project: string): string {
+  return agentWorktreeParent(project) ?? project;
+}
+
 function specialProjectLabel(project: string): string | null {
   const normalized = project.replace(/\/$/, "");
   if (!normalized) return null;
