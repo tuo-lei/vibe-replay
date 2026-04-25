@@ -6,11 +6,14 @@ import { useMemo, useState } from "react";
 import { localDayKey } from "../utils/date";
 import { navigateTo, rollupTopProjects } from "./dashboard-utils";
 import { useScanInsightsContext } from "./InsightsPanel";
+import SessionRelationshipsView from "./SessionRelationshipsView";
 import { formatDuration } from "./StatsPanel";
 
 interface ProjectsPanelProps {
   onNavigate: (view: "home" | "sessions" | "replays" | "projects") => void;
 }
+
+type PanelMode = "grid" | "relationships";
 
 // ─── Activity sparkline (compact) ───────────────────────────────────
 
@@ -73,6 +76,7 @@ function timeAgo(iso: string): string {
 
 export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
   const { userInsights, scanStatus } = useScanInsightsContext();
+  const [mode, setMode] = useState<PanelMode>("grid");
   const [sortBy, setSortBy] = useState<"lastActivity" | "sessions" | "cost" | "duration">(
     "lastActivity",
   );
@@ -130,6 +134,10 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
     }, 50);
   };
 
+  if (mode === "relationships") {
+    return <SessionRelationshipsView onBack={() => setMode("grid")} />;
+  }
+
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 space-y-4">
@@ -141,28 +149,39 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
               <span className="ml-2 text-terminal-dimmer font-normal">({projects.length})</span>
             </h2>
           </div>
-          <div className="flex items-center gap-1 text-[10px] font-sans">
-            <span className="text-terminal-dimmer mr-1">Sort:</span>
-            {(
-              [
-                ["lastActivity", "Recent"],
-                ["sessions", "Sessions"],
-                ["cost", "Cost"],
-                ["duration", "Duration"],
-              ] as const
-            ).map(([key, label]) => (
-              <button
-                key={key}
-                onClick={() => setSortBy(key)}
-                className={`px-2 py-1 rounded-md transition-colors ${
-                  sortBy === key
-                    ? "bg-terminal-green-subtle text-terminal-green"
-                    : "text-terminal-dim hover:text-terminal-text"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
+          <div className="flex items-center gap-2">
+            {/* Visualize button */}
+            <button
+              onClick={() => setMode("relationships")}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-mono bg-terminal-purple/10 text-terminal-purple border border-terminal-purple/30 hover:bg-terminal-purple/20 transition-colors"
+              title="View session relationship visualizations"
+            >
+              <span>⟶</span>
+              Visualize
+            </button>
+            <div className="flex items-center gap-1 text-[10px] font-sans">
+              <span className="text-terminal-dimmer mr-1">Sort:</span>
+              {(
+                [
+                  ["lastActivity", "Recent"],
+                  ["sessions", "Sessions"],
+                  ["cost", "Cost"],
+                  ["duration", "Duration"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setSortBy(key)}
+                  className={`px-2 py-1 rounded-md transition-colors ${
+                    sortBy === key
+                      ? "bg-terminal-green-subtle text-terminal-green"
+                      : "text-terminal-dim hover:text-terminal-text"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
