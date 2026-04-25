@@ -154,6 +154,8 @@ With three providers running in parallel, the vibe-replay dashboard shows everyt
 
 The "CLAUDE" badge in the sessions list is `claude-code`. "COWORK" is `claude-cowork`. "DESKTOP" is `claude-desktop`. The badges are how you tell them apart at a glance.
 
+[![Sessions list showing CLAUDE, COWORK, and DESKTOP provider badges](/blog/dispatch-deep-dive/sessions-list.png)](/blog/dispatch-deep-dive/sessions-list.png)
+
 ---
 
 ## Generating a Replay
