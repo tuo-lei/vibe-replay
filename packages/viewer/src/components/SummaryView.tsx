@@ -549,7 +549,11 @@ export default function SummaryView({ session }: Props) {
               costEstimate={meta.stats.costEstimate}
               turnLabels={turnLabels}
             />
-            <ContextWindowChart turnStats={meta.stats.turnStats!} turnLabels={turnLabels} />
+            <ContextWindowChart
+              turnStats={meta.stats.turnStats!}
+              turnLabels={turnLabels}
+              compactions={meta.compactions}
+            />
             {stats.turns.length >= 2 && (
               <ToolActivityChart turns={stats.turns} turnLabels={turnLabels} />
             )}
@@ -1093,9 +1097,11 @@ function CacheEfficiencyLine({ turnStats }: { turnStats: TurnStat[] }) {
 function ContextWindowChart({
   turnStats,
   turnLabels,
+  compactions,
 }: {
   turnStats: TurnStat[];
   turnLabels?: string[];
+  compactions?: Array<{ timestamp: string; trigger: string; preTokens?: number }>;
 }) {
   const contextSizes = turnStats.map((t) => t.contextTokens || 0);
   const n = contextSizes.length;
@@ -1173,13 +1179,26 @@ function ContextWindowChart({
   }
   const hasNoDataTurns = noDataPolygons.length > 0;
 
-  // Detect compaction points
-  const compactionTurns: number[] = [];
+  // Detect compaction points and attach metadata when available
+  const compactionTurns: Array<{
+    turnIndex: number;
+    trigger?: string;
+    preTokens?: number;
+  }> = [];
+  let compactionMetaIdx = 0;
   for (let i = 0; i < contextSizes.length - 1; i++) {
     const cur = contextSizes[i];
     const next = contextSizes[i + 1];
     if (cur > 0 && next > 0 && next < cur * 0.5) {
-      compactionTurns.push(i);
+      const meta =
+        compactions && compactionMetaIdx < compactions.length
+          ? compactions[compactionMetaIdx++]
+          : undefined;
+      compactionTurns.push({
+        turnIndex: i,
+        trigger: meta?.trigger,
+        preTokens: meta?.preTokens,
+      });
     }
   }
 
@@ -1259,11 +1278,11 @@ function ContextWindowChart({
             vectorEffect="non-scaling-stroke"
           />
           {/* Compaction markers */}
-          {compactionTurns.map((ti) => {
-            const x = toX(ti);
+          {compactionTurns.map((c) => {
+            const x = toX(c.turnIndex);
             return (
               <line
-                key={ti}
+                key={c.turnIndex}
                 x1={x}
                 y1="0"
                 x2={x}
@@ -1335,6 +1354,21 @@ function ContextWindowChart({
                   <div className="text-terminal-dim">{hoveredCacheRate.toFixed(0)}% cache hit</div>
                 </div>
               )}
+              {(() => {
+                const comp = compactionTurns.find((c) => c.turnIndex === hovered);
+                if (!comp) return null;
+                return (
+                  <div className="mt-0.5 border-t border-terminal-red/30 pt-0.5">
+                    <div className="text-terminal-red">compacted</div>
+                    {comp.trigger && <div className="text-terminal-dim">{comp.trigger}</div>}
+                    {comp.preTokens && (
+                      <div className="text-terminal-dim">
+                        {fmtNum(comp.preTokens)} tokens before
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </>
           )}
         </ChartTooltip>
@@ -1353,6 +1387,16 @@ function ContextWindowChart({
             />
             <span className="text-[10px] font-mono text-terminal-dimmer">
               {compactionTurns.length} compaction{compactionTurns.length !== 1 ? "s" : ""}
+              {compactionTurns.some((c) => c.trigger) && (
+                <span className="text-terminal-dim ml-1">
+                  (
+                  {compactionTurns
+                    .map((c) => c.trigger)
+                    .filter(Boolean)
+                    .join(", ")}
+                  )
+                </span>
+              )}
             </span>
           </div>
         )}
