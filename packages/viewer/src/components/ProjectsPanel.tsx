@@ -14,7 +14,13 @@ interface ProjectsPanelProps {
   onNavigate: (view: "home" | "sessions" | "replays" | "projects") => void;
 }
 
-type PanelMode = "grid" | "relationships";
+type PanelMode = "list" | "timeline" | "files";
+
+const PROJECT_VIEW_TABS: { id: PanelMode; label: string }[] = [
+  { id: "list", label: "List" },
+  { id: "timeline", label: "Timeline" },
+  { id: "files", label: "Files" },
+];
 
 // ─── Activity sparkline (compact) ───────────────────────────────────
 
@@ -63,32 +69,16 @@ function fmtNum(n: number): string {
 
 export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
   const { userInsights, scanStatus } = useScanInsightsContext();
-  const [mode, setMode] = useState<PanelMode>("grid");
-  const [sortBy, setSortBy] = useState<"lastActivity" | "sessions" | "cost" | "duration">(
-    "lastActivity",
-  );
+  const [mode, setMode] = useState<PanelMode>("list");
 
   const projects = useMemo(() => {
     if (!userInsights) return [];
     // Roll Claude agent worktrees up under their parent so the grid isn't
     // drowned by single-session sandbox dirs.
     const sorted = rollupTopProjects(userInsights.topProjects);
-    switch (sortBy) {
-      case "lastActivity":
-        sorted.sort((a, b) => (b.lastActivity || "").localeCompare(a.lastActivity || ""));
-        break;
-      case "sessions":
-        sorted.sort((a, b) => b.sessions - a.sessions);
-        break;
-      case "cost":
-        sorted.sort((a, b) => b.cost - a.cost);
-        break;
-      case "duration":
-        sorted.sort((a, b) => b.durationMs - a.durationMs);
-        break;
-    }
+    sorted.sort((a, b) => (b.lastActivity || "").localeCompare(a.lastActivity || ""));
     return sorted;
-  }, [userInsights, sortBy]);
+  }, [userInsights]);
 
   const isScanning = scanStatus?.running && scanStatus.total > 0;
 
@@ -121,10 +111,6 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
     }, 50);
   };
 
-  if (mode === "relationships") {
-    return <SessionRelationshipsView onBack={() => setMode("grid")} />;
-  }
-
   return (
     <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden">
       <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 space-y-4">
@@ -136,39 +122,20 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
               <span className="ml-2 text-terminal-dimmer font-normal">({projects.length})</span>
             </h2>
           </div>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            {/* Visualize button */}
-            <button
-              onClick={() => setMode("relationships")}
-              className="flex w-fit items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-mono bg-terminal-purple/10 text-terminal-purple border border-terminal-purple/30 hover:bg-terminal-purple/20 transition-colors"
-              title="View session relationship visualizations"
-            >
-              <span>⟶</span>
-              Visualize
-            </button>
-            <div className="flex flex-wrap items-center gap-1 text-[10px] font-sans">
-              <span className="text-terminal-dimmer mr-1">Sort:</span>
-              {(
-                [
-                  ["lastActivity", "Recent"],
-                  ["sessions", "Sessions"],
-                  ["cost", "Cost"],
-                  ["duration", "Duration"],
-                ] as const
-              ).map(([key, label]) => (
-                <button
-                  key={key}
-                  onClick={() => setSortBy(key)}
-                  className={`px-2 py-1 rounded-md transition-colors ${
-                    sortBy === key
-                      ? "bg-terminal-green-subtle text-terminal-green"
-                      : "text-terminal-dim hover:text-terminal-text"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+          <div className="flex flex-wrap items-center gap-1 text-[10px] font-sans">
+            {PROJECT_VIEW_TABS.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setMode(tab.id)}
+                className={`px-2.5 py-1.5 rounded-lg transition-colors ${
+                  mode === tab.id
+                    ? "bg-terminal-green-subtle text-terminal-green"
+                    : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-2"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -181,81 +148,88 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
           </div>
         )}
 
+        {mode === "timeline" && <SessionRelationshipsView view="timeline" />}
+        {mode === "files" && <SessionRelationshipsView view="files" />}
+
         {/* Projects grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {projects.map((p) => {
-            const name = p.project.split("/").pop() || p.project;
-            return (
-              <button
-                key={p.project}
-                onClick={() => handleProjectClick(p.project)}
-                className="text-left bg-terminal-surface rounded-xl p-4 shadow-layer-sm hover:bg-terminal-surface-hover transition-all duration-200 group border-l-2 border-terminal-green/40 hover:border-terminal-green"
-              >
-                {/* Project name + last activity */}
-                <div className="flex items-start justify-between gap-2 mb-3">
-                  <div className="min-w-0">
-                    <div className="text-sm font-sans font-medium text-terminal-text truncate group-hover:text-terminal-green transition-colors">
-                      {name}
+        {mode === "list" && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {projects.map((p) => {
+              const name = p.project.split("/").pop() || p.project;
+              return (
+                <button
+                  key={p.project}
+                  onClick={() => handleProjectClick(p.project)}
+                  className="text-left bg-terminal-surface rounded-xl p-4 shadow-layer-sm hover:bg-terminal-surface-hover transition-all duration-200 group border-l-2 border-terminal-green/40 hover:border-terminal-green"
+                >
+                  {/* Project name + last activity */}
+                  <div className="flex items-start justify-between gap-2 mb-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-sans font-medium text-terminal-text truncate group-hover:text-terminal-green transition-colors">
+                        {name}
+                      </div>
+                      <div className="text-[10px] font-mono text-terminal-dimmer truncate mt-0.5">
+                        {p.project}
+                      </div>
                     </div>
-                    <div className="text-[10px] font-mono text-terminal-dimmer truncate mt-0.5">
-                      {p.project}
-                    </div>
+                    {p.lastActivity && (
+                      <span className="text-[10px] font-mono text-terminal-dimmer shrink-0">
+                        {timeAgo(p.lastActivity, "long")}
+                      </span>
+                    )}
                   </div>
-                  {p.lastActivity && (
-                    <span className="text-[10px] font-mono text-terminal-dimmer shrink-0">
-                      {timeAgo(p.lastActivity, "long")}
-                    </span>
-                  )}
-                </div>
 
-                {/* Stats row */}
-                <div className="flex items-center gap-3 text-xs font-mono flex-wrap mb-3">
-                  <span className="text-terminal-text tabular-nums">
-                    {p.sessions}{" "}
-                    <span className="text-terminal-dimmer">
-                      session{p.sessions !== 1 ? "s" : ""}
+                  {/* Stats row */}
+                  <div className="flex items-center gap-3 text-xs font-mono flex-wrap mb-3">
+                    <span className="text-terminal-text tabular-nums">
+                      {p.sessions}{" "}
+                      <span className="text-terminal-dimmer">
+                        session{p.sessions !== 1 ? "s" : ""}
+                      </span>
                     </span>
-                  </span>
-                  {p.durationMs > 0 && (
-                    <span className="text-terminal-blue tabular-nums">
-                      {formatDuration(p.durationMs)}
+                    {p.durationMs > 0 && (
+                      <span className="text-terminal-blue tabular-nums">
+                        {formatDuration(p.durationMs)}
+                      </span>
+                    )}
+                    {p.cost > 0 && (
+                      <span className="text-terminal-orange tabular-nums">
+                        ${p.cost.toFixed(2)}
+                      </span>
+                    )}
+                    <span className="text-terminal-green tabular-nums">
+                      {fmtNum(p.prompts)} <span className="text-terminal-dimmer">prompts</span>
                     </span>
-                  )}
-                  {p.cost > 0 && (
-                    <span className="text-terminal-orange tabular-nums">${p.cost.toFixed(2)}</span>
-                  )}
-                  <span className="text-terminal-green tabular-nums">
-                    {fmtNum(p.prompts)} <span className="text-terminal-dimmer">prompts</span>
-                  </span>
-                </div>
+                  </div>
 
-                {/* Secondary stats */}
-                <div className="flex items-center gap-3 text-[10px] font-mono text-terminal-dimmer flex-wrap mb-2">
-                  {p.toolCalls > 0 && <span>{fmtNum(p.toolCalls)} tools</span>}
-                  {p.edits > 0 && <span>{fmtNum(p.edits)} edits</span>}
-                  {p.branchCount > 0 && (
-                    <span>
-                      {p.branchCount} branch{p.branchCount !== 1 ? "es" : ""}
-                    </span>
-                  )}
-                  {p.prCount > 0 && (
-                    <span>
-                      {p.prCount} PR{p.prCount !== 1 ? "s" : ""}
-                    </span>
-                  )}
-                  {p.memoryFileCount > 0 && (
-                    <span>
-                      {p.memoryFileCount} memory file{p.memoryFileCount !== 1 ? "s" : ""}
-                    </span>
-                  )}
-                </div>
+                  {/* Secondary stats */}
+                  <div className="flex items-center gap-3 text-[10px] font-mono text-terminal-dimmer flex-wrap mb-2">
+                    {p.toolCalls > 0 && <span>{fmtNum(p.toolCalls)} tools</span>}
+                    {p.edits > 0 && <span>{fmtNum(p.edits)} edits</span>}
+                    {p.branchCount > 0 && (
+                      <span>
+                        {p.branchCount} branch{p.branchCount !== 1 ? "es" : ""}
+                      </span>
+                    )}
+                    {p.prCount > 0 && (
+                      <span>
+                        {p.prCount} PR{p.prCount !== 1 ? "s" : ""}
+                      </span>
+                    )}
+                    {p.memoryFileCount > 0 && (
+                      <span>
+                        {p.memoryFileCount} memory file{p.memoryFileCount !== 1 ? "s" : ""}
+                      </span>
+                    )}
+                  </div>
 
-                {/* Sparkline */}
-                <MiniSparkline sessionsPerDay={p.sessionsPerDay} />
-              </button>
-            );
-          })}
-        </div>
+                  {/* Sparkline */}
+                  <MiniSparkline sessionsPerDay={p.sessionsPerDay} />
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

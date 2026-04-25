@@ -1,14 +1,12 @@
 /**
- * SessionRelationshipsView — Four relationship visualizations for the Projects tab:
- *   1. Project Grouping  — collapsible project rows with session lists
- *   2. Timeline Swimlane — each project is a horizontal lane, sessions are time blocks
- *   3. Dispatch Tree     — parent→child agent relationships
- *   4. File Connections  — sessions linked by shared modified files
+ * SessionRelationshipsView — alternate Projects tab views:
+ *   1. Timeline Swimlane — each project is a horizontal lane, sessions are time blocks
+ *   2. File Hotspots     — project-scoped files sorted by repeated edits
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { type ScanResultSession, useRelationshipData } from "../hooks/useRelationshipData";
-import { shortName, timeAgo } from "../utils/format";
+import { shortName } from "../utils/format";
 import { isAutomated, sessionScore } from "../utils/sessionSignals";
 import { rollupProject } from "./dashboard-utils";
 
@@ -114,108 +112,7 @@ function groupByProject(
   return groups.sort((a, b) => (b.lastActivity ?? "").localeCompare(a.lastActivity ?? ""));
 }
 
-// ─── 1. Project Grouping View ────────────────────────────────────────
-
-function SessionRow({
-  session,
-  color,
-}: {
-  session: ScanResultSession;
-  color: (typeof PROJECT_COLORS)[0];
-}) {
-  const duration = session.durationMs ?? 0;
-  return (
-    <div className="flex flex-col gap-2 px-4 py-2 border-b border-terminal-border/30 hover:bg-terminal-surface-2/50 text-xs font-mono sm:flex-row sm:items-center sm:gap-3">
-      <div className="flex-1 min-w-0">
-        <div className="text-terminal-text truncate">
-          {session.title ?? session.firstPrompt ?? session.slug}
-        </div>
-        <div className="text-terminal-dimmer text-[10px] mt-0.5">
-          {fmtDate(session.startTime)} {fmtShortTime(session.startTime)}
-          {session.endTime && <span className="ml-2">{timeAgo(session.endTime)} ago</span>}
-        </div>
-      </div>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 sm:shrink-0">
-        {duration > 0 && <span className={color.text}>{fmtDuration(duration)}</span>}
-        <span className="text-terminal-dimmer">{session.promptCount}p</span>
-        {session.editCount > 0 && (
-          <span className="text-terminal-orange">{session.editCount} edits</span>
-        )}
-        {(session.costEstimate ?? 0) > 0 && (
-          <span className="text-terminal-dimmer">${session.costEstimate!.toFixed(2)}</span>
-        )}
-        {session.gitBranch && (
-          <span className="text-terminal-purple truncate max-w-[80px]">{session.gitBranch}</span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ProjectGroupRow({ group }: { group: ProjectGroup }) {
-  const [expanded, setExpanded] = useState(false);
-  const color = colorFor(group.colorIdx);
-
-  return (
-    <div className={`rounded-xl overflow-hidden border border-terminal-border/40 ${color.bg}`}>
-      <button
-        className="w-full flex flex-col gap-2 px-4 py-3 text-left hover:bg-terminal-surface-hover/30 transition-colors sm:flex-row sm:items-center sm:gap-3"
-        onClick={() => setExpanded((x) => !x)}
-      >
-        <div className="flex min-w-0 items-center gap-3">
-          <span className={`text-xs ${expanded ? "rotate-90" : ""} transition-transform shrink-0`}>
-            ▶
-          </span>
-          <div
-            className={`w-1.5 h-1.5 rounded-full shrink-0`}
-            style={{ backgroundColor: color.solid }}
-          />
-          <div className="min-w-0">
-            <span className={`font-sans font-semibold text-sm ${color.text}`}>
-              {shortName(group.project)}
-            </span>
-            <span className="block truncate text-[10px] font-mono text-terminal-dimmer sm:ml-2 sm:inline">
-              {group.project}
-            </span>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pl-7 text-xs font-mono sm:ml-auto sm:shrink-0 sm:pl-0">
-          <span className="text-terminal-text">
-            {group.sessions.length} <span className="text-terminal-dimmer">sessions</span>
-          </span>
-          {group.totalDurationMs > 0 && (
-            <span className="text-terminal-blue">{fmtDuration(group.totalDurationMs)}</span>
-          )}
-          {group.totalCost > 0 && (
-            <span className="text-terminal-orange">${group.totalCost.toFixed(2)}</span>
-          )}
-          {group.lastActivity && (
-            <span className="text-terminal-dimmer">{timeAgo(group.lastActivity)}</span>
-          )}
-        </div>
-      </button>
-      {expanded && (
-        <div className="border-t border-terminal-border/30 bg-terminal-surface/60">
-          {group.sessions.map((s) => (
-            <SessionRow key={s.sessionId} session={s} color={color} />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ProjectGroupingView({ groups }: { groups: ProjectGroup[] }) {
-  return (
-    <div className="space-y-2 p-4">
-      {groups.map((g) => (
-        <ProjectGroupRow key={g.project} group={g} />
-      ))}
-    </div>
-  );
-}
-
-// ─── 2. Timeline View ────────────────────────────────────────────────
+// ─── 1. Timeline View ────────────────────────────────────────────────
 //
 // One row per project. Sessions within a project are lane-packed (no overlap),
 // each at a uniform LANE_HEIGHT so labels are always readable. Importance is
@@ -922,211 +819,95 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
   );
 }
 
-// ─── 3. Dispatch Tree View ───────────────────────────────────────────
-
-interface DispatchNode {
-  session: ScanResultSession;
-  children: DispatchNode[];
-  depth: number;
-}
-
-// Grace window for the heuristic: a child session may continue a few minutes
-// past the parent's recorded endTime due to async shutdown / clock skew between
-// parent and sub-agent JSONL writes. Wide enough to catch real children, small
-// enough to avoid pulling in unrelated later sessions.
-const DISPATCH_END_GRACE_MS = 5 * 60 * 1000;
-
-function buildDispatchTree(sessions: ScanResultSession[]): DispatchNode[] {
-  // Claude Code sub-agent detection: sessions with subAgentCount > 0 are parents.
-  // Without explicit parent-child IDs in the scan results, we infer relationships
-  // heuristically: sessions that started within a parent session's time range
-  // and have the same project are likely children.
-  const withSubAgents = sessions.filter((s) => s.subAgentCount > 0 && s.startTime);
-  const candidates = sessions.filter((s) => s.subAgentCount === 0 && s.startTime);
-
-  const roots: DispatchNode[] = [];
-  const usedIds = new Set<string>();
-
-  for (const parent of withSubAgents) {
-    const parentStart = new Date(parent.startTime!).getTime();
-    const parentEnd = parent.endTime
-      ? new Date(parent.endTime).getTime()
-      : parentStart + (parent.durationMs ?? 0);
-
-    // Find sessions that ran entirely within this parent's window
-    const children: DispatchNode[] = [];
-    for (const child of candidates) {
-      if (usedIds.has(child.sessionId)) continue;
-      if (rollupProject(child.project) !== rollupProject(parent.project)) continue;
-      const childStart = new Date(child.startTime!).getTime();
-      const childEnd = child.endTime
-        ? new Date(child.endTime).getTime()
-        : childStart + (child.durationMs ?? 0);
-      if (childStart >= parentStart && childEnd <= parentEnd + DISPATCH_END_GRACE_MS) {
-        children.push({ session: child, children: [], depth: 1 });
-        usedIds.add(child.sessionId);
-      }
-    }
-
-    if (children.length > 0) {
-      roots.push({ session: parent, children, depth: 0 });
-      usedIds.add(parent.sessionId);
-    }
-  }
-
-  // Sessions with subAgentCount > 0 but no children found — show as isolated
-  for (const s of withSubAgents) {
-    if (!usedIds.has(s.sessionId)) {
-      roots.push({ session: s, children: [], depth: 0 });
-    }
-  }
-
-  return roots;
-}
-
-function DispatchNodeRow({ node, colorIdx }: { node: DispatchNode; colorIdx: number }) {
-  const [expanded, setExpanded] = useState(true);
-  const color = colorFor(colorIdx);
-  const s = node.session;
-
-  return (
-    <div>
-      <div
-        className={`flex items-start gap-2 py-2 px-3 rounded-lg ${node.depth === 0 ? `${color.bg} border ${color.border}/40` : "hover:bg-terminal-surface-2/30"}`}
-        style={{ marginLeft: node.depth * 32 }}
-      >
-        {node.children.length > 0 && (
-          <button
-            className="shrink-0 mt-0.5 text-terminal-dimmer hover:text-terminal-text"
-            onClick={() => setExpanded((x) => !x)}
-          >
-            <span
-              className={`text-[10px] ${expanded ? "rotate-90" : ""} inline-block transition-transform`}
-            >
-              ▶
-            </span>
-          </button>
-        )}
-        {node.children.length === 0 && (
-          <span className="w-4 shrink-0 text-terminal-dimmer text-[10px]">
-            {node.depth > 0 ? "└" : "·"}
-          </span>
-        )}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span
-              className={`text-xs font-mono ${node.depth === 0 ? color.text : "text-terminal-text"} truncate`}
-            >
-              {s.title ?? s.firstPrompt ?? s.slug}
-            </span>
-            {node.depth === 0 && s.subAgentCount > 0 && (
-              <span className="text-[9px] font-mono text-terminal-purple bg-terminal-purple/10 px-1.5 py-0.5 rounded">
-                {s.subAgentCount} subagents
-              </span>
-            )}
-          </div>
-          <div className="text-[9px] font-mono text-terminal-dimmer mt-0.5 flex gap-2">
-            {s.startTime && <span>{fmtDate(s.startTime)}</span>}
-            {s.durationMs && (
-              <span className="text-terminal-blue">{fmtDuration(s.durationMs)}</span>
-            )}
-            <span>
-              {s.promptCount}p · {s.editCount} edits
-            </span>
-          </div>
-        </div>
-      </div>
-      {expanded &&
-        node.children.map((child) => (
-          <DispatchNodeRow key={child.session.sessionId} node={child} colorIdx={colorIdx} />
-        ))}
-    </div>
-  );
-}
-
-function DispatchTreeView({ groups }: { groups: ProjectGroup[] }) {
-  const trees = useMemo(() => {
-    const allSessions = groups.flatMap((g) => g.sessions);
-    return buildDispatchTree(allSessions);
-  }, [groups]);
-
-  if (trees.length === 0) {
-    return (
-      <div className="p-8 text-center space-y-2">
-        <div className="text-terminal-dimmer text-sm font-mono">
-          No dispatch relationships found.
-        </div>
-        <div className="text-terminal-dimmer/60 text-xs font-mono">
-          Sessions with sub-agents will appear here as parent→child trees.
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="p-4 space-y-3">
-      <div className="text-xs font-mono text-terminal-dimmer mb-4">
-        {trees.length} dispatch group{trees.length !== 1 ? "s" : ""} found
-        {" · "}
-        {trees.reduce((s, t) => s + t.children.length, 0)} child sessions
-      </div>
-      {trees.map((node, i) => {
-        const colorIdx = groups.findIndex((g) => g.project === node.session.project);
-        return (
-          <div key={node.session.sessionId} className="space-y-1">
-            <DispatchNodeRow node={node} colorIdx={colorIdx >= 0 ? colorIdx : i} />
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ─── 4. File Connections View ────────────────────────────────────────
+// ─── 2. File Hotspots View ───────────────────────────────────────────
 
 interface FileCluster {
   file: string;
   displayName: string;
+  totalEdits: number;
   sessions: Array<{ session: ScanResultSession; editCount: number; colorIdx: number }>;
 }
 
-function buildFileClusters(groups: ProjectGroup[]): FileCluster[] {
-  const fileMap = new Map<
-    string,
-    Array<{ session: ScanResultSession; editCount: number; colorIdx: number }>
-  >();
+interface ProjectFileGroup {
+  project: string;
+  colorIdx: number;
+  files: FileCluster[];
+  totalEdits: number;
+  totalSessions: number;
+}
+
+function displayFileName(file: string, project: string): string {
+  const normalizedProject = project.replace(/\/$/, "");
+  if (normalizedProject && file.startsWith(`${normalizedProject}/`)) {
+    return file.slice(normalizedProject.length + 1);
+  }
+  const parts = file.split("/");
+  return parts.slice(-3).join("/");
+}
+
+function buildProjectFileGroups(groups: ProjectGroup[]): ProjectFileGroup[] {
+  const projectFileGroups: ProjectFileGroup[] = [];
 
   for (const g of groups) {
+    const fileMap = new Map<
+      string,
+      Array<{ session: ScanResultSession; editCount: number; colorIdx: number }>
+    >();
+
     for (const s of g.sessions) {
       for (const f of s.filesModified) {
-        // Use full path as key to avoid false connections across projects
         const key = f.file;
         if (!fileMap.has(key)) fileMap.set(key, []);
         fileMap.get(key)!.push({ session: s, editCount: f.count, colorIdx: g.colorIdx });
       }
     }
-  }
 
-  // Only show files touched by 2+ sessions
-  const clusters: FileCluster[] = [];
-  for (const [file, sessions] of fileMap) {
-    const uniqueSessions = [...new Map(sessions.map((s) => [s.session.sessionId, s])).values()];
-    if (uniqueSessions.length >= 2) {
-      // Shortened display: last 3 path segments
-      const parts = file.split("/");
-      const displayName = parts.slice(-3).join("/");
-      clusters.push({ file, displayName, sessions: uniqueSessions });
+    const files: FileCluster[] = [];
+    for (const [file, sessions] of fileMap) {
+      const uniqueSessions = [...new Map(sessions.map((s) => [s.session.sessionId, s])).values()];
+      if (uniqueSessions.length < 2) continue;
+      files.push({
+        file,
+        displayName: displayFileName(file, g.project),
+        sessions: uniqueSessions.sort((a, b) => b.editCount - a.editCount),
+        totalEdits: uniqueSessions.reduce((sum, s) => sum + s.editCount, 0),
+      });
     }
+
+    if (files.length === 0) continue;
+    files.sort((a, b) => b.totalEdits - a.totalEdits || b.sessions.length - a.sessions.length);
+    projectFileGroups.push({
+      project: g.project,
+      colorIdx: g.colorIdx,
+      files,
+      totalEdits: files.reduce((sum, file) => sum + file.totalEdits, 0),
+      totalSessions: files.reduce((sum, file) => sum + file.sessions.length, 0),
+    });
   }
 
-  return clusters.sort((a, b) => b.sessions.length - a.sessions.length).slice(0, 50);
+  return projectFileGroups.sort(
+    (a, b) => b.totalEdits - a.totalEdits || b.totalSessions - a.totalSessions,
+  );
 }
 
 function FileConnectionsView({ groups }: { groups: ProjectGroup[] }) {
-  const clusters = useMemo(() => buildFileClusters(groups), [groups]);
+  const projectFileGroups = useMemo(() => buildProjectFileGroups(groups), [groups]);
+  const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
 
-  if (clusters.length === 0) {
+  useEffect(() => {
+    if (projectFileGroups.length === 0) {
+      setSelectedProject(null);
+      setSelectedFile(null);
+      return;
+    }
+    if (!selectedProject || !projectFileGroups.some((g) => g.project === selectedProject)) {
+      setSelectedProject(projectFileGroups[0].project);
+      setSelectedFile(null);
+    }
+  }, [projectFileGroups, selectedProject]);
+
+  if (projectFileGroups.length === 0) {
     return (
       <div className="p-8 text-center space-y-2">
         <div className="text-terminal-dimmer text-sm font-mono">No shared files found.</div>
@@ -1137,57 +918,85 @@ function FileConnectionsView({ groups }: { groups: ProjectGroup[] }) {
     );
   }
 
-  const selected = selectedFile ? clusters.find((c) => c.file === selectedFile) : null;
+  const selectedProjectGroup =
+    projectFileGroups.find((g) => g.project === selectedProject) ?? projectFileGroups[0];
+  const selected = selectedFile
+    ? selectedProjectGroup.files.find((c) => c.file === selectedFile)
+    : null;
+  const selectedProjectColor = colorFor(selectedProjectGroup.colorIdx);
 
   return (
-    <div className="flex h-full min-w-0 flex-col gap-4 p-4 md:flex-row">
-      {/* File list */}
-      <div className="max-h-64 w-full shrink-0 space-y-1 overflow-y-auto md:max-h-none md:w-64">
+    <div className="flex h-full min-w-0 flex-col gap-4 p-4 lg:flex-row">
+      {/* Project list */}
+      <div className="w-full shrink-0 space-y-1 overflow-y-auto lg:w-64">
         <div className="text-[10px] font-mono text-terminal-dimmer mb-2 px-2">
-          {clusters.length} shared files
+          {projectFileGroups.length} projects with shared files
         </div>
-        {clusters.map((cluster) => {
-          const isSelected = selectedFile === cluster.file;
-          const maxEdits = cluster.sessions.reduce((max, s) => Math.max(max, s.editCount), 0);
+        {projectFileGroups.map((group) => {
+          const isSelected = selectedProjectGroup.project === group.project;
+          const color = colorFor(group.colorIdx);
           return (
             <button
-              key={cluster.file}
-              onClick={() => setSelectedFile(isSelected ? null : cluster.file)}
+              key={group.project}
+              onClick={() => {
+                setSelectedProject(group.project);
+                setSelectedFile(null);
+              }}
               className={`w-full text-left px-3 py-2 rounded-lg text-xs font-mono transition-colors ${
                 isSelected
-                  ? "bg-terminal-green/20 border border-terminal-green text-terminal-green"
+                  ? `${color.bg} border ${color.border} ${color.text}`
                   : "hover:bg-terminal-surface-2 text-terminal-text border border-transparent"
               }`}
             >
-              <div className="truncate">{cluster.displayName.split("/").pop()}</div>
-              <div className="text-[9px] text-terminal-dimmer truncate">{cluster.displayName}</div>
-              <div className="flex items-center gap-2 mt-1">
-                <div className="flex gap-0.5">
-                  {cluster.sessions.slice(0, 8).map((s, i) => (
-                    <div
-                      key={i}
-                      className="w-2 h-2 rounded-full"
-                      style={{
-                        backgroundColor: colorFor(s.colorIdx).solid,
-                        opacity: 0.4 + (s.editCount / maxEdits) * 0.6,
-                      }}
-                    />
-                  ))}
-                </div>
-                <span className="text-[9px] text-terminal-dimmer">
-                  {cluster.sessions.length} sessions
-                </span>
+              <div className="truncate font-semibold">{shortName(group.project)}</div>
+              <div className="text-[9px] text-terminal-dimmer truncate">{group.project}</div>
+              <div className="mt-1 text-[9px] text-terminal-dimmer">
+                {group.files.length} files · {group.totalEdits.toLocaleString()} edits
               </div>
             </button>
           );
         })}
       </div>
 
-      {/* Detail panel */}
-      <div className="min-w-0 flex-1 overflow-y-auto">
+      {/* Project files + detail panel */}
+      <div className="min-w-0 flex-1 space-y-4 overflow-y-auto">
+        <div>
+          <div className={`text-sm font-sans font-semibold ${selectedProjectColor.text}`}>
+            {shortName(selectedProjectGroup.project)}
+          </div>
+          <div className="mt-0.5 truncate text-xs font-mono text-terminal-dimmer">
+            {selectedProjectGroup.project}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
+          {selectedProjectGroup.files.map((cluster) => {
+            const isSelected = selectedFile === cluster.file;
+            return (
+              <button
+                key={cluster.file}
+                onClick={() => setSelectedFile(isSelected ? null : cluster.file)}
+                className={`w-full text-left px-3 py-2 rounded-lg text-xs font-mono transition-colors ${
+                  isSelected
+                    ? "bg-terminal-green/20 border border-terminal-green text-terminal-green"
+                    : "hover:bg-terminal-surface-2 text-terminal-text border border-terminal-border/30"
+                }`}
+              >
+                <div className="truncate">{cluster.displayName.split("/").pop()}</div>
+                <div className="text-[9px] text-terminal-dimmer truncate">
+                  {cluster.displayName}
+                </div>
+                <div className="mt-1 text-[9px] text-terminal-dimmer">
+                  {cluster.totalEdits.toLocaleString()} edits · {cluster.sessions.length} sessions
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
         {selected ? (
           <div className="space-y-3">
-            <div>
+            <div className="border-t border-terminal-border/30 pt-4">
               <div className="text-sm font-mono text-terminal-text font-medium truncate">
                 {selected.displayName.split("/").pop()}
               </div>
@@ -1195,7 +1004,8 @@ function FileConnectionsView({ groups }: { groups: ProjectGroup[] }) {
                 {selected.file}
               </div>
               <div className="text-xs font-mono text-terminal-dimmer mt-1">
-                {selected.sessions.length} sessions modified this file
+                {selected.totalEdits.toLocaleString()} edits across {selected.sessions.length}{" "}
+                sessions
               </div>
             </div>
 
@@ -1230,7 +1040,8 @@ function FileConnectionsView({ groups }: { groups: ProjectGroup[] }) {
           </div>
         ) : (
           <div className="flex items-center justify-center h-40 text-terminal-dimmer text-xs font-mono">
-            Select a file to see which sessions modified it
+            Select a file in {shortName(selectedProjectGroup.project)} to see the sessions that
+            modified it
           </div>
         )}
       </div>
@@ -1240,22 +1051,14 @@ function FileConnectionsView({ groups }: { groups: ProjectGroup[] }) {
 
 // ─── Main Container ──────────────────────────────────────────────────
 
-type RelView = "timeline" | "group" | "tree" | "files";
-
-const VIEW_TABS: { id: RelView; label: string; icon: string; desc: string }[] = [
-  { id: "timeline", label: "Timeline", icon: "⟶", desc: "Sessions as time blocks per project" },
-  { id: "group", label: "Groups", icon: "≡", desc: "Sessions grouped by project" },
-  { id: "tree", label: "Dispatch", icon: "⤷", desc: "Parent → child agent relationships" },
-  { id: "files", label: "Files", icon: "⊕", desc: "Sessions linked by shared files" },
-];
+export type ProjectRelationshipView = "timeline" | "files";
 
 interface SessionRelationshipsViewProps {
-  onBack?: () => void;
+  view: ProjectRelationshipView;
 }
 
-export default function SessionRelationshipsView({ onBack }: SessionRelationshipsViewProps) {
+export default function SessionRelationshipsView({ view }: SessionRelationshipsViewProps) {
   const { sessions, loading, error } = useRelationshipData();
-  const [activeView, setActiveView] = useState<RelView>("timeline");
 
   // Collapse agent worktrees back to the project the user recognizes. The
   // session rows still expose the original path when it matters.
@@ -1286,46 +1089,7 @@ export default function SessionRelationshipsView({ onBack }: SessionRelationship
   }
 
   return (
-    <div className="flex-1 flex min-w-0 flex-col overflow-hidden">
-      {/* Header */}
-      <div className="flex shrink-0 flex-col gap-3 border-b border-terminal-border/40 px-4 py-3 md:px-6 lg:flex-row lg:items-center">
-        {onBack && (
-          <button
-            onClick={onBack}
-            className="self-start text-terminal-dimmer hover:text-terminal-text text-xs font-mono transition-colors lg:shrink-0"
-          >
-            ← Projects
-          </button>
-        )}
-        <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-sans font-semibold text-terminal-text">
-            Session Relationships
-            <span className="block text-terminal-dimmer font-normal text-xs font-mono sm:ml-2 sm:inline">
-              {sessions.length} sessions · {groups.length} projects
-            </span>
-          </h2>
-        </div>
-
-        {/* View tabs */}
-        <div className="flex max-w-full items-center gap-1 overflow-x-auto pb-1 lg:shrink-0 lg:pb-0">
-          {VIEW_TABS.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveView(tab.id)}
-              title={tab.desc}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-mono transition-all ${
-                activeView === tab.id
-                  ? "bg-terminal-green/15 text-terminal-green border border-terminal-green/30"
-                  : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-2"
-              }`}
-            >
-              <span className="text-[11px]">{tab.icon}</span>
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
+    <div className="flex min-w-0 flex-col overflow-hidden rounded-lg border border-terminal-border/30 bg-terminal-surface/20">
       {/* Stats bar */}
       <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-terminal-border/20 px-4 py-2 text-[10px] font-mono text-terminal-dimmer md:px-6">
         <span>
@@ -1356,10 +1120,8 @@ export default function SessionRelationshipsView({ onBack }: SessionRelationship
 
       {/* View content */}
       <div className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
-        {activeView === "timeline" && <TimelineSwimlaneView groups={groups} />}
-        {activeView === "group" && <ProjectGroupingView groups={groups} />}
-        {activeView === "tree" && <DispatchTreeView groups={groups} />}
-        {activeView === "files" && <FileConnectionsView groups={groups} />}
+        {view === "timeline" && <TimelineSwimlaneView groups={groups} />}
+        {view === "files" && <FileConnectionsView groups={groups} />}
       </div>
     </div>
   );
