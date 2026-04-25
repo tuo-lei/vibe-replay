@@ -3,6 +3,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { nanoid } from "nanoid";
 import { type AuthEnv, createAuth, DEV_ORIGINS, PROD_ORIGINS } from "./auth";
 import { cloudReplays, dailyInsights, insightProfiles, replays, userFiles } from "./db/schema";
@@ -128,16 +129,16 @@ app.on(["GET", "POST"], "/api/auth/*", async (c) => {
       method: req.method,
       headers,
       body: req.body,
-      duplex: "half" as any,
-    });
+      duplex: "half",
+    } as RequestInit);
   }
 
   // Validate callbackURL on social sign-in to prevent open redirect
   if (c.req.path === "/api/auth/sign-in/social" && c.req.method === "POST") {
     const cloned = req.clone();
     try {
-      const body = await cloned.json();
-      if (body.callbackURL && typeof body.callbackURL === "string") {
+      const body = (await cloned.json()) as { callbackURL?: unknown };
+      if (typeof body.callbackURL === "string") {
         if (!body.callbackURL.startsWith("/") || body.callbackURL.startsWith("//")) {
           return c.json({ error: "Invalid callbackURL" }, 400);
         }
@@ -745,7 +746,7 @@ app.post("/api/gists", async (c) => {
         : status === 422
           ? "GitHub rejected the request (content too large?)"
           : `GitHub API error (${status})`;
-    return c.json({ error: msg }, { status });
+    return c.json({ error: msg }, status as ContentfulStatusCode);
   }
 
   const gistData = (await gistResp.json()) as {
@@ -872,7 +873,7 @@ app.patch("/api/gists/:gistId", async (c) => {
           : status === 422
             ? "GitHub rejected the update (content too large?)"
             : `GitHub API error (${status})`;
-    return c.json({ error: msg }, { status });
+    return c.json({ error: msg }, status as ContentfulStatusCode);
   }
 
   const gistData = (await gistResp.json()) as {
@@ -2296,7 +2297,7 @@ async function importPrivateKey(pem: string): Promise<CryptoKey> {
     const pkcs8 = wrapPkcs1InPkcs8(bytes);
     return await crypto.subtle.importKey(
       "pkcs8",
-      pkcs8.buffer,
+      pkcs8,
       { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
       false,
       ["sign"],
@@ -2304,7 +2305,7 @@ async function importPrivateKey(pem: string): Promise<CryptoKey> {
   }
 }
 
-function wrapPkcs1InPkcs8(pkcs1: Uint8Array): Uint8Array {
+function wrapPkcs1InPkcs8(pkcs1: Uint8Array): Uint8Array<ArrayBuffer> {
   const rsaOid = new Uint8Array([
     0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00,
   ]);

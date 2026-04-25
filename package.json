@@ -20,6 +20,7 @@
     "test:e2e": "vitest run --config e2e/vitest.config.ts",
     "lint": "oxlint --fix packages/ website/src cloudflare/src && oxfmt packages/ website/src cloudflare/src",
     "lint:check": "oxlint packages/ website/src cloudflare/src && oxfmt --check packages/ website/src cloudflare/src",
+    "typecheck": "tsc --noEmit -p packages/types/tsconfig.json && tsc --noEmit -p packages/cli/tsconfig.json && tsc --noEmit -p packages/viewer/tsconfig.json && tsc --noEmit -p cloudflare/tsconfig.json",
     "fmt": "oxfmt packages/ website/src cloudflare/src",
     "prepare": "lefthook install"
   },
@@ -31,6 +32,7 @@
     "oxlint": "^1.61.0",
     "playwright": "^1.58.2",
     "tsx": "^4.21.0",
+    "typescript": "^6.0.3",
     "vitest": "^4.0.18"
   },
   "packageManager": "pnpm@10.24.0+sha512.01ff8ae71b4419903b65c60fb2dc9d34cf8bb6e06d03bde112ef38f7a34d6904c424ba66bea5cdcf12890230bf39f9580473140ed9c946fef328b6e5238a345a",

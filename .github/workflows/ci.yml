@@ -18,6 +18,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint:check
+      - run: pnpm typecheck
       - run: pnpm --filter @vibe-replay/website check
 
   test:

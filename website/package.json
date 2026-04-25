@@ -1,8 +1,8 @@
 {
   "name": "@vibe-replay/website",
-  "type": "module",
   "version": "0.0.1",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "bash ./scripts/run-with-required-node.sh dev",
     "build": "bash ./scripts/run-with-required-node.sh build",
@@ -17,6 +17,6 @@
     "@tailwindcss/vite": "^4.2.1",
     "astro": "^6.0.3",
     "tailwindcss": "^4.2.1",
-    "typescript": "^5.9.3"
+    "typescript": "^6.0.3"
   }
 }
