@@ -1267,15 +1267,19 @@ function SessionsPanel() {
   const { scanStatus, userInsights, projectInsightsCache, fetchProjectInsights } =
     useScanInsightsContext();
 
+  // Roll worktree paths up to the parent project so URL navigation to a
+  // (possibly cleaned-up) worktree path still hits the parent's data.
+  const selectedProjectKey = rollupProject(selectedProject);
+
   // Fetch project insights when selected project changes
   useEffect(() => {
-    if (selectedProject !== ALL_PROJECTS) {
-      fetchProjectInsights(selectedProject);
+    if (selectedProjectKey !== ALL_PROJECTS) {
+      fetchProjectInsights(selectedProjectKey);
     }
-  }, [selectedProject, fetchProjectInsights]);
+  }, [selectedProjectKey, fetchProjectInsights]);
 
   const projectInsights =
-    selectedProject !== ALL_PROJECTS ? projectInsightsCache.get(selectedProject) : undefined;
+    selectedProjectKey !== ALL_PROJECTS ? projectInsightsCache.get(selectedProjectKey) : undefined;
 
   const [generatingSlug, setGeneratingSlug] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
@@ -1484,14 +1488,21 @@ function SessionsPanel() {
 
   // Group by project, rolling up auto-created Claude agent worktrees under
   // their parent project so the sidebar isn't drowned by sandbox dirs.
+  // Track distinct worktree paths (not session count) per parent so the
+  // `+N wt` badge reads as "N sandboxes" rather than "N sessions".
   const byProject = new Map<string, SourceSession[]>();
-  const worktreeCountByProject = new Map<string, number>();
+  const worktreePathsByProject = new Map<string, Set<string>>();
   for (const s of visibleSources) {
     const key = rollupProject(s.project);
     if (!byProject.has(key)) byProject.set(key, []);
     byProject.get(key)?.push(s);
     if (key !== s.project) {
-      worktreeCountByProject.set(key, (worktreeCountByProject.get(key) || 0) + 1);
+      let paths = worktreePathsByProject.get(key);
+      if (!paths) {
+        paths = new Set();
+        worktreePathsByProject.set(key, paths);
+      }
+      paths.add(s.project);
     }
   }
   const projectEntries = [...byProject.entries()].sort((a, b) => {
@@ -1504,10 +1515,9 @@ function SessionsPanel() {
   const projectLabels = computeProjectLabels(projectEntries.map(([p]) => p));
 
   // Filter sessions within selected project. Tolerate URLs pointing at a
-  // worktree path by rolling that up to its parent before lookup.
-  const selectedProjectKey = rollupProject(selectedProject);
+  // worktree path — `selectedProjectKey` is already rolled up above.
   const projectSessions =
-    selectedProject === ALL_PROJECTS ? visibleSources : byProject.get(selectedProjectKey) || [];
+    selectedProjectKey === ALL_PROJECTS ? visibleSources : byProject.get(selectedProjectKey) || [];
 
   const filtered = filter
     ? projectSessions.filter(
@@ -1626,7 +1636,7 @@ function SessionsPanel() {
           {/* Per-project items */}
           {projectEntries.map(([project, sessions]) => {
             const replayCount = sessions.filter((s) => s.existingReplay).length;
-            const worktreeCount = worktreeCountByProject.get(project) || 0;
+            const worktreeCount = worktreePathsByProject.get(project)?.size ?? 0;
             const isActive = selectedProjectKey === project;
             const label = projectLabels.get(project) || projectName(project);
             // After worktree rollup, sessions[0] may be from a deleted worktree;
@@ -1696,7 +1706,7 @@ function SessionsPanel() {
                   {worktreeCount > 0 && (
                     <span
                       className={`text-xs font-mono ${isActive ? "text-terminal-dim" : "text-terminal-dimmer"}`}
-                      title={`${worktreeCount} agent worktree session${worktreeCount === 1 ? "" : "s"} merged in`}
+                      title={`${worktreeCount} agent worktree${worktreeCount === 1 ? "" : "s"} merged in (sandboxes Claude opened against this project)`}
                     >
                       +{worktreeCount} wt
                     </span>
@@ -2154,15 +2164,19 @@ function ReplaysPanel() {
   // Background scan + insights (shared singleton context)
   const { userInsights, projectInsightsCache, fetchProjectInsights } = useScanInsightsContext();
 
+  // Roll worktree paths up to the parent project so URL navigation to a
+  // (possibly cleaned-up) worktree path still hits the parent's data.
+  const selectedProjectKey = rollupProject(selectedProject);
+
   // Fetch project insights when selected project changes
   useEffect(() => {
-    if (selectedProject !== ALL_PROJECTS) {
-      fetchProjectInsights(selectedProject);
+    if (selectedProjectKey !== ALL_PROJECTS) {
+      fetchProjectInsights(selectedProjectKey);
     }
-  }, [selectedProject, fetchProjectInsights]);
+  }, [selectedProjectKey, fetchProjectInsights]);
 
   const projectInsights =
-    selectedProject !== ALL_PROJECTS ? projectInsightsCache.get(selectedProject) : undefined;
+    selectedProjectKey !== ALL_PROJECTS ? projectInsightsCache.get(selectedProjectKey) : undefined;
 
   useEffect(() => {
     let mounted = true;
@@ -2303,14 +2317,20 @@ function ReplaysPanel() {
     : sessions.filter((s) => !archivedSlugs.has(s.slug));
 
   // Group by project, rolling up Claude agent worktrees under their parent.
+  // Count distinct worktree paths so `+N wt` reads as "N sandboxes".
   const byProject = new Map<string, SessionSummary[]>();
-  const worktreeCountByProject = new Map<string, number>();
+  const worktreePathsByProject = new Map<string, Set<string>>();
   for (const s of visibleSessions) {
     const key = rollupProject(s.project);
     if (!byProject.has(key)) byProject.set(key, []);
     byProject.get(key)?.push(s);
     if (key !== s.project) {
-      worktreeCountByProject.set(key, (worktreeCountByProject.get(key) || 0) + 1);
+      let paths = worktreePathsByProject.get(key);
+      if (!paths) {
+        paths = new Set();
+        worktreePathsByProject.set(key, paths);
+      }
+      paths.add(s.project);
     }
   }
   const projectEntries = [...byProject.entries()].sort((a, b) => {
@@ -2321,10 +2341,9 @@ function ReplaysPanel() {
 
   const projectLabels = computeProjectLabels(projectEntries.map(([p]) => p));
 
-  // Filter within selected project (tolerate worktree URLs by rolling up).
-  const selectedProjectKey = rollupProject(selectedProject);
+  // Filter within selected project — `selectedProjectKey` is already rolled up.
   const projectSessions =
-    selectedProject === ALL_PROJECTS ? visibleSessions : byProject.get(selectedProjectKey) || [];
+    selectedProjectKey === ALL_PROJECTS ? visibleSessions : byProject.get(selectedProjectKey) || [];
 
   const filtered = filter
     ? projectSessions.filter(
@@ -2411,7 +2430,7 @@ function ReplaysPanel() {
             const isActive = selectedProjectKey === project;
             const label = projectLabels.get(project) || projectName(project);
             const publishedCount = replays.filter((s) => s.gist?.gistId).length;
-            const worktreeCount = worktreeCountByProject.get(project) || 0;
+            const worktreeCount = worktreePathsByProject.get(project)?.size ?? 0;
             return (
               <button
                 key={project}
@@ -2459,7 +2478,7 @@ function ReplaysPanel() {
                   {worktreeCount > 0 && (
                     <span
                       className={`text-xs font-mono ${isActive ? "text-terminal-dim" : "text-terminal-dimmer"}`}
-                      title={`${worktreeCount} agent worktree replay${worktreeCount === 1 ? "" : "s"} merged in`}
+                      title={`${worktreeCount} agent worktree${worktreeCount === 1 ? "" : "s"} merged in (sandboxes Claude opened against this project)`}
                     >
                       +{worktreeCount} wt
                     </span>
