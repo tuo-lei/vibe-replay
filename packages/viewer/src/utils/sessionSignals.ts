@@ -43,13 +43,3 @@ export function isAutomated(s: SessionScanWireData): boolean {
   }
   return false;
 }
-
-/**
- * Collapse worktree paths back to their parent repo so all worktree sessions
- * land in the same project lane. Anything matching `<repo>/.claude/worktrees/...`
- * folds to `<repo>`. Other paths pass through unchanged.
- */
-export function collapseWorktree(project: string): string {
-  const match = project.match(/^(.+?)\/\.claude\/worktrees\//);
-  return match ? match[1] : project;
-}

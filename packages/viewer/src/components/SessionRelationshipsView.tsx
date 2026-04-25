@@ -9,7 +9,8 @@
 import { useMemo, useState } from "react";
 import { type ScanResultSession, useRelationshipData } from "../hooks/useRelationshipData";
 import { shortName, timeAgo } from "../utils/format";
-import { collapseWorktree, isAutomated, sessionScore } from "../utils/sessionSignals";
+import { isAutomated, sessionScore } from "../utils/sessionSignals";
+import { rollupProject } from "./dashboard-utils";
 
 // ─── Shared helpers ──────────────────────────────────────────────────
 
@@ -92,7 +93,7 @@ function groupByProject(
 ): ProjectGroup[] {
   const map = new Map<string, ScanResultSession[]>();
   for (const s of sessions) {
-    const key = options.collapseWorktrees ? collapseWorktree(s.project) : s.project;
+    const key = options.collapseWorktrees ? rollupProject(s.project) : s.project;
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(s);
   }
