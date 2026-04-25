@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { computeCacheHitRate, computeContextLayers, turnCacheHitRate } from "../engine";
 import type { ReplaySession, TurnStat } from "../types";
+import { formatReplaySourceLabel } from "../utils/format";
 import {
   DataQualityIndicator,
   getSessionDataQualityNotes,
@@ -40,17 +41,6 @@ function classifyBash(command: string): string {
   if (cmd.trimStart().startsWith("git ")) return "git";
   if (/\b(lint|biome|eslint|prettier|format)\b/.test(cmd)) return "lint";
   return "other";
-}
-
-function formatDataSourceLabel(source?: string): string {
-  if (!source) return "unknown";
-  const labels: Record<string, string> = {
-    sqlite: "SQLite (store.db)",
-    "global-state": "SQLite (global state.vscdb)",
-    jsonl: "JSONL transcript",
-    "jsonl+tools": "JSONL + agent-tools",
-  };
-  return labels[source] || source;
 }
 
 function getOrderedBranchChain(gitBranch?: string, gitBranches?: string[]): string[] | undefined {
@@ -369,7 +359,7 @@ export default function SummaryView({ session }: Props) {
               Data Source
             </div>
             <div className="text-xs font-mono text-terminal-text">
-              {formatDataSourceLabel(meta.dataSourceInfo?.primary || meta.dataSource)}
+              {formatReplaySourceLabel(meta.dataSourceInfo?.primary || meta.dataSource)}
             </div>
             {meta.dataSourceInfo?.sources && meta.dataSourceInfo.sources.length > 0 && (
               <div className="mt-1 space-y-0.5">

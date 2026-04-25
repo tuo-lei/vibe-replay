@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { ReplaySession } from "../types";
+import { formatReplaySourceLabel } from "../utils/format";
 import {
   DataQualityIndicator,
   getSessionDataQualityNotes,
@@ -405,7 +406,7 @@ export default function StatsPanel({ session }: Props) {
           </div>
           <div className="text-terminal-dim">
             <span className="text-terminal-blue">
-              {formatDataSourceLabel(meta.dataSourceInfo?.primary || meta.dataSource)}
+              {formatReplaySourceLabel(meta.dataSourceInfo?.primary || meta.dataSource)}
             </span>
           </div>
           {meta.dataSourceInfo?.sources && meta.dataSourceInfo.sources.length > 0 && (
@@ -480,17 +481,6 @@ export function formatDuration(ms?: number): string {
   if (mins < 60) return `${mins}m ${secs % 60}s`;
   const hrs = Math.floor(mins / 60);
   return `${hrs}h ${mins % 60}m`;
-}
-
-function formatDataSourceLabel(source?: string): string {
-  if (!source) return "unknown";
-  const labels: Record<string, string> = {
-    sqlite: "SQLite (store.db)",
-    "global-state": "SQLite (global state.vscdb)",
-    jsonl: "JSONL transcript",
-    "jsonl+tools": "JSONL + agent-tools",
-  };
-  return labels[source] || source;
 }
 
 function formatGeneratedAt(iso?: string): string {

@@ -497,6 +497,8 @@ export function formatDataSourceLabel(hasSqlite?: boolean, dataSource?: string):
   if (dataSource === "sqlite") return hasSqlite ? "SQLite + JSONL supplement" : "SQLite";
   if (dataSource === "global-state") return "Cursor global state";
   if (dataSource === "jsonl") return hasSqlite ? "JSONL fallback" : "JSONL transcript";
+  if (dataSource === "jsonl+tools")
+    return hasSqlite ? "JSONL + agent-tools fallback" : "JSONL + agent-tools";
   return hasSqlite ? "SQLite + JSONL" : "JSONL";
 }
 
