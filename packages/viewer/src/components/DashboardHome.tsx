@@ -15,6 +15,7 @@ import {
   providerDisplayName,
   providerFamily,
   replaySuggestedTitle,
+  rollupTopProjects,
   type SourcesEnrichmentStatus,
   sourceSuggestedTitle,
   timeAgo,
@@ -689,6 +690,10 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     : null;
   const showRecentProjectsSkeleton =
     !userInsights && (loadingSources || Boolean(scanStatus?.running) || sources.length > 0);
+  const rolledUpTopProjects = useMemo(
+    () => (userInsights ? rollupTopProjects(userInsights.topProjects) : []),
+    [userInsights],
+  );
   const displayProjectCount = Math.max(insights.projectCount, userInsights?.totalProjects ?? 0);
   const displayTotalPrompts = userInsights?.totalPrompts ?? insights.totalPrompts;
   const displayTotalToolCalls = userInsights?.totalToolCalls ?? insights.totalToolCalls;
@@ -1160,7 +1165,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
         {/* Recent Projects (below sessions/replays to match tab menu order) */}
         {showRecentProjectsSkeleton ? (
           <RecentProjectsSkeleton />
-        ) : userInsights && userInsights.topProjects.length > 1 ? (
+        ) : userInsights && rolledUpTopProjects.length > 1 ? (
           <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
@@ -1171,7 +1176,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
               </span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-              {[...userInsights.topProjects]
+              {[...rolledUpTopProjects]
                 .sort((a, b) => (b.lastActivity || "").localeCompare(a.lastActivity || ""))
                 .slice(0, 5)
                 .map((p) => {
@@ -1205,7 +1210,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
                   );
                 })}
             </div>
-            {userInsights.topProjects.length > 5 && (
+            {rolledUpTopProjects.length > 5 && (
               <button
                 onClick={() => onNavigate("projects")}
                 className="w-full py-2 mt-2 text-xs font-sans font-semibold rounded-lg bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200"

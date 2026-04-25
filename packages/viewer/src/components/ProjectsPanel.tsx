@@ -4,7 +4,7 @@
 
 import { useMemo, useState } from "react";
 import { localDayKey } from "../utils/date";
-import { navigateTo } from "./dashboard-utils";
+import { navigateTo, rollupTopProjects } from "./dashboard-utils";
 import { useScanInsightsContext } from "./InsightsPanel";
 import { formatDuration } from "./StatsPanel";
 
@@ -79,7 +79,9 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
 
   const projects = useMemo(() => {
     if (!userInsights) return [];
-    const sorted = [...userInsights.topProjects];
+    // Roll Claude agent worktrees up under their parent so the grid isn't
+    // drowned by single-session sandbox dirs.
+    const sorted = rollupTopProjects(userInsights.topProjects);
     switch (sortBy) {
       case "lastActivity":
         sorted.sort((a, b) => (b.lastActivity || "").localeCompare(a.lastActivity || ""));

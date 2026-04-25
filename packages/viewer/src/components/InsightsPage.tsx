@@ -19,6 +19,7 @@ import {
   projectName,
   providerBarClass,
   providerDisplayName,
+  rollupTopProjects,
   shortModelName,
 } from "./dashboard-utils";
 import { useScanInsightsContext } from "./InsightsPanel";
@@ -1582,7 +1583,7 @@ export default function InsightsPage() {
               Top Projects
             </h3>
             <TopProjectsList
-              projects={(userInsights.topProjects || []).map((p) => ({
+              projects={rollupTopProjects(userInsights.topProjects || []).map((p) => ({
                 project: p.project,
                 sessions: p.sessions,
                 cost: p.cost,
