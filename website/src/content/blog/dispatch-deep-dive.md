@@ -72,21 +72,19 @@ I learned this the long way. Future me, reading this post, gets to skip that.
 
 ## Three providers, one discovery pass
 
-With those two insights, the rest of the implementation falls out:
+Once those two truths were in hand, the rest of the implementation practically wrote itself:
 
 - **`claude-code`** scans `~/.claude/projects/` for raw JSONL files. The original provider.
-- **`claude-desktop`** reads metadata from the Code tab's location, follows `cliSessionId` to `~/.claude/projects/` to find the actual JSONL, and overlays Desktop's richer metadata (title, exact model, permission mode) on top.
+- **`claude-desktop`** reads metadata from the Code tab's location, follows `cliSessionId` over to `~/.claude/projects/`, and overlays Desktop's richer metadata (title, exact model, permission mode) on top.
 - **`claude-cowork`** reads metadata from the autonomous-mode location and goes straight to the co-located audit.jsonl. No path resolution required — that's discovery 1 paying off.
 
-All three run in parallel and produce a flat list of sessions.
-
-Parallel discovery introduces a collision: the same Code-tab JSONL gets found twice — once raw by `claude-code`, once with metadata by `claude-desktop`. Both providers correctly assign the same `sessionId` to it. Dedup just keeps the best-quality record using a fixed priority:
+Running them in parallel introduces one collision: the same Code-tab JSONL gets found twice — once raw by `claude-code`, once dressed up by `claude-desktop`. Both correctly assign the same `sessionId`, so dedup just keeps the best-quality record:
 
 ```
 claude-cowork → claude-desktop → claude-code → cursor
 ```
 
-`claude-desktop` wins over `claude-code` because it has the title and model that the Desktop UI inferred. `claude-cowork` ranks first because its transcript is authoritative. `cursor` uses a different ID scheme entirely, so it never collides with the Claude family.
+`claude-desktop` wins over `claude-code` because it has the title and model that the Desktop UI inferred. `claude-cowork` ranks first because its transcript is authoritative.
 
 ---
 
@@ -96,19 +94,15 @@ A Cowork session in the player:
 
 [![The replay player showing the Japan trip planning session — prompt outline on left, conversation in center, tool use tags visible](/blog/dispatch-deep-dive/cowork-player.png)](/blog/dispatch-deep-dive/cowork-player.png)
 
-Left panel: outline of every user prompt — useful when there are 125 of them. Center: the conversation, with tool-use tags inline. The MCP toolkit Cowork exposes (`gmail_read_message`, `AskUserQuestion`, `navigate`, `Claude_in_Chrome`) shows up as recognizable tool tags instead of raw `mcp__workspace__*` strings.
+Left panel: outline of every user prompt — useful when there are 125 of them. Center: the conversation, with tool-use tags inline (the parser normalizes Cowork's `mcp__workspace__*` names into recognizable tags like `gmail_read_message` and `Claude_in_Chrome`).
 
-Code-tab sessions running through Desktop pick up extra metadata the raw JSONL never sees — the human-readable title Desktop inferred, the permission mode, the git worktree branch:
+Code-tab sessions running through Desktop pick up metadata the raw JSONL never sees — the human-readable title Desktop inferred, the permission mode, the git worktree branch:
 
 [![Claude Desktop session landing showing 'A Claude Desktop session replay' with worktree branch and dangerous mode badge](/blog/dispatch-deep-dive/desktop-session-landing.png)](/blog/dispatch-deep-dive/desktop-session-landing.png)
 
 (That session is literally the implementation of the Cowork provider itself. The first prompt: *"Add support for Cowork (Dispatch) sessions to vibe-replay…"* The `dangerous mode` badge and `claude/crazy-ishizaka-06a286` branch name come from Desktop's metadata.)
 
-And the dashboard ties it all together:
-
 [![vibe-replay dashboard: 279 sessions — Claude Code 224, Claude Cowork 47, Cursor 6, Claude Desktop 2, plus activity heatmap](/blog/dispatch-deep-dive/dashboard.png)](/blog/dispatch-deep-dive/dashboard.png)
-
-279 sessions across all four providers. The badges (`CLAUDE`, `COWORK`, `DESKTOP`) are how you tell them apart at a glance:
 
 [![Sessions list showing CLAUDE, COWORK, and DESKTOP provider badges](/blog/dispatch-deep-dive/sessions-list.png)](/blog/dispatch-deep-dive/sessions-list.png)
 
@@ -130,9 +124,7 @@ Or surface them all at once:
 npx vibe-replay --dashboard
 ```
 
-A few things still ahead: linking Dispatch's child sub-agents back to their parent session, surfacing richer MCP context (which server, which operation) in the player, and a unified timeline across long autonomous runs.
-
-But the foundation is in place. Every audit.jsonl Claude produces — Code, Desktop, Cowork — is now fair game.
+The foundation is in place. Every audit.jsonl Claude produces — Code, Desktop, Cowork — is now fair game.
 
 ---
 
