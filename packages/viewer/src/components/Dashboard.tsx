@@ -4,6 +4,7 @@ import { ALL_PROJECTS, usePanelFilters } from "../hooks/usePanelFilters";
 import type { SessionSummary, SourceSession } from "../types";
 import DashboardHome from "./DashboardHome";
 import {
+  agentWorktreeParent,
   cleanPrompt,
   computeProjectLabels,
   formatCacheAge,
@@ -21,6 +22,7 @@ import {
   providerBadgeClass,
   providerBadgeLabel,
   replaySuggestedTitle,
+  rollupProject,
   type SourcesEnrichmentStatus,
   shortModelName,
   sourceDisplayTitle,
@@ -1265,15 +1267,19 @@ function SessionsPanel() {
   const { scanStatus, userInsights, projectInsightsCache, fetchProjectInsights } =
     useScanInsightsContext();
 
+  // Roll worktree paths up to the parent project so URL navigation to a
+  // (possibly cleaned-up) worktree path still hits the parent's data.
+  const selectedProjectKey = rollupProject(selectedProject);
+
   // Fetch project insights when selected project changes
   useEffect(() => {
-    if (selectedProject !== ALL_PROJECTS) {
-      fetchProjectInsights(selectedProject);
+    if (selectedProjectKey !== ALL_PROJECTS) {
+      fetchProjectInsights(selectedProjectKey);
     }
-  }, [selectedProject, fetchProjectInsights]);
+  }, [selectedProjectKey, fetchProjectInsights]);
 
   const projectInsights =
-    selectedProject !== ALL_PROJECTS ? projectInsightsCache.get(selectedProject) : undefined;
+    selectedProjectKey !== ALL_PROJECTS ? projectInsightsCache.get(selectedProjectKey) : undefined;
 
   const [generatingSlug, setGeneratingSlug] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
@@ -1480,11 +1486,24 @@ function SessionsPanel() {
   const archivedCount = sources.filter((s) => archivedSlugs.has(s.slug)).length;
   const visibleSources = showArchived ? sources : sources.filter((s) => !archivedSlugs.has(s.slug));
 
-  // Group by project, sorted by most recent timestamp
+  // Group by project, rolling up auto-created Claude agent worktrees under
+  // their parent project so the sidebar isn't drowned by sandbox dirs.
+  // Track distinct worktree paths (not session count) per parent so the
+  // `+N wt` badge reads as "N sandboxes" rather than "N sessions".
   const byProject = new Map<string, SourceSession[]>();
+  const worktreePathsByProject = new Map<string, Set<string>>();
   for (const s of visibleSources) {
-    if (!byProject.has(s.project)) byProject.set(s.project, []);
-    byProject.get(s.project)?.push(s);
+    const key = rollupProject(s.project);
+    if (!byProject.has(key)) byProject.set(key, []);
+    byProject.get(key)?.push(s);
+    if (key !== s.project) {
+      let paths = worktreePathsByProject.get(key);
+      if (!paths) {
+        paths = new Set();
+        worktreePathsByProject.set(key, paths);
+      }
+      paths.add(s.project);
+    }
   }
   const projectEntries = [...byProject.entries()].sort((a, b) => {
     const aTime = a[1][0]?.timestamp || "";
@@ -1495,9 +1514,10 @@ function SessionsPanel() {
   // Compute disambiguated labels for projects
   const projectLabels = computeProjectLabels(projectEntries.map(([p]) => p));
 
-  // Filter sessions within selected project
+  // Filter sessions within selected project. Tolerate URLs pointing at a
+  // worktree path — `selectedProjectKey` is already rolled up above.
   const projectSessions =
-    selectedProject === ALL_PROJECTS ? visibleSources : byProject.get(selectedProject) || [];
+    selectedProjectKey === ALL_PROJECTS ? visibleSources : byProject.get(selectedProjectKey) || [];
 
   const filtered = filter
     ? projectSessions.filter(
@@ -1616,9 +1636,12 @@ function SessionsPanel() {
           {/* Per-project items */}
           {projectEntries.map(([project, sessions]) => {
             const replayCount = sessions.filter((s) => s.existingReplay).length;
-            const isActive = selectedProject === project;
+            const worktreeCount = worktreePathsByProject.get(project)?.size ?? 0;
+            const isActive = selectedProjectKey === project;
             const label = projectLabels.get(project) || projectName(project);
-            const exists = sessions[0]?.projectExists !== false;
+            // After worktree rollup, sessions[0] may be from a deleted worktree;
+            // treat the parent as existing if any session reports it exists.
+            const exists = sessions.some((s) => s.projectExists !== false);
             const isGit = sessions.some((s) => s.isGitRepo || s.gitBranch);
             return (
               <button
@@ -1678,6 +1701,14 @@ function SessionsPanel() {
                       className={`text-xs font-mono ${isActive ? "text-terminal-green" : "text-terminal-dimmer"}`}
                     >
                       {replayCount} {replayCount === 1 ? "replay" : "replays"}
+                    </span>
+                  )}
+                  {worktreeCount > 0 && (
+                    <span
+                      className={`text-xs font-mono ${isActive ? "text-terminal-dim" : "text-terminal-dimmer"}`}
+                      title={`${worktreeCount} agent worktree${worktreeCount === 1 ? "" : "s"} merged in (sandboxes Claude opened against this project)`}
+                    >
+                      +{worktreeCount} wt
                     </span>
                   )}
                 </div>
@@ -1887,6 +1918,7 @@ function SessionsPanel() {
                 const sessionTitle = sourceDisplayTitle(s, scanData);
                 const prompts = sessionPromptPreview(s, scanData, sessionTitle);
                 const branch = nonDefaultBranch(scanData?.gitBranch || s.gitBranch);
+                const isWorktree = agentWorktreeParent(s.project) !== null;
                 const displayPromptCount = scanData?.promptCount ?? s.promptCount;
                 const displayToolCount = scanData?.toolCallCount ?? s.toolCallCount;
                 const displayDurationMs = scanData?.durationMs ?? s.durationMsEst;
@@ -1925,6 +1957,14 @@ function SessionsPanel() {
                                 <path d="M5 6v4c0 1.1.9 2 2 2h2" />
                               </svg>
                               {branch}
+                            </span>
+                          )}
+                          {isWorktree && (
+                            <span
+                              className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple shrink-0 uppercase tracking-wider"
+                              title={`Claude agent worktree: ${s.project}`}
+                            >
+                              worktree
                             </span>
                           )}
                         </div>
@@ -2124,15 +2164,19 @@ function ReplaysPanel() {
   // Background scan + insights (shared singleton context)
   const { userInsights, projectInsightsCache, fetchProjectInsights } = useScanInsightsContext();
 
+  // Roll worktree paths up to the parent project so URL navigation to a
+  // (possibly cleaned-up) worktree path still hits the parent's data.
+  const selectedProjectKey = rollupProject(selectedProject);
+
   // Fetch project insights when selected project changes
   useEffect(() => {
-    if (selectedProject !== ALL_PROJECTS) {
-      fetchProjectInsights(selectedProject);
+    if (selectedProjectKey !== ALL_PROJECTS) {
+      fetchProjectInsights(selectedProjectKey);
     }
-  }, [selectedProject, fetchProjectInsights]);
+  }, [selectedProjectKey, fetchProjectInsights]);
 
   const projectInsights =
-    selectedProject !== ALL_PROJECTS ? projectInsightsCache.get(selectedProject) : undefined;
+    selectedProjectKey !== ALL_PROJECTS ? projectInsightsCache.get(selectedProjectKey) : undefined;
 
   useEffect(() => {
     let mounted = true;
@@ -2272,11 +2316,22 @@ function ReplaysPanel() {
     ? sessions
     : sessions.filter((s) => !archivedSlugs.has(s.slug));
 
-  // Group by project, sorted by most recent
+  // Group by project, rolling up Claude agent worktrees under their parent.
+  // Count distinct worktree paths so `+N wt` reads as "N sandboxes".
   const byProject = new Map<string, SessionSummary[]>();
+  const worktreePathsByProject = new Map<string, Set<string>>();
   for (const s of visibleSessions) {
-    if (!byProject.has(s.project)) byProject.set(s.project, []);
-    byProject.get(s.project)?.push(s);
+    const key = rollupProject(s.project);
+    if (!byProject.has(key)) byProject.set(key, []);
+    byProject.get(key)?.push(s);
+    if (key !== s.project) {
+      let paths = worktreePathsByProject.get(key);
+      if (!paths) {
+        paths = new Set();
+        worktreePathsByProject.set(key, paths);
+      }
+      paths.add(s.project);
+    }
   }
   const projectEntries = [...byProject.entries()].sort((a, b) => {
     const aTime = a[1][0]?.startTime || "";
@@ -2286,9 +2341,9 @@ function ReplaysPanel() {
 
   const projectLabels = computeProjectLabels(projectEntries.map(([p]) => p));
 
-  // Filter within selected project
+  // Filter within selected project — `selectedProjectKey` is already rolled up.
   const projectSessions =
-    selectedProject === ALL_PROJECTS ? visibleSessions : byProject.get(selectedProject) || [];
+    selectedProjectKey === ALL_PROJECTS ? visibleSessions : byProject.get(selectedProjectKey) || [];
 
   const filtered = filter
     ? projectSessions.filter(
@@ -2372,9 +2427,10 @@ function ReplaysPanel() {
 
           {/* Per-project items */}
           {projectEntries.map(([project, replays]) => {
-            const isActive = selectedProject === project;
+            const isActive = selectedProjectKey === project;
             const label = projectLabels.get(project) || projectName(project);
             const publishedCount = replays.filter((s) => s.gist?.gistId).length;
+            const worktreeCount = worktreePathsByProject.get(project)?.size ?? 0;
             return (
               <button
                 key={project}
@@ -2417,6 +2473,14 @@ function ReplaysPanel() {
                       className={`text-xs font-mono ${isActive ? "text-terminal-purple" : "text-terminal-dimmer"}`}
                     >
                       {publishedCount} published
+                    </span>
+                  )}
+                  {worktreeCount > 0 && (
+                    <span
+                      className={`text-xs font-mono ${isActive ? "text-terminal-dim" : "text-terminal-dimmer"}`}
+                      title={`${worktreeCount} agent worktree${worktreeCount === 1 ? "" : "s"} merged in (sandboxes Claude opened against this project)`}
+                    >
+                      +{worktreeCount} wt
                     </span>
                   )}
                 </div>
