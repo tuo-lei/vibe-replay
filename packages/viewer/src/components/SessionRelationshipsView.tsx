@@ -239,8 +239,11 @@ const MAX_LANES_PER_PROJECT = 5;
 const MIN_BAR_HEIGHT_PX = 8; // floor — low-score sessions are short ticks
 const MAX_BAR_HEIGHT_PX = 96; // cap — top-tier sessions tower at this height
 const LABEL_VISIBLE_MIN_HEIGHT_PX = 14; // below this, render bar without label
-const TWO_LINE_LABEL_MIN_HEIGHT_PX = 32;
-const THREE_LINE_LABEL_MIN_HEIGHT_PX = 60;
+// Line metrics for the dynamic line-clamp calculation. text-[10px] with
+// leading-tight resolves to ~12px line-height; we reserve 6px of vertical
+// padding inside the bar so a 14px bar still fits one line.
+const LABEL_LINE_HEIGHT_PX = 12;
+const LABEL_VERTICAL_PADDING_PX = 6;
 
 const MIN_BAR_MIN_WIDTH_PX = 6; // floor for low-importance sessions
 const MAX_BAR_MIN_WIDTH_PX = 160; // cap for the "important short session" widening
@@ -262,6 +265,13 @@ interface TimelineSession {
   fillAlpha: number; // 0-1 background alpha applied to color.solid
   showAccent: boolean;
   opacity: number;
+  /**
+   * Fraction of the rendered bar (0–1) that the *actual* session duration
+   * occupies. When < 1, the bar was widened by the min-width-by-importance
+   * floor; the remainder is visual padding. Drives the K-line "wick" strip
+   * along the bottom that recovers true-duration intuition.
+   */
+  realDurationFraction: number;
 }
 
 interface TimelineProject {
@@ -460,17 +470,24 @@ function buildTimeline(
       const rawRightPct = ((it.realEndMs - rangeStart) / rangeMs) * 100;
       const leftPct = Math.max(0, rawLeftPct);
       const widthPct = Math.max(0, rawRightPct - leftPct);
+      const minWidthPx = minWidthFor(it.score);
+      // Compare real-duration width vs. min-width-padded width to figure out
+      // how much of the rendered bar is actually "real time" vs. visual reach.
+      const realWidthPx = (widthPct / 100) * APPROX_TIMELINE_WIDTH_PX;
+      const visualWidthPx = Math.max(realWidthPx, minWidthPx);
+      const realDurationFraction = visualWidthPx > 0 ? Math.min(1, realWidthPx / visualWidthPx) : 1;
       tSessions.push({
         session: it.original,
         leftPct,
         widthPct,
         lane,
         score: it.score,
-        minWidthPx: minWidthFor(it.score),
+        minWidthPx,
         heightPx: heightFor(it.score),
         fillAlpha: fillAlphaFor(it.score),
         showAccent: it.score >= TOP_ACCENT_SCORE_THRESHOLD,
         opacity: opacityFor(it.score),
+        realDurationFraction,
       });
     }
 
@@ -710,14 +727,17 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                     const laneH = p.laneHeightsPx[ts.lane];
                     const top = laneTop + (laneH - ts.heightPx);
                     const opacity = automated ? 0.4 : ts.opacity;
-                    // Multi-line label support: tall bars allow 2 or 3 lines so
-                    // the extra real estate actually carries information.
-                    const lineClamp =
-                      ts.heightPx >= THREE_LINE_LABEL_MIN_HEIGHT_PX
-                        ? 3
-                        : ts.heightPx >= TWO_LINE_LABEL_MIN_HEIGHT_PX
-                          ? 2
-                          : 1;
+                    // Multi-line label support: clamp to whatever number of
+                    // lines actually fits in the bar's height, so we use the
+                    // full vertical real estate without growing the bar.
+                    const lineClamp = Math.max(
+                      1,
+                      Math.floor((ts.heightPx - LABEL_VERTICAL_PADDING_PX) / LABEL_LINE_HEIGHT_PX),
+                    );
+                    // K-line "wick": when the bar is widened by min-width, mark
+                    // the actual session duration as a thin strip along the
+                    // bottom so true duration is still readable.
+                    const showWick = ts.realDurationFraction < 0.85;
                     return (
                       <div
                         key={ts.session.sessionId}
@@ -775,6 +795,36 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                               {ts.session.title ?? ts.session.firstPrompt ?? ""}
                             </span>
                           </div>
+                        )}
+                        {showWick && (
+                          <>
+                            {/* K-line wick: bright strip along the bottom marks
+                                the actual session duration within the widened
+                                bar. Uses a near-white color so it contrasts
+                                against the bar's saturated fill. */}
+                            <div
+                              className="absolute bottom-0 left-0 pointer-events-none"
+                              style={{
+                                width: `${ts.realDurationFraction * 100}%`,
+                                height: 3,
+                                backgroundColor: "rgba(255, 255, 255, 0.85)",
+                              }}
+                              title="actual duration"
+                            />
+                            {/* End-of-real-time tick: a 2px-wide × 7px-tall mark
+                                at the wick's right edge so the end-position
+                                stays visible even when the wick itself is just
+                                a few pixels wide. */}
+                            <div
+                              className="absolute bottom-0 pointer-events-none"
+                              style={{
+                                left: `calc(${ts.realDurationFraction * 100}% - 2px)`,
+                                width: 2,
+                                height: 7,
+                                backgroundColor: "rgba(255, 255, 255, 0.95)",
+                              }}
+                            />
+                          </>
                         )}
                       </div>
                     );
