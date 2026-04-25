@@ -312,7 +312,7 @@ function buildTimeline(groups: ProjectGroup[]): {
       projects.push({
         project: g.project,
         sessions: tSessions,
-        laneCount: Math.max(...tSessions.map((s) => s.lane)) + 1,
+        laneCount: tSessions.reduce((max, s) => Math.max(max, s.lane), 0) + 1,
         colorIdx: g.colorIdx,
       });
     }
@@ -458,7 +458,10 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
       {tooltip && (
         <div
           className="fixed z-50 pointer-events-none bg-terminal-surface border border-terminal-border rounded-lg shadow-xl p-3 text-xs font-mono max-w-xs"
-          style={{ left: tooltip.x + 12, top: tooltip.y - 8 }}
+          style={{
+            left: Math.min(tooltip.x + 12, window.innerWidth - 280),
+            top: Math.max(8, Math.min(tooltip.y - 8, window.innerHeight - 160)),
+          }}
         >
           <div className="text-terminal-text font-medium mb-1 truncate">
             {tooltip.session.title ?? tooltip.session.firstPrompt ?? tooltip.session.slug}
@@ -520,6 +523,7 @@ function buildDispatchTree(sessions: ScanResultSession[]): DispatchNode[] {
     // Find sessions that ran entirely within this parent's window
     const children: DispatchNode[] = [];
     for (const child of candidates) {
+      if (usedIds.has(child.sessionId)) continue;
       if (child.project !== parent.project) continue;
       const childStart = new Date(child.startTime!).getTime();
       const childEnd = child.endTime
@@ -649,6 +653,7 @@ function DispatchTreeView({ groups }: { groups: ProjectGroup[] }) {
 
 interface FileCluster {
   file: string;
+  displayName: string;
   sessions: Array<{ session: ScanResultSession; editCount: number; colorIdx: number }>;
 }
 
@@ -661,9 +666,8 @@ function buildFileClusters(groups: ProjectGroup[]): FileCluster[] {
   for (const g of groups) {
     for (const s of g.sessions) {
       for (const f of s.filesModified) {
-        // Normalize path to just the last 2-3 segments for readability
-        const parts = f.file.split("/");
-        const key = parts.slice(-3).join("/");
+        // Use full path as key to avoid false connections across projects
+        const key = f.file;
         if (!fileMap.has(key)) fileMap.set(key, []);
         fileMap.get(key)!.push({ session: s, editCount: f.count, colorIdx: g.colorIdx });
       }
@@ -675,7 +679,10 @@ function buildFileClusters(groups: ProjectGroup[]): FileCluster[] {
   for (const [file, sessions] of fileMap) {
     const uniqueSessions = [...new Map(sessions.map((s) => [s.session.sessionId, s])).values()];
     if (uniqueSessions.length >= 2) {
-      clusters.push({ file, sessions: uniqueSessions });
+      // Shortened display: last 3 path segments
+      const parts = file.split("/");
+      const displayName = parts.slice(-3).join("/");
+      clusters.push({ file, displayName, sessions: uniqueSessions });
     }
   }
 
@@ -708,7 +715,7 @@ function FileConnectionsView({ groups }: { groups: ProjectGroup[] }) {
         </div>
         {clusters.map((cluster) => {
           const isSelected = selectedFile === cluster.file;
-          const maxEdits = Math.max(...cluster.sessions.map((s) => s.editCount));
+          const maxEdits = cluster.sessions.reduce((max, s) => Math.max(max, s.editCount), 0);
           return (
             <button
               key={cluster.file}
@@ -719,8 +726,8 @@ function FileConnectionsView({ groups }: { groups: ProjectGroup[] }) {
                   : "hover:bg-terminal-surface-2 text-terminal-text border border-transparent"
               }`}
             >
-              <div className="truncate">{cluster.file.split("/").pop()}</div>
-              <div className="text-[9px] text-terminal-dimmer truncate">{cluster.file}</div>
+              <div className="truncate">{cluster.displayName.split("/").pop()}</div>
+              <div className="text-[9px] text-terminal-dimmer truncate">{cluster.displayName}</div>
               <div className="flex items-center gap-2 mt-1">
                 <div className="flex gap-0.5">
                   {cluster.sessions.slice(0, 8).map((s, i) => (
@@ -749,35 +756,12 @@ function FileConnectionsView({ groups }: { groups: ProjectGroup[] }) {
           <div className="space-y-3">
             <div>
               <div className="text-sm font-mono text-terminal-text font-medium">
-                {selected.file.split("/").pop()}
+                {selected.displayName.split("/").pop()}
               </div>
               <div className="text-xs font-mono text-terminal-dimmer mt-0.5">{selected.file}</div>
               <div className="text-xs font-mono text-terminal-dimmer mt-1">
                 {selected.sessions.length} sessions modified this file
               </div>
-            </div>
-
-            {/* SVG connection diagram */}
-            <div className="relative">
-              <svg
-                width="100%"
-                height={Math.max(120, selected.sessions.length * 50 + 40)}
-                className="overflow-visible"
-              >
-                {/* File node in center */}
-                <g transform={`translate(50%, ${Math.max(60, selected.sessions.length * 25)})`}>
-                  <circle r={20} fill="#374151" stroke="#6b7280" strokeWidth={1.5} />
-                  <text
-                    textAnchor="middle"
-                    dy="0.35em"
-                    fontSize={8}
-                    fill="#9ca3af"
-                    className="font-mono"
-                  >
-                    📄
-                  </text>
-                </g>
-              </svg>
             </div>
 
             {/* Session list */}
