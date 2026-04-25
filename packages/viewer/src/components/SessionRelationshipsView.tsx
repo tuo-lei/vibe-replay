@@ -125,7 +125,7 @@ function SessionRow({
 }) {
   const duration = session.durationMs ?? 0;
   return (
-    <div className="flex items-center gap-3 px-4 py-2 border-b border-terminal-border/30 hover:bg-terminal-surface-2/50 text-xs font-mono">
+    <div className="flex flex-col gap-2 px-4 py-2 border-b border-terminal-border/30 hover:bg-terminal-surface-2/50 text-xs font-mono sm:flex-row sm:items-center sm:gap-3">
       <div className="flex-1 min-w-0">
         <div className="text-terminal-text truncate">
           {session.title ?? session.firstPrompt ?? session.slug}
@@ -135,7 +135,7 @@ function SessionRow({
           {session.endTime && <span className="ml-2">{timeAgo(session.endTime)} ago</span>}
         </div>
       </div>
-      <div className="flex items-center gap-3 shrink-0">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 sm:shrink-0">
         {duration > 0 && <span className={color.text}>{fmtDuration(duration)}</span>}
         <span className="text-terminal-dimmer">{session.promptCount}p</span>
         {session.editCount > 0 && (
@@ -159,25 +159,27 @@ function ProjectGroupRow({ group }: { group: ProjectGroup }) {
   return (
     <div className={`rounded-xl overflow-hidden border border-terminal-border/40 ${color.bg}`}>
       <button
-        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-terminal-surface-hover/30 transition-colors"
+        className="w-full flex flex-col gap-2 px-4 py-3 text-left hover:bg-terminal-surface-hover/30 transition-colors sm:flex-row sm:items-center sm:gap-3"
         onClick={() => setExpanded((x) => !x)}
       >
-        <span className={`text-xs ${expanded ? "rotate-90" : ""} transition-transform shrink-0`}>
-          ▶
-        </span>
-        <div
-          className={`w-1.5 h-1.5 rounded-full shrink-0`}
-          style={{ backgroundColor: color.solid }}
-        />
-        <div className="flex-1 min-w-0">
-          <span className={`font-sans font-semibold text-sm ${color.text}`}>
-            {shortName(group.project)}
+        <div className="flex min-w-0 items-center gap-3">
+          <span className={`text-xs ${expanded ? "rotate-90" : ""} transition-transform shrink-0`}>
+            ▶
           </span>
-          <span className="text-[10px] font-mono text-terminal-dimmer ml-2 truncate">
-            {group.project}
-          </span>
+          <div
+            className={`w-1.5 h-1.5 rounded-full shrink-0`}
+            style={{ backgroundColor: color.solid }}
+          />
+          <div className="min-w-0">
+            <span className={`font-sans font-semibold text-sm ${color.text}`}>
+              {shortName(group.project)}
+            </span>
+            <span className="block truncate text-[10px] font-mono text-terminal-dimmer sm:ml-2 sm:inline">
+              {group.project}
+            </span>
+          </div>
         </div>
-        <div className="flex items-center gap-4 shrink-0 text-xs font-mono">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pl-7 text-xs font-mono sm:ml-auto sm:shrink-0 sm:pl-0">
           <span className="text-terminal-text">
             {group.sessions.length} <span className="text-terminal-dimmer">sessions</span>
           </span>
@@ -612,10 +614,10 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
   const LABEL_WIDTH = 140;
 
   return (
-    <div className="p-4 space-y-0 select-none">
+    <div className="p-4 space-y-3 select-none">
       {/* Range selector + automated toggle */}
-      <div className="flex items-center justify-between mb-3 pl-1">
-        <div className="text-[11px] font-mono text-terminal-dimmer flex items-center gap-3">
+      <div className="flex flex-col gap-2 pl-1 lg:flex-row lg:items-center lg:justify-between">
+        <div className="text-[11px] font-mono text-terminal-dimmer flex flex-wrap items-center gap-x-3 gap-y-1">
           <span>
             {totalSessions} <span className="opacity-60">sessions</span>
           </span>
@@ -624,7 +626,7 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
             row = project · height + width + fill = importance · time → x-axis
           </span>
         </div>
-        <div className="flex items-center gap-3 text-[10px] font-mono">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[10px] font-mono">
           {hiddenAutomatedCount > 0 && !showAutomated && (
             <button
               onClick={() => setShowAutomated(true)}
@@ -674,188 +676,192 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
           )}
         </div>
       ) : (
-        <>
-          {/* Time axis header */}
-          <div className="flex" style={{ paddingLeft: LABEL_WIDTH }}>
-            <div className="relative flex-1 h-6 border-b border-terminal-border/40">
-              {ticks.map((t, i) => (
-                <div
-                  key={i}
-                  className="absolute flex flex-col items-center"
-                  style={{ left: `${t.leftPct}%`, transform: "translateX(-50%)" }}
-                >
-                  <span className="text-[9px] font-mono text-terminal-dimmer whitespace-nowrap">
-                    {t.label}
-                  </span>
-                  <div className="w-px h-1.5 bg-terminal-border/40 mt-0.5" />
-                </div>
-              ))}
+        <div className="overflow-x-auto pb-2">
+          <div className="min-w-[760px]">
+            {/* Time axis header */}
+            <div className="flex" style={{ paddingLeft: LABEL_WIDTH }}>
+              <div className="relative flex-1 h-6 border-b border-terminal-border/40">
+                {ticks.map((t, i) => (
+                  <div
+                    key={i}
+                    className="absolute flex flex-col items-center"
+                    style={{ left: `${t.leftPct}%`, transform: "translateX(-50%)" }}
+                  >
+                    <span className="text-[9px] font-mono text-terminal-dimmer whitespace-nowrap">
+                      {t.label}
+                    </span>
+                    <div className="w-px h-1.5 bg-terminal-border/40 mt-0.5" />
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
 
-          {/* Project rows — lane-packed, bottom-aligned skyline.
+            {/* Project rows — lane-packed, bottom-aligned skyline.
               Per-bar HEIGHT, WIDTH (min-width by score), FILL alpha, and an
               optional left ACCENT RIM all encode importance — important sessions
               are visibly larger and more saturated, low-importance ones are
               short ghosted ticks but still labeled and clickable. */}
-          {projects.map((p) => {
-            const color = colorFor(p.colorIdx);
-            const rowHeight = p.totalRowHeightPx;
-            const accentColor = color.solid;
-            return (
-              <div
-                key={p.project}
-                className="flex items-stretch border-b border-terminal-border/20 group"
-              >
-                {/* Project label */}
+            {projects.map((p) => {
+              const color = colorFor(p.colorIdx);
+              const rowHeight = p.totalRowHeightPx;
+              const accentColor = color.solid;
+              return (
                 <div
-                  className="flex flex-col justify-center shrink-0 py-1 pr-3 overflow-hidden"
-                  style={{ width: LABEL_WIDTH, height: rowHeight }}
+                  key={p.project}
+                  className="flex items-stretch border-b border-terminal-border/20 group"
                 >
-                  <div className={`text-xs font-sans font-medium truncate ${color.text}`}>
-                    {shortName(p.project)}
+                  {/* Project label */}
+                  <div
+                    className="flex flex-col justify-center shrink-0 py-1 pr-3 overflow-hidden"
+                    style={{ width: LABEL_WIDTH, height: rowHeight }}
+                  >
+                    <div className={`text-xs font-sans font-medium truncate ${color.text}`}>
+                      {shortName(p.project)}
+                    </div>
+                    <div className="text-[9px] font-mono text-terminal-dimmer truncate">
+                      {p.sessions.length} session{p.sessions.length !== 1 ? "s" : ""}
+                      {p.hiddenInLanesCount > 0 && (
+                        <span className="text-terminal-orange/70">
+                          {" "}
+                          · +{p.hiddenInLanesCount} hidden
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <div className="text-[9px] font-mono text-terminal-dimmer truncate">
-                    {p.sessions.length} session{p.sessions.length !== 1 ? "s" : ""}
-                    {p.hiddenInLanesCount > 0 && (
-                      <span className="text-terminal-orange/70">
-                        {" "}
-                        · +{p.hiddenInLanesCount} hidden
-                      </span>
-                    )}
-                  </div>
-                </div>
 
-                {/* Lane area */}
-                <div
-                  className="relative flex-1 overflow-hidden bg-terminal-surface/20 group-hover:bg-terminal-surface/30 transition-colors"
-                  style={{ height: rowHeight }}
-                >
-                  {/* Grid lines */}
-                  {ticks.map((t, i) => (
-                    <div
-                      key={i}
-                      className="absolute top-0 bottom-0 w-px bg-terminal-border/10"
-                      style={{ left: `${t.leftPct}%` }}
-                    />
-                  ))}
-
-                  {/* Session blocks — variable height (importance), bottom-aligned within lane */}
-                  {p.sessions.map((ts) => {
-                    const automated = isAutomated(ts.session);
-                    // Adaptive lanes: each lane's row height = its tallest bar.
-                    // Bars are bottom-aligned within their lane.
-                    const laneTop = p.laneTopsPx[ts.lane];
-                    const laneH = p.laneHeightsPx[ts.lane];
-                    const top = laneTop + (laneH - ts.heightPx);
-                    const opacity = automated ? 0.4 : ts.opacity;
-                    // Multi-line label support: clamp to whatever number of
-                    // lines actually fits in the bar's height, so we use the
-                    // full vertical real estate without growing the bar.
-                    const lineClamp = Math.max(
-                      1,
-                      Math.floor((ts.heightPx - LABEL_VERTICAL_PADDING_PX) / LABEL_LINE_HEIGHT_PX),
-                    );
-                    // K-line "wick": when the bar is widened by min-width, mark
-                    // the actual session duration as a thin strip along the
-                    // bottom so true duration is still readable.
-                    const showWick = ts.realDurationFraction < 0.85;
-                    return (
+                  {/* Lane area */}
+                  <div
+                    className="relative flex-1 overflow-hidden bg-terminal-surface/20 group-hover:bg-terminal-surface/30 transition-colors"
+                    style={{ height: rowHeight }}
+                  >
+                    {/* Grid lines */}
+                    {ticks.map((t, i) => (
                       <div
-                        key={ts.session.sessionId}
-                        className={`absolute overflow-hidden rounded-sm cursor-pointer hover:brightness-125 hover:z-10 transition-all border ${color.border} border-opacity-50`}
-                        style={{
-                          left: `${ts.leftPct}%`,
-                          width: `max(${ts.widthPct}%, ${ts.minWidthPx}px)`,
-                          top,
-                          height: ts.heightPx,
-                          opacity,
-                          zIndex: Math.round(ts.score),
-                          backgroundColor: hexToRgba(accentColor, ts.fillAlpha),
-                          ...(ts.showAccent
-                            ? {
-                                boxShadow: `inset 3px 0 0 ${accentColor}`,
-                              }
-                            : {}),
-                        }}
-                        onMouseEnter={(e) => {
-                          setTooltip({
-                            session: ts.session,
-                            x: e.clientX,
-                            y: e.clientY,
-                          });
-                        }}
-                        onMouseLeave={() => setTooltip(null)}
-                      >
-                        {ts.heightPx >= LABEL_VISIBLE_MIN_HEIGHT_PX && (
-                          <div
-                            className={`relative h-full flex text-[10px] font-mono leading-tight ${color.text} pointer-events-none ${
-                              lineClamp === 1 ? "items-center" : "items-start pt-1"
-                            }`}
-                            style={{
-                              paddingLeft: ts.showAccent ? 7 : 4,
-                              paddingRight: 4,
-                              minWidth: 0,
-                            }}
-                          >
-                            <span
-                              className={
-                                lineClamp === 1
-                                  ? "block truncate min-w-0 flex-1"
-                                  : "block min-w-0 flex-1 overflow-hidden"
-                              }
-                              style={
-                                lineClamp === 1
-                                  ? undefined
-                                  : {
-                                      display: "-webkit-box",
-                                      WebkitBoxOrient: "vertical",
-                                      WebkitLineClamp: lineClamp,
-                                    }
-                              }
+                        key={i}
+                        className="absolute top-0 bottom-0 w-px bg-terminal-border/10"
+                        style={{ left: `${t.leftPct}%` }}
+                      />
+                    ))}
+
+                    {/* Session blocks — variable height (importance), bottom-aligned within lane */}
+                    {p.sessions.map((ts) => {
+                      const automated = isAutomated(ts.session);
+                      // Adaptive lanes: each lane's row height = its tallest bar.
+                      // Bars are bottom-aligned within their lane.
+                      const laneTop = p.laneTopsPx[ts.lane];
+                      const laneH = p.laneHeightsPx[ts.lane];
+                      const top = laneTop + (laneH - ts.heightPx);
+                      const opacity = automated ? 0.4 : ts.opacity;
+                      // Multi-line label support: clamp to whatever number of
+                      // lines actually fits in the bar's height, so we use the
+                      // full vertical real estate without growing the bar.
+                      const lineClamp = Math.max(
+                        1,
+                        Math.floor(
+                          (ts.heightPx - LABEL_VERTICAL_PADDING_PX) / LABEL_LINE_HEIGHT_PX,
+                        ),
+                      );
+                      // K-line "wick": when the bar is widened by min-width, mark
+                      // the actual session duration as a thin strip along the
+                      // bottom so true duration is still readable.
+                      const showWick = ts.realDurationFraction < 0.85;
+                      return (
+                        <div
+                          key={ts.session.sessionId}
+                          className={`absolute overflow-hidden rounded-sm cursor-pointer hover:brightness-125 hover:z-10 transition-all border ${color.border} border-opacity-50`}
+                          style={{
+                            left: `${ts.leftPct}%`,
+                            width: `max(${ts.widthPct}%, ${ts.minWidthPx}px)`,
+                            top,
+                            height: ts.heightPx,
+                            opacity,
+                            zIndex: Math.round(ts.score),
+                            backgroundColor: hexToRgba(accentColor, ts.fillAlpha),
+                            ...(ts.showAccent
+                              ? {
+                                  boxShadow: `inset 3px 0 0 ${accentColor}`,
+                                }
+                              : {}),
+                          }}
+                          onMouseEnter={(e) => {
+                            setTooltip({
+                              session: ts.session,
+                              x: e.clientX,
+                              y: e.clientY,
+                            });
+                          }}
+                          onMouseLeave={() => setTooltip(null)}
+                        >
+                          {ts.heightPx >= LABEL_VISIBLE_MIN_HEIGHT_PX && (
+                            <div
+                              className={`relative h-full flex text-[10px] font-mono leading-tight ${color.text} pointer-events-none ${
+                                lineClamp === 1 ? "items-center" : "items-start pt-1"
+                              }`}
+                              style={{
+                                paddingLeft: ts.showAccent ? 7 : 4,
+                                paddingRight: 4,
+                                minWidth: 0,
+                              }}
                             >
-                              {ts.session.title ?? ts.session.firstPrompt ?? ""}
-                            </span>
-                          </div>
-                        )}
-                        {showWick && (
-                          <>
-                            {/* K-line wick: bright strip along the bottom marks
+                              <span
+                                className={
+                                  lineClamp === 1
+                                    ? "block truncate min-w-0 flex-1"
+                                    : "block min-w-0 flex-1 overflow-hidden"
+                                }
+                                style={
+                                  lineClamp === 1
+                                    ? undefined
+                                    : {
+                                        display: "-webkit-box",
+                                        WebkitBoxOrient: "vertical",
+                                        WebkitLineClamp: lineClamp,
+                                      }
+                                }
+                              >
+                                {ts.session.title ?? ts.session.firstPrompt ?? ""}
+                              </span>
+                            </div>
+                          )}
+                          {showWick && (
+                            <>
+                              {/* K-line wick: bright strip along the bottom marks
                                 the actual session duration within the widened
                                 bar. Uses a near-white color so it contrasts
                                 against the bar's saturated fill. */}
-                            <div
-                              className="absolute bottom-0 left-0 pointer-events-none"
-                              style={{
-                                width: `${ts.realDurationFraction * 100}%`,
-                                height: 3,
-                                backgroundColor: "rgba(255, 255, 255, 0.85)",
-                              }}
-                              title="actual duration"
-                            />
-                            {/* End-of-real-time tick: a 2px-wide × 7px-tall mark
+                              <div
+                                className="absolute bottom-0 left-0 pointer-events-none"
+                                style={{
+                                  width: `${ts.realDurationFraction * 100}%`,
+                                  height: 3,
+                                  backgroundColor: "rgba(255, 255, 255, 0.85)",
+                                }}
+                                title="actual duration"
+                              />
+                              {/* End-of-real-time tick: a 2px-wide × 7px-tall mark
                                 at the wick's right edge so the end-position
                                 stays visible even when the wick itself is just
                                 a few pixels wide. */}
-                            <div
-                              className="absolute bottom-0 pointer-events-none"
-                              style={{
-                                left: `calc(${ts.realDurationFraction * 100}% - 2px)`,
-                                width: 2,
-                                height: 7,
-                                backgroundColor: "rgba(255, 255, 255, 0.95)",
-                              }}
-                            />
-                          </>
-                        )}
-                      </div>
-                    );
-                  })}
+                              <div
+                                className="absolute bottom-0 pointer-events-none"
+                                style={{
+                                  left: `calc(${ts.realDurationFraction * 100}% - 2px)`,
+                                  width: 2,
+                                  height: 7,
+                                  backgroundColor: "rgba(255, 255, 255, 0.95)",
+                                }}
+                              />
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </>
+              );
+            })}
+          </div>
+        </div>
       )}
 
       {/* Tooltip */}
@@ -951,7 +957,7 @@ function buildDispatchTree(sessions: ScanResultSession[]): DispatchNode[] {
     const children: DispatchNode[] = [];
     for (const child of candidates) {
       if (usedIds.has(child.sessionId)) continue;
-      if (child.project !== parent.project) continue;
+      if (rollupProject(child.project) !== rollupProject(parent.project)) continue;
       const childStart = new Date(child.startTime!).getTime();
       const childEnd = child.endTime
         ? new Date(child.endTime).getTime()
@@ -1134,9 +1140,9 @@ function FileConnectionsView({ groups }: { groups: ProjectGroup[] }) {
   const selected = selectedFile ? clusters.find((c) => c.file === selectedFile) : null;
 
   return (
-    <div className="flex gap-4 p-4 h-full">
+    <div className="flex h-full min-w-0 flex-col gap-4 p-4 md:flex-row">
       {/* File list */}
-      <div className="w-64 shrink-0 space-y-1 overflow-y-auto">
+      <div className="max-h-64 w-full shrink-0 space-y-1 overflow-y-auto md:max-h-none md:w-64">
         <div className="text-[10px] font-mono text-terminal-dimmer mb-2 px-2">
           {clusters.length} shared files
         </div>
@@ -1178,14 +1184,16 @@ function FileConnectionsView({ groups }: { groups: ProjectGroup[] }) {
       </div>
 
       {/* Detail panel */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="min-w-0 flex-1 overflow-y-auto">
         {selected ? (
           <div className="space-y-3">
             <div>
-              <div className="text-sm font-mono text-terminal-text font-medium">
+              <div className="text-sm font-mono text-terminal-text font-medium truncate">
                 {selected.displayName.split("/").pop()}
               </div>
-              <div className="text-xs font-mono text-terminal-dimmer mt-0.5">{selected.file}</div>
+              <div className="text-xs font-mono text-terminal-dimmer mt-0.5 break-all">
+                {selected.file}
+              </div>
               <div className="text-xs font-mono text-terminal-dimmer mt-1">
                 {selected.sessions.length} sessions modified this file
               </div>
@@ -1198,10 +1206,10 @@ function FileConnectionsView({ groups }: { groups: ProjectGroup[] }) {
                 return (
                   <div
                     key={s.session.sessionId}
-                    className={`flex items-start gap-3 p-3 rounded-lg border ${color.bg} ${color.border}/40`}
+                    className={`flex flex-col gap-2 p-3 rounded-lg border sm:flex-row sm:items-start sm:gap-3 ${color.bg} ${color.border}/40`}
                   >
                     <div
-                      className="w-2 h-2 rounded-full mt-1.5 shrink-0"
+                      className="hidden w-2 h-2 rounded-full mt-1.5 shrink-0 sm:block"
                       style={{ backgroundColor: color.solid }}
                     />
                     <div className="flex-1 min-w-0">
@@ -1249,13 +1257,9 @@ export default function SessionRelationshipsView({ onBack }: SessionRelationship
   const { sessions, loading, error } = useRelationshipData();
   const [activeView, setActiveView] = useState<RelView>("timeline");
 
-  const groups = useMemo(() => groupByProject(sessions), [sessions]);
-  // Timeline collapses worktree paths back to their parent repo so the lanes
-  // reflect "real" projects instead of being polluted by every worktree.
-  const timelineGroups = useMemo(
-    () => groupByProject(sessions, { collapseWorktrees: true }),
-    [sessions],
-  );
+  // Collapse agent worktrees back to the project the user recognizes. The
+  // session rows still expose the original path when it matters.
+  const groups = useMemo(() => groupByProject(sessions, { collapseWorktrees: true }), [sessions]);
 
   if (loading) {
     return (
@@ -1282,28 +1286,28 @@ export default function SessionRelationshipsView({ onBack }: SessionRelationship
   }
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
+    <div className="flex-1 flex min-w-0 flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-4 px-4 md:px-6 py-3 border-b border-terminal-border/40 shrink-0">
+      <div className="flex shrink-0 flex-col gap-3 border-b border-terminal-border/40 px-4 py-3 md:px-6 lg:flex-row lg:items-center">
         {onBack && (
           <button
             onClick={onBack}
-            className="text-terminal-dimmer hover:text-terminal-text text-xs font-mono transition-colors"
+            className="self-start text-terminal-dimmer hover:text-terminal-text text-xs font-mono transition-colors lg:shrink-0"
           >
             ← Projects
           </button>
         )}
-        <div className="flex-1">
+        <div className="min-w-0 flex-1">
           <h2 className="text-sm font-sans font-semibold text-terminal-text">
             Session Relationships
-            <span className="ml-2 text-terminal-dimmer font-normal text-xs font-mono">
+            <span className="block text-terminal-dimmer font-normal text-xs font-mono sm:ml-2 sm:inline">
               {sessions.length} sessions · {groups.length} projects
             </span>
           </h2>
         </div>
 
         {/* View tabs */}
-        <div className="flex items-center gap-1">
+        <div className="flex max-w-full items-center gap-1 overflow-x-auto pb-1 lg:shrink-0 lg:pb-0">
           {VIEW_TABS.map((tab) => (
             <button
               key={tab.id}
@@ -1323,7 +1327,7 @@ export default function SessionRelationshipsView({ onBack }: SessionRelationship
       </div>
 
       {/* Stats bar */}
-      <div className="flex items-center gap-4 px-4 md:px-6 py-2 border-b border-terminal-border/20 text-[10px] font-mono text-terminal-dimmer shrink-0">
+      <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-terminal-border/20 px-4 py-2 text-[10px] font-mono text-terminal-dimmer md:px-6">
         <span>
           <span className="text-terminal-text">{sessions.length}</span> sessions
         </span>
@@ -1351,8 +1355,8 @@ export default function SessionRelationshipsView({ onBack }: SessionRelationship
       </div>
 
       {/* View content */}
-      <div className="flex-1 overflow-y-auto">
-        {activeView === "timeline" && <TimelineSwimlaneView groups={timelineGroups} />}
+      <div className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
+        {activeView === "timeline" && <TimelineSwimlaneView groups={groups} />}
         {activeView === "group" && <ProjectGroupingView groups={groups} />}
         {activeView === "tree" && <DispatchTreeView groups={groups} />}
         {activeView === "files" && <FileConnectionsView groups={groups} />}

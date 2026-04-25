@@ -126,27 +126,27 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto">
+    <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden">
       <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 space-y-4">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h2 className="text-sm font-sans font-semibold text-terminal-text">
               All Projects
               <span className="ml-2 text-terminal-dimmer font-normal">({projects.length})</span>
             </h2>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             {/* Visualize button */}
             <button
               onClick={() => setMode("relationships")}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-mono bg-terminal-purple/10 text-terminal-purple border border-terminal-purple/30 hover:bg-terminal-purple/20 transition-colors"
+              className="flex w-fit items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-mono bg-terminal-purple/10 text-terminal-purple border border-terminal-purple/30 hover:bg-terminal-purple/20 transition-colors"
               title="View session relationship visualizations"
             >
               <span>⟶</span>
               Visualize
             </button>
-            <div className="flex items-center gap-1 text-[10px] font-sans">
+            <div className="flex flex-wrap items-center gap-1 text-[10px] font-sans">
               <span className="text-terminal-dimmer mr-1">Sort:</span>
               {(
                 [
