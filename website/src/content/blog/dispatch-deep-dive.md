@@ -1,201 +1,139 @@
 ---
 title: "Capturing Claude's Autonomous Agent Mode: A Deep Dive into Dispatch"
-excerpt: "vibe-replay now captures Claude Desktop sessions — both the Code tab and Cowork's autonomous Dispatch mode. Here's how three different providers discover, deduplicate, and replay every session type Claude produces."
+excerpt: "I let Claude plan a 6-hour Japan trip in Cowork mode. Then I tried to replay it — and vibe-replay couldn't see the session at all. Here's what it took to fix that."
 cover: "/blog/dispatch-deep-dive/dashboard.png"
 date: 2026-04-25
 readTime: "8 min read"
 ---
 
-[![vibe-replay dashboard showing 279 sessions across Claude Code, Claude Cowork, Cursor, and Claude Desktop providers](/blog/dispatch-deep-dive/dashboard.png)](/blog/dispatch-deep-dive/dashboard.png)
+I let Claude plan a Japan spring break trip in autonomous mode. 6 hours, 125 prompts, 364 tool calls — Gmail searches, browser sessions, calendar checks, all chained together while I went about my day. When I came back, I wanted to replay it.
 
-When you open Claude Desktop, you get two very different AI experiences. The **Code tab** is Claude Code running in a managed environment — the same CLI, the same JSONL transcripts, same tool calls you'd see in your terminal. The **Cowork tab** is something else entirely: an autonomous agent mode where Claude runs in an isolated sandbox VM, orchestrates multi-step plans on your behalf, and writes its transcript into a completely different location on disk.
-
-vibe-replay now captures both. This post covers the architecture that makes it work.
-
----
-
-## What is Dispatch?
-
-When Claude Desktop runs in Cowork (autonomous agent) mode, it operates what Anthropic internally calls **Dispatch** — an orchestrator process that manages long-running agentic sessions. The name is fitting: Dispatch spawns and coordinates child tasks, maintains its own session state, and keeps a full audit trail separate from your regular Claude Code sessions.
-
-Each Cowork session runs inside a sandboxed VM with its own process name — codenames like `hopeful-awesome-feynman` or `zealous-wonderful-meitner` — and its own isolated filesystem rooted at `/sessions/{processName}/`. Your real folders are mounted into this sandbox via `userSelectedFolders`, but the session itself doesn't know it's running on your Mac. It thinks it has a fresh environment.
-
-The transcript format is almost identical to Claude Code's JSONL — but the outer wrapper records carry a `session_id` field instead of using filenames as identifiers, and tool names use MCP-style prefixes (`mcp__workspace__bash` instead of `Bash`, `mcp__cowork__request_cowork_directory` for workspace access). These subtle differences are what the new `claude-cowork` provider handles.
-
----
-
-## Where the Sessions Live
-
-Here's what the filesystem looks like after a few days of Claude Desktop usage:
-
-```
-~/Library/Application Support/Claude/
-├── claude-code-sessions/          ← Code tab sessions (Desktop provider)
-│   └── {accountId}/{orgId}/
-│       └── local_{id}.json        ← metadata: title, model, cliSessionId, cwd
-│
-└── local-agent-mode-sessions/     ← Cowork/Dispatch sessions
-    └── {accountId}/{orgId}/
-        ├── local_{id}.json        ← metadata: title, model, initialMessage
-        └── local_{id}/
-            └── audit.jsonl        ← full transcript (self-contained)
-```
-
-Compare this to Claude Code's native location:
-
-```
-~/.claude/projects/
-└── {encoded-cwd}/
-    └── {sessionId}.jsonl          ← transcript (CLI sessions)
-```
-
-The key distinction: **Cowork transcripts are self-contained**. The audit.jsonl file lives next to its metadata JSON, no cross-referencing required. Desktop Code-tab sessions, by contrast, store only metadata locally — the actual transcript is in `~/.claude/projects/`, referenced by `cliSessionId`.
-
----
-
-## Three Providers, One Discovery Pass
-
-vibe-replay now runs three parallel discovery passes, each targeting a different location:
-
-### `claude-code` — The original
-
-Scans `~/.claude/projects/` for JSONL files. Streams each file line-by-line, extracting session metadata from the first ~30 lines (slug, model, git branch) and counting prompts and tool calls with lightweight regex passes over every line. Returns one `SessionInfo` per file.
-
-### `claude-desktop` — Code tab sessions from Desktop
-
-Reads metadata from `~/Library/Application Support/Claude/claude-code-sessions/{accountId}/{orgId}/local_*.json`. Each metadata file contains a `cliSessionId` — the UUID of the backing JSONL in `~/.claude/projects/`. The provider encodes the `cwd` field using the same `/` → `-` scheme Claude Code uses for its project directory names, then resolves the JSONL path:
-
-```typescript
-const encodedCwd = desktop.cwd.replace(/\/+$/, "").replace(/\//g, "-");
-const jsonlPath = join(claudeProjectsDir, encodedCwd, `${desktop.cliSessionId}.jsonl`);
-```
-
-Once the JSONL is found, it hands off to the same `extractSessionInfo` function used by the `claude-code` provider, then overlays the richer Desktop metadata (title, model, timestamps) on top.
-
-### `claude-cowork` — Dispatch/autonomous sessions
-
-Reads metadata from `~/Library/Application Support/Claude/local-agent-mode-sessions/{accountId}/{orgId}/local_*.json`. Instead of resolving an external JSONL, it looks for the co-located audit file:
-
-```typescript
-const dir = jsonPath.replace(/\.json$/, "");  // local_{id}.json → local_{id}/
-const auditPath = join(dir, "audit.jsonl");
-```
-
-Then streams the audit.jsonl to count prompts and tool calls — the same line-by-line streaming approach as `claude-code`, but adapted for the Cowork wrapper format.
-
-One ID subtlety that matters: the `sessionId` used for deduplication is derived from the metadata's `sessionId` field (stripping the `local_` prefix), **not** the `cliSessionId`. The `cliSessionId` in a Cowork session identifies the inner Claude Code subprocess running inside the sandbox — a completely different UUID that doesn't appear on the outer audit records the parser reads. Using it for session identity would permanently break replay-to-source linking.
-
----
-
-## Deduplication: When the Same Session Appears Twice
-
-Claude Code sessions surfaced through the Desktop UI have a real collision problem: the same JSONL file on disk shows up under both `claude-code` (which finds it by scanning `~/.claude/projects/`) and `claude-desktop` (which resolves it via `cliSessionId`). Both providers assign the same `sessionId` to this session.
-
-After all three providers finish discovery, vibe-replay deduplicates by `sessionId` with a priority ordering:
-
-```typescript
-const PROVIDER_PRIORITY = ["claude-cowork", "claude-desktop", "claude-code", "cursor"];
-```
-
-```typescript
-export function deduplicateSessionsByProvider(sessions: SessionInfo[]): SessionInfo[] {
-  const seen = new Map<string, SessionInfo>();
-  for (const session of sessions) {
-    const existing = seen.get(session.sessionId);
-    if (!existing) {
-      seen.set(session.sessionId, session);
-    } else {
-      const existingPrio = PROVIDER_PRIORITY.indexOf(existing.provider);
-      const newPrio = PROVIDER_PRIORITY.indexOf(session.provider);
-      if (newPrio !== -1 && (existingPrio === -1 || newPrio < existingPrio)) {
-        seen.set(session.sessionId, session);
-      }
-    }
-  }
-  return Array.from(seen.values());
-}
-```
-
-The priority order reflects data quality: `claude-desktop` keeps the session over `claude-code` because it has richer metadata — the title that Claude Desktop infers, the exact model used, and precise timestamps from the Desktop process. `claude-cowork` ranks first because its transcript is authoritative and self-contained. `cursor` uses an entirely different ID scheme, so it never collides with the Claude family.
-
----
-
-## What a Cowork Replay Looks Like
-
-Here's a real Cowork session — 125 prompts, 364 tool calls, 6 hours and 40 minutes of autonomous Claude planning a Japan spring break trip:
+vibe-replay couldn't see the session.
 
 [![Cowork session landing page showing 'A Claude Cowork session replay by vibe-replay' — 125 turns, $71.07 cost](/blog/dispatch-deep-dive/cowork-landing.png)](/blog/dispatch-deep-dive/cowork-landing.png)
 
-The landing page shows the "Claude Cowork session" label, the sandbox VM's process name as the title, and the tool call summary. Tools include `gmail_read_message`, `AskUserQuestion`, `navigate`, and `Claude_in_Chrome` — the full MCP toolkit that Cowork makes available.
+It now can. This is what it took.
+
+---
+
+## Two Claudes in one app
+
+Claude Desktop is actually two AI experiences sharing a window. The **Code tab** is Claude Code in a managed wrapper — the same CLI, the same JSONL transcripts, the same tool calls you'd see in your terminal. The **Cowork tab** is something else entirely: an autonomous agent mode where Claude runs in an isolated sandbox VM, orchestrates multi-step plans on its own, and writes its transcript to a completely different place on disk.
+
+Anthropic internally calls the orchestrator behind Cowork **Dispatch** — and the name fits. Each Cowork session spins up a sandboxed VM with a codename like `hopeful-awesome-feynman` or `zealous-wonderful-meitner`, mounts your real folders into a fake filesystem rooted at `/sessions/{processName}/`, and writes its full audit trail into:
+
+```
+~/Library/Application Support/Claude/local-agent-mode-sessions/.../audit.jsonl
+```
+
+That's nowhere near `~/.claude/projects/`, which is what vibe-replay had been scanning since day one.
+
+That's the surface answer to "why couldn't it see the session." But once I started reading audit files, two deeper things mattered.
+
+---
+
+## Discovery 1: Cowork transcripts are self-contained
+
+Claude Code's storage layout has a small but consequential split. Metadata lives in one place; the transcript lives in another, joined by an ID:
+
+```
+~/.claude/projects/{encoded-cwd}/{sessionId}.jsonl   ← transcript
+~/Library/.../claude-code-sessions/.../local_{id}.json   ← metadata, with cliSessionId pointing back to the JSONL
+```
+
+To replay a Code-tab session, you read the metadata, follow the pointer, and find the JSONL — which means re-implementing Claude's "encode cwd by replacing `/` with `-`" path scheme. Brittle, but solvable.
+
+Cowork chose a different shape:
+
+```
+~/Library/.../local-agent-mode-sessions/{accountId}/{orgId}/
+├── local_{id}.json     ← metadata (title, model, initialMessage)
+└── local_{id}/
+    └── audit.jsonl     ← full transcript, right next door
+```
+
+No cross-references. No path encoding tricks. The transcript sits next to its metadata in a sibling directory. This is the kind of design choice that probably saved its authors a week of debugging — and it lets vibe-replay treat each Cowork session as a single self-contained unit, no matter what sandbox it ran in or what codename it got.
+
+---
+
+## Discovery 2: the `cliSessionId` trap
+
+Cowork sessions also carry a `cliSessionId` field. The name is suggestive — exactly the kind of thing you'd grab as a dedup key without thinking.
+
+Don't.
+
+The `cliSessionId` in a Cowork session is the UUID of the **inner Claude Code subprocess running inside the sandbox VM** — a completely separate process from the one writing the audit trail you're reading. It doesn't appear anywhere on the outer audit records. Treat it as the session's identity and you'll permanently break replay-to-source linking: every time the sandbox restarts that inner CLI, the "same" session gets a new ID.
+
+The right key is the metadata's `sessionId` field (with the `local_` prefix stripped). That's the stable, outer-loop identity of the Cowork session itself.
+
+I learned this the long way. Future me, reading this post, gets to skip that.
+
+---
+
+## Three providers, one discovery pass
+
+With those two insights, the rest of the implementation falls out:
+
+- **`claude-code`** scans `~/.claude/projects/` for raw JSONL files. The original provider.
+- **`claude-desktop`** reads metadata from the Code tab's location, follows `cliSessionId` to `~/.claude/projects/` to find the actual JSONL, and overlays Desktop's richer metadata (title, exact model, permission mode) on top.
+- **`claude-cowork`** reads metadata from the autonomous-mode location and goes straight to the co-located audit.jsonl. No path resolution required — that's discovery 1 paying off.
+
+All three run in parallel and produce a flat list of sessions.
+
+Parallel discovery introduces a collision: the same Code-tab JSONL gets found twice — once raw by `claude-code`, once with metadata by `claude-desktop`. Both providers correctly assign the same `sessionId` to it. Dedup just keeps the best-quality record using a fixed priority:
+
+```
+claude-cowork → claude-desktop → claude-code → cursor
+```
+
+`claude-desktop` wins over `claude-code` because it has the title and model that the Desktop UI inferred. `claude-cowork` ranks first because its transcript is authoritative. `cursor` uses a different ID scheme entirely, so it never collides with the Claude family.
+
+---
+
+## What replay looks like now
+
+A Cowork session in the player:
 
 [![The replay player showing the Japan trip planning session — prompt outline on left, conversation in center, tool use tags visible](/blog/dispatch-deep-dive/cowork-player.png)](/blog/dispatch-deep-dive/cowork-player.png)
 
-The player works identically to Claude Code replays. Left panel shows the session outline with every user prompt. Center shows the conversation: `YOU` turns with the user's message, `ASSISTANT` turns with tool-use summaries and the final response.
+Left panel: outline of every user prompt — useful when there are 125 of them. Center: the conversation, with tool-use tags inline. The MCP toolkit Cowork exposes (`gmail_read_message`, `AskUserQuestion`, `navigate`, `Claude_in_Chrome`) shows up as recognizable tool tags instead of raw `mcp__workspace__*` strings.
 
----
-
-## Desktop Sessions: Richer Metadata
-
-Code-tab sessions running through Claude Desktop get the `claude-desktop` badge and pick up extra metadata that the raw JSONL doesn't contain — the human-readable title Desktop assigns, the exact permission mode, and git worktree context:
+Code-tab sessions running through Desktop pick up extra metadata the raw JSONL never sees — the human-readable title Desktop inferred, the permission mode, the git worktree branch:
 
 [![Claude Desktop session landing showing 'A Claude Desktop session replay' with worktree branch and dangerous mode badge](/blog/dispatch-deep-dive/desktop-session-landing.png)](/blog/dispatch-deep-dive/desktop-session-landing.png)
 
-This session is literally the implementation of the Cowork provider itself. The first prompt: *"Add support for Cowork (Dispatch) sessions to vibe-replay. This builds on top of PR #187..."* The `dangerous mode` badge comes from the Desktop metadata's `permissionMode` field; the `claude/crazy-ishizaka-06a286` tag is the git worktree branch name. Neither is available from the JSONL alone.
+(That session is literally the implementation of the Cowork provider itself. The first prompt: *"Add support for Cowork (Dispatch) sessions to vibe-replay…"* The `dangerous mode` badge and `claude/crazy-ishizaka-06a286` branch name come from Desktop's metadata.)
 
----
-
-## The Dashboard: All Sessions in One Place
-
-With three providers running in parallel, the vibe-replay dashboard shows everything:
+And the dashboard ties it all together:
 
 [![vibe-replay dashboard: 279 sessions — Claude Code 224, Claude Cowork 47, Cursor 6, Claude Desktop 2, plus activity heatmap](/blog/dispatch-deep-dive/dashboard.png)](/blog/dispatch-deep-dive/dashboard.png)
 
-279 sessions total. 224 Claude Code, 47 Cowork, 6 Cursor, 2 Desktop. The heatmap shows activity concentrated in the last few months — that's when most of the Cowork experimentation happened.
-
-The "CLAUDE" badge in the sessions list is `claude-code`. "COWORK" is `claude-cowork`. "DESKTOP" is `claude-desktop`. The badges are how you tell them apart at a glance.
+279 sessions across all four providers. The badges (`CLAUDE`, `COWORK`, `DESKTOP`) are how you tell them apart at a glance:
 
 [![Sessions list showing CLAUDE, COWORK, and DESKTOP provider badges](/blog/dispatch-deep-dive/sessions-list.png)](/blog/dispatch-deep-dive/sessions-list.png)
 
 ---
 
-## Generating a Replay
+## Try it
 
-If you have Claude Desktop installed with Cowork sessions, generating a replay is one command:
+If you've used Cowork at all, you have audit files sitting on disk right now:
 
 ```bash
 npx vibe-replay
 ```
 
-vibe-replay auto-discovers all session types. In the interactive picker, Cowork sessions appear grouped under "Cowork" instead of a filesystem path (since they all run in sandboxed VMs with meaningless paths like `/sessions/hopeful-awesome-feynman`). Select one and a self-contained HTML file drops into `~/.vibe-replay/{sessionId}/index.html`.
+Auto-discovery picks up everything — Code, Desktop, Cowork, Cursor. Pick a session, get a self-contained HTML file in `~/.vibe-replay/{sessionId}/index.html`.
 
-You can also target a specific audit.jsonl directly:
-
-```bash
-npx vibe-replay \
-  -s ~/Library/Application\ Support/Claude/local-agent-mode-sessions/{accountId}/{orgId}/local_{id}/audit.jsonl \
-  -p claude-cowork
-```
-
-Or let the dashboard surface everything at once:
+Or surface them all at once:
 
 ```bash
 npx vibe-replay --dashboard
 ```
 
----
+A few things still ahead: linking Dispatch's child sub-agents back to their parent session, surfacing richer MCP context (which server, which operation) in the player, and a unified timeline across long autonomous runs.
 
-## What's Next
-
-A few things on the roadmap for Cowork/Dispatch support:
-
-**Child task visualization** — When Dispatch spawns sub-agents to execute specific tasks in parallel, each gets its own session. Linking these child sessions back to the parent Dispatch conversation (showing the tree structure of orchestrated work) is the next piece.
-
-**MCP tool mapping** — Cowork sessions use MCP tool names (`mcp__workspace__bash`) where Code sessions use short names (`Bash`). The parser normalizes these today, but surfacing the richer MCP context (which server, which operation) in the replay UI would add clarity.
-
-**Cross-session timeline** — If a single Cowork session spawns work across 6 hours and a dozen tool calls, a unified timeline view across all child tasks would tell the full story of what Dispatch actually did.
-
-The foundation is in place. Every audit.jsonl Claude produces is now fair game.
+But the foundation is in place. Every audit.jsonl Claude produces — Code, Desktop, Cowork — is now fair game.
 
 ---
 
-*vibe-replay is open source. The providers discussed here landed in [PR #187](https://github.com/tuo-lei/vibe-replay/pull/187). If you run Claude Desktop or Cowork, give it a try.*
+*vibe-replay is open source. The providers discussed here landed in [PR #187](https://github.com/tuo-lei/vibe-replay/pull/187).*
