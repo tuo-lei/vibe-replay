@@ -2,19 +2,67 @@
 import Footer from "../components/Footer.astro";
 import Nav from "../components/Nav.astro";
 import Layout from "../layouts/Layout.astro";
+
+const exploreFaq = [
+  {
+    q: "What are AI coding session replays?",
+    a: "Replays capture every prompt, tool call, file edit, and AI thinking step from a Claude Code or Cursor session, then render them as an interactive timeline you can scrub through. Browse public replays here to see how others build with AI.",
+  },
+  {
+    q: "How do I share my own replay?",
+    a: "Run `npx vibe-replay --gist` (publishes to GitHub Gist) or `npx vibe-replay --cloud` (publishes to vibe-replay cloud). Both produce a public URL you can share. Replays show up here automatically.",
+  },
+  {
+    q: "Can I replay Claude Code and Cursor sessions?",
+    a: "Yes. vibe-replay reads JSONL files for Claude Code and SQLite/JSONL for Cursor — no extra instrumentation. Both providers render with full prompt history, tool calls, diffs, and thinking blocks.",
+  },
+  {
+    q: "Are replays self-contained?",
+    a: "Every replay is a single static HTML file with all assets inlined — no external requests, no tracking. Open it offline, host it on any static server, or attach it to a PR.",
+  },
+];
+
+const exploreJsonLd = [
+  {
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    "name": "Public AI coding session replays",
+    "description":
+      "Browse public AI coding session replays shared by the community. Watch Claude Code and Cursor sessions as interactive web replays.",
+    "url": "https://vibe-replay.com/explore/",
+    "isPartOf": {
+      "@type": "WebSite",
+      "name": "vibe-replay",
+      "url": "https://vibe-replay.com",
+    },
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": exploreFaq.map(({ q, a }) => ({
+      "@type": "Question",
+      "name": q,
+      "acceptedAnswer": { "@type": "Answer", "text": a },
+    })),
+  },
+];
 ---
 
-<Layout title="Explore Replays - vibe-replay" description="Browse public AI coding session replays shared by the community. Watch Claude Code and Cursor sessions as interactive web replays.">
+<Layout
+  title="Explore Public AI Coding Replays — Claude Code & Cursor | vibe-replay"
+  description="Browse public AI coding session replays shared by the community. Watch real Claude Code and Cursor sessions as interactive, scrubbable web replays."
+  jsonLd={exploreJsonLd}
+>
   <div class="min-h-screen flex flex-col">
     <Nav active="explore" />
 
     <!-- Main content -->
     <main class="flex-1 max-w-6xl mx-auto w-full px-6 py-10">
       <!-- Title + sort controls -->
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
         <div>
-          <h1 class="text-2xl font-bold text-text-primary mb-1">Public Replays</h1>
-          <p class="text-text-muted text-sm font-mono">AI coding sessions shared by the community</p>
+          <h1 class="text-2xl font-bold text-text-primary mb-1">Public AI coding replays</h1>
+          <p class="text-text-muted text-sm font-mono">Claude Code &amp; Cursor sessions shared by the community</p>
         </div>
         <div class="flex items-center gap-1 rounded-lg border border-border overflow-hidden w-fit shrink-0">
           <button
@@ -33,6 +81,23 @@ import Layout from "../layouts/Layout.astro";
           </button>
         </div>
       </div>
+
+      <!-- Static intro for crawlers + first-paint readers -->
+      <section class="mb-8 text-text-secondary text-sm leading-relaxed max-w-3xl">
+        <p>
+          Watch real <a href="/blog/" class="text-accent hover:underline">AI coding sessions</a> from
+          Claude Code and Cursor &mdash; full prompts, tool calls, file diffs, and thinking blocks
+          rendered as an interactive timeline. Each replay is a self-contained HTML file you can open
+          offline, embed in a PR, or share as a link.
+        </p>
+        <p class="mt-3">
+          Want to share your own? Run
+          <code class="font-mono text-accent bg-surface-2 px-1.5 py-0.5 rounded">npx vibe-replay --gist</code>
+          or
+          <code class="font-mono text-accent bg-surface-2 px-1.5 py-0.5 rounded">npx vibe-replay --cloud</code>
+          and your replay will appear here.
+        </p>
+      </section>
 
       <!-- Loading state -->
       <div id="loading" class="text-center py-20">
@@ -54,6 +119,19 @@ import Layout from "../layouts/Layout.astro";
       <!-- Replay grid -->
       <div id="replay-grid" class="hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
       </div>
+
+      <!-- Static FAQ for crawlers (matches FAQPage JSON-LD above) -->
+      <section class="mt-16 pt-10 border-t border-border max-w-3xl">
+        <h2 class="text-lg font-bold text-text-primary mb-6">Frequently asked questions</h2>
+        <div class="flex flex-col gap-6">
+          {exploreFaq.map(({ q, a }) => (
+            <div>
+              <h3 class="text-sm font-semibold text-text-primary mb-1.5">{q}</h3>
+              <p class="text-text-secondary text-sm leading-relaxed" set:html={a.replace(/`([^`]+)`/g, '<code class="font-mono text-accent bg-surface-2 px-1.5 py-0.5 rounded">$1</code>')} />
+            </div>
+          ))}
+        </div>
+      </section>
     </main>
 
     <Footer />

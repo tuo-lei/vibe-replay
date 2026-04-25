@@ -3,7 +3,11 @@ import Nav from "../components/Nav.astro";
 import Layout from "../layouts/Layout.astro";
 ---
 
-<Layout title="Page not found - vibe-replay" description="The page you're looking for doesn't exist. Head back to vibe-replay to explore AI coding session replays.">
+<Layout
+  title="Page not found - vibe-replay"
+  description="The page you're looking for doesn't exist. Head back to vibe-replay to explore AI coding session replays."
+  noindex
+>
   <div class="flex flex-col min-h-screen">
     <Nav />
     <div class="flex-1 flex items-center justify-center px-6">

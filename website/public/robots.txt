@@ -1,4 +1,12 @@
 User-agent: *
 Allow: /
 
+# API + auth endpoints — never crawl (no HTML, just JSON / OAuth flow)
+Disallow: /api/
+Disallow: /auth/
+
+# /profile/ and /shared-insights/ are intentionally not Disallow'd here —
+# they use <meta name="robots" content="noindex"> instead, which only works
+# if crawlers can still fetch the page to read the tag.
+
 Sitemap: https://vibe-replay.com/sitemap-index.xml

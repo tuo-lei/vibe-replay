@@ -7,10 +7,41 @@ const viewerDevUrl = process.env.DEV_VIEWER_URL;
 // In dev, proxy /api/* to the local Cloudflare Worker so auth + cloud APIs work
 const workerDevUrl = process.env.DEV_WORKER_URL || "http://localhost:8787";
 
+// Pages excluded from sitemap (private / dynamic-only / requires auth).
+// Keep in sync with the noindex meta tags on these routes.
+const SITEMAP_EXCLUDED = new Set(["/profile", "/shared-insights"]);
+
 export default defineConfig({
   site: "https://vibe-replay.com",
   trailingSlash: "always",
-  integrations: [sitemap()],
+  integrations: [
+    sitemap({
+      filter: (page) => {
+        const path = new URL(page).pathname.replace(/\/$/, "");
+        return !SITEMAP_EXCLUDED.has(path);
+      },
+      serialize(item) {
+        const path = new URL(item.url).pathname.replace(/\/$/, "");
+        if (path === "") {
+          item.priority = 1.0;
+          item.changefreq = "weekly";
+        } else if (path === "/blog") {
+          item.priority = 0.9;
+          item.changefreq = "weekly";
+        } else if (path.startsWith("/blog/")) {
+          item.priority = 0.8;
+          item.changefreq = "monthly";
+        } else if (path === "/explore") {
+          item.priority = 0.7;
+          item.changefreq = "daily";
+        } else if (path === "/insights") {
+          item.priority = 0.7;
+          item.changefreq = "weekly";
+        }
+        return item;
+      },
+    }),
+  ],
   vite: {
     server: {
       proxy: {

@@ -8,9 +8,47 @@ import { formatDate } from "../../utils/date";
 const posts = (await getCollection("blog", ({ data }) => data.draft !== true)).sort(
   (a, b) => b.data.date.getTime() - a.data.date.getTime(),
 );
+
+const siteBase = import.meta.env.SITE;
+const blogIndexJsonLd = [
+  {
+    "@context": "https://schema.org",
+    "@type": "Blog",
+    "name": "vibe-replay blog",
+    "url": new URL("/blog/", siteBase).href,
+    "description":
+      "Updates, guides, and deep-dives on Claude Code, Cursor, AI coding workflows, and the vibe-replay project.",
+    "publisher": {
+      "@type": "Organization",
+      "name": "vibe-replay",
+      "url": siteBase,
+      "logo": new URL("/logo.png", siteBase).href,
+    },
+    "blogPost": posts.map((p) => ({
+      "@type": "BlogPosting",
+      "headline": p.data.title,
+      "description": p.data.excerpt,
+      "datePublished": p.data.date.toISOString(),
+      "url": new URL(`/blog/${p.id}/`, siteBase).href,
+      "author": { "@type": "Person", "name": p.data.author, "url": p.data.authorUrl },
+    })),
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+      { "@type": "ListItem", "position": 1, "name": "Home", "item": siteBase },
+      { "@type": "ListItem", "position": 2, "name": "Blog", "item": new URL("/blog/", siteBase).href },
+    ],
+  },
+];
 ---
 
-<Layout title="Blog — vibe-replay" description="Updates, guides, and stories from the vibe-replay project.">
+<Layout
+  title="Blog — Claude Code, Cursor, and AI coding deep-dives | vibe-replay"
+  description="Updates, guides, and deep-dives on Claude Code, Cursor, and AI coding workflows. Learn what AI agents actually store on your machine, how to capture sessions, and more."
+  jsonLd={blogIndexJsonLd}
+>
   <Nav active="blog" />
 
   <main class="min-h-screen pt-16 pb-20 px-6">
