@@ -28,7 +28,7 @@ Anthropic internally calls the orchestrator behind Cowork **Dispatch** — and t
 
 That's nowhere near `~/.claude/projects/`, which is what vibe-replay had been scanning since day one.
 
-That's the surface answer to "why couldn't it see the session." But once I started reading audit files, two deeper things mattered.
+That answered the surface question — *why didn't vibe-replay see the session?* But once I actually opened those audit files, two deeper things mattered.
 
 ---
 
