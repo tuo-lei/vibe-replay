@@ -226,16 +226,21 @@ function ProjectGroupingView({ groups }: { groups: ProjectGroup[] }) {
 // Automated / scheduled sessions are hidden by default and surfaced via a toggle.
 // Per-project lane count is capped; overflow is rolled up into a "+N more" hint.
 
-// Each lane reserves LANE_TOTAL_HEIGHT_PX of vertical space. Within a lane,
-// bars are *bottom-aligned* so their tops form a skyline — height encodes
-// importance in addition to width and fill. The 6x height ratio (8 → 48)
-// makes top-tier sessions visibly tower over routine ones.
-const LANE_TOTAL_HEIGHT_PX = 48;
+// Bars are *bottom-aligned* within their lane so the lane tops form a skyline
+// — height encodes importance alongside width and fill. The 12x height ratio
+// (8 → 96) makes top-tier sessions visibly tower over routine ones, and tall
+// bars wrap their title onto multiple lines so the extra real-estate is useful.
+//
+// Per-lane height is *adaptive* — each lane sizes to its tallest bar (capped
+// at MAX_BAR_HEIGHT_PX) instead of every lane reserving the global maximum,
+// which previously left huge dead zones in lanes that only held short bars.
 const LANE_GAP_PX = 4;
 const MAX_LANES_PER_PROJECT = 5;
 const MIN_BAR_HEIGHT_PX = 8; // floor — low-score sessions are short ticks
-const MAX_BAR_HEIGHT_PX = LANE_TOTAL_HEIGHT_PX; // cap — top-tier sessions fill the lane
+const MAX_BAR_HEIGHT_PX = 96; // cap — top-tier sessions tower at this height
 const LABEL_VISIBLE_MIN_HEIGHT_PX = 14; // below this, render bar without label
+const TWO_LINE_LABEL_MIN_HEIGHT_PX = 32;
+const THREE_LINE_LABEL_MIN_HEIGHT_PX = 60;
 
 const MIN_BAR_MIN_WIDTH_PX = 6; // floor for low-importance sessions
 const MAX_BAR_MIN_WIDTH_PX = 160; // cap for the "important short session" widening
@@ -263,6 +268,11 @@ interface TimelineProject {
   project: string;
   sessions: TimelineSession[];
   laneCount: number;
+  /** Per-lane height in px — each lane sizes to its tallest bar. */
+  laneHeightsPx: number[];
+  /** Per-lane top offset (cumulative sum of preceding heights + gaps). */
+  laneTopsPx: number[];
+  totalRowHeightPx: number;
   hiddenInLanesCount: number; // sessions dropped because they exceeded MAX_LANES_PER_PROJECT
   colorIdx: number;
   importance: number;
@@ -467,10 +477,32 @@ function buildTimeline(
     if (tSessions.length > 0) {
       // Render high-score sessions last so their accent rim sits on top of overlaps
       tSessions.sort((a, b) => a.score - b.score);
+
+      // Per-lane heights: each lane sizes to its tallest bar (importance-biased
+      // packing means lane 0 holds the highest scores and is naturally the
+      // tallest). This avoids the dead vertical space when only the top lane
+      // has tall bars and lower lanes hold short routine sessions.
+      const laneHeightsPx: number[] = Array.from({ length: laneCount }, () => MIN_BAR_HEIGHT_PX);
+      for (const ts of tSessions) {
+        if (ts.heightPx > laneHeightsPx[ts.lane]) {
+          laneHeightsPx[ts.lane] = ts.heightPx;
+        }
+      }
+      const laneTopsPx: number[] = [];
+      let cursor = 3;
+      for (const h of laneHeightsPx) {
+        laneTopsPx.push(cursor);
+        cursor += h + LANE_GAP_PX;
+      }
+      const totalRowHeightPx = cursor + 3;
+
       projects.push({
         project: g.project,
         sessions: tSessions,
         laneCount,
+        laneHeightsPx,
+        laneTopsPx,
+        totalRowHeightPx,
         hiddenInLanesCount: dropped,
         colorIdx: g.colorIdx,
         importance: tSessions.reduce((sum, t) => sum + t.score, 0),
@@ -629,7 +661,7 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
               short ghosted ticks but still labeled and clickable. */}
           {projects.map((p) => {
             const color = colorFor(p.colorIdx);
-            const rowHeight = p.laneCount * (LANE_TOTAL_HEIGHT_PX + LANE_GAP_PX) + 6;
+            const rowHeight = p.totalRowHeightPx;
             const accentColor = color.solid;
             return (
               <div
@@ -672,11 +704,20 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                   {/* Session blocks — variable height (importance), bottom-aligned within lane */}
                   {p.sessions.map((ts) => {
                     const automated = isAutomated(ts.session);
-                    // Lane row spans LANE_TOTAL_HEIGHT_PX. Bar bottom aligns to
-                    // the lane's bottom; height varies up to that ceiling.
-                    const laneTop = 3 + ts.lane * (LANE_TOTAL_HEIGHT_PX + LANE_GAP_PX);
-                    const top = laneTop + (LANE_TOTAL_HEIGHT_PX - ts.heightPx);
+                    // Adaptive lanes: each lane's row height = its tallest bar.
+                    // Bars are bottom-aligned within their lane.
+                    const laneTop = p.laneTopsPx[ts.lane];
+                    const laneH = p.laneHeightsPx[ts.lane];
+                    const top = laneTop + (laneH - ts.heightPx);
                     const opacity = automated ? 0.4 : ts.opacity;
+                    // Multi-line label support: tall bars allow 2 or 3 lines so
+                    // the extra real estate actually carries information.
+                    const lineClamp =
+                      ts.heightPx >= THREE_LINE_LABEL_MIN_HEIGHT_PX
+                        ? 3
+                        : ts.heightPx >= TWO_LINE_LABEL_MIN_HEIGHT_PX
+                          ? 2
+                          : 1;
                     return (
                       <div
                         key={ts.session.sessionId}
@@ -706,14 +747,31 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                       >
                         {ts.heightPx >= LABEL_VISIBLE_MIN_HEIGHT_PX && (
                           <div
-                            className={`relative h-full flex items-center text-[10px] font-mono ${color.text} pointer-events-none`}
+                            className={`relative h-full flex text-[10px] font-mono leading-tight ${color.text} pointer-events-none ${
+                              lineClamp === 1 ? "items-center" : "items-start pt-1"
+                            }`}
                             style={{
                               paddingLeft: ts.showAccent ? 7 : 4,
                               paddingRight: 4,
                               minWidth: 0,
                             }}
                           >
-                            <span className="block truncate min-w-0 flex-1">
+                            <span
+                              className={
+                                lineClamp === 1
+                                  ? "block truncate min-w-0 flex-1"
+                                  : "block min-w-0 flex-1 overflow-hidden"
+                              }
+                              style={
+                                lineClamp === 1
+                                  ? undefined
+                                  : {
+                                      display: "-webkit-box",
+                                      WebkitBoxOrient: "vertical",
+                                      WebkitLineClamp: lineClamp,
+                                    }
+                              }
+                            >
                               {ts.session.title ?? ts.session.firstPrompt ?? ""}
                             </span>
                           </div>
