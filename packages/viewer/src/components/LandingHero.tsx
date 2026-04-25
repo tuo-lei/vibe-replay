@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { ReplaySession } from "../types";
-import { providerDisplayName } from "./dashboard-utils";
+import { providerDisplayName, rollupProject } from "./dashboard-utils";
 import { formatDuration } from "./StatsPanel";
 
 interface Props {
@@ -59,7 +59,8 @@ export default function LandingHero({ session, onStart, onViewInsights }: Props)
   }, [scenes]);
 
   const duration = formatDuration(meta.stats.durationMs);
-  const title = meta.title || meta.project;
+  const displayProject = rollupProject(meta.project);
+  const title = meta.title || displayProject;
   const providerLabel = formatProviderLabel(meta.provider);
 
   // Build stat cards: pick the best 3–4 from available data

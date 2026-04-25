@@ -5,6 +5,7 @@ import {
   getSessionDataQualityNotes,
   getSessionMetricQuality,
 } from "./DataQualityIndicator";
+import { rollupProject } from "./dashboard-utils";
 
 interface Props {
   session: ReplaySession;
@@ -92,6 +93,8 @@ export default function StatsPanel({ session }: Props) {
   }, [session]);
 
   const { meta } = session;
+  const displayProject = rollupProject(meta.project);
+  const isWorktree = displayProject !== meta.project;
   const dataQualityNotes = useMemo(() => getSessionDataQualityNotes(meta), [meta]);
   const metricQuality = useMemo(() => getSessionMetricQuality(meta), [meta]);
 
@@ -107,12 +110,20 @@ export default function StatsPanel({ session }: Props) {
             {meta.title}
           </div>
         )}
-        <div className="text-terminal-dim truncate" title={meta.cwd}>
-          {meta.project}
+        <div className="text-terminal-dim truncate" title={isWorktree ? meta.project : meta.cwd}>
+          {displayProject}
         </div>
         <div className="text-terminal-dim mt-0.5 flex items-center gap-1.5 flex-wrap">
           {meta.model && <span className="text-terminal-dim">{meta.model}</span>}
           {meta.provider && <span>{meta.provider}</span>}
+          {isWorktree && (
+            <span
+              className="px-1 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple uppercase tracking-wider text-[10px]"
+              title={`Claude agent worktree: ${meta.project}`}
+            >
+              worktree
+            </span>
+          )}
           {dataQualityNotes.length > 0 && (
             <DataQualityIndicator title={dataQualityNotes.join("\n")} />
           )}
