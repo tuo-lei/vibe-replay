@@ -362,6 +362,29 @@ function packLanesByImportance(
   return { laneAssignments, laneCount: laneIntervals.length, dropped };
 }
 
+/**
+ * Active end of a session = startTime + durationMs.
+ *
+ * The raw `endTime` field on a JSONL session is the timestamp of the *last
+ * activity*, which can be days or weeks after the session's actual work
+ * concluded (Claude Code keeps writing keep-alive entries during long idle
+ * gaps). Using it as the visualization endpoint makes a 75-minute session
+ * that sat idle for 10 days look like a 10-day-long bar pinned to a window
+ * that doesn't actually contain any of its work.
+ *
+ * Prefer durationMs (real active time). Fall back to endTime - startTime
+ * only when duration isn't recorded, and even then cap at 12h to prevent
+ * pathological idle gaps from polluting the layout.
+ */
+function activeEndMs(startMs: number, s: ScanResultSession): number {
+  if (s.durationMs != null) return startMs + s.durationMs;
+  if (s.endTime) {
+    const wallClockMs = new Date(s.endTime).getTime() - startMs;
+    return startMs + Math.min(wallClockMs, 12 * 60 * 60 * 1000);
+  }
+  return startMs + 60_000; // unknown — assume ~1 minute
+}
+
 function buildTimeline(
   groups: ProjectGroup[],
   windowStart?: number,
@@ -377,17 +400,16 @@ function buildTimeline(
 } {
   // Determine time bounds. If an explicit window is provided (range selector),
   // use it. Otherwise fall back to min/max across all sessions ("All" view).
+  // Use the *active* end (start + durationMs), not raw endTime — see comment
+  // on activeEndMs.
   let minMs = Infinity;
   let maxMs = -Infinity;
   for (const g of groups) {
     for (const s of g.sessions) {
-      if (s.startTime) minMs = Math.min(minMs, new Date(s.startTime).getTime());
-      const end = s.endTime
-        ? new Date(s.endTime).getTime()
-        : s.startTime
-          ? new Date(s.startTime).getTime() + (s.durationMs ?? 0)
-          : null;
-      if (end) maxMs = Math.max(maxMs, end);
+      if (!s.startTime) continue;
+      const startMs = new Date(s.startTime).getTime();
+      minMs = Math.min(minMs, startMs);
+      maxMs = Math.max(maxMs, activeEndMs(startMs, s));
     }
   }
 
@@ -420,11 +442,13 @@ function buildTimeline(
   let hiddenAutomatedCount = 0;
 
   for (const g of groups) {
-    // Filter to window + automated policy
+    // Filter to window + automated policy. Use the *active* end so a session
+    // whose JSONL stayed open through 10 days of idle doesn't get pulled into
+    // any window its actual work didn't reach.
     const filtered = g.sessions.filter((s) => {
       if (!s.startTime) return false;
       const startMs = new Date(s.startTime).getTime();
-      const endMs = s.endTime ? new Date(s.endTime).getTime() : startMs + (s.durationMs ?? 0);
+      const endMs = activeEndMs(startMs, s);
       if (endMs < rangeStart || startMs > rangeEnd) return false;
       if (!includeAutomated && isAutomated(s)) {
         hiddenAutomatedCount++;
@@ -443,9 +467,7 @@ function buildTimeline(
     const minMsPerPx = rangeMs / APPROX_TIMELINE_WIDTH_PX;
     const intervals = filtered.map((s) => {
       const startMs = new Date(s.startTime!).getTime();
-      const realEndMs = s.endTime
-        ? new Date(s.endTime).getTime()
-        : startMs + (s.durationMs ?? 60000);
+      const realEndMs = activeEndMs(startMs, s);
       const score = sessionScore(s);
       const visualWidthMs = Math.max(realEndMs - startMs, minWidthFor(score) * minMsPerPx);
       return {
@@ -852,12 +874,26 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
             {tooltip.session.title ?? tooltip.session.firstPrompt ?? tooltip.session.slug}
           </div>
           <div className="text-terminal-dimmer space-y-0.5">
-            {tooltip.session.startTime && (
-              <div>
-                {fmtDate(tooltip.session.startTime)} {fmtShortTime(tooltip.session.startTime)}
-                {tooltip.session.endTime && <span> → {fmtShortTime(tooltip.session.endTime)}</span>}
-              </div>
-            )}
+            {tooltip.session.startTime &&
+              (() => {
+                const startMs = new Date(tooltip.session.startTime).getTime();
+                const endMs = activeEndMs(startMs, tooltip.session);
+                const startISO = tooltip.session.startTime;
+                const endISO = new Date(endMs).toISOString();
+                const sameDay = fmtDate(startISO) === fmtDate(endISO);
+                return (
+                  <div>
+                    {fmtDate(startISO)} {fmtShortTime(startISO)}
+                    {endMs !== startMs && (
+                      <span>
+                        {" → "}
+                        {sameDay ? "" : `${fmtDate(endISO)} `}
+                        {fmtShortTime(endISO)}
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
             {tooltip.session.durationMs && (
               <div className="text-terminal-blue">{fmtDuration(tooltip.session.durationMs)}</div>
             )}
