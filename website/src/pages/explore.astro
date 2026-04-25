@@ -22,6 +22,7 @@ const exploreFaq = [
   },
 ];
 
+const siteBase = import.meta.env.SITE;
 const exploreJsonLd = [
   {
     "@context": "https://schema.org",
@@ -29,11 +30,11 @@ const exploreJsonLd = [
     "name": "Public AI coding session replays",
     "description":
       "Browse public AI coding session replays shared by the community. Watch Claude Code and Cursor sessions as interactive web replays.",
-    "url": "https://vibe-replay.com/explore/",
+    "url": new URL("/explore/", siteBase).href,
     "isPartOf": {
       "@type": "WebSite",
       "name": "vibe-replay",
-      "url": "https://vibe-replay.com",
+      "url": siteBase,
     },
   },
   {

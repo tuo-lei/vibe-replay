@@ -8,26 +8,30 @@ import HowItWorks from "../components/HowItWorks.astro";
 import Plugin from "../components/Plugin.astro";
 import Layout from "../layouts/Layout.astro";
 
+const siteBase = import.meta.env.SITE;
 const homeJsonLd = [
   {
     "@context": "https://schema.org",
     "@type": "WebSite",
     "name": "vibe-replay",
-    "url": "https://vibe-replay.com",
+    "url": siteBase,
     "description":
       "Replay, analyze, and share your Claude Code and Cursor AI coding sessions as interactive web replays.",
     "publisher": {
       "@type": "Organization",
       "name": "vibe-replay",
-      "url": "https://vibe-replay.com",
-      "logo": "https://vibe-replay.com/logo.png",
+      "url": siteBase,
+      "logo": {
+        "@type": "ImageObject",
+        "url": new URL("/logo.png", siteBase).href,
+      },
     },
   },
   {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "vibe-replay",
-    "url": "https://vibe-replay.com",
+    "url": siteBase,
     "description":
       "Replay, analyze, and share your Claude Code and Cursor AI coding sessions as interactive web replays. One command, one self-contained HTML file. Free and open source.",
     "applicationCategory": "DeveloperApplication",
@@ -41,7 +45,7 @@ const homeJsonLd = [
     "creator": {
       "@type": "Organization",
       "name": "vibe-replay",
-      "url": "https://vibe-replay.com",
+      "url": siteBase,
     },
     "license": "https://github.com/tuo-lei/vibe-replay/blob/main/LICENSE",
   },

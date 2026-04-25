@@ -22,7 +22,10 @@ const blogIndexJsonLd = [
       "@type": "Organization",
       "name": "vibe-replay",
       "url": siteBase,
-      "logo": new URL("/logo.png", siteBase).href,
+      "logo": {
+        "@type": "ImageObject",
+        "url": new URL("/logo.png", siteBase).href,
+      },
     },
     "blogPost": posts.map((p) => ({
       "@type": "BlogPosting",
