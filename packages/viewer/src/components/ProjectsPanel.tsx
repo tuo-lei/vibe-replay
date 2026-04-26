@@ -482,6 +482,7 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
         {/* Mobile project selector */}
         <div className="md:hidden px-3 pt-3">
           <select
+            aria-label="Select project"
             value={selectedProject}
             onChange={(e) => {
               setSelectedProject(e.target.value);

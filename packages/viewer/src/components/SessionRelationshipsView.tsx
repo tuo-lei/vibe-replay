@@ -1179,6 +1179,20 @@ export default function SessionRelationshipsView({
     () => filteredSessions.filter((session) => sessionHasEstimatedTime(session)).length,
     [filteredSessions],
   );
+  // Totals are derived once per render — same reduce was previously running
+  // twice in the JSX (once for the value, once for plural). For a 300-session
+  // scan that's noticeable and pointless.
+  const totals = useMemo(() => {
+    let durationMs = 0;
+    let cost = 0;
+    let edits = 0;
+    for (const s of filteredSessions) {
+      durationMs += s.durationMs ?? 0;
+      cost += s.costEstimate ?? 0;
+      edits += s.editCount;
+    }
+    return { durationMs, cost, edits };
+  }, [filteredSessions]);
 
   if (loading) {
     return (
@@ -1222,50 +1236,42 @@ export default function SessionRelationshipsView({
     <div className="relative flex min-w-0 flex-col overflow-hidden rounded-2xl bg-gradient-to-br from-terminal-surface via-terminal-bg to-terminal-surface shadow-layer-xl">
       <div className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-terminal-green/5 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-24 -left-24 h-56 w-56 rounded-full bg-terminal-blue/5 blur-3xl" />
-      {/* Stats bar */}
-      <div className="relative z-10 flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-[10px] font-mono text-terminal-dimmer md:px-6">
-        <span>
-          <span className="text-terminal-text">{filteredSessions.length}</span>{" "}
-          {plural(filteredSessions.length, "session")}
-        </span>
-        {!projectFilter && (
+      {/* Stats bar — hidden when projectFilter is set, because the parent
+          ProjectOverview already shows the project's all-time rollup. Showing
+          a window-filtered count beneath an all-time card was a UX trap (same
+          project, two visibly different "N sessions" numbers). */}
+      {!projectFilter && (
+        <div className="relative z-10 flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-[10px] font-mono text-terminal-dimmer md:px-6">
+          <span>
+            <span className="text-terminal-text">{filteredSessions.length}</span>{" "}
+            {plural(filteredSessions.length, "session")}
+          </span>
           <span>
             <span className="text-terminal-text">{groups.length}</span>{" "}
             {plural(groups.length, "project")}
           </span>
-        )}
-        {providerSummary && (
-          <span>
-            <span className="text-terminal-purple">{providerSummary}</span>
-          </span>
-        )}
-        <span>
-          <span className="text-terminal-blue">
-            {fmtDuration(filteredSessions.reduce((s, x) => s + (x.durationMs ?? 0), 0))}
-          </span>{" "}
-          total time
-        </span>
-        <span>
-          <span className="text-terminal-orange">
-            ${filteredSessions.reduce((s, x) => s + (x.costEstimate ?? 0), 0).toFixed(2)}
-          </span>{" "}
-          total cost
-        </span>
-        <span>
-          <span className="text-terminal-green">
-            {filteredSessions.reduce((s, x) => s + x.editCount, 0).toLocaleString()}
-          </span>{" "}
-          {plural(
-            filteredSessions.reduce((s, x) => s + x.editCount, 0),
-            "edit",
+          {providerSummary && (
+            <span>
+              <span className="text-terminal-purple">{providerSummary}</span>
+            </span>
           )}
-        </span>
-        {estimatedTimingCount > 0 && (
           <span>
-            <span className="text-terminal-dimmer">{estimatedTimingCount}</span> estimated timing
+            <span className="text-terminal-blue">{fmtDuration(totals.durationMs)}</span> total time
           </span>
-        )}
-      </div>
+          <span>
+            <span className="text-terminal-orange">${totals.cost.toFixed(2)}</span> total cost
+          </span>
+          <span>
+            <span className="text-terminal-green">{totals.edits.toLocaleString()}</span>{" "}
+            {plural(totals.edits, "edit")}
+          </span>
+          {estimatedTimingCount > 0 && (
+            <span>
+              <span className="text-terminal-dimmer">{estimatedTimingCount}</span> estimated timing
+            </span>
+          )}
+        </div>
+      )}
 
       {/* View content */}
       <div className="relative z-10 min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
