@@ -192,6 +192,36 @@ export interface InsightsStore {
   sessions: SessionInsight[];
 }
 
+/**
+ * Wire format for the per-session entries returned by `/api/scan/results`.
+ * This is the canonical client-facing subset of `SessionScanResult`
+ * (defined in `packages/cli/src/scanner.ts`). Keep in sync with that type
+ * when adding fields the viewer needs.
+ */
+export interface SessionScanWireData {
+  sessionId: string;
+  provider: string;
+  project: string;
+  slug: string;
+  title?: string;
+  firstPrompt?: string;
+  startTime?: string;
+  endTime?: string;
+  durationMs?: number;
+  gitBranch?: string;
+  model?: string;
+  promptCount: number;
+  toolCallCount: number;
+  editCount: number;
+  filesModified: Array<{ file: string; count: number }>;
+  costEstimate?: number;
+  subAgentCount: number;
+  entrypoint?: string;
+  prLinks?: PrLink[];
+  dataSource?: DataSource;
+  dataQualityNotes?: string[];
+}
+
 export interface ReplaySession {
   meta: {
     sessionId: string;

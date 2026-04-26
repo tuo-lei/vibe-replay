@@ -41,7 +41,7 @@ import {
 import ProjectsPanel from "./ProjectsPanel";
 import { formatDuration } from "./StatsPanel";
 
-type Tab = "home" | "sessions" | "replays" | "projects" | "insights";
+export type Tab = "home" | "sessions" | "replays" | "projects" | "insights";
 
 const MoreDotsIcon = () => (
   <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
@@ -1295,6 +1295,39 @@ function SessionsPanel() {
   const [generatingSlug, setGeneratingSlug] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  // When another panel (Projects → Timeline / Hot Files) opens a session via
+  // the `vibe-open-session` event, route the slug into the popup. Two paths:
+  //   1. If SessionsPanel just mounted (e.g. tab switched from Projects),
+  //      Dashboard already pushed `?selected=<slug>` to the URL — read it.
+  //   2. If SessionsPanel is already mounted (user on Sessions tab clicked
+  //      from a still-rendered Projects view, or back-button), the URL push
+  //      doesn't trigger a re-mount, so listen for the event live.
+  // Strip `?selected` afterward so a refresh doesn't keep re-opening it.
+  useEffect(() => {
+    const consumeUrl = () => {
+      const params = new URLSearchParams(window.location.search);
+      const selected = params.get("selected");
+      if (!selected) return;
+      setSelectedSlug(selected);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("selected");
+      window.history.replaceState(null, "", url);
+    };
+    consumeUrl();
+    const handler = (e: Event) => {
+      const slug = (e as CustomEvent<{ slug: string }>).detail?.slug;
+      if (!slug) return;
+      setSelectedSlug(slug);
+      // Dashboard's root handler also writes `?selected=slug` for the
+      // cold-mount path. Strip it here so a tab round-trip after dismissing
+      // the popup doesn't reopen it on remount.
+      const url = new URL(window.location.href);
+      url.searchParams.delete("selected");
+      window.history.replaceState(null, "", url);
+    };
+    window.addEventListener("vibe-open-session", handler);
+    return () => window.removeEventListener("vibe-open-session", handler);
+  }, []);
   const wasEnrichingRef = useRef(false);
   const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());
   const [enrichmentStatus, setEnrichmentStatus] = useState<SourcesEnrichmentStatus | null>(null);
@@ -2730,6 +2763,23 @@ export default function Dashboard({
     window.addEventListener("popstate", handler);
     return () => window.removeEventListener("popstate", handler);
   }, [getTabFromUrl]);
+
+  // Cross-panel "open this session in the Sessions popup" channel. Dispatched
+  // from Projects → Timeline / Hot Files when the user clicks a session that
+  // may or may not have a generated replay yet. We switch to Sessions tab and
+  // pass the slug via URL — SessionsPanel's mount effect picks it up and opens
+  // SessionDetailPopup, which handles both the "open replay" and "generate
+  // replay" cases uniformly.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const slug = (e as CustomEvent<{ slug: string }>).detail?.slug;
+      if (!slug) return;
+      setTab("sessions");
+      navigateTo({ tab: "sessions", selected: slug, project: null, q: null, archived: null });
+    };
+    window.addEventListener("vibe-open-session", handler);
+    return () => window.removeEventListener("vibe-open-session", handler);
+  }, []);
 
   const handleTabChange = (id: Tab) => {
     setTab(id);
