@@ -3,8 +3,13 @@ import { homedir } from "node:os";
 import { basename, extname, join } from "node:path";
 import type { ContentBlock, ParsedTurn, SessionInfo } from "../../types.js";
 import type { DataSourceInfo, ProviderParseResult } from "../types.js";
-import { sanitizeCursorAssistantText } from "./sanitize.js";
-import { isSystemContextText, parseCursorSqlite } from "./sqlite-reader.js";
+import { sanitizeCursorAssistantText, sanitizeCursorReasoningText } from "./sanitize.js";
+import {
+  isSystemContextText,
+  mapCursorToolName,
+  mapToolArgs,
+  parseCursorSqlite,
+} from "./sqlite-reader.js";
 
 function toErrorMessage(err: unknown): string {
   if (err instanceof Error && err.message) return err.message;
@@ -198,14 +203,18 @@ async function parseCursorJsonl(
           blocks.push({ type: "_user_images", images: dedupedImages });
         }
         if (blocks.length > 0) {
-          allTurns.push({ role, blocks });
+          allTurns.push({
+            role,
+            ...(typeof obj.timestamp === "string" ? { timestamp: obj.timestamp } : {}),
+            blocks,
+          });
         }
         continue;
       }
 
       const hasInlineToolUse = contentBlocks.some((block) => block?.type === "tool_use");
       const blocks: ContentBlock[] = [];
-      for (const block of contentBlocks as ContentBlock[]) {
+      for (const block of contentBlocks) {
         if (block.type === "text" && block.text) {
           const cleanedText = sanitizeAssistantTextForReplay(block.text, hasInlineToolUse);
           if (!cleanedText) continue;
@@ -222,15 +231,27 @@ async function parseCursorJsonl(
           } else {
             blocks.push({ type: "text", text: cleanedText });
           }
+        } else if (block.type === "thinking" || block.type === "reasoning") {
+          const rawThinking =
+            typeof block.thinking === "string"
+              ? block.thinking
+              : typeof block.text === "string"
+                ? block.text
+                : "";
+          const thinking = sanitizeCursorReasoningText(rawThinking);
+          if (thinking) blocks.push({ type: "thinking", thinking });
         } else if (block.type === "tool_use") {
+          const rawName =
+            typeof block.name === "string" && block.name.trim() ? block.name.trim() : "Tool";
+          const name = mapCursorToolName(rawName);
           blocks.push({
             type: "tool_use",
             id:
               typeof block.id === "string" && block.id.trim()
                 ? block.id
                 : `cursor-inline-${syntheticToolId++}`,
-            name: typeof block.name === "string" && block.name.trim() ? block.name : "Tool",
-            input: block.input && typeof block.input === "object" ? block.input : {},
+            name,
+            input: mapToolArgs(rawName, block.input),
           });
         }
       }
@@ -413,7 +434,10 @@ function attachToolResults(
     for (const block of turn.blocks) {
       if (block.type !== "tool_use" || typeof block.id !== "string") continue;
       const result = toolResults.get(block.id);
-      if (result !== undefined) block._result = result;
+      if (result !== undefined) {
+        block._result = result;
+        block.input = mapToolArgs(block.name, block.input, result);
+      }
       const images = toolImages.get(block.id);
       if (images?.length) block._images = images;
       if (toolErrors.get(block.id)) block._isError = true;

@@ -247,8 +247,7 @@ function ProjectOverview({
         )}
         {insight.memoryFileCount > 0 && (
           <span>
-            {insight.memoryFileCount}{" "}
-            {insight.memoryFileCount === 1 ? "Claude memory" : "Claude memories"}
+            {insight.memoryFileCount} {plural(insight.memoryFileCount, "memory file")}
           </span>
         )}
       </div>

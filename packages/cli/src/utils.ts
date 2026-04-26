@@ -18,6 +18,7 @@ export function normalizeTitle(value?: string): string | undefined {
 /** Tool names that modify files on disk. Used to count edits and track modified files. */
 export const FILE_EDIT_TOOLS: ReadonlySet<string> = new Set([
   "Edit",
+  "MultiEdit",
   "Write",
   "NotebookEdit",
   "Delete",

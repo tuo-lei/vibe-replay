@@ -684,6 +684,7 @@ function buildScanResultFromParsed(
   const costEstimate = estimateParsedCost(parsed);
   const fallbackStart = parsed.startTime || input.timestamp;
   const durationMs = parsed.totalDurationMs;
+  const firstPrompt = firstUserPrompt(parsed.turns) || input.firstPrompt || parsed.title;
 
   return {
     sessionId: input.sessionId,
@@ -691,7 +692,7 @@ function buildScanResultFromParsed(
     project: input.project,
     slug: input.slug,
     title: parsed.title || input.title,
-    firstPrompt: parsed.title || input.firstPrompt,
+    firstPrompt,
     startTime: fallbackStart,
     endTime: parsed.endTime,
     durationMs,
@@ -722,6 +723,18 @@ function buildScanResultFromParsed(
       ?.map((t) => t.durationMs)
       .filter((d): d is number => d != null && d > 0),
   };
+}
+
+function firstUserPrompt(turns: ProviderParseResult["turns"]): string | undefined {
+  for (const turn of turns) {
+    if (turn.role !== "user" || turn.subtype === "compaction-summary") continue;
+    for (const block of turn.blocks) {
+      if (block.type !== "text") continue;
+      const text = block.text.replace(/\s+/g, " ").trim();
+      if (text.length >= 10) return text.slice(0, 200);
+    }
+  }
+  return undefined;
 }
 
 function estimateParsedCost(parsed: ProviderParseResult): number | undefined {

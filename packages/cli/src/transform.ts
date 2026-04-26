@@ -211,6 +211,18 @@ function buildFileDiff(
       newContent: input.new_string ?? "",
     };
   }
+  if (toolName === "MultiEdit" && input.file_path && Array.isArray(input.edits)) {
+    const edits = input.edits.filter((edit: unknown): edit is Record<string, any> => {
+      return edit != null && typeof edit === "object";
+    });
+    if (edits.length > 0) {
+      return {
+        filePath: redactPath(input.file_path),
+        oldContent: edits.map((edit) => edit.old_string ?? "").join("\n\n"),
+        newContent: edits.map((edit) => edit.new_string ?? "").join("\n\n"),
+      };
+    }
+  }
   if (toolName === "Write" && input.file_path) {
     return {
       filePath: redactPath(input.file_path),

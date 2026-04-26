@@ -4,7 +4,6 @@ import { ALL_PROJECTS, usePanelFilters } from "../hooks/usePanelFilters";
 import type { SessionSummary, SourceSession } from "../types";
 import DashboardHome from "./DashboardHome";
 import {
-  agentWorktreeParent,
   cleanPrompt,
   computeProjectLabels,
   formatCacheAge,
@@ -1191,7 +1190,7 @@ function ReplayCard({
         {isWorktreeReplay && (
           <span
             className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple uppercase tracking-wider"
-            title={`Claude agent worktree: ${s.project}`}
+            title={`Agent worktree: ${s.project}`}
           >
             worktree
           </span>
@@ -1944,7 +1943,8 @@ function SessionsPanel() {
                 const sessionTitle = sourceDisplayTitle(s, scanData);
                 const prompts = sessionPromptPreview(s, scanData, sessionTitle);
                 const branch = nonDefaultBranch(scanData?.gitBranch || s.gitBranch);
-                const isWorktree = agentWorktreeParent(s.project) !== null;
+                const rolledProject = rollupProject(s.project);
+                const isWorktree = rolledProject !== s.project;
                 const displayPromptCount = scanData?.promptCount ?? s.promptCount;
                 const displayToolCount = scanData?.toolCallCount ?? s.toolCallCount;
                 const displayDurationMs = scanData?.durationMs ?? s.durationMsEst;
@@ -1988,7 +1988,7 @@ function SessionsPanel() {
                           {isWorktree && (
                             <span
                               className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple shrink-0 uppercase tracking-wider"
-                              title={`Claude agent worktree: ${s.project}`}
+                              title={`Agent worktree: ${s.project}`}
                             >
                               worktree
                             </span>
@@ -2110,7 +2110,9 @@ function SessionsPanel() {
                           className="text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim"
                           title={s.project}
                         >
-                          {projectLabels.get(s.project) || projectName(s.project)}
+                          {projectLabels.get(rolledProject) ||
+                            projectLabels.get(s.project) ||
+                            projectName(rolledProject)}
                         </span>
                       )}
                       {displayModel && (
