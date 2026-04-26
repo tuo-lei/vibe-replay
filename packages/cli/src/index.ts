@@ -575,7 +575,10 @@ program
       console.log(result.markdown);
       // Status messages go to stderr so they don't pollute piped output
       process.stderr.write(`\n${chalk.bold.green("  Done!")}\n`);
-      process.stderr.write(`${chalk.dim("  Files: ")}${chalk.white(outputDir)}\n\n`);
+      process.stderr.write(`${chalk.dim("  Files: ")}${chalk.white(outputDir)}\n`);
+      process.stderr.write(
+        `${chalk.dim("  Redactions: ")}${chalk.white(result.redactionsPath)}\n\n`,
+      );
       return;
     }
 

@@ -56,15 +56,27 @@ Read `redactions.json`. It has two fields:
 - Note that some matches are false positives — commit hashes, UUIDs, version strings, package names can look like tokens. Use the surrounding context to judge.
 - Offer choices: "Redact all", "Review one-by-one", "Keep as-is" (if you believe they're false positives), or "Cancel"
 
-For anything the user wants redacted, replace the matched substring in `github-summary.md` with `[REDACTED]`.
+If the user chooses to redact any finding, **first copy the original to a working file** (do not overwrite `github-summary.md`):
+
+```bash
+cp ~/.vibe-replay/<slug>/github-summary.md ~/.vibe-replay/<slug>/github-summary.clean.md
+```
+
+Then apply replacements to `github-summary.clean.md`. The original stays intact so the user can recover the unedited version. All later steps (translation, tone) also operate on the `.clean.md` copy — create it on the first edit, then keep using it.
 
 ## Step 3 — Offer translation
 
-Detect the language of the user-prompt sections in `github-summary.md`. If the dominant language is not English (or doesn't match the repo's primary language — check `README.md` if unsure), ask:
+Read the working file (`github-summary.clean.md` if it exists from step 2, otherwise `github-summary.md`):
+
+```bash
+cat ~/.vibe-replay/<slug>/github-summary.clean.md 2>/dev/null || cat ~/.vibe-replay/<slug>/github-summary.md
+```
+
+Detect the language of the user-prompt sections. If the dominant language is not English (or doesn't match the repo's primary language — check `README.md` if unsure), ask:
 
 > "The prompts are in {detected language}. Translate to {target language} before sharing? [Yes / No]"
 
-If yes, apply this prompt to the user-prompt sections of the markdown:
+If yes, apply this prompt to the user-prompt sections of the markdown (always write the result to `github-summary.clean.md`, creating it from a copy of the original if it doesn't exist yet):
 
 ```
 You are a translation assistant for AI coding sessions.
@@ -87,7 +99,7 @@ Scan the user-prompt sections for harsh language, profanity, frustration, or pas
 
 > "Some prompts contain {brief example, e.g. 'frustrated language'}. Soften the tone before sharing? [Professional / Neutral / Friendly / Skip]"
 
-If the user picks a style, apply this prompt to the affected user prompts:
+If the user picks a style, apply this prompt to the affected user prompts (write the result to `github-summary.clean.md`, same rule as step 3):
 
 ```
 You are a tone adjustment assistant for AI coding sessions.
@@ -110,18 +122,34 @@ Style guide:
 
 Show the user the final markdown (or a diff against the original if changes were made). Ask:
 
-> "Paste into a PR now? [Current branch's PR / Open new PR / Just save the file / Cancel]"
+> "Paste into a PR now? [Append to current PR's body / Replace current PR's body / Open new PR / Just save the file / Cancel]"
 
-If pasting into the current branch's PR:
+**Important**: `gh pr edit --body-file <file>` **replaces** the entire PR body. If the user already has a hand-written summary, checklist, or screenshots in the PR body, replacing wipes them silently. Default to **appending** under a `## Session Replay` heading instead.
+
+To append (recommended default):
 
 ```bash
-gh pr edit --body-file <updated-markdown>
+# Read existing body, then write existing + separator + cleaned summary
+gh pr view --json body --jq .body > /tmp/pr-body.md
+echo "" >> /tmp/pr-body.md
+echo "---" >> /tmp/pr-body.md
+echo "" >> /tmp/pr-body.md
+echo "## Session Replay" >> /tmp/pr-body.md
+echo "" >> /tmp/pr-body.md
+cat ~/.vibe-replay/<slug>/github-summary.clean.md >> /tmp/pr-body.md
+gh pr edit --body-file /tmp/pr-body.md
 ```
 
-If saving locally only, write the cleaned version to `~/.vibe-replay/<slug>/github-summary.clean.md` and report the path.
+To replace (only if the user explicitly chooses this — confirm out loud what's about to be lost first):
+
+```bash
+gh pr edit --body-file ~/.vibe-replay/<slug>/github-summary.clean.md
+```
+
+If saving locally only, the cleaned version is already at `~/.vibe-replay/<slug>/github-summary.clean.md` from earlier steps — just report the path. If no cleanup steps ran, copy the original first so the user has a `.clean.md` to share without touching the source.
 
 ## Notes
 
 - **The skip-the-image rule still applies**: by default, do NOT include the GIF reference (first line of the original markdown) when pasting into a PR — committing a binary GIF bloats git history. Only include it if the user explicitly asks for the GIF.
-- **Never modify the original `github-summary.md`** unless the user is doing a destructive edit and confirms. Write changes to `github-summary.clean.md` so the original is recoverable.
+- **`github-summary.clean.md` is the only file the skill writes to**. The original `github-summary.md` is treated as read-only so the user can always recover the raw output.
 - **Session ID detection**: the literal `${CLAUDE_SESSION_ID}` is interpolated by the harness when this skill runs. If it's empty, ask the user which session they want.
