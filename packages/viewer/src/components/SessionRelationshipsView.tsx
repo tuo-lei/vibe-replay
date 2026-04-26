@@ -1050,8 +1050,10 @@ function FileConnectionsView({
         </div>
       )}
 
-      {/* Project files + detail panel */}
-      <div className="min-w-0 flex-1 space-y-4 overflow-y-auto">
+      {/* Project files + detail panel — files grid on the left scrolls
+          independently; the detail panel is sticky on the right so clicking a
+          file shows its sessions immediately, no scrolling required. */}
+      <div className="min-w-0 flex-1 space-y-4">
         <div className="relative overflow-hidden rounded-2xl bg-terminal-bg/35 p-4 shadow-inner">
           <div className="pointer-events-none absolute -right-12 -top-12 h-28 w-28 rounded-full bg-terminal-green/5 blur-2xl" />
           <div className="relative">
@@ -1078,86 +1080,92 @@ function FileConnectionsView({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
-          {selectedProjectGroup.files.map((cluster) => {
-            const isSelected = selectedFile === cluster.file;
-            return (
-              <button
-                key={cluster.file}
-                onClick={() => setSelectedFile(isSelected ? null : cluster.file)}
-                className={`w-full rounded-xl px-3 py-2.5 text-left transition-all duration-200 ease-material ${
-                  isSelected
-                    ? "bg-terminal-green-subtle text-terminal-green shadow-layer-md"
-                    : "bg-terminal-bg/40 text-terminal-text shadow-layer-sm hover:bg-terminal-surface-hover hover:shadow-layer-md"
-                }`}
-              >
-                <div className="truncate text-xs font-mono">
-                  {cluster.displayName.split("/").pop()}
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
+          {/* Files grid — left column, scrolls independently */}
+          <div className="min-w-0 grid grid-cols-1 gap-2 xl:grid-cols-2 self-start">
+            {selectedProjectGroup.files.map((cluster) => {
+              const isSelected = selectedFile === cluster.file;
+              return (
+                <button
+                  key={cluster.file}
+                  onClick={() => setSelectedFile(isSelected ? null : cluster.file)}
+                  className={`w-full rounded-xl px-3 py-2.5 text-left transition-all duration-200 ease-material ${
+                    isSelected
+                      ? "bg-terminal-green-subtle text-terminal-green shadow-layer-md"
+                      : "bg-terminal-bg/40 text-terminal-text shadow-layer-sm hover:bg-terminal-surface-hover hover:shadow-layer-md"
+                  }`}
+                >
+                  <div className="truncate text-xs font-mono">
+                    {cluster.displayName.split("/").pop()}
+                  </div>
+                  <div className="mt-0.5 truncate text-[10px] font-mono text-terminal-dimmer">
+                    {cluster.displayName}
+                  </div>
+                  <div className="mt-1 text-[10px] font-mono text-terminal-dimmer">
+                    {cluster.totalEdits.toLocaleString()} {plural(cluster.totalEdits, "edit")} ·{" "}
+                    {cluster.sessions.length} {plural(cluster.sessions.length, "session")}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Detail panel — right column, sticky so it stays visible while
+              the user scrolls the files grid */}
+          <div className="lg:sticky lg:top-3 lg:self-start lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto">
+            {selected ? (
+              <div className="space-y-3">
+                <div className="rounded-2xl bg-terminal-surface p-4 shadow-layer-sm">
+                  <div className="text-sm font-sans font-semibold text-terminal-text truncate">
+                    {selected.displayName.split("/").pop()}
+                  </div>
+                  <div className="text-xs font-mono text-terminal-dimmer mt-0.5 break-all">
+                    {selected.file}
+                  </div>
+                  <div className="text-xs font-mono text-terminal-dimmer mt-1">
+                    {selected.totalEdits.toLocaleString()} {plural(selected.totalEdits, "edit")}{" "}
+                    across {selected.sessions.length} {plural(selected.sessions.length, "session")}
+                  </div>
                 </div>
-                <div className="mt-0.5 truncate text-[10px] font-mono text-terminal-dimmer">
-                  {cluster.displayName}
+
+                {/* Session list */}
+                <div className="space-y-2">
+                  {selected.sessions.map((s) => {
+                    const color = colorFor(s.colorIdx);
+                    return (
+                      <button
+                        type="button"
+                        key={s.session.sessionId}
+                        onClick={() => navigateTo({ view: null, session: s.session.slug })}
+                        className="flex w-full flex-col gap-2 rounded-xl bg-terminal-bg/45 p-3 text-left shadow-layer-sm transition-all duration-200 ease-material hover:bg-terminal-surface-hover hover:shadow-layer-md sm:flex-row sm:items-start sm:gap-3"
+                      >
+                        <div
+                          className="hidden w-2 h-2 rounded-full mt-1.5 shrink-0 sm:block"
+                          style={{ backgroundColor: color.solid }}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs font-sans font-medium text-terminal-text truncate">
+                            {sessionTitle(s.session)}
+                          </div>
+                          <div className="text-[9px] font-mono text-terminal-dimmer mt-0.5">
+                            {projectName(s.session.project)} · {fmtDate(s.session.startTime)}
+                          </div>
+                        </div>
+                        <div className="shrink-0 text-xs font-mono text-terminal-orange">
+                          {s.editCount} {plural(s.editCount, "edit")}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
-                <div className="mt-1 text-[10px] font-mono text-terminal-dimmer">
-                  {cluster.totalEdits.toLocaleString()} {plural(cluster.totalEdits, "edit")} ·{" "}
-                  {cluster.sessions.length} {plural(cluster.sessions.length, "session")}
-                </div>
-              </button>
-            );
-          })}
+              </div>
+            ) : (
+              <div className="flex h-40 items-center justify-center rounded-2xl bg-terminal-bg/35 text-terminal-dimmer text-xs font-mono p-4 text-center">
+                Select a file to see the sessions that modified it
+              </div>
+            )}
+          </div>
         </div>
-
-        {selected ? (
-          <div className="space-y-3">
-            <div className="rounded-2xl bg-terminal-surface p-4 shadow-layer-sm">
-              <div className="text-sm font-sans font-semibold text-terminal-text truncate">
-                {selected.displayName.split("/").pop()}
-              </div>
-              <div className="text-xs font-mono text-terminal-dimmer mt-0.5 break-all">
-                {selected.file}
-              </div>
-              <div className="text-xs font-mono text-terminal-dimmer mt-1">
-                {selected.totalEdits.toLocaleString()} {plural(selected.totalEdits, "edit")} across{" "}
-                {selected.sessions.length} {plural(selected.sessions.length, "session")}
-              </div>
-            </div>
-
-            {/* Session list */}
-            <div className="space-y-2">
-              {selected.sessions.map((s) => {
-                const color = colorFor(s.colorIdx);
-                return (
-                  <button
-                    type="button"
-                    key={s.session.sessionId}
-                    onClick={() => navigateTo({ view: null, session: s.session.slug })}
-                    className="flex w-full flex-col gap-2 rounded-xl bg-terminal-bg/45 p-3 text-left shadow-layer-sm transition-all duration-200 ease-material hover:bg-terminal-surface-hover hover:shadow-layer-md sm:flex-row sm:items-start sm:gap-3"
-                  >
-                    <div
-                      className="hidden w-2 h-2 rounded-full mt-1.5 shrink-0 sm:block"
-                      style={{ backgroundColor: color.solid }}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs font-sans font-medium text-terminal-text truncate">
-                        {sessionTitle(s.session)}
-                      </div>
-                      <div className="text-[9px] font-mono text-terminal-dimmer mt-0.5">
-                        {projectName(s.session.project)} · {fmtDate(s.session.startTime)}
-                      </div>
-                    </div>
-                    <div className="shrink-0 text-xs font-mono text-terminal-orange">
-                      {s.editCount} {plural(s.editCount, "edit")}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ) : (
-          <div className="flex items-center justify-center h-40 text-terminal-dimmer text-xs font-mono">
-            Select a file in {projectName(selectedProjectGroup.project)} to see the sessions that
-            modified it
-          </div>
-        )}
       </div>
     </div>
   );
