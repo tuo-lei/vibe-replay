@@ -245,11 +245,15 @@ function heightFor(score: number): number {
  */
 function packTimelineLanes(
   sessions: { startMs: number; endMs: number; score: number; original: ScanResultSession }[],
+  /** When true, drop the MAX_LANES_PER_PROJECT cap — used by per-project
+      "show all" toggle so users can opt into seeing every session. */
+  unlimited: boolean = false,
 ): { laneAssignments: Map<string, number>; laneCount: number; dropped: number } {
   const ordered = [...sessions].sort((a, b) => a.startMs - b.startMs || b.score - a.score);
   const laneIntervals: Array<Array<{ startMs: number; endMs: number }>> = [];
   const laneAssignments = new Map<string, number>();
   let dropped = 0;
+  const cap = unlimited ? Infinity : MAX_LANES_PER_PROJECT;
 
   for (const s of ordered) {
     let placed = -1;
@@ -262,7 +266,7 @@ function packTimelineLanes(
     }
 
     if (placed === -1) {
-      if (laneIntervals.length >= MAX_LANES_PER_PROJECT) {
+      if (laneIntervals.length >= cap) {
         dropped++;
         continue;
       }
@@ -305,6 +309,7 @@ function buildTimeline(
   windowStart?: number,
   windowEnd?: number,
   includeAutomated = false,
+  expandedProjects: Set<string> = new Set(),
 ): {
   projects: TimelineProject[];
   ticks: { leftPct: number; label: string }[];
@@ -391,7 +396,10 @@ function buildTimeline(
       };
     });
 
-    const { laneAssignments, laneCount, dropped } = packTimelineLanes(intervals);
+    const { laneAssignments, laneCount, dropped } = packTimelineLanes(
+      intervals,
+      expandedProjects.has(g.project),
+    );
 
     const tSessions: TimelineSession[] = [];
     for (const it of intervals) {
@@ -508,10 +516,21 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
   const [range, setRange] = useState<TimelineRange>("7d");
   const [showAutomated, setShowAutomated] = useState(false);
   const [tooltip, setTooltip] = useState<TooltipInfo | null>(null);
+  // Per-project lane-cap override: clicking "+N hidden" on a project's label
+  // adds it here, which lifts MAX_LANES_PER_PROJECT for that project.
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
+  const toggleExpanded = (project: string) => {
+    setExpandedProjects((prev) => {
+      const next = new Set(prev);
+      if (next.has(project)) next.delete(project);
+      else next.add(project);
+      return next;
+    });
+  };
   const { start, end } = useMemo(() => rangeWindow(range), [range]);
   const { projects, ticks, totalSessions, hiddenAutomatedCount } = useMemo(
-    () => buildTimeline(groups, start, end, showAutomated),
-    [groups, start, end, showAutomated],
+    () => buildTimeline(groups, start, end, showAutomated, expandedProjects),
+    [groups, start, end, showAutomated, expandedProjects],
   );
   const timelineSessions = useMemo(
     () =>
@@ -637,10 +656,24 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                         <div className="text-[9px] font-mono text-terminal-dimmer truncate">
                           {p.sessions.length} {plural(p.sessions.length, "session")}
                           {p.hiddenInLanesCount > 0 && (
-                            <span className="text-terminal-orange/70">
-                              {" "}
-                              · +{p.hiddenInLanesCount} hidden
-                            </span>
+                            <button
+                              type="button"
+                              onClick={() => toggleExpanded(p.project)}
+                              className="ml-1 text-terminal-orange hover:underline cursor-pointer"
+                              title={`Show the ${p.hiddenInLanesCount} session(s) hidden by the lane cap`}
+                            >
+                              · +{p.hiddenInLanesCount} hidden ▸
+                            </button>
+                          )}
+                          {expandedProjects.has(p.project) && (
+                            <button
+                              type="button"
+                              onClick={() => toggleExpanded(p.project)}
+                              className="ml-1 text-terminal-purple hover:underline cursor-pointer"
+                              title="Restore the lane cap"
+                            >
+                              · collapse
+                            </button>
                           )}
                         </div>
                       </div>

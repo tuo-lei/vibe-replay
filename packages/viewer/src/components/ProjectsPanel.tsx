@@ -452,11 +452,16 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
     lastActivity: p.lastActivity,
   }));
 
-  // Determine which tab is showing in the right pane.
-  // Default tab when "All projects" is selected: overview (= grid)
-  // Default when a single project is picked: overview (= hero card)
-  const activeMode = mode;
-  const projectFilterArg = selectedProject === ALL_PROJECTS ? undefined : selectedProject;
+  // Tabs: when a single project is selected, drop the standalone Timeline tab
+  // because Overview already embeds the timeline below the hero card. Hot Files
+  // is still its own tab — the file grid + detail layout takes too much space
+  // to live inside Overview.
+  const isSingleProject = selectedProject !== ALL_PROJECTS;
+  const visibleTabs = isSingleProject
+    ? PROJECT_VIEW_TABS.filter((t) => t.id !== "timeline")
+    : PROJECT_VIEW_TABS;
+  const activeMode = visibleTabs.some((t) => t.id === mode) ? mode : "overview";
+  const projectFilterArg = isSingleProject ? selectedProject : undefined;
 
   return (
     <div className="flex flex-1 min-h-0">
@@ -510,7 +515,7 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
             )}
           </div>
           <div className="inline-flex w-fit items-center rounded-xl bg-terminal-surface/80 p-0.5 shadow-layer-sm backdrop-blur-sm">
-            {PROJECT_VIEW_TABS.map((tab) => (
+            {visibleTabs.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setMode(tab.id)}
@@ -532,11 +537,17 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
             <ProjectsGrid projects={projects} onProjectClick={setSelectedProject} />
           )}
           {activeMode === "overview" && selectedInsight && (
-            <ProjectOverview
-              project={selectedProject}
-              insight={selectedInsight}
-              onOpenSessions={() => openSessionsForProject(selectedProject)}
-            />
+            <>
+              <ProjectOverview
+                project={selectedProject}
+                insight={selectedInsight}
+                onOpenSessions={() => openSessionsForProject(selectedProject)}
+              />
+              {/* Single-project Overview embeds the timeline + Top Sessions
+                  inline so users see project info, when work happened, and
+                  which sessions mattered without switching tabs. */}
+              <SessionRelationshipsView view="timeline" projectFilter={projectFilterArg} />
+            </>
           )}
           {activeMode === "timeline" && (
             <SessionRelationshipsView view="timeline" projectFilter={projectFilterArg} />
