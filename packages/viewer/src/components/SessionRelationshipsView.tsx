@@ -543,10 +543,6 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
       ),
     [projects],
   );
-  const topSessions = useMemo(
-    () => [...timelineSessions].sort((a, b) => b.score - a.score).slice(0, 6),
-    [timelineSessions],
-  );
   const estimatedTimingCount = useMemo(
     () => timelineSessions.filter((ts) => sessionHasEstimatedTime(ts.session)).length,
     [timelineSessions],
@@ -615,246 +611,178 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
           )}
         </div>
       ) : (
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
-          <div className="overflow-x-auto rounded-2xl bg-terminal-bg/35 p-3 shadow-inner">
-            <div className="min-w-[760px]">
-              {/* Time axis header */}
-              <div className="flex" style={{ paddingLeft: LABEL_WIDTH }}>
-                <div className="relative flex-1 h-6">
-                  {ticks.map((t, i) => (
-                    <div
-                      key={i}
-                      className="absolute flex flex-col items-center"
-                      style={{ left: `${t.leftPct}%`, transform: "translateX(-50%)" }}
-                    >
-                      <span className="text-[9px] font-mono text-terminal-dimmer whitespace-nowrap">
-                        {t.label}
-                      </span>
-                      <div className="w-px h-1.5 bg-terminal-border/20 mt-0.5" />
-                    </div>
-                  ))}
-                  <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-terminal-border/25 to-transparent" />
-                </div>
+        <div className="overflow-x-auto rounded-2xl bg-terminal-bg/35 p-3 shadow-inner">
+          <div className="min-w-[760px]">
+            {/* Time axis header */}
+            <div className="flex" style={{ paddingLeft: LABEL_WIDTH }}>
+              <div className="relative flex-1 h-6">
+                {ticks.map((t, i) => (
+                  <div
+                    key={i}
+                    className="absolute flex flex-col items-center"
+                    style={{ left: `${t.leftPct}%`, transform: "translateX(-50%)" }}
+                  >
+                    <span className="text-[9px] font-mono text-terminal-dimmer whitespace-nowrap">
+                      {t.label}
+                    </span>
+                    <div className="w-px h-1.5 bg-terminal-border/20 mt-0.5" />
+                  </div>
+                ))}
+                <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-terminal-border/25 to-transparent" />
               </div>
+            </div>
 
-              {/* Project rows: time stays on x-axis; project color identifies the lane. */}
-              <div className="space-y-1.5">
-                {projects.map((p) => {
-                  const color = colorFor(p.colorIdx);
-                  const rowHeight = p.totalRowHeightPx;
-                  const accentColor = color.solid;
-                  return (
-                    <div key={p.project} className="flex items-stretch rounded-xl group">
-                      {/* Project label */}
-                      <div
-                        className="flex flex-col justify-center shrink-0 py-1 pr-3 overflow-hidden"
-                        style={{ width: LABEL_WIDTH, height: rowHeight }}
-                      >
-                        <div className={`text-xs font-sans font-medium truncate ${color.text}`}>
-                          {projectName(p.project)}
-                        </div>
-                        <div className="text-[9px] font-mono text-terminal-dimmer truncate">
-                          {p.sessions.length} {plural(p.sessions.length, "session")}
-                          {p.hiddenInLanesCount > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => toggleExpanded(p.project)}
-                              className="ml-1 text-terminal-orange hover:underline cursor-pointer"
-                              title={`Show the ${p.hiddenInLanesCount} session(s) hidden by the lane cap`}
-                            >
-                              · +{p.hiddenInLanesCount} hidden ▸
-                            </button>
-                          )}
-                          {expandedProjects.has(p.project) && (
-                            <button
-                              type="button"
-                              onClick={() => toggleExpanded(p.project)}
-                              className="ml-1 text-terminal-purple hover:underline cursor-pointer"
-                              title="Restore the lane cap"
-                            >
-                              · collapse
-                            </button>
-                          )}
-                        </div>
+            {/* Project rows: time stays on x-axis; project color identifies the lane. */}
+            <div className="space-y-1.5">
+              {projects.map((p) => {
+                const color = colorFor(p.colorIdx);
+                const rowHeight = p.totalRowHeightPx;
+                const accentColor = color.solid;
+                return (
+                  <div key={p.project} className="flex items-stretch rounded-xl group">
+                    {/* Project label */}
+                    <div
+                      className="flex flex-col justify-center shrink-0 py-1 pr-3 overflow-hidden"
+                      style={{ width: LABEL_WIDTH, height: rowHeight }}
+                    >
+                      <div className={`text-xs font-sans font-medium truncate ${color.text}`}>
+                        {projectName(p.project)}
                       </div>
+                      <div className="text-[9px] font-mono text-terminal-dimmer truncate">
+                        {p.sessions.length} {plural(p.sessions.length, "session")}
+                        {p.hiddenInLanesCount > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => toggleExpanded(p.project)}
+                            className="ml-1 text-terminal-orange hover:underline cursor-pointer"
+                            title={`Show the ${p.hiddenInLanesCount} session(s) hidden by the lane cap`}
+                          >
+                            · +{p.hiddenInLanesCount} hidden ▸
+                          </button>
+                        )}
+                        {expandedProjects.has(p.project) && (
+                          <button
+                            type="button"
+                            onClick={() => toggleExpanded(p.project)}
+                            className="ml-1 text-terminal-purple hover:underline cursor-pointer"
+                            title="Restore the lane cap"
+                          >
+                            · collapse
+                          </button>
+                        )}
+                      </div>
+                    </div>
 
-                      {/* Lane area */}
-                      <div
-                        className="relative flex-1 overflow-hidden rounded-xl bg-terminal-surface/45 shadow-layer-sm transition-colors group-hover:bg-terminal-surface-hover/70"
-                        style={{ height: rowHeight }}
-                      >
-                        {/* Grid lines */}
-                        {ticks.map((t, i) => (
-                          <div
-                            key={i}
-                            className="absolute top-0 bottom-0 w-px bg-terminal-border/[0.06]"
-                            style={{ left: `${t.leftPct}%` }}
-                          />
-                        ))}
+                    {/* Lane area */}
+                    <div
+                      className="relative flex-1 overflow-hidden rounded-xl bg-terminal-surface/45 shadow-layer-sm transition-colors group-hover:bg-terminal-surface-hover/70"
+                      style={{ height: rowHeight }}
+                    >
+                      {/* Grid lines */}
+                      {ticks.map((t, i) => (
+                        <div
+                          key={i}
+                          className="absolute top-0 bottom-0 w-px bg-terminal-border/[0.06]"
+                          style={{ left: `${t.leftPct}%` }}
+                        />
+                      ))}
 
-                        {/* Session blocks */}
-                        {p.sessions.map((ts) => {
-                          const automated = isAutomated(ts.session);
-                          const laneTop = p.laneTopsPx[ts.lane];
-                          const laneH = p.laneHeightsPx[ts.lane];
-                          const top = laneTop + (laneH - ts.heightPx);
-                          const opacity = automated ? 0.4 : ts.opacity;
-                          const lineClamp = Math.max(
-                            1,
-                            Math.floor(
-                              (ts.heightPx - LABEL_VERTICAL_PADDING_PX) / LABEL_LINE_HEIGHT_PX,
-                            ),
-                          );
-                          const showWick = ts.realDurationFraction < 0.85;
-                          return (
-                            <button
-                              type="button"
-                              key={ts.session.sessionId}
-                              className="absolute overflow-hidden rounded-md text-left shadow-layer-sm transition-all duration-200 ease-material hover:z-10 hover:shadow-layer-md"
-                              style={{
-                                left: `${ts.leftPct}%`,
-                                // Cap min-width to whatever space is left
-                                // between the bar's start and the lane's right
-                                // edge — otherwise bars near "today" overflow
-                                // the overflow-hidden lane container and get
-                                // visually truncated.
-                                width: `max(${ts.widthPct}%, min(${ts.minWidthPx}px, calc(100% - ${ts.leftPct}%)))`,
-                                top,
-                                height: ts.heightPx,
-                                opacity,
-                                zIndex: automated ? 1 : 2,
-                                backgroundColor: hexToRgba(accentColor, ts.fillAlpha),
-                              }}
-                              aria-label={`Open ${sessionTitle(ts.session)}`}
-                              onClick={() => navigateTo({ view: null, session: ts.session.slug })}
-                              onMouseEnter={(e) => {
-                                setTooltip({
-                                  session: ts.session,
-                                  x: e.clientX,
-                                  y: e.clientY,
-                                });
-                              }}
-                              onMouseLeave={() => setTooltip(null)}
-                            >
-                              {ts.heightPx >= LABEL_VISIBLE_MIN_HEIGHT_PX && (
-                                <span
-                                  className={`pointer-events-none block min-w-0 px-1.5 text-[10px] font-mono leading-tight ${color.text} ${
-                                    lineClamp === 1
-                                      ? "truncate leading-[18px]"
-                                      : "overflow-hidden pt-1"
-                                  }`}
-                                  style={
-                                    lineClamp === 1
-                                      ? undefined
-                                      : {
-                                          display: "-webkit-box",
-                                          WebkitBoxOrient: "vertical",
-                                          WebkitLineClamp: lineClamp,
-                                        }
-                                  }
-                                >
-                                  {sessionTitle(ts.session)}
-                                </span>
-                              )}
-                              {showWick && (
-                                <>
-                                  {/* K-line wick: bright strip along the bottom marks
+                      {/* Session blocks */}
+                      {p.sessions.map((ts) => {
+                        const automated = isAutomated(ts.session);
+                        const laneTop = p.laneTopsPx[ts.lane];
+                        const laneH = p.laneHeightsPx[ts.lane];
+                        const top = laneTop + (laneH - ts.heightPx);
+                        const opacity = automated ? 0.4 : ts.opacity;
+                        const lineClamp = Math.max(
+                          1,
+                          Math.floor(
+                            (ts.heightPx - LABEL_VERTICAL_PADDING_PX) / LABEL_LINE_HEIGHT_PX,
+                          ),
+                        );
+                        const showWick = ts.realDurationFraction < 0.85;
+                        return (
+                          <button
+                            type="button"
+                            key={ts.session.sessionId}
+                            className="absolute overflow-hidden rounded-md text-left shadow-layer-sm transition-all duration-200 ease-material hover:z-10 hover:shadow-layer-md"
+                            style={{
+                              left: `${ts.leftPct}%`,
+                              // Cap min-width to whatever space is left
+                              // between the bar's start and the lane's right
+                              // edge — otherwise bars near "today" overflow
+                              // the overflow-hidden lane container and get
+                              // visually truncated.
+                              width: `max(${ts.widthPct}%, min(${ts.minWidthPx}px, calc(100% - ${ts.leftPct}%)))`,
+                              top,
+                              height: ts.heightPx,
+                              opacity,
+                              zIndex: automated ? 1 : 2,
+                              backgroundColor: hexToRgba(accentColor, ts.fillAlpha),
+                            }}
+                            aria-label={`Open ${sessionTitle(ts.session)}`}
+                            onClick={() => navigateTo({ view: null, session: ts.session.slug })}
+                            onMouseEnter={(e) => {
+                              setTooltip({
+                                session: ts.session,
+                                x: e.clientX,
+                                y: e.clientY,
+                              });
+                            }}
+                            onMouseLeave={() => setTooltip(null)}
+                          >
+                            {ts.heightPx >= LABEL_VISIBLE_MIN_HEIGHT_PX && (
+                              <span
+                                className={`pointer-events-none block min-w-0 px-1.5 text-[10px] font-mono leading-tight ${color.text} ${
+                                  lineClamp === 1
+                                    ? "truncate leading-[18px]"
+                                    : "overflow-hidden pt-1"
+                                }`}
+                                style={
+                                  lineClamp === 1
+                                    ? undefined
+                                    : {
+                                        display: "-webkit-box",
+                                        WebkitBoxOrient: "vertical",
+                                        WebkitLineClamp: lineClamp,
+                                      }
+                                }
+                              >
+                                {sessionTitle(ts.session)}
+                              </span>
+                            )}
+                            {showWick && (
+                              <>
+                                {/* K-line wick: bright strip along the bottom marks
                                       the actual session duration within the (widened)
                                       bar. Thin enough to coexist with the title above,
                                       bright enough to register against any project
                                       color's fill. */}
-                                  <span
-                                    className="pointer-events-none absolute bottom-0 left-0 h-[2px] rounded-r-full bg-white/85"
-                                    style={{ width: `${ts.realDurationFraction * 100}%` }}
-                                    title="actual duration"
-                                  />
-                                  {/* End-tick at the wick's right edge so the real
+                                <span
+                                  className="pointer-events-none absolute bottom-0 left-0 h-[2px] rounded-r-full bg-white/85"
+                                  style={{ width: `${ts.realDurationFraction * 100}%` }}
+                                  title="actual duration"
+                                />
+                                {/* End-tick at the wick's right edge so the real
                                       end-position is visible even when the wick is
                                       only a few pixels wide. */}
-                                  <span
-                                    className="pointer-events-none absolute bottom-0 h-[6px] w-[2px] bg-white/90"
-                                    style={{
-                                      left: `calc(${ts.realDurationFraction * 100}% - 2px)`,
-                                    }}
-                                  />
-                                </>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
+                                <span
+                                  className="pointer-events-none absolute bottom-0 h-[6px] w-[2px] bg-white/90"
+                                  style={{
+                                    left: `calc(${ts.realDurationFraction * 100}% - 2px)`,
+                                  }}
+                                />
+                              </>
+                            )}
+                          </button>
+                        );
+                      })}
                     </div>
-                  );
-                })}
-              </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
-
-          <aside className="relative overflow-hidden rounded-2xl bg-terminal-surface p-4 shadow-layer-lg">
-            <div className="pointer-events-none absolute -right-16 -top-16 h-36 w-36 rounded-full bg-terminal-blue/5 blur-3xl" />
-            <div className="pointer-events-none absolute -bottom-16 -left-16 h-36 w-36 rounded-full bg-terminal-green/5 blur-3xl" />
-            <div className="relative">
-              <div className="mb-3">
-                <div className="text-sm font-sans font-semibold text-terminal-text">
-                  Top Sessions
-                </div>
-                <div className="mt-0.5 text-[10px] font-mono text-terminal-dimmer">
-                  Ranked by activity signals. Badges show provider and Cursor data source.
-                </div>
-              </div>
-              <div className="space-y-2">
-                {topSessions.map((ts) => {
-                  const color = colorFor(ts.colorIdx);
-                  return (
-                    <button
-                      type="button"
-                      key={ts.session.sessionId}
-                      onClick={() => navigateTo({ view: null, session: ts.session.slug })}
-                      className="w-full rounded-xl bg-terminal-bg/45 p-2.5 text-left shadow-layer-sm transition-all duration-200 ease-material hover:bg-terminal-surface-hover hover:shadow-layer-md"
-                    >
-                      <div className="flex items-start gap-2">
-                        <span
-                          className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full"
-                          style={{ backgroundColor: color.solid }}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-xs font-sans font-medium text-terminal-text">
-                            {sessionTitle(ts.session)}
-                          </div>
-                          <div className="mt-0.5 truncate text-[10px] font-mono text-terminal-dimmer">
-                            {projectName(ts.project)}
-                          </div>
-                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] font-mono">
-                            <span className="rounded-md bg-terminal-green-subtle px-1.5 py-0.5 text-terminal-green">
-                              score {Math.round(ts.score)}
-                            </span>
-                            {sessionBadges(ts.session).map((badge) => (
-                              <span
-                                key={badge}
-                                className="rounded-md bg-terminal-surface-2 px-1.5 py-0.5 text-terminal-dim"
-                              >
-                                {badge}
-                              </span>
-                            ))}
-                            {ts.session.durationMs ? (
-                              <span className="text-terminal-blue">
-                                {fmtDuration(ts.session.durationMs)}
-                              </span>
-                            ) : null}
-                            {ts.session.editCount > 0 ? (
-                              <span className="text-terminal-dimmer">
-                                {ts.session.editCount} {plural(ts.session.editCount, "edit")}
-                              </span>
-                            ) : null}
-                          </div>
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </aside>
         </div>
       )}
 
@@ -1262,24 +1190,14 @@ export default function SessionRelationshipsView({
             <div className="h-3 w-24 rounded bg-terminal-surface-2 opacity-70" />
             <div className="h-3 w-32 rounded bg-terminal-surface-2 opacity-50" />
           </div>
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
-            <div className="rounded-2xl bg-terminal-bg/35 p-3 shadow-inner">
-              <div className="space-y-2">
-                {Array.from({ length: 5 }, (_, i) => (
-                  <div key={i} className="flex items-center gap-3">
-                    <div className="h-8 w-32 rounded bg-terminal-surface-2 opacity-60" />
-                    <div className="h-9 flex-1 rounded-xl bg-terminal-surface/60 shadow-layer-sm" />
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="rounded-2xl bg-terminal-surface p-4 shadow-layer-lg">
-              <div className="mb-3 h-4 w-24 rounded bg-terminal-surface-2" />
-              <div className="space-y-2">
-                {Array.from({ length: 4 }, (_, i) => (
-                  <div key={i} className="h-16 rounded-xl bg-terminal-bg/45 shadow-layer-sm" />
-                ))}
-              </div>
+          <div className="rounded-2xl bg-terminal-bg/35 p-3 shadow-inner">
+            <div className="space-y-2">
+              {Array.from({ length: 5 }, (_, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <div className="h-8 w-32 rounded bg-terminal-surface-2 opacity-60" />
+                  <div className="h-9 flex-1 rounded-xl bg-terminal-surface/60 shadow-layer-sm" />
+                </div>
+              ))}
             </div>
           </div>
         </div>
