@@ -1,13 +1,15 @@
 import { memo, useState } from "react";
 import type { Scene, SubAgent } from "../types";
 import { displayToolName } from "../utils/toolName";
+import { ErrorBadge } from "./Badges";
 import BashBlock from "./BashBlock";
 import CodeDiffBlock from "./CodeDiffBlock";
-import { formatDuration } from "./StatsPanel";
+import { formatToolDuration, formatTokens } from "./StatsPanel";
+
+const CHEVRON = "▶";
 
 function ToolDuration({ ms }: { ms?: number }) {
-  if (!ms) return null;
-  const label = formatDuration(ms);
+  const label = formatToolDuration(ms);
   if (!label) return null;
   return (
     <span
@@ -19,6 +21,42 @@ function ToolDuration({ ms }: { ms?: number }) {
   );
 }
 
+function ToolTokens({ tokens }: { tokens?: number }) {
+  const label = formatTokens(tokens);
+  if (!label) return null;
+  return (
+    <span
+      className="text-[10px] text-terminal-dimmer font-mono shrink-0"
+      title={`~${label} tokens added to context (heuristic estimate)`}
+    >
+      ~{label} tok
+    </span>
+  );
+}
+
+function subAgentTotalTokens(sa: SubAgent): number {
+  if (!sa.tokenUsage) return 0;
+  return (
+    sa.tokenUsage.inputTokens +
+    sa.tokenUsage.outputTokens +
+    sa.tokenUsage.cacheCreationTokens +
+    sa.tokenUsage.cacheReadTokens
+  );
+}
+
+function subAgentTotalDurationMs(sa: SubAgent): number {
+  // Skip nested Agent calls: their `durationMs` is the inner subagent's whole
+  // wall time, which already covers all of its own tool calls. Counting both
+  // would double-count anything below depth 1.
+  let total = 0;
+  for (const s of sa.scenes) {
+    if (s.type === "tool-call" && s.toolName !== "Agent" && s.durationMs) {
+      total += s.durationMs;
+    }
+  }
+  return total;
+}
+
 type ToolScene = Extract<Scene, { type: "tool-call" }>;
 
 interface Props {
@@ -28,120 +66,161 @@ interface Props {
 }
 
 function toolIcon(name: string): string {
-  if (name.startsWith("mcp__")) return "\uD83D\uDD0C"; // 🔌
+  if (name.startsWith("mcp__")) return "🔌"; // 🔌
   switch (name) {
     case "Read":
-      return "\uD83D\uDCC4";
+      return "📄";
     case "Write":
-      return "\u270F\uFE0F";
+      return "✏️";
     case "Edit":
-      return "\u2702\uFE0F";
+      return "✂️";
     case "Delete":
-      return "\uD83D\uDDD1\uFE0F";
+      return "🗑️";
     case "Bash":
       return "$";
     case "Glob":
-      return "\uD83D\uDD0D";
+      return "🔍";
     case "Grep":
-      return "\uD83D\uDD0E";
+      return "🔎";
     case "Agent":
-      return "\uD83E\uDD16";
+      return "🤖";
     default:
-      return "\u2699\uFE0F";
+      return "⚙️";
   }
 }
 
-const AGENT_TYPE_COLORS: Record<string, string> = {
-  Explore: "bg-blue-500/20 text-blue-300 border-blue-500/30",
-  Plan: "bg-purple-500/20 text-purple-300 border-purple-500/30",
-  Shell: "bg-cyan-500/20 text-cyan-300 border-cyan-500/30",
-  "general-purpose": "bg-green-500/20 text-green-300 border-green-500/30",
-  "claude-code-guide": "bg-amber-500/20 text-amber-300 border-amber-500/30",
+/**
+ * Map known agent types onto the design-system palette so subagent visuals
+ * use the same theme tokens (`terminal-*-subtle` / `terminal-*-emphasis`)
+ * that drive the Assistant section, Jump Target pill, etc. Falls back to
+ * purple for unknown types — purple is the brand color for subagents.
+ *
+ * Class strings are spelled out (not interpolated) so the Tailwind JIT can
+ * see them at build time.
+ */
+type AgentTheme = "blue" | "purple" | "green" | "orange";
+
+const AGENT_TYPE_THEME: Record<string, AgentTheme> = {
+  Explore: "blue",
+  Plan: "purple",
+  Shell: "blue",
+  "general-purpose": "green",
+  "claude-code-guide": "orange",
 };
 
+function agentTheme(type: string): AgentTheme {
+  return AGENT_TYPE_THEME[type] || "purple";
+}
+
+const THEME_CLASSES: Record<
+  AgentTheme,
+  { text: string; bgSubtle: string; borderL: string; pill: string }
+> = {
+  blue: {
+    text: "text-terminal-blue",
+    bgSubtle: "bg-terminal-blue-subtle",
+    borderL: "border-terminal-blue",
+    pill: "bg-terminal-blue-emphasis text-terminal-blue",
+  },
+  purple: {
+    text: "text-terminal-purple",
+    bgSubtle: "bg-terminal-purple-subtle",
+    borderL: "border-terminal-purple",
+    pill: "bg-terminal-purple-emphasis text-terminal-purple",
+  },
+  green: {
+    text: "text-terminal-green",
+    bgSubtle: "bg-terminal-green-subtle",
+    borderL: "border-terminal-green",
+    pill: "bg-terminal-green-emphasis text-terminal-green",
+  },
+  orange: {
+    text: "text-terminal-orange",
+    bgSubtle: "bg-terminal-orange-subtle",
+    borderL: "border-terminal-orange",
+    pill: "bg-terminal-orange-emphasis text-terminal-orange",
+  },
+};
+
+/** Agent-type pill — matches the design language of the Assistant group's
+ * "Jump Target" / "Focused" pills (rounded-full, sans-serif uppercase). */
 function AgentTypeBadge({ type }: { type: string }) {
-  const colors = AGENT_TYPE_COLORS[type] || "bg-gray-500/20 text-gray-300 border-gray-500/30";
+  const c = THEME_CLASSES[agentTheme(type)];
   return (
-    <span className={`text-[10px] px-1.5 py-0.5 rounded border font-mono ${colors}`}>{type}</span>
+    <span
+      className={`text-[10px] font-sans font-medium uppercase tracking-widest px-2 py-0.5 rounded-full ${c.pill}`}
+    >
+      {type}
+    </span>
   );
 }
 
-function SubAgentView({ subAgent }: { subAgent: SubAgent }) {
-  const [showScenes, setShowScenes] = useState(false);
-  const totalTokens = subAgent.tokenUsage
-    ? subAgent.tokenUsage.inputTokens +
-      subAgent.tokenUsage.outputTokens +
-      subAgent.tokenUsage.cacheCreationTokens +
-      subAgent.tokenUsage.cacheReadTokens
-    : 0;
-
+/** Section label — matches the "Assistant" header treatment so a subagent
+ * card reads as a sibling section, not a tool row. */
+function SubagentLabel({ theme }: { theme: AgentTheme }) {
   return (
-    <div className="border-t border-terminal-border-subtle">
-      {/* Summary bar */}
-      <div className="px-3 py-2 bg-terminal-surface-hover/50">
-        <div className="flex items-center gap-2 flex-wrap">
-          <AgentTypeBadge type={subAgent.agentType} />
-          {subAgent.model && (
-            <span className="text-[10px] text-terminal-dim font-mono">{subAgent.model}</span>
-          )}
-          <span className="text-[10px] text-terminal-dim">|</span>
-          <span className="text-[10px] text-terminal-dim font-mono">
-            {subAgent.toolCalls} tools
-          </span>
-          {subAgent.thinkingBlocks > 0 && (
-            <span className="text-[10px] text-terminal-dim font-mono">
-              {subAgent.thinkingBlocks} thinking
-            </span>
-          )}
-          {subAgent.textResponses > 0 && (
-            <span className="text-[10px] text-terminal-dim font-mono">
-              {subAgent.textResponses} responses
-            </span>
-          )}
-          {totalTokens > 0 && (
-            <>
-              <span className="text-[10px] text-terminal-dim">|</span>
-              <span className="text-[10px] text-terminal-dim font-mono">
-                {totalTokens > 1000000
-                  ? `${(totalTokens / 1000000).toFixed(1)}M`
-                  : totalTokens > 1000
-                    ? `${(totalTokens / 1000).toFixed(0)}K`
-                    : totalTokens}{" "}
-                tokens
-              </span>
-            </>
-          )}
-        </div>
-        {subAgent.description && (
-          <div className="text-[11px] text-terminal-text/70 mt-1 italic">
-            {subAgent.description}
-          </div>
-        )}
-      </div>
+    <span
+      className={`text-[10px] font-sans font-semibold uppercase tracking-widest ${THEME_CLASSES[theme].text}`}
+    >
+      Subagent
+    </span>
+  );
+}
 
-      {/* Expandable scenes */}
-      {subAgent.scenes.length > 0 && (
-        <div className="border-t border-terminal-border-subtle">
-          <button
-            onClick={() => setShowScenes(!showScenes)}
-            className="w-full px-3 py-1.5 text-left text-[11px] text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors"
-          >
-            <span
-              className={`inline-block transition-transform mr-1 ${showScenes ? "rotate-90" : ""}`}
-            >
-              {"\u25B6"}
-            </span>
-            {showScenes ? "Hide" : "Show"} agent conversation ({subAgent.scenes.length} scenes)
-          </button>
-          {showScenes && (
-            <div className="px-3 pb-2 space-y-1 max-h-[400px] overflow-y-auto">
-              {subAgent.scenes.map((s, i) => (
-                <SubAgentSceneItem key={i} scene={s} />
-              ))}
-            </div>
-          )}
+function SubAgentBody({ subAgent }: { subAgent: SubAgent }) {
+  return (
+    <div className="mt-3 space-y-3">
+      {subAgent.prompt && (
+        <div>
+          <div className="text-[10px] font-sans font-semibold uppercase tracking-widest text-terminal-dim mb-1.5">
+            Prompt
+          </div>
+          <div className="text-[11px] text-terminal-text/85 font-mono whitespace-pre-wrap break-words max-h-[120px] overflow-y-auto rounded-md bg-terminal-surface-inset px-3 py-2">
+            {subAgent.prompt}
+          </div>
         </div>
       )}
+      {subAgent.scenes.length > 0 && <SubAgentTrace scenes={subAgent.scenes} />}
+    </div>
+  );
+}
+
+/**
+ * Trace section. For large subagents (e.g. an Explore that fired 80+ tools)
+ * we show only a window plus an explicit "show all" toggle so the parent
+ * agent expand doesn't dump hundreds of rows of DOM at once.
+ */
+const TRACE_INITIAL_LIMIT = 20;
+
+function SubAgentTrace({ scenes }: { scenes: Scene[] }) {
+  const [showAll, setShowAll] = useState(false);
+  const isLong = scenes.length > TRACE_INITIAL_LIMIT;
+  const visible = isLong && !showAll ? scenes.slice(0, TRACE_INITIAL_LIMIT) : scenes;
+  const hidden = scenes.length - visible.length;
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[10px] font-sans font-semibold uppercase tracking-widest text-terminal-dim">
+          Trace · {scenes.length} {scenes.length === 1 ? "scene" : "scenes"}
+        </span>
+        {isLong && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowAll((v) => !v);
+            }}
+            className="text-[10px] font-mono text-terminal-dim hover:text-terminal-text transition-colors"
+          >
+            {showAll ? "Show first 20" : `Show all (+${hidden})`}
+          </button>
+        )}
+      </div>
+      <div className="space-y-1 max-h-[500px] overflow-y-auto rounded-md bg-terminal-surface-inset px-3 py-2">
+        {visible.map((s, i) => (
+          <SubAgentSceneItem key={i} scene={s} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -150,18 +229,26 @@ function SubAgentSceneItem({ scene }: { scene: Scene }) {
   const [expanded, setExpanded] = useState(false);
 
   if (scene.type === "thinking") {
+    const tokenLabel = formatTokens(scene.tokens);
     return (
-      <div className="text-[10px] font-mono text-purple-400/60 pl-2 border-l-2 border-purple-500/20 py-0.5">
-        <span className="text-purple-400/40 mr-1">[thinking]</span>
-        {(scene.content || "").slice(0, 120)}
-        {(scene.content || "").length > 120 ? "..." : ""}
+      <div className="text-[10px] font-mono text-purple-400/80 pl-2 border-l-2 border-purple-500/30 py-0.5">
+        <span className="text-purple-400/70 font-bold mr-1">[thinking]</span>
+        {tokenLabel && (
+          <span className="text-purple-400/70 mr-1" title="Approximate thinking tokens">
+            ~{tokenLabel} tok
+          </span>
+        )}
+        <span className="text-purple-400/70">
+          {(scene.content || "").slice(0, 120)}
+          {(scene.content || "").length > 120 ? "..." : ""}
+        </span>
       </div>
     );
   }
 
   if (scene.type === "text-response") {
     return (
-      <div className="text-[10px] font-mono text-terminal-text/80 pl-2 border-l-2 border-blue-500/20 py-0.5">
+      <div className="text-[10px] font-mono text-terminal-text/80 pl-2 border-l-2 border-blue-500/30 py-0.5">
         {(scene.content || "").slice(0, 200)}
         {(scene.content || "").length > 200 ? "..." : ""}
       </div>
@@ -169,20 +256,27 @@ function SubAgentSceneItem({ scene }: { scene: Scene }) {
   }
 
   if (scene.type === "tool-call") {
-    const toolScene = scene as Extract<Scene, { type: "tool-call" }>;
+    const toolScene = scene as ToolScene;
+    const errorAccent = toolScene.isError
+      ? "border-l-red-500 bg-red-500/5"
+      : "border-l-orange-500/30";
     return (
-      <div className="pl-2 border-l-2 border-orange-500/20 py-0.5">
+      <div className={`pl-2 border-l-2 py-0.5 ${errorAccent}`}>
         <button
           onClick={() => setExpanded(!expanded)}
           className="flex items-center gap-1 text-[10px] font-mono w-full text-left hover:bg-terminal-surface-hover/30 rounded px-1"
         >
-          <span className="text-terminal-orange font-bold">
+          <span
+            className={`font-bold ${toolScene.isError ? "text-red-400" : "text-terminal-orange"}`}
+          >
             {displayToolName(toolScene.toolName)}
           </span>
           <span className="text-terminal-dim truncate flex-1">
             {summarizeInput(toolScene.toolName, toolScene.input)}
           </span>
-          {toolScene.isError && <span className="text-red-400 text-[9px]">ERR</span>}
+          {toolScene.isError && <ErrorBadge />}
+          <ToolTokens tokens={toolScene.resultTokens} />
+          <ToolDuration ms={toolScene.durationMs} />
         </button>
         {expanded && toolScene.result && (
           <pre className="text-[9px] text-terminal-dim font-mono whitespace-pre-wrap break-words max-h-[100px] overflow-y-auto mt-0.5 px-1 bg-terminal-bg/50 rounded">
@@ -199,14 +293,20 @@ function SubAgentSceneItem({ scene }: { scene: Scene }) {
 export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: Props) {
   const [expanded, setExpanded] = useState(false);
 
-  // When force-collapsing, show a one-liner summary for all tool types
+  // When force-collapsing, show a one-liner summary for all tool types.
   if (forceCollapse) {
     return (
-      <div className="flex items-center gap-2 px-3 py-1 text-xs font-mono text-terminal-dim">
+      <div
+        className={`flex items-center gap-2 px-3 py-1 text-xs font-mono text-terminal-dim ${scene.isError ? "border-l-2 border-l-red-500 bg-red-500/5" : ""}`}
+      >
         <span>{toolIcon(scene.toolName)}</span>
-        <span className="text-terminal-orange font-bold">{displayToolName(scene.toolName)}</span>
-        <span className="truncate">{summarizeInput(scene.toolName, scene.input)}</span>
+        <span className={`font-bold ${scene.isError ? "text-red-400" : "text-terminal-orange"}`}>
+          {displayToolName(scene.toolName)}
+        </span>
+        <span className="truncate flex-1">{summarizeInput(scene.toolName, scene.input)}</span>
         {scene.subAgent && <AgentTypeBadge type={scene.subAgent.agentType} />}
+        {scene.isError && <ErrorBadge />}
+        <ToolTokens tokens={scene.resultTokens} />
         <ToolDuration ms={scene.durationMs} />
       </div>
     );
@@ -220,6 +320,8 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
         stdout={scene.bashOutput.stdout}
         isActive={isActive}
         durationMs={scene.durationMs}
+        resultTokens={scene.resultTokens}
+        isError={scene.isError}
       />
     );
   }
@@ -233,61 +335,95 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
         oldContent={scene.diff.oldContent}
         newContent={scene.diff.newContent}
         isActive={isActive}
+        isError={scene.isError}
       />
     );
   }
 
-  // Agent tool call with subagent data — special rendering
+  // Agent tool call with subagent data — rendered as a design-system section
+  // card (matching the Assistant group) so subagents read as "delegated
+  // sub-conversations" rather than just another tool row.
   if (scene.toolName === "Agent" && scene.subAgent) {
+    const sa = scene.subAgent;
+    const theme = agentTheme(sa.agentType);
+    const c = THEME_CLASSES[theme];
+    const totalTok = subAgentTotalTokens(sa);
+    const totalDur = subAgentTotalDurationMs(sa);
+    const description = sa.description || (scene.input.description as string) || "";
     return (
-      <div>
-        <div className="bg-terminal-surface rounded-xl overflow-hidden shadow-layer-sm">
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="w-full flex items-center gap-2 px-3 py-2 bg-terminal-surface hover:bg-terminal-surface-hover transition-colors duration-200 ease-material text-left"
-          >
-            <span className="text-xs font-mono">{toolIcon("Agent")}</span>
-            <span className="text-xs font-mono font-bold text-terminal-orange">Agent</span>
-            <AgentTypeBadge type={scene.subAgent.agentType} />
-            <span className="text-xs text-terminal-dim font-mono truncate flex-1">
-              {scene.subAgent.description || scene.input.description || ""}
-            </span>
-            <span className="text-[10px] text-terminal-dim font-mono">
-              {scene.subAgent.toolCalls} tools
-            </span>
-            <ToolDuration ms={scene.durationMs} />
+      <div
+        className={`relative rounded-xl px-5 py-4 border-l-2 ${c.borderL} ${c.bgSubtle} shadow-layer-sm transition-all duration-200 ease-material`}
+      >
+        <button onClick={() => setExpanded(!expanded)} className="w-full text-left">
+          {/* Header row — mirrors the Assistant group header */}
+          <div className="flex items-center gap-2 flex-wrap mb-1.5">
+            <SubagentLabel theme={theme} />
+            <AgentTypeBadge type={sa.agentType} />
+            {sa.model && (
+              <span className="text-[10px] text-terminal-dimmer font-mono">{sa.model}</span>
+            )}
+            <span className="flex-1" />
+            <span className="text-[10px] text-terminal-dim font-mono">{sa.toolCalls} tools</span>
+            {sa.thinkingBlocks > 0 && (
+              <span className="text-[10px] text-terminal-dim font-mono">
+                {sa.thinkingBlocks} thinking
+              </span>
+            )}
+            {totalTok > 0 && (
+              <span
+                className={`text-[10px] font-mono font-semibold ${c.text}`}
+                title="Total tokens billed for this subagent (input + output + cache)"
+              >
+                {formatTokens(totalTok)} tok
+              </span>
+            )}
+            {totalDur > 0 && <ToolDuration ms={totalDur} />}
             <span
               className={`text-xs text-terminal-dim transition-transform ${expanded ? "rotate-90" : ""}`}
             >
-              {"\u25B6"}
+              {CHEVRON}
             </span>
-          </button>
-          {expanded && <SubAgentView subAgent={scene.subAgent} />}
-        </div>
+          </div>
+          {/* Description — large, like a section title */}
+          {description && (
+            <div className="text-sm text-terminal-text font-sans font-medium leading-snug">
+              {description}
+            </div>
+          )}
+        </button>
+        {expanded && <SubAgentBody subAgent={sa} />}
       </div>
     );
   }
 
   // Generic tool call
+  const errorRing = scene.isError ? "ring-1 ring-red-500/40 border-l-2 border-l-red-500" : "";
+  const errorBg = scene.isError ? "bg-red-500/5" : "";
   return (
     <div>
-      <div className="bg-terminal-surface rounded-xl overflow-hidden shadow-layer-sm">
+      <div
+        className={`bg-terminal-surface rounded-xl overflow-hidden shadow-layer-sm ${errorRing}`}
+      >
         <button
           onClick={() => setExpanded(!expanded)}
-          className="w-full flex items-center gap-2 px-3 py-2 bg-terminal-surface hover:bg-terminal-surface-hover transition-colors duration-200 ease-material text-left"
+          className={`w-full flex items-center gap-2 px-3 py-2 hover:bg-terminal-surface-hover transition-colors duration-200 ease-material text-left ${errorBg || "bg-terminal-surface"}`}
         >
           <span className="text-xs font-mono">{toolIcon(scene.toolName)}</span>
-          <span className="text-xs font-mono font-bold text-terminal-orange">
+          <span
+            className={`text-xs font-mono font-bold ${scene.isError ? "text-red-400" : "text-terminal-orange"}`}
+          >
             {displayToolName(scene.toolName)}
           </span>
           <span className="text-xs text-terminal-dim font-mono truncate flex-1">
             {summarizeInput(scene.toolName, scene.input)}
           </span>
+          {scene.isError && <ErrorBadge />}
+          <ToolTokens tokens={scene.resultTokens} />
           <ToolDuration ms={scene.durationMs} />
           <span
             className={`text-xs text-terminal-dim transition-transform ${expanded ? "rotate-90" : ""}`}
           >
-            {"\u25B6"}
+            {CHEVRON}
           </span>
         </button>
         {expanded && (

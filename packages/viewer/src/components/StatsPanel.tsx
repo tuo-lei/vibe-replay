@@ -483,6 +483,29 @@ export function formatDuration(ms?: number): string {
   return `${hrs}h ${mins % 60}m`;
 }
 
+/**
+ * Fine-grained duration for individual tool calls. Tool calls are usually
+ * sub-second so the regular formatDuration ("0s") would be useless.
+ */
+export function formatToolDuration(ms?: number): string {
+  if (!ms || ms < 1) return "";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
+  return formatDuration(ms);
+}
+
+/**
+ * Compact token count: 919 / 1.5K / 12K / 2.3M. Use a "~" prefix in callers
+ * since these are heuristic estimates, not exact tokenizer counts.
+ */
+export function formatTokens(n?: number): string {
+  if (!n || n < 1) return "";
+  if (n < 1000) return `${n}`;
+  if (n < 10_000) return `${(n / 1000).toFixed(1)}K`;
+  if (n < 1_000_000) return `${Math.round(n / 1000)}K`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
 function formatGeneratedAt(iso?: string): string {
   if (!iso) return "";
   const date = new Date(iso);

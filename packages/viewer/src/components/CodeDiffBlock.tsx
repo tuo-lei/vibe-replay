@@ -1,6 +1,7 @@
 import { diffLines as computeLineDiff } from "diff";
 import { Highlight, themes } from "prism-react-renderer";
 import { memo, useMemo, useSyncExternalStore } from "react";
+import { ErrorBadge } from "./Badges";
 
 // Subscribe to dark/light class changes on <html> for prism theme switching
 const subscribe = (cb: () => void) => {
@@ -16,6 +17,7 @@ interface Props {
   oldContent: string;
   newContent: string;
   isActive: boolean;
+  isError?: boolean;
 }
 
 interface DiffLine {
@@ -74,6 +76,7 @@ export default memo(function CodeDiffBlock({
   oldContent,
   newContent,
   isActive: _isActive,
+  isError,
 }: Props) {
   const diffLines = useMemo(() => computeDiff(oldContent, newContent), [oldContent, newContent]);
   const language = guessLanguage(filePath);
@@ -82,10 +85,19 @@ export default memo(function CodeDiffBlock({
   const isDeletedFile = toolName === "Delete" && !newContent;
 
   return (
-    <div className="bg-terminal-surface rounded-xl overflow-hidden shadow-layer-sm">
-      <div className="flex items-center gap-2 px-3 py-2 bg-terminal-surface">
-        <span className="text-xs font-mono font-bold text-terminal-orange">{toolName}</span>
-        <span className="text-xs font-mono text-terminal-blue truncate">{filePath}</span>
+    <div
+      className={`bg-terminal-surface rounded-xl overflow-hidden shadow-layer-sm ${isError ? "ring-1 ring-red-500/40 border-l-2 border-l-red-500" : ""}`}
+    >
+      <div
+        className={`flex items-center gap-2 px-3 py-2 bg-terminal-surface ${isError ? "bg-red-500/5" : ""}`}
+      >
+        <span
+          className={`text-xs font-mono font-bold ${isError ? "text-red-400" : "text-terminal-orange"}`}
+        >
+          {toolName}
+        </span>
+        <span className="text-xs font-mono text-terminal-blue truncate flex-1">{filePath}</span>
+        {isError && <ErrorBadge />}
         {isNewFile && (
           <span className="text-xs px-1.5 py-0.5 rounded bg-terminal-green/20 text-terminal-green">
             new

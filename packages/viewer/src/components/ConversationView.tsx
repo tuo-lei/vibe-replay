@@ -4,7 +4,7 @@ import type { EffectivePrefs } from "../hooks/useViewPrefs";
 import type { Scene, TurnStat } from "../types";
 import { displayToolName } from "../utils/toolName";
 import CompactionSummaryBlock from "./CompactionSummaryBlock";
-import { fmtNum, formatDuration } from "./StatsPanel";
+import { fmtNum, formatDuration, formatTokens, formatToolDuration } from "./StatsPanel";
 import TextResponseBlock from "./TextResponseBlock";
 import ThinkingBlock from "./ThinkingBlock";
 import ToolCallBlock from "./ToolCallBlock";
@@ -1220,6 +1220,19 @@ function ToolBatch({
     return "";
   });
 
+  // Aggregate token/duration across the batch — one glance at "what did this
+  // burst of tool calls cost the context window?"
+  let batchTokens = 0;
+  let batchMs = 0;
+  for (const { scene } of batch) {
+    if (scene.type === "tool-call") {
+      if (scene.resultTokens) batchTokens += scene.resultTokens;
+      if (scene.durationMs) batchMs += scene.durationMs;
+    }
+  }
+  const batchTokenLabel = formatTokens(batchTokens);
+  const batchDurationLabel = formatToolDuration(batchMs);
+
   return (
     <div
       data-scene-index={batch[0].index}
@@ -1238,9 +1251,25 @@ function ToolBatch({
           {batch.length} call{batch.length > 1 ? "s" : ""}
         </span>
         {!expanded && (
-          <span className="truncate text-terminal-dimmer ml-1">
+          <span className="truncate text-terminal-dimmer ml-1 flex-1">
             {summaries.filter(Boolean).slice(0, 3).join(", ")}
             {summaries.filter(Boolean).length > 3 && "..."}
+          </span>
+        )}
+        {!expanded && batchTokenLabel && (
+          <span
+            className="text-[10px] text-terminal-dimmer font-mono shrink-0"
+            title={`~${batchTokenLabel} tokens added to context across ${batch.length} call${batch.length > 1 ? "s" : ""}`}
+          >
+            ~{batchTokenLabel} tok
+          </span>
+        )}
+        {!expanded && batchDurationLabel && (
+          <span
+            className="text-[10px] text-terminal-dimmer font-mono shrink-0"
+            title={`Combined tool execution: ${batchDurationLabel}`}
+          >
+            {batchDurationLabel}
           </span>
         )}
       </button>
@@ -1349,7 +1378,7 @@ const SceneBlock = memo(function SceneBlock({
     case "context-injection":
       return <CompactionSummaryBlock content={scene.content} isActive={isActive} />;
     case "thinking":
-      return <ThinkingBlock content={scene.content} isActive={isActive} />;
+      return <ThinkingBlock content={scene.content} isActive={isActive} tokens={scene.tokens} />;
     case "text-response":
       return (
         <>
