@@ -16,8 +16,16 @@ export interface RelationshipData {
   error: string | null;
 }
 
+interface ScanStatus {
+  running?: boolean;
+  resultCount?: number;
+}
+
 let cachedSessions: ScanResultSession[] | null = null;
 let cachedError: string | null = null;
+let cachedResultCount = 0;
+
+const REFRESH_WHILE_SCANNING_MS = 4000;
 
 export function useRelationshipData(): RelationshipData {
   const [sessions, setSessions] = useState<ScanResultSession[]>(cachedSessions ?? []);
@@ -26,31 +34,62 @@ export function useRelationshipData(): RelationshipData {
 
   useEffect(() => {
     let cancelled = false;
+    let pollTimer: ReturnType<typeof setTimeout> | null = null;
 
-    async function load() {
+    async function loadResults() {
+      const resp = await fetch("/api/scan/results");
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = (await resp.json()) as { results: ScanResultSession[] };
+      cachedSessions = data.results ?? [];
+      cachedResultCount = cachedSessions.length;
+      cachedError = null;
+      if (!cancelled) {
+        setSessions(cachedSessions);
+        setError(null);
+      }
+    }
+
+    async function loadStatus(): Promise<ScanStatus | null> {
       try {
-        const resp = await fetch("/api/scan/results");
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const data = (await resp.json()) as { results: ScanResultSession[] };
-        cachedSessions = data.results ?? [];
-        cachedError = null;
-        if (!cancelled) {
-          setSessions(cachedSessions);
-          setError(null);
+        const resp = await fetch("/api/scan/status");
+        if (!resp.ok) return null;
+        return (await resp.json()) as ScanStatus;
+      } catch {
+        return null;
+      }
+    }
+
+    async function tick() {
+      try {
+        const status = await loadStatus();
+        const stillRunning = status?.running === true;
+        const remoteCount = status?.resultCount ?? 0;
+        // Refetch results when we have nothing yet, when the scan reports more
+        // sessions than we last saw, or unconditionally on the first pass.
+        if (cachedSessions === null || remoteCount !== cachedResultCount) {
+          await loadResults();
+        }
+        if (stillRunning && !cancelled) {
+          pollTimer = setTimeout(tick, REFRESH_WHILE_SCANNING_MS);
         }
       } catch (e) {
-        cachedError = e instanceof Error ? e.message : "Failed to load";
+        const message = e instanceof Error ? e.message : "Failed to load";
+        cachedError = message;
         if (!cancelled) {
-          setError(cachedError);
+          // Surface the error only when there's no cached data to fall back
+          // on. Transient network/API failures shouldn't blank a Timeline that
+          // already loaded successfully — leave the prior data visible.
+          if (cachedSessions === null) setError(message);
         }
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
 
-    load();
+    tick();
     return () => {
       cancelled = true;
+      if (pollTimer) clearTimeout(pollTimer);
     };
   }, []);
 

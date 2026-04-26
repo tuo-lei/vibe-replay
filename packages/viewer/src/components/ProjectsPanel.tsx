@@ -263,7 +263,7 @@ function ProjectOverview({
         onClick={onOpenSessions}
         className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-terminal-green-subtle px-3 py-1.5 text-xs font-sans font-semibold text-terminal-green hover:bg-terminal-green-emphasis transition-colors"
       >
-        Open sessions →
+        View all sessions →
       </button>
     </div>
   );
