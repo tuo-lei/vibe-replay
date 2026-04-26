@@ -8,18 +8,18 @@
  */
 
 import { useMemo, useState } from "react";
+import { ALL_PROJECTS } from "../hooks/usePanelFilters";
 import { localDayKey } from "../utils/date";
-import { timeAgo } from "../utils/format";
+import { plural, timeAgo } from "../utils/format";
+import type { Tab } from "./Dashboard";
 import { navigateTo, projectName, rollupTopProjects } from "./dashboard-utils";
 import { useScanInsightsContext } from "./InsightsPanel";
 import SessionRelationshipsView from "./SessionRelationshipsView";
-import { formatDuration } from "./StatsPanel";
+import { fmtNum, formatDuration } from "./StatsPanel";
 
 interface ProjectsPanelProps {
-  onNavigate: (view: "home" | "sessions" | "replays" | "projects") => void;
+  onNavigate: (view: Tab) => void;
 }
-
-const ALL_PROJECTS = "__all__";
 
 type PanelMode = "overview" | "timeline" | "files";
 
@@ -38,21 +38,23 @@ function MiniSparkline({
   sessionsPerDay: Record<string, number>;
   size?: "sm" | "md";
 }) {
-  const data = useMemo(() => {
+  const { data, max } = useMemo(() => {
     const end = new Date();
     const start = new Date(end);
     start.setDate(start.getDate() - 29);
     const result: number[] = [];
+    let m = 1;
     const cursor = new Date(start);
     while (cursor <= end) {
       const key = localDayKey(cursor)!;
-      result.push(sessionsPerDay[key] || 0);
+      const count = sessionsPerDay[key] || 0;
+      result.push(count);
+      if (count > m) m = count;
       cursor.setDate(cursor.getDate() + 1);
     }
-    return result;
+    return { data: result, max: m };
   }, [sessionsPerDay]);
 
-  const max = Math.max(...data, 1);
   const heightClass = size === "md" ? "h-8" : "h-4";
 
   return (
@@ -69,18 +71,6 @@ function MiniSparkline({
       ))}
     </div>
   );
-}
-
-// ─── Helpers ────────────────────────────────────────────────────────
-
-function fmtNum(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
-}
-
-function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
-  return count === 1 ? singular : pluralForm;
 }
 
 // ─── Project sidebar (left pane) ────────────────────────────────────
@@ -164,12 +154,10 @@ function ProjectSidebar({
                 </span>
               </div>
               {p.lastActivity && (
-                <div className="mt-1 ml-0.5">
-                  <span
-                    className={`text-xs font-mono truncate ${isActive ? "text-terminal-dim" : "text-terminal-dimmer"}`}
-                  >
-                    {timeAgo(p.lastActivity, "long")}
-                  </span>
+                <div
+                  className={`mt-1 ml-0.5 text-xs font-mono truncate ${isActive ? "text-terminal-dim" : "text-terminal-dimmer"}`}
+                >
+                  {timeAgo(p.lastActivity, "long")}
                 </div>
               )}
             </button>
@@ -195,91 +183,88 @@ function ProjectOverview({
 }) {
   const name = projectName(project);
   return (
-    <div className="space-y-4">
-      {/* Hero card */}
-      <div className="hover-lift relative overflow-hidden rounded-2xl bg-gradient-to-br from-terminal-surface via-terminal-surface to-terminal-bg/70 p-5 shadow-layer-md">
-        <span className="absolute inset-y-3 left-0 w-0.5 rounded-r-full bg-gradient-to-b from-terminal-green to-terminal-blue opacity-60" />
-        <span className="pointer-events-none absolute -right-10 -top-12 h-32 w-32 rounded-full bg-terminal-green/5 blur-2xl" />
+    <div className="hover-lift relative overflow-hidden rounded-2xl bg-gradient-to-br from-terminal-surface via-terminal-surface to-terminal-bg/70 p-5 shadow-layer-md">
+      <span className="absolute inset-y-3 left-0 w-0.5 rounded-r-full bg-gradient-to-b from-terminal-green to-terminal-blue opacity-60" />
+      <span className="pointer-events-none absolute -right-10 -top-12 h-32 w-32 rounded-full bg-terminal-green/5 blur-2xl" />
 
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-base font-sans font-semibold text-terminal-text truncate">
-              {name}
-            </div>
-            <div className="text-[10px] font-mono text-terminal-dimmer truncate mt-0.5">
-              {project}
-            </div>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-base font-sans font-semibold text-terminal-text truncate">
+            {name}
           </div>
-          {insight.lastActivity && (
-            <span className="text-[10px] font-mono text-terminal-dimmer shrink-0">
-              {timeAgo(insight.lastActivity, "long")}
-            </span>
-          )}
+          <div className="text-[10px] font-mono text-terminal-dimmer truncate mt-0.5">
+            {project}
+          </div>
         </div>
-
-        {/* Stats grid */}
-        <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
-          <Stat
-            label={plural(insight.sessions, "session")}
-            value={insight.sessions.toString()}
-            tone="text"
-          />
-          {insight.durationMs > 0 && (
-            <Stat label="active time" value={formatDuration(insight.durationMs)} tone="blue" />
-          )}
-          {insight.cost > 0 && (
-            <Stat label="cost" value={`$${insight.cost.toFixed(2)}`} tone="orange" />
-          )}
-          <Stat
-            label={plural(insight.prompts, "prompt")}
-            value={fmtNum(insight.prompts)}
-            tone="green"
-          />
-        </div>
-
-        {/* Secondary stats */}
-        <div className="mt-3 flex items-center gap-3 text-[10px] font-mono text-terminal-dimmer flex-wrap">
-          {insight.toolCalls > 0 && (
-            <span>
-              {fmtNum(insight.toolCalls)} {plural(insight.toolCalls, "tool")}
-            </span>
-          )}
-          {insight.edits > 0 && (
-            <span>
-              {fmtNum(insight.edits)} {plural(insight.edits, "edit")}
-            </span>
-          )}
-          {insight.branchCount > 0 && (
-            <span>
-              {insight.branchCount} {plural(insight.branchCount, "branch", "branches")}
-            </span>
-          )}
-          {insight.prCount > 0 && (
-            <span>
-              {insight.prCount} {plural(insight.prCount, "PR")}
-            </span>
-          )}
-          {insight.memoryFileCount > 0 && (
-            <span>
-              {insight.memoryFileCount}{" "}
-              {insight.memoryFileCount === 1 ? "Claude memory" : "Claude memories"}
-            </span>
-          )}
-        </div>
-
-        {/* Sparkline */}
-        <div className="mt-4">
-          <MiniSparkline sessionsPerDay={insight.sessionsPerDay} size="md" />
-          <div className="mt-1 text-[10px] font-mono text-terminal-dimmer">last 30 days</div>
-        </div>
-
-        <button
-          onClick={onOpenSessions}
-          className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-terminal-green-subtle px-3 py-1.5 text-xs font-sans font-semibold text-terminal-green hover:bg-terminal-green-emphasis transition-colors"
-        >
-          Open sessions →
-        </button>
+        {insight.lastActivity && (
+          <span className="text-[10px] font-mono text-terminal-dimmer shrink-0">
+            {timeAgo(insight.lastActivity, "long")}
+          </span>
+        )}
       </div>
+
+      {/* Stats grid */}
+      <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
+        <Stat
+          label={plural(insight.sessions, "session")}
+          value={insight.sessions.toString()}
+          tone="text"
+        />
+        {insight.durationMs > 0 && (
+          <Stat label="active time" value={formatDuration(insight.durationMs)} tone="blue" />
+        )}
+        {insight.cost > 0 && (
+          <Stat label="cost" value={`$${insight.cost.toFixed(2)}`} tone="orange" />
+        )}
+        <Stat
+          label={plural(insight.prompts, "prompt")}
+          value={fmtNum(insight.prompts)}
+          tone="green"
+        />
+      </div>
+
+      {/* Secondary stats */}
+      <div className="mt-3 flex items-center gap-3 text-[10px] font-mono text-terminal-dimmer flex-wrap">
+        {insight.toolCalls > 0 && (
+          <span>
+            {fmtNum(insight.toolCalls)} {plural(insight.toolCalls, "tool")}
+          </span>
+        )}
+        {insight.edits > 0 && (
+          <span>
+            {fmtNum(insight.edits)} {plural(insight.edits, "edit")}
+          </span>
+        )}
+        {insight.branchCount > 0 && (
+          <span>
+            {insight.branchCount} {plural(insight.branchCount, "branch", "branches")}
+          </span>
+        )}
+        {insight.prCount > 0 && (
+          <span>
+            {insight.prCount} {plural(insight.prCount, "PR")}
+          </span>
+        )}
+        {insight.memoryFileCount > 0 && (
+          <span>
+            {insight.memoryFileCount}{" "}
+            {insight.memoryFileCount === 1 ? "Claude memory" : "Claude memories"}
+          </span>
+        )}
+      </div>
+
+      {/* Sparkline */}
+      <div className="mt-4">
+        <MiniSparkline sessionsPerDay={insight.sessionsPerDay} size="md" />
+        <div className="mt-1 text-[10px] font-mono text-terminal-dimmer">last 30 days</div>
+      </div>
+
+      <button
+        onClick={onOpenSessions}
+        className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-terminal-green-subtle px-3 py-1.5 text-xs font-sans font-semibold text-terminal-green hover:bg-terminal-green-emphasis transition-colors"
+      >
+        Open sessions →
+      </button>
     </div>
   );
 }
@@ -411,11 +396,10 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
     return sorted;
   }, [userInsights]);
 
-  const selectedInsight = useMemo(
-    () =>
-      selectedProject === ALL_PROJECTS ? null : projects.find((p) => p.project === selectedProject),
-    [projects, selectedProject],
-  );
+  const selectedInsight =
+    selectedProject === ALL_PROJECTS
+      ? null
+      : (projects.find((p) => p.project === selectedProject) ?? null);
 
   const isScanning = scanStatus?.running && scanStatus.total > 0;
 
@@ -452,10 +436,8 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
     lastActivity: p.lastActivity,
   }));
 
-  // Tabs: when a single project is selected, drop the standalone Timeline tab
-  // because Overview already embeds the timeline below the hero card. Hot Files
-  // is still its own tab — the file grid + detail layout takes too much space
-  // to live inside Overview.
+  // Single-project Overview already embeds the timeline; the standalone tab
+  // is redundant and dropped. Hot Files stays as its own tab.
   const isSingleProject = selectedProject !== ALL_PROJECTS;
   const visibleTabs = isSingleProject
     ? PROJECT_VIEW_TABS.filter((t) => t.id !== "timeline")
@@ -471,8 +453,6 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
         selected={selectedProject}
         onSelect={(project) => {
           setSelectedProject(project);
-          // Reset to overview when a new project is picked so users see the
-          // hero card first, not whatever inner tab was previously open.
           setMode("overview");
         }}
       />
@@ -544,9 +524,6 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
                 insight={selectedInsight}
                 onOpenSessions={() => openSessionsForProject(selectedProject)}
               />
-              {/* Single-project Overview embeds the timeline + Top Sessions
-                  inline so users see project info, when work happened, and
-                  which sessions mattered without switching tabs. */}
               <SessionRelationshipsView view="timeline" projectFilter={projectFilterArg} />
             </>
           )}

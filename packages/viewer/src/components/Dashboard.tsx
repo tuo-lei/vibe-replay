@@ -41,7 +41,7 @@ import {
 import ProjectsPanel from "./ProjectsPanel";
 import { formatDuration } from "./StatsPanel";
 
-type Tab = "home" | "sessions" | "replays" | "projects" | "insights";
+export type Tab = "home" | "sessions" | "replays" | "projects" | "insights";
 
 const MoreDotsIcon = () => (
   <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">

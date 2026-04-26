@@ -7,6 +7,11 @@ export function shortName(project: string): string {
   return project.split("/").pop() || project;
 }
 
+/** Returns `singular` for count === 1, otherwise `pluralForm` (defaults to `${singular}s`). */
+export function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
+  return count === 1 ? singular : pluralForm;
+}
+
 /**
  * Compact relative time. Pass `format: "long"` for ProjectsPanel-style suffixes
  * ("just now", "5m ago"), or omit for SessionRelationshipsView-style ("now", "5m").

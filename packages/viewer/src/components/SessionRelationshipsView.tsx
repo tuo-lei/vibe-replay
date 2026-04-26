@@ -6,6 +6,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { type ScanResultSession, useRelationshipData } from "../hooks/useRelationshipData";
+import { plural } from "../utils/format";
 import { isAutomated, sessionScore } from "../utils/sessionSignals";
 import {
   cleanPrompt,
@@ -38,10 +39,6 @@ function fmtDuration(ms?: number): string {
   const h = Math.floor(ms / 3600000);
   const m = Math.round((ms % 3600000) / 60000);
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
-}
-
-function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
-  return count === 1 ? singular : pluralForm;
 }
 
 function sessionTitle(s: ScanResultSession): string {
@@ -147,16 +144,23 @@ function groupByProject(
       const bStart = b.startTime ? new Date(b.startTime).getTime() : 0;
       return bStart - aStart;
     });
-    const lastActivityMs = sorted.reduce((max, s) => {
-      if (!s.startTime) return max;
-      const startMs = new Date(s.startTime).getTime();
-      return Math.max(max, activeEndMs(startMs, s));
-    }, 0);
+    let totalDurationMs = 0;
+    let totalCost = 0;
+    let lastActivityMs = 0;
+    for (const s of sorted) {
+      totalDurationMs += s.durationMs ?? 0;
+      totalCost += s.costEstimate ?? 0;
+      if (s.startTime) {
+        const startMs = new Date(s.startTime).getTime();
+        const endMs = activeEndMs(startMs, s);
+        if (endMs > lastActivityMs) lastActivityMs = endMs;
+      }
+    }
     groups.push({
       project,
       sessions: sorted,
-      totalDurationMs: sorted.reduce((s, x) => s + (x.durationMs ?? 0), 0),
-      totalCost: sorted.reduce((s, x) => s + (x.costEstimate ?? 0), 0),
+      totalDurationMs,
+      totalCost,
       lastActivity:
         lastActivityMs > 0 ? new Date(lastActivityMs).toISOString() : sorted[0]?.startTime,
       colorIdx: idx++,
@@ -250,35 +254,38 @@ function packTimelineLanes(
   unlimited: boolean = false,
 ): { laneAssignments: Map<string, number>; laneCount: number; dropped: number } {
   const ordered = [...sessions].sort((a, b) => a.startMs - b.startMs || b.score - a.score);
-  const laneIntervals: Array<Array<{ startMs: number; endMs: number }>> = [];
+  // Sessions are processed in start-time order, so each lane's only relevant
+  // overlap candidate is the last interval placed in it — anything earlier
+  // ended even sooner. Track only that single end timestamp per lane.
+  const laneEnds: number[] = [];
   const laneAssignments = new Map<string, number>();
   let dropped = 0;
   const cap = unlimited ? Infinity : MAX_LANES_PER_PROJECT;
 
   for (const s of ordered) {
     let placed = -1;
-    for (let i = 0; i < laneIntervals.length; i++) {
-      const overlap = laneIntervals[i].some((iv) => s.startMs < iv.endMs && s.endMs > iv.startMs);
-      if (!overlap) {
+    for (let i = 0; i < laneEnds.length; i++) {
+      if (s.startMs >= laneEnds[i]) {
         placed = i;
         break;
       }
     }
 
     if (placed === -1) {
-      if (laneIntervals.length >= cap) {
+      if (laneEnds.length >= cap) {
         dropped++;
         continue;
       }
-      placed = laneIntervals.length;
-      laneIntervals.push([]);
+      placed = laneEnds.length;
+      laneEnds.push(s.endMs);
+    } else {
+      laneEnds[placed] = s.endMs;
     }
 
-    laneIntervals[placed].push({ startMs: s.startMs, endMs: s.endMs });
     laneAssignments.set(s.original.sessionId, placed);
   }
 
-  return { laneAssignments, laneCount: laneIntervals.length, dropped };
+  return { laneAssignments, laneCount: laneEnds.length, dropped };
 }
 
 /**
@@ -318,18 +325,24 @@ function buildTimeline(
   totalSessions: number;
   hiddenAutomatedCount: number;
 } {
-  // Determine time bounds. If an explicit window is provided (range selector),
-  // use it. Otherwise fall back to min/max across all sessions ("All" view).
-  // Use the *active* end (start + durationMs), not raw endTime — see comment
-  // on activeEndMs.
+  // Cache parsed start/end times per session — used at least 3 times each
+  // (bounds, window filter, interval map). new Date(...).getTime() isn't free.
+  const timed: Array<{
+    session: ScanResultSession;
+    startMs: number;
+    endMs: number;
+    group: ProjectGroup;
+  }> = [];
   let minMs = Infinity;
   let maxMs = -Infinity;
   for (const g of groups) {
     for (const s of g.sessions) {
       if (!s.startTime) continue;
       const startMs = new Date(s.startTime).getTime();
-      minMs = Math.min(minMs, startMs);
-      maxMs = Math.max(maxMs, activeEndMs(startMs, s));
+      const endMs = activeEndMs(startMs, s);
+      timed.push({ session: s, startMs, endMs, group: g });
+      if (startMs < minMs) minMs = startMs;
+      if (endMs > maxMs) maxMs = endMs;
     }
   }
 
@@ -356,35 +369,30 @@ function buildTimeline(
     rangeEnd = maxMs + paddingMs;
   }
   const rangeMs = rangeEnd - rangeStart;
+  const minMsPerPx = rangeMs / APPROX_TIMELINE_WIDTH_PX;
+
+  // Bucket per-project after window + automated filtering.
+  const perGroup = new Map<ProjectGroup, typeof timed>();
+  let hiddenAutomatedCount = 0;
+  for (const entry of timed) {
+    if (entry.endMs < rangeStart || entry.startMs > rangeEnd) continue;
+    if (!includeAutomated && isAutomated(entry.session)) {
+      hiddenAutomatedCount++;
+      continue;
+    }
+    const bucket = perGroup.get(entry.group);
+    if (bucket) bucket.push(entry);
+    else perGroup.set(entry.group, [entry]);
+  }
 
   const projects: TimelineProject[] = [];
   let totalSessions = 0;
-  let hiddenAutomatedCount = 0;
 
   for (const g of groups) {
-    // Filter to window + automated policy. Use the *active* end so a session
-    // whose JSONL stayed open through 10 days of idle doesn't get pulled into
-    // any window its actual work didn't reach.
-    const filtered = g.sessions.filter((s) => {
-      if (!s.startTime) return false;
-      const startMs = new Date(s.startTime).getTime();
-      const endMs = activeEndMs(startMs, s);
-      if (endMs < rangeStart || startMs > rangeEnd) return false;
-      if (!includeAutomated && isAutomated(s)) {
-        hiddenAutomatedCount++;
-        return false;
-      }
-      return true;
-    });
+    const filtered = perGroup.get(g);
+    if (!filtered || filtered.length === 0) continue;
 
-    if (filtered.length === 0) continue;
-
-    // Build interval list for lane packing. The only visual floor is a small
-    // hit target for very short sessions; width otherwise tracks active time.
-    const minMsPerPx = rangeMs / APPROX_TIMELINE_WIDTH_PX;
-    const intervals = filtered.map((s) => {
-      const startMs = new Date(s.startTime!).getTime();
-      const realEndMs = activeEndMs(startMs, s);
+    const intervals = filtered.map(({ session: s, startMs, endMs: realEndMs }) => {
       const score = sessionScore(s);
       const visualWidthMs = Math.max(realEndMs - startMs, minWidthFor(score) * minMsPerPx);
       return {
@@ -532,21 +540,15 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
     () => buildTimeline(groups, start, end, showAutomated, expandedProjects),
     [groups, start, end, showAutomated, expandedProjects],
   );
-  const timelineSessions = useMemo(
-    () =>
-      projects.flatMap((project) =>
-        project.sessions.map((session) => ({
-          ...session,
-          project: project.project,
-          colorIdx: project.colorIdx,
-        })),
-      ),
-    [projects],
-  );
-  const estimatedTimingCount = useMemo(
-    () => timelineSessions.filter((ts) => sessionHasEstimatedTime(ts.session)).length,
-    [timelineSessions],
-  );
+  const estimatedTimingCount = useMemo(() => {
+    let count = 0;
+    for (const p of projects) {
+      for (const ts of p.sessions) {
+        if (sessionHasEstimatedTime(ts.session)) count++;
+      }
+    }
+    return count;
+  }, [projects]);
 
   const LABEL_WIDTH = 140;
 
@@ -753,19 +755,13 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                             )}
                             {showWick && (
                               <>
-                                {/* K-line wick: bright strip along the bottom marks
-                                      the actual session duration within the (widened)
-                                      bar. Thin enough to coexist with the title above,
-                                      bright enough to register against any project
-                                      color's fill. */}
+                                {/* Bottom strip + end-tick mark the actual session
+                                    duration inside the min-width-padded bar. */}
                                 <span
                                   className="pointer-events-none absolute bottom-0 left-0 h-[2px] rounded-r-full bg-white/85"
                                   style={{ width: `${ts.realDurationFraction * 100}%` }}
                                   title="actual duration"
                                 />
-                                {/* End-tick at the wick's right edge so the real
-                                      end-position is visible even when the wick is
-                                      only a few pixels wide. */}
                                 <span
                                   className="pointer-events-none absolute bottom-0 h-[6px] w-[2px] bg-white/90"
                                   style={{
@@ -1179,9 +1175,6 @@ export default function SessionRelationshipsView({
     () => filteredSessions.filter((session) => sessionHasEstimatedTime(session)).length,
     [filteredSessions],
   );
-  // Totals are derived once per render — same reduce was previously running
-  // twice in the JSX (once for the value, once for plural). For a 300-session
-  // scan that's noticeable and pointless.
   const totals = useMemo(() => {
     let durationMs = 0;
     let cost = 0;
