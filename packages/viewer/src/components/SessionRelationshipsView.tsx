@@ -11,7 +11,6 @@ import { isAutomated, sessionScore } from "../utils/sessionSignals";
 import {
   cleanPrompt,
   formatDataSourceLabel,
-  navigateTo,
   normalizeTitleText,
   projectName,
   providerBadgeLabel,
@@ -61,6 +60,17 @@ function sessionBadges(s: ScanResultSession): string[] {
   if (source) badges.push(source);
   if (sessionHasEstimatedTime(s)) badges.push("estimated time");
   return badges;
+}
+
+/**
+ * Pop the Sessions tab's SessionDetailPopup for a session, regardless of
+ * whether a replay has been generated yet. Dashboard listens for this event,
+ * switches to the Sessions tab, and forwards the slug via URL so SessionsPanel
+ * can open the popup uniformly for both "open replay" and "generate replay"
+ * cases.
+ */
+function openSessionPopup(slug: string) {
+  window.dispatchEvent(new CustomEvent("vibe-open-session", { detail: { slug } }));
 }
 
 function rangeEmptyLabel(range: TimelineRange): string {
@@ -200,6 +210,13 @@ interface TimelineSession {
   fillAlpha: number;
   opacity: number;
   realDurationFraction: number;
+  /**
+   * True when the bar would overflow the lane's right edge if rendered from
+   * its leftPct. Right-anchored bars hug the right edge with their full
+   * minWidth and grow leftward — the bar's left edge no longer aligns with
+   * startTime, but the title stays readable. Tooltip carries the exact time.
+   */
+  rightAnchored: boolean;
 }
 
 interface TimelineProject {
@@ -392,15 +409,24 @@ function buildTimeline(
     const filtered = perGroup.get(g);
     if (!filtered || filtered.length === 0) continue;
 
+    // Build packing intervals using the bar's *visual* extent (after right-
+    // anchoring + min-width). Otherwise multiple late sessions all hugging the
+    // right edge get placed into the same lane and overlap each other.
     const intervals = filtered.map(({ session: s, startMs, endMs: realEndMs }) => {
       const score = sessionScore(s);
-      const visualWidthMs = Math.max(realEndMs - startMs, minWidthFor(score) * minMsPerPx);
+      const minWidthMs = minWidthFor(score) * minMsPerPx;
+      const naturalEndMs = Math.max(realEndMs, startMs + minWidthMs);
+      const rightAnchored = naturalEndMs > rangeEnd;
+      const visStartMs = rightAnchored ? Math.min(startMs, rangeEnd - minWidthMs) : startMs;
+      const visEndMs = rightAnchored ? rangeEnd : naturalEndMs;
       return {
-        startMs,
-        endMs: startMs + visualWidthMs, // visual end for packing
-        realEndMs, // for tooltip / display
+        startMs: visStartMs,
+        endMs: visEndMs,
+        realStartMs: startMs,
+        realEndMs,
         score,
         original: s,
+        rightAnchored,
       };
     });
 
@@ -413,16 +439,13 @@ function buildTimeline(
     for (const it of intervals) {
       const lane = laneAssignments.get(it.original.sessionId);
       if (lane == null) continue; // dropped due to lane cap
-      // Clip to viewport: if the bar starts before the visible window, push the
-      // left edge to 0 and shorten the width. Avoids "mid-string truncation"
-      // where the visible portion starts at some arbitrary character of the title.
-      const rawLeftPct = ((it.startMs - rangeStart) / rangeMs) * 100;
+      // Clip to viewport on the left so a bar starting before the window
+      // begins at 0% (no mid-string truncation).
+      const rawLeftPct = ((it.realStartMs - rangeStart) / rangeMs) * 100;
       const rawRightPct = ((it.realEndMs - rangeStart) / rangeMs) * 100;
       const leftPct = Math.max(0, rawLeftPct);
       const widthPct = Math.max(0, rawRightPct - leftPct);
       const minWidthPx = minWidthFor(it.score);
-      // Compare real-duration width vs. min-width-padded width to figure out
-      // how much of the rendered bar is actually "real time" vs. visual reach.
       const realWidthPx = (widthPct / 100) * APPROX_TIMELINE_WIDTH_PX;
       const visualWidthPx = Math.max(realWidthPx, minWidthPx);
       const realDurationFraction = visualWidthPx > 0 ? Math.min(1, realWidthPx / visualWidthPx) : 1;
@@ -437,6 +460,7 @@ function buildTimeline(
         fillAlpha: fillAlphaFor(it.score),
         opacity: opacityFor(it.score),
         realDurationFraction,
+        rightAnchored: it.rightAnchored,
       });
     }
 
@@ -709,13 +733,15 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                             key={ts.session.sessionId}
                             className="absolute overflow-hidden rounded-md text-left shadow-layer-sm transition-all duration-200 ease-material hover:z-10 hover:shadow-layer-md"
                             style={{
-                              left: `${ts.leftPct}%`,
-                              // Cap min-width to whatever space is left
-                              // between the bar's start and the lane's right
-                              // edge — otherwise bars near "today" overflow
-                              // the overflow-hidden lane container and get
-                              // visually truncated.
-                              width: `max(${ts.widthPct}%, min(${ts.minWidthPx}px, calc(100% - ${ts.leftPct}%)))`,
+                              ...(ts.rightAnchored
+                                ? // Hug the right edge with full minWidth so the
+                                  // title stays readable for sessions starting
+                                  // close to "now"; the bar grows leftward.
+                                  { right: 0, width: `${ts.minWidthPx}px` }
+                                : {
+                                    left: `${ts.leftPct}%`,
+                                    width: `max(${ts.widthPct}%, ${ts.minWidthPx}px)`,
+                                  }),
                               top,
                               height: ts.heightPx,
                               opacity,
@@ -723,7 +749,7 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                               backgroundColor: hexToRgba(accentColor, ts.fillAlpha),
                             }}
                             aria-label={`Open ${sessionTitle(ts.session)}`}
-                            onClick={() => navigateTo({ view: null, session: ts.session.slug })}
+                            onClick={() => openSessionPopup(ts.session.slug)}
                             onMouseEnter={(e) => {
                               setTooltip({
                                 session: ts.session,
@@ -1093,7 +1119,7 @@ function FileConnectionsView({
                       <button
                         type="button"
                         key={s.session.sessionId}
-                        onClick={() => navigateTo({ view: null, session: s.session.slug })}
+                        onClick={() => openSessionPopup(s.session.slug)}
                         className="flex w-full flex-col gap-2 rounded-xl bg-terminal-bg/45 p-3 text-left shadow-layer-sm transition-all duration-200 ease-material hover:bg-terminal-surface-hover hover:shadow-layer-md sm:flex-row sm:items-start sm:gap-3"
                       >
                         <div

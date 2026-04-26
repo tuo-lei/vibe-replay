@@ -1295,6 +1295,18 @@ function SessionsPanel() {
   const [generatingSlug, setGeneratingSlug] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  // When another panel (Projects → Timeline / Hot Files) routes us here with
+  // `?selected=<slug>`, open the popup for that session and strip the param
+  // so a refresh doesn't keep re-opening it.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const selected = params.get("selected");
+    if (!selected) return;
+    setSelectedSlug(selected);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("selected");
+    window.history.replaceState(null, "", url);
+  }, []);
   const wasEnrichingRef = useRef(false);
   const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());
   const [enrichmentStatus, setEnrichmentStatus] = useState<SourcesEnrichmentStatus | null>(null);
@@ -2730,6 +2742,23 @@ export default function Dashboard({
     window.addEventListener("popstate", handler);
     return () => window.removeEventListener("popstate", handler);
   }, [getTabFromUrl]);
+
+  // Cross-panel "open this session in the Sessions popup" channel. Dispatched
+  // from Projects → Timeline / Hot Files when the user clicks a session that
+  // may or may not have a generated replay yet. We switch to Sessions tab and
+  // pass the slug via URL — SessionsPanel's mount effect picks it up and opens
+  // SessionDetailPopup, which handles both the "open replay" and "generate
+  // replay" cases uniformly.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const slug = (e as CustomEvent<{ slug: string }>).detail?.slug;
+      if (!slug) return;
+      setTab("sessions");
+      navigateTo({ tab: "sessions", selected: slug, project: null, q: null, archived: null });
+    };
+    window.addEventListener("vibe-open-session", handler);
+    return () => window.removeEventListener("vibe-open-session", handler);
+  }, []);
 
   const handleTabChange = (id: Tab) => {
     setTab(id);
