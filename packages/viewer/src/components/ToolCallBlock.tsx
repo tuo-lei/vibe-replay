@@ -5,6 +5,8 @@ import BashBlock from "./BashBlock";
 import CodeDiffBlock from "./CodeDiffBlock";
 import { formatToolDuration, formatTokens } from "./StatsPanel";
 
+const CHEVRON = "▶";
+
 function ToolDuration({ ms }: { ms?: number }) {
   const label = formatToolDuration(ms);
   if (!label) return null;
@@ -27,6 +29,17 @@ function ToolTokens({ tokens }: { tokens?: number }) {
       title={`~${label} tokens added to context (heuristic estimate)`}
     >
       ~{label} tok
+    </span>
+  );
+}
+
+function ErrorBadge() {
+  return (
+    <span
+      className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30 shrink-0"
+      title="This tool call returned an error"
+    >
+      ERROR
     </span>
   );
 }
@@ -58,26 +71,26 @@ interface Props {
 }
 
 function toolIcon(name: string): string {
-  if (name.startsWith("mcp__")) return "\uD83D\uDD0C"; // 🔌
+  if (name.startsWith("mcp__")) return "🔌"; // 🔌
   switch (name) {
     case "Read":
-      return "\uD83D\uDCC4";
+      return "📄";
     case "Write":
-      return "\u270F\uFE0F";
+      return "✏️";
     case "Edit":
-      return "\u2702\uFE0F";
+      return "✂️";
     case "Delete":
-      return "\uD83D\uDDD1\uFE0F";
+      return "🗑️";
     case "Bash":
       return "$";
     case "Glob":
-      return "\uD83D\uDD0D";
+      return "🔍";
     case "Grep":
-      return "\uD83D\uDD0E";
+      return "🔎";
     case "Agent":
-      return "\uD83E\uDD16";
+      return "🤖";
     default:
-      return "\u2699\uFE0F";
+      return "⚙️";
   }
 }
 
@@ -89,6 +102,19 @@ const AGENT_TYPE_COLORS: Record<string, string> = {
   "claude-code-guide": "bg-amber-500/20 text-amber-300 border-amber-500/30",
 };
 
+/** Distinct accent color used for the subagent left border + faint background. */
+const AGENT_TYPE_ACCENTS: Record<string, { border: string; bg: string }> = {
+  Explore: { border: "border-l-blue-400", bg: "bg-blue-500/[0.04]" },
+  Plan: { border: "border-l-purple-400", bg: "bg-purple-500/[0.04]" },
+  Shell: { border: "border-l-cyan-400", bg: "bg-cyan-500/[0.04]" },
+  "general-purpose": { border: "border-l-green-400", bg: "bg-green-500/[0.04]" },
+  "claude-code-guide": { border: "border-l-amber-400", bg: "bg-amber-500/[0.04]" },
+};
+
+function agentAccent(type: string) {
+  return AGENT_TYPE_ACCENTS[type] || { border: "border-l-gray-400", bg: "bg-gray-500/[0.04]" };
+}
+
 function AgentTypeBadge({ type }: { type: string }) {
   const colors = AGENT_TYPE_COLORS[type] || "bg-gray-500/20 text-gray-300 border-gray-500/30";
   return (
@@ -96,75 +122,38 @@ function AgentTypeBadge({ type }: { type: string }) {
   );
 }
 
-function SubAgentView({ subAgent }: { subAgent: SubAgent }) {
-  const [showScenes, setShowScenes] = useState(false);
-  const totalTokens = subAgentTotalTokens(subAgent);
-  const totalDurationMs = subAgentTotalDurationMs(subAgent);
-
+/** Prominent "TASK" pill so subagents are immediately distinguishable from
+ * regular tool calls — the Agent block is conceptually a sub-conversation,
+ * not a leaf operation, and the eye should land on it first. */
+function TaskBadge() {
   return (
-    <div className="border-t border-terminal-border-subtle">
-      {/* Summary bar */}
-      <div className="px-3 py-2 bg-terminal-surface-hover/50">
-        <div className="flex items-center gap-2 flex-wrap">
-          <AgentTypeBadge type={subAgent.agentType} />
-          {subAgent.model && (
-            <span className="text-[10px] text-terminal-dim font-mono">{subAgent.model}</span>
-          )}
-          <span className="text-[10px] text-terminal-dim">|</span>
-          <span className="text-[10px] text-terminal-dim font-mono">
-            {subAgent.toolCalls} tools
-          </span>
-          {subAgent.thinkingBlocks > 0 && (
-            <span className="text-[10px] text-terminal-dim font-mono">
-              {subAgent.thinkingBlocks} thinking
-            </span>
-          )}
-          {subAgent.textResponses > 0 && (
-            <span className="text-[10px] text-terminal-dim font-mono">
-              {subAgent.textResponses} responses
-            </span>
-          )}
-          {totalTokens > 0 && (
-            <>
-              <span className="text-[10px] text-terminal-dim">|</span>
-              <span
-                className="text-[10px] text-terminal-purple/80 font-mono"
-                title="Total tokens billed for this subagent (input + output + cache)"
-              >
-                {formatTokens(totalTokens)} tok
-              </span>
-            </>
-          )}
-          {totalDurationMs > 0 && <ToolDuration ms={totalDurationMs} />}
-        </div>
-        {subAgent.description && (
-          <div className="text-[11px] text-terminal-text/70 mt-1 italic">
-            {subAgent.description}
-          </div>
-        )}
-      </div>
+    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-terminal-purple/20 text-terminal-purple border border-terminal-purple/40 tracking-wider">
+      TASK
+    </span>
+  );
+}
 
-      {/* Expandable scenes */}
+function SubAgentView({ subAgent }: { subAgent: SubAgent }) {
+  const accent = agentAccent(subAgent.agentType);
+  return (
+    <div className={`border-t border-terminal-border-subtle ${accent.bg}`}>
+      {subAgent.prompt && (
+        <div className="px-3 py-2 border-b border-terminal-border-subtle/50">
+          <div className="text-[10px] text-terminal-dim font-mono uppercase tracking-wide mb-1">
+            Prompt
+          </div>
+          <div className="text-[11px] text-terminal-text/85 font-mono whitespace-pre-wrap break-words max-h-[120px] overflow-y-auto">
+            {subAgent.prompt}
+          </div>
+        </div>
+      )}
       {subAgent.scenes.length > 0 && (
-        <div className="border-t border-terminal-border-subtle">
-          <button
-            onClick={() => setShowScenes(!showScenes)}
-            className="w-full px-3 py-1.5 text-left text-[11px] text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors"
-          >
-            <span
-              className={`inline-block transition-transform mr-1 ${showScenes ? "rotate-90" : ""}`}
-            >
-              {"\u25B6"}
-            </span>
-            {showScenes ? "Hide" : "Show"} agent conversation ({subAgent.scenes.length} scenes)
-          </button>
-          {showScenes && (
-            <div className="px-3 pb-2 space-y-1 max-h-[400px] overflow-y-auto">
-              {subAgent.scenes.map((s, i) => (
-                <SubAgentSceneItem key={i} scene={s} />
-              ))}
-            </div>
-          )}
+        <div
+          className={`pl-3 pr-2 py-2 border-l-2 ${accent.border} ml-2 my-2 space-y-1 max-h-[500px] overflow-y-auto`}
+        >
+          {subAgent.scenes.map((s, i) => (
+            <SubAgentSceneItem key={i} scene={s} />
+          ))}
         </div>
       )}
     </div>
@@ -177,14 +166,14 @@ function SubAgentSceneItem({ scene }: { scene: Scene }) {
   if (scene.type === "thinking") {
     const tokenLabel = formatTokens(scene.tokens);
     return (
-      <div className="text-[10px] font-mono text-purple-400/70 pl-2 border-l-2 border-purple-500/20 py-0.5">
-        <span className="text-purple-400/50 mr-1">[thinking]</span>
+      <div className="text-[10px] font-mono text-purple-400/80 pl-2 border-l-2 border-purple-500/30 py-0.5">
+        <span className="text-purple-400/70 font-bold mr-1">[thinking]</span>
         {tokenLabel && (
-          <span className="text-purple-400/60 mr-1" title="Approximate thinking tokens">
+          <span className="text-purple-400/70 mr-1" title="Approximate thinking tokens">
             ~{tokenLabel} tok
           </span>
         )}
-        <span className="text-purple-400/60">
+        <span className="text-purple-400/70">
           {(scene.content || "").slice(0, 120)}
           {(scene.content || "").length > 120 ? "..." : ""}
         </span>
@@ -194,7 +183,7 @@ function SubAgentSceneItem({ scene }: { scene: Scene }) {
 
   if (scene.type === "text-response") {
     return (
-      <div className="text-[10px] font-mono text-terminal-text/80 pl-2 border-l-2 border-blue-500/20 py-0.5">
+      <div className="text-[10px] font-mono text-terminal-text/80 pl-2 border-l-2 border-blue-500/30 py-0.5">
         {(scene.content || "").slice(0, 200)}
         {(scene.content || "").length > 200 ? "..." : ""}
       </div>
@@ -202,20 +191,25 @@ function SubAgentSceneItem({ scene }: { scene: Scene }) {
   }
 
   if (scene.type === "tool-call") {
-    const toolScene = scene as Extract<Scene, { type: "tool-call" }>;
+    const toolScene = scene as ToolScene;
+    const errorAccent = toolScene.isError
+      ? "border-l-red-500 bg-red-500/5"
+      : "border-l-orange-500/30";
     return (
-      <div className="pl-2 border-l-2 border-orange-500/20 py-0.5">
+      <div className={`pl-2 border-l-2 py-0.5 ${errorAccent}`}>
         <button
           onClick={() => setExpanded(!expanded)}
           className="flex items-center gap-1 text-[10px] font-mono w-full text-left hover:bg-terminal-surface-hover/30 rounded px-1"
         >
-          <span className="text-terminal-orange font-bold">
+          <span
+            className={`font-bold ${toolScene.isError ? "text-red-400" : "text-terminal-orange"}`}
+          >
             {displayToolName(toolScene.toolName)}
           </span>
           <span className="text-terminal-dim truncate flex-1">
             {summarizeInput(toolScene.toolName, toolScene.input)}
           </span>
-          {toolScene.isError && <span className="text-red-400 text-[9px]">ERR</span>}
+          {toolScene.isError && <ErrorBadge />}
           <ToolTokens tokens={toolScene.resultTokens} />
           <ToolDuration ms={toolScene.durationMs} />
         </button>
@@ -234,14 +228,19 @@ function SubAgentSceneItem({ scene }: { scene: Scene }) {
 export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: Props) {
   const [expanded, setExpanded] = useState(false);
 
-  // When force-collapsing, show a one-liner summary for all tool types
+  // When force-collapsing, show a one-liner summary for all tool types.
   if (forceCollapse) {
     return (
-      <div className="flex items-center gap-2 px-3 py-1 text-xs font-mono text-terminal-dim">
+      <div
+        className={`flex items-center gap-2 px-3 py-1 text-xs font-mono text-terminal-dim ${scene.isError ? "border-l-2 border-l-red-500 bg-red-500/5" : ""}`}
+      >
         <span>{toolIcon(scene.toolName)}</span>
-        <span className="text-terminal-orange font-bold">{displayToolName(scene.toolName)}</span>
+        <span className={`font-bold ${scene.isError ? "text-red-400" : "text-terminal-orange"}`}>
+          {displayToolName(scene.toolName)}
+        </span>
         <span className="truncate flex-1">{summarizeInput(scene.toolName, scene.input)}</span>
         {scene.subAgent && <AgentTypeBadge type={scene.subAgent.agentType} />}
+        {scene.isError && <ErrorBadge />}
         <ToolTokens tokens={scene.resultTokens} />
         <ToolDuration ms={scene.durationMs} />
       </div>
@@ -256,6 +255,8 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
         stdout={scene.bashOutput.stdout}
         isActive={isActive}
         durationMs={scene.durationMs}
+        resultTokens={scene.resultTokens}
+        isError={scene.isError}
       />
     );
   }
@@ -269,73 +270,94 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
         oldContent={scene.diff.oldContent}
         newContent={scene.diff.newContent}
         isActive={isActive}
+        isError={scene.isError}
       />
     );
   }
 
-  // Agent tool call with subagent data — special rendering
+  // Agent tool call with subagent data — rendered with prominent TASK header,
+  // agent-color left border, and inline scene rendering when expanded.
   if (scene.toolName === "Agent" && scene.subAgent) {
+    const sa = scene.subAgent;
+    const accent = agentAccent(sa.agentType);
+    const totalTok = subAgentTotalTokens(sa);
+    const totalDur = subAgentTotalDurationMs(sa);
+    const description = sa.description || (scene.input.description as string) || "";
     return (
       <div>
-        <div className="bg-terminal-surface rounded-xl overflow-hidden shadow-layer-sm">
+        <div
+          className={`bg-terminal-surface rounded-xl overflow-hidden shadow-layer-sm border-l-4 ${accent.border}`}
+        >
           <button
             onClick={() => setExpanded(!expanded)}
-            className="w-full flex items-center gap-2 px-3 py-2 bg-terminal-surface hover:bg-terminal-surface-hover transition-colors duration-200 ease-material text-left"
+            className="w-full flex flex-col gap-1.5 px-3 py-2.5 bg-terminal-surface hover:bg-terminal-surface-hover transition-colors duration-200 ease-material text-left"
           >
-            <span className="text-xs font-mono">{toolIcon("Agent")}</span>
-            <span className="text-xs font-mono font-bold text-terminal-orange">Agent</span>
-            <AgentTypeBadge type={scene.subAgent.agentType} />
-            <span className="text-xs text-terminal-dim font-mono truncate flex-1">
-              {scene.subAgent.description || scene.input.description || ""}
-            </span>
-            <span className="text-[10px] text-terminal-dim font-mono">
-              {scene.subAgent.toolCalls} tools
-            </span>
-            {(() => {
-              const t = subAgentTotalTokens(scene.subAgent);
-              return t > 0 ? (
-                <span
-                  className="text-[10px] text-terminal-purple/80 font-mono"
-                  title="Total subagent tokens (input + output + cache)"
-                >
-                  {formatTokens(t)} tok
+            <div className="flex items-center gap-2 flex-wrap">
+              <TaskBadge />
+              <AgentTypeBadge type={sa.agentType} />
+              {sa.model && (
+                <span className="text-[10px] text-terminal-dim font-mono">{sa.model}</span>
+              )}
+              <span className="text-[10px] text-terminal-dim font-mono">{sa.toolCalls} tools</span>
+              {sa.thinkingBlocks > 0 && (
+                <span className="text-[10px] text-terminal-dim font-mono">
+                  {sa.thinkingBlocks} thinking
                 </span>
-              ) : null;
-            })()}
-            <ToolDuration ms={scene.durationMs} />
-            <span
-              className={`text-xs text-terminal-dim transition-transform ${expanded ? "rotate-90" : ""}`}
-            >
-              {"\u25B6"}
-            </span>
+              )}
+              <span className="flex-1" />
+              {totalTok > 0 && (
+                <span
+                  className="text-[10px] text-terminal-purple font-mono font-bold"
+                  title="Total tokens billed for this subagent (input + output + cache)"
+                >
+                  {formatTokens(totalTok)} tok
+                </span>
+              )}
+              {totalDur > 0 && <ToolDuration ms={totalDur} />}
+              <span
+                className={`text-xs text-terminal-dim transition-transform ${expanded ? "rotate-90" : ""}`}
+              >
+                {CHEVRON}
+              </span>
+            </div>
+            {description && (
+              <div className="text-xs text-terminal-text/90 font-mono">{description}</div>
+            )}
           </button>
-          {expanded && <SubAgentView subAgent={scene.subAgent} />}
+          {expanded && <SubAgentView subAgent={sa} />}
         </div>
       </div>
     );
   }
 
   // Generic tool call
+  const errorRing = scene.isError ? "ring-1 ring-red-500/40 border-l-2 border-l-red-500" : "";
+  const errorBg = scene.isError ? "bg-red-500/5" : "";
   return (
     <div>
-      <div className="bg-terminal-surface rounded-xl overflow-hidden shadow-layer-sm">
+      <div
+        className={`bg-terminal-surface rounded-xl overflow-hidden shadow-layer-sm ${errorRing}`}
+      >
         <button
           onClick={() => setExpanded(!expanded)}
-          className="w-full flex items-center gap-2 px-3 py-2 bg-terminal-surface hover:bg-terminal-surface-hover transition-colors duration-200 ease-material text-left"
+          className={`w-full flex items-center gap-2 px-3 py-2 hover:bg-terminal-surface-hover transition-colors duration-200 ease-material text-left ${errorBg || "bg-terminal-surface"}`}
         >
           <span className="text-xs font-mono">{toolIcon(scene.toolName)}</span>
-          <span className="text-xs font-mono font-bold text-terminal-orange">
+          <span
+            className={`text-xs font-mono font-bold ${scene.isError ? "text-red-400" : "text-terminal-orange"}`}
+          >
             {displayToolName(scene.toolName)}
           </span>
           <span className="text-xs text-terminal-dim font-mono truncate flex-1">
             {summarizeInput(scene.toolName, scene.input)}
           </span>
+          {scene.isError && <ErrorBadge />}
           <ToolTokens tokens={scene.resultTokens} />
           <ToolDuration ms={scene.durationMs} />
           <span
             className={`text-xs text-terminal-dim transition-transform ${expanded ? "rotate-90" : ""}`}
           >
-            {"\u25B6"}
+            {CHEVRON}
           </span>
         </button>
         {expanded && (
