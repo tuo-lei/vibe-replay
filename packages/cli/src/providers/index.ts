@@ -1,6 +1,7 @@
 import { claudeCodeProvider } from "./claude-code/index.js";
 import { claudeCoworkProvider } from "./claude-cowork/index.js";
 import { claudeDesktopProvider } from "./claude-desktop/index.js";
+import { codexProvider } from "./codex/index.js";
 import { cursorProvider } from "./cursor/index.js";
 import type { Provider } from "./types.js";
 import type { SessionInfo } from "../types.js";
@@ -9,13 +10,15 @@ const providers: Provider[] = [
   claudeCoworkProvider,
   claudeDesktopProvider,
   claudeCodeProvider,
+  codexProvider,
   cursorProvider,
 ];
 
 // Priority order for deduplication — lower index = higher priority.
 // Cowork ranks first because its audit.jsonl is self-contained and the only
 // source of truth for agent-mode sessions (no other provider can discover them).
-const PROVIDER_PRIORITY = ["claude-cowork", "claude-desktop", "claude-code", "cursor"];
+// Codex uses distinct rollout UUIDs, so it does not collide with the Claude family.
+const PROVIDER_PRIORITY = ["claude-cowork", "claude-desktop", "claude-code", "codex", "cursor"];
 
 export function getAllProviders(): Provider[] {
   return providers;
