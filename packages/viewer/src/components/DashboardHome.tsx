@@ -12,8 +12,6 @@ import {
   projectName,
   providerBadgeClass,
   providerBadgeLabel,
-  providerDisplayName,
-  providerFamily,
   replaySuggestedTitle,
   rollupTopProjects,
   type SourcesEnrichmentStatus,
@@ -36,7 +34,6 @@ interface InsightStats {
   totalPrompts: number;
   totalToolCalls: number;
   totalDuration: number;
-  providerBreakdown: { provider: string; count: number; label: string }[];
   projectCount: number;
   sessionsPerDay: Record<string, number>;
   recentSources: SourceSession[];
@@ -264,15 +261,6 @@ function computeInsights(sources: SourceSession[], replays: SessionSummary[]): I
     totalDuration += r.stats.durationMs || 0;
   }
 
-  // Provider breakdown
-  const providerCounts = new Map<string, number>();
-  for (const s of sources) {
-    providerCounts.set(s.provider, (providerCounts.get(s.provider) || 0) + 1);
-  }
-  const providerBreakdown = [...providerCounts.entries()]
-    .map(([provider, count]) => ({ provider, count, label: providerDisplayName(provider) }))
-    .sort((a, b) => b.count - a.count);
-
   // Projects
   const projects = new Set<string>();
   for (const s of sources) projects.add(s.project);
@@ -298,7 +286,6 @@ function computeInsights(sources: SourceSession[], replays: SessionSummary[]): I
     totalPrompts,
     totalToolCalls,
     totalDuration,
-    providerBreakdown,
     projectCount: projects.size,
     sessionsPerDay,
     recentSources: [...sources].sort((a, b) => b.timestamp.localeCompare(a.timestamp)).slice(0, 5),
@@ -697,16 +684,6 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   const displayProjectCount = Math.max(insights.projectCount, userInsights?.totalProjects ?? 0);
   const displayTotalPrompts = userInsights?.totalPrompts ?? insights.totalPrompts;
   const displayTotalToolCalls = userInsights?.totalToolCalls ?? insights.totalToolCalls;
-  const displayProviderBreakdown =
-    insights.providerBreakdown.length > 0
-      ? insights.providerBreakdown
-      : Object.entries(userInsights?.providers || {})
-          .map(([provider, count]) => ({
-            provider,
-            count,
-            label: providerDisplayName(provider),
-          }))
-          .sort((a, b) => b.count - a.count);
   const displaySessionsPerDay =
     Object.keys(insights.sessionsPerDay).length > 0
       ? insights.sessionsPerDay
@@ -982,82 +959,38 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
         {/* Combined Overview + Activity */}
         <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm">
           {/* Compact stats row */}
-          <div className="flex items-start justify-between mb-4">
-            <div className="grid grid-cols-4 gap-x-6 gap-y-1 flex-1 min-w-0">
-              <div>
-                <div className="text-2xl font-mono font-bold text-terminal-green tabular-nums">
-                  <AnimatedValue value={insights.totalSessions} />
-                </div>
-                <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest mt-0.5">
-                  sessions
-                </div>
+          <div className="grid grid-cols-4 gap-x-6 gap-y-1 mb-4">
+            <div>
+              <div className="text-2xl font-mono font-bold text-terminal-green tabular-nums">
+                <AnimatedValue value={insights.totalSessions} />
               </div>
-              <div>
-                <div className="text-2xl font-mono font-bold text-terminal-blue tabular-nums">
-                  <AnimatedValue value={insights.totalReplays} />
-                </div>
-                <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest mt-0.5">
-                  replays
-                </div>
-              </div>
-              <div>
-                <div className="text-2xl font-mono font-bold text-terminal-green tabular-nums">
-                  <AnimatedValue value={displayTotalPrompts} />
-                </div>
-                <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest mt-0.5">
-                  turns
-                </div>
-              </div>
-              <div>
-                <div className="text-2xl font-mono font-bold text-terminal-orange tabular-nums">
-                  <AnimatedValue value={displayTotalToolCalls} />
-                </div>
-                <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest mt-0.5">
-                  tool calls
-                </div>
+              <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest mt-0.5">
+                sessions
               </div>
             </div>
-            <div className="flex flex-col items-end gap-1 shrink-0">
-              {displayProviderBreakdown.map((b) => {
-                // Literal class strings (not templated) so Tailwind's content
-                // scanner emits them. All Claude sub-providers share the
-                // orange family so the home chip matches the insights bars.
-                const family = providerFamily(b.provider);
-                const chip = {
-                  orange: {
-                    bg: "bg-terminal-orange/8",
-                    dot: "bg-terminal-orange",
-                    label: "text-terminal-orange/80",
-                    value: "text-terminal-orange",
-                  },
-                  blue: {
-                    bg: "bg-terminal-blue/8",
-                    dot: "bg-terminal-blue",
-                    label: "text-terminal-blue/80",
-                    value: "text-terminal-blue",
-                  },
-                  dim: {
-                    bg: "bg-terminal-dim/8",
-                    dot: "bg-terminal-dim",
-                    label: "text-terminal-dim",
-                    value: "text-terminal-dim",
-                  },
-                }[family];
-                return (
-                  <div
-                    key={b.provider}
-                    className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md ${chip.bg}`}
-                  >
-                    <span className={`w-1.5 h-1.5 rounded-full ${chip.dot}`} />
-                    <span className={`text-[10px] font-mono tabular-nums ${chip.label}`}>
-                      {b.label}
-                    </span>
-                    <span className={`text-[10px] font-mono font-bold tabular-nums ${chip.value}`}>
-                      {b.count}
-                    </span>
-                  </div>
-                );
-              })}
+            <div>
+              <div className="text-2xl font-mono font-bold text-terminal-blue tabular-nums">
+                <AnimatedValue value={insights.totalReplays} />
+              </div>
+              <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest mt-0.5">
+                replays
+              </div>
+            </div>
+            <div>
+              <div className="text-2xl font-mono font-bold text-terminal-green tabular-nums">
+                <AnimatedValue value={displayTotalPrompts} />
+              </div>
+              <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest mt-0.5">
+                turns
+              </div>
+            </div>
+            <div>
+              <div className="text-2xl font-mono font-bold text-terminal-orange tabular-nums">
+                <AnimatedValue value={displayTotalToolCalls} />
+              </div>
+              <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest mt-0.5">
+                tool calls
+              </div>
             </div>
           </div>
 
