@@ -45,6 +45,24 @@ describe("Extra Claude Code metadata extraction", () => {
     expect(result.title).toBe("User chosen title");
   });
 
+  it("prefers custom-title even when ai-title appears after it", async () => {
+    const lines = [
+      baseUserMessage("hi", "2026-04-01T00:00:00Z"),
+      JSON.stringify({
+        type: "custom-title",
+        customTitle: "User chosen title",
+        sessionId: "extras-session",
+      }),
+      JSON.stringify({
+        type: "ai-title",
+        aiTitle: "AI generated title",
+        sessionId: "extras-session",
+      }),
+    ];
+    const result = await parseClaudeCodeLines(lines);
+    expect(result.title).toBe("User chosen title");
+  });
+
   it("captures agent-name", async () => {
     const lines = [
       baseUserMessage("hi", "2026-04-01T00:00:00Z"),
@@ -56,6 +74,24 @@ describe("Extra Claude Code metadata extraction", () => {
     ];
     const result = await parseClaudeCodeLines(lines);
     expect(result.agentName).toBe("auth-refactor-bot");
+  });
+
+  it("agent-name is latest-wins when multiple entries appear", async () => {
+    const lines = [
+      baseUserMessage("hi", "2026-04-01T00:00:00Z"),
+      JSON.stringify({
+        type: "agent-name",
+        agentName: "first-name",
+        sessionId: "extras-session",
+      }),
+      JSON.stringify({
+        type: "agent-name",
+        agentName: "renamed-bot",
+        sessionId: "extras-session",
+      }),
+    ];
+    const result = await parseClaudeCodeLines(lines);
+    expect(result.agentName).toBe("renamed-bot");
   });
 
   it("standalone permission-mode entry overrides message-level value", async () => {
