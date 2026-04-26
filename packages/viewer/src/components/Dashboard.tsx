@@ -1316,7 +1316,14 @@ function SessionsPanel() {
     consumeUrl();
     const handler = (e: Event) => {
       const slug = (e as CustomEvent<{ slug: string }>).detail?.slug;
-      if (slug) setSelectedSlug(slug);
+      if (!slug) return;
+      setSelectedSlug(slug);
+      // Dashboard's root handler also writes `?selected=slug` for the
+      // cold-mount path. Strip it here so a tab round-trip after dismissing
+      // the popup doesn't reopen it on remount.
+      const url = new URL(window.location.href);
+      url.searchParams.delete("selected");
+      window.history.replaceState(null, "", url);
     };
     window.addEventListener("vibe-open-session", handler);
     return () => window.removeEventListener("vibe-open-session", handler);
