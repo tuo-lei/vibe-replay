@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { readFileCache, writeFileCache } from "./cache.js";
 import { estimateActiveDuration } from "./duration.js";
 import { estimateCost, estimateCostSimple } from "./pricing.js";
+import { parseCodexSession } from "./providers/codex/parser.js";
 import { parseCursorSession } from "./providers/cursor/parser.js";
 import { getCursorSessionCachePaths } from "./providers/cursor/sqlite-reader.js";
 import type { ProviderParseResult } from "./providers/types.js";
@@ -23,7 +24,7 @@ import type { DataSource, PrLink, SessionInfo, TokenUsage } from "./types.js";
 import { FILE_EDIT_TOOLS, extractToolFilePath, localDayKey, shortenPath } from "./utils.js";
 
 // Bump this when we extract new fields — forces re-scan of all sessions.
-const SCANNER_VERSION = 7;
+const SCANNER_VERSION = 8;
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -277,6 +278,14 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
     } catch {
       // Fall back to the legacy lightweight scanner below so Cursor sessions
       // still show up even if richer parsing fails for one host/schema.
+    }
+  }
+  if (input.provider === "codex") {
+    try {
+      return await scanCodexSession(input);
+    } catch {
+      // Fall through to the lightweight scanner so a partial Codex rollout
+      // still appears in insights if the richer parser hits an unknown event.
     }
   }
 
@@ -592,6 +601,27 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
     mcpServersUsed: mcpServersUsed.size > 0 ? [...mcpServersUsed].sort() : undefined,
     turnDurations: turnDurations.length > 0 ? turnDurations : undefined,
   };
+}
+
+async function scanCodexSession(input: ScanInput): Promise<SessionScanResult> {
+  const sessionInfo: SessionInfo = {
+    provider: "codex",
+    sessionId: input.sessionId,
+    slug: input.slug,
+    title: input.title,
+    project: input.project,
+    cwd: input.workspacePath || input.project,
+    version: "",
+    timestamp: input.timestamp || new Date().toISOString(),
+    lineCount: 0,
+    fileSize: 0,
+    filePath: input.filePaths[0] || "",
+    filePaths: input.filePaths,
+    firstPrompt: input.firstPrompt || input.title || "",
+  };
+
+  const parsed = await parseCodexSession(input.filePaths, sessionInfo);
+  return buildScanResultFromParsed(input, parsed);
 }
 
 async function scanCursorSession(input: ScanInput): Promise<SessionScanResult> {
