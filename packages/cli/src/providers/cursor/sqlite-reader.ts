@@ -619,6 +619,14 @@ export function countComposerConversationHeaders(composer: Record<string, any>):
     : 0;
 }
 
+function firstUserTextSnippet(turns: ParsedTurn[]): string | undefined {
+  const firstUser = turns.find((t) => t.role === "user");
+  const firstText = firstUser?.blocks.find(
+    (b): b is Extract<ContentBlock, { type: "text" }> => b.type === "text",
+  );
+  return firstText?.text.slice(0, 80);
+}
+
 function finalizeGlobalStateDiscovery(
   discoveredSessions: SessionInfo[],
   knownSessionIds: Set<string>,
@@ -902,9 +910,7 @@ async function parseCursorStoreDb(sessionId: string): Promise<ProviderParseResul
     const { turns, turnStats, totalDurationMs } = messagesToTurns(messages);
     const slug = sessionId.slice(0, 8);
 
-    const firstUser = turns.find((t) => t.role === "user");
-    const firstText = firstUser?.blocks.find((b) => b.type === "text");
-    const title = metaJson.name || (firstText as any)?.text?.slice(0, 80);
+    const title = metaJson.name || firstUserTextSnippet(turns);
     const hasDurationStats = turnStats.some((stat) => (stat.durationMs || 0) > 0);
 
     const notes: string[] = [];
@@ -1939,8 +1945,6 @@ async function parseCursorGlobalStateDb(
     const turns = entries.map((entry) => entry.turn);
     if (turns.length === 0) return null;
 
-    const firstUser = turns.find((t) => t.role === "user");
-    const firstText = firstUser?.blocks.find((b) => b.type === "text") as any;
     const inferredProject = await inferProjectFromComposerData(rawComposer, []);
     const modelName = normalizeCursorModelName(
       composer.modelConfig &&
@@ -2010,8 +2014,7 @@ async function parseCursorGlobalStateDb(
       sessionId,
       slug: sessionId.slice(0, 8),
       title:
-        (typeof composer.name === "string" && composer.name.trim()) ||
-        (firstText?.text as string | undefined)?.slice(0, 80),
+        (typeof composer.name === "string" && composer.name.trim()) || firstUserTextSnippet(turns),
       cwd: inferredProject || "",
       model: modelName,
       startTime,
