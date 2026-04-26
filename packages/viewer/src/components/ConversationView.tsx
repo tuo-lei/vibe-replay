@@ -833,14 +833,29 @@ function CompactAssistantGroup({
 
   // Ordered tool names for display (common ones first)
   const sortedToolEntries = useMemo(() => {
-    const order = ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "Agent"];
+    const order = [
+      "Read",
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "Delete",
+      "Bash",
+      "Glob",
+      "Grep",
+      "SemanticSearch",
+      "Browser",
+      "Agent",
+    ];
+    const priority = (name: string) => {
+      const index = order.indexOf(name);
+      return index >= 0 ? index : 100;
+    };
     const entries = Object.entries(stats.toolBreakdown);
     entries.sort((a, b) => {
-      const ai = order.indexOf(a[0]);
-      const bi = order.indexOf(b[0]);
-      const ao = ai >= 0 ? ai : 100;
-      const bo = bi >= 0 ? bi : 100;
-      return ao - bo;
+      const byPriority = priority(a[0]) - priority(b[0]);
+      if (byPriority !== 0) return byPriority;
+      const byCount = b[1] - a[1];
+      return byCount !== 0 ? byCount : a[0].localeCompare(b[0]);
     });
     return entries;
   }, [stats.toolBreakdown]);

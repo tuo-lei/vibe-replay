@@ -590,8 +590,12 @@ export default function SummaryView({ session }: Props) {
                     </div>
                     <div className="text-terminal-dimmer">
                       {maxRetry > 0
-                        ? "Cursor automatically retried some of these errors."
-                        : "These errors were observed in local Cursor metadata."}
+                        ? meta.provider === "cursor"
+                          ? "Cursor automatically retried some of these errors."
+                          : "The provider retried some of these errors before continuing."
+                        : meta.provider === "cursor"
+                          ? "These errors were observed in local Cursor metadata."
+                          : "These errors were observed in session telemetry."}
                     </div>
                   </>
                 );

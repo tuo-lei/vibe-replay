@@ -120,7 +120,7 @@ export default function StatsPanel({ session }: Props) {
           {isWorktree && (
             <span
               className="px-1 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple uppercase tracking-wider text-[10px]"
-              title={`Claude agent worktree: ${meta.project}`}
+              title={`Agent worktree: ${meta.project}`}
             >
               worktree
             </span>

@@ -446,7 +446,7 @@ export function ProjectInsightsPanel({ insights }: { insights: ProjectInsights }
     const entries = Object.entries(insights.models);
     if (entries.length === 0) return null;
     entries.sort((a, b) => b[1] - a[1]);
-    return entries[0][0].replace(/^claude-/, "").split("-202")[0];
+    return shortModelName(entries[0][0]);
   }, [insights.models]);
 
   const multiBranchSessions = useMemo(() => {
@@ -592,7 +592,7 @@ export function ProjectInsightsPanel({ insights }: { insights: ProjectInsights }
                 Models:{" "}
                 {Object.entries(insights.models)
                   .sort((a, b) => b[1] - a[1])
-                  .map(([m, c]) => `${m.replace(/^claude-/, "").split("-202")[0]} (${c})`)
+                  .map(([m, c]) => `${shortModelName(m)} (${c})`)
                   .join(", ")}
               </span>
             )}

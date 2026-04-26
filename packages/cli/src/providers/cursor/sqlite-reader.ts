@@ -2198,7 +2198,7 @@ function buildStoreTurnStats(turns: ParsedTurn[]): TurnStat[] {
   return turnStats;
 }
 
-function mapCursorToolName(name: string): string {
+export function mapCursorToolName(name: string): string {
   const mapping: Record<string, string> = {
     Shell: "Bash",
     run_terminal_command_v2: "Bash",
@@ -2227,6 +2227,8 @@ function mapCursorToolName(name: string): string {
     search_replace: "Edit",
     ApplyPatch: "Edit",
     apply_patch: "Edit",
+    MultiEdit: "MultiEdit",
+    multi_edit: "MultiEdit",
     Write: "Write",
     WriteFile: "Write",
     write: "Write",
@@ -2353,7 +2355,7 @@ function mapEditLikeArgs(argsObj: Record<string, any>, resultText: string): Reco
   return mapped;
 }
 
-function mapToolArgs(toolName: string, args: unknown, resultText = ""): Record<string, any> {
+export function mapToolArgs(toolName: string, args: unknown, resultText = ""): Record<string, any> {
   const argsObj =
     args && typeof args === "object" && !Array.isArray(args) ? (args as Record<string, any>) : null;
   if (toolName === "ApplyPatch" || toolName === "apply_patch") {
@@ -2399,6 +2401,15 @@ function mapToolArgs(toolName: string, args: unknown, resultText = ""): Record<s
   }
   if (toolName === "Edit" && (argsObj.path || argsObj.file_path || argsObj.relativeWorkspacePath)) {
     return mapEditLikeArgs(argsObj, resultText);
+  }
+  if (
+    (toolName === "MultiEdit" || toolName === "multi_edit") &&
+    (argsObj.path || argsObj.file_path || argsObj.relativeWorkspacePath)
+  ) {
+    return {
+      file_path: argsObj.file_path ?? argsObj.path ?? argsObj.relativeWorkspacePath,
+      edits: Array.isArray(argsObj.edits) ? argsObj.edits : [],
+    };
   }
   if (
     (toolName === "Write" || toolName === "WriteFile") &&

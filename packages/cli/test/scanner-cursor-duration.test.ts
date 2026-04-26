@@ -82,4 +82,35 @@ describe("scanSession cursor duration", () => {
 
     expect(result.subAgentCount).toBe(1);
   });
+
+  it("uses the first user prompt instead of the parsed title for Cursor scan previews", async () => {
+    mockedParseCursorSession.mockResolvedValueOnce({
+      sessionId: "cursor-session",
+      slug: "cursor-slug",
+      title: "Hand-written session title",
+      cwd: "/repo",
+      turns: [
+        {
+          role: "user",
+          blocks: [{ type: "text", text: "Please audit Cursor parity gaps in this project" }],
+        },
+        { role: "assistant", blocks: [{ type: "text", text: "I will inspect the codebase." }] },
+      ],
+      dataSource: "jsonl",
+    });
+
+    const result = await scanSession({
+      sessionId: "cursor-session",
+      provider: "cursor",
+      project: "~/Code/project",
+      slug: "cursor-slug",
+      filePaths: ["/tmp/session.jsonl"],
+      timestamp: "2025-01-01T00:00:00.000Z",
+      title: "Source title",
+      firstPrompt: "Fallback prompt",
+    });
+
+    expect(result.title).toBe("Hand-written session title");
+    expect(result.firstPrompt).toBe("Please audit Cursor parity gaps in this project");
+  });
 });

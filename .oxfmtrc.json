@@ -17,6 +17,8 @@
     "**/.astro/**",
     "**/build/**",
     "packages/cli/assets/**",
+    "packages/cli/vibe-replay/**",
+    "packages/viewer/public/**",
     "website/public/**",
     "cloudflare/drizzle/**",
     "cloudflare/worker-configuration.d.ts",

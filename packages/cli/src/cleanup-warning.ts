@@ -44,11 +44,12 @@ export async function getClaudeCodeCleanupPeriod(): Promise<number> {
 export function computeDaysUntilCleanup(
   timestamp: string,
   cleanupPeriodDays: number,
+  nowMs = Date.now(),
 ): number | undefined {
   if (cleanupPeriodDays <= 0) return undefined;
   const sessionTime = new Date(timestamp).getTime();
   if (Number.isNaN(sessionTime)) return undefined;
-  const ageDays = (Date.now() - sessionTime) / (1000 * 60 * 60 * 24);
+  const ageDays = (nowMs - sessionTime) / (1000 * 60 * 60 * 24);
   return Math.max(0, Math.floor(cleanupPeriodDays - ageDays));
 }
 

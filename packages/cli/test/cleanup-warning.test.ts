@@ -21,6 +21,8 @@ function makeSession(overrides: Partial<SessionInfo>): SessionInfo {
 }
 
 describe("computeDaysUntilCleanup", () => {
+  const NOW = Date.parse("2026-04-25T12:00:00.000Z");
+
   it("returns undefined when cleanupPeriodDays is 0 (disabled)", () => {
     expect(computeDaysUntilCleanup(new Date().toISOString(), 0)).toBeUndefined();
   });
@@ -31,28 +33,28 @@ describe("computeDaysUntilCleanup", () => {
 
   it("returns correct days for a recent session", () => {
     // Session created 5 days ago with 30-day cleanup → 25 days left (floor)
-    const fiveDaysAgo = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
-    const daysLeft = computeDaysUntilCleanup(fiveDaysAgo, 30);
+    const fiveDaysAgo = new Date(NOW - 5 * 24 * 60 * 60 * 1000).toISOString();
+    const daysLeft = computeDaysUntilCleanup(fiveDaysAgo, 30, NOW);
     expect(daysLeft).toBe(25);
   });
 
   it("returns 0 for sessions past cleanup deadline", () => {
-    const fortyDaysAgo = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString();
-    const daysLeft = computeDaysUntilCleanup(fortyDaysAgo, 30);
+    const fortyDaysAgo = new Date(NOW - 40 * 24 * 60 * 60 * 1000).toISOString();
+    const daysLeft = computeDaysUntilCleanup(fortyDaysAgo, 30, NOW);
     expect(daysLeft).toBe(0);
   });
 
   it("returns correct days for session near expiry", () => {
     // Session created 27 days ago with 30-day cleanup → 3 days left
-    const twentySevenDaysAgo = new Date(Date.now() - 27 * 24 * 60 * 60 * 1000).toISOString();
-    const daysLeft = computeDaysUntilCleanup(twentySevenDaysAgo, 30);
+    const twentySevenDaysAgo = new Date(NOW - 27 * 24 * 60 * 60 * 1000).toISOString();
+    const daysLeft = computeDaysUntilCleanup(twentySevenDaysAgo, 30, NOW);
     expect(daysLeft).toBe(3);
   });
 
   it("uses Math.floor for conservative estimate", () => {
     // Session 25.9 days old → 30 - 25.9 = 4.1 → floor = 4 (not ceil = 5)
-    const almostTwentySixDays = new Date(Date.now() - 25.9 * 24 * 60 * 60 * 1000).toISOString();
-    const daysLeft = computeDaysUntilCleanup(almostTwentySixDays, 30);
+    const almostTwentySixDays = new Date(NOW - 25.9 * 24 * 60 * 60 * 1000).toISOString();
+    const daysLeft = computeDaysUntilCleanup(almostTwentySixDays, 30, NOW);
     expect(daysLeft).toBe(4);
   });
 });

@@ -231,6 +231,124 @@ describe("Cursor parser — inline JSONL fixtures", () => {
     expect(result.dataSourceInfo?.sources?.length).toBeGreaterThan(0);
   });
 
+  it("normalizes inline Cursor JSONL tool calls for diff parity", async () => {
+    const path = await writeJsonl(tempDir, "inline-tool-call.jsonl", [
+      {
+        role: "user",
+        timestamp: "2026-04-01T00:00:00.000Z",
+        message: { content: [{ type: "text", text: "Patch the app" }] },
+      },
+      {
+        role: "assistant",
+        timestamp: "2026-04-01T00:00:01.000Z",
+        message: {
+          content: [
+            { type: "reasoning", text: "Need to update the literal." },
+            {
+              type: "tool_use",
+              id: "edit-1",
+              name: "search_replace",
+              input: {
+                relativeWorkspacePath: "src/app.ts",
+                oldStr: "const value = 1;",
+                newStr: "const value = 2;",
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    const parsed = await parseCursorSession(path);
+    expect(parsed.turns[0].timestamp).toBe("2026-04-01T00:00:00.000Z");
+
+    const assistant = parsed.turns.find((turn) => turn.role === "assistant")!;
+    expect(assistant.blocks[0]).toMatchObject({
+      type: "thinking",
+      thinking: "Need to update the literal.",
+    });
+    expect(assistant.blocks[1]).toMatchObject({
+      type: "tool_use",
+      name: "Edit",
+      input: {
+        file_path: "src/app.ts",
+        old_string: "const value = 1;",
+        new_string: "const value = 2;",
+      },
+    });
+
+    const replay = transformToReplay(parsed, "cursor", "~/test");
+    const toolScene = replay.scenes.find((scene) => scene.type === "tool-call");
+    expect(toolScene?.type).toBe("tool-call");
+    if (toolScene?.type === "tool-call") {
+      expect(toolScene.toolName).toBe("Edit");
+      expect(toolScene.diff).toMatchObject({
+        filePath: "src/app.ts",
+        oldContent: "const value = 1;",
+        newContent: "const value = 2;",
+      });
+    }
+  });
+
+  it("infers Cursor edit diffs from JSONL tool results", async () => {
+    const path = await writeJsonl(tempDir, "inline-edit-result.jsonl", [
+      {
+        role: "user",
+        message: { content: [{ type: "text", text: "Update config" }] },
+      },
+      {
+        role: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              id: "edit-1",
+              name: "edit_file_v2",
+              input: {
+                relativeWorkspacePath: "src/config.ts",
+                streamingContent: "",
+              },
+            },
+          ],
+        },
+      },
+      {
+        role: "user",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "edit-1",
+              content: JSON.stringify({
+                contentsAfterEdit: "export const enabled = true;",
+                diff: {
+                  chunks: [
+                    {
+                      diffString:
+                        "@@\n-export const enabled = false;\n+export const enabled = true;",
+                    },
+                  ],
+                },
+              }),
+            },
+          ],
+        },
+      },
+    ]);
+
+    const parsed = await parseCursorSession(path);
+    const replay = transformToReplay(parsed, "cursor", "~/test");
+    const toolScene = replay.scenes.find((scene) => scene.type === "tool-call");
+    expect(toolScene?.type).toBe("tool-call");
+    if (toolScene?.type === "tool-call") {
+      expect(toolScene.diff).toMatchObject({
+        filePath: "src/config.ts",
+        oldContent: "export const enabled = false;",
+        newContent: "export const enabled = true;",
+      });
+    }
+  });
+
   it("maps tool output to marker and converts extras to thinking", async () => {
     const jsonl = await writeJsonl(tempDir, "marker-pairing.jsonl", [
       {
