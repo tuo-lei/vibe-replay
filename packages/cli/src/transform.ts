@@ -216,6 +216,8 @@ function buildFileDiff(
       return edit != null && typeof edit === "object";
     });
     if (edits.length > 0) {
+      // MultiEdit records independent replacements, not full before/after file
+      // states. Show a synthetic chunk list so the replay still surfaces what changed.
       return {
         filePath: redactPath(input.file_path),
         oldContent: edits.map((edit) => edit.old_string ?? "").join("\n\n"),

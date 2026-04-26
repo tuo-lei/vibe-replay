@@ -1944,6 +1944,7 @@ function SessionsPanel() {
                 const prompts = sessionPromptPreview(s, scanData, sessionTitle);
                 const branch = nonDefaultBranch(scanData?.gitBranch || s.gitBranch);
                 const rolledProject = rollupProject(s.project);
+                // True when the display project is a rolled-up agent worktree path.
                 const isWorktree = rolledProject !== s.project;
                 const displayPromptCount = scanData?.promptCount ?? s.promptCount;
                 const displayToolCount = scanData?.toolCallCount ?? s.toolCallCount;

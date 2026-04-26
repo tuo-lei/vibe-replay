@@ -251,6 +251,8 @@ async function parseCursorJsonl(
                 ? block.id
                 : `cursor-inline-${syntheticToolId++}`,
             name,
+            // Keep the raw name here because Cursor raw tools carry different arg
+            // schemas even when they map to the same canonical replay tool.
             input: mapToolArgs(rawName, block.input),
           });
         }
