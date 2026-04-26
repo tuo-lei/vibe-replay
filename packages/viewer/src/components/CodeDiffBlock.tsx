@@ -1,6 +1,7 @@
 import { diffLines as computeLineDiff } from "diff";
 import { Highlight, themes } from "prism-react-renderer";
 import { memo, useMemo, useSyncExternalStore } from "react";
+import { ErrorBadge } from "./Badges";
 
 // Subscribe to dark/light class changes on <html> for prism theme switching
 const subscribe = (cb: () => void) => {
@@ -96,14 +97,7 @@ export default memo(function CodeDiffBlock({
           {toolName}
         </span>
         <span className="text-xs font-mono text-terminal-blue truncate flex-1">{filePath}</span>
-        {isError && (
-          <span
-            className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30 shrink-0"
-            title="This tool call returned an error"
-          >
-            ERROR
-          </span>
-        )}
+        {isError && <ErrorBadge />}
         {isNewFile && (
           <span className="text-xs px-1.5 py-0.5 rounded bg-terminal-green/20 text-terminal-green">
             new

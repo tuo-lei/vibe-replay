@@ -1,6 +1,7 @@
 import { memo, useState } from "react";
 import type { Scene, SubAgent } from "../types";
 import { displayToolName } from "../utils/toolName";
+import { ErrorBadge } from "./Badges";
 import BashBlock from "./BashBlock";
 import CodeDiffBlock from "./CodeDiffBlock";
 import { formatToolDuration, formatTokens } from "./StatsPanel";
@@ -33,17 +34,6 @@ function ToolTokens({ tokens }: { tokens?: number }) {
   );
 }
 
-function ErrorBadge() {
-  return (
-    <span
-      className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30 shrink-0"
-      title="This tool call returned an error"
-    >
-      ERROR
-    </span>
-  );
-}
-
 function subAgentTotalTokens(sa: SubAgent): number {
   if (!sa.tokenUsage) return 0;
   return (
@@ -55,9 +45,14 @@ function subAgentTotalTokens(sa: SubAgent): number {
 }
 
 function subAgentTotalDurationMs(sa: SubAgent): number {
+  // Skip nested Agent calls: their `durationMs` is the inner subagent's whole
+  // wall time, which already covers all of its own tool calls. Counting both
+  // would double-count anything below depth 1.
   let total = 0;
   for (const s of sa.scenes) {
-    if (s.type === "tool-call" && s.durationMs) total += s.durationMs;
+    if (s.type === "tool-call" && s.toolName !== "Agent" && s.durationMs) {
+      total += s.durationMs;
+    }
   }
   return total;
 }
@@ -185,18 +180,47 @@ function SubAgentBody({ subAgent }: { subAgent: SubAgent }) {
           </div>
         </div>
       )}
-      {subAgent.scenes.length > 0 && (
-        <div>
-          <div className="text-[10px] font-sans font-semibold uppercase tracking-widest text-terminal-dim mb-1.5">
-            Trace
-          </div>
-          <div className="space-y-1 max-h-[500px] overflow-y-auto rounded-md bg-terminal-surface-inset px-3 py-2">
-            {subAgent.scenes.map((s, i) => (
-              <SubAgentSceneItem key={i} scene={s} />
-            ))}
-          </div>
-        </div>
-      )}
+      {subAgent.scenes.length > 0 && <SubAgentTrace scenes={subAgent.scenes} />}
+    </div>
+  );
+}
+
+/**
+ * Trace section. For large subagents (e.g. an Explore that fired 80+ tools)
+ * we show only a window plus an explicit "show all" toggle so the parent
+ * agent expand doesn't dump hundreds of rows of DOM at once.
+ */
+const TRACE_INITIAL_LIMIT = 20;
+
+function SubAgentTrace({ scenes }: { scenes: Scene[] }) {
+  const [showAll, setShowAll] = useState(false);
+  const isLong = scenes.length > TRACE_INITIAL_LIMIT;
+  const visible = isLong && !showAll ? scenes.slice(0, TRACE_INITIAL_LIMIT) : scenes;
+  const hidden = scenes.length - visible.length;
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[10px] font-sans font-semibold uppercase tracking-widest text-terminal-dim">
+          Trace · {scenes.length} {scenes.length === 1 ? "scene" : "scenes"}
+        </span>
+        {isLong && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowAll((v) => !v);
+            }}
+            className="text-[10px] font-mono text-terminal-dim hover:text-terminal-text transition-colors"
+          >
+            {showAll ? "Show first 20" : `Show all (+${hidden})`}
+          </button>
+        )}
+      </div>
+      <div className="space-y-1 max-h-[500px] overflow-y-auto rounded-md bg-terminal-surface-inset px-3 py-2">
+        {visible.map((s, i) => (
+          <SubAgentSceneItem key={i} scene={s} />
+        ))}
+      </div>
     </div>
   );
 }

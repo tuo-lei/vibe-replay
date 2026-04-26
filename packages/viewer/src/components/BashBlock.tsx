@@ -1,4 +1,5 @@
 import { memo, useState } from "react";
+import { ErrorBadge } from "./Badges";
 import { formatToolDuration, formatTokens } from "./StatsPanel";
 
 interface Props {
@@ -37,14 +38,7 @@ export default memo(function BashBlock({
           $
         </span>
         <span className="text-xs font-mono text-terminal-text truncate flex-1">{command}</span>
-        {isError && (
-          <span
-            className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30 shrink-0"
-            title="This tool call returned an error"
-          >
-            ERROR
-          </span>
-        )}
+        {isError && <ErrorBadge />}
         {tokenLabel && (
           <span
             className="text-[10px] text-terminal-dimmer font-mono shrink-0"
