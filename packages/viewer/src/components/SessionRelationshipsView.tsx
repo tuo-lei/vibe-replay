@@ -720,15 +720,23 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                               )}
                               {showWick && (
                                 <>
+                                  {/* K-line wick: bright strip along the bottom marks
+                                      the actual session duration within the (widened)
+                                      bar. Thin enough to coexist with the title above,
+                                      bright enough to register against any project
+                                      color's fill. */}
                                   <span
-                                    className="pointer-events-none absolute bottom-0 left-0 h-0.5 rounded-r-full bg-terminal-text/70"
+                                    className="pointer-events-none absolute bottom-0 left-0 h-[2px] rounded-r-full bg-white/85"
                                     style={{ width: `${ts.realDurationFraction * 100}%` }}
                                     title="actual duration"
                                   />
+                                  {/* End-tick at the wick's right edge so the real
+                                      end-position is visible even when the wick is
+                                      only a few pixels wide. */}
                                   <span
-                                    className="pointer-events-none absolute bottom-0 h-1.5 w-px bg-terminal-text/80"
+                                    className="pointer-events-none absolute bottom-0 h-[6px] w-[2px] bg-white/90"
                                     style={{
-                                      left: `calc(${ts.realDurationFraction * 100}% - 1px)`,
+                                      left: `calc(${ts.realDurationFraction * 100}% - 2px)`,
                                     }}
                                   />
                                 </>
