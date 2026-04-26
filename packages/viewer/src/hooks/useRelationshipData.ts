@@ -30,7 +30,10 @@ const REFRESH_WHILE_SCANNING_MS = 4000;
 export function useRelationshipData(): RelationshipData {
   const [sessions, setSessions] = useState<ScanResultSession[]>(cachedSessions ?? []);
   const [loading, setLoading] = useState(cachedSessions === null && cachedError === null);
-  const [error, setError] = useState<string | null>(cachedError);
+  // Only restore an error state if we have no cached data to fall back on —
+  // otherwise a stale cachedError from a previous transient failure would
+  // render the error screen over still-usable sessions.
+  const [error, setError] = useState<string | null>(cachedSessions === null ? cachedError : null);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,29 +63,30 @@ export function useRelationshipData(): RelationshipData {
     }
 
     async function tick() {
+      let stillRunning = false;
       try {
         const status = await loadStatus();
-        const stillRunning = status?.running === true;
+        stillRunning = status?.running === true;
         const remoteCount = status?.resultCount ?? 0;
-        // Refetch results when we have nothing yet, when the scan reports more
-        // sessions than we last saw, or unconditionally on the first pass.
+        // Refetch results when we have nothing yet or the count diverges.
         if (cachedSessions === null || remoteCount !== cachedResultCount) {
           await loadResults();
-        }
-        if (stillRunning && !cancelled) {
-          pollTimer = setTimeout(tick, REFRESH_WHILE_SCANNING_MS);
         }
       } catch (e) {
         const message = e instanceof Error ? e.message : "Failed to load";
         cachedError = message;
-        if (!cancelled) {
-          // Surface the error only when there's no cached data to fall back
-          // on. Transient network/API failures shouldn't blank a Timeline that
-          // already loaded successfully — leave the prior data visible.
-          if (cachedSessions === null) setError(message);
+        if (!cancelled && cachedSessions === null) {
+          // Only blank the view if there's no cached data. A transient
+          // refresh failure should leave the prior data on screen.
+          setError(message);
         }
       } finally {
         if (!cancelled) setLoading(false);
+        // Keep polling while the scan is running, even if this tick errored —
+        // a single transient 5xx shouldn't stop the live updates permanently.
+        if (!cancelled && stillRunning) {
+          pollTimer = setTimeout(tick, REFRESH_WHILE_SCANNING_MS);
+        }
       }
     }
 
