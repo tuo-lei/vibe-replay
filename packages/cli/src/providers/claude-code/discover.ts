@@ -98,19 +98,18 @@ export async function extractSessionInfo(
   let hasPR = false;
   let model: string | undefined;
 
-  // Ring buffer of the most recent non-empty lines — used to look back for
-  // `custom-title` records that are written late in the session.
+  // Ring buffer of the most recent non-empty lines. Used in two reverse-scan
+  // fallbacks after streaming completes: `custom-title` records written late
+  // in the session, and the last record's outer `timestamp` (the session's
+  // last activity time). Both rely on JSON.parse to read top-level fields
+  // safely — a regex on the whole line would risk capturing nested timestamp
+  // fields (e.g. inside user-pasted JSON content).
   const tail: string[] = [];
 
   const toolUseRe = /"type"\s*:\s*"tool_use"/g;
   const modelRe = /"model"\s*:\s*"(claude-[^"]+)"/;
   const durationRe = /"durationMs"\s*:\s*(\d+)/;
   const editToolRe = /"name"\s*:\s*"(Edit|Write|MultiEdit|NotebookEdit)"/;
-  // Matches the outer record `timestamp` — every JSONL record carries one and
-  // records are written in append-order, so overwriting on each line lands on
-  // the last activity. Anchored on `{"` to avoid grabbing a nested timestamp
-  // inside a stringified message body.
-  const recordTsRe = /"timestamp"\s*:\s*"([^"]+)"/;
 
   let rl: ReturnType<typeof createInterface> | undefined;
   try {
@@ -145,11 +144,6 @@ export async function extractSessionInfo(
         if (d) durationMsEst += Number(d[1]);
       }
       if (!hasPR && line.includes('"pr-link"')) hasPR = true;
-
-      // Track the most recent record timestamp — JSONL is append-order, so the
-      // final overwrite is the last activity time.
-      const tsMatch = line.match(recordTsRe);
-      if (tsMatch) timestamp = tsMatch[1];
 
       // --- JSON-parse only the first PROMPT_SCAN_LINES lines ---
       // Metadata typically lands in the first ~30 lines; initial prompts within 150.
@@ -219,8 +213,24 @@ export async function extractSessionInfo(
     }
   }
 
-  // Fallback: file mtime. Reaches here only if no record on any line had a
-  // `timestamp` field — extremely unusual but keeps discovery resilient.
+  // Last activity timestamp: reverse-scan the tail buffer for the most recent
+  // record carrying a top-level `timestamp`. JSON.parse is the right primitive
+  // here — a substring/regex match on the line would be fooled by nested
+  // `"timestamp"` keys inside `message.content` (e.g. user-pasted JSON), and
+  // virtually every JSONL record envelope carries an outer timestamp so the
+  // first hit is normally the very last record.
+  for (let i = tail.length - 1; i >= 0 && !timestamp; i--) {
+    try {
+      const obj = JSON.parse(tail[i]);
+      if (typeof obj.timestamp === "string" && obj.timestamp) {
+        timestamp = obj.timestamp;
+      }
+    } catch {}
+  }
+
+  // Last-resort fallback: file mtime. Reaches here only if every record in the
+  // tail buffer is unparseable or lacks a timestamp — extremely unusual but
+  // keeps discovery resilient.
   if (!timestamp) {
     const fileStat2 = await stat(filePath).catch(() => null);
     if (fileStat2) timestamp = fileStat2.mtime.toISOString();
