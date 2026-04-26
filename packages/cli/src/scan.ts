@@ -2,9 +2,10 @@
  * Post-generation secret scanner.
  *
  * Layer 2 defense: after transform.ts redacts inline, this module
- * scans the final serialized JSON for anything that slipped through.
- * Results are presented interactively — the user decides what's a
- * false alarm and what should block publishing.
+ * scans the final serialized output (JSON or markdown — anything
+ * stringy) for anything that slipped through. Results are presented
+ * interactively — the user decides what's a false alarm and what
+ * should block publishing.
  */
 
 export interface Finding {
@@ -87,11 +88,11 @@ const SCAN_RULES: { id: string; label: string; pattern: RegExp }[] = [
 ];
 
 /**
- * Scan a JSON string for potential secrets.
+ * Scan any string (JSON, markdown, plain text) for potential secrets.
  * Returns deduplicated findings with context.
  */
-export function scanForSecrets(json: string): Finding[] {
-  const lines = json.split("\n");
+export function scanForSecrets(content: string): Finding[] {
+  const lines = content.split("\n");
   const findings: Finding[] = [];
   const seen = new Set<string>();
 
