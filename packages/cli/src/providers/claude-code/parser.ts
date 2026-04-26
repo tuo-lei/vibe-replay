@@ -638,16 +638,42 @@ function extractToolResultText(block: ContentBlock): string {
   if (block.type !== "tool_result") return "";
 
   const { content } = block;
-  if (typeof content === "string") return content;
+  if (typeof content === "string") return unwrapPersistedOutput(content);
   if (Array.isArray(content)) {
-    return content
+    const text = content
       .map((c) => {
         if (c.type === "text") return c.text;
+        // Image blocks are extracted separately by extractImages(); skip them
+        // here so a base64 payload doesn't get JSON-stringified into the
+        // result text (would dump kilobytes of garbage in the UI).
+        if (c.type === "image") return "";
         return JSON.stringify(c);
       })
+      .filter((s) => s.length > 0)
       .join("\n");
+    return unwrapPersistedOutput(text);
   }
   return JSON.stringify(content);
+}
+
+/**
+ * Claude Code wraps oversized tool results as:
+ *   <persisted-output>
+ *   Output too large (XKB). Full output saved to: <path>
+ *
+ *   Preview (first 2KB):
+ *   <preview content>
+ *   </persisted-output>
+ *
+ * Strip the wrapper and metadata so the UI sees clean preview content.
+ * Returns the input unchanged if the wrapper isn't present.
+ */
+function unwrapPersistedOutput(text: string): string {
+  if (!text.includes("<persisted-output>")) return text;
+  return text.replace(
+    /<persisted-output>\s*(?:Output too large [^\n]*\n+)?(?:Full output saved to:[^\n]*\n+)?(?:Preview \([^)]*\):\s*\n)?([\s\S]*?)\n?<\/persisted-output>/g,
+    (_, preview) => preview.trimEnd(),
+  );
 }
 
 /**
@@ -892,12 +918,7 @@ async function readSubagents(
             prompt = (block.text || "").slice(0, 500);
           }
           if (block.type === "tool_result") {
-            const resultText =
-              typeof block.content === "string"
-                ? block.content
-                : Array.isArray(block.content)
-                  ? block.content.map((c: any) => c.text || "").join("\n")
-                  : "";
+            const resultText = extractToolResultText(block as ContentBlock);
             saToolResults.set(block.tool_use_id, resultText.slice(0, 1000));
             if (block.is_error) saToolErrors.set(block.tool_use_id, true);
           }

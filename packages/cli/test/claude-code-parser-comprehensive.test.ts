@@ -407,6 +407,79 @@ describe("Claude Code parser — tool result content types", () => {
     // Should extract text from the array content
     expect((toolBlock as any)._result).toContain("Screenshot captured");
   });
+
+  it("does not pollute result text with image block JSON", async () => {
+    // Mixed text+image tool_result should not embed the base64 payload as
+    // JSON.stringify garbage in the textual result — images are surfaced via
+    // _images instead.
+    const result = await parseClaudeCodeSession(fixture("claude-code-images.jsonl"));
+    const toolBlock = result.turns
+      .filter((t) => t.role === "assistant")
+      .flatMap((t) => t.blocks)
+      .find((b) => b.type === "tool_use");
+    const resultText = (toolBlock as any)._result as string;
+    expect(resultText).toBe("Screenshot captured");
+    expect(resultText).not.toContain("base64");
+    expect(resultText).not.toContain('"type":"image"');
+  });
+
+  it("unwraps Claude Code <persisted-output> wrapper", async () => {
+    // Build a tiny JSONL fixture in-memory and run it through the
+    // line-level parser to verify the wrapper gets stripped.
+    const { parseClaudeCodeLines } = await import("../src/providers/claude-code/parser.js");
+    const lines = [
+      JSON.stringify({
+        type: "user",
+        sessionId: "s",
+        timestamp: "2025-01-01T00:00:00Z",
+        message: { role: "user", content: "hello" },
+      }),
+      JSON.stringify({
+        type: "assistant",
+        sessionId: "s",
+        timestamp: "2025-01-01T00:00:01Z",
+        message: {
+          id: "m1",
+          role: "assistant",
+          model: "claude-opus-4",
+          content: [
+            {
+              type: "tool_use",
+              id: "tool_1",
+              name: "Bash",
+              input: { command: "cat big.txt" },
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: "user",
+        sessionId: "s",
+        timestamp: "2025-01-01T00:00:02Z",
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool_1",
+              content:
+                "<persisted-output>\nOutput too large (12.3KB). Full output saved to: /tmp/x.txt\n\nPreview (first 2KB):\nactual preview line 1\nactual preview line 2\n</persisted-output>",
+            },
+          ],
+        },
+      }),
+    ];
+    const parsed = await parseClaudeCodeLines(lines);
+    const tool = parsed.turns
+      .filter((t) => t.role === "assistant")
+      .flatMap((t) => t.blocks)
+      .find((b) => b.type === "tool_use");
+    const resultText = (tool as any)._result as string;
+    expect(resultText).toBe("actual preview line 1\nactual preview line 2");
+    expect(resultText).not.toContain("<persisted-output>");
+    expect(resultText).not.toContain("Output too large");
+    expect(resultText).not.toContain("Preview (first");
+  });
 });
 
 // ---------------------------------------------------------------------------

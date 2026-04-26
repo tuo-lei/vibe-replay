@@ -466,25 +466,60 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
 function summarizeInput(name: string, input: Record<string, any>): string {
   switch (name) {
     case "Read":
+    case "Write":
+    case "Edit":
+    case "MultiEdit":
       return input.file_path || "";
+    case "NotebookEdit":
+      return input.notebook_path || "";
     case "Glob":
       return input.pattern || "";
     case "Grep":
-      return `/${input.pattern || ""}/ ${input.path || ""}`;
+      return `/${input.pattern || ""}/ ${input.path || ""}`.trim();
+    case "Bash":
+      // Prefer command (more identifying); fall back to description.
+      // The Agent-rendered AgentTypeBadge handles subagent_type already.
+      return input.command || input.description || "";
+    case "BashOutput":
+      return input.bash_id || "";
     case "Agent":
-      return input.description || "";
-    case "Write":
-      return input.file_path || "";
-    case "Edit":
-      return input.file_path || "";
+    case "Task": {
+      const desc = input.description || "";
+      const subtype = input.subagent_type;
+      return subtype ? `${subtype} — ${desc}` : desc;
+    }
+    case "TodoWrite": {
+      const todos = Array.isArray(input.todos) ? input.todos : [];
+      if (todos.length === 0) return "";
+      const inProgress = todos.find((t: any) => t?.status === "in_progress");
+      return inProgress?.content
+        ? `${todos.length} todos · ${inProgress.content}`
+        : `${todos.length} todos`;
+    }
     case "WebSearch":
       return input.query || "";
     case "WebFetch":
       return input.url || "";
+    case "SlashCommand":
+      return input.command || "";
+    case "ExitPlanMode":
+      return (input.plan || "").slice(0, 80);
     default:
-      return Object.values(input)
-        .filter((v) => typeof v === "string")
-        .join(" ")
-        .slice(0, 80);
+      // mcp__server__tool — surface the most likely identifying value, or
+      // fall back to a short joined string of scalar args.
+      return shortenScalarSummary(input);
   }
+}
+
+function shortenScalarSummary(input: Record<string, any>): string {
+  // Prefer commonly meaningful keys before falling back to all string values.
+  const preferred = ["url", "path", "file_path", "query", "name", "id"];
+  for (const k of preferred) {
+    const v = input[k];
+    if (typeof v === "string" && v) return v.slice(0, 80);
+  }
+  return Object.values(input)
+    .filter((v) => typeof v === "string")
+    .join(" ")
+    .slice(0, 80);
 }
