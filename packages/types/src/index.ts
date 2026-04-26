@@ -54,7 +54,13 @@ export type Scene =
       /** What kind of injection: "skill", "local-command", "slash-command", "image", or "other" */
       injectionType?: string;
     }
-  | { type: "thinking"; content: string; timestamp?: string }
+  | {
+      type: "thinking";
+      content: string;
+      timestamp?: string;
+      /** Estimated tokens consumed by this thinking block (chars/4 heuristic) */
+      tokens?: number;
+    }
   | { type: "text-response"; content: string; timestamp?: string; isTruncated?: boolean }
   | {
       type: "tool-call";
@@ -69,6 +75,12 @@ export type Scene =
       subAgent?: SubAgent;
       /** Tool execution duration in ms (assistant timestamp → tool_result timestamp) */
       durationMs?: number;
+      /**
+       * Estimated tokens of the tool result that was injected back into the
+       * model's context (chars/4 heuristic on the un-truncated result).
+       * Useful for "what is eating my context window?" diagnostics.
+       */
+      resultTokens?: number;
     };
 
 export interface Annotation {

@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { estimateCost, estimateCostSimple, getModelContextLimit } from "./pricing.js";
 import type { ProviderParseResult } from "./providers/types.js";
 import type { ContentBlock, ReplaySession, Scene, SubAgent } from "./types.js";
+import { estimateTokens } from "./utils/tokenEstimate.js";
 
 type ToolCallScene = Extract<Scene, { type: "tool-call" }>;
 
@@ -68,10 +69,12 @@ export function transformToReplay(
       if (block.type === "thinking") {
         const thinking = block.thinking || "";
         if (thinking.trim()) {
+          const tokens = estimateTokens(thinking);
           scenes.push({
             type: "thinking",
             content: truncate(redactPath(thinking), 2000),
             timestamp: turn.timestamp,
+            ...(tokens > 0 ? { tokens } : {}),
           });
           thinkingBlocks++;
         }
@@ -248,11 +251,15 @@ function buildToolScene(
   result: string,
   images?: string[],
 ): ToolCallScene {
+  // Estimate tokens from the un-truncated result — that's what was actually
+  // injected back into the model's context window.
+  const resultTokens = estimateTokens(result);
   const scene: ToolCallScene = {
     type: "tool-call",
     toolName,
     input: sanitizeInput(input),
     result: truncate(redactPath(result), 5000),
+    ...(resultTokens > 0 ? { resultTokens } : {}),
     ...(images && images.length > 0 ? { images } : {}),
   };
 
@@ -412,13 +419,17 @@ function redactSubAgentScene(s: Scene): Scene {
   if (s.type === "tool-call") {
     const toolName = s.toolName || "";
     const input = s.input || {};
+    const resultRaw = s.result || "";
+    const resultTokens = estimateTokens(resultRaw);
     const scene: ToolCallScene = {
       type: "tool-call",
       toolName,
       input: s.input ? sanitizeInput(s.input) : {},
-      result: truncate(redactPath(s.result || ""), 1000),
+      result: truncate(redactPath(resultRaw), 1000),
       timestamp: s.timestamp,
       isError: s.isError || false,
+      ...(s.durationMs ? { durationMs: s.durationMs } : {}),
+      ...(resultTokens > 0 ? { resultTokens } : {}),
     };
 
     const diff = buildFileDiff(toolName, input);
@@ -427,6 +438,16 @@ function redactSubAgentScene(s: Scene): Scene {
     }
 
     return scene;
+  }
+  if (s.type === "thinking") {
+    const content = truncate(redactSecrets(redactPath(s.content || "")), 1000);
+    const tokens = estimateTokens(s.content || "");
+    return {
+      type: "thinking",
+      content,
+      timestamp: s.timestamp,
+      ...(tokens > 0 ? { tokens } : {}),
+    };
   }
   return {
     type: s.type,

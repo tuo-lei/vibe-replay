@@ -118,6 +118,29 @@ describe("Generated HTML E2E", () => {
     expect(title).not.toBe("vibe-replay"); // Should be customized, not default
   });
 
+  it("attaches resultTokens estimate to tool-call scenes with non-empty results", () => {
+    const toolScenes = session.scenes.filter((s) => s.type === "tool-call");
+    expect(toolScenes.length).toBeGreaterThan(0);
+    // At least one tool scene with a non-trivial result should carry an estimate.
+    const withTokens = toolScenes.filter(
+      (s) => s.type === "tool-call" && typeof s.resultTokens === "number" && s.resultTokens > 0,
+    );
+    expect(withTokens.length).toBeGreaterThan(0);
+  });
+
+  it("preserves resultTokens through the embedded data envelope", async () => {
+    // The viewer reads from window.__VIBE_REPLAY_DATA__; verifying the field
+    // survives serialization is the load-bearing check. The DOM badge text
+    // ("~Ntok") is incidental rendering of this field via formatTokens.
+    const embeddedTokens = await page.evaluate(() => {
+      const scenes = window.__VIBE_REPLAY_DATA__?.scenes ?? [];
+      return scenes
+        .filter((s: { type?: string }) => s.type === "tool-call")
+        .map((s: { resultTokens?: number }) => s.resultTokens ?? 0);
+    });
+    expect(embeddedTokens.some((n: number) => n > 0)).toBe(true);
+  });
+
   it("supports subAgent field in tool-call scenes (backward compatible)", async () => {
     // Verify the data structure supports subAgent (optional field on tool-call scenes)
     const toolScenes = session.scenes.filter((s) => s.type === "tool-call");

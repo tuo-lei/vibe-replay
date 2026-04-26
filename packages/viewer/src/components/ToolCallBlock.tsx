@@ -3,11 +3,10 @@ import type { Scene, SubAgent } from "../types";
 import { displayToolName } from "../utils/toolName";
 import BashBlock from "./BashBlock";
 import CodeDiffBlock from "./CodeDiffBlock";
-import { formatDuration } from "./StatsPanel";
+import { formatToolDuration, formatTokens } from "./StatsPanel";
 
 function ToolDuration({ ms }: { ms?: number }) {
-  if (!ms) return null;
-  const label = formatDuration(ms);
+  const label = formatToolDuration(ms);
   if (!label) return null;
   return (
     <span
@@ -17,6 +16,37 @@ function ToolDuration({ ms }: { ms?: number }) {
       {label}
     </span>
   );
+}
+
+function ToolTokens({ tokens }: { tokens?: number }) {
+  const label = formatTokens(tokens);
+  if (!label) return null;
+  return (
+    <span
+      className="text-[10px] text-terminal-dimmer font-mono shrink-0"
+      title={`~${label} tokens added to context (heuristic estimate)`}
+    >
+      ~{label} tok
+    </span>
+  );
+}
+
+function subAgentTotalTokens(sa: SubAgent): number {
+  if (!sa.tokenUsage) return 0;
+  return (
+    sa.tokenUsage.inputTokens +
+    sa.tokenUsage.outputTokens +
+    sa.tokenUsage.cacheCreationTokens +
+    sa.tokenUsage.cacheReadTokens
+  );
+}
+
+function subAgentTotalDurationMs(sa: SubAgent): number {
+  let total = 0;
+  for (const s of sa.scenes) {
+    if (s.type === "tool-call" && s.durationMs) total += s.durationMs;
+  }
+  return total;
 }
 
 type ToolScene = Extract<Scene, { type: "tool-call" }>;
@@ -68,12 +98,8 @@ function AgentTypeBadge({ type }: { type: string }) {
 
 function SubAgentView({ subAgent }: { subAgent: SubAgent }) {
   const [showScenes, setShowScenes] = useState(false);
-  const totalTokens = subAgent.tokenUsage
-    ? subAgent.tokenUsage.inputTokens +
-      subAgent.tokenUsage.outputTokens +
-      subAgent.tokenUsage.cacheCreationTokens +
-      subAgent.tokenUsage.cacheReadTokens
-    : 0;
+  const totalTokens = subAgentTotalTokens(subAgent);
+  const totalDurationMs = subAgentTotalDurationMs(subAgent);
 
   return (
     <div className="border-t border-terminal-border-subtle">
@@ -101,16 +127,15 @@ function SubAgentView({ subAgent }: { subAgent: SubAgent }) {
           {totalTokens > 0 && (
             <>
               <span className="text-[10px] text-terminal-dim">|</span>
-              <span className="text-[10px] text-terminal-dim font-mono">
-                {totalTokens > 1000000
-                  ? `${(totalTokens / 1000000).toFixed(1)}M`
-                  : totalTokens > 1000
-                    ? `${(totalTokens / 1000).toFixed(0)}K`
-                    : totalTokens}{" "}
-                tokens
+              <span
+                className="text-[10px] text-terminal-purple/80 font-mono"
+                title="Total tokens billed for this subagent (input + output + cache)"
+              >
+                {formatTokens(totalTokens)} tok
               </span>
             </>
           )}
+          {totalDurationMs > 0 && <ToolDuration ms={totalDurationMs} />}
         </div>
         {subAgent.description && (
           <div className="text-[11px] text-terminal-text/70 mt-1 italic">
@@ -150,11 +175,19 @@ function SubAgentSceneItem({ scene }: { scene: Scene }) {
   const [expanded, setExpanded] = useState(false);
 
   if (scene.type === "thinking") {
+    const tokenLabel = formatTokens(scene.tokens);
     return (
-      <div className="text-[10px] font-mono text-purple-400/60 pl-2 border-l-2 border-purple-500/20 py-0.5">
-        <span className="text-purple-400/40 mr-1">[thinking]</span>
-        {(scene.content || "").slice(0, 120)}
-        {(scene.content || "").length > 120 ? "..." : ""}
+      <div className="text-[10px] font-mono text-purple-400/70 pl-2 border-l-2 border-purple-500/20 py-0.5">
+        <span className="text-purple-400/50 mr-1">[thinking]</span>
+        {tokenLabel && (
+          <span className="text-purple-400/60 mr-1" title="Approximate thinking tokens">
+            ~{tokenLabel} tok
+          </span>
+        )}
+        <span className="text-purple-400/60">
+          {(scene.content || "").slice(0, 120)}
+          {(scene.content || "").length > 120 ? "..." : ""}
+        </span>
       </div>
     );
   }
@@ -183,6 +216,8 @@ function SubAgentSceneItem({ scene }: { scene: Scene }) {
             {summarizeInput(toolScene.toolName, toolScene.input)}
           </span>
           {toolScene.isError && <span className="text-red-400 text-[9px]">ERR</span>}
+          <ToolTokens tokens={toolScene.resultTokens} />
+          <ToolDuration ms={toolScene.durationMs} />
         </button>
         {expanded && toolScene.result && (
           <pre className="text-[9px] text-terminal-dim font-mono whitespace-pre-wrap break-words max-h-[100px] overflow-y-auto mt-0.5 px-1 bg-terminal-bg/50 rounded">
@@ -205,8 +240,9 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
       <div className="flex items-center gap-2 px-3 py-1 text-xs font-mono text-terminal-dim">
         <span>{toolIcon(scene.toolName)}</span>
         <span className="text-terminal-orange font-bold">{displayToolName(scene.toolName)}</span>
-        <span className="truncate">{summarizeInput(scene.toolName, scene.input)}</span>
+        <span className="truncate flex-1">{summarizeInput(scene.toolName, scene.input)}</span>
         {scene.subAgent && <AgentTypeBadge type={scene.subAgent.agentType} />}
+        <ToolTokens tokens={scene.resultTokens} />
         <ToolDuration ms={scene.durationMs} />
       </div>
     );
@@ -255,6 +291,17 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
             <span className="text-[10px] text-terminal-dim font-mono">
               {scene.subAgent.toolCalls} tools
             </span>
+            {(() => {
+              const t = subAgentTotalTokens(scene.subAgent);
+              return t > 0 ? (
+                <span
+                  className="text-[10px] text-terminal-purple/80 font-mono"
+                  title="Total subagent tokens (input + output + cache)"
+                >
+                  {formatTokens(t)} tok
+                </span>
+              ) : null;
+            })()}
             <ToolDuration ms={scene.durationMs} />
             <span
               className={`text-xs text-terminal-dim transition-transform ${expanded ? "rotate-90" : ""}`}
@@ -283,6 +330,7 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
           <span className="text-xs text-terminal-dim font-mono truncate flex-1">
             {summarizeInput(scene.toolName, scene.input)}
           </span>
+          <ToolTokens tokens={scene.resultTokens} />
           <ToolDuration ms={scene.durationMs} />
           <span
             className={`text-xs text-terminal-dim transition-transform ${expanded ? "rotate-90" : ""}`}
