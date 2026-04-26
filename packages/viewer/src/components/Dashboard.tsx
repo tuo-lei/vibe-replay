@@ -1295,17 +1295,31 @@ function SessionsPanel() {
   const [generatingSlug, setGeneratingSlug] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
-  // When another panel (Projects → Timeline / Hot Files) routes us here with
-  // `?selected=<slug>`, open the popup for that session and strip the param
-  // so a refresh doesn't keep re-opening it.
+  // When another panel (Projects → Timeline / Hot Files) opens a session via
+  // the `vibe-open-session` event, route the slug into the popup. Two paths:
+  //   1. If SessionsPanel just mounted (e.g. tab switched from Projects),
+  //      Dashboard already pushed `?selected=<slug>` to the URL — read it.
+  //   2. If SessionsPanel is already mounted (user on Sessions tab clicked
+  //      from a still-rendered Projects view, or back-button), the URL push
+  //      doesn't trigger a re-mount, so listen for the event live.
+  // Strip `?selected` afterward so a refresh doesn't keep re-opening it.
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const selected = params.get("selected");
-    if (!selected) return;
-    setSelectedSlug(selected);
-    const url = new URL(window.location.href);
-    url.searchParams.delete("selected");
-    window.history.replaceState(null, "", url);
+    const consumeUrl = () => {
+      const params = new URLSearchParams(window.location.search);
+      const selected = params.get("selected");
+      if (!selected) return;
+      setSelectedSlug(selected);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("selected");
+      window.history.replaceState(null, "", url);
+    };
+    consumeUrl();
+    const handler = (e: Event) => {
+      const slug = (e as CustomEvent<{ slug: string }>).detail?.slug;
+      if (slug) setSelectedSlug(slug);
+    };
+    window.addEventListener("vibe-open-session", handler);
+    return () => window.removeEventListener("vibe-open-session", handler);
   }, []);
   const wasEnrichingRef = useRef(false);
   const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());

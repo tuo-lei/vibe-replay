@@ -188,6 +188,10 @@ const LANE_GAP_PX = 4;
 const MAX_LANES_PER_PROJECT = 5;
 const MIN_BAR_HEIGHT_PX = 10;
 const MAX_BAR_HEIGHT_PX = 72;
+// Floor for a project row's height so the project label (name + count line)
+// always has room. Without this, a project with one low-score session could
+// produce a row only ~16px tall and clip the second label line's descenders.
+const MIN_ROW_HEIGHT_PX = 40;
 const LABEL_VISIBLE_MIN_HEIGHT_PX = 14;
 const LABEL_LINE_HEIGHT_PX = 12;
 const LABEL_VERTICAL_PADDING_PX = 6;
@@ -479,7 +483,14 @@ function buildTimeline(
         laneTopsPx.push(cursor);
         cursor += h + LANE_GAP_PX;
       }
-      const totalRowHeightPx = cursor + 4;
+      const contentHeight = cursor + 4;
+      const totalRowHeightPx = Math.max(contentHeight, MIN_ROW_HEIGHT_PX);
+      // If row was floored above content height, push lane tops down so bars
+      // stay bottom-aligned within the now-taller row.
+      const verticalPadding = totalRowHeightPx - contentHeight;
+      if (verticalPadding > 0) {
+        for (let i = 0; i < laneTopsPx.length; i++) laneTopsPx[i] += verticalPadding;
+      }
 
       projects.push({
         project: g.project,
@@ -726,7 +737,10 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                             (ts.heightPx - LABEL_VERTICAL_PADDING_PX) / LABEL_LINE_HEIGHT_PX,
                           ),
                         );
-                        const showWick = ts.realDurationFraction < 0.85;
+                        // Right-anchored bars no longer have their left edge
+                        // at startTime, so a left-aligned wick would be
+                        // misleading. Use the tooltip for exact timing instead.
+                        const showWick = !ts.rightAnchored && ts.realDurationFraction < 0.85;
                         return (
                           <button
                             type="button"
