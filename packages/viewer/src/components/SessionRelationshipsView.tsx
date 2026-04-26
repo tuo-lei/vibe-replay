@@ -965,7 +965,14 @@ function buildProjectFileGroups(groups: ProjectGroup[]): ProjectFileGroup[] {
   );
 }
 
-function FileConnectionsView({ groups }: { groups: ProjectGroup[] }) {
+function FileConnectionsView({
+  groups,
+  hideProjectList,
+}: {
+  groups: ProjectGroup[];
+  /** True when the outer Projects sidebar already restricts us to one project. */
+  hideProjectList?: boolean;
+}) {
   const projectFileGroups = useMemo(() => buildProjectFileGroups(groups), [groups]);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -1001,43 +1008,47 @@ function FileConnectionsView({ groups }: { groups: ProjectGroup[] }) {
 
   return (
     <div className="flex h-full min-w-0 flex-col gap-4 p-4 lg:flex-row">
-      {/* Project list */}
-      <div className="w-full shrink-0 space-y-2 overflow-y-auto lg:w-64">
-        <div className="px-1">
-          <div className="text-sm font-sans font-semibold text-terminal-text">Hot Files</div>
-          <div className="mt-0.5 text-[10px] font-mono text-terminal-dimmer">
-            {projectFileGroups.length} {plural(projectFileGroups.length, "project")} with hot files
+      {/* Project list — hidden when the outer Projects sidebar already filters
+          us to a single project (avoids a redundant second-level project list) */}
+      {!hideProjectList && (
+        <div className="w-full shrink-0 space-y-2 overflow-y-auto lg:w-64">
+          <div className="px-1">
+            <div className="text-sm font-sans font-semibold text-terminal-text">Hot Files</div>
+            <div className="mt-0.5 text-[10px] font-mono text-terminal-dimmer">
+              {projectFileGroups.length} {plural(projectFileGroups.length, "project")} with hot
+              files
+            </div>
           </div>
+          {projectFileGroups.map((group) => {
+            const isSelected = selectedProjectGroup.project === group.project;
+            return (
+              <button
+                key={group.project}
+                onClick={() => {
+                  setSelectedProject(group.project);
+                  setSelectedFile(null);
+                }}
+                className={`w-full rounded-lg border px-3 py-2.5 text-left transition-all duration-200 ease-material ${
+                  isSelected
+                    ? "border-transparent bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
+                    : "border-transparent bg-terminal-bg/35 text-terminal-text shadow-layer-sm hover:bg-terminal-surface-hover hover:shadow-layer-md"
+                }`}
+              >
+                <div className="truncate text-xs font-sans font-semibold">
+                  {projectName(group.project)}
+                </div>
+                <div className="mt-0.5 truncate text-[10px] font-mono text-terminal-dimmer">
+                  {group.project}
+                </div>
+                <div className="mt-1 text-[10px] font-mono text-terminal-dimmer">
+                  {group.files.length} {plural(group.files.length, "file")} ·{" "}
+                  {group.totalEdits.toLocaleString()} {plural(group.totalEdits, "edit")}
+                </div>
+              </button>
+            );
+          })}
         </div>
-        {projectFileGroups.map((group) => {
-          const isSelected = selectedProjectGroup.project === group.project;
-          return (
-            <button
-              key={group.project}
-              onClick={() => {
-                setSelectedProject(group.project);
-                setSelectedFile(null);
-              }}
-              className={`w-full rounded-lg border px-3 py-2.5 text-left transition-all duration-200 ease-material ${
-                isSelected
-                  ? "border-transparent bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
-                  : "border-transparent bg-terminal-bg/35 text-terminal-text shadow-layer-sm hover:bg-terminal-surface-hover hover:shadow-layer-md"
-              }`}
-            >
-              <div className="truncate text-xs font-sans font-semibold">
-                {projectName(group.project)}
-              </div>
-              <div className="mt-0.5 truncate text-[10px] font-mono text-terminal-dimmer">
-                {group.project}
-              </div>
-              <div className="mt-1 text-[10px] font-mono text-terminal-dimmer">
-                {group.files.length} {plural(group.files.length, "file")} ·{" "}
-                {group.totalEdits.toLocaleString()} {plural(group.totalEdits, "edit")}
-              </div>
-            </button>
-          );
-        })}
-      </div>
+      )}
 
       {/* Project files + detail panel */}
       <div className="min-w-0 flex-1 space-y-4 overflow-y-auto">
@@ -1158,17 +1169,34 @@ export type ProjectRelationshipView = "timeline" | "files";
 
 interface SessionRelationshipsViewProps {
   view: ProjectRelationshipView;
+  /**
+   * If set, restrict the view to a single project (post-rollup key).
+   * The outer Projects sidebar already shows the project list, so the inner
+   * Hot Files project list collapses to a single row when filter is active.
+   */
+  projectFilter?: string;
 }
 
-export default function SessionRelationshipsView({ view }: SessionRelationshipsViewProps) {
+export default function SessionRelationshipsView({
+  view,
+  projectFilter,
+}: SessionRelationshipsViewProps) {
   const { sessions, loading, error } = useRelationshipData();
 
   // Collapse agent worktrees back to the project the user recognizes. The
   // session rows still expose the original path when it matters.
-  const groups = useMemo(() => groupByProject(sessions, { collapseWorktrees: true }), [sessions]);
+  const filteredSessions = useMemo(
+    () =>
+      projectFilter ? sessions.filter((s) => rollupProject(s.project) === projectFilter) : sessions,
+    [sessions, projectFilter],
+  );
+  const groups = useMemo(
+    () => groupByProject(filteredSessions, { collapseWorktrees: true }),
+    [filteredSessions],
+  );
   const providerSummary = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const s of sessions) {
+    for (const s of filteredSessions) {
       const label = providerBadgeLabel(s.provider);
       counts.set(label, (counts.get(label) || 0) + 1);
     }
@@ -1177,10 +1205,10 @@ export default function SessionRelationshipsView({ view }: SessionRelationshipsV
       .slice(0, 3)
       .map(([label, count]) => `${label} ${count}`)
       .join(" · ");
-  }, [sessions]);
+  }, [filteredSessions]);
   const estimatedTimingCount = useMemo(
-    () => sessions.filter((session) => sessionHasEstimatedTime(session)).length,
-    [sessions],
+    () => filteredSessions.filter((session) => sessionHasEstimatedTime(session)).length,
+    [filteredSessions],
   );
 
   if (loading) {
@@ -1238,13 +1266,15 @@ export default function SessionRelationshipsView({ view }: SessionRelationshipsV
       {/* Stats bar */}
       <div className="relative z-10 flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-[10px] font-mono text-terminal-dimmer md:px-6">
         <span>
-          <span className="text-terminal-text">{sessions.length}</span>{" "}
-          {plural(sessions.length, "session")}
+          <span className="text-terminal-text">{filteredSessions.length}</span>{" "}
+          {plural(filteredSessions.length, "session")}
         </span>
-        <span>
-          <span className="text-terminal-text">{groups.length}</span>{" "}
-          {plural(groups.length, "project")}
-        </span>
+        {!projectFilter && (
+          <span>
+            <span className="text-terminal-text">{groups.length}</span>{" "}
+            {plural(groups.length, "project")}
+          </span>
+        )}
         {providerSummary && (
           <span>
             <span className="text-terminal-purple">{providerSummary}</span>
@@ -1252,22 +1282,22 @@ export default function SessionRelationshipsView({ view }: SessionRelationshipsV
         )}
         <span>
           <span className="text-terminal-blue">
-            {fmtDuration(sessions.reduce((s, x) => s + (x.durationMs ?? 0), 0))}
+            {fmtDuration(filteredSessions.reduce((s, x) => s + (x.durationMs ?? 0), 0))}
           </span>{" "}
           total time
         </span>
         <span>
           <span className="text-terminal-orange">
-            ${sessions.reduce((s, x) => s + (x.costEstimate ?? 0), 0).toFixed(2)}
+            ${filteredSessions.reduce((s, x) => s + (x.costEstimate ?? 0), 0).toFixed(2)}
           </span>{" "}
           total cost
         </span>
         <span>
           <span className="text-terminal-green">
-            {sessions.reduce((s, x) => s + x.editCount, 0).toLocaleString()}
+            {filteredSessions.reduce((s, x) => s + x.editCount, 0).toLocaleString()}
           </span>{" "}
           {plural(
-            sessions.reduce((s, x) => s + x.editCount, 0),
+            filteredSessions.reduce((s, x) => s + x.editCount, 0),
             "edit",
           )}
         </span>
@@ -1281,7 +1311,9 @@ export default function SessionRelationshipsView({ view }: SessionRelationshipsV
       {/* View content */}
       <div className="relative z-10 min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
         {view === "timeline" && <TimelineSwimlaneView groups={groups} />}
-        {view === "files" && <FileConnectionsView groups={groups} />}
+        {view === "files" && (
+          <FileConnectionsView groups={groups} hideProjectList={Boolean(projectFilter)} />
+        )}
       </div>
     </div>
   );
