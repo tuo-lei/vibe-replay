@@ -94,66 +94,107 @@ function toolIcon(name: string): string {
   }
 }
 
-const AGENT_TYPE_COLORS: Record<string, string> = {
-  Explore: "bg-blue-500/20 text-blue-300 border-blue-500/30",
-  Plan: "bg-purple-500/20 text-purple-300 border-purple-500/30",
-  Shell: "bg-cyan-500/20 text-cyan-300 border-cyan-500/30",
-  "general-purpose": "bg-green-500/20 text-green-300 border-green-500/30",
-  "claude-code-guide": "bg-amber-500/20 text-amber-300 border-amber-500/30",
+/**
+ * Map known agent types onto the design-system palette so subagent visuals
+ * use the same theme tokens (`terminal-*-subtle` / `terminal-*-emphasis`)
+ * that drive the Assistant section, Jump Target pill, etc. Falls back to
+ * purple for unknown types — purple is the brand color for subagents.
+ *
+ * Class strings are spelled out (not interpolated) so the Tailwind JIT can
+ * see them at build time.
+ */
+type AgentTheme = "blue" | "purple" | "green" | "orange";
+
+const AGENT_TYPE_THEME: Record<string, AgentTheme> = {
+  Explore: "blue",
+  Plan: "purple",
+  Shell: "blue",
+  "general-purpose": "green",
+  "claude-code-guide": "orange",
 };
 
-/** Distinct accent color used for the subagent left border + faint background. */
-const AGENT_TYPE_ACCENTS: Record<string, { border: string; bg: string }> = {
-  Explore: { border: "border-l-blue-400", bg: "bg-blue-500/[0.04]" },
-  Plan: { border: "border-l-purple-400", bg: "bg-purple-500/[0.04]" },
-  Shell: { border: "border-l-cyan-400", bg: "bg-cyan-500/[0.04]" },
-  "general-purpose": { border: "border-l-green-400", bg: "bg-green-500/[0.04]" },
-  "claude-code-guide": { border: "border-l-amber-400", bg: "bg-amber-500/[0.04]" },
-};
-
-function agentAccent(type: string) {
-  return AGENT_TYPE_ACCENTS[type] || { border: "border-l-gray-400", bg: "bg-gray-500/[0.04]" };
+function agentTheme(type: string): AgentTheme {
+  return AGENT_TYPE_THEME[type] || "purple";
 }
 
+const THEME_CLASSES: Record<
+  AgentTheme,
+  { text: string; bgSubtle: string; borderL: string; pill: string }
+> = {
+  blue: {
+    text: "text-terminal-blue",
+    bgSubtle: "bg-terminal-blue-subtle",
+    borderL: "border-terminal-blue",
+    pill: "bg-terminal-blue-emphasis text-terminal-blue",
+  },
+  purple: {
+    text: "text-terminal-purple",
+    bgSubtle: "bg-terminal-purple-subtle",
+    borderL: "border-terminal-purple",
+    pill: "bg-terminal-purple-emphasis text-terminal-purple",
+  },
+  green: {
+    text: "text-terminal-green",
+    bgSubtle: "bg-terminal-green-subtle",
+    borderL: "border-terminal-green",
+    pill: "bg-terminal-green-emphasis text-terminal-green",
+  },
+  orange: {
+    text: "text-terminal-orange",
+    bgSubtle: "bg-terminal-orange-subtle",
+    borderL: "border-terminal-orange",
+    pill: "bg-terminal-orange-emphasis text-terminal-orange",
+  },
+};
+
+/** Agent-type pill — matches the design language of the Assistant group's
+ * "Jump Target" / "Focused" pills (rounded-full, sans-serif uppercase). */
 function AgentTypeBadge({ type }: { type: string }) {
-  const colors = AGENT_TYPE_COLORS[type] || "bg-gray-500/20 text-gray-300 border-gray-500/30";
+  const c = THEME_CLASSES[agentTheme(type)];
   return (
-    <span className={`text-[10px] px-1.5 py-0.5 rounded border font-mono ${colors}`}>{type}</span>
-  );
-}
-
-/** Prominent "TASK" pill so subagents are immediately distinguishable from
- * regular tool calls — the Agent block is conceptually a sub-conversation,
- * not a leaf operation, and the eye should land on it first. */
-function TaskBadge() {
-  return (
-    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-terminal-purple/20 text-terminal-purple border border-terminal-purple/40 tracking-wider">
-      TASK
+    <span
+      className={`text-[10px] font-sans font-medium uppercase tracking-widest px-2 py-0.5 rounded-full ${c.pill}`}
+    >
+      {type}
     </span>
   );
 }
 
-function SubAgentView({ subAgent }: { subAgent: SubAgent }) {
-  const accent = agentAccent(subAgent.agentType);
+/** Section label — matches the "Assistant" header treatment so a subagent
+ * card reads as a sibling section, not a tool row. */
+function SubagentLabel({ theme }: { theme: AgentTheme }) {
   return (
-    <div className={`border-t border-terminal-border-subtle ${accent.bg}`}>
+    <span
+      className={`text-[10px] font-sans font-semibold uppercase tracking-widest ${THEME_CLASSES[theme].text}`}
+    >
+      Subagent
+    </span>
+  );
+}
+
+function SubAgentBody({ subAgent }: { subAgent: SubAgent }) {
+  return (
+    <div className="mt-3 space-y-3">
       {subAgent.prompt && (
-        <div className="px-3 py-2 border-b border-terminal-border-subtle/50">
-          <div className="text-[10px] text-terminal-dim font-mono uppercase tracking-wide mb-1">
+        <div>
+          <div className="text-[10px] font-sans font-semibold uppercase tracking-widest text-terminal-dim mb-1.5">
             Prompt
           </div>
-          <div className="text-[11px] text-terminal-text/85 font-mono whitespace-pre-wrap break-words max-h-[120px] overflow-y-auto">
+          <div className="text-[11px] text-terminal-text/85 font-mono whitespace-pre-wrap break-words max-h-[120px] overflow-y-auto rounded-md bg-terminal-surface-inset px-3 py-2">
             {subAgent.prompt}
           </div>
         </div>
       )}
       {subAgent.scenes.length > 0 && (
-        <div
-          className={`pl-3 pr-2 py-2 border-l-2 ${accent.border} ml-2 my-2 space-y-1 max-h-[500px] overflow-y-auto`}
-        >
-          {subAgent.scenes.map((s, i) => (
-            <SubAgentSceneItem key={i} scene={s} />
-          ))}
+        <div>
+          <div className="text-[10px] font-sans font-semibold uppercase tracking-widest text-terminal-dim mb-1.5">
+            Trace
+          </div>
+          <div className="space-y-1 max-h-[500px] overflow-y-auto rounded-md bg-terminal-surface-inset px-3 py-2">
+            {subAgent.scenes.map((s, i) => (
+              <SubAgentSceneItem key={i} scene={s} />
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -275,57 +316,58 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
     );
   }
 
-  // Agent tool call with subagent data — rendered with prominent TASK header,
-  // agent-color left border, and inline scene rendering when expanded.
+  // Agent tool call with subagent data — rendered as a design-system section
+  // card (matching the Assistant group) so subagents read as "delegated
+  // sub-conversations" rather than just another tool row.
   if (scene.toolName === "Agent" && scene.subAgent) {
     const sa = scene.subAgent;
-    const accent = agentAccent(sa.agentType);
+    const theme = agentTheme(sa.agentType);
+    const c = THEME_CLASSES[theme];
     const totalTok = subAgentTotalTokens(sa);
     const totalDur = subAgentTotalDurationMs(sa);
     const description = sa.description || (scene.input.description as string) || "";
     return (
-      <div>
-        <div
-          className={`bg-terminal-surface rounded-xl overflow-hidden shadow-layer-sm border-l-4 ${accent.border}`}
-        >
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="w-full flex flex-col gap-1.5 px-3 py-2.5 bg-terminal-surface hover:bg-terminal-surface-hover transition-colors duration-200 ease-material text-left"
-          >
-            <div className="flex items-center gap-2 flex-wrap">
-              <TaskBadge />
-              <AgentTypeBadge type={sa.agentType} />
-              {sa.model && (
-                <span className="text-[10px] text-terminal-dim font-mono">{sa.model}</span>
-              )}
-              <span className="text-[10px] text-terminal-dim font-mono">{sa.toolCalls} tools</span>
-              {sa.thinkingBlocks > 0 && (
-                <span className="text-[10px] text-terminal-dim font-mono">
-                  {sa.thinkingBlocks} thinking
-                </span>
-              )}
-              <span className="flex-1" />
-              {totalTok > 0 && (
-                <span
-                  className="text-[10px] text-terminal-purple font-mono font-bold"
-                  title="Total tokens billed for this subagent (input + output + cache)"
-                >
-                  {formatTokens(totalTok)} tok
-                </span>
-              )}
-              {totalDur > 0 && <ToolDuration ms={totalDur} />}
-              <span
-                className={`text-xs text-terminal-dim transition-transform ${expanded ? "rotate-90" : ""}`}
-              >
-                {CHEVRON}
-              </span>
-            </div>
-            {description && (
-              <div className="text-xs text-terminal-text/90 font-mono">{description}</div>
+      <div
+        className={`relative rounded-xl px-5 py-4 border-l-2 ${c.borderL} ${c.bgSubtle} shadow-layer-sm transition-all duration-200 ease-material`}
+      >
+        <button onClick={() => setExpanded(!expanded)} className="w-full text-left">
+          {/* Header row — mirrors the Assistant group header */}
+          <div className="flex items-center gap-2 flex-wrap mb-1.5">
+            <SubagentLabel theme={theme} />
+            <AgentTypeBadge type={sa.agentType} />
+            {sa.model && (
+              <span className="text-[10px] text-terminal-dimmer font-mono">{sa.model}</span>
             )}
-          </button>
-          {expanded && <SubAgentView subAgent={sa} />}
-        </div>
+            <span className="flex-1" />
+            <span className="text-[10px] text-terminal-dim font-mono">{sa.toolCalls} tools</span>
+            {sa.thinkingBlocks > 0 && (
+              <span className="text-[10px] text-terminal-dim font-mono">
+                {sa.thinkingBlocks} thinking
+              </span>
+            )}
+            {totalTok > 0 && (
+              <span
+                className={`text-[10px] font-mono font-semibold ${c.text}`}
+                title="Total tokens billed for this subagent (input + output + cache)"
+              >
+                {formatTokens(totalTok)} tok
+              </span>
+            )}
+            {totalDur > 0 && <ToolDuration ms={totalDur} />}
+            <span
+              className={`text-xs text-terminal-dim transition-transform ${expanded ? "rotate-90" : ""}`}
+            >
+              {CHEVRON}
+            </span>
+          </div>
+          {/* Description — large, like a section title */}
+          {description && (
+            <div className="text-sm text-terminal-text font-sans font-medium leading-snug">
+              {description}
+            </div>
+          )}
+        </button>
+        {expanded && <SubAgentBody subAgent={sa} />}
       </div>
     );
   }
