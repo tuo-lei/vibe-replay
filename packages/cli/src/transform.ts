@@ -197,6 +197,34 @@ export function transformToReplay(
   };
 }
 
+function buildFileDiff(
+  toolName: string,
+  input: Record<string, any>,
+): ToolCallScene["diff"] | undefined {
+  if (toolName === "Edit" && input.file_path) {
+    return {
+      filePath: redactPath(input.file_path),
+      oldContent: input.old_string ?? "",
+      newContent: input.new_string ?? "",
+    };
+  }
+  if (toolName === "Write" && input.file_path) {
+    return {
+      filePath: redactPath(input.file_path),
+      oldContent: "",
+      newContent: truncate(input.content || "", 3000),
+    };
+  }
+  if (toolName === "Delete" && input.file_path) {
+    return {
+      filePath: redactPath(input.file_path),
+      oldContent: input.old_string ?? "(file deleted)",
+      newContent: "",
+    };
+  }
+  return undefined;
+}
+
 function buildToolScene(
   toolName: string,
   input: Record<string, any>,
@@ -211,24 +239,9 @@ function buildToolScene(
     ...(images && images.length > 0 ? { images } : {}),
   };
 
-  if (toolName === "Edit" && input.file_path) {
-    scene.diff = {
-      filePath: redactPath(input.file_path),
-      oldContent: input.old_string ?? "",
-      newContent: input.new_string ?? "",
-    };
-  } else if (toolName === "Write" && input.file_path) {
-    scene.diff = {
-      filePath: redactPath(input.file_path),
-      oldContent: "",
-      newContent: truncate(input.content || "", 3000),
-    };
-  } else if (toolName === "Delete" && input.file_path) {
-    scene.diff = {
-      filePath: redactPath(input.file_path),
-      oldContent: input.old_string ?? "(file deleted)",
-      newContent: "",
-    };
+  const diff = buildFileDiff(toolName, input);
+  if (diff) {
+    scene.diff = diff;
   } else if (toolName === "Bash" && input.command) {
     scene.bashOutput = {
       command: redactSecrets(redactPath(input.command)),
@@ -391,25 +404,9 @@ function redactSubAgentScene(s: Scene): Scene {
       isError: s.isError || false,
     };
 
-    // Preserve diff for file-modifying tools (same logic as buildToolScene)
-    if (toolName === "Edit" && input.file_path) {
-      scene.diff = {
-        filePath: redactPath(input.file_path),
-        oldContent: input.old_string ?? "",
-        newContent: input.new_string ?? "",
-      };
-    } else if (toolName === "Write" && input.file_path) {
-      scene.diff = {
-        filePath: redactPath(input.file_path),
-        oldContent: "",
-        newContent: truncate(input.content || "", 3000),
-      };
-    } else if (toolName === "Delete" && input.file_path) {
-      scene.diff = {
-        filePath: redactPath(input.file_path),
-        oldContent: input.old_string ?? "(file deleted)",
-        newContent: "",
-      };
+    const diff = buildFileDiff(toolName, input);
+    if (diff) {
+      scene.diff = diff;
     }
 
     return scene;
