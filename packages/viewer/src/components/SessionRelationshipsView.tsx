@@ -680,7 +680,12 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                               className="absolute overflow-hidden rounded-md text-left shadow-layer-sm transition-all duration-200 ease-material hover:z-10 hover:shadow-layer-md"
                               style={{
                                 left: `${ts.leftPct}%`,
-                                width: `max(${ts.widthPct}%, ${ts.minWidthPx}px)`,
+                                // Cap min-width to whatever space is left
+                                // between the bar's start and the lane's right
+                                // edge — otherwise bars near "today" overflow
+                                // the overflow-hidden lane container and get
+                                // visually truncated.
+                                width: `max(${ts.widthPct}%, min(${ts.minWidthPx}px, calc(100% - ${ts.leftPct}%)))`,
                                 top,
                                 height: ts.heightPx,
                                 opacity,
