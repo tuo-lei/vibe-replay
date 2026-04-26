@@ -1,7 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { loadOverlays, sessionWithEffectiveContent } from "../overlays.js";
+import type { ReplaySession } from "../types.js";
 
 const CLOUD_META_FILE = ".vibe-replay-cloud.json";
 export const DEFAULT_API_URL = "https://vibe-replay.com";
@@ -212,6 +214,35 @@ export async function publishCloud(
   });
 
   return data;
+}
+
+/**
+ * Like publishCloud, but first merges any editor overlays (overlays.json next
+ * to replay.json) into the session so cloud links reflect the user's edits.
+ * Writes the merged content to replay.json for the duration of the upload,
+ * then restores the original on the way out.
+ */
+export async function publishCloudWithOverlays(
+  outputDir: string,
+  opts?: { visibility?: "public" | "unlisted" | "private" },
+): Promise<CloudResult> {
+  const slug = basename(outputDir);
+  const baseDir = dirname(outputDir);
+  const overlays = await loadOverlays(baseDir, slug);
+  if (overlays.overlays.length === 0) {
+    return publishCloud(outputDir, opts);
+  }
+
+  const replayPath = join(outputDir, "replay.json");
+  const originalContent = await readFile(replayPath, "utf-8");
+  const session = JSON.parse(originalContent) as ReplaySession;
+  const merged = sessionWithEffectiveContent(session, overlays);
+  await writeFile(replayPath, JSON.stringify(merged), "utf-8");
+  try {
+    return await publishCloud(outputDir, opts);
+  } finally {
+    await writeFile(replayPath, originalContent, "utf-8");
+  }
 }
 
 export async function loadSavedCloudInfo(outputDir: string): Promise<SavedCloudInfo | undefined> {

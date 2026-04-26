@@ -23,6 +23,7 @@ import { generateGitHubGif } from "./formatters/gif.js";
 import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.js";
 import { generateOutput, injectDataScript, loadViewerHtml } from "./generator.js";
 import { mergeInsights, readInsightsStore, writeInsightsStore } from "./insights.js";
+import { loadOverlays, sessionWithEffectiveContent } from "./overlays.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
 import {
   getApiUrl,
@@ -31,7 +32,7 @@ import {
   loadAnyAuthToken,
   loadAuthToken,
   loadSavedCloudInfo,
-  publishCloud,
+  publishCloudWithOverlays,
   removeAuthToken,
   saveAuthToken,
 } from "./publishers/cloud.js";
@@ -734,24 +735,6 @@ async function saveAnnotations(
 }
 
 // ─── Overlay persistence ────────────────────────────────────────────────────
-
-const EMPTY_OVERLAYS: SessionOverlays = { version: 1, overlays: [] };
-
-async function loadOverlays(baseDir: string, slug: string): Promise<SessionOverlays> {
-  const dirs = [join(baseDir, slug), resolve("./vibe-replay", slug)];
-  for (const dir of dirs) {
-    try {
-      const raw = await readFile(join(dir, "overlays.json"), "utf-8");
-      const parsed = JSON.parse(raw) as SessionOverlays;
-      if (parsed && typeof parsed === "object" && Array.isArray(parsed.overlays)) {
-        return parsed;
-      }
-    } catch {
-      /* not found */
-    }
-  }
-  return EMPTY_OVERLAYS;
-}
 
 async function saveOverlays(
   baseDir: string,
@@ -2356,31 +2339,18 @@ export async function startServer(
     }
   });
 
-  // Publish to cloud (R2)
+  // Publish to cloud (R2) — overlay merging is handled by publishCloudWithOverlays
   app.post("/api/publish/cloud", async (c) => {
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
     const targetDir = join(baseDir, result.slug);
 
     try {
-      const rawSession = await loadSessionFromDisk(baseDir, result.slug);
-      const overlaysData = await loadOverlays(baseDir, result.slug);
-      const targetSession = sessionWithEffectiveContent(rawSession, overlaysData);
-
-      // Write effective content for upload, then restore the original replay.json
-      const replayPath = join(targetDir, "replay.json");
-      const originalContent = await readFile(replayPath, "utf-8");
-      await writeFile(replayPath, JSON.stringify(targetSession), "utf-8");
-
-      try {
-        const body = await c.req.json().catch(() => ({}));
-        const cloudResult = await publishCloud(targetDir, {
-          visibility: body.visibility || "unlisted",
-        });
-        return c.json(cloudResult);
-      } finally {
-        await writeFile(replayPath, originalContent, "utf-8");
-      }
+      const body = await c.req.json().catch(() => ({}));
+      const cloudResult = await publishCloudWithOverlays(targetDir, {
+        visibility: body.visibility || "unlisted",
+      });
+      return c.json(cloudResult);
     } catch (err) {
       return c.json({ error: getErrorMessage(err) }, 500);
     }
@@ -2626,36 +2596,6 @@ export async function startServer(
     }
     return c.json({ ok: true });
   });
-
-  // --- Overlay chaining helper ---
-  // When running a new operation (translate/tone), use effective content from existing
-  // overlays so operations chain correctly (e.g. soften AFTER translate works on translated text)
-  function sessionWithEffectiveContent(
-    session: ReplaySession,
-    existing: SessionOverlays,
-  ): ReplaySession {
-    if (existing.overlays.length === 0) return session;
-    // For each scene, find the latest overlay by updatedAt
-    const latestByScene = new Map<number, { value: string; time: string }>();
-    for (const o of existing.overlays) {
-      const current = latestByScene.get(o.sceneIndex);
-      if (!current || o.updatedAt > current.time) {
-        latestByScene.set(o.sceneIndex, { value: o.modifiedValue, time: o.updatedAt });
-      }
-    }
-    if (latestByScene.size === 0) return session;
-    return {
-      ...session,
-      scenes: session.scenes.map((scene, i) => {
-        const entry = latestByScene.get(i);
-        if (!entry) return scene;
-        if (scene.type === "user-prompt" || scene.type === "text-response") {
-          return { ...scene, content: entry.value };
-        }
-        return scene;
-      }),
-    };
-  }
 
   // After generation, fix originalValue to be the TRUE original from the unmodified session
   function fixOriginalValues(

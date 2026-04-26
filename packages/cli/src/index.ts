@@ -19,7 +19,7 @@ import {
   DEFAULT_API_URL,
   getAuthFilePath,
   loadAuthToken,
-  publishCloud,
+  publishCloudWithOverlays,
   removeAuthTokenSync,
   saveAuthTokenSync,
 } from "./publishers/cloud.js";
@@ -648,7 +648,7 @@ program
         } else {
           const cloudSpinner = ora("Uploading to cloud...").start();
           try {
-            const result = await publishCloud(outputDir);
+            const result = await publishCloudWithOverlays(outputDir);
             cloudSpinner.succeed("Uploaded!");
             console.log(chalk.dim("  Share URL: ") + chalk.cyan(result.url));
             console.log(
@@ -913,18 +913,18 @@ program
   .description("Share an existing replay via cloud (unlisted link, expires in 7 days)")
   .argument("[path]", "Path to replay directory or replay.json")
   .option("--visibility <type>", `Visibility: ${VISIBILITIES.join(", ")}`, "unlisted")
-  .option("--api-url <url>", "API base URL", DEFAULT_API_URL)
-  .action(async (pathArg: string | undefined, opts: { visibility: string; apiUrl: string }) => {
+  .option("--api-url <url>", `API base URL (default: ${DEFAULT_API_URL})`)
+  .action(async (pathArg: string | undefined, opts: { visibility: string; apiUrl?: string }) => {
     const { existsSync, statSync } = await import("node:fs");
     const { readFile, readdir } = await import("node:fs/promises");
     const { join, dirname, resolve } = await import("node:path");
     const { homedir } = await import("node:os");
 
-    // Honor --api-url by setting env var, since publishCloud reads from getApiUrl().
-    // Only mutate when the user actually overrode the default.
-    const apiUrl = opts.apiUrl.replace(/\/$/, "");
-    if (apiUrl !== DEFAULT_API_URL) {
-      process.env.VIBE_REPLAY_API_URL = apiUrl;
+    // Honor --api-url whenever the user supplies it, even when the value
+    // matches DEFAULT_API_URL (overriding a preset shell env var).
+    // Without the flag, fall through to existing precedence: env > DEFAULT_API_URL.
+    if (opts.apiUrl) {
+      process.env.VIBE_REPLAY_API_URL = opts.apiUrl.replace(/\/$/, "");
     }
 
     // Validate raw string before narrowing the type.
@@ -1004,7 +1004,7 @@ program
 
     const spinner = ora("Uploading to cloud...").start();
     try {
-      const result = await publishCloud(outputDir, { visibility });
+      const result = await publishCloudWithOverlays(outputDir, { visibility });
       spinner.succeed("Uploaded!");
       console.log();
       console.log(chalk.dim("  Share URL: ") + chalk.cyan(result.url));
