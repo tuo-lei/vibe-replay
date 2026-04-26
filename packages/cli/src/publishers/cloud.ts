@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 const CLOUD_META_FILE = ".vibe-replay-cloud.json";
-const DEFAULT_API_URL = "https://vibe-replay.com";
+export const DEFAULT_API_URL = "https://vibe-replay.com";
 const AUTH_DIR = join(homedir(), ".config", "vibe-replay");
 const AUTH_FILE = join(AUTH_DIR, "auth.json");
 

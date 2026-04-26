@@ -16,6 +16,7 @@ import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.j
 import { generateOutput } from "./generator.js";
 import { deduplicateSessionsByProvider, getAllProviders, getProvider } from "./providers/index.js";
 import {
+  DEFAULT_API_URL,
   getAuthFilePath,
   loadAuthToken,
   publishCloud,
@@ -904,26 +905,40 @@ authCmd
 // share — upload an existing replay to the cloud
 // ---------------------------------------------------------------------------
 
+const VISIBILITIES = ["public", "unlisted", "private"] as const;
+type Visibility = (typeof VISIBILITIES)[number];
+
 program
   .command("share")
-  .description("Share an existing replay via cloud (7-day link)")
+  .description("Share an existing replay via cloud (unlisted link, expires in 7 days)")
   .argument("[path]", "Path to replay directory or replay.json")
-  .option("--visibility <type>", "Visibility: public, unlisted, private", "unlisted")
-  .option("--api-url <url>", "API base URL", "https://vibe-replay.com")
+  .option("--visibility <type>", `Visibility: ${VISIBILITIES.join(", ")}`, "unlisted")
+  .option("--api-url <url>", "API base URL", DEFAULT_API_URL)
   .action(async (pathArg: string | undefined, opts: { visibility: string; apiUrl: string }) => {
     const { existsSync, statSync } = await import("node:fs");
     const { readFile, readdir } = await import("node:fs/promises");
     const { join, dirname, resolve } = await import("node:path");
     const { homedir } = await import("node:os");
 
-    // Honor --api-url by setting env var, since publishCloud reads from getApiUrl()
+    // Honor --api-url by setting env var, since publishCloud reads from getApiUrl().
+    // Only mutate when the user actually overrode the default.
     const apiUrl = opts.apiUrl.replace(/\/$/, "");
-    process.env.VIBE_REPLAY_API_URL = apiUrl;
+    if (apiUrl !== DEFAULT_API_URL) {
+      process.env.VIBE_REPLAY_API_URL = apiUrl;
+    }
 
-    const visibility = opts.visibility as "public" | "unlisted" | "private";
-    if (!["public", "unlisted", "private"].includes(visibility)) {
+    // Validate raw string before narrowing the type.
+    if (!(VISIBILITIES as readonly string[]).includes(opts.visibility)) {
       console.error(chalk.red(`\n  ✗ Invalid --visibility: ${opts.visibility}`));
-      console.error(chalk.dim("  Must be one of: public, unlisted, private\n"));
+      console.error(chalk.dim(`  Must be one of: ${VISIBILITIES.join(", ")}\n`));
+      process.exit(1);
+    }
+    const visibility = opts.visibility as Visibility;
+
+    // Pre-flight auth check — fail fast before any picker / I/O / spinner.
+    if (!loadAuthToken()) {
+      console.error(chalk.red("\n  ✗ Not logged in."));
+      console.error(chalk.dim("  Run → ") + chalk.white("vibe-replay auth login\n"));
       process.exit(1);
     }
 
