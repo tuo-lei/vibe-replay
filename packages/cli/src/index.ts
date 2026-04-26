@@ -41,6 +41,7 @@ interface GitHubExportResult {
   svgPath: string;
   gifPath?: string;
   mdPath: string;
+  redactionsPath: string;
 }
 
 async function runGitHubExport(
@@ -86,12 +87,37 @@ async function runGitHubExport(
   await writeFile(mdFilePath, markdown, "utf-8");
   mdSpinner.succeed(`Markdown: ${mdFilePath}`);
 
+  // Redaction report: lets agents/users audit what was filtered before sharing.
+  // - alreadyRedactedCount: counts [REDACTED] markers from transform.ts (layer 1)
+  // - leftoverFindings: layer-2 scan of the final markdown for anything that slipped past
+  const redactionsSpinner = ora("Generating redaction report...").start();
+  const alreadyRedactedCount = (markdown.match(/\[REDACTED\]/g) || []).length;
+  const leftoverFindings = scanForSecrets(markdown);
+  const redactionsReport = {
+    version: 1,
+    source: "github-summary.md",
+    alreadyRedactedCount,
+    leftoverFindings,
+    notes: [
+      "alreadyRedactedCount: substrings replaced by transform.ts before this export.",
+      "leftoverFindings: regex matches in the final markdown — review these before sharing.",
+    ],
+  };
+  const redactionsPath = join(outputDir, "redactions.json");
+  await writeFile(redactionsPath, `${JSON.stringify(redactionsReport, null, 2)}\n`, "utf-8");
+  const leftoverNote =
+    leftoverFindings.length > 0
+      ? chalk.yellow(`(${leftoverFindings.length} leftover finding(s) — review)`)
+      : chalk.dim("(no leftover findings)");
+  redactionsSpinner.succeed(`Redactions: ${redactionsPath} ${leftoverNote}`);
+
   return {
     markdown,
     outputDir,
     svgPath: svgFilePath,
     gifPath: gifGenerated ? join(outputDir, "session-preview.gif") : undefined,
     mdPath: mdFilePath,
+    redactionsPath,
   };
 }
 
