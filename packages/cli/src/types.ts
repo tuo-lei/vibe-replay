@@ -66,7 +66,6 @@ export interface ParsedTurn {
 export interface RawMessage {
   parentUuid: string | null;
   uuid?: string;
-  isSidechain: boolean;
   /** True for system-injected messages (skill injection, context injection, etc.) */
   isMeta?: boolean;
   /** True for compaction summary messages */
