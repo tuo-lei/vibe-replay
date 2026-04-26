@@ -683,6 +683,7 @@ program
       console.log();
       console.log(chalk.bold.green("  Done!"));
       console.log(chalk.dim("  Files: ") + chalk.white(outputDir));
+      console.log(chalk.dim("  Redactions: ") + chalk.white(result.redactionsPath));
       console.log(
         chalk.dim("  Tip: ") +
           chalk.white(
