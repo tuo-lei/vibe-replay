@@ -33,7 +33,7 @@ export interface SessionInfo {
   cwd: string;
   version: string;
   gitBranch?: string;
-  timestamp: string; // ISO string of session start/last update
+  timestamp: string; // ISO string of last activity (most recent record / lastActivityAt / file mtime depending on provider)
   lineCount: number;
   fileSize: number;
   filePath: string; // primary file (most recent)

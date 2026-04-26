@@ -80,6 +80,12 @@ export async function extractSessionInfo(
   let cwd = "";
   let version = "";
   let gitBranch: string | undefined;
+  // `timestamp` carries the *last activity* on this session — the timestamp of
+  // the most recent record in the JSONL. This matches what Claude Code's own
+  // `/resume` list and Cursor's chat list show ("X minutes ago" reflects when
+  // the session was last touched, not when it started). claude-desktop and
+  // claude-cowork already pull lastActivityAt from their metadata; cursor uses
+  // file mtime — keeping all four providers in sync.
   let timestamp = "";
   const prompts: string[] = [];
   let title: string | undefined;
@@ -93,13 +99,18 @@ export async function extractSessionInfo(
   let model: string | undefined;
 
   // Ring buffer of the most recent non-empty lines — used to look back for
-  // `custom-title` and `system.timestamp` that are written late in the session.
+  // `custom-title` records that are written late in the session.
   const tail: string[] = [];
 
   const toolUseRe = /"type"\s*:\s*"tool_use"/g;
   const modelRe = /"model"\s*:\s*"(claude-[^"]+)"/;
   const durationRe = /"durationMs"\s*:\s*(\d+)/;
   const editToolRe = /"name"\s*:\s*"(Edit|Write|MultiEdit|NotebookEdit)"/;
+  // Matches the outer record `timestamp` — every JSONL record carries one and
+  // records are written in append-order, so overwriting on each line lands on
+  // the last activity. Anchored on `{"` to avoid grabbing a nested timestamp
+  // inside a stringified message body.
+  const recordTsRe = /"timestamp"\s*:\s*"([^"]+)"/;
 
   let rl: ReturnType<typeof createInterface> | undefined;
   try {
@@ -135,6 +146,11 @@ export async function extractSessionInfo(
       }
       if (!hasPR && line.includes('"pr-link"')) hasPR = true;
 
+      // Track the most recent record timestamp — JSONL is append-order, so the
+      // final overwrite is the last activity time.
+      const tsMatch = line.match(recordTsRe);
+      if (tsMatch) timestamp = tsMatch[1];
+
       // --- JSON-parse only the first PROMPT_SCAN_LINES lines ---
       // Metadata typically lands in the first ~30 lines; initial prompts within 150.
       if (lineCount <= PROMPT_SCAN_LINES) {
@@ -150,9 +166,6 @@ export async function extractSessionInfo(
 
             if (obj.type === "custom-title" && (obj.customTitle || obj.title)) {
               title = obj.customTitle || obj.title;
-            }
-            if (obj.type === "file-history-snapshot" && obj.snapshot?.timestamp && !timestamp) {
-              timestamp = obj.snapshot.timestamp;
             }
           }
 
@@ -206,18 +219,8 @@ export async function extractSessionInfo(
     }
   }
 
-  // Fallback timestamp: take the last `system` timestamp from the tail buffer.
-  if (!timestamp) {
-    const lookback = tail.slice(-10);
-    for (const line of lookback) {
-      try {
-        const obj = JSON.parse(line);
-        if (obj.type === "system" && obj.timestamp) timestamp = obj.timestamp;
-      } catch {}
-    }
-  }
-
-  // Last fallback: file mtime.
+  // Fallback: file mtime. Reaches here only if no record on any line had a
+  // `timestamp` field — extremely unusual but keeps discovery resilient.
   if (!timestamp) {
     const fileStat2 = await stat(filePath).catch(() => null);
     if (fileStat2) timestamp = fileStat2.mtime.toISOString();

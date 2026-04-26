@@ -66,11 +66,14 @@ describe("extractSessionInfo – multi-prompt extraction", () => {
     expect(info?.toolCallCount).toBe(0);
   });
 
-  it("extracts metadata from init line", async () => {
+  it("extracts metadata from init line and uses last-record timestamp", async () => {
+    // `timestamp` is the last activity (final record) — matches Claude Code's
+    // own `/resume` semantics. Final record in the fixture is a turn_duration
+    // at 10:00:12Z.
     const fileStat = await stat(FIXTURE);
     const info = await extractSessionInfo(FIXTURE, fileStat.size, "/Users/test/project");
 
-    expect(info?.timestamp).toBe("2025-06-01T10:00:00Z");
+    expect(info?.timestamp).toBe("2025-06-01T10:00:12Z");
     expect(info?.lineCount).toBe(11); // 12 lines minus empty trailing
   });
 });

@@ -43,11 +43,15 @@ describe("extractSessionInfo – VS Code extension array content format", () => 
     }
   });
 
-  it("extracts timestamp from file-history-snapshot", async () => {
+  it("extracts timestamp from the last record (last activity)", async () => {
+    // Aligns with Claude Code's `/resume` and Cursor's chat list UX, where the
+    // displayed time reflects the most recent activity in the session, not the
+    // session start. Final record in the fixture is a `system` turn_duration at
+    // 10:00:20Z; that's the expected last-activity timestamp.
     const fileStat = await stat(FIXTURE_EXT);
     const info = await extractSessionInfo(FIXTURE_EXT, fileStat.size, "/Users/test/project");
 
-    expect(info?.timestamp).toBe("2025-07-01T10:00:01Z");
+    expect(info?.timestamp).toBe("2025-07-01T10:00:20Z");
   });
 });
 
