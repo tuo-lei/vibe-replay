@@ -16,8 +16,10 @@ import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.j
 import { generateOutput } from "./generator.js";
 import { deduplicateSessionsByProvider, getAllProviders, getProvider } from "./providers/index.js";
 import {
+  DEFAULT_API_URL,
   getAuthFilePath,
   loadAuthToken,
+  publishCloudWithOverlays,
   removeAuthTokenSync,
   saveAuthTokenSync,
 } from "./publishers/cloud.js";
@@ -587,12 +589,16 @@ program
     const gistLabel = publishStatus.available
       ? `${chalk.blue("↑")} Publish to Gist now ${chalk.dim("(skip editor, publish directly)")}`
       : `${chalk.dim("↑ Publish to Gist now")} ${chalk.red("(login required)")}`;
+    const isLoggedIn = !!loadAuthToken();
+    const cloudLabel = isLoggedIn
+      ? `${chalk.cyan("☁")} Share via Cloud ${chalk.dim("(7-day link, up to 10MB)")}`
+      : `${chalk.dim("☁ Share via Cloud")} ${chalk.red("(login required)")}`;
 
     // Publish target
     console.log();
     const choices: {
       name: string;
-      value: "local" | "editor" | "gist" | "github" | "exit";
+      value: "local" | "editor" | "cloud" | "gist" | "github" | "exit";
     }[] = [
       {
         name: `${chalk.magenta("✎")} Open in Editor ${chalk.dim("(annotate, publish, export)")}`,
@@ -602,6 +608,7 @@ program
         name: `${chalk.green("●")} Quick preview ${chalk.dim("(open HTML in browser, no editing)")}`,
         value: "local" as const,
       },
+      { name: cloudLabel, value: "cloud" as const },
       { name: gistLabel, value: "gist" as const },
       {
         name: `${chalk.yellow("★")} Export for GitHub ${chalk.dim("(markdown + animated SVG for PRs)")}`,
@@ -625,6 +632,34 @@ program
           : undefined,
       });
       return; // startServer blocks until Ctrl+C
+    } else if (target === "cloud") {
+      if (!isLoggedIn) {
+        console.log();
+        console.log(chalk.yellow("  Login required for cloud sharing."));
+        console.log(chalk.dim("  Run → ") + chalk.white("vibe-replay auth login"));
+      } else {
+        const { confirm } = await import("@inquirer/prompts");
+        const ok = await confirm({
+          message: "Upload to vibe-replay cloud? (unlisted link, expires in 7 days)",
+          default: true,
+        });
+        if (!ok) {
+          console.log(chalk.dim("\n  Cloud share cancelled."));
+        } else {
+          const cloudSpinner = ora("Uploading to cloud...").start();
+          try {
+            const result = await publishCloudWithOverlays(outputDir);
+            cloudSpinner.succeed("Uploaded!");
+            console.log(chalk.dim("  Share URL: ") + chalk.cyan(result.url));
+            console.log(
+              chalk.dim("  Expires:   ") +
+                chalk.white(new Date(result.expiresAt).toLocaleDateString()),
+            );
+          } catch (err: unknown) {
+            cloudSpinner.fail(err instanceof Error ? err.message : String(err));
+          }
+        }
+      }
     } else if (target === "gist") {
       if (!publishStatus.available) {
         console.log();
@@ -864,6 +899,123 @@ authCmd
     console.log(chalk.dim("  API:       ") + chalk.white(apiUrl));
     console.log(chalk.dim("  Auth file: ") + chalk.white(getAuthFilePath()));
     console.log();
+  });
+
+// ---------------------------------------------------------------------------
+// share — upload an existing replay to the cloud
+// ---------------------------------------------------------------------------
+
+const VISIBILITIES = ["public", "unlisted", "private"] as const;
+type Visibility = (typeof VISIBILITIES)[number];
+
+program
+  .command("share")
+  .description("Share an existing replay via cloud (unlisted link, expires in 7 days)")
+  .argument("[path]", "Path to replay directory or replay.json")
+  .option("--visibility <type>", `Visibility: ${VISIBILITIES.join(", ")}`, "unlisted")
+  .option("--api-url <url>", `API base URL (default: ${DEFAULT_API_URL})`)
+  .action(async (pathArg: string | undefined, opts: { visibility: string; apiUrl?: string }) => {
+    const { existsSync, statSync } = await import("node:fs");
+    const { readFile, readdir } = await import("node:fs/promises");
+    const { join, dirname, resolve } = await import("node:path");
+    const { homedir } = await import("node:os");
+
+    // Honor --api-url whenever the user supplies it, even when the value
+    // matches DEFAULT_API_URL (overriding a preset shell env var).
+    // Without the flag, fall through to existing precedence: env > DEFAULT_API_URL.
+    if (opts.apiUrl) {
+      process.env.VIBE_REPLAY_API_URL = opts.apiUrl.replace(/\/$/, "");
+    }
+
+    // Validate raw string before narrowing the type.
+    if (!(VISIBILITIES as readonly string[]).includes(opts.visibility)) {
+      console.error(chalk.red(`\n  ✗ Invalid --visibility: ${opts.visibility}`));
+      console.error(chalk.dim(`  Must be one of: ${VISIBILITIES.join(", ")}\n`));
+      process.exit(1);
+    }
+    const visibility = opts.visibility as Visibility;
+
+    // Pre-flight auth check — fail fast before any picker / I/O / spinner.
+    if (!loadAuthToken()) {
+      console.error(chalk.red("\n  ✗ Not logged in."));
+      console.error(chalk.dim("  Run → ") + chalk.white("vibe-replay auth login\n"));
+      process.exit(1);
+    }
+
+    let outputDir: string;
+
+    if (pathArg) {
+      const abs = resolve(pathArg);
+      if (!existsSync(abs)) {
+        console.error(chalk.red(`\n  ✗ Path not found: ${abs}\n`));
+        process.exit(1);
+      }
+      const s = statSync(abs);
+      outputDir = s.isDirectory() ? abs : dirname(abs);
+    } else {
+      const replayBaseDir = join(homedir(), ".vibe-replay");
+      const entries = await readdir(replayBaseDir).catch(() => [] as string[]);
+      const replays: { name: string; value: string; time: string }[] = [];
+
+      for (const slug of entries) {
+        if (slug.startsWith(".") || slug === "cache") continue;
+        const jsonPath = join(replayBaseDir, slug, "replay.json");
+        try {
+          const raw = await readFile(jsonPath, "utf-8");
+          const replay = JSON.parse(raw) as ReplaySession;
+          const title = replay.meta?.title || slug;
+          const startTime = replay.meta?.startTime || "";
+          const time = startTime
+            ? new Date(startTime).toLocaleString("en-US", {
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: false,
+              })
+            : "";
+          replays.push({
+            name: time ? `${chalk.dim(`[${time}]`)} ${chalk.white(title)}` : chalk.white(title),
+            value: join(replayBaseDir, slug),
+            time: startTime,
+          });
+        } catch {
+          // skip slugs without a valid replay.json
+        }
+      }
+
+      if (replays.length === 0) {
+        console.log(chalk.yellow("\n  No replays found. Generate one first!\n"));
+        process.exit(1);
+      }
+
+      replays.sort((a, b) => b.time.localeCompare(a.time));
+      outputDir = await select({
+        message: "Pick a replay to share:",
+        choices: replays,
+      });
+    }
+
+    const jsonPath = join(outputDir, "replay.json");
+    if (!existsSync(jsonPath)) {
+      console.error(chalk.red(`\n  ✗ No replay.json found in ${outputDir}\n`));
+      process.exit(1);
+    }
+
+    const spinner = ora("Uploading to cloud...").start();
+    try {
+      const result = await publishCloudWithOverlays(outputDir, { visibility });
+      spinner.succeed("Uploaded!");
+      console.log();
+      console.log(chalk.dim("  Share URL: ") + chalk.cyan(result.url));
+      console.log(
+        chalk.dim("  Expires:   ") + chalk.white(new Date(result.expiresAt).toLocaleDateString()),
+      );
+      console.log();
+    } catch (err: unknown) {
+      spinner.fail(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    }
   });
 
 // Keep backwards-compatible hidden alias
