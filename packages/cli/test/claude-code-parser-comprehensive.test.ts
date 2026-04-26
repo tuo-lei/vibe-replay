@@ -480,6 +480,142 @@ describe("Claude Code parser — tool result content types", () => {
     expect(resultText).not.toContain("Output too large");
     expect(resultText).not.toContain("Preview (first");
   });
+
+  it("unwraps <persisted-output> wrapper from array-content tool result", async () => {
+    // Same wrapper, but inside a content-block array (mixed pattern Claude Code
+    // uses when a tool returns text + image, or just a single text block).
+    const { parseClaudeCodeLines } = await import("../src/providers/claude-code/parser.js");
+    const lines = [
+      JSON.stringify({
+        type: "assistant",
+        sessionId: "s",
+        timestamp: "2025-01-01T00:00:01Z",
+        message: {
+          id: "m1",
+          role: "assistant",
+          model: "claude-opus-4",
+          content: [{ type: "tool_use", id: "t1", name: "WebFetch", input: { url: "https://x" } }],
+        },
+      }),
+      JSON.stringify({
+        type: "user",
+        sessionId: "s",
+        timestamp: "2025-01-01T00:00:02Z",
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "t1",
+              content: [
+                {
+                  type: "text",
+                  text: "<persisted-output>\nOutput too large (5KB). Full output saved to: /tmp/y.txt\n\nPreview (first 2KB):\narray-path preview\n</persisted-output>",
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    ];
+    const parsed = await parseClaudeCodeLines(lines);
+    const tool = parsed.turns
+      .filter((t) => t.role === "assistant")
+      .flatMap((t) => t.blocks)
+      .find((b) => b.type === "tool_use");
+    expect((tool as any)._result).toBe("array-path preview");
+  });
+
+  it("unwraps multiple <persisted-output> blocks in a single result", async () => {
+    // Defensive: the regex uses /g, so multiple wrappers in one string should
+    // all unwrap. Hypothetical (Claude Code typically emits one per result),
+    // but cheap to guarantee.
+    const { parseClaudeCodeLines } = await import("../src/providers/claude-code/parser.js");
+    const lines = [
+      JSON.stringify({
+        type: "assistant",
+        sessionId: "s",
+        timestamp: "2025-01-01T00:00:01Z",
+        message: {
+          id: "m1",
+          role: "assistant",
+          model: "claude-opus-4",
+          content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "x" } }],
+        },
+      }),
+      JSON.stringify({
+        type: "user",
+        sessionId: "s",
+        timestamp: "2025-01-01T00:00:02Z",
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "t1",
+              content:
+                "<persisted-output>\nOutput too large (1KB). Full output saved to: /tmp/a.txt\n\nPreview (first 2KB):\nfirst\n</persisted-output>\n\n<persisted-output>\nOutput too large (2KB). Full output saved to: /tmp/b.txt\n\nPreview (first 2KB):\nsecond\n</persisted-output>",
+            },
+          ],
+        },
+      }),
+    ];
+    const parsed = await parseClaudeCodeLines(lines);
+    const tool = parsed.turns
+      .filter((t) => t.role === "assistant")
+      .flatMap((t) => t.blocks)
+      .find((b) => b.type === "tool_use");
+    const resultText = (tool as any)._result as string;
+    expect(resultText).toContain("first");
+    expect(resultText).toContain("second");
+    expect(resultText).not.toContain("<persisted-output>");
+  });
+
+  it("tolerates text blocks with missing/null text field without crashing", async () => {
+    // Defensive: external JSONL is untyped. A `type:"text"` block with no
+    // `text` field used to be silently coerced to ""; the post-fix code must
+    // continue to do so instead of throwing TypeError on `.length`.
+    const { parseClaudeCodeLines } = await import("../src/providers/claude-code/parser.js");
+    const lines = [
+      JSON.stringify({
+        type: "assistant",
+        sessionId: "s",
+        timestamp: "2025-01-01T00:00:01Z",
+        message: {
+          id: "m1",
+          role: "assistant",
+          model: "claude-opus-4",
+          content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "x" } }],
+        },
+      }),
+      JSON.stringify({
+        type: "user",
+        sessionId: "s",
+        timestamp: "2025-01-01T00:00:02Z",
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "t1",
+              content: [
+                { type: "text" }, // missing text field
+                { type: "text", text: null }, // null text field
+                { type: "text", text: "real content" },
+              ],
+            },
+          ],
+        },
+      }),
+    ];
+    // Should not throw
+    const parsed = await parseClaudeCodeLines(lines);
+    const tool = parsed.turns
+      .filter((t) => t.role === "assistant")
+      .flatMap((t) => t.blocks)
+      .find((b) => b.type === "tool_use");
+    expect((tool as any)._result).toBe("real content");
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -463,7 +463,11 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
   );
 });
 
-function summarizeInput(name: string, input: Record<string, any>): string {
+// Multi-line / very long Bash pipelines would overflow the one-line summary.
+// 200 chars is enough to identify a command without breaking layout.
+const BASH_SUMMARY_MAX = 200;
+
+export function summarizeInput(name: string, input: Record<string, any>): string {
   switch (name) {
     case "Read":
     case "Write":
@@ -476,10 +480,13 @@ function summarizeInput(name: string, input: Record<string, any>): string {
       return input.pattern || "";
     case "Grep":
       return `/${input.pattern || ""}/ ${input.path || ""}`.trim();
-    case "Bash":
+    case "Bash": {
       // Prefer command (more identifying); fall back to description.
-      // The Agent-rendered AgentTypeBadge handles subagent_type already.
-      return input.command || input.description || "";
+      // Collapse newlines so multi-line commands stay one-line in the summary.
+      const raw = (input.command || input.description || "") as string;
+      const oneLine = raw.replace(/\s+/g, " ").trim();
+      return oneLine.length > BASH_SUMMARY_MAX ? `${oneLine.slice(0, BASH_SUMMARY_MAX)}…` : oneLine;
+    }
     case "BashOutput":
       return input.bash_id || "";
     case "Agent":
@@ -511,7 +518,7 @@ function summarizeInput(name: string, input: Record<string, any>): string {
   }
 }
 
-function shortenScalarSummary(input: Record<string, any>): string {
+export function shortenScalarSummary(input: Record<string, any>): string {
   // Prefer commonly meaningful keys before falling back to all string values.
   const preferred = ["url", "path", "file_path", "query", "name", "id"];
   for (const k of preferred) {

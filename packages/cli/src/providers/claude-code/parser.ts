@@ -642,7 +642,9 @@ function extractToolResultText(block: ContentBlock): string {
   if (Array.isArray(content)) {
     const text = content
       .map((c) => {
-        if (c.type === "text") return c.text;
+        // External JSONL is untyped; tolerate text blocks with missing/null
+        // `text` rather than crashing the whole session parse on a TypeError.
+        if (c.type === "text") return typeof c.text === "string" ? c.text : "";
         // Image blocks are extracted separately by extractImages(); skip them
         // here so a base64 payload doesn't get JSON-stringified into the
         // result text (would dump kilobytes of garbage in the UI).
