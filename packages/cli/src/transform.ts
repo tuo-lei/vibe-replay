@@ -192,6 +192,9 @@ export function transformToReplay(
       ...(parsed.skillsUsed ? { skillsUsed: parsed.skillsUsed } : {}),
       ...(parsed.mcpServersUsed ? { mcpServersUsed: parsed.mcpServersUsed } : {}),
       ...(parsed.truncatedResponses ? { truncatedResponses: parsed.truncatedResponses } : {}),
+      ...(parsed.agentName ? { agentName: parsed.agentName } : {}),
+      ...(parsed.worktree ? { worktree: parsed.worktree } : {}),
+      ...(parsed.queueOperationStats ? { queueOperationStats: parsed.queueOperationStats } : {}),
     },
     scenes,
   };

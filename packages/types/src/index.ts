@@ -295,6 +295,19 @@ export interface ReplaySession {
     mcpServersUsed?: string[];
     /** Number of assistant responses truncated by max_tokens */
     truncatedResponses?: number;
+    /** Agent's custom name (from `/rename` or swarm) — Claude Code only */
+    agentName?: string;
+    /** Worktree state at session end (Claude Code EnterWorktree / --worktree) */
+    worktree?: {
+      name?: string;
+      path?: string;
+      branch?: string;
+    };
+    /** Queue-operation event counts — proxy for "user changed their mind" frequency */
+    queueOperationStats?: {
+      enqueued: number;
+      cancelled: number;
+    };
   };
   scenes: Scene[];
   annotations?: Annotation[];

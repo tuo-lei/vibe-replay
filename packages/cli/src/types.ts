@@ -96,10 +96,12 @@ export interface RawMessage {
     | "ai-title"
     | "tag"
     | "mode"
+    | "permission-mode"
     | "worktree-state"
     | "speculation-accept"
     | "attribution-snapshot"
-    | "content-replacement";
+    | "content-replacement"
+    | "attachment";
   subtype?: string;
   timestamp?: string;
   message?: {
@@ -122,6 +124,17 @@ export interface RawMessage {
   entrypoint?: string;
   permissionMode?: string;
   customTitle?: string;
+  aiTitle?: string;
+  agentName?: string;
+  /** worktree-state entries: null means user exited the worktree */
+  worktreeSession?: {
+    worktreeName?: string;
+    worktreePath?: string;
+    worktreeBranch?: string;
+  } | null;
+  /** queue-operation entry payload */
+  operation?: string;
+  content?: string;
   snapshot?: {
     timestamp?: string;
     trackedFileBackups?: Record<string, unknown>;

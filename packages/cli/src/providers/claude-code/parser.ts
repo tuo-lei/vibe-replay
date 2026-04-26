@@ -40,12 +40,21 @@ export async function parseClaudeCodeLines(
   let cwd = "";
   let model: string | undefined;
   let title: string | undefined;
+  let aiTitle: string | undefined;
+  let agentName: string | undefined;
+  let worktreeName: string | undefined;
+  let worktreePath: string | undefined;
+  let worktreeBranch: string | undefined;
   let startTime: string | undefined;
   let endTime: string | undefined;
   let totalDurationMs = 0;
   const gitBranches: string[] = []; // all branches in order of appearance
   let entrypoint: string | undefined;
   let permissionMode: string | undefined;
+  // Counts of queue-operation events — written by Claude Code's MessageQueueManager
+  // when the user enqueues/cancels a queued message while Claude is busy.
+  let queueEnqueueCount = 0;
+  let queueCancelledCount = 0;
 
   // Token usage: track last usage + model per message ID to avoid double-counting
   // (each message.id appears in multiple JSONL lines with the same cumulative usage)
@@ -142,6 +151,58 @@ export async function parseClaudeCodeLines(
 
     if (obj.type === "custom-title") {
       title = obj.customTitle || obj.title || title;
+      continue;
+    }
+
+    // AI-generated session title — used as fallback after custom-title.
+    // Distinct entry type so user renames always win (logs.ts AiTitleMessage).
+    if (obj.type === "ai-title") {
+      if (obj.aiTitle) aiTitle = obj.aiTitle;
+      continue;
+    }
+
+    // Agent's custom name (from /rename or swarm). Latest wins.
+    if (obj.type === "agent-name") {
+      if (obj.agentName) agentName = obj.agentName;
+      continue;
+    }
+
+    // Standalone permission-mode entries are more authoritative than
+    // message-level obj.permissionMode (which is often stale). Latest wins.
+    if (obj.type === "permission-mode") {
+      if (obj.permissionMode) permissionMode = obj.permissionMode;
+      continue;
+    }
+
+    // Worktree session state. Last-wins per Claude Code: an enter writes the
+    // session, an exit writes null (worktreeSession === null).
+    // Use ?? not || — Claude Code always writes name+path+branch together for
+    // a given worktree, so the previous-value fallback is just defensive; ??
+    // keeps "" from being treated as absent if that contract ever changes.
+    if (obj.type === "worktree-state") {
+      const ws = obj.worktreeSession;
+      if (ws && typeof ws === "object") {
+        worktreeName = ws.worktreeName ?? worktreeName;
+        worktreePath = ws.worktreePath ?? worktreePath;
+        worktreeBranch = ws.worktreeBranch ?? worktreeBranch;
+      } else if (ws === null) {
+        // Explicit exit — clear so we don't misreport an old worktree.
+        worktreeName = undefined;
+        worktreePath = undefined;
+        worktreeBranch = undefined;
+      }
+      continue;
+    }
+
+    // Queue-operation events: track how often the user enqueued or cancelled
+    // a queued message. Useful as a "user changed their mind" signal.
+    // "dequeue" = message was dispatched normally (not cancelled), so we
+    // intentionally skip it — only "remove" indicates a user cancellation.
+    if (obj.type === "queue-operation") {
+      const op = obj.operation;
+      if (op === "enqueue") queueEnqueueCount++;
+      else if (op === "remove") queueCancelledCount++;
+      continue;
     }
 
     if (obj.type === "file-history-snapshot") {
@@ -495,10 +556,30 @@ export async function parseClaudeCodeLines(
   // Count truncated assistant responses (stop_reason: "max_tokens")
   const truncatedCount = [...stopReasons.values()].filter((r) => r === "max_tokens").length;
 
+  // Title resolution: customTitle (user) > aiTitle (Claude generated) > undefined
+  // (transform falls back to firstPrompt). Keeps user renames sacred.
+  const resolvedTitle = title || aiTitle;
+
+  // Cancelled queue events are the interesting signal — surface even when zero
+  // enqueues so callers can use it consistently. Omit entirely if no events.
+  const queueOperationStats =
+    queueEnqueueCount > 0 || queueCancelledCount > 0
+      ? { enqueued: queueEnqueueCount, cancelled: queueCancelledCount }
+      : undefined;
+
+  const worktree =
+    worktreeName || worktreePath
+      ? {
+          ...(worktreeName ? { name: worktreeName } : {}),
+          ...(worktreePath ? { path: worktreePath } : {}),
+          ...(worktreeBranch ? { branch: worktreeBranch } : {}),
+        }
+      : undefined;
+
   return {
     sessionId,
     slug,
-    title,
+    title: resolvedTitle,
     cwd,
     model,
     startTime,
@@ -521,6 +602,9 @@ export async function parseClaudeCodeLines(
     truncatedResponses: truncatedCount > 0 ? truncatedCount : undefined,
     skillsUsed: skillsUsed.size > 0 ? [...skillsUsed].sort() : undefined,
     mcpServersUsed: mcpServersUsed.size > 0 ? [...mcpServersUsed].sort() : undefined,
+    agentName,
+    worktree,
+    queueOperationStats,
   };
 }
 
