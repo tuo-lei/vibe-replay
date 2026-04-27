@@ -1309,10 +1309,14 @@ export async function startServer(
         return;
       }
 
-      // Discover the source session by sessionId. We re-discover on each connect
-      // so we always pick up new file paths (e.g. /resume creates new JSONL files).
+      // Discover the source session by sessionId. We re-discover on each
+      // connect (and on every rebuild) so we always pick up new file paths —
+      // Claude `/resume` creates new JSONL shards under the same logical
+      // session, and `mergeSameSessions` collapses them into one record so
+      // `parse()` sees the full conversation history instead of a single
+      // shard mid-stream.
       const resolveSessionInfo = async () => {
-        const all = await provider.discover();
+        const all = mergeSameSessions(await provider.discover());
         return all.find((s) => s.sessionId === sessionId);
       };
 
@@ -1374,12 +1378,16 @@ export async function startServer(
               generatedAt: new Date().toISOString(),
             },
           });
-          // Dedup on content — generatedAt would otherwise change every parse
-          // and force every fs.watch event (including atime-only) to emit a
-          // redundant 100KB payload. Scene count + last scene timestamp +
-          // turn count is enough to identify "anything changed".
-          const lastScene = replay.scenes[replay.scenes.length - 1];
-          const signature = `${replay.scenes.length}|${replay.meta.stats.userPrompts}|${replay.meta.stats.toolCalls}|${lastScene?.timestamp || ""}`;
+          // Dedup on the serialized scene array. Hashing only coarse counters
+          // (scene count, prompt count, last timestamp) misses content-only
+          // mutations — e.g. Claude tool_result lines populate `_result` on an
+          // existing tool_use scene without changing scene count or the latest
+          // turn timestamp, so the user would never see tool output appear.
+          // Stringify excludes meta.generator.generatedAt (which would
+          // otherwise force every fs.watch tick to emit a redundant payload),
+          // and is fast enough at typical session sizes (~500 scenes,
+          // ~tens of KB).
+          const signature = JSON.stringify(replay.scenes);
           if (signature !== lastSignature) {
             lastSignature = signature;
             await stream.writeSSE({
@@ -1420,6 +1428,20 @@ export async function startServer(
       // every reported file path on this first call.
       await buildAndSend();
 
+      // Polling fallback for sources we can't directly fs.watch. Cursor
+      // SQLite-backed sessions report `filePaths: []` (the SQLite file is
+      // discovered separately and isn't in `paths`); without a poll, the
+      // initial payload is the only update the client ever sees. The 3s
+      // cadence still feels live enough for human reading, and the dedup
+      // signature suppresses redundant emits when nothing actually changed.
+      const pollInterval =
+        watchedPaths.size === 0
+          ? setInterval(() => {
+              if (aborted) return;
+              scheduleRebuild(0);
+            }, 3_000)
+          : null;
+
       // SSE keepalive — proxies (and some browsers) drop idle connections.
       const pingInterval = setInterval(() => {
         if (aborted) return;
@@ -1432,6 +1454,7 @@ export async function startServer(
           aborted = true;
           if (pendingTimer) clearTimeout(pendingTimer);
           clearInterval(pingInterval);
+          if (pollInterval) clearInterval(pollInterval);
           for (const w of watchers) {
             try {
               w.close();

@@ -105,6 +105,11 @@ interface LiveParams {
 function readLiveParams(): LiveParams | null {
   const params = new URLSearchParams(window.location.search);
   if (params.get("live") !== "1") return null;
+  // ?view=dashboard wins over ?live=1 — without this, navigating from the
+  // live viewer back to the dashboard via the in-app link (which sets
+  // view=dashboard but leaves the live params intact in popstate) would
+  // re-open the SSE stream instead of showing the dashboard.
+  if (params.get("view") === "dashboard") return null;
   const provider = params.get("provider");
   const sessionId = params.get("sessionId");
   if (!provider || !sessionId) return null;
