@@ -151,6 +151,50 @@ describe("Cursor parser — tool outputs", () => {
     expect(toolScenes[1].result).toContain("https://example.com/docs");
   });
 
+  it("uses JSONL tool_result timestamps for tool-call durations", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-cursor-tool-duration-"));
+    const jsonlPath = join(tempDir, "tool-duration.jsonl");
+    await writeFile(
+      jsonlPath,
+      [
+        JSON.stringify({
+          role: "assistant",
+          timestamp: "2026-01-01T00:00:00.000Z",
+          message: {
+            content: [
+              {
+                type: "tool_use",
+                id: "toolu_1",
+                name: "run_terminal_cmd",
+                input: { command: "pnpm test" },
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          role: "user",
+          timestamp: "2026-01-01T00:00:02.500Z",
+          message: {
+            content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "tests passed" }],
+          },
+        }),
+      ].join("\n"),
+      "utf-8",
+    );
+
+    try {
+      const parsed = await parseCursorSession(jsonlPath);
+      const replay = transformToReplay(parsed, "cursor", "~/test/project");
+      const toolScenes = replay.scenes.filter((s) => s.type === "tool-call");
+
+      expect(toolScenes).toHaveLength(1);
+      expect(toolScenes[0].durationMs).toBe(2500);
+      expect(toolScenes[0].resultTokens).toBeGreaterThan(0);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("converts unpaired marker to thinking when no tool output matches", async () => {
     const parsed = await parseCursorSession(FIXTURE);
     const replay = transformToReplay(parsed, "cursor", "~/test/project");

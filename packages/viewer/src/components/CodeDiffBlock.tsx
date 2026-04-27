@@ -2,6 +2,7 @@ import { diffLines as computeLineDiff } from "diff";
 import { Highlight, themes } from "prism-react-renderer";
 import { memo, useMemo, useSyncExternalStore } from "react";
 import { ErrorBadge } from "./Badges";
+import { formatToolDuration, formatTokens } from "./StatsPanel";
 
 // Subscribe to dark/light class changes on <html> for prism theme switching
 const subscribe = (cb: () => void) => {
@@ -18,6 +19,8 @@ interface Props {
   newContent: string;
   isActive: boolean;
   isError?: boolean;
+  durationMs?: number;
+  resultTokens?: number;
 }
 
 interface DiffLine {
@@ -77,12 +80,16 @@ export default memo(function CodeDiffBlock({
   newContent,
   isActive: _isActive,
   isError,
+  durationMs,
+  resultTokens,
 }: Props) {
   const diffLines = useMemo(() => computeDiff(oldContent, newContent), [oldContent, newContent]);
   const language = guessLanguage(filePath);
   const isDark = useSyncExternalStore(subscribe, getIsDark);
   const isNewFile = !oldContent;
   const isDeletedFile = toolName === "Delete" && !newContent;
+  const tokenLabel = formatTokens(resultTokens);
+  const durationLabel = formatToolDuration(durationMs);
 
   return (
     <div
@@ -98,6 +105,22 @@ export default memo(function CodeDiffBlock({
         </span>
         <span className="text-xs font-mono text-terminal-blue truncate flex-1">{filePath}</span>
         {isError && <ErrorBadge />}
+        {tokenLabel && (
+          <span
+            className="text-[10px] text-terminal-dimmer font-mono shrink-0"
+            title={`~${tokenLabel} tokens added to context`}
+          >
+            ~{tokenLabel} tok
+          </span>
+        )}
+        {durationLabel && (
+          <span
+            className="text-[10px] text-terminal-dimmer font-mono shrink-0"
+            title={`Execution: ${durationLabel}`}
+          >
+            {durationLabel}
+          </span>
+        )}
         {isNewFile && (
           <span className="text-xs px-1.5 py-0.5 rounded bg-terminal-green/20 text-terminal-green">
             new

@@ -336,6 +336,8 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
         newContent={scene.diff.newContent}
         isActive={isActive}
         isError={scene.isError}
+        durationMs={scene.durationMs}
+        resultTokens={scene.resultTokens}
       />
     );
   }
