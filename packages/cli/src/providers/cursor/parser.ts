@@ -104,6 +104,11 @@ interface ParseJsonlOptions {
   inferToolPaths: boolean;
 }
 
+interface CursorToolResult {
+  result: string;
+  timestamp?: string;
+}
+
 function defaultDataSourceInfo(
   dataSource?: ProviderParseResult["dataSource"],
 ): DataSourceInfo | undefined {
@@ -426,11 +431,6 @@ function extractToolResultImages(block: Extract<ContentBlock, { type: "tool_resu
       return `data:${mediaType};base64,${source.data}`;
     })
     .filter((value): value is string => typeof value === "string");
-}
-
-interface CursorToolResult {
-  result: string;
-  timestamp?: string;
 }
 
 function attachToolResults(
