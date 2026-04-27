@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { type FSWatcher, watch as fsWatch } from "node:fs";
 import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -750,6 +751,7 @@ export async function startServer(
   opts?: {
     openDashboard?: boolean;
     openSlug?: string;
+    openLive?: { provider: string; sessionId: string };
     externalViewerUrl?: string;
   },
 ): Promise<void> {
@@ -1280,6 +1282,194 @@ export async function startServer(
       return c.json(session);
     } catch {
       return c.json({ error: `Session not found: ${result.slug}` }, 404);
+    }
+  });
+
+  // --- Live: stream a session as it's being written to disk ---
+  // Watches the source JSONL file(s), re-parses + transforms on every change,
+  // and pushes the full ReplaySession over SSE. The viewer hot-swaps and (when
+  // the user is at the tail) auto-follows the newest scene.
+  app.get("/api/live", (c) => {
+    const providerName = c.req.query("provider") || "";
+    const sessionId = c.req.query("sessionId") || "";
+
+    return streamSSE(c, async (stream) => {
+      const sendError = async (message: string) => {
+        await stream.writeSSE({ data: JSON.stringify({ type: "error", message }) });
+      };
+
+      if (!providerName || !sessionId) {
+        await sendError("provider and sessionId query parameters are required");
+        return;
+      }
+
+      const provider = getProvider(providerName);
+      if (!provider) {
+        await sendError(`Unknown provider: ${providerName}`);
+        return;
+      }
+
+      // Discover the source session by sessionId. We re-discover on each connect
+      // so we always pick up new file paths (e.g. /resume creates new JSONL files).
+      const resolveSessionInfo = async () => {
+        const all = await provider.discover();
+        return all.find((s) => s.sessionId === sessionId);
+      };
+
+      let sessionInfo = await resolveSessionInfo();
+      if (!sessionInfo) {
+        await sendError(`Session not found: ${sessionId}`);
+        return;
+      }
+
+      const home = homedir();
+      const projectFor = (info: SessionInfo): string =>
+        info.project.startsWith(home) ? `~${info.project.slice(home.length)}` : info.project;
+
+      const watchers: FSWatcher[] = [];
+      let pendingTimer: ReturnType<typeof setTimeout> | null = null;
+      let aborted = false;
+      let inFlight = false;
+      let dirty = false;
+      let lastSignature: string | null = null;
+
+      const buildAndSend = async () => {
+        if (aborted) return;
+        if (inFlight) {
+          dirty = true;
+          return;
+        }
+        inFlight = true;
+        try {
+          // Re-resolve so we pick up new filePaths from /resume mid-stream
+          const fresh = await resolveSessionInfo();
+          if (fresh) sessionInfo = fresh;
+          const info = sessionInfo!;
+          const paths = [...info.filePaths, ...(info.toolPaths || [])];
+          const parsed = await provider.parse(paths, info);
+          const replay = transformToReplay(parsed, providerName, projectFor(info), {
+            generator: {
+              name: "vibe-replay",
+              version: CLI_VERSION,
+              generatedAt: new Date().toISOString(),
+            },
+          });
+          // Dedup on content — generatedAt would otherwise change every parse
+          // and force every fs.watch event (including atime-only) to emit a
+          // redundant 100KB payload. Scene count + last scene timestamp +
+          // turn count is enough to identify "anything changed".
+          const lastScene = replay.scenes[replay.scenes.length - 1];
+          const signature = `${replay.scenes.length}|${replay.meta.stats.userPrompts}|${lastScene?.timestamp || ""}|${lastScene?.id || ""}`;
+          if (signature !== lastSignature) {
+            lastSignature = signature;
+            await stream.writeSSE({
+              data: JSON.stringify({ type: "session", session: replay }),
+            });
+          }
+        } catch (err) {
+          if (!aborted) {
+            await stream
+              .writeSSE({
+                data: JSON.stringify({ type: "error", message: getErrorMessage(err) }),
+              })
+              .catch(() => {});
+          }
+        } finally {
+          inFlight = false;
+          if (dirty && !aborted) {
+            dirty = false;
+            // Tail-call equivalent: schedule the next build that piled up while we
+            // were busy. Use a microtask delay so other awaiters (e.g. abort
+            // handler) get a chance to run first.
+            scheduleRebuild(0);
+          }
+        }
+      };
+
+      const scheduleRebuild = (delay = 250) => {
+        if (aborted) return;
+        if (pendingTimer) clearTimeout(pendingTimer);
+        pendingTimer = setTimeout(() => {
+          pendingTimer = null;
+          void buildAndSend();
+        }, delay);
+      };
+
+      // Initial payload — establishes the baseline session before any deltas.
+      await buildAndSend();
+
+      // Watch every file path the provider reported. fs.watch fires on append
+      // for JSONL-style writes and is debounced via scheduleRebuild.
+      const watchPaths = new Set<string>([
+        ...sessionInfo.filePaths,
+        ...(sessionInfo.toolPaths || []),
+      ]);
+      for (const fp of watchPaths) {
+        try {
+          const w = fsWatch(fp, { persistent: false }, () => scheduleRebuild());
+          w.on("error", () => {});
+          watchers.push(w);
+        } catch {
+          // best-effort — if a path can't be watched, the others may still work
+        }
+      }
+
+      // SSE keepalive — proxies (and some browsers) drop idle connections.
+      const pingInterval = setInterval(() => {
+        if (aborted) return;
+        stream.writeSSE({ data: JSON.stringify({ type: "ping" }) }).catch(() => {});
+      }, 25_000);
+
+      // Block until the client disconnects, then tear down.
+      await new Promise<void>((resolve) => {
+        stream.onAbort(() => {
+          aborted = true;
+          if (pendingTimer) clearTimeout(pendingTimer);
+          clearInterval(pingInterval);
+          for (const w of watchers) {
+            try {
+              w.close();
+            } catch {
+              // ignore close errors during teardown
+            }
+          }
+          resolve();
+        });
+      });
+    });
+  });
+
+  // --- Live source lookup: helper for the viewer to resolve provider/sessionId
+  // from the most-recently-active source so the user can land on /?live=1
+  // without picking. ---
+  app.get("/api/live/most-recent", async (c) => {
+    try {
+      const providers = getAllProviders();
+      const collected: SessionInfo[] = [];
+      for (const provider of providers) {
+        try {
+          const sessions = await provider.discover();
+          collected.push(...sessions);
+        } catch {
+          // best-effort across providers
+        }
+      }
+      if (collected.length === 0) {
+        return c.json({ session: null });
+      }
+      collected.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+      const top = collected[0]!;
+      return c.json({
+        session: {
+          provider: top.provider,
+          sessionId: top.sessionId,
+          title: top.title,
+          project: top.project,
+          timestamp: top.timestamp,
+        },
+      });
+    } catch (err) {
+      return c.json({ error: getErrorMessage(err) }, 500);
     }
   });
 
@@ -2739,7 +2929,14 @@ export async function startServer(
       // Build the URL to open in the browser
       let browseUrl: string;
       const viewerBase = opts?.externalViewerUrl || url;
-      if (opts?.openDashboard) {
+      if (opts?.openLive) {
+        const qp = new URLSearchParams({
+          live: "1",
+          provider: opts.openLive.provider,
+          sessionId: opts.openLive.sessionId,
+        });
+        browseUrl = `${viewerBase}/?${qp.toString()}`;
+      } else if (opts?.openDashboard) {
         browseUrl = `${viewerBase}/?view=dashboard`;
       } else if (opts?.openSlug) {
         browseUrl = `${viewerBase}/?session=${encodeURIComponent(opts.openSlug)}`;
@@ -2747,7 +2944,11 @@ export async function startServer(
         browseUrl = `${viewerBase}/?view=dashboard`;
       }
 
-      const label = opts?.openDashboard || !opts?.openSlug ? "Dashboard" : "Editor";
+      const label = opts?.openLive
+        ? "Live"
+        : opts?.openDashboard || !opts?.openSlug
+          ? "Dashboard"
+          : "Editor";
       if (opts?.externalViewerUrl) {
         console.log(
           chalk.bold.cyan(`\n  ${label} API running on port ${port}`) +

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAnnotations } from "../hooks/useAnnotations";
 import { useOverlays } from "../hooks/useOverlays";
 import { usePlayback } from "../hooks/usePlayback";
-import type { ViewerMode } from "../hooks/useSessionLoader";
+import type { LiveStatus, ViewerMode } from "../hooks/useSessionLoader";
 import { getEffectivePrefs, type ViewPrefs } from "../hooks/useViewPrefs";
 import type { ReplaySession } from "../types";
 import AiStudioDrawer from "./AiStudioDrawer";
@@ -28,6 +28,8 @@ interface Props {
   setActiveView: (view: ActiveView) => void;
   /** Ref that Player populates with a function to return to the landing page */
   returnToLandingRef?: React.MutableRefObject<(() => void) | null>;
+  /** When set, the session is being streamed from a running CLI process */
+  live?: LiveStatus;
 }
 
 function flashJumpTarget(el: HTMLElement) {
@@ -47,9 +49,13 @@ export default function Player({
   activeView,
   setActiveView,
   returnToLandingRef,
+  live,
 }: Props) {
   const isReadOnly = viewerMode === "readonly";
-  const [landed, setLanded] = useState(false);
+  const isLive = !!live;
+  // In live mode, skip the landing hero — the user explicitly asked to tail
+  // a running session, so we should drop them straight into the conversation.
+  const [landed, setLanded] = useState(isLive);
 
   // Expose a callback so the parent header can return to the landing page
   useEffect(() => {
@@ -446,9 +452,11 @@ export default function Player({
   }, []);
 
   // Sync currentIndex → URL ?s= param (debounced to avoid noise during playback)
+  // Skip in live mode — the URL identifies the running session by provider/sessionId
+  // and a moving ?s= param fights with auto-follow.
   const urlSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (currentIndex < 0 || !landed) return;
+    if (currentIndex < 0 || !landed || isLive) return;
     if (urlSyncTimer.current) clearTimeout(urlSyncTimer.current);
     const delay = state === "playing" ? 500 : 0;
     urlSyncTimer.current = setTimeout(() => {
@@ -459,7 +467,24 @@ export default function Player({
     return () => {
       if (urlSyncTimer.current) clearTimeout(urlSyncTimer.current);
     };
-  }, [currentIndex, state, landed]);
+  }, [currentIndex, state, landed, isLive]);
+
+  // Live mode tail-follow — when the streaming session grows, jump to the new
+  // last scene as long as the user was already pinned to (or past) the previous
+  // tail. If they've scrolled back to read something earlier, leave them alone.
+  const prevLiveCountRef = useRef(0);
+  useEffect(() => {
+    if (!isLive) return;
+    const prev = prevLiveCountRef.current;
+    const curr = session.scenes.length;
+    prevLiveCountRef.current = curr;
+    if (curr === 0 || curr <= prev) return;
+    // currentIndex < 0 covers the initial load (no scene picked yet); the
+    // >= prev - 1 check covers the steady-state "user is at the tail" case.
+    if (currentIndex < 0 || currentIndex >= prev - 1) {
+      seekTo(curr - 1);
+    }
+  }, [isLive, session.scenes.length, currentIndex, seekTo]);
 
   const hasAiStudio = viewerMode === "editor";
   const hasAiFeedback = useMemo(

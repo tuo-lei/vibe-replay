@@ -1018,6 +1018,98 @@ program
     }
   });
 
+// ---------------------------------------------------------------------------
+// live — open the dashboard streaming a currently-active session
+// ---------------------------------------------------------------------------
+
+program
+  .command("live")
+  .description("Watch a running AI coding session live in the browser")
+  .option("-p, --provider <name>", "Provider name (default: auto-detect)")
+  .option("-s, --session <sessionId>", "Specific session ID to watch")
+  .action(async (opts: { provider?: string; session?: string }) => {
+    if (process.platform === "win32") {
+      console.log(chalk.yellow("\n  ⚠ Windows is not supported yet.\n"));
+      process.exit(1);
+    }
+
+    const { join: pathJoin } = await import("node:path");
+    const { homedir } = await import("node:os");
+    const replayBaseDir = pathJoin(homedir(), ".vibe-replay");
+
+    console.log(chalk.bold.cyan("\n  vibe-replay live") + chalk.dim(` v${CLI_VERSION}\n`));
+
+    let target: { provider: string; sessionId: string; title?: string } | null = null;
+
+    if (opts.session) {
+      // Explicit session id — find which provider owns it
+      const providerHint = opts.provider;
+      const providers = providerHint
+        ? [getProvider(providerHint)].filter((p): p is NonNullable<typeof p> => !!p)
+        : getAllProviders();
+      for (const provider of providers) {
+        try {
+          const sessions = await provider.discover();
+          const match = sessions.find((s) => s.sessionId === opts.session);
+          if (match) {
+            target = { provider: match.provider, sessionId: match.sessionId, title: match.title };
+            break;
+          }
+        } catch {
+          // best-effort across providers
+        }
+      }
+      if (!target) {
+        console.log(chalk.red(`  ✗ Session not found: ${opts.session}\n`));
+        process.exit(1);
+      }
+    } else {
+      // Auto-pick most-recently-active session across providers
+      const ora = (await import("ora")).default;
+      const spinner = ora("Finding the most recent session...").start();
+      const all: SessionInfo[] = [];
+      const providers = opts.provider
+        ? [getProvider(opts.provider)].filter((p): p is NonNullable<typeof p> => !!p)
+        : getAllProviders();
+      for (const provider of providers) {
+        try {
+          const sessions = await provider.discover();
+          all.push(...sessions);
+        } catch {
+          // best-effort
+        }
+      }
+      if (all.length === 0) {
+        spinner.fail("No AI coding sessions found");
+        console.log(chalk.dim("  Start a Claude Code or Cursor session, then run again.\n"));
+        process.exit(1);
+      }
+      all.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+      const top = all[0]!;
+      target = { provider: top.provider, sessionId: top.sessionId, title: top.title };
+      const ageMs = Date.now() - new Date(top.timestamp).getTime();
+      const ageLabel =
+        ageMs < 60_000
+          ? `${Math.max(1, Math.round(ageMs / 1000))}s ago`
+          : ageMs < 3_600_000
+            ? `${Math.round(ageMs / 60_000)}m ago`
+            : `${Math.round(ageMs / 3_600_000)}h ago`;
+      spinner.succeed(`${top.title || top.sessionId.slice(0, 8)} (${top.provider}, ${ageLabel})`);
+      if (ageMs > 5 * 60_000) {
+        console.log(
+          chalk.yellow(
+            `  ⚠ Last activity was ${ageLabel} — the session may not be running anymore.`,
+          ),
+        );
+        console.log(chalk.dim("    The viewer will still update if Claude writes new turns.\n"));
+      }
+    }
+
+    await startServer(replayBaseDir, {
+      openLive: { provider: target.provider, sessionId: target.sessionId },
+    });
+  });
+
 // Keep backwards-compatible hidden alias
 program
   .command("login", { hidden: true })
