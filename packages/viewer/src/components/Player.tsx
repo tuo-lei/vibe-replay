@@ -479,8 +479,10 @@ export default function Player({
     const curr = session.scenes.length;
     prevLiveCountRef.current = curr;
     if (curr === 0 || curr <= prev) return;
-    // currentIndex < 0 covers the initial load (no scene picked yet); the
-    // >= prev - 1 check covers the steady-state "user is at the tail" case.
+    // currentIndex < 0 covers the initial load (no scene picked yet). The
+    // >= prev - 1 check covers steady-state tail-follow: prev was the previous
+    // total scene count, so the previous tail index is prev - 1; if the user
+    // is sitting on (or past) it, they're "at the tail" and we can advance.
     if (currentIndex < 0 || currentIndex >= prev - 1) {
       seekTo(curr - 1);
     }

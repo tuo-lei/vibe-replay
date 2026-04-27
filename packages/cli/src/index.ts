@@ -1022,6 +1022,11 @@ program
 // live — open the dashboard streaming a currently-active session
 // ---------------------------------------------------------------------------
 
+// If the most-recent session was last touched more than this long ago, warn
+// the user — the source process is probably no longer running, so the live
+// stream will sit idle until they kick off a new turn.
+const LIVE_STALENESS_WARNING_MS = 5 * 60_000;
+
 program
   .command("live")
   .description("Watch a running AI coding session live in the browser")
@@ -1095,7 +1100,7 @@ program
             ? `${Math.round(ageMs / 60_000)}m ago`
             : `${Math.round(ageMs / 3_600_000)}h ago`;
       spinner.succeed(`${top.title || top.sessionId.slice(0, 8)} (${top.provider}, ${ageLabel})`);
-      if (ageMs > 5 * 60_000) {
+      if (ageMs > LIVE_STALENESS_WARNING_MS) {
         console.log(
           chalk.yellow(
             `  ⚠ Last activity was ${ageLabel} — the session may not be running anymore.`,

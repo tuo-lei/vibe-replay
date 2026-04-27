@@ -1327,11 +1327,26 @@ export async function startServer(
         info.project.startsWith(home) ? `~${info.project.slice(home.length)}` : info.project;
 
       const watchers: FSWatcher[] = [];
+      const watchedPaths = new Set<string>();
       let pendingTimer: ReturnType<typeof setTimeout> | null = null;
       let aborted = false;
       let inFlight = false;
       let dirty = false;
       let lastSignature: string | null = null;
+
+      const ensureWatchersFor = (paths: Iterable<string>): void => {
+        for (const fp of paths) {
+          if (aborted || watchedPaths.has(fp)) continue;
+          try {
+            const w = fsWatch(fp, { persistent: false }, () => scheduleRebuild());
+            w.on("error", () => {});
+            watchers.push(w);
+            watchedPaths.add(fp);
+          } catch {
+            // best-effort — if a path can't be watched, the others may still work
+          }
+        }
+      };
 
       const buildAndSend = async () => {
         if (aborted) return;
@@ -1346,6 +1361,11 @@ export async function startServer(
           if (fresh) sessionInfo = fresh;
           const info = sessionInfo!;
           const paths = [...info.filePaths, ...(info.toolPaths || [])];
+          // Register watchers for any new paths (e.g. /resume created a new
+          // JSONL between rebuilds). Without this, appends to those new files
+          // would never trigger another scheduleRebuild and the stream would
+          // silently go stale.
+          ensureWatchersFor(paths);
           const parsed = await provider.parse(paths, info);
           const replay = transformToReplay(parsed, providerName, projectFor(info), {
             generator: {
@@ -1359,7 +1379,7 @@ export async function startServer(
           // redundant 100KB payload. Scene count + last scene timestamp +
           // turn count is enough to identify "anything changed".
           const lastScene = replay.scenes[replay.scenes.length - 1];
-          const signature = `${replay.scenes.length}|${replay.meta.stats.userPrompts}|${lastScene?.timestamp || ""}|${lastScene?.id || ""}`;
+          const signature = `${replay.scenes.length}|${replay.meta.stats.userPrompts}|${replay.meta.stats.toolCalls}|${lastScene?.timestamp || ""}`;
           if (signature !== lastSignature) {
             lastSignature = signature;
             await stream.writeSSE({
@@ -1396,23 +1416,9 @@ export async function startServer(
       };
 
       // Initial payload — establishes the baseline session before any deltas.
+      // ensureWatchersFor() inside buildAndSend() also registers fs.watch for
+      // every reported file path on this first call.
       await buildAndSend();
-
-      // Watch every file path the provider reported. fs.watch fires on append
-      // for JSONL-style writes and is debounced via scheduleRebuild.
-      const watchPaths = new Set<string>([
-        ...sessionInfo.filePaths,
-        ...(sessionInfo.toolPaths || []),
-      ]);
-      for (const fp of watchPaths) {
-        try {
-          const w = fsWatch(fp, { persistent: false }, () => scheduleRebuild());
-          w.on("error", () => {});
-          watchers.push(w);
-        } catch {
-          // best-effort — if a path can't be watched, the others may still work
-        }
-      }
 
       // SSE keepalive — proxies (and some browsers) drop idle connections.
       const pingInterval = setInterval(() => {
@@ -1437,40 +1443,6 @@ export async function startServer(
         });
       });
     });
-  });
-
-  // --- Live source lookup: helper for the viewer to resolve provider/sessionId
-  // from the most-recently-active source so the user can land on /?live=1
-  // without picking. ---
-  app.get("/api/live/most-recent", async (c) => {
-    try {
-      const providers = getAllProviders();
-      const collected: SessionInfo[] = [];
-      for (const provider of providers) {
-        try {
-          const sessions = await provider.discover();
-          collected.push(...sessions);
-        } catch {
-          // best-effort across providers
-        }
-      }
-      if (collected.length === 0) {
-        return c.json({ session: null });
-      }
-      collected.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-      const top = collected[0]!;
-      return c.json({
-        session: {
-          provider: top.provider,
-          sessionId: top.sessionId,
-          title: top.title,
-          project: top.project,
-          timestamp: top.timestamp,
-        },
-      });
-    } catch (err) {
-      return c.json({ error: getErrorMessage(err) }, 500);
-    }
   });
 
   // --- Dashboard: list all sessions ---

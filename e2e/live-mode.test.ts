@@ -101,13 +101,11 @@ describe("Live mode SSE", () => {
     // points at the fixture. We use a bootstrap script that calls startServer
     // directly — the `vibe-replay` entry doesn't expose a way to skip auto-open
     // without going through `live` (which would auto-pick the wrong session).
+    // startServer keeps the process alive on its own; we read the port from
+    // stdout once it logs the listening URL.
     const bootstrap = `
       import { startServer } from "${join(import.meta.dirname, "..", "packages/cli/src/server.ts").replace(/\\\\/g, "/")}";
-      const port = await new Promise(async (resolve) => {
-        const baseDir = "${join(tmpHome, ".vibe-replay").replace(/\\\\/g, "/")}";
-        // startServer auto-opens unless VIBE_REPLAY_NO_AUTO_OPEN=1; that's set in env
-        startServer(baseDir, { openDashboard: true });
-      });
+      await startServer("${join(tmpHome, ".vibe-replay").replace(/\\\\/g, "/")}", {});
     `;
     const bootstrapPath = join(tmpHome, "boot.mjs");
     await writeFile(bootstrapPath, bootstrap, "utf-8");
