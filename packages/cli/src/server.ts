@@ -1315,9 +1315,18 @@ export async function startServer(
       // session, and `mergeSameSessions` collapses them into one record so
       // `parse()` sees the full conversation history instead of a single
       // shard mid-stream.
+      //
+      // Note: `mergeSameSessions` keeps the latest shard's sessionId on the
+      // merged record, so we look the user-supplied sessionId up against the
+      // unmerged list first (any shard matches), then return the merged
+      // record for that shard's project+slug — that way the viewer can pass
+      // whichever sessionId it knows about and still get the full history.
       const resolveSessionInfo = async () => {
-        const all = mergeSameSessions(await provider.discover());
-        return all.find((s) => s.sessionId === sessionId);
+        const all = await provider.discover();
+        const seed = all.find((s) => s.sessionId === sessionId);
+        if (!seed) return undefined;
+        const merged = mergeSameSessions(all);
+        return merged.find((s) => s.project === seed.project && s.slug === seed.slug);
       };
 
       let sessionInfo = await resolveSessionInfo();
