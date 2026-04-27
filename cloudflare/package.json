@@ -1,8 +1,8 @@
 {
   "name": "@vibe-replay/cloudflare",
-  "type": "module",
   "version": "0.0.1",
   "private": true,
+  "type": "module",
   "scripts": {
     "deploy": "wrangler deploy",
     "db:generate": "drizzle-kit generate",
@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "better-auth": "^1.5.5",
-    "drizzle-orm": "^0.44.0",
+    "drizzle-orm": "^0.45.2",
     "hono": "^4.12.5",
     "nanoid": "^5.1.7"
   },
