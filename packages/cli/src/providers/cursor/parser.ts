@@ -104,6 +104,11 @@ interface ParseJsonlOptions {
   inferToolPaths: boolean;
 }
 
+interface CursorToolResult {
+  result: string;
+  timestamp?: string;
+}
+
 function defaultDataSourceInfo(
   dataSource?: ProviderParseResult["dataSource"],
 ): DataSourceInfo | undefined {
@@ -138,7 +143,7 @@ async function parseCursorJsonl(
 ): Promise<ProviderParseResult> {
   const allTurns: ParsedTurn[] = [];
   let syntheticToolId = 0;
-  const toolResults = new Map<string, string>();
+  const toolResults = new Map<string, CursorToolResult>();
   const toolErrors = new Map<string, boolean>();
   const toolImages = new Map<string, string[]>();
   const sortedTranscriptPaths = await sortByMtime(transcriptPaths);
@@ -167,7 +172,10 @@ async function parseCursorJsonl(
         if (block.type === "tool_result") {
           const toolUseId = typeof block.tool_use_id === "string" ? block.tool_use_id : "";
           if (toolUseId) {
-            toolResults.set(toolUseId, extractToolResultText(block));
+            toolResults.set(toolUseId, {
+              result: extractToolResultText(block),
+              timestamp: typeof obj.timestamp === "string" ? obj.timestamp : undefined,
+            });
             if ((block as any).is_error) toolErrors.set(toolUseId, true);
             const images = extractToolResultImages(block);
             if (images.length > 0) toolImages.set(toolUseId, images);
@@ -427,7 +435,7 @@ function extractToolResultImages(block: Extract<ContentBlock, { type: "tool_resu
 
 function attachToolResults(
   turns: ParsedTurn[],
-  toolResults: Map<string, string>,
+  toolResults: Map<string, CursorToolResult>,
   toolErrors: Map<string, boolean>,
   toolImages: Map<string, string[]>,
 ): void {
@@ -437,8 +445,10 @@ function attachToolResults(
       if (block.type !== "tool_use" || typeof block.id !== "string") continue;
       const result = toolResults.get(block.id);
       if (result !== undefined) {
-        block._result = result;
-        block.input = mapToolArgs(block.name, block.input, result);
+        block._result = result.result;
+        block.input = mapToolArgs(block.name, block.input, result.result);
+        const durationMs = durationBetween(turn.timestamp, result.timestamp);
+        if (durationMs !== undefined) block._durationMs = durationMs;
       }
       const images = toolImages.get(block.id);
       if (images?.length) block._images = images;
@@ -704,6 +714,8 @@ function attachToolEvents(turns: ParsedTurn[], tools: ToolEvent[]): void {
       ...tool.input,
     };
     marker.block._result = tool.result;
+    const durationMs = durationBetween(marker.turn.timestamp, tool.timestamp);
+    if (durationMs !== undefined) marker.block._durationMs = durationMs;
     marker.block._isPendingMarker = undefined;
     if (!marker.turn.timestamp && tool.timestamp) {
       marker.turn.timestamp = tool.timestamp;
@@ -740,6 +752,14 @@ function toToolUseBlock(tool: ToolEvent): ContentBlock {
     input: tool.input,
     _result: tool.result,
   };
+}
+
+function durationBetween(start?: string, end?: string): number | undefined {
+  if (!start || !end) return undefined;
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return undefined;
+  return Math.round(endMs - startMs);
 }
 
 function splitToolMarker(text: string): { markerName: string; textBody?: string } | undefined {

@@ -1,38 +1,12 @@
 import { memo, useState } from "react";
 import type { Scene, SubAgent } from "../types";
 import { displayToolName } from "../utils/toolName";
-import { ErrorBadge } from "./Badges";
+import { ErrorBadge, ToolDuration, ToolTokens } from "./Badges";
 import BashBlock from "./BashBlock";
 import CodeDiffBlock from "./CodeDiffBlock";
-import { formatToolDuration, formatTokens } from "./StatsPanel";
+import { formatTokens } from "./StatsPanel";
 
 const CHEVRON = "▶";
-
-function ToolDuration({ ms }: { ms?: number }) {
-  const label = formatToolDuration(ms);
-  if (!label) return null;
-  return (
-    <span
-      className="text-[10px] text-terminal-dimmer font-mono shrink-0"
-      title={`Tool execution: ${label}`}
-    >
-      {label}
-    </span>
-  );
-}
-
-function ToolTokens({ tokens }: { tokens?: number }) {
-  const label = formatTokens(tokens);
-  if (!label) return null;
-  return (
-    <span
-      className="text-[10px] text-terminal-dimmer font-mono shrink-0"
-      title={`~${label} tokens added to context (heuristic estimate)`}
-    >
-      ~{label} tok
-    </span>
-  );
-}
 
 function subAgentTotalTokens(sa: SubAgent): number {
   if (!sa.tokenUsage) return 0;
@@ -336,6 +310,8 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
         newContent={scene.diff.newContent}
         isActive={isActive}
         isError={scene.isError}
+        durationMs={scene.durationMs}
+        resultTokens={scene.resultTokens}
       />
     );
   }
