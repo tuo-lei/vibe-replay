@@ -6,7 +6,7 @@ import type { SessionInfo } from "./types.js";
 const DEFAULT_CLEANUP_PERIOD_DAYS = 30;
 export const WARNING_THRESHOLD_DAYS = 7;
 
-export interface CleanupWarningResult {
+interface CleanupWarningResult {
   expiringCount: number;
   soonestDays: number;
   cleanupPeriodDays: number;
