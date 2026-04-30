@@ -1015,6 +1015,11 @@ describe("cursor sqlite metrics helpers", () => {
     expect(__testables.normalizeTurnText("<user_query>\nFix auth bug\n</user_query>")).toBe(
       "Fix auth bug",
     );
+    expect(
+      __testables.normalizeTurnText(
+        "<timestamp>Tuesday, Apr 28, 2026, 4:43 PM (UTC-7)</timestamp>\n<user_query>\nFix auth bug\n</user_query>",
+      ),
+    ).toBe("Fix auth bug");
   });
 
   it("maps ApplyPatch into Edit with diff-like args", () => {

@@ -145,23 +145,6 @@ function sqlLikePrefix(prefix: string): string {
   );
 }
 
-function truncatedCursorBubbleValueSql(column = "value"): string {
-  return [
-    "CASE",
-    `WHEN json_valid(${column})`,
-    `AND json_type(${column}, '$.toolFormerData.result') = 'text'`,
-    `AND length(json_extract(${column}, '$.toolFormerData.result')) > ${MAX_CURSOR_GLOBAL_STATE_TOOL_RESULT_CHARS}`,
-    "THEN json_set(",
-    column,
-    ", '$.toolFormerData.result',",
-    `substr(json_extract(${column}, '$.toolFormerData.result'), 1, ${MAX_CURSOR_GLOBAL_STATE_TOOL_RESULT_CHARS})`,
-    `|| '\\n... (truncated by vibe-replay, ' || length(json_extract(${column}, '$.toolFormerData.result')) || ' chars total)'`,
-    ")",
-    `ELSE ${column}`,
-    "END",
-  ].join(" ");
-}
-
 function projectedCursorBubbleSelectSql(): string {
   const value = "value";
   const toolResult = `json_extract(${value}, '$.toolFormerData.result')`;
@@ -1055,19 +1038,6 @@ export async function discoverGlobalStateOnlySessions(
   };
 }
 
-export async function getCursorSessionCachePaths(sessionId: string): Promise<string[]> {
-  const paths: string[] = [];
-  const storeDb = await findStoreDb(sessionId);
-  if (storeDb) paths.push(storeDb);
-
-  const globalStateDb = await openGlobalStateDb();
-  if (globalStateDb && (await hasGlobalStateSession(globalStateDb, sessionId))) {
-    paths.push(globalStateDb.dbPath);
-  }
-
-  return [...new Set(paths)];
-}
-
 interface ChatMeta {
   agentId: string;
   latestRootBlobId: string;
@@ -1250,7 +1220,7 @@ function parseThinking(value: unknown): string {
 
 function normalizeTurnText(raw: unknown): string {
   if (typeof raw !== "string") return "";
-  const cleaned = raw.replace(/<\/?user_query>/g, "").trim();
+  const cleaned = sanitizeCursorUserText(raw);
   if (!cleaned || CURSOR_SYSTEM_CONTEXT_RE.test(cleaned)) return "";
   return cleaned;
 }
@@ -2961,5 +2931,4 @@ export const __testables = {
   parseUserContent,
   projectedCursorBubbleRowToBubble,
   projectedCursorBubbleSelectSql,
-  truncatedCursorBubbleValueSql,
 };
