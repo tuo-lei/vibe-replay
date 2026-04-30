@@ -5,9 +5,9 @@
  * extracts only aggregate metadata for project/user-level insights. It reads
  * each JSONL line once and collects counts, timestamps, branches, PRs, etc.
  *
- * Results are cached per-session keyed by input file metadata + scannerVersion.
- * Cursor sessions extend that fingerprint with sqlite/global-state dependencies
- * so repeated dashboard loads can reuse cached scans without serving stale data.
+ * Results are cached per-session keyed by input metadata + scannerVersion.
+ * Cursor SQLite/global-state scans use discovery fingerprints so dashboard
+ * cache checks do not repeatedly query large Cursor databases.
  */
 
 import { readdir, readFile, stat } from "node:fs/promises";
@@ -18,7 +18,6 @@ import { estimateActiveDuration } from "./duration.js";
 import { estimateCost, estimateCostSimple } from "./pricing.js";
 import { parseCodexSession } from "./providers/codex/parser.js";
 import { parseCursorSession } from "./providers/cursor/parser.js";
-import { getCursorSessionCachePaths } from "./providers/cursor/sqlite-reader.js";
 import type { ProviderParseResult } from "./providers/types.js";
 import type { DataSource, PrLink, SessionInfo, TokenUsage } from "./types.js";
 import { FILE_EDIT_TOOLS, extractToolFilePath, localDayKey, shortenPath } from "./utils.js";
@@ -252,8 +251,12 @@ export interface ScanInput {
   slug: string;
   filePaths: string[];
   toolPaths?: string[];
+  sourceFilePath?: string;
+  sourceFileSize?: number;
+  sourceLineCount?: number;
   workspacePath?: string;
   hasSqlite?: boolean;
+  deferRichCursorParse?: boolean;
   timestamp?: string;
   title?: string;
   firstPrompt?: string;
@@ -625,6 +628,10 @@ async function scanCodexSession(input: ScanInput): Promise<SessionScanResult> {
 }
 
 async function scanCursorSession(input: ScanInput): Promise<SessionScanResult> {
+  if (input.deferRichCursorParse && input.hasSqlite) {
+    return buildLightweightCursorScanResult(input);
+  }
+
   const sessionInfo: SessionInfo = {
     provider: "cursor",
     sessionId: input.sessionId,
@@ -649,6 +656,39 @@ async function scanCursorSession(input: ScanInput): Promise<SessionScanResult> {
     sessionInfo,
   );
   return buildScanResultFromParsed(input, parsed);
+}
+
+function buildLightweightCursorScanResult(input: ScanInput): SessionScanResult {
+  const firstPrompt = input.firstPrompt || input.title;
+  const hasPrompt = typeof firstPrompt === "string" && firstPrompt.trim().length > 0;
+  const estimatedPromptCount = Math.max(
+    hasPrompt ? 1 : 0,
+    input.sourceLineCount ? Math.ceil(input.sourceLineCount / 2) : 0,
+  );
+  const sourceFilePath = input.sourceFilePath || "";
+  const dataSource: DataSource = sourceFilePath.includes("#composerData:")
+    ? "global-state"
+    : "sqlite";
+  return {
+    sessionId: input.sessionId,
+    provider: input.provider,
+    project: input.project,
+    slug: input.slug,
+    title: input.title,
+    firstPrompt,
+    startTime: input.timestamp,
+    promptCount: estimatedPromptCount,
+    toolCallCount: 0,
+    editCount: 0,
+    filesModified: [],
+    subAgentCount: 0,
+    apiErrorCount: 0,
+    compactionCount: 0,
+    dataSource,
+    dataQualityNotes: [
+      "Cursor SQLite/global-state details are deferred during background insights scans to avoid high dashboard CPU.",
+    ],
+  };
 }
 
 function buildScanResultFromParsed(
@@ -804,27 +844,40 @@ async function getFileMeta(filePaths: string[]): Promise<{ mtimeMs: number; file
   return { mtimeMs: maxMtime, fileSize: totalSize };
 }
 
+async function getScanCacheMeta(session: ScanInput): Promise<{
+  mtimeMs: number;
+  fileSize: number;
+}> {
+  const paths = [...session.filePaths, ...(session.toolPaths || [])];
+  const sourceFilePath = session.sourceFilePath || "";
+  if (sourceFilePath && !sourceFilePath.includes("#") && !paths.includes(sourceFilePath)) {
+    paths.push(sourceFilePath);
+  }
+
+  const meta = await getFileMeta([...new Set(paths)]);
+  if (session.provider === "cursor" && session.hasSqlite) {
+    const sessionTimestampMs = session.timestamp ? Date.parse(session.timestamp) : NaN;
+    if (Number.isFinite(sessionTimestampMs) && sessionTimestampMs > meta.mtimeMs) {
+      meta.mtimeMs = sessionTimestampMs;
+    }
+    meta.fileSize += session.sourceFileSize || 0;
+  }
+  return meta;
+}
+
 /**
  * Check if a cached scan entry is still valid for the given file(s).
  * Returns the file meta on cache miss (avoids a second stat() round).
  */
 async function checkCache(
   entry: ScanCacheEntry | undefined,
-  filePaths: string[],
+  session: ScanInput,
 ): Promise<{ valid: true } | { valid: false; meta: { mtimeMs: number; fileSize: number } }> {
-  const meta = await getFileMeta(filePaths);
+  const meta = await getScanCacheMeta(session);
   if (entry && entry.mtimeMs === meta.mtimeMs && entry.fileSize === meta.fileSize) {
     return { valid: true };
   }
   return { valid: false, meta };
-}
-
-async function getScanCachePaths(session: ScanInput): Promise<string[]> {
-  const paths = [...session.filePaths, ...(session.toolPaths || [])];
-  if (session.provider === "cursor" && session.hasSqlite) {
-    paths.push(...(await getCursorSessionCachePaths(session.sessionId)));
-  }
-  return [...new Set(paths)];
 }
 
 // ─── Background scanner ────────────────────────────────────────────
@@ -861,8 +914,7 @@ export async function runBackgroundScan(
   const processSession = async (index: number): Promise<void> => {
     const session = sessions[index];
     const cached = cache.entries[session.sessionId];
-    const cacheablePaths = await getScanCachePaths(session);
-    const cacheCheck = await checkCache(cached, cacheablePaths);
+    const cacheCheck = await checkCache(cached, session);
 
     if (cacheCheck.valid && cached) {
       results[index] = cached.result;

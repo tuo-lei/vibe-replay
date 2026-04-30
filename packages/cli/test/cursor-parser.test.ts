@@ -34,6 +34,39 @@ describe("Cursor parser", () => {
     expect(text).toBe("Fix the login bug in auth.ts");
   });
 
+  it("strips Cursor timestamp wrappers from user prompts", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-cursor-timestamp-"));
+    const jsonlPath = join(tempDir, "timestamp-session.jsonl");
+    await writeFile(
+      jsonlPath,
+      JSON.stringify({
+        role: "user",
+        message: {
+          content: [
+            {
+              type: "text",
+              text: [
+                "<timestamp>Tuesday, Apr 28, 2026, 4:43 PM (UTC-7)</timestamp>",
+                "<user_query>",
+                "Replay this Cursor session",
+                "</user_query>",
+              ].join("\n"),
+            },
+          ],
+        },
+      }),
+      "utf-8",
+    );
+
+    try {
+      const result = await parseCursorSession(jsonlPath);
+      const firstUser = result.turns.find((t) => t.role === "user")!;
+      expect((firstUser.blocks[0] as any).text).toBe("Replay this Cursor session");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("extracts <image_files> into _user_images and removes image markers", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-cursor-images-"));
     const imagePath = join(tempDir, "shot.png");

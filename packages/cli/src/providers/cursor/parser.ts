@@ -3,7 +3,11 @@ import { homedir } from "node:os";
 import { basename, extname, join } from "node:path";
 import type { ContentBlock, ParsedTurn, SessionInfo } from "../../types.js";
 import type { DataSourceInfo, ProviderParseResult } from "../types.js";
-import { sanitizeCursorAssistantText, sanitizeCursorReasoningText } from "./sanitize.js";
+import {
+  sanitizeCursorAssistantText,
+  sanitizeCursorReasoningText,
+  sanitizeCursorUserText,
+} from "./sanitize.js";
 import {
   isSystemContextText,
   mapCursorToolName,
@@ -38,10 +42,8 @@ export async function parseCursorSession(
     sqliteAttempted = true;
     let sqliteResult: ProviderParseResult | null = null;
     try {
-      sqliteResult = await parseCursorSqlite(
-        sessionInfo.workspacePath || "",
-        sessionInfo.sessionId,
-      );
+      const preferredWorkspacePath = sessionInfo.workspacePath || sessionInfo.cwd || "";
+      sqliteResult = await parseCursorSqlite(preferredWorkspacePath, sessionInfo.sessionId);
     } catch (err) {
       // Cursor DB schemas can vary across versions/hosts; fall back to JSONL when available.
       sqliteError = compactErrorMessage(err);
@@ -91,6 +93,10 @@ export async function parseCursorSession(
   const jsonlResult = await parseCursorJsonl(transcriptPaths, explicitToolPaths, {
     inferToolPaths: true,
   });
+  const preferredWorkspacePath = sessionInfo?.workspacePath || sessionInfo?.cwd || "";
+  if (!jsonlResult.cwd && preferredWorkspacePath) {
+    jsonlResult.cwd = preferredWorkspacePath;
+  }
   if (sqliteFallbackNote) {
     jsonlResult.dataSourceInfo = withNote(
       jsonlResult.dataSourceInfo || defaultDataSourceInfo(jsonlResult.dataSource),
@@ -313,7 +319,7 @@ async function parseCursorJsonl(
 }
 
 function stripUserQueryWrapper(text: string): string {
-  return text.replace(/<\/?user_query>/g, "").trim();
+  return sanitizeCursorUserText(text);
 }
 
 function sanitizeAssistantTextForReplay(text: string, hasInlineToolUse: boolean): string {

@@ -20,6 +20,13 @@ export function sanitizeCursorAssistantText(value: string, hasToolContext: boole
   return trimInternalPlanningTail(trimmed);
 }
 
+export function sanitizeCursorUserText(value: string): string {
+  return value
+    .replace(/<timestamp>[\s\S]*?<\/timestamp>/gi, "")
+    .replace(/<\/?user_query>/g, "")
+    .trim();
+}
+
 export function sanitizeCursorReasoningText(value: string): string {
   return trimInternalPlanningTail(value);
 }

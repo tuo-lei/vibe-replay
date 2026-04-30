@@ -17,9 +17,55 @@ describe("countComposerConversationHeaders", () => {
       }),
     ).toBe(3);
   });
+
+  it("counts legacy inline conversation payloads", () => {
+    expect(
+      countComposerConversationHeaders({
+        conversation: [{ bubbleId: "a" }, { bubbleId: "b" }],
+      }),
+    ).toBe(2);
+  });
+
+  it("keeps legacy conversation replayable when an empty new header array is present", () => {
+    expect(
+      countComposerConversationHeaders({
+        fullConversationHeadersOnly: [],
+        conversation: [{ bubbleId: "a" }, { bubbleId: "b" }],
+      }),
+    ).toBe(2);
+  });
 });
 
 describe("cursor sqlite metrics helpers", () => {
+  it("projects global-state bubble values with bounded tool results", () => {
+    const sql = __testables.projectedCursorBubbleSelectSql();
+
+    expect(sql).toContain("$.toolFormerData.result");
+    expect(sql).toContain("substr");
+    expect(sql).toContain("toolResultLength");
+  });
+
+  it("rebuilds projected global-state bubble rows with truncated tool results", () => {
+    const bubble = __testables.projectedCursorBubbleRowToBubble({
+      key: "bubbleId:session-1:bubble-1",
+      type: "ai",
+      text: "done",
+      toolName: "Read",
+      toolParams: '{"file_path":"/tmp/demo.ts"}',
+      toolResult: "const value = true;",
+      toolResultLength: 20_000,
+      relevantFiles: '["/tmp/demo.ts"]',
+    });
+
+    expect(bubble?.bubbleId).toBe("bubble-1");
+    expect(bubble?.toolFormerData).toMatchObject({
+      name: "Read",
+      params: { file_path: "/tmp/demo.ts" },
+    });
+    expect(bubble?.toolFormerData.result).toContain("truncated by vibe-replay");
+    expect(bubble?.relevantFiles).toEqual(["/tmp/demo.ts"]);
+  });
+
   it("retries async initializer after a failure", async () => {
     let calls = 0;
     const init = __testables.createRetryableInit(async () => {
@@ -100,7 +146,11 @@ describe("cursor sqlite metrics helpers", () => {
             timestamp: "2026-01-01T00:00:00.000Z",
             blocks: [{ type: "text", text: "first prompt" }],
           },
-          bubble: { type: 1, tokenCount: { inputTokens: 0, outputTokens: 0 } },
+          bubble: {
+            type: 1,
+            tokenCount: { inputTokens: 0, outputTokens: 0 },
+            timingInfo: { clientStartTime: Date.parse("2026-01-01T00:00:00.000Z") },
+          },
         },
         {
           turn: {
@@ -112,6 +162,7 @@ describe("cursor sqlite metrics helpers", () => {
             type: 2,
             tokenCount: { inputTokens: 1000, outputTokens: 80 },
             modelInfo: { modelName: "claude-4.6-opus-high-thinking" },
+            timingInfo: { clientEndTime: Date.parse("2026-01-01T00:00:12.000Z") },
           },
         },
         {
@@ -154,6 +205,49 @@ describe("cursor sqlite metrics helpers", () => {
     expect(metrics.turnStats?.[0]?.durationMs).toBe(2000);
     expect(metrics.totalDurationMs).toBe(2000);
     expect(metrics.usedWallClock).toBe(false);
+  });
+
+  it("does not use clustered createdAt values as wall-clock durations", () => {
+    const metrics = __testables.buildGlobalStateMetrics(
+      [
+        {
+          turn: {
+            role: "user",
+            timestamp: "2026-04-29T02:41:02.875Z",
+            blocks: [{ type: "text", text: "prompt" }],
+          },
+          bubble: {
+            type: 1,
+            createdAt: "2026-04-29T02:41:02.875Z",
+            tokenCount: { inputTokens: 0, outputTokens: 0 },
+          },
+        },
+        {
+          turn: {
+            role: "assistant",
+            timestamp: "2026-04-29T02:41:02.899Z",
+            blocks: [{ type: "text", text: "reply" }],
+          },
+          bubble: {
+            type: 2,
+            createdAt: "2026-04-29T02:41:02.899Z",
+            tokenCount: { inputTokens: 500, outputTokens: 30 },
+            thinkingDurationMs: 4476,
+          },
+        },
+      ] as any,
+      undefined,
+    );
+
+    expect(metrics.turnStats?.[0]?.durationMs).toBe(4476);
+    expect(metrics.totalDurationMs).toBe(4476);
+    expect(metrics.usedWallClock).toBe(false);
+  });
+
+  it("keeps global-state end time at least as recent as turn timestamps", () => {
+    expect(
+      __testables.maxIsoTimestamp(["2026-04-28T20:24:48.109Z", "2026-04-28T20:25:48.085Z"]),
+    ).toBe("2026-04-28T20:25:48.085Z");
   });
 
   it("extracts Cursor branch metadata from composer payload", () => {
@@ -211,6 +305,53 @@ describe("cursor sqlite metrics helpers", () => {
         [],
       ),
     ).resolves.toBe("/workspaces/api");
+  });
+
+  it("infers projects from decoded workspace paths without filesystem probing", () => {
+    expect(
+      __testables.inferProjectFromComposerDataFast(
+        JSON.stringify({
+          relevantFiles: ["/Users/tlei/Code/ros/src/index.ts"],
+        }),
+        ["/Users/tlei/Code/ros", "/Users/tlei/Code/sandbox"],
+      ),
+    ).toBe("/Users/tlei/Code/ros");
+  });
+
+  it("infers devcontainer workspace roots from escaped tool cwd values", () => {
+    expect(
+      __testables.inferProjectFromComposerDataFast(
+        JSON.stringify({
+          fullConversationHeadersOnly: [{ bubbleId: "bubble-1" }],
+          toolFormerData: {
+            params: JSON.stringify({
+              command: "git status",
+              cwd: "/workspaces",
+            }),
+          },
+        }),
+        [],
+      ),
+    ).toBe("/workspaces");
+  });
+
+  it("keeps legacy high-confidence composer path hints discoverable", () => {
+    expect(
+      __testables.inferProjectFromComposerDataFast(
+        JSON.stringify({
+          humanChanges: [
+            {
+              renderedDiffs: [
+                {
+                  beforeContextLines: ["/Users/tlei/Code/ros/localstack/localstack-setup.sh"],
+                },
+              ],
+            },
+          ],
+        }),
+        [],
+      ),
+    ).toBe("/Users/tlei/Code/ros");
   });
 
   it("normalizes composite Cursor model labels to the latest distinct model", () => {
@@ -401,6 +542,46 @@ describe("cursor sqlite metrics helpers", () => {
         ].join("\n"),
       ),
     ).toBe("Short visible note");
+  });
+
+  it("strips Cursor timestamp wrappers from store-backed user prompts", () => {
+    const blocks = __testables.parseUserContent([
+      {
+        type: "text",
+        text: [
+          "<timestamp>Tuesday, Apr 28, 2026, 4:43 PM (UTC-7)</timestamp>",
+          "<user_query>",
+          "Fix the Cursor replay",
+          "</user_query>",
+        ].join("\n"),
+      },
+    ] as any);
+
+    expect(blocks).toEqual([{ type: "text", text: "Fix the Cursor replay" }]);
+  });
+
+  it("parses legacy inline conversation bubbles with timingInfo timestamps", () => {
+    const userTurn = __testables.bubbleToTurn({
+      type: 1,
+      text: "old prompt",
+      timingInfo: { clientStartTime: Date.parse("2025-04-10T20:17:11.305Z") },
+    });
+    const assistantTurn = __testables.bubbleToTurn({
+      type: 2,
+      text: "old reply",
+      timingInfo: { clientStartTime: Date.parse("2025-04-10T20:17:54.751Z") },
+    });
+
+    expect(userTurn).toEqual({
+      role: "user",
+      timestamp: "2025-04-10T20:17:11.305Z",
+      blocks: [{ type: "text", text: "old prompt" }],
+    });
+    expect(assistantTurn).toEqual({
+      role: "assistant",
+      timestamp: "2025-04-10T20:17:54.751Z",
+      blocks: [{ type: "text", text: "old reply" }],
+    });
   });
 
   it("strips hidden planning tails from store-backed assistant content", () => {
