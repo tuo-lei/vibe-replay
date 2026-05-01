@@ -60,6 +60,7 @@ describe("parseCursorSession", () => {
 
     expect(parsed.dataSource).toBe("sqlite");
     expect(parsed.sessionId).toBe("sqlite-session");
+    expect(mockedParseCursorSqlite).toHaveBeenCalledWith("/repo", "sqlite-session");
   });
 
   it("falls back to JSONL when sqlite parsing throws", async () => {
@@ -99,6 +100,7 @@ describe("parseCursorSession", () => {
     expect(parsed.dataSource).toBe("jsonl");
     expect(parsed.turns.length).toBeGreaterThan(0);
     expect(parsed.turns[0]?.role).toBe("user");
+    expect(parsed.cwd).toBe(dir);
     expect(parsed.dataSourceInfo?.notes?.[0]).toContain("SQLite parse failed");
     expect(parsed.dataSourceInfo?.notes?.[0]).toContain("fell back to JSONL transcript");
   });

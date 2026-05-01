@@ -8,6 +8,7 @@ import {
   discoverSqliteOnlySessions,
   listStoreDbSessionIds,
 } from "./sqlite-reader.js";
+import { sanitizeCursorUserText } from "./sanitize.js";
 
 const CURSOR_DIR = join(homedir(), ".cursor", "projects");
 
@@ -127,11 +128,7 @@ async function extractSessionInfo(
         if (obj.role === "user") {
           const textBlock = obj.message?.content?.find?.((b: any) => b.type === "text");
           if (textBlock?.text) {
-            // Strip <user_query> wrapper if present
-            firstPrompt = textBlock.text
-              .replace(/<\/?user_query>/g, "")
-              .trim()
-              .slice(0, 200);
+            firstPrompt = sanitizeCursorUserText(textBlock.text).slice(0, 200);
             break;
           }
         }

@@ -1,19 +1,29 @@
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { promisify } from "node:util";
 import type { CursorSidecars, PrLink, TokenUsage, TurnStat } from "@vibe-replay/types";
 import { readFileCache, writeFileCache } from "../../cache.js";
 import type { ContentBlock, ParsedTurn, SessionInfo } from "../../types.js";
 import { shortenPath } from "../../utils.js";
 import type { ProviderParseResult } from "../types.js";
-import { sanitizeCursorAssistantText, sanitizeCursorReasoningText } from "./sanitize.js";
+import {
+  sanitizeCursorAssistantText,
+  sanitizeCursorReasoningText,
+  sanitizeCursorUserText,
+} from "./sanitize.js";
 
 const CURSOR_CHATS_DIR = join(homedir(), ".cursor", "chats");
 const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const MIN_STORE_DB_SIZE = 8192;
 const MAX_CURSOR_REQUEST_CONTEXT_ROWS = 500;
+const SQLITE_CLI_MAX_BUFFER = 256 * 1024 * 1024;
+const SQLITE_CLI_QUERY_TIMEOUT_MS = 120_000;
+const MAX_CURSOR_GLOBAL_STATE_TOOL_RESULT_CHARS = 10_000;
+const execFileAsync = promisify(execFile);
 
 function createRetryableInit<T>(factory: () => Promise<T>): () => Promise<T> {
   let promise: Promise<T> | null = null;
@@ -35,10 +45,24 @@ const getSqlJs = createRetryableInit(async () => {
 
 interface CachedSqlJsDb {
   dbPath: string;
+  backend: "sqljs";
   db: any;
   size: number;
   mtimeMs: number;
+  walSize: number;
+  walMtimeMs: number;
 }
+
+interface CachedSqliteCliDb {
+  dbPath: string;
+  backend: "sqlite-cli";
+  size: number;
+  mtimeMs: number;
+  walSize: number;
+  walMtimeMs: number;
+}
+
+type CachedGlobalStateDb = CachedSqlJsDb | CachedSqliteCliDb;
 
 interface StoreDbIndexEntry {
   dbPath: string;
@@ -52,15 +76,17 @@ interface GlobalStateDiscoveryCache {
   dbPath: string;
   size: number;
   mtimeMs: number;
+  walSize?: number;
+  walMtimeMs?: number;
   decodedPathsHash: string;
   sessions: SessionInfo[];
   sessionIds: string[];
 }
 
-let cachedGlobalStateDb: CachedSqlJsDb | null = null;
+let cachedGlobalStateDb: CachedGlobalStateDb | null = null;
 let cachedStoreDbIndex: Map<string, StoreDbIndexEntry> | null = null;
 const resolvedProjectRootCache = new Map<string, Promise<string | null>>();
-const GLOBAL_STATE_DISCOVERY_CACHE_PREFIX = "cursor-global-state-discovery-v1";
+const GLOBAL_STATE_DISCOVERY_CACHE_PREFIX = "cursor-global-state-discovery-v3";
 
 export function workspaceHash(absolutePath: string): string {
   return createHash("md5").update(absolutePath).digest("hex");
@@ -98,19 +124,140 @@ async function findGlobalStateDb(): Promise<string | null> {
   return null;
 }
 
-async function openGlobalStateDb(): Promise<CachedSqlJsDb | null> {
+async function globalStateWalFingerprint(dbPath: string): Promise<{
+  walSize: number;
+  walMtimeMs: number;
+}> {
+  const walStat = await stat(`${dbPath}-wal`).catch(() => null);
+  return {
+    walSize: walStat?.isFile() ? walStat.size : 0,
+    walMtimeMs: walStat?.isFile() ? walStat.mtimeMs : 0,
+  };
+}
+
+function sqlString(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+function sqlLikePrefix(prefix: string): string {
+  return sqlString(
+    `${prefix.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`,
+  );
+}
+
+function projectedCursorBubbleSelectSql(): string {
+  const value = "value";
+  const toolResult = `json_extract(${value}, '$.toolFormerData.result')`;
+  const truncatedToolResult = [
+    "CASE",
+    `WHEN json_type(${value}, '$.toolFormerData.result') = 'text'`,
+    `THEN substr(${toolResult}, 1, ${MAX_CURSOR_GLOBAL_STATE_TOOL_RESULT_CHARS})`,
+    `ELSE ${toolResult}`,
+    "END",
+  ].join(" ");
+  return [
+    "key",
+    `json_extract(${value}, '$.type') AS type`,
+    `json_extract(${value}, '$.text') AS text`,
+    `json_extract(${value}, '$.thinking') AS thinking`,
+    `json_extract(${value}, '$.createdAt') AS createdAt`,
+    `json_extract(${value}, '$.lastUpdatedAt') AS lastUpdatedAt`,
+    `json_extract(${value}, '$.timingInfo') AS timingInfo`,
+    `json_extract(${value}, '$.thinkingDurationMs') AS thinkingDurationMs`,
+    `json_extract(${value}, '$.tokenCount') AS tokenCount`,
+    `json_extract(${value}, '$.modelInfo') AS modelInfo`,
+    `json_extract(${value}, '$.modelName') AS modelName`,
+    `json_extract(${value}, '$.modelConfig') AS modelConfig`,
+    `json_extract(${value}, '$.toolFormerData.name') AS toolName`,
+    `json_extract(${value}, '$.toolFormerData.params') AS toolParams`,
+    `${truncatedToolResult} AS toolResult`,
+    `length(${toolResult}) AS toolResultLength`,
+    `json_extract(${value}, '$.toolFormerData.toolCallId') AS toolCallId`,
+    `json_extract(${value}, '$.pullRequests') AS pullRequests`,
+    `json_extract(${value}, '$.errorDetails') AS errorDetails`,
+    `json_extract(${value}, '$.retryAttempt') AS retryAttempt`,
+    `json_extract(${value}, '$.relevantFiles') AS relevantFiles`,
+    `json_extract(${value}, '$.recentlyViewedFiles') AS recentlyViewedFiles`,
+  ].join(", ");
+}
+
+async function canUseSqliteCli(dbPath: string): Promise<boolean> {
+  try {
+    const { stdout } = await execFileAsync(
+      "sqlite3",
+      ["-readonly", "-json", dbPath, "SELECT json_valid('{}') AS ok;"],
+      {
+        maxBuffer: 1024 * 1024,
+      },
+    );
+    const rows = JSON.parse(stdout.trim()) as Array<{ ok?: number }>;
+    return rows[0]?.ok === 1;
+  } catch {
+    return false;
+  }
+}
+
+async function querySqliteCli(dbPath: string, sql: string): Promise<Record<string, any>[]> {
+  const { stdout } = await execFileAsync("sqlite3", ["-readonly", "-json", dbPath, sql], {
+    maxBuffer: SQLITE_CLI_MAX_BUFFER,
+    timeout: SQLITE_CLI_QUERY_TIMEOUT_MS,
+  });
+  const trimmed = stdout.trim();
+  if (!trimmed) return [];
+  return JSON.parse(trimmed) as Record<string, any>[];
+}
+
+function sqlJsRows(db: any, sql: string): Record<string, any>[] {
+  const result = db.exec(sql);
+  if (!result.length) return [];
+  const [{ columns, values }] = result;
+  return values.map((row: unknown[]) => {
+    const record: Record<string, any> = {};
+    columns.forEach((column: string, index: number) => {
+      record[column] = row[index];
+    });
+    return record;
+  });
+}
+
+async function queryGlobalStateRows(
+  globalStateDb: CachedGlobalStateDb,
+  sql: string,
+): Promise<Record<string, any>[]> {
+  if (globalStateDb.backend === "sqlite-cli") {
+    return querySqliteCli(globalStateDb.dbPath, sql);
+  }
+  return sqlJsRows(globalStateDb.db, sql);
+}
+
+async function openGlobalStateDb(): Promise<CachedGlobalStateDb | null> {
   const dbPath = await findGlobalStateDb();
   if (!dbPath) return null;
 
   const dbStat = await stat(dbPath).catch(() => null);
   if (!dbStat?.isFile() || dbStat.size < MIN_STORE_DB_SIZE) return null;
+  const walFingerprint = await globalStateWalFingerprint(dbPath);
 
   if (
     cachedGlobalStateDb &&
     cachedGlobalStateDb.dbPath === dbPath &&
     cachedGlobalStateDb.size === dbStat.size &&
-    cachedGlobalStateDb.mtimeMs === dbStat.mtimeMs
+    cachedGlobalStateDb.mtimeMs === dbStat.mtimeMs &&
+    cachedGlobalStateDb.walSize === walFingerprint.walSize &&
+    cachedGlobalStateDb.walMtimeMs === walFingerprint.walMtimeMs
   ) {
+    return cachedGlobalStateDb;
+  }
+
+  if (await canUseSqliteCli(dbPath)) {
+    if (cachedGlobalStateDb?.backend === "sqljs") cachedGlobalStateDb.db.close();
+    cachedGlobalStateDb = {
+      dbPath,
+      backend: "sqlite-cli",
+      size: dbStat.size,
+      mtimeMs: dbStat.mtimeMs,
+      ...walFingerprint,
+    };
     return cachedGlobalStateDb;
   }
 
@@ -125,21 +272,29 @@ async function openGlobalStateDb(): Promise<CachedSqlJsDb | null> {
   if (!dbBuffer) return null;
 
   const db = new SQL.Database(dbBuffer);
-  cachedGlobalStateDb?.db.close();
+  if (cachedGlobalStateDb?.backend === "sqljs") cachedGlobalStateDb.db.close();
   cachedGlobalStateDb = {
     dbPath,
+    backend: "sqljs",
     db,
     size: dbStat.size,
     mtimeMs: dbStat.mtimeMs,
+    ...walFingerprint,
   };
   return cachedGlobalStateDb;
 }
 
-function hasGlobalStateSession(db: any, sessionId: string): boolean {
-  const rows = db.exec("SELECT 1 FROM cursorDiskKV WHERE key = ? LIMIT 1", [
-    `composerData:${sessionId}`,
-  ]);
-  return rows.length > 0 && rows[0].values.length > 0;
+async function hasGlobalStateSession(
+  globalStateDb: CachedGlobalStateDb,
+  sessionId: string,
+): Promise<boolean> {
+  const rows = await queryGlobalStateRows(
+    globalStateDb,
+    `SELECT 1 AS present FROM cursorDiskKV WHERE key = ${sqlString(
+      `composerData:${sessionId}`,
+    )} LIMIT 1`,
+  );
+  return rows.length > 0;
 }
 
 /**
@@ -224,6 +379,71 @@ function parseJson<T = any>(raw: unknown): T | null {
   }
 }
 
+function parseJsonColumn(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  return parseJson(value) ?? value;
+}
+
+function optionalJsonColumn(value: unknown): unknown {
+  if (value === null || value === undefined || value === "") return undefined;
+  return parseJsonColumn(value);
+}
+
+function projectedCursorBubbleRowToBubble(row: Record<string, any>): Record<string, any> | null {
+  const key = valueToString(row.key);
+  if (!key) return null;
+  const bubble: Record<string, any> = {
+    bubbleId: key.slice(key.lastIndexOf(":") + 1),
+  };
+
+  for (const field of [
+    "type",
+    "text",
+    "createdAt",
+    "lastUpdatedAt",
+    "thinkingDurationMs",
+    "modelName",
+    "retryAttempt",
+  ] as const) {
+    if (row[field] !== null && row[field] !== undefined) bubble[field] = row[field];
+  }
+
+  for (const field of [
+    "thinking",
+    "timingInfo",
+    "tokenCount",
+    "modelInfo",
+    "modelConfig",
+    "pullRequests",
+    "errorDetails",
+    "relevantFiles",
+    "recentlyViewedFiles",
+  ] as const) {
+    const value = optionalJsonColumn(row[field]);
+    if (value !== undefined) bubble[field] = value;
+  }
+
+  if (row.toolName) {
+    const result =
+      typeof row.toolResult === "string" ? row.toolResult : valueToString(row.toolResult);
+    const parsedResultLength = Number(row.toolResultLength);
+    const resultLength = Number.isFinite(parsedResultLength) ? parsedResultLength : result.length;
+    bubble.toolFormerData = {
+      name: valueToString(row.toolName),
+      ...(row.toolParams !== null && row.toolParams !== undefined
+        ? { params: optionalJsonColumn(row.toolParams) ?? row.toolParams }
+        : {}),
+      result:
+        resultLength > MAX_CURSOR_GLOBAL_STATE_TOOL_RESULT_CHARS
+          ? `${result}\n... (truncated by vibe-replay, ${resultLength} chars total)`
+          : result,
+      ...(row.toolCallId ? { toolCallId: valueToString(row.toolCallId) } : {}),
+    };
+  }
+
+  return bubble;
+}
+
 function toIsoTimestamp(value: unknown): string | undefined {
   if (typeof value === "number" && Number.isFinite(value)) {
     const ms = value > 10_000_000_000 ? value : value * 1000;
@@ -235,6 +455,32 @@ function toIsoTimestamp(value: unknown): string | undefined {
     return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
   }
   return undefined;
+}
+
+function maxIsoTimestamp(values: Array<unknown>): string | undefined {
+  let maxMs: number | undefined;
+  for (const value of values) {
+    const iso = toIsoTimestamp(value);
+    if (!iso) continue;
+    const ms = Date.parse(iso);
+    if (!Number.isFinite(ms)) continue;
+    if (maxMs === undefined || ms > maxMs) maxMs = ms;
+  }
+  return maxMs === undefined ? undefined : new Date(maxMs).toISOString();
+}
+
+function bubbleTimestamp(bubble: Record<string, any>): string | undefined {
+  const timingInfo =
+    bubble.timingInfo && typeof bubble.timingInfo === "object"
+      ? (bubble.timingInfo as Record<string, any>)
+      : undefined;
+  return (
+    toIsoTimestamp(bubble.createdAt) ||
+    toIsoTimestamp(bubble.lastUpdatedAt) ||
+    toIsoTimestamp(timingInfo?.clientStartTime) ||
+    toIsoTimestamp(timingInfo?.clientEndTime) ||
+    toIsoTimestamp(timingInfo?.clientSettleTime)
+  );
 }
 
 function toNonNegativeInt(value: unknown): number {
@@ -393,6 +639,28 @@ async function inferProjectFromComposerData(
   rawComposerData: string,
   decodedWorkspacePaths: string[],
 ): Promise<string> {
+  const fastProject = inferProjectFromComposerDataFast(rawComposerData, decodedWorkspacePaths);
+  if (fastProject) return fastProject;
+
+  const hintedRoots = extractComposerProjectRootHints(rawComposerData);
+  for (const hint of hintedRoots) {
+    const resolved = await resolveProjectRootFromPath(hint);
+    if (resolved && !isLowSignalProjectRoot(resolved)) return resolved;
+  }
+
+  const matches =
+    rawComposerData.match(/\/(?:Users|home|workspace|workspaces|tmp)\/[^"'\s,}{]{1,240}/g) || [];
+  for (const match of matches) {
+    const resolved = await resolveProjectRootFromPath(match);
+    if (resolved && !isLowSignalProjectRoot(resolved)) return resolved;
+  }
+  return "";
+}
+
+function inferProjectFromComposerDataFast(
+  rawComposerData: string,
+  decodedWorkspacePaths: string[],
+): string {
   const uniqueDecoded = [...new Set(decodedWorkspacePaths.filter(Boolean))].sort(
     (a, b) => b.length - a.length,
   );
@@ -428,31 +696,31 @@ async function inferProjectFromComposerData(
     if (matchingDecoded.length === 1) return matchingDecoded[0];
 
     if (canUseComposerProjectHintDirectly(hint)) return hint;
-
-    const resolved = await resolveProjectRootFromPath(hint);
-    if (resolved && !isLowSignalProjectRoot(resolved)) return resolved;
   }
 
-  const matches =
-    rawComposerData.match(/\/(?:Users|home|workspace|workspaces|tmp)\/[^"'\s,}{]{1,240}/g) || [];
-  for (const match of matches) {
-    const resolved = await resolveProjectRootFromPath(match);
-    if (resolved && !isLowSignalProjectRoot(resolved)) return resolved;
-  }
   if (bestHint) return bestHint;
   return "";
 }
 
 function extractComposerProjectRootHints(rawComposerData: string): string[] {
+  const searchable = `${rawComposerData}\n${rawComposerData
+    .replace(/\\"/g, '"')
+    .replace(/\\\//g, "/")}`;
+  const explicitCwdRoots = [...searchable.matchAll(/"cwd"\s*:\s*"([^"]+)"/g)]
+    .map((match) => inferProjectRootFromPathHint(match[1], { allowWorkspaceRoot: true }))
+    .filter((value): value is string => Boolean(value));
   const matches =
-    rawComposerData.match(/\/(?:Users|home|workspace|workspaces|tmp)\/[^"'\s,}{]{1,240}/g) || [];
+    searchable.match(/\/(?:Users|home|workspace|workspaces|tmp)\/[^"'\\\s,}{]{0,240}/g) || [];
   const roots = matches
     .map((match) => inferProjectRootFromPathHint(match))
     .filter((value): value is string => Boolean(value));
-  return [...new Set(roots)].sort((a, b) => b.length - a.length);
+  return [...new Set([...explicitCwdRoots, ...roots])].sort((a, b) => b.length - a.length);
 }
 
-function inferProjectRootFromPathHint(pathValue: string): string | null {
+function inferProjectRootFromPathHint(
+  pathValue: string,
+  options?: { allowWorkspaceRoot?: boolean },
+): string | null {
   const normalized = pathValue.replaceAll("\\", "/").replace(/[)"',]+$/g, "");
   if (!normalized.startsWith("/")) return null;
 
@@ -475,6 +743,9 @@ function inferProjectRootFromPathHint(pathValue: string): string | null {
   const workspaceMatch = normalized.match(/^\/(workspace|workspaces)\/([^/]+)/);
   if (workspaceMatch?.[2] && !workspaceMatch[2].startsWith(".")) {
     return `/${workspaceMatch[1]}/${workspaceMatch[2]}`;
+  }
+  if (options?.allowWorkspaceRoot && /^\/workspaces?\/?$/.test(normalized)) {
+    return normalized.replace(/\/$/, "");
   }
 
   const parts = normalized.split("/").filter(Boolean);
@@ -499,6 +770,7 @@ function isLowSignalProjectRoot(pathValue: string): boolean {
 
 function canUseComposerProjectHintDirectly(pathValue: string): boolean {
   return (
+    /^\/workspaces?$/.test(pathValue) ||
     /^\/workspaces\/[^/]+$/.test(pathValue) ||
     /^\/workspace\/[^/]+$/.test(pathValue) ||
     /^\/home\/[^/]+\/[^/]+$/.test(pathValue) ||
@@ -614,9 +886,13 @@ export interface GlobalStateDiscoveryResult {
 }
 
 export function countComposerConversationHeaders(composer: Record<string, any>): number {
-  return Array.isArray(composer.fullConversationHeadersOnly)
+  const fullHeaders = Array.isArray(composer.fullConversationHeadersOnly)
     ? composer.fullConversationHeadersOnly.length
     : 0;
+  const legacyConversation = Array.isArray(composer.conversation)
+    ? composer.conversation.length
+    : 0;
+  return Math.max(fullHeaders, legacyConversation);
 }
 
 function firstUserTextSnippet(turns: ParsedTurn[]): string | undefined {
@@ -630,40 +906,10 @@ function firstUserTextSnippet(turns: ParsedTurn[]): string | undefined {
 function finalizeGlobalStateDiscovery(
   discoveredSessions: SessionInfo[],
   knownSessionIds: Set<string>,
-  decodedWorkspacePaths: string[],
 ): SessionInfo[] {
-  const sessions: SessionInfo[] = [];
-  const unknownProjectSessions: SessionInfo[] = [];
-
-  for (const session of discoveredSessions) {
-    if (knownSessionIds.has(session.sessionId)) continue;
-    if (session.cwd) {
-      sessions.push(session);
-    } else {
-      unknownProjectSessions.push(session);
-    }
-  }
-
-  const perProjectLimit = 40;
-  const byProject = new Map<string, SessionInfo[]>();
-  for (const session of sessions) {
-    const key = session.project;
-    if (!byProject.has(key)) byProject.set(key, []);
-    byProject.get(key)?.push(session);
-  }
-
-  const cappedProjectSessions: SessionInfo[] = [];
-  for (const projectSessions of byProject.values()) {
-    projectSessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-    cappedProjectSessions.push(...projectSessions.slice(0, perProjectLimit));
-  }
-
-  const includeUnknownLimit = decodedWorkspacePaths.length > 0 ? 50 : Number.POSITIVE_INFINITY;
-  unknownProjectSessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-  const finalSessions = [
-    ...cappedProjectSessions,
-    ...unknownProjectSessions.slice(0, includeUnknownLimit),
-  ];
+  const finalSessions = discoveredSessions.filter(
+    (session) => !knownSessionIds.has(session.sessionId),
+  );
   finalSessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   return finalSessions;
 }
@@ -680,7 +926,7 @@ export async function discoverGlobalStateOnlySessions(
   const sessionIds = new Set<string>();
   const globalStateDb = await openGlobalStateDb();
   if (!globalStateDb) return { sessions: [], sessionIds };
-  const { dbPath, db } = globalStateDb;
+  const { dbPath } = globalStateDb;
   const decodedPathsHash = hashWorkspacePaths(decodedWorkspacePaths);
   const cacheKey = `${GLOBAL_STATE_DISCOVERY_CACHE_PREFIX}-${decodedPathsHash}`;
 
@@ -689,15 +935,13 @@ export async function discoverGlobalStateOnlySessions(
     cached?.data.dbPath === dbPath &&
     cached.data.size === globalStateDb.size &&
     cached.data.mtimeMs === globalStateDb.mtimeMs &&
+    (cached.data.walSize ?? 0) === globalStateDb.walSize &&
+    (cached.data.walMtimeMs ?? 0) === globalStateDb.walMtimeMs &&
     cached.data.decodedPathsHash === decodedPathsHash
   ) {
     const cachedIds = new Set(cached.data.sessionIds);
     return {
-      sessions: finalizeGlobalStateDiscovery(
-        cached.data.sessions,
-        knownSessionIds,
-        decodedWorkspacePaths,
-      ),
+      sessions: finalizeGlobalStateDiscovery(cached.data.sessions, knownSessionIds),
       sessionIds: cachedIds,
     };
   }
@@ -705,18 +949,33 @@ export async function discoverGlobalStateOnlySessions(
   const discoveredSessions: SessionInfo[] = [];
 
   try {
-    const rows = db.exec("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'");
-    if (!rows.length || !rows[0].values.length) return { sessions: [], sessionIds };
+    const composerDiscoverySql =
+      globalStateDb.backend === "sqlite-cli"
+        ? [
+            "SELECT key,",
+            "MAX(COALESCE(json_array_length(value,'$.fullConversationHeadersOnly'),0),",
+            "COALESCE(json_array_length(value,'$.conversation'),0)) AS headerCount,",
+            "json_extract(value,'$.lastUpdatedAt') AS lastUpdatedAt,",
+            "json_extract(value,'$.createdAt') AS createdAt,",
+            "json_extract(value,'$.name') AS title,",
+            "length(value) AS fileSize",
+            "FROM cursorDiskKV WHERE key LIKE 'composerData:%' AND json_valid(value)",
+          ].join(" ")
+        : "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'";
+    const rows = await queryGlobalStateRows(globalStateDb, composerDiscoverySql);
+    if (rows.length === 0) return { sessions: [], sessionIds };
 
-    for (const [keyValue, value] of rows[0].values) {
-      const key = valueToString(keyValue);
+    for (const row of rows) {
+      const key = valueToString(row.key);
       const sessionId = key.startsWith("composerData:") ? key.slice("composerData:".length) : "";
       if (!SESSION_ID_RE.test(sessionId)) continue;
 
-      const rawComposer = valueToString(value);
-      const composer = parseJson<Record<string, any>>(rawComposer);
-      if (!composer) continue;
-      const headerCount = countComposerConversationHeaders(composer);
+      const rawComposer = row.value === undefined ? "" : valueToString(row.value);
+      const composer = rawComposer ? parseJson<Record<string, any>>(rawComposer) : null;
+      if (rawComposer && !composer) continue;
+      const headerCount = composer
+        ? countComposerConversationHeaders(composer)
+        : toNonNegativeInt(row.headerCount);
       // Skip sessions without conversation headers: they cannot be replayed.
       if (headerCount === 0) continue;
 
@@ -724,15 +983,18 @@ export async function discoverGlobalStateOnlySessions(
       sessionIds.add(sessionId);
 
       const timestamp =
-        toIsoTimestamp(composer.lastUpdatedAt) ||
-        toIsoTimestamp(composer.createdAt) ||
+        toIsoTimestamp(composer?.lastUpdatedAt ?? row.lastUpdatedAt) ||
+        toIsoTimestamp(composer?.createdAt ?? row.createdAt) ||
         new Date().toISOString();
       const title =
-        typeof composer.name === "string" && composer.name.trim()
-          ? composer.name.trim()
+        typeof (composer?.name ?? row.title) === "string" &&
+        valueToString(composer?.name ?? row.title).trim()
+          ? valueToString(composer?.name ?? row.title).trim()
           : undefined;
       const firstPrompt = title || "(cursor global state session)";
-      const projectPath = await inferProjectFromComposerData(rawComposer, decodedWorkspacePaths);
+      const projectPath = rawComposer
+        ? inferProjectFromComposerDataFast(rawComposer, decodedWorkspacePaths)
+        : "";
 
       const sessionInfo: SessionInfo = {
         provider: "cursor",
@@ -744,7 +1006,9 @@ export async function discoverGlobalStateOnlySessions(
         version: "",
         timestamp,
         lineCount: headerCount,
-        fileSize: Buffer.byteLength(rawComposer, "utf-8"),
+        fileSize: rawComposer
+          ? Buffer.byteLength(rawComposer, "utf-8")
+          : toNonNegativeInt(row.fileSize),
         filePath: `${dbPath}#composerData:${sessionId}`,
         filePaths: [],
         workspacePath: projectPath,
@@ -761,32 +1025,17 @@ export async function discoverGlobalStateOnlySessions(
     dbPath,
     size: globalStateDb.size,
     mtimeMs: globalStateDb.mtimeMs,
+    walSize: globalStateDb.walSize,
+    walMtimeMs: globalStateDb.walMtimeMs,
     decodedPathsHash,
     sessions: discoveredSessions,
     sessionIds: [...sessionIds],
   });
 
   return {
-    sessions: finalizeGlobalStateDiscovery(
-      discoveredSessions,
-      knownSessionIds,
-      decodedWorkspacePaths,
-    ),
+    sessions: finalizeGlobalStateDiscovery(discoveredSessions, knownSessionIds),
     sessionIds,
   };
-}
-
-export async function getCursorSessionCachePaths(sessionId: string): Promise<string[]> {
-  const paths: string[] = [];
-  const storeDb = await findStoreDb(sessionId);
-  if (storeDb) paths.push(storeDb);
-
-  const globalStateDb = await openGlobalStateDb();
-  if (globalStateDb && hasGlobalStateSession(globalStateDb.db, sessionId)) {
-    paths.push(globalStateDb.dbPath);
-  }
-
-  return [...new Set(paths)];
 }
 
 interface ChatMeta {
@@ -837,27 +1086,34 @@ function extractChildBlobIds(data: Uint8Array): string[] {
 }
 
 export async function parseCursorSqlite(
-  _workspacePath: string,
+  workspacePath: string,
   sessionId: string,
 ): Promise<ProviderParseResult | null> {
-  const storeResult = await parseCursorStoreDb(sessionId);
+  const storeResult = await parseCursorStoreDb(sessionId, workspacePath);
   if (storeResult) {
     // sql.js needs the whole DB loaded into memory, so the first global-state probe is expensive.
     // Keep the cheap composer-key existence check below so store-backed sessions avoid the full
     // enrichment parse when they do not actually exist in state.vscdb.
     const globalStateDb = await openGlobalStateDb();
-    if (!globalStateDb || !hasGlobalStateSession(globalStateDb.db, sessionId)) {
+    if (!globalStateDb || !(await hasGlobalStateSession(globalStateDb, sessionId))) {
       return storeResult;
     }
-    const globalStateResult = await parseCursorGlobalStateDb(sessionId, globalStateDb);
+    const globalStateResult = await parseCursorGlobalStateDb(
+      sessionId,
+      globalStateDb,
+      workspacePath,
+    );
     return globalStateResult
       ? mergeCursorParseResults(storeResult, globalStateResult)
       : storeResult;
   }
-  return parseCursorGlobalStateDb(sessionId);
+  return parseCursorGlobalStateDb(sessionId, undefined, workspacePath);
 }
 
-async function parseCursorStoreDb(sessionId: string): Promise<ProviderParseResult | null> {
+async function parseCursorStoreDb(
+  sessionId: string,
+  workspacePath = "",
+): Promise<ProviderParseResult | null> {
   let SQL: any;
   try {
     SQL = await getSqlJs();
@@ -925,7 +1181,7 @@ async function parseCursorStoreDb(sessionId: string): Promise<ProviderParseResul
       sessionId,
       slug,
       title,
-      cwd: "",
+      cwd: workspacePath,
       model:
         normalizeCursorModelName(metaJson.lastUsedModel) ||
         turnStats.find((stat) => typeof stat.model === "string" && stat.model)?.model,
@@ -964,7 +1220,7 @@ function parseThinking(value: unknown): string {
 
 function normalizeTurnText(raw: unknown): string {
   if (typeof raw !== "string") return "";
-  const cleaned = raw.replace(/<\/?user_query>/g, "").trim();
+  const cleaned = sanitizeCursorUserText(raw);
   if (!cleaned || CURSOR_SYSTEM_CONTEXT_RE.test(cleaned)) return "";
   return cleaned;
 }
@@ -1269,10 +1525,7 @@ function extractCursorApiErrors(
       undefined;
 
     const timestamp =
-      toIsoTimestamp(entry.bubble.createdAt) ||
-      toIsoTimestamp(entry.bubble.lastUpdatedAt) ||
-      entry.turnTimestamp ||
-      new Date().toISOString();
+      bubbleTimestamp(entry.bubble) || entry.turnTimestamp || new Date().toISOString();
 
     const dedupeKey = `${details.generationUUID || ""}::${timestamp}::${statusCode || ""}::${errorType || ""}::${details.message || ""}`;
     if (seenKeys.has(dedupeKey)) continue;
@@ -1437,28 +1690,54 @@ function extractCursorContextSummary(
   };
 }
 
-function loadCursorRequestContexts(db: any, sessionId: string): Record<string, any>[] {
-  const rows = db.exec(
-    `SELECT value FROM cursorDiskKV WHERE key LIKE ? LIMIT ${MAX_CURSOR_REQUEST_CONTEXT_ROWS}`,
-    [`messageRequestContext:${sessionId}:%`],
+function buildBubbleProjectHintData(entries: GlobalStateBubbleEntry[]): string {
+  return entries
+    .map((entry) => {
+      const bubble = entry.bubble;
+      const toolFormerData =
+        bubble.toolFormerData && typeof bubble.toolFormerData === "object"
+          ? (bubble.toolFormerData as Record<string, any>)
+          : undefined;
+      return JSON.stringify({
+        relevantFiles: bubble.relevantFiles,
+        recentlyViewedFiles: bubble.recentlyViewedFiles,
+        toolParams: toolFormerData?.params,
+      });
+    })
+    .join("\n");
+}
+
+async function loadCursorRequestContexts(
+  globalStateDb: CachedGlobalStateDb,
+  sessionId: string,
+): Promise<Record<string, any>[]> {
+  const rows = await queryGlobalStateRows(
+    globalStateDb,
+    `SELECT value FROM cursorDiskKV WHERE key LIKE ${sqlLikePrefix(
+      `messageRequestContext:${sessionId}:`,
+    )} ESCAPE '\\' LIMIT ${MAX_CURSOR_REQUEST_CONTEXT_ROWS}`,
   );
-  if (!rows.length) return [];
 
   const contexts: Record<string, any>[] = [];
-  for (const row of rows[0].values) {
-    const raw = valueToString(row[0]);
+  for (const row of rows) {
+    const raw = valueToString(row.value);
     const parsed = parseJson<Record<string, any>>(raw);
     if (parsed) contexts.push(parsed);
   }
   return contexts;
 }
 
-function countCursorCheckpointEntries(db: any, sessionId: string): number {
-  const rows = db.exec("SELECT COUNT(*) FROM cursorDiskKV WHERE key LIKE ?", [
-    `checkpointId:${sessionId}:%`,
-  ]);
-  if (!rows.length || !rows[0].values.length) return 0;
-  return toNonNegativeInt(rows[0].values[0][0]);
+async function countCursorCheckpointEntries(
+  globalStateDb: CachedGlobalStateDb,
+  sessionId: string,
+): Promise<number> {
+  const rows = await queryGlobalStateRows(
+    globalStateDb,
+    `SELECT COUNT(*) AS count FROM cursorDiskKV WHERE key LIKE ${sqlLikePrefix(
+      `checkpointId:${sessionId}:`,
+    )} ESCAPE '\\'`,
+  );
+  return toNonNegativeInt(rows[0]?.count);
 }
 
 function mergeUniqueStrings(...groups: Array<string[] | undefined>): string[] | undefined {
@@ -1694,10 +1973,49 @@ function extractBubbleDurationMs(bubble: Record<string, any>): number | undefine
   return thinkingMs ?? toolMs;
 }
 
-function timestampToMs(value: unknown): number | undefined {
-  if (typeof value !== "string" || !value.trim()) return undefined;
-  const ms = Date.parse(value);
+function timestampValueToMs(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value > 10_000_000_000 ? value : value * 1000;
+  }
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (/^[0-9]+(?:\.[0-9]+)?$/.test(trimmed)) {
+    const numeric = Number(trimmed);
+    return Number.isFinite(numeric)
+      ? numeric > 10_000_000_000
+        ? numeric
+        : numeric * 1000
+      : undefined;
+  }
+  const ms = Date.parse(trimmed);
   return Number.isFinite(ms) ? ms : undefined;
+}
+
+function bubbleTimingInfo(bubble: Record<string, any>): Record<string, any> | undefined {
+  return bubble.timingInfo && typeof bubble.timingInfo === "object"
+    ? (bubble.timingInfo as Record<string, any>)
+    : undefined;
+}
+
+function bubbleWallClockStartMs(bubble: Record<string, any>): number | undefined {
+  const timingInfo = bubbleTimingInfo(bubble);
+  if (!timingInfo) return undefined;
+  return (
+    timestampValueToMs(timingInfo.clientStartTime) ||
+    timestampValueToMs(timingInfo.clientEndTime) ||
+    timestampValueToMs(timingInfo.clientSettleTime)
+  );
+}
+
+function bubbleWallClockEndMs(bubble: Record<string, any>): number | undefined {
+  const timingInfo = bubbleTimingInfo(bubble);
+  if (!timingInfo) return undefined;
+  return (
+    timestampValueToMs(timingInfo.clientEndTime) ||
+    timestampValueToMs(timingInfo.clientSettleTime) ||
+    timestampValueToMs(timingInfo.clientStartTime)
+  );
 }
 
 function applyGlobalStateWallClockDurations(
@@ -1725,17 +2043,14 @@ function applyGlobalStateWallClockDurations(
   };
 
   for (const entry of entries) {
-    const bubbleTimestamp =
-      timestampToMs(entry.turn.timestamp) ||
-      timestampToMs(entry.bubble.createdAt) ||
-      timestampToMs(entry.bubble.lastUpdatedAt);
     if (entry.turn.role === "user") {
       finalizeTurn();
       currentTurnIndex++;
-      currentUserAt = bubbleTimestamp;
+      currentUserAt = bubbleWallClockStartMs(entry.bubble);
       currentAssistantAt = undefined;
       continue;
     }
+    const bubbleTimestamp = bubbleWallClockEndMs(entry.bubble);
     if (currentTurnIndex < 0 || bubbleTimestamp === undefined) continue;
     if (currentAssistantAt === undefined || bubbleTimestamp > currentAssistantAt) {
       currentAssistantAt = bubbleTimestamp;
@@ -1883,69 +2198,86 @@ function bubbleToTurn(bubble: Record<string, any>): ParsedTurn | null {
   if (blocks.length === 0) return null;
   return {
     role,
-    timestamp: toIsoTimestamp(bubble.createdAt),
+    timestamp: bubbleTimestamp(bubble),
     blocks,
   };
 }
 
 async function parseCursorGlobalStateDb(
   sessionId: string,
-  globalStateDb?: CachedSqlJsDb,
+  globalStateDb?: CachedGlobalStateDb,
+  preferredWorkspacePath = "",
 ): Promise<ProviderParseResult | null> {
   const resolvedGlobalStateDb = globalStateDb ?? (await openGlobalStateDb());
   if (!resolvedGlobalStateDb) return null;
-  const { db } = resolvedGlobalStateDb;
 
   try {
-    const composerRows = db.exec("SELECT value FROM cursorDiskKV WHERE key = ?", [
-      `composerData:${sessionId}`,
-    ]);
-    if (!composerRows.length || !composerRows[0].values.length) return null;
+    const composerRows = await queryGlobalStateRows(
+      resolvedGlobalStateDb,
+      `SELECT value FROM cursorDiskKV WHERE key = ${sqlString(`composerData:${sessionId}`)}`,
+    );
+    if (composerRows.length === 0) return null;
 
-    const rawComposer = valueToString(composerRows[0].values[0][0]);
+    const rawComposer = valueToString(composerRows[0].value);
     const composer = parseJson<Record<string, any>>(rawComposer);
     if (!composer) return null;
 
-    if (countComposerConversationHeaders(composer) === 0) return null;
-    const headers = composer.fullConversationHeadersOnly as any[];
-
     const entries: GlobalStateTurnEntry[] = [];
     const bubbleEntries: GlobalStateBubbleEntry[] = [];
-    const bubbleStmt = db.prepare("SELECT value FROM cursorDiskKV WHERE key = ?");
-    for (const header of headers) {
-      const bubbleId =
-        header && typeof header === "object" && typeof (header as any).bubbleId === "string"
-          ? (header as any).bubbleId
-          : "";
-      if (!bubbleId) continue;
 
-      try {
-        bubbleStmt.bind([`bubbleId:${sessionId}:${bubbleId}`]);
-        if (bubbleStmt.step()) {
-          const rawBubble = valueToString(bubbleStmt.get()[0]);
-          const bubble = parseJson<Record<string, any>>(rawBubble);
-          if (bubble) {
-            bubbleEntries.push({
-              bubble,
-              turnTimestamp:
-                toIsoTimestamp(bubble.createdAt) ||
-                toIsoTimestamp(bubble.lastUpdatedAt) ||
-                undefined,
-            });
-            const turn = bubbleToTurn(bubble);
-            if (turn) entries.push({ turn, bubble });
-          }
-        }
-      } finally {
-        bubbleStmt.reset();
+    const addBubble = (bubble: Record<string, any>) => {
+      bubbleEntries.push({
+        bubble,
+        turnTimestamp: bubbleTimestamp(bubble),
+      });
+      const turn = bubbleToTurn(bubble);
+      if (turn) entries.push({ turn, bubble });
+    };
+
+    const hasFullConversationHeaders =
+      Array.isArray(composer.fullConversationHeadersOnly) &&
+      composer.fullConversationHeadersOnly.length > 0;
+    if (hasFullConversationHeaders) {
+      const bubbleIds: string[] = composer.fullConversationHeadersOnly
+        .map((header: any) =>
+          header && typeof header === "object" && typeof header.bubbleId === "string"
+            ? header.bubbleId
+            : "",
+        )
+        .filter((bubbleId: string) => Boolean(bubbleId));
+      const expectedBubbleKeys = new Set(
+        bubbleIds.map((bubbleId) => `bubbleId:${sessionId}:${bubbleId}`),
+      );
+      const bubblesByKey = new Map<string, Record<string, any>>();
+      const rows = await queryGlobalStateRows(
+        resolvedGlobalStateDb,
+        `SELECT ${projectedCursorBubbleSelectSql()} FROM cursorDiskKV WHERE key LIKE ${sqlLikePrefix(`bubbleId:${sessionId}:`)} AND json_valid(value)`,
+      );
+      for (const row of rows) {
+        const key = valueToString(row.key);
+        if (!expectedBubbleKeys.has(key)) continue;
+        const bubble = projectedCursorBubbleRowToBubble(row);
+        if (bubble) bubblesByKey.set(key, bubble);
+      }
+      for (const bubbleId of bubbleIds) {
+        const bubble = bubblesByKey.get(`bubbleId:${sessionId}:${bubbleId}`);
+        if (bubble) addBubble(bubble);
+      }
+    } else if (Array.isArray(composer.conversation)) {
+      for (const item of composer.conversation) {
+        if (item && typeof item === "object") addBubble(item as Record<string, any>);
       }
     }
-    bubbleStmt.free();
 
     const turns = entries.map((entry) => entry.turn);
     if (turns.length === 0) return null;
 
-    const inferredProject = await inferProjectFromComposerData(rawComposer, []);
+    const inferredProject =
+      preferredWorkspacePath ||
+      (await inferProjectFromComposerData(
+        `${rawComposer}\n${buildBubbleProjectHintData(bubbleEntries)}`,
+        [],
+      ));
     const modelName = normalizeCursorModelName(
       composer.modelConfig &&
         typeof composer.modelConfig === "object" &&
@@ -1953,17 +2285,20 @@ async function parseCursorGlobalStateDb(
         ? composer.modelConfig.modelName
         : undefined,
     );
-    const requestContexts = loadCursorRequestContexts(db, sessionId);
+    const requestContexts = await loadCursorRequestContexts(resolvedGlobalStateDb, sessionId);
 
     const startTime = toIsoTimestamp(composer.createdAt);
-    const endTime = toIsoTimestamp(composer.lastUpdatedAt);
+    const endTime = maxIsoTimestamp([
+      composer.lastUpdatedAt,
+      ...turns.map((turn) => turn.timestamp).filter(Boolean),
+    ]);
     const sessionTokenUsage = tokenUsageFromCursorTokenCount(composer.tokenCount);
     const metrics = buildGlobalStateMetrics(entries, modelName, sessionTokenUsage);
     const branchMeta = extractCursorBranchMetadata(composer);
     const prLinks = extractCursorPrLinks(bubbleEntries);
     const apiErrors = extractCursorApiErrors(bubbleEntries);
     const contextSummary = extractCursorContextSummary(bubbleEntries, requestContexts);
-    const checkpointCount = countCursorCheckpointEntries(db, sessionId);
+    const checkpointCount = await countCursorCheckpointEntries(resolvedGlobalStateDb, sessionId);
 
     const notes = ["cursorDiskKV keys: composerData:* + bubbleId:*"];
     if (!metrics.tokenUsage) {
@@ -2122,7 +2457,7 @@ function parseUserContent(content: string | CursorBlock[] | undefined): ContentB
   if (!content) return [];
   if (typeof content === "string") {
     if (isSystemContextText(content)) return [];
-    const cleaned = content.replace(/<\/?user_query>/g, "").trim();
+    const cleaned = sanitizeCursorUserText(content);
     if (isSystemContextText(cleaned)) return [];
     return cleaned ? [{ type: "text", text: cleaned }] : [];
   }
@@ -2130,7 +2465,7 @@ function parseUserContent(content: string | CursorBlock[] | undefined): ContentB
   for (const b of content) {
     if (b.type === "text" && b.text) {
       if (isSystemContextText(b.text)) continue;
-      const cleaned = b.text.replace(/<\/?user_query>/g, "").trim();
+      const cleaned = sanitizeCursorUserText(b.text);
       if (isSystemContextText(cleaned)) continue;
       if (cleaned) blocks.push({ type: "text", text: cleaned });
     }
@@ -2570,6 +2905,7 @@ function extractModel(msg: CursorMessage): string | undefined {
 
 export const __testables = {
   applyGlobalStateWallClockDurations,
+  bubbleTimestamp,
   buildGlobalStateMetrics,
   buildStoreTurnStats,
   createRetryableInit,
@@ -2581,13 +2917,18 @@ export const __testables = {
   hasReplayableRootBlob,
   mapCursorToolName,
   mapToolArgs,
+  maxIsoTimestamp,
   mergeCursorParseResults,
   mergeTurnStats,
   parseAssistantContent,
   inferProjectFromComposerData,
+  inferProjectFromComposerDataFast,
   inferProjectRootFromPathHint,
   normalizeTurnText,
   normalizeCursorModelName,
+  bubbleToTurn,
   parseThinking,
   parseUserContent,
+  projectedCursorBubbleRowToBubble,
+  projectedCursorBubbleSelectSql,
 };
