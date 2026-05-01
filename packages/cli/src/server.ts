@@ -1,6 +1,15 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { type FSWatcher, watch as fsWatch } from "node:fs";
+import {
+  mkdir,
+  open as fsOpen,
+  readdir,
+  readFile,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -24,6 +33,7 @@ import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.j
 import { generateOutput, injectDataScript, loadViewerHtml } from "./generator.js";
 import { mergeInsights, readInsightsStore, writeInsightsStore } from "./insights.js";
 import { loadOverlays, sessionWithEffectiveContent } from "./overlays.js";
+import { parseClaudeCodeLines } from "./providers/claude-code/parser.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
 import {
   getApiUrl,
@@ -668,6 +678,81 @@ async function buildSourcesResult(
   });
 }
 
+/**
+ * Live-session state derived from Claude Code's per-process metadata file
+ * (`~/.claude/sessions/<pid>.json`).
+ *
+ * - `busy`    — Claude is actively processing (streaming a response, running a
+ *               tool, etc.). The metadata file's `status` field is "busy" and
+ *               its PID is alive.
+ * - `idle`    — Claude is alive but waiting on the user (prompt input is
+ *               focused, no in-flight request). `status` is anything other
+ *               than "busy" and PID is alive.
+ * - `stopped` — No metadata file matches `sessionId`, the file lacks a
+ *               `status` field (Claude exited cleanly), or the PID is dead.
+ *               Cursor / Codex / Cowork sessions also fall through to this
+ *               since they don't write the Claude metadata file — for those
+ *               providers `state` is reported as `unknown` instead so the
+ *               viewer doesn't claim "Session ended" when we genuinely
+ *               can't tell.
+ */
+type LiveSessionState = "busy" | "idle" | "stopped" | "unknown";
+
+/**
+ * Walk `~/.claude/sessions/*.json` looking for an alive process whose
+ * sessionId matches. After a `/resume` (or any abnormal exit), the dir
+ * can hold multiple files for the same logical session — the dead
+ * pre-resume one and the live post-resume one — and `readdir` order is
+ * not guaranteed. We must inspect every match and only conclude
+ * "stopped" once all of them are dead/missing-status.
+ *
+ * Known limitation: PID recycling. If a Claude process exits without
+ * cleaning up its metadata file and a new process happens to claim the
+ * same PID, this function will report busy/idle for one tick. The 2s
+ * poller corrects on the next iteration once the recycled process
+ * touches the state file (or doesn't, surfacing "stopped"). Probability
+ * is low and the false reading self-heals.
+ */
+async function readClaudeSessionState(sessionId: string): Promise<LiveSessionState> {
+  const sessionsDir = join(homedir(), ".claude", "sessions");
+  let files: string[];
+  try {
+    files = await readdir(sessionsDir);
+  } catch {
+    return "stopped";
+  }
+  for (const file of files) {
+    if (!file.endsWith(".json")) continue;
+    let data: { sessionId?: string; pid?: number; status?: string };
+    try {
+      const content = await readFile(join(sessionsDir, file), "utf-8");
+      data = JSON.parse(content);
+    } catch {
+      continue;
+    }
+    if (data.sessionId !== sessionId) continue;
+    // Partial / racing-write file (pid not flushed yet, status absent on
+    // first init) — keep iterating; another file may carry the live state.
+    if (typeof data.pid !== "number" || !data.status) continue;
+
+    // Liveness probe via signal 0. Two errors to disambiguate:
+    //   ESRCH — process truly gone → keep looking, prefer a live match
+    //           if any other file matches; only "stopped" if none do.
+    //   EPERM — process exists but we can't signal it (different uid,
+    //           e.g. Claude was started under sudo). Treat as alive.
+    let alive = false;
+    try {
+      process.kill(data.pid, 0);
+      alive = true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "EPERM") alive = true;
+    }
+    if (alive) return data.status === "busy" ? "busy" : "idle";
+    // Dead PID — don't return yet; another file may be the live one.
+  }
+  return "stopped";
+}
+
 function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
   const groups = new Map<string, SessionInfo[]>();
   for (const s of sessions) {
@@ -750,6 +835,7 @@ export async function startServer(
   opts?: {
     openDashboard?: boolean;
     openSlug?: string;
+    openLive?: { provider: string; sessionId: string };
     externalViewerUrl?: string;
   },
 ): Promise<void> {
@@ -1281,6 +1367,365 @@ export async function startServer(
     } catch {
       return c.json({ error: `Session not found: ${result.slug}` }, 404);
     }
+  });
+
+  // --- Live: stream a session as it's being written to disk ---
+  // For Claude (JSONL) we tail each shard at the byte level — fs.read() at
+  // the cached offset, accumulate complete lines, hold an incomplete trailing
+  // fragment until the next newline arrives. Other providers fall back to
+  // full provider.parse() on every change (their formats aren't pure JSONL).
+  // The transformed ReplaySession is pushed as a full snapshot over SSE; the
+  // viewer hot-swaps and auto-follows the tail when the user is there.
+  app.get("/api/live", (c) => {
+    const providerName = c.req.query("provider") || "";
+    const sessionId = c.req.query("sessionId") || "";
+
+    return streamSSE(c, async (stream) => {
+      const sendError = async (message: string) => {
+        await stream.writeSSE({ data: JSON.stringify({ type: "error", message }) });
+      };
+
+      if (!providerName || !sessionId) {
+        await sendError("provider and sessionId query parameters are required");
+        return;
+      }
+
+      const provider = getProvider(providerName);
+      if (!provider) {
+        await sendError(`Unknown provider: ${providerName}`);
+        return;
+      }
+
+      // Resolve sessionId → SessionInfo. Discovery is expensive (full
+      // ~/.claude/projects walk for Claude), so we only run it on the
+      // initial connect and on a 15s cadence inside buildAndSend — that's
+      // the safety net that picks up `/resume` shards mid-stream.
+      //
+      // `mergeSameSessions` keeps the latest shard's sessionId on the merged
+      // record, so we look the user-supplied sessionId up against the
+      // unmerged list first (any shard matches), then return the merged
+      // record for that shard's project+slug — the viewer can pass whichever
+      // sessionId it happens to know about and still get the full history.
+      const resolveSessionInfo = async () => {
+        const all = await provider.discover();
+        const seed = all.find((s) => s.sessionId === sessionId);
+        if (!seed) return undefined;
+        const merged = mergeSameSessions(all);
+        return merged.find((s) => s.project === seed.project && s.slug === seed.slug);
+      };
+
+      let sessionInfo = await resolveSessionInfo();
+      if (!sessionInfo) {
+        await sendError(`Session not found: ${sessionId}`);
+        return;
+      }
+
+      const home = homedir();
+      const projectFor = (info: SessionInfo): string =>
+        info.project.startsWith(home) ? `~${info.project.slice(home.length)}` : info.project;
+
+      const watchers: FSWatcher[] = [];
+      const watchedPaths = new Set<string>();
+      let pendingTimer: ReturnType<typeof setTimeout> | null = null;
+      let aborted = false;
+      let inFlight = false;
+      let dirty = false;
+      let lastSignature: string | null = null;
+      // Live session state (busy / idle / stopped / unknown) — populated
+      // from `~/.claude/sessions/<pid>.json` for Claude. Other providers
+      // don't write that file, so they get "unknown" and the viewer keeps
+      // the existing always-live UI rather than misreporting "stopped".
+      const isClaudeProvider = providerName === "claude-code";
+      let lastLiveState: LiveSessionState = isClaudeProvider ? "busy" : "unknown";
+
+      const ensureWatchersFor = (paths: Iterable<string>): void => {
+        for (const fp of paths) {
+          if (aborted || watchedPaths.has(fp)) continue;
+          try {
+            const w = fsWatch(fp, { persistent: false }, () => scheduleRebuild());
+            w.on("error", () => {});
+            watchers.push(w);
+            watchedPaths.add(fp);
+          } catch {
+            // best-effort — if a path can't be watched, the others may still work
+          }
+        }
+      };
+
+      // Re-resolving (full provider.discover()) is expensive — for Claude it
+      // walks the whole ~/.claude/projects tree and takes seconds. We only do
+      // it on a slow periodic cadence (and lazily, the next time we need to
+      // build) so that fast-path rebuilds — driven by fs.watch events on the
+      // already-known JSONL — pay only parse + transform cost.
+      const RESOLVE_REFRESH_INTERVAL_MS = 15_000;
+      let lastResolvedAt = Date.now();
+
+      // Per-file JSONL tail cache. Tracks the last byte offset we read for
+      // each path plus an unterminated trailing fragment (a JSONL append may
+      // flush mid-line). Each fs.watch tick reads only the new bytes via
+      // pread() instead of re-reading the whole file — a multi-thousand-line
+      // session goes from O(file_size) per tick to O(new_bytes).
+      //
+      // `partial` is a Buffer (not a string) on purpose: a write may flush
+      // mid-multi-byte-character (UTF-8 user prompts contain Chinese / emoji
+      // routinely), and Buffer.toString("utf8") on a half-character silently
+      // emits U+FFFD and discards the broken bytes. Holding raw bytes lets
+      // us defer decoding until a `\n` arrives, by which point the next
+      // read has supplied the rest of the multi-byte sequence.
+      const NEWLINE = 0x0a;
+      type TailCache = { offset: number; partial: Buffer; lines: string[] };
+      const jsonlTail = new Map<string, TailCache>();
+
+      const splitDecodedLines = (combined: Buffer): { lines: string[]; partial: Buffer } => {
+        const lastNl = combined.lastIndexOf(NEWLINE);
+        if (lastNl < 0) return { lines: [], partial: combined };
+        const decoded = combined.subarray(0, lastNl).toString("utf8");
+        const lines = decoded.split("\n").filter((l) => l.length > 0);
+        return { lines, partial: combined.subarray(lastNl + 1) };
+      };
+
+      const tailReadJsonl = async (filePath: string): Promise<string[]> => {
+        const cached = jsonlTail.get(filePath);
+        let size: number;
+        try {
+          size = (await stat(filePath)).size;
+        } catch {
+          // File disappeared — drop cache so a fresh read sets up clean state.
+          jsonlTail.delete(filePath);
+          return cached?.lines ?? [];
+        }
+
+        // First read or file shrank (truncate / rotate) — read whole file.
+        // Invariants: `offset` = absolute byte position to read NEXT (= end of
+        // last read). `partial` = bytes after the last newline (may be a
+        // half-written line, possibly mid-UTF8). Next call reads `[offset,
+        // size)`, prepends `partial`, and re-splits at the last newline.
+        //
+        // offset comes from `content.length`, not the earlier stat `size`:
+        // the file may grow between stat() and readFile() if Claude is
+        // writing concurrently, and stamping `size` here would let the next
+        // tick re-read bytes in [size, content.length) and emit them twice.
+        if (!cached || size < cached.offset) {
+          const content = await readFile(filePath);
+          const { lines, partial } = splitDecodedLines(content);
+          jsonlTail.set(filePath, { offset: content.length, partial, lines });
+          return lines;
+        }
+
+        if (size === cached.offset) {
+          return cached.lines;
+        }
+
+        // Read just the new tail. Use a file handle + read() at offset so we
+        // don't slurp the whole file for a tiny append.
+        const len = size - cached.offset;
+        const fh = await fsOpen(filePath, "r");
+        try {
+          const buf = Buffer.alloc(len);
+          await fh.read(buf, 0, len, cached.offset);
+          const combined = cached.partial.length === 0 ? buf : Buffer.concat([cached.partial, buf]);
+          const { lines, partial } = splitDecodedLines(combined);
+          for (const line of lines) cached.lines.push(line);
+          cached.partial = partial;
+          cached.offset = size;
+        } finally {
+          await fh.close();
+        }
+        return cached.lines;
+      };
+
+      // Claude is the only provider with a pure-JSONL transcript that's
+      // safe to incrementally tail. Cursor / Codex / Cowork stay on full
+      // provider.parse() each tick — their formats aren't append-only or
+      // need provider-specific decoding (SQLite, encoded blobs, etc.).
+      const isClaudeJsonl = isClaudeProvider;
+
+      const buildAndSend = async () => {
+        if (aborted) return;
+        if (inFlight) {
+          dirty = true;
+          return;
+        }
+        inFlight = true;
+        try {
+          // Refresh sessionInfo only if it's been a while since the last
+          // resolve. This lets /resume mid-stream eventually pick up new
+          // JSONL shards without paying a full discovery cost on every save.
+          if (Date.now() - lastResolvedAt >= RESOLVE_REFRESH_INTERVAL_MS) {
+            const fresh = await resolveSessionInfo();
+            if (fresh) sessionInfo = fresh;
+            lastResolvedAt = Date.now();
+          }
+          const info = sessionInfo!;
+          const paths = [...info.filePaths, ...(info.toolPaths || [])];
+          // Register watchers for any new paths (e.g. /resume created a new
+          // JSONL between rebuilds). Without this, appends to those new files
+          // would never trigger another scheduleRebuild and the stream would
+          // silently go stale.
+          ensureWatchersFor(paths);
+          let parsed;
+          if (isClaudeJsonl) {
+            // Tail-based fast path. Concat already-cached lines from every
+            // shard (filePaths is sorted chronologically by mergeSameSessions)
+            // and parse them as one stream — the parser handles cross-shard
+            // continuity. Subagent agents/ files are still re-read in full
+            // inside the parser, but they're typically small.
+            const allLines: string[] = [];
+            for (const fp of paths) {
+              const lines = await tailReadJsonl(fp);
+              allLines.push(...lines);
+            }
+            parsed = await parseClaudeCodeLines(allLines, { subagentsSourcePath: paths[0] });
+          } else {
+            parsed = await provider.parse(paths, info);
+          }
+          const replay = transformToReplay(parsed, providerName, projectFor(info), {
+            generator: {
+              name: "vibe-replay",
+              version: CLI_VERSION,
+              generatedAt: new Date().toISOString(),
+            },
+          });
+          // Dedup on the serialized scene array. Hashing only coarse counters
+          // (scene count, prompt count, last timestamp) misses content-only
+          // mutations — e.g. Claude tool_result lines populate `_result` on an
+          // existing tool_use scene without changing scene count or the latest
+          // turn timestamp, so the user would never see tool output appear.
+          // Stringify excludes meta.generator.generatedAt (which would
+          // otherwise force every fs.watch tick to emit a redundant payload),
+          // and is fast enough at typical session sizes (~500 scenes,
+          // ~tens of KB).
+          // Refresh live state before emit so the payload's `state` matches
+          // the latest session metadata. This is the only state read tied to
+          // file changes — the standalone 2s poller below catches busy↔idle
+          // and idle→stopped transitions that don't touch the JSONL.
+          if (isClaudeProvider) {
+            lastLiveState = await readClaudeSessionState(sessionId);
+          }
+          const signature = JSON.stringify(replay.scenes);
+          if (signature !== lastSignature) {
+            lastSignature = signature;
+            await stream.writeSSE({
+              data: JSON.stringify({
+                type: "session",
+                session: replay,
+                state: lastLiveState,
+              }),
+            });
+          }
+        } catch (err) {
+          if (!aborted) {
+            await stream
+              .writeSSE({
+                data: JSON.stringify({ type: "error", message: getErrorMessage(err) }),
+              })
+              .catch(() => {});
+          }
+        } finally {
+          inFlight = false;
+          if (dirty && !aborted) {
+            dirty = false;
+            // Drain the dirty flag: a rebuild was queued while we were
+            // in-flight. Use a 0ms timer so the abort handler (and any other
+            // awaiters) gets a chance to run before the next build starts.
+            scheduleRebuild(0);
+          }
+        }
+      };
+
+      // 100ms debounce — claude-devtools uses the same value. Long enough to
+      // coalesce a burst of fs.watch events from a single JSONL flush, short
+      // enough that a streamed assistant response feels live.
+      const scheduleRebuild = (delay = 100) => {
+        if (aborted) return;
+        if (pendingTimer) clearTimeout(pendingTimer);
+        pendingTimer = setTimeout(() => {
+          pendingTimer = null;
+          void buildAndSend();
+        }, delay);
+      };
+
+      // Initial payload — establishes the baseline session before any deltas.
+      // ensureWatchersFor() inside buildAndSend() also registers fs.watch for
+      // every reported file path on this first call.
+      await buildAndSend();
+
+      // Polling fallback for sources we can't directly fs.watch. Two cases:
+      //   1. `watchedPaths.size === 0` — Cursor SQLite-only sessions report
+      //      `filePaths: []` (SQLite file is discovered separately and isn't
+      //      in `paths`).
+      //   2. `sessionInfo?.hasSqlite` — Cursor sessions where SQLite is
+      //      authoritative but transcript / tool sidecars are *also* watched.
+      //      Updates landing only in SQLite (no sidecar write) wouldn't
+      //      trigger any fs.watch event, so the stream would silently stall.
+      // The 3s cadence still feels live enough for human reading, and the
+      // dedup signature suppresses redundant emits when nothing changed.
+      const needsPolling = watchedPaths.size === 0 || !!sessionInfo?.hasSqlite;
+      const pollInterval = needsPolling
+        ? setInterval(() => {
+            if (aborted) return;
+            scheduleRebuild(0);
+          }, 3_000)
+        : null;
+
+      // SSE keepalive — proxies (and some browsers) drop idle connections.
+      const pingInterval = setInterval(() => {
+        if (aborted) return;
+        stream.writeSSE({ data: JSON.stringify({ type: "ping" }) }).catch(() => {});
+      }, 25_000);
+
+      // Standalone state poller — Claude can transition busy↔idle (and
+      // idle→stopped on exit) without touching the JSONL, so file-watch
+      // alone misses those edges. We poll the metadata file at 2s; on a
+      // change, push a state-only event so the viewer can swap the bottom
+      // BUSY / IDLE / ENDED card without re-rendering scenes.
+      const stateInterval = isClaudeProvider
+        ? setInterval(async () => {
+            if (aborted) return;
+            const next = await readClaudeSessionState(sessionId);
+            if (next === lastLiveState) return;
+            lastLiveState = next;
+            await stream
+              .writeSSE({ data: JSON.stringify({ type: "state", state: next }) })
+              .catch(() => {});
+          }, 2_000)
+        : null;
+
+      // Rediscovery heartbeat. The 15s `RESOLVE_REFRESH_INTERVAL_MS`
+      // sessionInfo refresh lives INSIDE buildAndSend(), so it only runs
+      // when something else has already woken us up. Without an
+      // independent tick: a Claude session that does `/resume` will write
+      // the new turn to a *new* JSONL shard while the old shard goes
+      // silent — no fs.watch event fires on the old file, polling is
+      // disabled (watchedPaths is non-empty, hasSqlite is false), and
+      // the live stream silently stalls until the user reconnects.
+      // Fire scheduleRebuild() every 15s as the safety net; the existing
+      // dedup signature absorbs the no-op when nothing changed.
+      const rediscoverInterval = setInterval(() => {
+        if (aborted) return;
+        scheduleRebuild(0);
+      }, RESOLVE_REFRESH_INTERVAL_MS);
+
+      // Block until the client disconnects, then tear down.
+      await new Promise<void>((resolve) => {
+        stream.onAbort(() => {
+          aborted = true;
+          if (pendingTimer) clearTimeout(pendingTimer);
+          clearInterval(pingInterval);
+          if (pollInterval) clearInterval(pollInterval);
+          if (stateInterval) clearInterval(stateInterval);
+          clearInterval(rediscoverInterval);
+          for (const w of watchers) {
+            try {
+              w.close();
+            } catch {
+              // ignore close errors during teardown
+            }
+          }
+          resolve();
+        });
+      });
+    });
   });
 
   // --- Dashboard: list all sessions ---
@@ -2739,7 +3184,14 @@ export async function startServer(
       // Build the URL to open in the browser
       let browseUrl: string;
       const viewerBase = opts?.externalViewerUrl || url;
-      if (opts?.openDashboard) {
+      if (opts?.openLive) {
+        const qp = new URLSearchParams({
+          live: "1",
+          provider: opts.openLive.provider,
+          sessionId: opts.openLive.sessionId,
+        });
+        browseUrl = `${viewerBase}/?${qp.toString()}`;
+      } else if (opts?.openDashboard) {
         browseUrl = `${viewerBase}/?view=dashboard`;
       } else if (opts?.openSlug) {
         browseUrl = `${viewerBase}/?session=${encodeURIComponent(opts.openSlug)}`;
@@ -2747,7 +3199,11 @@ export async function startServer(
         browseUrl = `${viewerBase}/?view=dashboard`;
       }
 
-      const label = opts?.openDashboard || !opts?.openSlug ? "Dashboard" : "Editor";
+      const label = opts?.openLive
+        ? "Live"
+        : opts?.openDashboard || !opts?.openSlug
+          ? "Dashboard"
+          : "Editor";
       if (opts?.externalViewerUrl) {
         console.log(
           chalk.bold.cyan(`\n  ${label} API running on port ${port}`) +

@@ -1,32 +1,75 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReplaySession } from "../types";
 
 export type ViewerMode = "embedded" | "editor" | "readonly";
 
 type LoadState =
   | { status: "loading" }
-  | { status: "ready"; session: ReplaySession; mode: ViewerMode; gistOwner?: string }
+  | {
+      status: "ready";
+      session: ReplaySession;
+      mode: ViewerMode;
+      gistOwner?: string;
+      live?: LiveStatus;
+    }
   | { status: "dashboard" }
   | { status: "error"; message: string };
+
+export interface LiveStatus {
+  /** Connection state of the SSE stream */
+  state: "connecting" | "open" | "error" | "closed";
+  /** Total scenes in the latest payload */
+  scenes: number;
+  /** Time of the last received session payload */
+  lastUpdate?: number;
+  /** Last reported error, if any */
+  error?: string;
+  /**
+   * Live session state surfaced by the server from
+   * `~/.claude/sessions/<pid>.json`. `unknown` for non-Claude providers
+   * (Cursor / Codex / Cowork) — they don't write that file, so we keep
+   * the existing always-live UI rather than misreporting "stopped".
+   */
+  sessionState?: "busy" | "idle" | "stopped" | "unknown";
+}
 
 interface LoadResult {
   session: ReplaySession;
   mode: ViewerMode;
   gistOwner?: string;
+  live?: LiveStatus;
 }
 
 /**
  * Load session data from one of:
  * 1. window.__VIBE_REPLAY_DATA__ (embedded by CLI)
- * 2. Editor mode — with ?view=dashboard shows dashboard, with ?session=slug loads another session
+ * 2. Editor mode — with ?view=dashboard shows dashboard, with ?session=slug loads another session,
+ *    or ?live=1&provider=<>&sessionId=<> streams a running session via SSE
  * 3. ?url=<jsonl-or-json-url> (fetch from URL, e.g., raw gist)
  * 4. ?file=<local-path> (dev mode, fetch from Vite public/)
  */
 export function useSessionLoader(): LoadState {
   const [state, setState] = useState<LoadState>({ status: "loading" });
+  const liveSourceRef = useRef<EventSource | null>(null);
+
+  const closeLive = useCallback(() => {
+    if (liveSourceRef.current) {
+      liveSourceRef.current.close();
+      liveSourceRef.current = null;
+    }
+  }, []);
 
   const load = useCallback(() => {
+    closeLive();
     setState({ status: "loading" });
+
+    // Live mode is special — it streams updates rather than resolving once.
+    const liveParams = readLiveParams();
+    if (liveParams && isEditorMode()) {
+      startLiveStream(liveParams, liveSourceRef, setState);
+      return;
+    }
+
     loadSession().then(
       (result) => {
         if (result === "dashboard") {
@@ -42,20 +85,134 @@ export function useSessionLoader(): LoadState {
       },
       (err) => setState({ status: "error", message: String(err.message || err) }),
     );
-  }, []);
+  }, [closeLive]);
 
   useEffect(() => {
     load();
     const onPopState = () => load();
     window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, [load]);
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+      closeLive();
+    };
+  }, [load, closeLive]);
 
   return state;
 }
 
 function isEditorMode(): boolean {
   return !!window.__VIBE_REPLAY_EDITOR__;
+}
+
+interface LiveParams {
+  provider: string;
+  sessionId: string;
+}
+
+function readLiveParams(): LiveParams | null {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("live") !== "1") return null;
+  // ?view=dashboard wins over ?live=1 — without this, navigating from the
+  // live viewer back to the dashboard via the in-app link (which sets
+  // view=dashboard but leaves the live params intact in popstate) would
+  // re-open the SSE stream instead of showing the dashboard.
+  if (params.get("view") === "dashboard") return null;
+  // ?session=<slug> also wins over ?live=1. The reverse navigation from
+  // live → a specific replay can leave stale `live=1` in the URL; an
+  // explicit session request should always resolve to that replay rather
+  // than re-opening the SSE stream.
+  if (params.get("session")) return null;
+  const provider = params.get("provider");
+  const sessionId = params.get("sessionId");
+  if (!provider || !sessionId) return null;
+  // Tighten input — these go straight onto a server query string and into a
+  // file-watcher path, so reject anything that doesn't look like a normal id.
+  if (!/^[a-zA-Z0-9_.-]{1,64}$/.test(provider)) return null;
+  if (!/^[a-zA-Z0-9_.-]{1,128}$/.test(sessionId)) return null;
+  return { provider, sessionId };
+}
+
+function startLiveStream(
+  params: LiveParams,
+  ref: React.MutableRefObject<EventSource | null>,
+  setState: (s: LoadState) => void,
+): void {
+  const url = `/api/live?provider=${encodeURIComponent(params.provider)}&sessionId=${encodeURIComponent(params.sessionId)}`;
+  const source = new EventSource(url);
+  ref.current = source;
+
+  let lastSession: ReplaySession | null = null;
+  let liveStatus: LiveStatus = { state: "connecting", scenes: 0 };
+
+  // Guard against stale handlers from a closed-but-not-yet-cleaned-up
+  // EventSource overwriting state owned by a fresher stream. closeLive()
+  // calls .close() and clears ref.current, but events queued on the JS
+  // event loop before the close may still fire afterwards. Without this
+  // guard, those late events would call setState with stale `lastSession`
+  // / `liveStatus` from this closed-over scope, clobbering the new view
+  // (or surfacing an "error" toast that no longer applies).
+  const emit = () => {
+    if (ref.current !== source) return;
+    if (lastSession) {
+      setState({
+        status: "ready",
+        session: lastSession,
+        mode: "editor",
+        live: liveStatus,
+      });
+    } else if (liveStatus.state === "error" && liveStatus.error) {
+      setState({ status: "error", message: liveStatus.error });
+    }
+  };
+
+  source.onopen = () => {
+    liveStatus = { ...liveStatus, state: "open", error: undefined };
+    emit();
+  };
+
+  source.onmessage = (ev) => {
+    let payload: {
+      type?: string;
+      session?: ReplaySession;
+      message?: string;
+      state?: LiveStatus["sessionState"];
+    };
+    try {
+      payload = JSON.parse(ev.data);
+    } catch {
+      return;
+    }
+    if (payload.type === "session" && payload.session) {
+      lastSession = payload.session;
+      liveStatus = {
+        state: "open",
+        scenes: payload.session.scenes.length,
+        lastUpdate: Date.now(),
+        error: undefined,
+        sessionState: payload.state ?? liveStatus.sessionState,
+      };
+      emit();
+    } else if (payload.type === "state" && payload.state) {
+      // Standalone state-only event: server detected busy↔idle or
+      // idle→stopped without a JSONL change. Update sessionState in place
+      // so the viewer can swap the bottom card without re-rendering scenes.
+      liveStatus = { ...liveStatus, sessionState: payload.state };
+      emit();
+    } else if (payload.type === "error") {
+      liveStatus = {
+        ...liveStatus,
+        state: "error",
+        error: payload.message || "Live stream error",
+      };
+      emit();
+    }
+  };
+
+  source.onerror = () => {
+    // EventSource auto-reconnects; surface the disconnected state until then.
+    liveStatus = { ...liveStatus, state: "error", error: liveStatus.error || "Disconnected" };
+    emit();
+  };
 }
 
 async function loadSession(): Promise<LoadResult | "dashboard"> {
