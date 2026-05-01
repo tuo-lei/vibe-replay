@@ -14,7 +14,7 @@ du -sh ~/.claude/
 
 Mine says **858 MB**. Three weeks of usage. 129 sessions (plus hundreds of sub-agent files), 1,642 prompts, 17,487 tool calls — all stored as plain text on my local machine.
 
-Most [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) users never look inside this directory. I did, because I needed to parse it for [vibe-replay](/blog/introducing-vibe-replay). What I found was more than I expected — a complete record of every AI coding session, with data that reveals things Claude Code's own UI never shows you.
+Most [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) users never look inside this directory. I did, because I needed to parse it for [vibe-replay](/blog/introducing-vibe-replay/). What I found was more than I expected — a complete record of every AI coding session, with data that reveals things Claude Code's own UI never shows you.
 
 ---
 
@@ -198,8 +198,8 @@ For the full picture — token burn over time, context window growth, tool distr
 npx vibe-replay
 ```
 
-One command. It discovers your Claude Code (and Cursor) sessions, you pick one, and it generates a self-contained HTML replay. No server, no account, no external requests. Open it in any browser, share it with your team, or [publish it to the cloud](https://vibe-replay.com/explore).
+One command. It discovers your Claude Code (and Cursor) sessions, you pick one, and it generates a self-contained HTML replay. No server, no account, no external requests. Open it in any browser, share it with your team, or [publish it to the cloud](/explore/).
 
 Your `~/.claude/` directory is a goldmine. Stop grepping through JSONL.
 
-**[Try it on your own sessions](https://github.com/tuo-lei/vibe-replay)** · **[Watch a live demo](https://vibe-replay.com/view/?gist=586f3f56d9e6c82e3b60b42ea13b341e)** · **[Explore public replays](https://vibe-replay.com/explore)**
+**[Try it on your own sessions](https://github.com/tuo-lei/vibe-replay)** · **[Watch a live demo](https://vibe-replay.com/view/?gist=586f3f56d9e6c82e3b60b42ea13b341e)** · **[Explore public replays](/explore/)**
