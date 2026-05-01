@@ -11,7 +11,7 @@ import { streamSSE } from "hono/streaming";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import open from "open";
 import { readFileCache, writeFileCache } from "./cache.js";
-import { cleanPromptText } from "./clean-prompt.js";
+import { cleanPromptText, previewPrompt } from "./clean-prompt.js";
 import { computeDaysUntilCleanup, getClaudeCodeCleanupPeriod } from "./cleanup-warning.js";
 import {
   detectFeedbackTools,
@@ -261,7 +261,7 @@ async function scanSessionsFromDir(baseDir: string): Promise<ReplaySummary[]> {
 
       const userPrompts = (session.scenes || [])
         .filter((sc) => sc.type === "user-prompt")
-        .map((sc) => cleanPromptText(sc.content).slice(0, 200))
+        .map((sc) => previewPrompt(sc.content))
         .filter((m) => m.length >= 10);
       const firstMessage = userPrompts[0] || undefined;
       const messages = userPrompts.length > 0 ? userPrompts.slice(0, 2) : undefined;
@@ -532,7 +532,7 @@ function extractPromptPreviewsFromTurns(turns: ParsedTurn[], limit = 3): string[
       .map((block) => block.text)
       .join("\n")
       .trim();
-    const cleaned = cleanPromptText(text).slice(0, 200);
+    const cleaned = previewPrompt(text);
     if (cleaned.length < 8 || prompts.includes(cleaned)) continue;
     prompts.push(cleaned);
     if (prompts.length >= limit) break;
@@ -627,8 +627,8 @@ async function buildSourcesResult(
       lineCount: s.lineCount,
       promptCount,
       toolCallCount,
-      firstPrompt: cleanPromptText(s.firstPrompt).slice(0, 200),
-      prompts: s.prompts?.map((p) => cleanPromptText(p).slice(0, 200)),
+      firstPrompt: previewPrompt(s.firstPrompt),
+      prompts: s.prompts?.map((p) => previewPrompt(p)),
       filePaths: s.filePaths,
       toolPaths: s.toolPaths,
       hasSqlite: s.hasSqlite,
@@ -895,8 +895,8 @@ export async function startServer(
             normalizeTitle(promptPreviews[0] || "");
           const enrichedFirstPrompt =
             promptPreviews[0] ||
-            cleanPromptText(parsed.title || "").slice(0, 200) ||
-            cleanPromptText(session.firstPrompt).slice(0, 200);
+            previewPrompt(parsed.title || "") ||
+            previewPrompt(session.firstPrompt);
           const target = pickSourceRecordForSession(session, bySessionId, byKey);
           if (target) {
             let targetChanged = false;
