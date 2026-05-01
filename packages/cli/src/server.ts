@@ -678,6 +678,60 @@ async function buildSourcesResult(
   });
 }
 
+/**
+ * Live-session state derived from Claude Code's per-process metadata file
+ * (`~/.claude/sessions/<pid>.json`).
+ *
+ * - `busy`    — Claude is actively processing (streaming a response, running a
+ *               tool, etc.). The metadata file's `status` field is "busy" and
+ *               its PID is alive.
+ * - `idle`    — Claude is alive but waiting on the user (prompt input is
+ *               focused, no in-flight request). `status` is anything other
+ *               than "busy" and PID is alive.
+ * - `stopped` — No metadata file matches `sessionId`, the file lacks a
+ *               `status` field (Claude exited cleanly), or the PID is dead.
+ *               Cursor / Codex / Cowork sessions also fall through to this
+ *               since they don't write the Claude metadata file — for those
+ *               providers `state` is reported as `unknown` instead so the
+ *               viewer doesn't claim "Session ended" when we genuinely
+ *               can't tell.
+ */
+type LiveSessionState = "busy" | "idle" | "stopped" | "unknown";
+
+async function readClaudeSessionState(sessionId: string): Promise<LiveSessionState> {
+  const sessionsDir = join(homedir(), ".claude", "sessions");
+  let files: string[];
+  try {
+    files = await readdir(sessionsDir);
+  } catch {
+    return "stopped";
+  }
+  for (const file of files) {
+    if (!file.endsWith(".json")) continue;
+    let data: { sessionId?: string; pid?: number; status?: string };
+    try {
+      const content = await readFile(join(sessionsDir, file), "utf-8");
+      data = JSON.parse(content);
+    } catch {
+      continue;
+    }
+    if (data.sessionId !== sessionId) continue;
+    // Match found. Both pid and status must be present, and the process
+    // must still be running. PID-only liveness is the simple-and-correct
+    // heuristic — Claude Code overwrites `status` between busy/idle as
+    // state changes, but the PID file is the authoritative "alive" signal.
+    if (typeof data.pid !== "number" || !data.status) return "stopped";
+    try {
+      // Signal 0 doesn't kill — it just probes existence + permission.
+      process.kill(data.pid, 0);
+    } catch {
+      return "stopped";
+    }
+    return data.status === "busy" ? "busy" : "idle";
+  }
+  return "stopped";
+}
+
 function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
   const groups = new Map<string, SessionInfo[]>();
   for (const s of sessions) {
@@ -1356,6 +1410,12 @@ export async function startServer(
       let inFlight = false;
       let dirty = false;
       let lastSignature: string | null = null;
+      // Live session state (busy / idle / stopped / unknown) — populated
+      // from `~/.claude/sessions/<pid>.json` for Claude. Other providers
+      // don't write that file, so they get "unknown" and the viewer keeps
+      // the existing always-live UI rather than misreporting "stopped".
+      const isClaudeProvider = providerName === "claude-code";
+      let lastLiveState: LiveSessionState = isClaudeProvider ? "busy" : "unknown";
 
       const ensureWatchersFor = (paths: Iterable<string>): void => {
         for (const fp of paths) {
@@ -1453,10 +1513,11 @@ export async function startServer(
         return cached.lines;
       };
 
-      // Cache the last `provider.parse` result for fallback (non-Claude)
-      // providers; we still need to call provider.parse for Cursor/Codex etc.
-      // because those formats aren't pure JSONL.
-      const isClaudeJsonl = providerName === "claude-code";
+      // Claude is the only provider with a pure-JSONL transcript that's
+      // safe to incrementally tail. Cursor / Codex / Cowork stay on full
+      // provider.parse() each tick — their formats aren't append-only or
+      // need provider-specific decoding (SQLite, encoded blobs, etc.).
+      const isClaudeJsonl = isClaudeProvider;
 
       const buildAndSend = async () => {
         if (aborted) return;
@@ -1513,11 +1574,22 @@ export async function startServer(
           // otherwise force every fs.watch tick to emit a redundant payload),
           // and is fast enough at typical session sizes (~500 scenes,
           // ~tens of KB).
+          // Refresh live state before emit so the payload's `state` matches
+          // the latest session metadata. This is the only state read tied to
+          // file changes — the standalone 5s poller below catches busy↔idle
+          // and idle→stopped transitions that don't touch the JSONL.
+          if (isClaudeProvider) {
+            lastLiveState = await readClaudeSessionState(sessionId);
+          }
           const signature = JSON.stringify(replay.scenes);
           if (signature !== lastSignature) {
             lastSignature = signature;
             await stream.writeSSE({
-              data: JSON.stringify({ type: "session", session: replay }),
+              data: JSON.stringify({
+                type: "session",
+                session: replay,
+                state: lastLiveState,
+              }),
             });
           }
         } catch (err) {
@@ -1581,6 +1653,23 @@ export async function startServer(
         stream.writeSSE({ data: JSON.stringify({ type: "ping" }) }).catch(() => {});
       }, 25_000);
 
+      // Standalone state poller — Claude can transition busy↔idle (and
+      // idle→stopped on exit) without touching the JSONL, so file-watch
+      // alone misses those edges. We poll the metadata file at 2s; on a
+      // change, push a state-only event so the viewer can swap the bottom
+      // BUSY / IDLE / ENDED card without re-rendering scenes.
+      const stateInterval = isClaudeProvider
+        ? setInterval(async () => {
+            if (aborted) return;
+            const next = await readClaudeSessionState(sessionId);
+            if (next === lastLiveState) return;
+            lastLiveState = next;
+            await stream
+              .writeSSE({ data: JSON.stringify({ type: "state", state: next }) })
+              .catch(() => {});
+          }, 2_000)
+        : null;
+
       // Block until the client disconnects, then tear down.
       await new Promise<void>((resolve) => {
         stream.onAbort(() => {
@@ -1588,6 +1677,7 @@ export async function startServer(
           if (pendingTimer) clearTimeout(pendingTimer);
           clearInterval(pingInterval);
           if (pollInterval) clearInterval(pollInterval);
+          if (stateInterval) clearInterval(stateInterval);
           for (const w of watchers) {
             try {
               w.close();

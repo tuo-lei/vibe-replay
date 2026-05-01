@@ -803,6 +803,7 @@ export default function Player({
                     overlayActions={overlayActions}
                     turnStats={session.meta.stats.turnStats}
                     isLive={isLive}
+                    liveSessionState={live?.sessionState}
                     onComment={
                       isReadOnly
                         ? undefined

@@ -24,6 +24,13 @@ export interface LiveStatus {
   lastUpdate?: number;
   /** Last reported error, if any */
   error?: string;
+  /**
+   * Live session state surfaced by the server from
+   * `~/.claude/sessions/<pid>.json`. `unknown` for non-Claude providers
+   * (Cursor / Codex / Cowork) — they don't write that file, so we keep
+   * the existing always-live UI rather than misreporting "stopped".
+   */
+  sessionState?: "busy" | "idle" | "stopped" | "unknown";
 }
 
 interface LoadResult {
@@ -164,7 +171,12 @@ function startLiveStream(
   };
 
   source.onmessage = (ev) => {
-    let payload: { type?: string; session?: ReplaySession; message?: string };
+    let payload: {
+      type?: string;
+      session?: ReplaySession;
+      message?: string;
+      state?: LiveStatus["sessionState"];
+    };
     try {
       payload = JSON.parse(ev.data);
     } catch {
@@ -177,7 +189,14 @@ function startLiveStream(
         scenes: payload.session.scenes.length,
         lastUpdate: Date.now(),
         error: undefined,
+        sessionState: payload.state ?? liveStatus.sessionState,
       };
+      emit();
+    } else if (payload.type === "state" && payload.state) {
+      // Standalone state-only event: server detected busy↔idle or
+      // idle→stopped without a JSONL change. Update sessionState in place
+      // so the viewer can swap the bottom card without re-rendering scenes.
+      liveStatus = { ...liveStatus, sessionState: payload.state };
       emit();
     } else if (payload.type === "error") {
       liveStatus = {

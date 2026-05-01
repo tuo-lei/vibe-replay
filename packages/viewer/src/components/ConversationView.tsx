@@ -23,8 +23,15 @@ interface Props {
   overlayActions?: OverlayActions;
   turnStats?: TurnStat[];
   /** When set, the session is being streamed live and the trailing "the end"
-   *  card is replaced with a "waiting for next turn" indicator. */
+   *  card is replaced with a state-aware indicator. */
   isLive?: boolean;
+  /** Current Claude session state, surfaced from `~/.claude/sessions/<pid>.json`.
+   *  - busy:    Claude is actively processing → red pulsing indicator.
+   *  - idle:    Claude is alive, waiting for the next user prompt → green dim.
+   *  - stopped: Claude exited / process is dead → muted "session ended".
+   *  - unknown: non-Claude provider, no metadata file → fall back to BUSY UX.
+   *  Only consulted when `isLive` is true. */
+  liveSessionState?: "busy" | "idle" | "stopped" | "unknown";
 }
 
 interface TurnGroup {
@@ -63,6 +70,7 @@ export default function ConversationView({
   overlayActions,
   turnStats,
   isLive,
+  liveSessionState,
 }: Props & { onSeek?: (index: number) => void }) {
   // Pre-compute ALL groups once — stable across playback ticks
   const allGroups = useMemo(() => {
@@ -266,23 +274,83 @@ export default function ConversationView({
         </div>
       )}
 
-      {visibleCount >= scenes.length && isLive && (
-        <div className="pt-10 pb-24 flex flex-col items-center justify-center select-none">
-          <div className="h-px w-8 bg-terminal-border-subtle mb-5" />
-          <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-terminal-red-subtle/50 border border-terminal-red/20">
-            <span className="relative flex w-2 h-2">
-              <span className="absolute inline-flex h-full w-full rounded-full bg-terminal-red opacity-75 animate-ping" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-terminal-red" />
-            </span>
-            <span className="text-[10px] font-mono font-bold text-terminal-red uppercase tracking-[0.25em]">
-              Busy
-            </span>
-          </div>
-          <div className="text-[9px] font-mono text-terminal-dimmer mt-3 tracking-wide">
-            waiting for the next turn to land on disk
-          </div>
+      {visibleCount >= scenes.length && isLive && <LiveStateCard sessionState={liveSessionState} />}
+    </div>
+  );
+}
+
+/**
+ * Trailing card for live mode. Branches on the Claude session state so the
+ * user gets honest feedback about whether anything is going to happen:
+ *
+ * - `busy`              — red pulsing dot, "BUSY" + the waiting message.
+ *                         Claude is mid-turn (streaming, running a tool).
+ * - `idle`              — green dot (no animation), "IDLE" + "Claude is
+ *                         waiting for your next prompt". File watcher will
+ *                         not show progress until you submit something.
+ * - `stopped`           — muted gray, "ENDED" + "the Claude process exited".
+ *                         Tells the user that further updates won't arrive
+ *                         and they should just read this as a static replay.
+ * - `unknown` / undef.  — fall back to the busy UI for non-Claude providers
+ *                         (Cursor / Codex etc.) where we can't tell.
+ */
+function LiveStateCard({
+  sessionState,
+}: {
+  sessionState?: "busy" | "idle" | "stopped" | "unknown";
+}) {
+  const effective = sessionState ?? "busy";
+
+  if (effective === "stopped") {
+    return (
+      <div className="pt-10 pb-24 flex flex-col items-center justify-center select-none">
+        <div className="h-px w-8 bg-terminal-border-subtle mb-5" />
+        <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-terminal-surface/40 border border-terminal-border-subtle">
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-terminal-dimmer" />
+          <span className="text-[10px] font-mono font-bold text-terminal-dim uppercase tracking-[0.25em]">
+            Ended
+          </span>
         </div>
-      )}
+        <div className="text-[9px] font-mono text-terminal-dimmer mt-3 tracking-wide">
+          the claude process exited — no further updates will arrive
+        </div>
+      </div>
+    );
+  }
+
+  if (effective === "idle") {
+    return (
+      <div className="pt-10 pb-24 flex flex-col items-center justify-center select-none">
+        <div className="h-px w-8 bg-terminal-border-subtle mb-5" />
+        <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-terminal-green-subtle/40 border border-terminal-green/20">
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-terminal-green" />
+          <span className="text-[10px] font-mono font-bold text-terminal-green uppercase tracking-[0.25em]">
+            Idle
+          </span>
+        </div>
+        <div className="text-[9px] font-mono text-terminal-dimmer mt-3 tracking-wide">
+          claude is waiting for your next prompt
+        </div>
+      </div>
+    );
+  }
+
+  // busy + unknown: same red pulsing UI
+  return (
+    <div className="pt-10 pb-24 flex flex-col items-center justify-center select-none">
+      <div className="h-px w-8 bg-terminal-border-subtle mb-5" />
+      <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-terminal-red-subtle/50 border border-terminal-red/20">
+        <span className="relative flex w-2 h-2">
+          <span className="absolute inline-flex h-full w-full rounded-full bg-terminal-red opacity-75 animate-ping" />
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-terminal-red" />
+        </span>
+        <span className="text-[10px] font-mono font-bold text-terminal-red uppercase tracking-[0.25em]">
+          Busy
+        </span>
+      </div>
+      <div className="text-[9px] font-mono text-terminal-dimmer mt-3 tracking-wide">
+        waiting for the next turn to land on disk
+      </div>
     </div>
   );
 }
