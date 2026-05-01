@@ -1419,10 +1419,15 @@ export async function startServer(
         // last read). `partial` = bytes after the last newline (may be a
         // half-written line, possibly mid-UTF8). Next call reads `[offset,
         // size)`, prepends `partial`, and re-splits at the last newline.
+        //
+        // offset comes from `content.length`, not the earlier stat `size`:
+        // the file may grow between stat() and readFile() if Claude is
+        // writing concurrently, and stamping `size` here would let the next
+        // tick re-read bytes in [size, content.length) and emit them twice.
         if (!cached || size < cached.offset) {
           const content = await readFile(filePath);
           const { lines, partial } = splitDecodedLines(content);
-          jsonlTail.set(filePath, { offset: size, partial, lines });
+          jsonlTail.set(filePath, { offset: content.length, partial, lines });
           return lines;
         }
 
@@ -1527,9 +1532,9 @@ export async function startServer(
           inFlight = false;
           if (dirty && !aborted) {
             dirty = false;
-            // Tail-call equivalent: schedule the next build that piled up while we
-            // were busy. Use a microtask delay so other awaiters (e.g. abort
-            // handler) get a chance to run first.
+            // Drain the dirty flag: a rebuild was queued while we were
+            // in-flight. Use a 0ms timer so the abort handler (and any other
+            // awaiters) gets a chance to run before the next build starts.
             scheduleRebuild(0);
           }
         }
@@ -1552,19 +1557,23 @@ export async function startServer(
       // every reported file path on this first call.
       await buildAndSend();
 
-      // Polling fallback for sources we can't directly fs.watch. Cursor
-      // SQLite-backed sessions report `filePaths: []` (the SQLite file is
-      // discovered separately and isn't in `paths`); without a poll, the
-      // initial payload is the only update the client ever sees. The 3s
-      // cadence still feels live enough for human reading, and the dedup
-      // signature suppresses redundant emits when nothing actually changed.
-      const pollInterval =
-        watchedPaths.size === 0
-          ? setInterval(() => {
-              if (aborted) return;
-              scheduleRebuild(0);
-            }, 3_000)
-          : null;
+      // Polling fallback for sources we can't directly fs.watch. Two cases:
+      //   1. `watchedPaths.size === 0` — Cursor SQLite-only sessions report
+      //      `filePaths: []` (SQLite file is discovered separately and isn't
+      //      in `paths`).
+      //   2. `sessionInfo?.hasSqlite` — Cursor sessions where SQLite is
+      //      authoritative but transcript / tool sidecars are *also* watched.
+      //      Updates landing only in SQLite (no sidecar write) wouldn't
+      //      trigger any fs.watch event, so the stream would silently stall.
+      // The 3s cadence still feels live enough for human reading, and the
+      // dedup signature suppresses redundant emits when nothing changed.
+      const needsPolling = watchedPaths.size === 0 || !!sessionInfo?.hasSqlite;
+      const pollInterval = needsPolling
+        ? setInterval(() => {
+            if (aborted) return;
+            scheduleRebuild(0);
+          }, 3_000)
+        : null;
 
       // SSE keepalive — proxies (and some browsers) drop idle connections.
       const pingInterval = setInterval(() => {

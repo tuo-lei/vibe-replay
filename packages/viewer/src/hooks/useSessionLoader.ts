@@ -110,6 +110,11 @@ function readLiveParams(): LiveParams | null {
   // view=dashboard but leaves the live params intact in popstate) would
   // re-open the SSE stream instead of showing the dashboard.
   if (params.get("view") === "dashboard") return null;
+  // ?session=<slug> also wins over ?live=1. The reverse navigation from
+  // live → a specific replay can leave stale `live=1` in the URL; an
+  // explicit session request should always resolve to that replay rather
+  // than re-opening the SSE stream.
+  if (params.get("session")) return null;
   const provider = params.get("provider");
   const sessionId = params.get("sessionId");
   if (!provider || !sessionId) return null;

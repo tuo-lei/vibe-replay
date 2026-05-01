@@ -214,7 +214,7 @@ describe("Live mode SSE", () => {
     const { appendFile } = await import("node:fs/promises");
     await appendFile(jsonlPath, `${newLines.join("\n")}\n`, "utf-8");
 
-    // Wait for delta event (debounce is 250ms so allow generous timeout)
+    // Wait for delta event (debounce is 100ms so allow generous timeout)
     await waitForCount(2, 5_000);
     await collect;
 
