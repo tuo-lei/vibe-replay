@@ -80,7 +80,7 @@ export interface SessionScanResult {
   turnDurations?: number[];
 }
 
-export interface ScanCacheEntry {
+interface ScanCacheEntry {
   mtimeMs: number;
   fileSize: number;
   scannedAt: string;
@@ -259,7 +259,7 @@ export interface ScanInput {
   firstPrompt?: string;
 }
 
-export interface ScanProgress {
+interface ScanProgress {
   scanned: number;
   total: number;
   currentSession?: string;

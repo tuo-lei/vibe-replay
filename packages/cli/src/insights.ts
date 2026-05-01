@@ -307,11 +307,6 @@ export function aggregateDailyInsights(store: InsightsStore): {
   };
 }
 
-/** Get store file path (for display/debugging) */
-export function getInsightsStorePath(): string {
-  return STORE_PATH;
-}
-
 /** Get store stats */
 export function getInsightsStats(store: InsightsStore): {
   total: number;

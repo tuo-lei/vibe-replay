@@ -15,6 +15,11 @@ export function isSystemGeneratedMessage(text: string): boolean {
   );
 }
 
+/** Cleaned prompt clipped to ~200 chars for list/preview display. */
+export function previewPrompt(text: string): string {
+  return cleanPromptText(text).slice(0, 200);
+}
+
 /**
  * Strip system-injected boilerplate from user prompts.
  * Shared by discover (session scanning) and server (API responses).

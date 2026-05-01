@@ -3,7 +3,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { cleanPromptText, isSystemGeneratedMessage } from "../../clean-prompt.js";
+import { isSystemGeneratedMessage, previewPrompt } from "../../clean-prompt.js";
 import type { SessionInfo } from "../../types.js";
 
 /**
@@ -219,7 +219,7 @@ function collectPromptsFromLines(lines: string[], initialMessage?: string): stri
   const pushCleaned = (text: string | undefined): void => {
     if (!text) return;
     if (isSystemGeneratedMessage(text)) return;
-    const cleaned = cleanPromptText(text).slice(0, 200);
+    const cleaned = previewPrompt(text);
     if (cleaned.length < 10) return;
     if (prompts.includes(cleaned)) return;
     prompts.push(cleaned);
