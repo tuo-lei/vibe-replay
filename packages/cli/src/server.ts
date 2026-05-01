@@ -1456,7 +1456,7 @@ export async function startServer(
       };
 
       const ensureCursorDbWatchersFor = async (info: SessionInfo): Promise<void> => {
-        if (!isCursorProvider || !info.hasSqlite) return;
+        if (!isCursorProvider || !info.hasSqlite || cursorDbWatchAttached) return;
         try {
           const paths = await resolveCursorLiveWatchPaths(info.sessionId);
           const before = watchedPaths.size;
@@ -1674,15 +1674,23 @@ export async function startServer(
       //
       // Cursor SQLite/global-state sessions now try to watch store.db/state.vscdb
       // plus their WAL files, which gives near-immediate rebuild triggers when
-      // Cursor flushes DB updates. Keep the 3s timer only when no watcher exists
-      // or when SQLite is present but those DB/WAL watchers could not be attached.
-      const needsPolling =
-        watchedPaths.size === 0 || (!!sessionInfo?.hasSqlite && !cursorDbWatchAttached);
-      const pollInterval = needsPolling
+      // Cursor flushes DB updates. Keep a slower watchdog even after DB/WAL
+      // watchers attach: SQLite can rotate WAL/SHM files and macOS file events
+      // can miss in-place WAL writes, so this prevents a permanently stale stream
+      // without making polling the primary update path.
+      const POLL_INTERVAL_MS = 3_000;
+      const CURSOR_SQLITE_WATCHDOG_MS = 10_000;
+      const pollIntervalMs =
+        watchedPaths.size === 0 || (!!sessionInfo?.hasSqlite && !cursorDbWatchAttached)
+          ? POLL_INTERVAL_MS
+          : isCursorProvider && !!sessionInfo?.hasSqlite
+            ? CURSOR_SQLITE_WATCHDOG_MS
+            : null;
+      const pollInterval = pollIntervalMs
         ? setInterval(() => {
             if (aborted) return;
             scheduleRebuild(0);
-          }, 3_000)
+          }, pollIntervalMs)
         : null;
 
       // SSE keepalive — proxies (and some browsers) drop idle connections.

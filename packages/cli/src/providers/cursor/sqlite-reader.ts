@@ -181,7 +181,13 @@ function projectedCursorBubbleSelectSql(): string {
   ].join(", ");
 }
 
+const sqliteCliUsabilityCache = new Map<string, boolean>();
+
 async function canUseSqliteCli(dbPath: string): Promise<boolean> {
+  const cached = sqliteCliUsabilityCache.get(dbPath);
+  if (cached !== undefined) return cached;
+
+  let canUse = false;
   try {
     const { stdout } = await execFileAsync(
       "sqlite3",
@@ -191,10 +197,12 @@ async function canUseSqliteCli(dbPath: string): Promise<boolean> {
       },
     );
     const rows = JSON.parse(stdout.trim()) as Array<{ ok?: number }>;
-    return rows[0]?.ok === 1;
+    canUse = rows[0]?.ok === 1;
   } catch {
-    return false;
+    canUse = false;
   }
+  sqliteCliUsabilityCache.set(dbPath, canUse);
+  return canUse;
 }
 
 async function querySqliteCli(dbPath: string, sql: string): Promise<Record<string, any>[]> {
@@ -1233,6 +1241,8 @@ async function parseCursorStoreDbWithSqliteCli(
   const metaHex = typeof metaRows[0]?.value === "string" ? metaRows[0].value : "";
   if (!metaHex) return null;
 
+  // If sqlite3 returns malformed data, let the caller fall back to the sql.js
+  // path below; that path has historically handled store.db quirks well.
   const metaJson: ChatMeta = JSON.parse(Buffer.from(metaHex, "hex").toString("utf-8"));
   const rootId = metaJson.latestRootBlobId;
   if (!rootId) return null;
@@ -1251,6 +1261,8 @@ async function parseCursorStoreDbWithSqliteCli(
   const chunkSize = 200;
   for (let i = 0; i < childIds.length; i += chunkSize) {
     const chunk = childIds.slice(i, i + chunkSize);
+    // Keep the sqlite3 path WAL-aware by querying through SQLite itself. Chunk
+    // the blob lookup so large conversations do not create huge IN clauses.
     const rows = await querySqliteCli(
       dbPath,
       `SELECT id, hex(data) AS dataHex FROM blobs WHERE id IN (${chunk.map(sqlString).join(",")})`,
