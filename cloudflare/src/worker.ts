@@ -2016,11 +2016,21 @@ app.get("/r/:id", (c) => {
 // Fallback — serve static assets (Astro website)
 // ---------------------------------------------------------------------------
 
-app.all("*", (c) => {
+app.all("*", async (c) => {
   if (!c.env.ASSETS) {
     return c.text("Not Found", 404);
   }
-  return c.env.ASSETS.fetch(c.req.raw);
+  const res = await c.env.ASSETS.fetch(c.req.raw);
+  // Workers Assets returns 307/308 for trailing-slash canonicalization. Promote to
+  // 301 so search engines treat the canonical URL as permanent and pass link equity.
+  if (res.status === 307 || res.status === 308) {
+    const location = res.headers.get("location");
+    if (location) {
+      const headers = new Headers(res.headers);
+      return new Response(null, { status: 301, headers });
+    }
+  }
+  return res;
 });
 
 // ---------------------------------------------------------------------------

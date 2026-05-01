@@ -1148,12 +1148,12 @@ import Layout from "../layouts/Layout.astro";
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({ provider: "github", callbackURL: "/insights" }),
+          body: JSON.stringify({ provider: "github", callbackURL: "/insights/" }),
         });
         const data = await res.json();
         if (data?.url) window.location.href = data.url;
       } catch {
-        window.location.href = "/auth/login?callback=/insights";
+        window.location.href = "/auth/login?callback=/insights/";
       }
     });
   }

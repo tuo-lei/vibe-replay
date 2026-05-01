@@ -452,7 +452,7 @@ import Layout from "../layouts/Layout.astro";
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ provider: "github", callbackURL: "/profile" }),
+        body: JSON.stringify({ provider: "github", callbackURL: "/profile/" }),
       });
       const data = await res.json();
       if (data?.url) window.location.href = data.url;

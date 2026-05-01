@@ -97,4 +97,4 @@ The more complex the AI session, the more valuable the replay. `/simplify` is a 
 
 **[Watch the interactive replay](https://vibe-replay.com/view/?gist=e5b2731d90cfa20fee4f3f7ab980cbb1)**
 
-**[GitHub](https://github.com/tuo-lei/vibe-replay)** | **[Explore Public Replays](/explore)**
+**[GitHub](https://github.com/tuo-lei/vibe-replay)** | **[Explore Public Replays](/explore/)**
