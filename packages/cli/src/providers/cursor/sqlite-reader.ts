@@ -181,11 +181,18 @@ function projectedCursorBubbleSelectSql(): string {
   ].join(", ");
 }
 
-const sqliteCliUsabilityCache = new Map<string, boolean>();
+interface SqliteCliUsabilityCacheEntry {
+  canUse: boolean;
+  checkedAt: number;
+}
+
+const SQLITE_CLI_NEGATIVE_CACHE_TTL_MS = 30_000;
+const sqliteCliUsabilityCache = new Map<string, SqliteCliUsabilityCacheEntry>();
 
 async function canUseSqliteCli(dbPath: string): Promise<boolean> {
   const cached = sqliteCliUsabilityCache.get(dbPath);
-  if (cached !== undefined) return cached;
+  if (cached?.canUse) return true;
+  if (cached && Date.now() - cached.checkedAt < SQLITE_CLI_NEGATIVE_CACHE_TTL_MS) return false;
 
   let canUse = false;
   try {
@@ -201,7 +208,7 @@ async function canUseSqliteCli(dbPath: string): Promise<boolean> {
   } catch {
     canUse = false;
   }
-  sqliteCliUsabilityCache.set(dbPath, canUse);
+  sqliteCliUsabilityCache.set(dbPath, { canUse, checkedAt: Date.now() });
   return canUse;
 }
 

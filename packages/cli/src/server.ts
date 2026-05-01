@@ -1440,6 +1440,9 @@ export async function startServer(
       const isCursorProvider = providerName === "cursor";
       let lastLiveState: LiveSessionState = isClaudeProvider ? "busy" : "unknown";
       let cursorDbWatchAttached = false;
+      const cursorDbWatchedSessionIds = new Set<string>();
+      const cursorDbWatchAttemptedAt = new Map<string, number>();
+      const CURSOR_DB_WATCH_RETRY_MS = 15_000;
 
       const ensureWatchersFor = (paths: Iterable<string>): void => {
         for (const fp of paths) {
@@ -1456,15 +1459,23 @@ export async function startServer(
       };
 
       const ensureCursorDbWatchersFor = async (info: SessionInfo): Promise<void> => {
-        if (!isCursorProvider || !info.hasSqlite || cursorDbWatchAttached) return;
+        if (!isCursorProvider || !info.hasSqlite || cursorDbWatchedSessionIds.has(info.sessionId)) {
+          return;
+        }
+        const now = Date.now();
+        const lastAttempt = cursorDbWatchAttemptedAt.get(info.sessionId) || 0;
+        if (now - lastAttempt < CURSOR_DB_WATCH_RETRY_MS) return;
+        cursorDbWatchAttemptedAt.set(info.sessionId, now);
+
         try {
           const paths = await resolveCursorLiveWatchPaths(info.sessionId);
           const before = watchedPaths.size;
           ensureWatchersFor(paths);
-          cursorDbWatchAttached =
-            cursorDbWatchAttached ||
-            watchedPaths.size > before ||
-            paths.some((p) => watchedPaths.has(p));
+          const attached = watchedPaths.size > before || paths.some((p) => watchedPaths.has(p));
+          if (attached) {
+            cursorDbWatchAttached = true;
+            cursorDbWatchedSessionIds.add(info.sessionId);
+          }
         } catch {
           // Best-effort. If DB/WAL watchers cannot be resolved, the polling
           // fallback below keeps SQLite-backed Cursor live sessions updating.
