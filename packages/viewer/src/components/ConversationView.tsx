@@ -166,7 +166,6 @@ export default function ConversationView({
           <GroupCard
             group={group}
             currentIndex={currentIndex}
-            visibleCount={visibleCount}
             effectivePrefs={effectivePrefs}
             focusIndex={focusIndex}
             annotatedScenes={annotatedScenes}
@@ -358,7 +357,6 @@ const LazyGroup = memo(function LazyGroup({
 const GroupCard = memo(function GroupCard({
   group,
   currentIndex,
-  visibleCount,
   effectivePrefs,
   focusIndex,
   annotatedScenes: _annotatedScenes,
@@ -369,7 +367,6 @@ const GroupCard = memo(function GroupCard({
 }: {
   group: TurnGroup;
   currentIndex: number;
-  visibleCount: number;
   effectivePrefs: EffectivePrefs;
   focusIndex?: number;
   annotatedScenes?: Set<number>;
