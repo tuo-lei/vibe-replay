@@ -360,6 +360,38 @@ export function navigateTo(
   }
 }
 
+/**
+ * Navigate to live mode for a running source session.
+ *
+ * Live mode is a separate viewer state, not a dashboard tab — so we strip
+ * every dashboard- and viewer-scoped query param before applying the live
+ * triplet. Otherwise leftovers like `view=dashboard` or `tab=sessions` (which
+ * useSessionLoader prioritizes) would block the SSE stream from opening.
+ */
+export function navigateToLive(provider: string, sessionId: string) {
+  const url = new URL(window.location.href);
+  for (const k of [
+    "view",
+    "tab",
+    "session",
+    "gist",
+    "cloud",
+    "url",
+    "project",
+    "q",
+    "archived",
+    "v",
+    "s",
+  ]) {
+    url.searchParams.delete(k);
+  }
+  url.searchParams.set("live", "1");
+  url.searchParams.set("provider", provider);
+  url.searchParams.set("sessionId", sessionId);
+  window.history.pushState({}, "", url.toString());
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
 // ─── Shared UI components ────────────────────────────────────────────
 
 // ─── Shared UI helpers ────────────────────────────────────────────────

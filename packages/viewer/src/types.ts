@@ -54,6 +54,8 @@ export interface SessionSummary {
 
 export interface SourceSession {
   provider: string;
+  /** Stable per-session id from the provider (e.g. Claude Code JSONL `sessionId`). */
+  sessionId?: string;
   slug: string;
   title?: string;
   project: string;

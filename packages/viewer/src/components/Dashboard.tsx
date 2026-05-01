@@ -15,6 +15,7 @@ import {
   getErrorMessage,
   isCacheFresh,
   navigateTo,
+  navigateToLive,
   normalizeTitleText,
   parseCachedList,
   projectName,
@@ -772,6 +773,19 @@ export function SessionDetailPopup({
             )}
           </div>
           <div className="flex items-center gap-2">
+            {s.sessionId && (
+              <button
+                onClick={() => navigateToLive(s.provider, s.sessionId!)}
+                title="Stream this source session as the provider writes new turns"
+                className="h-11 px-5 text-sm font-sans font-semibold rounded-xl bg-terminal-red-subtle text-terminal-red hover:bg-terminal-red-emphasis transition-all duration-200 flex items-center gap-2"
+              >
+                <span className="relative flex w-2 h-2">
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-terminal-red opacity-75 animate-ping" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-terminal-red" />
+                </span>
+                Watch live
+              </button>
+            )}
             {s.replay && (
               <>
                 <button
