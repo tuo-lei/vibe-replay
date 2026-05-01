@@ -33,7 +33,7 @@ interface CodexTokenSnapshot {
 }
 
 function asCodexTokenInfo(value: unknown): CodexTokenInfo | undefined {
-  if (!value || typeof value !== "object") return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   return value as CodexTokenInfo;
 }
 
