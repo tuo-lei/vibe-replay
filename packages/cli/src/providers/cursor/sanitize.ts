@@ -21,8 +21,12 @@ export function sanitizeCursorAssistantText(value: string, hasToolContext: boole
 }
 
 export function sanitizeCursorUserText(value: string): string {
+  // Cursor prepends a `<timestamp>...</timestamp>` metadata wrapper before the
+  // user prompt body. Scope the strip to the leading position so that prompts
+  // legitimately containing `<timestamp>` markup elsewhere (e.g. discussing
+  // XML/HTML samples) are preserved verbatim.
   return value
-    .replace(/<timestamp>[\s\S]*?<\/timestamp>/gi, "")
+    .replace(/^\s*<timestamp>[\s\S]*?<\/timestamp>\s*/i, "")
     .replace(/<\/?user_query>/g, "")
     .trim();
 }

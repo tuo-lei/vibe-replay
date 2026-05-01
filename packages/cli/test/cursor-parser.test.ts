@@ -67,6 +67,34 @@ describe("Cursor parser", () => {
     }
   });
 
+  it("preserves non-leading <timestamp> markup inside user prompts", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-cursor-timestamp-inline-"));
+    const jsonlPath = join(tempDir, "timestamp-inline-session.jsonl");
+    const userBody = [
+      "<user_query>",
+      "Why is `<timestamp>2026-04-28</timestamp>` valid XML in our schema?",
+      "</user_query>",
+    ].join("\n");
+    await writeFile(
+      jsonlPath,
+      JSON.stringify({
+        role: "user",
+        message: { content: [{ type: "text", text: userBody }] },
+      }),
+      "utf-8",
+    );
+
+    try {
+      const result = await parseCursorSession(jsonlPath);
+      const firstUser = result.turns.find((t) => t.role === "user")!;
+      expect((firstUser.blocks[0] as any).text).toBe(
+        "Why is `<timestamp>2026-04-28</timestamp>` valid XML in our schema?",
+      );
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("extracts <image_files> into _user_images and removes image markers", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-cursor-images-"));
     const imagePath = join(tempDir, "shot.png");
