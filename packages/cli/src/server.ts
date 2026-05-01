@@ -34,6 +34,7 @@ import { generateOutput, injectDataScript, loadViewerHtml } from "./generator.js
 import { mergeInsights, readInsightsStore, writeInsightsStore } from "./insights.js";
 import { loadOverlays, sessionWithEffectiveContent } from "./overlays.js";
 import { parseClaudeCodeLines } from "./providers/claude-code/parser.js";
+import { resolveCursorLiveWatchPaths } from "./providers/cursor/sqlite-reader.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
 import {
   getApiUrl,
@@ -1436,7 +1437,9 @@ export async function startServer(
       // don't write that file, so they get "unknown" and the viewer keeps
       // the existing always-live UI rather than misreporting "stopped".
       const isClaudeProvider = providerName === "claude-code";
+      const isCursorProvider = providerName === "cursor";
       let lastLiveState: LiveSessionState = isClaudeProvider ? "busy" : "unknown";
+      let cursorDbWatchAttached = false;
 
       const ensureWatchersFor = (paths: Iterable<string>): void => {
         for (const fp of paths) {
@@ -1449,6 +1452,22 @@ export async function startServer(
           } catch {
             // best-effort — if a path can't be watched, the others may still work
           }
+        }
+      };
+
+      const ensureCursorDbWatchersFor = async (info: SessionInfo): Promise<void> => {
+        if (!isCursorProvider || !info.hasSqlite) return;
+        try {
+          const paths = await resolveCursorLiveWatchPaths(info.sessionId);
+          const before = watchedPaths.size;
+          ensureWatchersFor(paths);
+          cursorDbWatchAttached =
+            cursorDbWatchAttached ||
+            watchedPaths.size > before ||
+            paths.some((p) => watchedPaths.has(p));
+        } catch {
+          // Best-effort. If DB/WAL watchers cannot be resolved, the polling
+          // fallback below keeps SQLite-backed Cursor live sessions updating.
         }
       };
 
@@ -1563,6 +1582,7 @@ export async function startServer(
           // would never trigger another scheduleRebuild and the stream would
           // silently go stale.
           ensureWatchersFor(paths);
+          await ensureCursorDbWatchersFor(info);
           let parsed;
           if (isClaudeJsonl) {
             // Tail-based fast path. Concat already-cached lines from every
@@ -1650,17 +1670,14 @@ export async function startServer(
       // every reported file path on this first call.
       await buildAndSend();
 
-      // Polling fallback for sources we can't directly fs.watch. Two cases:
-      //   1. `watchedPaths.size === 0` — Cursor SQLite-only sessions report
-      //      `filePaths: []` (SQLite file is discovered separately and isn't
-      //      in `paths`).
-      //   2. `sessionInfo?.hasSqlite` — Cursor sessions where SQLite is
-      //      authoritative but transcript / tool sidecars are *also* watched.
-      //      Updates landing only in SQLite (no sidecar write) wouldn't
-      //      trigger any fs.watch event, so the stream would silently stall.
-      // The 3s cadence still feels live enough for human reading, and the
-      // dedup signature suppresses redundant emits when nothing changed.
-      const needsPolling = watchedPaths.size === 0 || !!sessionInfo?.hasSqlite;
+      // Polling fallback for sources we still cannot directly fs.watch.
+      //
+      // Cursor SQLite/global-state sessions now try to watch store.db/state.vscdb
+      // plus their WAL files, which gives near-immediate rebuild triggers when
+      // Cursor flushes DB updates. Keep the 3s timer only when no watcher exists
+      // or when SQLite is present but those DB/WAL watchers could not be attached.
+      const needsPolling =
+        watchedPaths.size === 0 || (!!sessionInfo?.hasSqlite && !cursorDbWatchAttached);
       const pollInterval = needsPolling
         ? setInterval(() => {
             if (aborted) return;

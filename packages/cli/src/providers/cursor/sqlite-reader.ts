@@ -354,6 +354,52 @@ async function findStoreDb(sessionId: string): Promise<string | null> {
   return refreshed.get(sessionId)?.dbPath || null;
 }
 
+async function existingPath(path: string): Promise<string | null> {
+  const s = await stat(path).catch(() => null);
+  return s ? path : null;
+}
+
+/**
+ * Files that should wake Cursor live mode promptly when SQLite-backed data changes.
+ *
+ * Cursor often writes active conversation state into SQLite WAL files before the
+ * main DB mtime moves. These paths are triggers only; parsing still goes through
+ * the normal SQLite/global-state reader so we keep one source of truth.
+ */
+export async function resolveCursorLiveWatchPaths(sessionId: string): Promise<string[]> {
+  const paths = new Set<string>();
+
+  const addIfExists = async (path: string) => {
+    const existing = await existingPath(path);
+    if (existing) paths.add(existing);
+  };
+
+  const storeDb = await findStoreDb(sessionId);
+  if (storeDb) {
+    await addIfExists(storeDb);
+    await addIfExists(`${storeDb}-wal`);
+    await addIfExists(`${storeDb}-shm`);
+    // Session-scoped directory catches WAL creation when it does not exist yet.
+    await addIfExists(dirname(storeDb));
+  }
+
+  const globalStateDb = await openGlobalStateDb();
+  if (globalStateDb && (await hasGlobalStateSession(globalStateDb, sessionId))) {
+    await addIfExists(globalStateDb.dbPath);
+    const beforeWal = paths.size;
+    await addIfExists(`${globalStateDb.dbPath}-wal`);
+    await addIfExists(`${globalStateDb.dbPath}-shm`);
+    // The global WAL may be created lazily. Watch the directory only when there
+    // is no WAL/SHM file to watch yet; otherwise the shared globalStorage folder
+    // is noisier than the specific SQLite files.
+    if (paths.size === beforeWal) {
+      await addIfExists(dirname(globalStateDb.dbPath));
+    }
+  }
+
+  return [...paths];
+}
+
 export async function storeDbExists(_workspacePath: string, sessionId: string): Promise<boolean> {
   const dbPath = await findStoreDb(sessionId);
   return dbPath !== null;
@@ -1114,15 +1160,24 @@ async function parseCursorStoreDb(
   sessionId: string,
   workspacePath = "",
 ): Promise<ProviderParseResult | null> {
+  const dbPath = await findStoreDb(sessionId);
+  if (!dbPath) return null;
+
+  if (await canUseSqliteCli(dbPath)) {
+    try {
+      return await parseCursorStoreDbWithSqliteCli(dbPath, sessionId, workspacePath);
+    } catch {
+      // Fall through to sql.js. Some machines may have sqlite3 installed but
+      // unable to read this specific DB/WAL state in readonly mode.
+    }
+  }
+
   let SQL: any;
   try {
     SQL = await getSqlJs();
   } catch {
     return null;
   }
-
-  const dbPath = await findStoreDb(sessionId);
-  if (!dbPath) return null;
 
   const dbBuffer = await readFile(dbPath);
   const db = new SQL.Database(dbBuffer);
@@ -1163,42 +1218,103 @@ async function parseCursorStoreDb(
     }
     stmt.free();
 
-    const { turns, turnStats, totalDurationMs } = messagesToTurns(messages);
-    const slug = sessionId.slice(0, 8);
-
-    const title = metaJson.name || firstUserTextSnippet(turns);
-    const hasDurationStats = turnStats.some((stat) => (stat.durationMs || 0) > 0);
-
-    const notes: string[] = [];
-    if (hasDurationStats) {
-      notes.push("Per-turn duration is estimated from Cursor tool execution metadata.");
-    } else {
-      notes.push("Per-turn duration metrics are unavailable for this Cursor SQLite session.");
-    }
-    notes.push("Token usage is unavailable for this Cursor SQLite session.");
-
-    return {
-      sessionId,
-      slug,
-      title,
-      cwd: workspacePath,
-      model:
-        normalizeCursorModelName(metaJson.lastUsedModel) ||
-        turnStats.find((stat) => typeof stat.model === "string" && stat.model)?.model,
-      startTime: metaJson.createdAt ? new Date(metaJson.createdAt).toISOString() : undefined,
-      ...(totalDurationMs !== undefined ? { totalDurationMs } : {}),
-      ...(turnStats.length > 0 ? { turnStats } : {}),
-      turns,
-      dataSource: "sqlite",
-      dataSourceInfo: {
-        primary: "sqlite",
-        sources: ["cursor/chats/<workspace-hash>/<session-id>/store.db"],
-        notes,
-      },
-    };
+    return buildCursorStoreResult(sessionId, workspacePath, metaJson, messages);
   } finally {
     db.close();
   }
+}
+
+async function parseCursorStoreDbWithSqliteCli(
+  dbPath: string,
+  sessionId: string,
+  workspacePath: string,
+): Promise<ProviderParseResult | null> {
+  const metaRows = await querySqliteCli(dbPath, "SELECT value FROM meta WHERE key = '0'");
+  const metaHex = typeof metaRows[0]?.value === "string" ? metaRows[0].value : "";
+  if (!metaHex) return null;
+
+  const metaJson: ChatMeta = JSON.parse(Buffer.from(metaHex, "hex").toString("utf-8"));
+  const rootId = metaJson.latestRootBlobId;
+  if (!rootId) return null;
+
+  const rootRows = await querySqliteCli(
+    dbPath,
+    `SELECT hex(data) AS dataHex FROM blobs WHERE id = ${sqlString(rootId)}`,
+  );
+  const rootDataHex = typeof rootRows[0]?.dataHex === "string" ? rootRows[0].dataHex : "";
+  if (!rootDataHex) return null;
+
+  const childIds = extractChildBlobIds(Buffer.from(rootDataHex, "hex"));
+  if (childIds.length === 0) return null;
+
+  const blobHexById = new Map<string, string>();
+  const chunkSize = 200;
+  for (let i = 0; i < childIds.length; i += chunkSize) {
+    const chunk = childIds.slice(i, i + chunkSize);
+    const rows = await querySqliteCli(
+      dbPath,
+      `SELECT id, hex(data) AS dataHex FROM blobs WHERE id IN (${chunk.map(sqlString).join(",")})`,
+    );
+    for (const row of rows) {
+      if (typeof row.id === "string" && typeof row.dataHex === "string") {
+        blobHexById.set(row.id, row.dataHex);
+      }
+    }
+  }
+
+  const messages: CursorMessage[] = [];
+  for (const cid of childIds) {
+    const dataHex = blobHexById.get(cid);
+    if (!dataHex) continue;
+    try {
+      const text = Buffer.from(dataHex, "hex").toString("utf-8");
+      messages.push(JSON.parse(text));
+    } catch {
+      // binary or corrupted blob, skip
+    }
+  }
+
+  return buildCursorStoreResult(sessionId, workspacePath, metaJson, messages);
+}
+
+function buildCursorStoreResult(
+  sessionId: string,
+  workspacePath: string,
+  metaJson: ChatMeta,
+  messages: CursorMessage[],
+): ProviderParseResult {
+  const { turns, turnStats, totalDurationMs } = messagesToTurns(messages);
+  const slug = sessionId.slice(0, 8);
+  const title = metaJson.name || firstUserTextSnippet(turns);
+  const hasDurationStats = turnStats.some((stat) => (stat.durationMs || 0) > 0);
+
+  const notes: string[] = [];
+  if (hasDurationStats) {
+    notes.push("Per-turn duration is estimated from Cursor tool execution metadata.");
+  } else {
+    notes.push("Per-turn duration metrics are unavailable for this Cursor SQLite session.");
+  }
+  notes.push("Token usage is unavailable for this Cursor SQLite session.");
+
+  return {
+    sessionId,
+    slug,
+    title,
+    cwd: workspacePath,
+    model:
+      normalizeCursorModelName(metaJson.lastUsedModel) ||
+      turnStats.find((stat) => typeof stat.model === "string" && stat.model)?.model,
+    startTime: metaJson.createdAt ? new Date(metaJson.createdAt).toISOString() : undefined,
+    ...(totalDurationMs !== undefined ? { totalDurationMs } : {}),
+    ...(turnStats.length > 0 ? { turnStats } : {}),
+    turns,
+    dataSource: "sqlite",
+    dataSourceInfo: {
+      primary: "sqlite",
+      sources: ["cursor/chats/<workspace-hash>/<session-id>/store.db"],
+      notes,
+    },
+  };
 }
 
 function bubbleTypeToRole(type: unknown): "user" | "assistant" {
