@@ -698,6 +698,21 @@ async function buildSourcesResult(
  */
 type LiveSessionState = "busy" | "idle" | "stopped" | "unknown";
 
+/**
+ * Walk `~/.claude/sessions/*.json` looking for an alive process whose
+ * sessionId matches. After a `/resume` (or any abnormal exit), the dir
+ * can hold multiple files for the same logical session — the dead
+ * pre-resume one and the live post-resume one — and `readdir` order is
+ * not guaranteed. We must inspect every match and only conclude
+ * "stopped" once all of them are dead/missing-status.
+ *
+ * Known limitation: PID recycling. If a Claude process exits without
+ * cleaning up its metadata file and a new process happens to claim the
+ * same PID, this function will report busy/idle for one tick. The 2s
+ * poller corrects on the next iteration once the recycled process
+ * touches the state file (or doesn't, surfacing "stopped"). Probability
+ * is low and the false reading self-heals.
+ */
 async function readClaudeSessionState(sessionId: string): Promise<LiveSessionState> {
   const sessionsDir = join(homedir(), ".claude", "sessions");
   let files: string[];
@@ -716,18 +731,24 @@ async function readClaudeSessionState(sessionId: string): Promise<LiveSessionSta
       continue;
     }
     if (data.sessionId !== sessionId) continue;
-    // Match found. Both pid and status must be present, and the process
-    // must still be running. PID-only liveness is the simple-and-correct
-    // heuristic — Claude Code overwrites `status` between busy/idle as
-    // state changes, but the PID file is the authoritative "alive" signal.
-    if (typeof data.pid !== "number" || !data.status) return "stopped";
+    // Partial / racing-write file (pid not flushed yet, status absent on
+    // first init) — keep iterating; another file may carry the live state.
+    if (typeof data.pid !== "number" || !data.status) continue;
+
+    // Liveness probe via signal 0. Two errors to disambiguate:
+    //   ESRCH — process truly gone → keep looking, prefer a live match
+    //           if any other file matches; only "stopped" if none do.
+    //   EPERM — process exists but we can't signal it (different uid,
+    //           e.g. Claude was started under sudo). Treat as alive.
+    let alive = false;
     try {
-      // Signal 0 doesn't kill — it just probes existence + permission.
       process.kill(data.pid, 0);
-    } catch {
-      return "stopped";
+      alive = true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "EPERM") alive = true;
     }
-    return data.status === "busy" ? "busy" : "idle";
+    if (alive) return data.status === "busy" ? "busy" : "idle";
+    // Dead PID — don't return yet; another file may be the live one.
   }
   return "stopped";
 }
@@ -1576,7 +1597,7 @@ export async function startServer(
           // ~tens of KB).
           // Refresh live state before emit so the payload's `state` matches
           // the latest session metadata. This is the only state read tied to
-          // file changes — the standalone 5s poller below catches busy↔idle
+          // file changes — the standalone 2s poller below catches busy↔idle
           // and idle→stopped transitions that don't touch the JSONL.
           if (isClaudeProvider) {
             lastLiveState = await readClaudeSessionState(sessionId);
