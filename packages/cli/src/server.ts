@@ -1439,6 +1439,8 @@ export async function startServer(
       // the existing always-live UI rather than misreporting "stopped".
       const isClaudeProvider = providerName === "claude-code";
       const isCursorProvider = providerName === "cursor";
+      const isCodexProvider = providerName === "codex";
+      const isJsonlLiveProvider = isClaudeProvider || isCodexProvider;
       let lastLiveState: LiveSessionState = isClaudeProvider ? "busy" : "unknown";
       let cursorDbWatchAttached = false;
       const cursorDbWatchedSessionIds = new Set<string>();
@@ -1565,13 +1567,6 @@ export async function startServer(
         return cached.lines;
       };
 
-      // Claude Code and Codex both persist append-only JSONL transcripts.
-      // Cursor / Cowork stay on full provider.parse() each tick — their
-      // formats aren't append-only or need provider-specific decoding
-      // (SQLite, encoded blobs, etc.).
-      const isCodexProvider = providerName === "codex";
-      const isJsonlLiveProvider = isClaudeProvider || isCodexProvider;
-
       const buildAndSend = async () => {
         if (aborted) return;
         if (inFlight) {
@@ -1634,6 +1629,8 @@ export async function startServer(
           // the latest session metadata. This is the only state read tied to
           // file changes — the standalone 2s poller below catches busy↔idle
           // and idle→stopped transitions that don't touch the JSONL.
+          // Codex has no sidecar state file, so it intentionally remains
+          // "unknown" and keeps the viewer's always-live UI.
           if (isClaudeProvider) {
             lastLiveState = await readClaudeSessionState(sessionId);
           }

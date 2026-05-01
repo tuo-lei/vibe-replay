@@ -5,6 +5,7 @@
 //
 // HOME is overridden BEFORE the dynamic import so the Claude Code provider's
 // module-level `CLAUDE_DIR = join(homedir(), ...)` resolves to the temp dir.
+// Codex resolves homedir at discovery time, but shares the same fixture HOME.
 
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -50,6 +51,13 @@ async function* readSse(
         // Ignore malformed lines (e.g., keep-alive comments)
       }
     }
+  }
+}
+
+async function waitForCount(events: any[], n: number, timeoutMs: number): Promise<void> {
+  const start = Date.now();
+  while (events.length < n && Date.now() - start < timeoutMs) {
+    await new Promise((r) => setTimeout(r, 50));
   }
 }
 
@@ -227,13 +235,7 @@ describe("Live mode SSE", () => {
     });
 
     // Wait for initial event
-    const waitForCount = async (n: number, timeoutMs: number) => {
-      const start = Date.now();
-      while (events.length < n && Date.now() - start < timeoutMs) {
-        await new Promise((r) => setTimeout(r, 50));
-      }
-    };
-    await waitForCount(1, 5_000);
+    await waitForCount(events, 1, 5_000);
     expect(events.length).toBeGreaterThanOrEqual(1);
     expect(events[0].type).toBe("session");
     const initialScenes = events[0].session.scenes.length;
@@ -260,7 +262,7 @@ describe("Live mode SSE", () => {
     await appendFile(jsonlPath, `${newLines.join("\n")}\n`, "utf-8");
 
     // Wait for delta event (debounce is 100ms so allow generous timeout)
-    await waitForCount(2, 5_000);
+    await waitForCount(events, 2, 5_000);
     await collect;
 
     expect(events.length).toBeGreaterThanOrEqual(2);
@@ -287,14 +289,7 @@ describe("Live mode SSE", () => {
       if (err?.name !== "AbortError") throw err;
     });
 
-    const waitForCount = async (n: number, timeoutMs: number) => {
-      const start = Date.now();
-      while (events.length < n && Date.now() - start < timeoutMs) {
-        await new Promise((r) => setTimeout(r, 50));
-      }
-    };
-
-    await waitForCount(1, 5_000);
+    await waitForCount(events, 1, 5_000);
     expect(events.length).toBeGreaterThanOrEqual(1);
     expect(events[0].type).toBe("session");
     expect(events[0].state).toBe("unknown");
@@ -325,7 +320,7 @@ describe("Live mode SSE", () => {
     ];
     await appendFile(codexJsonlPath, `${codexNewLines.join("\n")}\n`, "utf-8");
 
-    await waitForCount(2, 5_000);
+    await waitForCount(events, 2, 5_000);
     await collect;
 
     expect(events.length).toBeGreaterThanOrEqual(2);
