@@ -1295,9 +1295,12 @@ export async function startServer(
   });
 
   // --- Live: stream a session as it's being written to disk ---
-  // Watches the source JSONL file(s), re-parses + transforms on every change,
-  // and pushes the full ReplaySession over SSE. The viewer hot-swaps and (when
-  // the user is at the tail) auto-follows the newest scene.
+  // For Claude (JSONL) we tail each shard at the byte level — fs.read() at
+  // the cached offset, accumulate complete lines, hold an incomplete trailing
+  // fragment until the next newline arrives. Other providers fall back to
+  // full provider.parse() on every change (their formats aren't pure JSONL).
+  // The transformed ReplaySession is pushed as a full snapshot over SSE; the
+  // viewer hot-swaps and auto-follows the tail when the user is there.
   app.get("/api/live", (c) => {
     const providerName = c.req.query("provider") || "";
     const sessionId = c.req.query("sessionId") || "";
@@ -1318,18 +1321,16 @@ export async function startServer(
         return;
       }
 
-      // Discover the source session by sessionId. We re-discover on each
-      // connect (and on every rebuild) so we always pick up new file paths —
-      // Claude `/resume` creates new JSONL shards under the same logical
-      // session, and `mergeSameSessions` collapses them into one record so
-      // `parse()` sees the full conversation history instead of a single
-      // shard mid-stream.
+      // Resolve sessionId → SessionInfo. Discovery is expensive (full
+      // ~/.claude/projects walk for Claude), so we only run it on the
+      // initial connect and on a 15s cadence inside buildAndSend — that's
+      // the safety net that picks up `/resume` shards mid-stream.
       //
-      // Note: `mergeSameSessions` keeps the latest shard's sessionId on the
-      // merged record, so we look the user-supplied sessionId up against the
+      // `mergeSameSessions` keeps the latest shard's sessionId on the merged
+      // record, so we look the user-supplied sessionId up against the
       // unmerged list first (any shard matches), then return the merged
-      // record for that shard's project+slug — that way the viewer can pass
-      // whichever sessionId it knows about and still get the full history.
+      // record for that shard's project+slug — the viewer can pass whichever
+      // sessionId it happens to know about and still get the full history.
       const resolveSessionInfo = async () => {
         const all = await provider.discover();
         const seed = all.find((s) => s.sessionId === sessionId);
@@ -1383,8 +1384,24 @@ export async function startServer(
       // flush mid-line). Each fs.watch tick reads only the new bytes via
       // pread() instead of re-reading the whole file — a multi-thousand-line
       // session goes from O(file_size) per tick to O(new_bytes).
-      type TailCache = { offset: number; partial: string; lines: string[] };
+      //
+      // `partial` is a Buffer (not a string) on purpose: a write may flush
+      // mid-multi-byte-character (UTF-8 user prompts contain Chinese / emoji
+      // routinely), and Buffer.toString("utf8") on a half-character silently
+      // emits U+FFFD and discards the broken bytes. Holding raw bytes lets
+      // us defer decoding until a `\n` arrives, by which point the next
+      // read has supplied the rest of the multi-byte sequence.
+      const NEWLINE = 0x0a;
+      type TailCache = { offset: number; partial: Buffer; lines: string[] };
       const jsonlTail = new Map<string, TailCache>();
+
+      const splitDecodedLines = (combined: Buffer): { lines: string[]; partial: Buffer } => {
+        const lastNl = combined.lastIndexOf(NEWLINE);
+        if (lastNl < 0) return { lines: [], partial: combined };
+        const decoded = combined.subarray(0, lastNl).toString("utf8");
+        const lines = decoded.split("\n").filter((l) => l.length > 0);
+        return { lines, partial: combined.subarray(lastNl + 1) };
+      };
 
       const tailReadJsonl = async (filePath: string): Promise<string[]> => {
         const cached = jsonlTail.get(filePath);
@@ -1399,14 +1416,12 @@ export async function startServer(
 
         // First read or file shrank (truncate / rotate) — read whole file.
         // Invariants: `offset` = absolute byte position to read NEXT (= end of
-        // last read). `partial` = trailing fragment held back from `lines`
-        // until a newline arrives. Next call reads `[offset, size)`, prepends
-        // `partial` in memory, and re-splits.
+        // last read). `partial` = bytes after the last newline (may be a
+        // half-written line, possibly mid-UTF8). Next call reads `[offset,
+        // size)`, prepends `partial`, and re-splits at the last newline.
         if (!cached || size < cached.offset) {
-          const content = await readFile(filePath, "utf-8");
-          const parts = content.split("\n");
-          const partial = parts.pop() ?? "";
-          const lines = parts.filter((l) => l.length > 0);
+          const content = await readFile(filePath);
+          const { lines, partial } = splitDecodedLines(content);
           jsonlTail.set(filePath, { offset: size, partial, lines });
           return lines;
         }
@@ -1422,13 +1437,10 @@ export async function startServer(
         try {
           const buf = Buffer.alloc(len);
           await fh.read(buf, 0, len, cached.offset);
-          const text = cached.partial + buf.toString("utf8");
-          const parts = text.split("\n");
-          const newPartial = parts.pop() ?? "";
-          for (const line of parts) {
-            if (line.length > 0) cached.lines.push(line);
-          }
-          cached.partial = newPartial;
+          const combined = cached.partial.length === 0 ? buf : Buffer.concat([cached.partial, buf]);
+          const { lines, partial } = splitDecodedLines(combined);
+          for (const line of lines) cached.lines.push(line);
+          cached.partial = partial;
           cached.offset = size;
         } finally {
           await fh.close();
