@@ -137,7 +137,15 @@ function startLiveStream(
   let lastSession: ReplaySession | null = null;
   let liveStatus: LiveStatus = { state: "connecting", scenes: 0 };
 
+  // Guard against stale handlers from a closed-but-not-yet-cleaned-up
+  // EventSource overwriting state owned by a fresher stream. closeLive()
+  // calls .close() and clears ref.current, but events queued on the JS
+  // event loop before the close may still fire afterwards. Without this
+  // guard, those late events would call setState with stale `lastSession`
+  // / `liveStatus` from this closed-over scope, clobbering the new view
+  // (or surfacing an "error" toast that no longer applies).
   const emit = () => {
+    if (ref.current !== source) return;
     if (lastSession) {
       setState({
         status: "ready",
