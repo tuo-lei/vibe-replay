@@ -1440,7 +1440,7 @@ app.post("/api/insights/profile", async (c) => {
   // Sanitize: only allow boolean values
   for (const key of Object.keys(config) as (keyof ProfileConfig)[]) {
     if (typeof config[key] !== "boolean") {
-      (config as any)[key] = DEFAULT_PROFILE_CONFIG[key];
+      config[key] = DEFAULT_PROFILE_CONFIG[key];
     }
   }
 
