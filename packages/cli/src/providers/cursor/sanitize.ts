@@ -20,6 +20,17 @@ export function sanitizeCursorAssistantText(value: string, hasToolContext: boole
   return trimInternalPlanningTail(trimmed);
 }
 
+export function sanitizeCursorUserText(value: string): string {
+  // Cursor prepends a `<timestamp>...</timestamp>` metadata wrapper before the
+  // user prompt body. Scope the strip to the leading position so that prompts
+  // legitimately containing `<timestamp>` markup elsewhere (e.g. discussing
+  // XML/HTML samples) are preserved verbatim.
+  return value
+    .replace(/^\s*<timestamp>[\s\S]*?<\/timestamp>\s*/i, "")
+    .replace(/<\/?user_query>/g, "")
+    .trim();
+}
+
 export function sanitizeCursorReasoningText(value: string): string {
   return trimInternalPlanningTail(value);
 }

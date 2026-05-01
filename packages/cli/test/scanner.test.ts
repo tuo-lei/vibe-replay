@@ -337,6 +337,30 @@ describe("scanSession", () => {
     expect(result.startTime).toBe("2026-03-20T10:00:00.000Z");
     expect(result.filesModified).toEqual([]);
   });
+
+  it("defers rich Cursor SQLite parsing for background scans", async () => {
+    const result = await scanSession({
+      sessionId: "cursor-sqlite-session",
+      provider: "cursor",
+      project: "~/test/project",
+      slug: "cursor-sqlite",
+      filePaths: [join(tmpDir, "missing-cursor-transcript.jsonl")],
+      sourceFilePath:
+        "/Users/test/Library/Application Support/Cursor/User/globalStorage/state.vscdb#composerData:cursor-sqlite-session",
+      sourceFileSize: 2048,
+      sourceLineCount: 9,
+      hasSqlite: true,
+      deferRichCursorParse: true,
+      timestamp: "2026-03-20T10:00:00.000Z",
+      title: "Cursor SQLite session",
+      firstPrompt: "Build the dashboard.",
+    });
+
+    expect(result.promptCount).toBe(5);
+    expect(result.toolCallCount).toBe(0);
+    expect(result.dataSource).toBe("global-state");
+    expect(result.dataQualityNotes?.[0]).toContain("deferred");
+  });
 });
 
 // ─── Aggregation tests ──────────────────────────────────────────────

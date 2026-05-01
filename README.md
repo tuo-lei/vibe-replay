@@ -123,6 +123,9 @@ curl -o ~/.claude/skills/replay/SKILL.md \
 | Provider | Status |
 |----------|--------|
 | Claude Code | Supported |
+| Claude Desktop | Supported |
+| Claude Cowork | Supported (agent-mode sessions) |
+| Codex | Supported |
 | Cursor | Supported (SQLite + JSONL, auto-discovered) |
 | More coming soon | — |
 
