@@ -1670,6 +1670,21 @@ export async function startServer(
           }, 2_000)
         : null;
 
+      // Rediscovery heartbeat. The 15s `RESOLVE_REFRESH_INTERVAL_MS`
+      // sessionInfo refresh lives INSIDE buildAndSend(), so it only runs
+      // when something else has already woken us up. Without an
+      // independent tick: a Claude session that does `/resume` will write
+      // the new turn to a *new* JSONL shard while the old shard goes
+      // silent — no fs.watch event fires on the old file, polling is
+      // disabled (watchedPaths is non-empty, hasSqlite is false), and
+      // the live stream silently stalls until the user reconnects.
+      // Fire scheduleRebuild() every 15s as the safety net; the existing
+      // dedup signature absorbs the no-op when nothing changed.
+      const rediscoverInterval = setInterval(() => {
+        if (aborted) return;
+        scheduleRebuild(0);
+      }, RESOLVE_REFRESH_INTERVAL_MS);
+
       // Block until the client disconnects, then tear down.
       await new Promise<void>((resolve) => {
         stream.onAbort(() => {
@@ -1678,6 +1693,7 @@ export async function startServer(
           clearInterval(pingInterval);
           if (pollInterval) clearInterval(pollInterval);
           if (stateInterval) clearInterval(stateInterval);
+          clearInterval(rediscoverInterval);
           for (const w of watchers) {
             try {
               w.close();
