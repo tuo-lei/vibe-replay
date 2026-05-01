@@ -34,6 +34,7 @@ import { generateOutput, injectDataScript, loadViewerHtml } from "./generator.js
 import { mergeInsights, readInsightsStore, writeInsightsStore } from "./insights.js";
 import { loadOverlays, sessionWithEffectiveContent } from "./overlays.js";
 import { parseClaudeCodeLines } from "./providers/claude-code/parser.js";
+import { parseCodexLines } from "./providers/codex/parser.js";
 import { resolveCursorLiveWatchPaths } from "./providers/cursor/sqlite-reader.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
 import {
@@ -1371,7 +1372,7 @@ export async function startServer(
   });
 
   // --- Live: stream a session as it's being written to disk ---
-  // For Claude (JSONL) we tail each shard at the byte level — fs.read() at
+  // For append-only JSONL providers we tail each shard at the byte level — fs.read() at
   // the cached offset, accumulate complete lines, hold an incomplete trailing
   // fragment until the next newline arrives. Other providers fall back to
   // full provider.parse() on every change (their formats aren't pure JSONL).
@@ -1564,11 +1565,12 @@ export async function startServer(
         return cached.lines;
       };
 
-      // Claude is the only provider with a pure-JSONL transcript that's
-      // safe to incrementally tail. Cursor / Codex / Cowork stay on full
-      // provider.parse() each tick — their formats aren't append-only or
-      // need provider-specific decoding (SQLite, encoded blobs, etc.).
-      const isClaudeJsonl = isClaudeProvider;
+      // Claude Code and Codex both persist append-only JSONL transcripts.
+      // Cursor / Cowork stay on full provider.parse() each tick — their
+      // formats aren't append-only or need provider-specific decoding
+      // (SQLite, encoded blobs, etc.).
+      const isCodexProvider = providerName === "codex";
+      const isJsonlLiveProvider = isClaudeProvider || isCodexProvider;
 
       const buildAndSend = async () => {
         if (aborted) return;
@@ -1595,7 +1597,7 @@ export async function startServer(
           ensureWatchersFor(paths);
           await ensureCursorDbWatchersFor(info);
           let parsed;
-          if (isClaudeJsonl) {
+          if (isJsonlLiveProvider) {
             // Tail-based fast path. Concat already-cached lines from every
             // shard (filePaths is sorted chronologically by mergeSameSessions)
             // and parse them as one stream — the parser handles cross-shard
@@ -1606,7 +1608,9 @@ export async function startServer(
               const lines = await tailReadJsonl(fp);
               allLines.push(...lines);
             }
-            parsed = await parseClaudeCodeLines(allLines, { subagentsSourcePath: paths[0] });
+            parsed = isClaudeProvider
+              ? await parseClaudeCodeLines(allLines, { subagentsSourcePath: paths[0] })
+              : parseCodexLines(allLines, info, paths);
           } else {
             parsed = await provider.parse(paths, info);
           }

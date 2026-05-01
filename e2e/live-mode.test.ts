@@ -1,6 +1,6 @@
 // E2E for live mode (`/api/live` SSE endpoint)
 // — boots the *real* CLI server with a temp $HOME containing a fake
-//   Claude Code JSONL session, opens an SSE connection, then appends new
+//   Claude Code and Codex JSONL sessions, opens an SSE connection, then appends new
 //   turns to the JSONL and asserts the stream delivers updated payloads.
 //
 // HOME is overridden BEFORE the dynamic import so the Claude Code provider's
@@ -55,10 +55,12 @@ async function* readSse(
 
 describe("Live mode SSE", () => {
   const sessionId = "live-test-session-001";
+  const codexSessionId = "codex-live-test-session-001";
   const projectPath = "/Users/test/live-project";
   const projectDirEncoded = "-Users-test-live-project";
   let tmpHome: string;
   let jsonlPath: string;
+  let codexJsonlPath: string;
   let serverProcess: ReturnType<typeof spawn> | null = null;
   let serverPort: number | null = null;
   let browser: Browser | null = null;
@@ -96,6 +98,49 @@ describe("Live mode SSE", () => {
       }),
     ];
     await writeFile(jsonlPath, `${initialLines.join("\n")}\n`, "utf-8");
+
+    const codexSessionsDir = join(tmpHome, ".codex", "sessions", "2026", "04", "26");
+    await mkdir(codexSessionsDir, { recursive: true });
+    codexJsonlPath = join(codexSessionsDir, `rollout-2026-04-26T10-00-00-${codexSessionId}.jsonl`);
+    const codexInitialLines = [
+      JSON.stringify({
+        timestamp: "2026-04-26T10:00:00.000Z",
+        type: "session_meta",
+        payload: {
+          id: codexSessionId,
+          timestamp: "2026-04-26T10:00:00.000Z",
+          cwd: projectPath,
+          originator: "codex-tui",
+          cli_version: "0.125.0",
+          source: "cli",
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-04-26T10:00:00.100Z",
+        type: "turn_context",
+        payload: { model: "gpt-5.5", approval_policy: "on-request" },
+      }),
+      JSON.stringify({
+        timestamp: "2026-04-26T10:00:01.000Z",
+        type: "event_msg",
+        payload: {
+          type: "user_message",
+          message: "Hello from Codex live.",
+          images: [],
+          local_images: [],
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-04-26T10:00:02.000Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "Codex live is connected." }],
+        },
+      }),
+    ];
+    await writeFile(codexJsonlPath, `${codexInitialLines.join("\n")}\n`, "utf-8");
 
     // Spawn the real CLI server with our temp HOME so Claude Code's discover()
     // points at the fixture. We use a bootstrap script that calls startServer
@@ -221,6 +266,75 @@ describe("Live mode SSE", () => {
     expect(events.length).toBeGreaterThanOrEqual(2);
     expect(events[1].type).toBe("session");
     expect(events[1].session.scenes.length).toBeGreaterThan(initialScenes);
+  }, 30_000);
+
+  it("streams a Codex rollout and a delta after the JSONL grows", async () => {
+    expect(serverPort).not.toBeNull();
+    const ac = new AbortController();
+    const url = `http://127.0.0.1:${serverPort}/api/live?provider=codex&sessionId=${encodeURIComponent(codexSessionId)}`;
+
+    const events: any[] = [];
+    const collect = (async () => {
+      for await (const ev of readSse(url, ac.signal)) {
+        if (ev.data.type === "ping") continue;
+        events.push(ev.data);
+        if (events.length >= 2) {
+          ac.abort();
+          break;
+        }
+      }
+    })().catch((err) => {
+      if (err?.name !== "AbortError") throw err;
+    });
+
+    const waitForCount = async (n: number, timeoutMs: number) => {
+      const start = Date.now();
+      while (events.length < n && Date.now() - start < timeoutMs) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+    };
+
+    await waitForCount(1, 5_000);
+    expect(events.length).toBeGreaterThanOrEqual(1);
+    expect(events[0].type).toBe("session");
+    expect(events[0].state).toBe("unknown");
+    const initialScenes = events[0].session.scenes.length;
+    expect(initialScenes).toBeGreaterThan(0);
+
+    const { appendFile } = await import("node:fs/promises");
+    const codexNewLines = [
+      JSON.stringify({
+        timestamp: "2026-04-26T10:01:00.000Z",
+        type: "event_msg",
+        payload: {
+          type: "user_message",
+          message: "Tell me a Codex live joke.",
+          images: [],
+          local_images: [],
+        },
+      }),
+      JSON.stringify({
+        timestamp: "2026-04-26T10:01:01.000Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "Codex streamed the punchline." }],
+        },
+      }),
+    ];
+    await appendFile(codexJsonlPath, `${codexNewLines.join("\n")}\n`, "utf-8");
+
+    await waitForCount(2, 5_000);
+    await collect;
+
+    expect(events.length).toBeGreaterThanOrEqual(2);
+    expect(events[1].type).toBe("session");
+    expect(JSON.stringify(events[1].session.scenes)).toContain("Tell me a Codex live joke.");
+    expect(JSON.stringify(events[1].session.scenes)).toContain("Codex streamed the punchline.");
+    expect(JSON.stringify(events[1].session.scenes)).not.toBe(
+      JSON.stringify(events[0].session.scenes),
+    );
   }, 30_000);
 
   it("renders the LIVE badge in the viewer and follows tail when JSONL grows", async () => {
