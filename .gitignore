@@ -18,7 +18,7 @@ _tmp_*
 packages/viewer/public/demo.json
 packages/viewer/dist/
 packages/cli/assets/viewer.html
-plan/
+/plan
 .claude/*
 !.claude/settings.json
 !.claude/skills
@@ -32,6 +32,7 @@ plan/
 # Cloudflare
 cloudflare/.wrangler/
 cloudflare/.dev.vars
+cloudflare/worker-configuration.d.ts
 
 # Environment
 .env
