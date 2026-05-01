@@ -245,6 +245,7 @@ export default function App() {
   const session = loadState.status === "ready" ? loadState.session : null;
   const viewerMode = loadState.status === "ready" ? loadState.mode : "embedded";
   const gistOwner = loadState.status === "ready" ? loadState.gistOwner : undefined;
+  const live = loadState.status === "ready" ? loadState.live : undefined;
   const isEditor = viewerMode === "editor";
 
   const [activeView, setActiveView] = useState<ActiveView>(getActiveViewFromUrl());
@@ -377,6 +378,31 @@ export default function App() {
               Local
               <span className="instant-tooltip-text">
                 {`v${__CLI_VERSION__}\nViewer ${window.location.host}${import.meta.env.VITE_API_PORT ? `\nCLI :${import.meta.env.VITE_API_PORT}` : ""}${__CLOUD_API_URL__ ? `\nCloud ${__CLOUD_API_URL__}` : ""}`}
+              </span>
+            </span>
+          )}
+          {live && (
+            <span
+              className={`instant-tooltip inline-flex items-center gap-1 text-[9px] font-sans font-bold px-2 py-0.5 rounded-full uppercase tracking-wider border ${
+                live.state === "open"
+                  ? "bg-terminal-red/10 text-terminal-red border-terminal-red/20"
+                  : "bg-terminal-dim/10 text-terminal-dim border-terminal-dim/20"
+              }`}
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  live.state === "open" ? "bg-terminal-red animate-pulse" : "bg-terminal-dim"
+                }`}
+              />
+              {live.state === "open"
+                ? "Live"
+                : live.state === "connecting"
+                  ? "Connecting"
+                  : "Offline"}
+              <span className="instant-tooltip-text">
+                {live.state === "open"
+                  ? `Streaming ${live.scenes} scene${live.scenes === 1 ? "" : "s"}${live.lastUpdate ? `\nLast update ${new Date(live.lastUpdate).toLocaleTimeString()}` : ""}`
+                  : live.error || "Reconnecting..."}
               </span>
             </span>
           )}
@@ -666,6 +692,7 @@ export default function App() {
         activeView={activeView}
         setActiveView={handleViewChange}
         returnToLandingRef={returnToLandingRef}
+        live={live}
       />
     </div>
   );

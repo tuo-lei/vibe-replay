@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAnnotations } from "../hooks/useAnnotations";
 import { useOverlays } from "../hooks/useOverlays";
 import { usePlayback } from "../hooks/usePlayback";
-import type { ViewerMode } from "../hooks/useSessionLoader";
+import type { LiveStatus, ViewerMode } from "../hooks/useSessionLoader";
 import { getEffectivePrefs, type ViewPrefs } from "../hooks/useViewPrefs";
 import type { ReplaySession } from "../types";
 import AiStudioDrawer from "./AiStudioDrawer";
@@ -28,6 +28,8 @@ interface Props {
   setActiveView: (view: ActiveView) => void;
   /** Ref that Player populates with a function to return to the landing page */
   returnToLandingRef?: React.MutableRefObject<(() => void) | null>;
+  /** When set, the session is being streamed from a running CLI process */
+  live?: LiveStatus;
 }
 
 function flashJumpTarget(el: HTMLElement) {
@@ -47,9 +49,13 @@ export default function Player({
   activeView,
   setActiveView,
   returnToLandingRef,
+  live,
 }: Props) {
   const isReadOnly = viewerMode === "readonly";
-  const [landed, setLanded] = useState(false);
+  const isLive = !!live;
+  // In live mode, skip the landing hero — the user explicitly asked to tail
+  // a running session, so we should drop them straight into the conversation.
+  const [landed, setLanded] = useState(isLive);
 
   // Expose a callback so the parent header can return to the landing page
   useEffect(() => {
@@ -79,7 +85,13 @@ export default function Player({
   const { effectiveSession } = overlayActions;
   const { annotations } = annotationActions;
 
-  const effectivePrefs = getEffectivePrefs(viewPrefs);
+  // Force "all" display mode in live — compact hides thinking and collapses
+  // tools, which makes a streaming session look like nothing is happening
+  // (the user's complaint: "we never see progress"). Don't mutate the
+  // persisted pref; just override the derived flags for this render.
+  const effectivePrefs = isLive
+    ? getEffectivePrefs({ ...viewPrefs, displayMode: "all" })
+    : getEffectivePrefs(viewPrefs);
 
   const {
     state,
@@ -252,6 +264,17 @@ export default function Player({
     }
     const el = scrollRef.current;
     programScrollRef.current = true;
+    // Live mode: snap to the bottom instantly. Smooth animations from
+    // back-to-back SSE ticks stack on each other and produce visible jitter
+    // ("屏幕抖动"); the user experience the user actually wants here is
+    // "always at the latest", not "smoothly follow each new scene".
+    if (isLive) {
+      el.scrollTop = el.scrollHeight;
+      setTimeout(() => {
+        programScrollRef.current = false;
+      }, 50);
+      return;
+    }
     const getGroupFirstIndex = (idx: number): number => {
       const scenes = session.scenes;
       if (idx < 0 || idx >= scenes.length) return idx;
@@ -293,7 +316,7 @@ export default function Player({
         programScrollRef.current = false;
       }, 400);
     });
-  }, [currentIndex, state, session.scenes]);
+  }, [currentIndex, state, session.scenes, isLive]);
 
   // User scroll/touch → auto-pause + enter infinite scroll mode
   useEffect(() => {
@@ -446,9 +469,11 @@ export default function Player({
   }, []);
 
   // Sync currentIndex → URL ?s= param (debounced to avoid noise during playback)
+  // Skip in live mode — the URL identifies the running session by provider/sessionId
+  // and a moving ?s= param fights with auto-follow.
   const urlSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (currentIndex < 0 || !landed) return;
+    if (currentIndex < 0 || !landed || isLive) return;
     if (urlSyncTimer.current) clearTimeout(urlSyncTimer.current);
     const delay = state === "playing" ? 500 : 0;
     urlSyncTimer.current = setTimeout(() => {
@@ -459,7 +484,22 @@ export default function Player({
     return () => {
       if (urlSyncTimer.current) clearTimeout(urlSyncTimer.current);
     };
-  }, [currentIndex, state, landed]);
+  }, [currentIndex, state, landed, isLive]);
+
+  // Live mode tail-follow — always pin to the latest scene. Claude Code's
+  // own CLI does this and the user expects parity: they want continuous
+  // progress signal, not a stale view they'd have to manually scroll
+  // forward. useLayoutEffect (not useEffect) so currentIndex updates
+  // before paint — otherwise we'd render a frame with new scenes but
+  // stale currentIndex, and the user sees a flicker every SSE tick.
+  const prevLiveCountRef = useRef(0);
+  useLayoutEffect(() => {
+    if (!isLive) return;
+    const curr = session.scenes.length;
+    if (curr === 0 || curr === prevLiveCountRef.current) return;
+    prevLiveCountRef.current = curr;
+    seekTo(curr - 1);
+  }, [isLive, session.scenes.length, seekTo]);
 
   const hasAiStudio = viewerMode === "editor";
   const hasAiFeedback = useMemo(
@@ -752,7 +792,7 @@ export default function Player({
                 >
                   <ConversationView
                     scenes={session.scenes}
-                    visibleCount={visibleCount}
+                    visibleCount={isLive ? session.scenes.length : visibleCount}
                     currentIndex={currentIndex}
                     effectivePrefs={effectivePrefs}
                     focusIndex={navFocusIndex}
@@ -762,6 +802,8 @@ export default function Player({
                     state={state}
                     overlayActions={overlayActions}
                     turnStats={session.meta.stats.turnStats}
+                    isLive={isLive}
+                    liveSessionState={live?.sessionState}
                     onComment={
                       isReadOnly
                         ? undefined

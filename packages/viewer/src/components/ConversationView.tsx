@@ -22,6 +22,16 @@ interface Props {
   state?: string;
   overlayActions?: OverlayActions;
   turnStats?: TurnStat[];
+  /** When set, the session is being streamed live and the trailing "the end"
+   *  card is replaced with a state-aware indicator. */
+  isLive?: boolean;
+  /** Current Claude session state, surfaced from `~/.claude/sessions/<pid>.json`.
+   *  - busy:    Claude is actively processing → red pulsing indicator.
+   *  - idle:    Claude is alive, waiting for the next user prompt → green dim.
+   *  - stopped: Claude exited / process is dead → muted "session ended".
+   *  - unknown: non-Claude provider, no metadata file → fall back to BUSY UX.
+   *  Only consulted when `isLive` is true. */
+  liveSessionState?: "busy" | "idle" | "stopped" | "unknown";
 }
 
 interface TurnGroup {
@@ -59,6 +69,8 @@ export default function ConversationView({
   state,
   overlayActions,
   turnStats,
+  isLive,
+  liveSessionState,
 }: Props & { onSeek?: (index: number) => void }) {
   // Pre-compute ALL groups once — stable across playback ticks
   const allGroups = useMemo(() => {
@@ -105,15 +117,17 @@ export default function ConversationView({
     return result;
   }, [scenes]);
 
-  // Only show groups that have visible scenes, filtered by effectivePrefs
+  // Show ALL turns by default — never hide content the user already has on
+  // disk. Playback (the play button + currentIndex / visibleCount) now
+  // controls only the camera (scroll-to-current) and the focus indicator.
+  // Hiding follow-up turns made it look like content was missing — see
+  // https://github.com/tuo-lei/vibe-replay/pull/215 review feedback.
   const displayGroups = useMemo(() => {
     if (effectivePrefs.promptsOnly) {
-      return allGroups.filter(
-        (g) => (g.type === "user" || g.type === "compaction") && g.scenes[0].index < visibleCount,
-      );
+      return allGroups.filter((g) => g.type === "user" || g.type === "compaction");
     }
-    return allGroups.filter((g) => g.scenes[0].index < visibleCount);
-  }, [allGroups, visibleCount, effectivePrefs.promptsOnly]);
+    return allGroups;
+  }, [allGroups, effectivePrefs.promptsOnly]);
 
   // Find which group contains the currentIndex
   const currentGroupIdx = useMemo(() => {
@@ -160,7 +174,6 @@ export default function ConversationView({
           <GroupCard
             group={group}
             currentIndex={currentIndex}
-            visibleCount={visibleCount}
             effectivePrefs={effectivePrefs}
             focusIndex={focusIndex}
             annotatedScenes={annotatedScenes}
@@ -212,7 +225,7 @@ export default function ConversationView({
         </div>
       )}
 
-      {visibleCount >= scenes.length && (
+      {visibleCount >= scenes.length && !isLive && (
         <div className="pt-12 pb-24 flex flex-col items-center justify-center animate-in fade-in zoom-in-95 duration-1000 ease-out select-none">
           <div className="h-px w-8 bg-terminal-border-subtle mb-6" />
           <div className="flex flex-col items-center gap-1">
@@ -260,6 +273,84 @@ export default function ConversationView({
           </div>
         </div>
       )}
+
+      {visibleCount >= scenes.length && isLive && <LiveStateCard sessionState={liveSessionState} />}
+    </div>
+  );
+}
+
+/**
+ * Trailing card for live mode. Branches on the Claude session state so the
+ * user gets honest feedback about whether anything is going to happen:
+ *
+ * - `busy`              — red pulsing dot, "BUSY" + the waiting message.
+ *                         Claude is mid-turn (streaming, running a tool).
+ * - `idle`              — green dot (no animation), "IDLE" + "Claude is
+ *                         waiting for your next prompt". File watcher will
+ *                         not show progress until you submit something.
+ * - `stopped`           — muted gray, "ENDED" + "the Claude process exited".
+ *                         Tells the user that further updates won't arrive
+ *                         and they should just read this as a static replay.
+ * - `unknown` / undef.  — fall back to the busy UI for non-Claude providers
+ *                         (Cursor / Codex etc.) where we can't tell.
+ */
+function LiveStateCard({
+  sessionState,
+}: {
+  sessionState?: "busy" | "idle" | "stopped" | "unknown";
+}) {
+  const effective = sessionState ?? "busy";
+
+  if (effective === "stopped") {
+    return (
+      <div className="pt-10 pb-24 flex flex-col items-center justify-center select-none">
+        <div className="h-px w-8 bg-terminal-border-subtle mb-5" />
+        <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-terminal-surface/40 border border-terminal-border-subtle">
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-terminal-dimmer" />
+          <span className="text-[10px] font-mono font-bold text-terminal-dim uppercase tracking-[0.25em]">
+            Ended
+          </span>
+        </div>
+        <div className="text-[9px] font-mono text-terminal-dimmer mt-3 tracking-wide">
+          the claude process exited — no further updates will arrive
+        </div>
+      </div>
+    );
+  }
+
+  if (effective === "idle") {
+    return (
+      <div className="pt-10 pb-24 flex flex-col items-center justify-center select-none">
+        <div className="h-px w-8 bg-terminal-border-subtle mb-5" />
+        <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-terminal-green-subtle/40 border border-terminal-green/20">
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-terminal-green" />
+          <span className="text-[10px] font-mono font-bold text-terminal-green uppercase tracking-[0.25em]">
+            Idle
+          </span>
+        </div>
+        <div className="text-[9px] font-mono text-terminal-dimmer mt-3 tracking-wide">
+          claude is waiting for your next prompt
+        </div>
+      </div>
+    );
+  }
+
+  // busy + unknown: same red pulsing UI
+  return (
+    <div className="pt-10 pb-24 flex flex-col items-center justify-center select-none">
+      <div className="h-px w-8 bg-terminal-border-subtle mb-5" />
+      <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-terminal-red-subtle/50 border border-terminal-red/20">
+        <span className="relative flex w-2 h-2">
+          <span className="absolute inline-flex h-full w-full rounded-full bg-terminal-red opacity-75 animate-ping" />
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-terminal-red" />
+        </span>
+        <span className="text-[10px] font-mono font-bold text-terminal-red uppercase tracking-[0.25em]">
+          Busy
+        </span>
+      </div>
+      <div className="text-[9px] font-mono text-terminal-dimmer mt-3 tracking-wide">
+        waiting for the next turn to land on disk
+      </div>
     </div>
   );
 }
@@ -334,7 +425,6 @@ const LazyGroup = memo(function LazyGroup({
 const GroupCard = memo(function GroupCard({
   group,
   currentIndex,
-  visibleCount,
   effectivePrefs,
   focusIndex,
   annotatedScenes: _annotatedScenes,
@@ -345,7 +435,6 @@ const GroupCard = memo(function GroupCard({
 }: {
   group: TurnGroup;
   currentIndex: number;
-  visibleCount: number;
   effectivePrefs: EffectivePrefs;
   focusIndex?: number;
   annotatedScenes?: Set<number>;
@@ -379,18 +468,17 @@ const GroupCard = memo(function GroupCard({
     return peak > 200_000 ? 1_000_000 : 200_000;
   }, [turnStats]);
 
-  // Only include scenes that are visible so far
-  const visibleScenes = useMemo(
-    () => group.scenes.filter((s) => s.index < visibleCount),
-    [group.scenes, visibleCount],
-  );
+  // Render every scene in the group — no longer gated by visibleCount.
+  // Playback advance still updates currentIndex (used for the focus
+  // indicator + scroll-follow), but never hides content.
+  const groupScenes = group.scenes;
 
-  const groupHasCurrent = visibleScenes.some(({ index }) => index === currentIndex);
+  const groupHasCurrent = groupScenes.some(({ index }) => index === currentIndex);
   const groupHasFocusedTarget =
-    typeof focusIndex === "number" && visibleScenes.some(({ index }) => index === focusIndex);
-  const firstIndex = visibleScenes[0]?.index;
+    typeof focusIndex === "number" && groupScenes.some(({ index }) => index === focusIndex);
+  const firstIndex = groupScenes[0]?.index;
 
-  if (visibleScenes.length === 0) return null;
+  if (groupScenes.length === 0) return null;
 
   // User groups get a group-level comment button (single scene)
   const userCommentCount = group.type === "user" ? annotationCounts?.get(firstIndex) || 0 : 0;
@@ -498,7 +586,7 @@ const GroupCard = memo(function GroupCard({
             );
           })()}
         <div className="text-left">
-          {visibleScenes.map(({ scene, index }) => {
+          {groupScenes.map(({ scene, index }) => {
             const sceneOverlays = overlayActions?.getOverlays(index) ?? [];
             const effectiveContent = overlayActions?.getEffectiveContent(index);
             const isShowingOriginal = overlayActions?.showOriginal.has(index);
@@ -547,7 +635,7 @@ const GroupCard = memo(function GroupCard({
   }
 
   if (group.type === "compaction") {
-    const scene = visibleScenes[0]?.scene;
+    const scene = groupScenes[0]?.scene;
     if (!scene || scene.type !== "compaction-summary") return null;
 
     // Find compaction token impact from turnStats (context drop > 50%) near this group's position
@@ -602,7 +690,7 @@ const GroupCard = memo(function GroupCard({
   }
 
   if (group.type === "context-injection") {
-    const scene = visibleScenes[0]?.scene;
+    const scene = groupScenes[0]?.scene;
     if (!scene || scene.type !== "context-injection") return null;
     const it = scene.injectionType || "system";
     const label = it.startsWith("skill:")
@@ -643,8 +731,8 @@ const GroupCard = memo(function GroupCard({
 
   // Assistant group — filter by effectivePrefs
   const filteredScenes = effectivePrefs.hideThinking
-    ? visibleScenes.filter((s) => s.scene.type !== "thinking")
-    : visibleScenes;
+    ? groupScenes.filter((s) => s.scene.type !== "thinking")
+    : groupScenes;
 
   if (filteredScenes.length === 0) return null;
 
