@@ -84,6 +84,19 @@ interface GlobalStateDiscoveryCache {
 }
 
 let cachedGlobalStateDb: CachedGlobalStateDb | null = null;
+
+// Releasing a sql.js Database can throw if the underlying memory was already
+// freed (e.g. by a previous close() in a refresh path). Swallow defensively —
+// we drop the cache slot either way.
+function closeCachedSqlJsDb(): void {
+  if (cachedGlobalStateDb?.backend !== "sqljs") return;
+  try {
+    cachedGlobalStateDb.db.close();
+  } catch {
+    // ignore — we're discarding the reference next anyway
+  }
+}
+
 let cachedStoreDbIndex: Map<string, StoreDbIndexEntry> | null = null;
 const resolvedProjectRootCache = new Map<string, Promise<string | null>>();
 const GLOBAL_STATE_DISCOVERY_CACHE_PREFIX = "cursor-global-state-discovery-v3";
@@ -265,7 +278,7 @@ async function openGlobalStateDb(): Promise<CachedGlobalStateDb | null> {
   }
 
   if (await canUseSqliteCli(dbPath)) {
-    if (cachedGlobalStateDb?.backend === "sqljs") cachedGlobalStateDb.db.close();
+    closeCachedSqlJsDb();
     cachedGlobalStateDb = {
       dbPath,
       backend: "sqlite-cli",
@@ -287,7 +300,7 @@ async function openGlobalStateDb(): Promise<CachedGlobalStateDb | null> {
   if (!dbBuffer) return null;
 
   const db = new SQL.Database(dbBuffer);
-  if (cachedGlobalStateDb?.backend === "sqljs") cachedGlobalStateDb.db.close();
+  closeCachedSqlJsDb();
   cachedGlobalStateDb = {
     dbPath,
     backend: "sqljs",

@@ -1719,12 +1719,19 @@ export async function startServer(
       const stateInterval = isClaudeProvider
         ? setInterval(async () => {
             if (aborted) return;
-            const next = await readClaudeSessionState(sessionId);
-            if (next === lastLiveState) return;
-            lastLiveState = next;
-            await stream
-              .writeSSE({ data: JSON.stringify({ type: "state", state: next }) })
-              .catch(() => {});
+            try {
+              const next = await readClaudeSessionState(sessionId);
+              if (next === lastLiveState) return;
+              lastLiveState = next;
+              await stream
+                .writeSSE({ data: JSON.stringify({ type: "state", state: next }) })
+                .catch(() => {});
+            } catch {
+              // Transient state-file read failures shouldn't surface as an
+              // unhandled rejection — the next tick will retry. Worst case the
+              // viewer keeps showing the previous state, which is correct
+              // until we observe a transition.
+            }
           }, 2_000)
         : null;
 
