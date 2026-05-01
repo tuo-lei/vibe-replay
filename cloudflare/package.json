@@ -12,11 +12,11 @@
   "dependencies": {
     "better-auth": "^1.5.5",
     "drizzle-orm": "^0.45.2",
-    "hono": "^4.12.5",
-    "nanoid": "^5.1.7"
+    "hono": "^4.12.16",
+    "nanoid": "^5.1.11"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260305.1",
+    "@cloudflare/workers-types": "^4.20260501.1",
     "drizzle-kit": "^0.31.0",
     "wrangler": "^4.0.0"
   }
