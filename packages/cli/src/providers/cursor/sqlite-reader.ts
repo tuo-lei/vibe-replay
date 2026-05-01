@@ -393,7 +393,6 @@ export async function resolveCursorLiveWatchPaths(sessionId: string): Promise<st
   if (storeDb) {
     await addIfExists(storeDb);
     await addIfExists(`${storeDb}-wal`);
-    await addIfExists(`${storeDb}-shm`);
     // Session-scoped directory catches WAL creation when it does not exist yet.
     await addIfExists(dirname(storeDb));
   }
@@ -403,10 +402,9 @@ export async function resolveCursorLiveWatchPaths(sessionId: string): Promise<st
     await addIfExists(globalStateDb.dbPath);
     const beforeWal = paths.size;
     await addIfExists(`${globalStateDb.dbPath}-wal`);
-    await addIfExists(`${globalStateDb.dbPath}-shm`);
     // The global WAL may be created lazily. Watch the directory only when there
-    // is no WAL/SHM file to watch yet; otherwise the shared globalStorage folder
-    // is noisier than the specific SQLite files.
+    // is no WAL file to watch yet; otherwise the shared globalStorage folder is
+    // noisier than the specific SQLite files.
     if (paths.size === beforeWal) {
       await addIfExists(dirname(globalStateDb.dbPath));
     }
