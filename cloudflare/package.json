@@ -18,6 +18,6 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260501.1",
     "drizzle-kit": "^0.31.0",
-    "wrangler": "^4.0.0"
+    "wrangler": "^4.87.0"
   }
 }
