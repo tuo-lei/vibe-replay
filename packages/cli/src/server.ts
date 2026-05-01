@@ -34,6 +34,7 @@ import { generateOutput, injectDataScript, loadViewerHtml } from "./generator.js
 import { mergeInsights, readInsightsStore, writeInsightsStore } from "./insights.js";
 import { loadOverlays, sessionWithEffectiveContent } from "./overlays.js";
 import { parseClaudeCodeLines } from "./providers/claude-code/parser.js";
+import { resolveCursorLiveWatchPaths } from "./providers/cursor/sqlite-reader.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
 import {
   getApiUrl,
@@ -1436,7 +1437,12 @@ export async function startServer(
       // don't write that file, so they get "unknown" and the viewer keeps
       // the existing always-live UI rather than misreporting "stopped".
       const isClaudeProvider = providerName === "claude-code";
+      const isCursorProvider = providerName === "cursor";
       let lastLiveState: LiveSessionState = isClaudeProvider ? "busy" : "unknown";
+      let cursorDbWatchAttached = false;
+      const cursorDbWatchedSessionIds = new Set<string>();
+      const cursorDbWatchAttemptedAt = new Map<string, number>();
+      const CURSOR_DB_WATCH_RETRY_MS = 15_000;
 
       const ensureWatchersFor = (paths: Iterable<string>): void => {
         for (const fp of paths) {
@@ -1449,6 +1455,30 @@ export async function startServer(
           } catch {
             // best-effort — if a path can't be watched, the others may still work
           }
+        }
+      };
+
+      const ensureCursorDbWatchersFor = async (info: SessionInfo): Promise<void> => {
+        if (!isCursorProvider || !info.hasSqlite || cursorDbWatchedSessionIds.has(info.sessionId)) {
+          return;
+        }
+        const now = Date.now();
+        const lastAttempt = cursorDbWatchAttemptedAt.get(info.sessionId) || 0;
+        if (now - lastAttempt < CURSOR_DB_WATCH_RETRY_MS) return;
+        cursorDbWatchAttemptedAt.set(info.sessionId, now);
+
+        try {
+          const paths = await resolveCursorLiveWatchPaths(info.sessionId);
+          const before = watchedPaths.size;
+          ensureWatchersFor(paths);
+          const attached = watchedPaths.size > before || paths.some((p) => watchedPaths.has(p));
+          if (attached) {
+            cursorDbWatchAttached = true;
+            cursorDbWatchedSessionIds.add(info.sessionId);
+          }
+        } catch {
+          // Best-effort. If DB/WAL watchers cannot be resolved, the polling
+          // fallback below keeps SQLite-backed Cursor live sessions updating.
         }
       };
 
@@ -1563,6 +1593,7 @@ export async function startServer(
           // would never trigger another scheduleRebuild and the stream would
           // silently go stale.
           ensureWatchersFor(paths);
+          await ensureCursorDbWatchersFor(info);
           let parsed;
           if (isClaudeJsonl) {
             // Tail-based fast path. Concat already-cached lines from every
@@ -1650,22 +1681,27 @@ export async function startServer(
       // every reported file path on this first call.
       await buildAndSend();
 
-      // Polling fallback for sources we can't directly fs.watch. Two cases:
-      //   1. `watchedPaths.size === 0` — Cursor SQLite-only sessions report
-      //      `filePaths: []` (SQLite file is discovered separately and isn't
-      //      in `paths`).
-      //   2. `sessionInfo?.hasSqlite` — Cursor sessions where SQLite is
-      //      authoritative but transcript / tool sidecars are *also* watched.
-      //      Updates landing only in SQLite (no sidecar write) wouldn't
-      //      trigger any fs.watch event, so the stream would silently stall.
-      // The 3s cadence still feels live enough for human reading, and the
-      // dedup signature suppresses redundant emits when nothing changed.
-      const needsPolling = watchedPaths.size === 0 || !!sessionInfo?.hasSqlite;
-      const pollInterval = needsPolling
+      // Polling fallback for sources we still cannot directly fs.watch.
+      //
+      // Cursor SQLite/global-state sessions now try to watch store.db/state.vscdb
+      // plus their WAL files, which gives near-immediate rebuild triggers when
+      // Cursor flushes DB updates. Keep a slower watchdog even after DB/WAL
+      // watchers attach: SQLite can rotate WAL/SHM files and macOS file events
+      // can miss in-place WAL writes, so this prevents a permanently stale stream
+      // without making polling the primary update path.
+      const POLL_INTERVAL_MS = 3_000;
+      const CURSOR_SQLITE_WATCHDOG_MS = 10_000;
+      const pollIntervalMs =
+        watchedPaths.size === 0 || (!!sessionInfo?.hasSqlite && !cursorDbWatchAttached)
+          ? POLL_INTERVAL_MS
+          : isCursorProvider && !!sessionInfo?.hasSqlite
+            ? CURSOR_SQLITE_WATCHDOG_MS
+            : null;
+      const pollInterval = pollIntervalMs
         ? setInterval(() => {
             if (aborted) return;
             scheduleRebuild(0);
-          }, 3_000)
+          }, pollIntervalMs)
         : null;
 
       // SSE keepalive — proxies (and some browsers) drop idle connections.
