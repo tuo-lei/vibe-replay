@@ -22,6 +22,9 @@ interface Props {
   state?: string;
   overlayActions?: OverlayActions;
   turnStats?: TurnStat[];
+  /** When set, the session is being streamed live and the trailing "the end"
+   *  card is replaced with a "waiting for next turn" indicator. */
+  isLive?: boolean;
 }
 
 interface TurnGroup {
@@ -59,6 +62,7 @@ export default function ConversationView({
   state,
   overlayActions,
   turnStats,
+  isLive,
 }: Props & { onSeek?: (index: number) => void }) {
   // Pre-compute ALL groups once — stable across playback ticks
   const allGroups = useMemo(() => {
@@ -212,7 +216,7 @@ export default function ConversationView({
         </div>
       )}
 
-      {visibleCount >= scenes.length && (
+      {visibleCount >= scenes.length && !isLive && (
         <div className="pt-12 pb-24 flex flex-col items-center justify-center animate-in fade-in zoom-in-95 duration-1000 ease-out select-none">
           <div className="h-px w-8 bg-terminal-border-subtle mb-6" />
           <div className="flex flex-col items-center gap-1">
@@ -257,6 +261,24 @@ export default function ConversationView({
               <div className="w-1 h-1 rounded-full bg-terminal-blue" />
               <div className="w-1 h-1 rounded-full bg-terminal-orange" />
             </div>
+          </div>
+        </div>
+      )}
+
+      {visibleCount >= scenes.length && isLive && (
+        <div className="pt-10 pb-24 flex flex-col items-center justify-center select-none">
+          <div className="h-px w-8 bg-terminal-border-subtle mb-5" />
+          <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-terminal-red-subtle/50 border border-terminal-red/20">
+            <span className="relative flex w-2 h-2">
+              <span className="absolute inline-flex h-full w-full rounded-full bg-terminal-red opacity-75 animate-ping" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-terminal-red" />
+            </span>
+            <span className="text-[10px] font-mono font-bold text-terminal-red uppercase tracking-[0.25em]">
+              Busy
+            </span>
+          </div>
+          <div className="text-[9px] font-mono text-terminal-dimmer mt-3 tracking-wide">
+            waiting for the next turn to land on disk
           </div>
         </div>
       )}
