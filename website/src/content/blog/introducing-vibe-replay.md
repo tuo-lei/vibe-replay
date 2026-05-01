@@ -101,6 +101,6 @@ npx vibe-replay
 
 One command. It discovers your Claude Code and Cursor sessions, picks the one you want, and generates an interactive replay.
 
-The output is a single self-contained HTML file. No server, no account, no external requests. Open it in any browser, share it anywhere. Or sign in and [share it to the cloud](/explore).
+The output is a single self-contained HTML file. No server, no account, no external requests. Open it in any browser, share it anywhere. Or sign in and [share it to the cloud](/explore/).
 
-**[GitHub](https://github.com/tuo-lei/vibe-replay)** · **[Live Demo](https://vibe-replay.com/view/?gist=586f3f56d9e6c82e3b60b42ea13b341e)** · **[Explore Public Replays](/explore)**
+**[GitHub](https://github.com/tuo-lei/vibe-replay)** · **[Live Demo](https://vibe-replay.com/view/?gist=586f3f56d9e6c82e3b60b42ea13b341e)** · **[Explore Public Replays](/explore/)**

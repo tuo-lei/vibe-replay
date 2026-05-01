@@ -103,4 +103,4 @@ npx vibe-replay
 
 Sign in from the dashboard, and your insights page builds automatically from your local session history. No manual tracking, no configuration. If you've been vibe coding with Claude Code or Cursor, the data is already on your machine — insights just surfaces it.
 
-**[See my insights](https://vibe-replay.com/shared-insights/?s=tuo-lei)** · **[GitHub](https://github.com/tuo-lei/vibe-replay)** · **[Explore public replays](/explore)**
+**[See my insights](https://vibe-replay.com/shared-insights/?s=tuo-lei)** · **[GitHub](https://github.com/tuo-lei/vibe-replay)** · **[Explore public replays](/explore/)**

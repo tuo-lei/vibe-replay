@@ -7,6 +7,12 @@ routes = [{ pattern = "vibe-replay.com", custom_domain = true }]
 
 [assets]
 directory = "../website/dist"
+binding = "ASSETS"
+# Run the worker before serving assets so we can intercept the default 307
+# trailing-slash redirect from Workers Assets and promote it to a 301 (see
+# worker.ts fallback handler). Search engines treat 301 as permanent and pass
+# link equity to the canonical URL.
+run_worker_first = true
 
 [[d1_databases]]
 binding = "DB"
