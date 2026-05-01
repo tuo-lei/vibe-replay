@@ -39,11 +39,14 @@ export default defineConfig({
     target: "es2022",
   },
   server: {
+    // Force IPv4 — rolldown-vite 7.3.x's default binds to [::1] on macOS but
+    // doesn't accept incoming connections, leaving curl/browsers hung at "Trying ::1".
+    host: "127.0.0.1",
     port: process.env.VITE_PORT ? Number(process.env.VITE_PORT) : undefined,
     strictPort: !!process.env.VITE_PORT,
     proxy: {
       "/api": {
-        target: `http://localhost:${process.env.VITE_API_PORT || "13456"}`,
+        target: `http://127.0.0.1:${process.env.VITE_API_PORT || "13456"}`,
         changeOrigin: true,
       },
     },
