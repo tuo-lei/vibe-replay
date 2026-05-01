@@ -20,6 +20,23 @@ interface ToolResult {
   durationMs?: number;
 }
 
+interface CodexTokenInfo {
+  input_tokens?: number;
+  cached_input_tokens?: number;
+  output_tokens?: number;
+}
+
+interface CodexTokenSnapshot {
+  timestamp?: string;
+  total?: CodexTokenInfo;
+  last?: CodexTokenInfo;
+}
+
+function asCodexTokenInfo(value: unknown): CodexTokenInfo | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  return value as CodexTokenInfo;
+}
+
 export async function parseCodexSession(
   filePaths: string | string[],
   sessionInfo?: SessionInfo,
@@ -55,7 +72,7 @@ export function parseCodexLines(
   const compactions: Compaction[] = [];
   const tools = new Map<string, PendingTool>();
   const toolResults = new Map<string, ToolResult>();
-  const tokenSnapshots: Array<{ timestamp?: string; total?: any; last?: any }> = [];
+  const tokenSnapshots: CodexTokenSnapshot[] = [];
   const mcpServersUsed = new Set<string>();
   const skillsUsed = new Set<string>();
   const gitBranches: string[] = [];
@@ -127,8 +144,8 @@ export function parseCodexLines(
       if (p.type === "token_count") {
         tokenSnapshots.push({
           timestamp: obj.timestamp,
-          total: p.info?.total_token_usage,
-          last: p.info?.last_token_usage,
+          total: asCodexTokenInfo(p.info?.total_token_usage),
+          last: asCodexTokenInfo(p.info?.last_token_usage),
         });
         continue;
       }
@@ -425,9 +442,7 @@ function durationToMs(duration: any): number | undefined {
   return ms > 0 ? ms : undefined;
 }
 
-function tokenUsageFromSnapshots(
-  snapshots: Array<{ total?: any; last?: any }>,
-): TokenUsage | undefined {
+function tokenUsageFromSnapshots(snapshots: CodexTokenSnapshot[]): TokenUsage | undefined {
   const latest = [...snapshots].toReversed().find((s) => s.total)?.total;
   if (!latest) return undefined;
   const input = latest.input_tokens || 0;
@@ -440,11 +455,7 @@ function tokenUsageFromSnapshots(
   };
 }
 
-function buildCodexTurnStats(
-  turns: ParsedTurn[],
-  snapshots: Array<{ timestamp?: string; last?: any }>,
-  model?: string,
-) {
+function buildCodexTurnStats(turns: ParsedTurn[], snapshots: CodexTokenSnapshot[], model?: string) {
   const userTurns = turns.filter((t) => t.role === "user");
   const usable = snapshots.filter((s) => s.last);
   return userTurns.map((turn, i) => {
