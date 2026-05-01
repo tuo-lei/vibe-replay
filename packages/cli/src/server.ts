@@ -1,7 +1,15 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { type FSWatcher, watch as fsWatch } from "node:fs";
-import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  open as fsOpen,
+  readdir,
+  readFile,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -25,6 +33,7 @@ import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.j
 import { generateOutput, injectDataScript, loadViewerHtml } from "./generator.js";
 import { mergeInsights, readInsightsStore, writeInsightsStore } from "./insights.js";
 import { loadOverlays, sessionWithEffectiveContent } from "./overlays.js";
+import { parseClaudeCodeLines } from "./providers/claude-code/parser.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
 import {
   getApiUrl,
@@ -1361,6 +1370,77 @@ export async function startServer(
         }
       };
 
+      // Re-resolving (full provider.discover()) is expensive — for Claude it
+      // walks the whole ~/.claude/projects tree and takes seconds. We only do
+      // it on a slow periodic cadence (and lazily, the next time we need to
+      // build) so that fast-path rebuilds — driven by fs.watch events on the
+      // already-known JSONL — pay only parse + transform cost.
+      const RESOLVE_REFRESH_INTERVAL_MS = 15_000;
+      let lastResolvedAt = Date.now();
+
+      // Per-file JSONL tail cache. Tracks the last byte offset we read for
+      // each path plus an unterminated trailing fragment (a JSONL append may
+      // flush mid-line). Each fs.watch tick reads only the new bytes via
+      // pread() instead of re-reading the whole file — a multi-thousand-line
+      // session goes from O(file_size) per tick to O(new_bytes).
+      type TailCache = { offset: number; partial: string; lines: string[] };
+      const jsonlTail = new Map<string, TailCache>();
+
+      const tailReadJsonl = async (filePath: string): Promise<string[]> => {
+        const cached = jsonlTail.get(filePath);
+        let size: number;
+        try {
+          size = (await stat(filePath)).size;
+        } catch {
+          // File disappeared — drop cache so a fresh read sets up clean state.
+          jsonlTail.delete(filePath);
+          return cached?.lines ?? [];
+        }
+
+        // First read or file shrank (truncate / rotate) — read whole file.
+        // Invariants: `offset` = absolute byte position to read NEXT (= end of
+        // last read). `partial` = trailing fragment held back from `lines`
+        // until a newline arrives. Next call reads `[offset, size)`, prepends
+        // `partial` in memory, and re-splits.
+        if (!cached || size < cached.offset) {
+          const content = await readFile(filePath, "utf-8");
+          const parts = content.split("\n");
+          const partial = parts.pop() ?? "";
+          const lines = parts.filter((l) => l.length > 0);
+          jsonlTail.set(filePath, { offset: size, partial, lines });
+          return lines;
+        }
+
+        if (size === cached.offset) {
+          return cached.lines;
+        }
+
+        // Read just the new tail. Use a file handle + read() at offset so we
+        // don't slurp the whole file for a tiny append.
+        const len = size - cached.offset;
+        const fh = await fsOpen(filePath, "r");
+        try {
+          const buf = Buffer.alloc(len);
+          await fh.read(buf, 0, len, cached.offset);
+          const text = cached.partial + buf.toString("utf8");
+          const parts = text.split("\n");
+          const newPartial = parts.pop() ?? "";
+          for (const line of parts) {
+            if (line.length > 0) cached.lines.push(line);
+          }
+          cached.partial = newPartial;
+          cached.offset = size;
+        } finally {
+          await fh.close();
+        }
+        return cached.lines;
+      };
+
+      // Cache the last `provider.parse` result for fallback (non-Claude)
+      // providers; we still need to call provider.parse for Cursor/Codex etc.
+      // because those formats aren't pure JSONL.
+      const isClaudeJsonl = providerName === "claude-code";
+
       const buildAndSend = async () => {
         if (aborted) return;
         if (inFlight) {
@@ -1369,9 +1449,14 @@ export async function startServer(
         }
         inFlight = true;
         try {
-          // Re-resolve so we pick up new filePaths from /resume mid-stream
-          const fresh = await resolveSessionInfo();
-          if (fresh) sessionInfo = fresh;
+          // Refresh sessionInfo only if it's been a while since the last
+          // resolve. This lets /resume mid-stream eventually pick up new
+          // JSONL shards without paying a full discovery cost on every save.
+          if (Date.now() - lastResolvedAt >= RESOLVE_REFRESH_INTERVAL_MS) {
+            const fresh = await resolveSessionInfo();
+            if (fresh) sessionInfo = fresh;
+            lastResolvedAt = Date.now();
+          }
           const info = sessionInfo!;
           const paths = [...info.filePaths, ...(info.toolPaths || [])];
           // Register watchers for any new paths (e.g. /resume created a new
@@ -1379,7 +1464,22 @@ export async function startServer(
           // would never trigger another scheduleRebuild and the stream would
           // silently go stale.
           ensureWatchersFor(paths);
-          const parsed = await provider.parse(paths, info);
+          let parsed;
+          if (isClaudeJsonl) {
+            // Tail-based fast path. Concat already-cached lines from every
+            // shard (filePaths is sorted chronologically by mergeSameSessions)
+            // and parse them as one stream — the parser handles cross-shard
+            // continuity. Subagent agents/ files are still re-read in full
+            // inside the parser, but they're typically small.
+            const allLines: string[] = [];
+            for (const fp of paths) {
+              const lines = await tailReadJsonl(fp);
+              allLines.push(...lines);
+            }
+            parsed = await parseClaudeCodeLines(allLines, { subagentsSourcePath: paths[0] });
+          } else {
+            parsed = await provider.parse(paths, info);
+          }
           const replay = transformToReplay(parsed, providerName, projectFor(info), {
             generator: {
               name: "vibe-replay",
@@ -1423,7 +1523,10 @@ export async function startServer(
         }
       };
 
-      const scheduleRebuild = (delay = 250) => {
+      // 100ms debounce — claude-devtools uses the same value. Long enough to
+      // coalesce a burst of fs.watch events from a single JSONL flush, short
+      // enough that a streamed assistant response feels live.
+      const scheduleRebuild = (delay = 100) => {
         if (aborted) return;
         if (pendingTimer) clearTimeout(pendingTimer);
         pendingTimer = setTimeout(() => {
