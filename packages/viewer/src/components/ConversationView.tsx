@@ -109,15 +109,17 @@ export default function ConversationView({
     return result;
   }, [scenes]);
 
-  // Only show groups that have visible scenes, filtered by effectivePrefs
+  // Show ALL turns by default — never hide content the user already has on
+  // disk. Playback (the play button + currentIndex / visibleCount) now
+  // controls only the camera (scroll-to-current) and the focus indicator.
+  // Hiding follow-up turns made it look like content was missing — see
+  // https://github.com/tuo-lei/vibe-replay/pull/215 review feedback.
   const displayGroups = useMemo(() => {
     if (effectivePrefs.promptsOnly) {
-      return allGroups.filter(
-        (g) => (g.type === "user" || g.type === "compaction") && g.scenes[0].index < visibleCount,
-      );
+      return allGroups.filter((g) => g.type === "user" || g.type === "compaction");
     }
-    return allGroups.filter((g) => g.scenes[0].index < visibleCount);
-  }, [allGroups, visibleCount, effectivePrefs.promptsOnly]);
+    return allGroups;
+  }, [allGroups, effectivePrefs.promptsOnly]);
 
   // Find which group contains the currentIndex
   const currentGroupIdx = useMemo(() => {
@@ -401,18 +403,17 @@ const GroupCard = memo(function GroupCard({
     return peak > 200_000 ? 1_000_000 : 200_000;
   }, [turnStats]);
 
-  // Only include scenes that are visible so far
-  const visibleScenes = useMemo(
-    () => group.scenes.filter((s) => s.index < visibleCount),
-    [group.scenes, visibleCount],
-  );
+  // Render every scene in the group — no longer gated by visibleCount.
+  // Playback advance still updates currentIndex (used for the focus
+  // indicator + scroll-follow), but never hides content.
+  const groupScenes = group.scenes;
 
-  const groupHasCurrent = visibleScenes.some(({ index }) => index === currentIndex);
+  const groupHasCurrent = groupScenes.some(({ index }) => index === currentIndex);
   const groupHasFocusedTarget =
-    typeof focusIndex === "number" && visibleScenes.some(({ index }) => index === focusIndex);
-  const firstIndex = visibleScenes[0]?.index;
+    typeof focusIndex === "number" && groupScenes.some(({ index }) => index === focusIndex);
+  const firstIndex = groupScenes[0]?.index;
 
-  if (visibleScenes.length === 0) return null;
+  if (groupScenes.length === 0) return null;
 
   // User groups get a group-level comment button (single scene)
   const userCommentCount = group.type === "user" ? annotationCounts?.get(firstIndex) || 0 : 0;
@@ -520,7 +521,7 @@ const GroupCard = memo(function GroupCard({
             );
           })()}
         <div className="text-left">
-          {visibleScenes.map(({ scene, index }) => {
+          {groupScenes.map(({ scene, index }) => {
             const sceneOverlays = overlayActions?.getOverlays(index) ?? [];
             const effectiveContent = overlayActions?.getEffectiveContent(index);
             const isShowingOriginal = overlayActions?.showOriginal.has(index);
@@ -569,7 +570,7 @@ const GroupCard = memo(function GroupCard({
   }
 
   if (group.type === "compaction") {
-    const scene = visibleScenes[0]?.scene;
+    const scene = groupScenes[0]?.scene;
     if (!scene || scene.type !== "compaction-summary") return null;
 
     // Find compaction token impact from turnStats (context drop > 50%) near this group's position
@@ -624,7 +625,7 @@ const GroupCard = memo(function GroupCard({
   }
 
   if (group.type === "context-injection") {
-    const scene = visibleScenes[0]?.scene;
+    const scene = groupScenes[0]?.scene;
     if (!scene || scene.type !== "context-injection") return null;
     const it = scene.injectionType || "system";
     const label = it.startsWith("skill:")
@@ -665,8 +666,8 @@ const GroupCard = memo(function GroupCard({
 
   // Assistant group — filter by effectivePrefs
   const filteredScenes = effectivePrefs.hideThinking
-    ? visibleScenes.filter((s) => s.scene.type !== "thinking")
-    : visibleScenes;
+    ? groupScenes.filter((s) => s.scene.type !== "thinking")
+    : groupScenes;
 
   if (filteredScenes.length === 0) return null;
 
