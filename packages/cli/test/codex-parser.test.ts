@@ -214,6 +214,76 @@ describe("Codex parser", () => {
     }
   });
 
+  it("converts Codex response-item image paths to data URLs", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vibe-replay-codex-content-image-"));
+    const imagePath = join(dir, "tiny.png");
+    await writeFile(imagePath, Buffer.from("89504e470d0a1a0a", "hex"));
+
+    try {
+      const result = parseCodexLines(
+        [
+          {
+            timestamp: "2026-04-26T07:30:00.000Z",
+            type: "session_meta",
+            payload: { id: "codex-session-3b", cwd: "/Users/test/project", source: "app" },
+          },
+          {
+            timestamp: "2026-04-26T07:30:01.000Z",
+            type: "response_item",
+            payload: {
+              type: "message",
+              role: "user",
+              content: [{ type: "input_image", path: imagePath }],
+            },
+          },
+        ].map((line) => JSON.stringify(line)),
+      );
+
+      const imageBlock = result.turns[0].blocks.find((block) => block.type === "_user_images");
+      expect(imageBlock).toMatchObject({
+        type: "_user_images",
+        images: [expect.stringMatching(/^data:image\/png;base64,/)],
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("parses Codex response-item local_image parts", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vibe-replay-codex-local-image-"));
+    const imagePath = join(dir, "tiny.png");
+    await writeFile(imagePath, Buffer.from("89504e470d0a1a0a", "hex"));
+
+    try {
+      const result = parseCodexLines(
+        [
+          {
+            timestamp: "2026-04-26T07:40:00.000Z",
+            type: "session_meta",
+            payload: { id: "codex-session-3c", cwd: "/Users/test/project", source: "app" },
+          },
+          {
+            timestamp: "2026-04-26T07:40:01.000Z",
+            type: "response_item",
+            payload: {
+              type: "message",
+              role: "user",
+              content: [{ type: "local_image", path: imagePath }],
+            },
+          },
+        ].map((line) => JSON.stringify(line)),
+      );
+
+      const imageBlock = result.turns[0].blocks.find((block) => block.type === "_user_images");
+      expect(imageBlock).toMatchObject({
+        type: "_user_images",
+        images: [expect.stringMatching(/^data:image\/png;base64,/)],
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("normalizes Codex edit tool names for scan counters", () => {
     const result = parseCodexLines(
       [
@@ -269,6 +339,37 @@ describe("Codex parser", () => {
           local_images: ["/Users/test/screenshot.png"],
         },
       },
+      {
+        timestamp: "2026-04-26T09:00:01.500Z",
+        type: "event_msg",
+        payload: {
+          type: "user_message",
+          local_images: ["/Users/test/other-screenshot.png"],
+        },
+      },
+      {
+        timestamp: "2026-04-26T09:00:01.900Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_image",
+              source: { media_type: "image/png", data: "aW1hZ2UtYnl0ZXM=" },
+            },
+          ],
+        },
+      },
+      {
+        timestamp: "2026-04-26T09:00:02.300Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "local_image", path: "/Users/test/local-image.png" }],
+        },
+      },
     ]
       .map((line) => JSON.stringify(line))
       .join("\n");
@@ -280,7 +381,158 @@ describe("Codex parser", () => {
       expect(info).toMatchObject({
         sessionId: "codex-session-5",
         firstPrompt: "[Image]",
+        promptCount: 4,
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("discovers all Codex tool-call item variants", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vibe-replay-codex-discover-tools-"));
+    const rolloutPath = join(dir, "rollout-2026-04-26T09-30-00-codex-session-tools.jsonl");
+    const content = [
+      {
+        timestamp: "2026-04-26T09:30:00.000Z",
+        type: "session_meta",
+        payload: { id: "codex-session-tools", cwd: "/Users/test/project", source: "cli" },
+      },
+      {
+        timestamp: "2026-04-26T09:30:01.000Z",
+        type: "event_msg",
+        payload: { type: "user_message", message: "Run tools for this session." },
+      },
+      {
+        timestamp: "2026-04-26T09:30:02.000Z",
+        type: "response_item",
+        payload: { type: "local_shell_call", call_id: "shell_1", action: { command: "pwd" } },
+      },
+      {
+        timestamp: "2026-04-26T09:30:03.000Z",
+        type: "response_item",
+        payload: {
+          type: "tool_search_call",
+          call_id: "search_1",
+          arguments: { query: "github" },
+        },
+      },
+      {
+        timestamp: "2026-04-26T09:30:04.000Z",
+        type: "response_item",
+        payload: {
+          type: "function_call",
+          name: "apply_patch",
+          call_id: "edit_1",
+          arguments: JSON.stringify({ file_path: "src/app.ts" }),
+        },
+      },
+    ]
+      .map((line) => JSON.stringify(line))
+      .join("\n");
+    await writeFile(rolloutPath, content);
+
+    try {
+      const info = await extractCodexSessionInfo(rolloutPath, Buffer.byteLength(content));
+
+      expect(info).toMatchObject({
+        sessionId: "codex-session-tools",
+        toolCallCount: 3,
+        editCountEst: 1,
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("discovers response-item user messages when event messages are absent", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vibe-replay-codex-discover-response-user-"));
+    const rolloutPath = join(dir, "rollout-2026-04-26T09-45-00-codex-session-response-user.jsonl");
+    const content = [
+      {
+        timestamp: "2026-04-26T09:45:00.000Z",
+        type: "session_meta",
+        payload: { id: "codex-session-response-user", cwd: "/Users/test/project", source: "app" },
+      },
+      {
+        timestamp: "2026-04-26T09:45:00.100Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: "<environment_context>\n  <cwd>/Users/test/project</cwd>\n  <shell>zsh</shell>\n  <current_date>2026-05-02</current_date>\n  <timezone>America/Los_Angeles</timezone>\n</environment_context>\nOnly response item prompt.",
+            },
+          ],
+        },
+      },
+      {
+        timestamp: "2026-04-26T09:45:00.200Z",
+        type: "event_msg",
+        payload: {
+          type: "user_message",
+          message:
+            "<permissions instructions>\nFilesystem sandboxing allows all commands.\nApproval policy is never.\n</permissions instructions>",
+        },
+      },
+    ]
+      .map((line) => JSON.stringify(line))
+      .join("\n");
+    await writeFile(rolloutPath, content);
+
+    try {
+      const info = await extractCodexSessionInfo(rolloutPath, Buffer.byteLength(content));
+
+      expect(info).toMatchObject({
+        sessionId: "codex-session-response-user",
+        firstPrompt: "Only response item prompt.",
         promptCount: 1,
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("counts repeated Codex discovery prompts after the dedupe window", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vibe-replay-codex-discover-repeat-"));
+    const rolloutPath = join(dir, "rollout-2026-04-26T09-50-00-codex-session-repeat.jsonl");
+    const content = [
+      {
+        timestamp: "2026-04-26T09:50:00.000Z",
+        type: "session_meta",
+        payload: { id: "codex-session-repeat", cwd: "/Users/test/project", source: "app" },
+      },
+      {
+        timestamp: "2026-04-26T09:50:01.000Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "Please run the same command." }],
+        },
+      },
+      {
+        timestamp: "2026-04-26T09:50:01.001Z",
+        type: "event_msg",
+        payload: { type: "user_message", message: "Please run the same command." },
+      },
+      {
+        timestamp: "2026-04-26T09:51:01.000Z",
+        type: "event_msg",
+        payload: { type: "user_message", message: "Please run the same command." },
+      },
+    ]
+      .map((line) => JSON.stringify(line))
+      .join("\n");
+    await writeFile(rolloutPath, content);
+
+    try {
+      const info = await extractCodexSessionInfo(rolloutPath, Buffer.byteLength(content));
+
+      expect(info).toMatchObject({
+        sessionId: "codex-session-repeat",
+        promptCount: 2,
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -339,6 +591,234 @@ describe("Codex parser", () => {
       type: "tool_use",
       name: "web_search",
       _result: "[Search: Codex rollout schema]",
+    });
+  });
+
+  it("parses current Codex response-item user messages without duplicating event messages", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-05-03T06:31:26.394Z",
+          type: "session_meta",
+          payload: { id: "codex-session-7", cwd: "/Users/test/project", source: "codex-app" },
+        },
+        {
+          timestamp: "2026-05-03T06:31:26.394Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text: "<environment_context>\n  <cwd>/Users/test/project</cwd>\n</environment_context>\n## My request for Codex: Address Codex compatibility gaps.",
+              },
+            ],
+          },
+        },
+        {
+          timestamp: "2026-05-03T06:31:26.396Z",
+          type: "event_msg",
+          payload: { type: "user_message", message: "Address Codex compatibility gaps." },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    const userTurns = result.turns.filter((turn) => turn.role === "user");
+    expect(userTurns).toHaveLength(1);
+    expect(userTurns[0].blocks[0]).toMatchObject({
+      type: "text",
+      text: "Address Codex compatibility gaps.",
+    });
+  });
+
+  it("keeps repeated same-text Codex prompts after the dedupe window", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-05-03T06:35:00.000Z",
+          type: "session_meta",
+          payload: { id: "codex-session-repeat", cwd: "/Users/test/project", source: "codex-app" },
+        },
+        {
+          timestamp: "2026-05-03T06:35:01.000Z",
+          type: "event_msg",
+          payload: { type: "user_message", message: "Same prompt after a pause." },
+        },
+        {
+          timestamp: "2026-05-03T06:36:01.000Z",
+          type: "event_msg",
+          payload: { type: "user_message", message: "Same prompt after a pause." },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    expect(result.turns.filter((turn) => turn.role === "user")).toHaveLength(2);
+  });
+
+  it("parses Codex agent messages and MCP tool end events", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-05-03T06:32:00.000Z",
+          type: "session_meta",
+          payload: { id: "codex-session-8", cwd: "/Users/test/project", source: "codex-app" },
+        },
+        {
+          timestamp: "2026-05-03T06:32:01.000Z",
+          type: "event_msg",
+          payload: { type: "agent_message", message: "I will inspect the recent PRs." },
+        },
+        {
+          timestamp: "2026-05-03T06:32:02.000Z",
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            name: "_get_users_recent_prs_in_repo",
+            call_id: "mcp_1",
+            arguments: JSON.stringify({ repository_full_name: "tuo-lei/vibe-replay" }),
+          },
+        },
+        {
+          timestamp: "2026-05-03T06:32:03.000Z",
+          type: "event_msg",
+          payload: {
+            type: "mcp_tool_call_end",
+            call_id: "mcp_1",
+            invocation: {
+              server: "codex_apps",
+              tool: "github_get_users_recent_prs_in_repo",
+              arguments: { repository_full_name: "tuo-lei/vibe-replay" },
+            },
+            duration: { secs: 1, nanos: 0 },
+            result: { Ok: { content: [{ type: "text", text: "PR #231" }] } },
+          },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    expect(result.turns.some((turn) => JSON.stringify(turn.blocks).includes("recent PRs"))).toBe(
+      true,
+    );
+    expect(result.mcpServersUsed).toEqual(["codex_apps"]);
+    const tool = result.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.type === "tool_use");
+    expect(tool).toMatchObject({
+      type: "tool_use",
+      name: "mcp__codex_apps__github_get_users_recent_prs_in_repo",
+      _result: "PR #231",
+      _durationMs: 1000,
+    });
+  });
+
+  it("marks failed Codex MCP tool end events as errors", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-05-03T06:40:00.000Z",
+          type: "session_meta",
+          payload: {
+            id: "codex-session-mcp-error",
+            cwd: "/Users/test/project",
+            source: "codex-app",
+          },
+        },
+        {
+          timestamp: "2026-05-03T06:40:01.000Z",
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            name: "_get_users_recent_prs_in_repo",
+            call_id: "mcp_error",
+            arguments: JSON.stringify({ repository_full_name: "tuo-lei/vibe-replay" }),
+          },
+        },
+        {
+          timestamp: "2026-05-03T06:40:02.000Z",
+          type: "event_msg",
+          payload: {
+            type: "mcp_tool_call_end",
+            call_id: "mcp_error",
+            invocation: {
+              server: "codex_apps",
+              tool: "github_get_users_recent_prs_in_repo",
+            },
+            duration: { secs: 3, nanos: 0 },
+            result: { Err: "rate limited" },
+          },
+        },
+        {
+          timestamp: "2026-05-03T06:40:03.000Z",
+          type: "response_item",
+          payload: {
+            type: "function_call_output",
+            call_id: "mcp_error",
+            output: JSON.stringify({ result: { Err: "rate limited" } }),
+          },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    const tool = result.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.type === "tool_use");
+    expect(tool).toMatchObject({
+      type: "tool_use",
+      _isError: true,
+      _result: "rate limited",
+      _durationMs: 3000,
+    });
+  });
+
+  it("marks Codex MCP result.isError payloads as errors", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-05-03T06:45:00.000Z",
+          type: "session_meta",
+          payload: {
+            id: "codex-session-mcp-result-error",
+            cwd: "/Users/test/project",
+            source: "codex-app",
+          },
+        },
+        {
+          timestamp: "2026-05-03T06:45:01.000Z",
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            name: "_get_users_recent_prs_in_repo",
+            call_id: "mcp_result_error",
+            arguments: JSON.stringify({ repository_full_name: "tuo-lei/vibe-replay" }),
+          },
+        },
+        {
+          timestamp: "2026-05-03T06:45:02.000Z",
+          type: "event_msg",
+          payload: {
+            type: "mcp_tool_call_end",
+            call_id: "mcp_result_error",
+            invocation: {
+              server: "codex_apps",
+              tool: "github_get_users_recent_prs_in_repo",
+            },
+            result: {
+              isError: true,
+              content: [{ type: "text", text: "permission denied" }],
+            },
+          },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    const tool = result.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.type === "tool_use");
+    expect(tool).toMatchObject({
+      type: "tool_use",
+      _isError: true,
+      _result: "permission denied",
     });
   });
 });
