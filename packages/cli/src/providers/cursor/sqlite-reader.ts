@@ -2114,7 +2114,7 @@ function extractBubbleModelName(
 
 function extractBubbleDurationMs(bubble: Record<string, any>): number | undefined {
   const thinkingMs = toPositiveMs(bubble.thinkingDurationMs);
-  const toolMs = extractToolExecutionTimeMs((bubble.toolFormerData as any)?.result);
+  const toolMs = extractToolExecutionTimeMs(bubble.toolFormerData?.result);
   if (thinkingMs !== undefined && toolMs !== undefined) return thinkingMs + toolMs;
   return thinkingMs ?? toolMs;
 }
