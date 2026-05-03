@@ -182,7 +182,7 @@ async function parseCursorJsonl(
               result: extractToolResultText(block),
               timestamp: typeof obj.timestamp === "string" ? obj.timestamp : undefined,
             });
-            if ((block as any).is_error) toolErrors.set(toolUseId, true);
+            if (block.is_error) toolErrors.set(toolUseId, true);
             const images = extractToolResultImages(block);
             if (images.length > 0) toolImages.set(toolUseId, images);
           }
