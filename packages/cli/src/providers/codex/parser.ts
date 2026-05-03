@@ -4,7 +4,7 @@ import { extname } from "node:path";
 import { estimateActiveDuration } from "../../duration.js";
 import type { ContentBlock, ParsedTurn, SessionInfo } from "../../types.js";
 import type { Compaction, ProviderParseResult, TokenUsage } from "../types.js";
-import { USER_MESSAGE_BEGIN } from "./constants.js";
+import { CODEX_CONTEXT_TAGS, isCodexToolCallType, USER_MESSAGE_BEGIN } from "./constants.js";
 
 interface PendingTool {
   id: string;
@@ -76,6 +76,8 @@ export function parseCodexLines(
   const mcpServersUsed = new Set<string>();
   const skillsUsed = new Set<string>();
   const gitBranches: string[] = [];
+  const seenUserMessages = new Map<string, number[]>();
+  const seenAssistantMessages = new Map<string, number[]>();
 
   for (const line of lines) {
     let obj: any;
@@ -119,9 +121,29 @@ export function parseCodexLines(
       }
       if (p.type === "user_message") {
         const blocks = userMessageBlocks(p);
-        if (blocks.length > 0) {
-          turns.push({ role: "user", timestamp: obj.timestamp, blocks });
+        const text = textFromBlocks(blocks);
+        if (blocks.length > 0 && shouldRecordMessage(seenUserMessages, obj.timestamp, blocks)) {
+          turns.push({
+            role: "user",
+            ...(isCompactionSummaryText(text) ? { subtype: "compaction-summary" as const } : {}),
+            timestamp: obj.timestamp,
+            blocks,
+          });
         }
+        continue;
+      }
+      if (
+        p.type === "agent_message" &&
+        typeof p.message === "string" &&
+        p.message.trim().length > 0
+      ) {
+        const blocks: ContentBlock[] = [{ type: "text", text: p.message }];
+        if (!shouldRecordMessage(seenAssistantMessages, obj.timestamp, blocks)) continue;
+        turns.push({
+          role: "assistant",
+          timestamp: obj.timestamp,
+          blocks,
+        });
         continue;
       }
       if (p.type === "agent_reasoning" && typeof p.text === "string" && p.text.trim()) {
@@ -133,7 +155,7 @@ export function parseCodexLines(
         continue;
       }
       if (p.type === "exec_command_end" && p.call_id) {
-        toolResults.set(p.call_id, {
+        mergeToolResult(toolResults, p.call_id, {
           result: formatExecResult(p),
           isError: typeof p.exit_code === "number" ? p.exit_code !== 0 : undefined,
           timestamp: obj.timestamp,
@@ -159,9 +181,25 @@ export function parseCodexLines(
             timestamp: obj.timestamp,
           });
         }
-        toolResults.set(callId, {
+        mergeToolResult(toolResults, callId, {
           result: `[Search: ${typeof p.query === "string" ? p.query : JSON.stringify(p.query)}]`,
           timestamp: obj.timestamp,
+        });
+      }
+      if (p.type === "mcp_tool_call_end" && p.call_id) {
+        const invocation = p.invocation || {};
+        const server = typeof invocation.server === "string" ? invocation.server : "";
+        const toolName = typeof invocation.tool === "string" ? invocation.tool : "";
+        const tool = tools.get(p.call_id);
+        if (tool && server && toolName) {
+          tool.name = `mcp__${server}__${toolName}`;
+          mcpServersUsed.add(server);
+        }
+        mergeToolResult(toolResults, p.call_id, {
+          result: formatMcpToolResult(p),
+          isError: isMcpToolError(p),
+          timestamp: obj.timestamp,
+          durationMs: durationToMs(p.duration),
         });
       }
       continue;
@@ -170,13 +208,29 @@ export function parseCodexLines(
     if (obj.type !== "response_item") continue;
     const p = obj.payload || {};
 
+    if (p.type === "message" && p.role === "user") {
+      const blocks = userMessageBlocksFromContent(p.content);
+      const text = textFromBlocks(blocks);
+      if (blocks.length > 0 && shouldRecordMessage(seenUserMessages, obj.timestamp, blocks)) {
+        turns.push({
+          role: "user",
+          ...(isCompactionSummaryText(text) ? { subtype: "compaction-summary" as const } : {}),
+          timestamp: obj.timestamp,
+          blocks,
+        });
+      }
+      continue;
+    }
+
     if (p.type === "message" && p.role === "assistant") {
       const text = contentText(p.content);
       if (text.trim()) {
+        const blocks: ContentBlock[] = [{ type: "text", text }];
+        if (!shouldRecordMessage(seenAssistantMessages, obj.timestamp, blocks)) continue;
         turns.push({
           role: "assistant",
           timestamp: obj.timestamp,
-          blocks: [{ type: "text", text }],
+          blocks,
         });
       }
       continue;
@@ -202,14 +256,7 @@ export function parseCodexLines(
       continue;
     }
 
-    if (
-      p.type === "function_call" ||
-      p.type === "local_shell_call" ||
-      p.type === "custom_tool_call" ||
-      p.type === "tool_search_call" ||
-      p.type === "web_search_call" ||
-      p.type === "image_generation_call"
-    ) {
+    if (isCodexToolCallType(p.type)) {
       const callId = p.call_id || p.id || `${p.type}:${obj.timestamp}:${tools.size}`;
       const name = p.name || normalizeCodexToolName(p.type);
       const input = inputForResponseItem(p);
@@ -228,10 +275,15 @@ export function parseCodexLines(
       p.type === "tool_search_output"
     ) {
       if (p.call_id) {
-        toolResults.set(p.call_id, {
-          result: formatOutputPayload(p),
-          timestamp: obj.timestamp,
-        });
+        mergeToolResult(
+          toolResults,
+          p.call_id,
+          {
+            result: formatOutputPayload(p),
+            timestamp: obj.timestamp,
+          },
+          { preferExistingResult: true },
+        );
       }
       continue;
     }
@@ -299,8 +351,7 @@ export function parseCodexLines(
 
 function userMessageBlocks(payload: any): ContentBlock[] {
   const blocks: ContentBlock[] = [];
-  const text =
-    typeof payload.message === "string" ? stripUserMessagePrefix(payload.message).trim() : "";
+  const text = typeof payload.message === "string" ? normalizeUserMessageText(payload.message) : "";
   if (text) blocks.push({ type: "text", text });
 
   const imageUrls = [...(Array.isArray(payload.images) ? payload.images : [])].filter(
@@ -313,6 +364,62 @@ function userMessageBlocks(payload: any): ContentBlock[] {
   imageUrls.push(...localImages);
   if (imageUrls.length > 0) blocks.push({ type: "_user_images", images: imageUrls });
   return blocks;
+}
+
+function userMessageBlocksFromContent(content: any): ContentBlock[] {
+  const blocks: ContentBlock[] = [];
+  const text = normalizeUserMessageText(contentText(content));
+  if (text) blocks.push({ type: "text", text });
+
+  const images = contentImages(content);
+  if (images.length > 0) blocks.push({ type: "_user_images", images });
+  return blocks;
+}
+
+function textFromBlocks(blocks: ContentBlock[]): string {
+  return blocks
+    .filter((block): block is ContentBlock & { type: "text" } => block.type === "text")
+    .map((block) => block.text || "")
+    .join("\n")
+    .trim();
+}
+
+function shouldRecordMessage(
+  seen: Map<string, number[]>,
+  timestamp: string | undefined,
+  blocks: ContentBlock[],
+): boolean {
+  const key = messageDedupeKey(blocks);
+  const time = timestamp ? Date.parse(timestamp) : Number.NaN;
+  const previous = seen.get(key) || [];
+  const isDuplicate = Number.isNaN(time)
+    ? previous.length > 0
+    : previous.some((prev) => Math.abs(time - prev) <= 2_000);
+  if (isDuplicate) return false;
+  seen.set(key, [...previous, Number.isNaN(time) ? Number.NEGATIVE_INFINITY : time]);
+  return true;
+}
+
+function messageDedupeKey(blocks: ContentBlock[]): string {
+  return blocks
+    .map((block) => {
+      if (block.type === "text") return `text:${block.text || ""}`;
+      if (block.type === "_user_images") {
+        return `images:${block.images.map(imageDedupeKey).join(",")}`;
+      }
+      return `block:${block.type}`;
+    })
+    .join("|");
+}
+
+function imageDedupeKey(image: string): string {
+  return `${image.slice(0, 64)}:${image.length}:${image.slice(-32)}`;
+}
+
+function isCompactionSummaryText(text: string): boolean {
+  // Codex-native compactions emit `response_item.compaction`; this keeps
+  // compatibility with imported/bridged transcripts that use Claude's preamble.
+  return text.startsWith("This session is being continued from a previous conversation");
 }
 
 function contentText(content: any): string {
@@ -328,6 +435,28 @@ function contentText(content: any): string {
     })
     .filter(Boolean)
     .join("\n");
+}
+
+function contentImages(content: any): string[] {
+  if (!Array.isArray(content)) return [];
+  const images: string[] = [];
+  for (const part of content) {
+    if (part?.type !== "input_image" && part?.type !== "image" && part?.type !== "local_image") {
+      continue;
+    }
+    const imageUrl =
+      typeof part.image_url === "string"
+        ? part.image_url
+        : typeof part.image_url?.url === "string"
+          ? part.image_url.url
+          : typeof part.source?.data === "string"
+            ? `data:${part.source.media_type || "image/png"};base64,${part.source.data}`
+            : typeof part.path === "string"
+              ? localImageToDataUrl(part.path) || ""
+              : "";
+    if (imageUrl) images.push(imageUrl);
+  }
+  return images;
 }
 
 function reasoningText(payload: any): string {
@@ -421,6 +550,42 @@ function formatOutputPayload(payload: any): string {
   return JSON.stringify(payload);
 }
 
+function mergeToolResult(
+  toolResults: Map<string, ToolResult>,
+  callId: string,
+  next: ToolResult,
+  options: { preferExistingResult?: boolean } = {},
+): void {
+  const previous = toolResults.get(callId);
+  if (!previous) {
+    toolResults.set(callId, next);
+    return;
+  }
+
+  toolResults.set(callId, {
+    result:
+      options.preferExistingResult && previous.result
+        ? previous.result
+        : next.result || previous.result,
+    isError: next.isError ?? previous.isError,
+    timestamp: next.timestamp || previous.timestamp,
+    durationMs: next.durationMs ?? previous.durationMs,
+  });
+}
+
+function formatMcpToolResult(payload: any): string {
+  const result = payload.result?.Ok ?? payload.result?.Err ?? payload.result;
+  if (result?.content) return formatContentItems(result.content);
+  if (typeof result === "string") return result;
+  return result ? JSON.stringify(result, null, 2) : "";
+}
+
+function isMcpToolError(payload: any): boolean {
+  return Boolean(
+    payload.isError || payload.is_error || payload.result?.Err || payload.result?.isError,
+  );
+}
+
 function formatContentItems(items: any[]): string {
   return items
     .map((item) => {
@@ -493,6 +658,33 @@ function buildCodexTurnStats(turns: ParsedTurn[], snapshots: CodexTokenSnapshot[
 
 function pushUnique(items: string[], value: string): void {
   if (items.length === 0 || items[items.length - 1] !== value) items.push(value);
+}
+
+function normalizeUserMessageText(text: string): string {
+  let normalized = text;
+  for (let i = 0; i < 2; i++) {
+    normalized = stripUserMessagePrefix(stripLeadingCodexContextBlocks(normalized)).trim();
+  }
+  return normalized;
+}
+
+function stripLeadingCodexContextBlocks(text: string): string {
+  let remaining = text.trim();
+  let stripped = true;
+  while (stripped) {
+    stripped = false;
+    for (const tag of CODEX_CONTEXT_TAGS) {
+      const open = `<${tag}>`;
+      const close = `</${tag}>`;
+      if (!remaining.startsWith(open)) continue;
+      const closeIndex = remaining.indexOf(close);
+      if (closeIndex === -1) return "";
+      remaining = remaining.slice(closeIndex + close.length).trim();
+      stripped = true;
+      break;
+    }
+  }
+  return remaining;
 }
 
 function stripUserMessagePrefix(text: string): string {

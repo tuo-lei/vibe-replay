@@ -6,7 +6,7 @@ import { createInterface } from "node:readline";
 import { cleanPromptText } from "../../clean-prompt.js";
 import type { SessionInfo } from "../../types.js";
 import { shortenPath } from "../../utils.js";
-import { USER_MESSAGE_BEGIN } from "./constants.js";
+import { CODEX_CONTEXT_TAGS, isCodexToolCallType, USER_MESSAGE_BEGIN } from "./constants.js";
 
 const STATE_DB_FILENAME = "state_5.sqlite";
 
@@ -53,7 +53,10 @@ async function sessionInfoFromThreadRow(row: CodexThreadRow): Promise<SessionInf
   if (!fileStat?.isFile()) return null;
 
   const extracted = await extractCodexSessionInfo(row.rollout_path, fileStat.size);
-  const firstPrompt = cleanCodexUserMessage(row.first_user_message || extracted?.firstPrompt || "");
+  const rowFirstPrompt = row.first_user_message
+    ? normalizeDiscoveredUserMessage(row.first_user_message)
+    : "";
+  const firstPrompt = rowFirstPrompt || extracted?.firstPrompt || "";
   if (!firstPrompt) return extracted;
 
   return {
@@ -101,6 +104,7 @@ export async function extractCodexSessionInfo(
   let editCountEst = 0;
   let durationMsEst = 0;
   const prompts: string[] = [];
+  const promptSeen = new Map<string, number[]>();
 
   let rl: ReturnType<typeof createInterface> | undefined;
   try {
@@ -139,13 +143,11 @@ export async function extractCodexSessionInfo(
         const p = obj.payload || {};
         if (p.type === "thread_name_updated" && p.thread_name) title = p.thread_name;
         if (p.type === "user_message") {
-          const cleaned = typeof p.message === "string" ? cleanCodexUserMessage(p.message) : "";
-          const hasImages = hasUserImages(p);
-          if (cleaned.length >= 10 || hasImages) {
+          const rawText = typeof p.message === "string" ? p.message : "";
+          const cleaned = normalizeDiscoveredUserMessage(rawText);
+          const imageKey = userImageDedupeKey(p);
+          if (recordDiscoveredPrompt(promptSeen, prompts, obj.timestamp, cleaned, imageKey)) {
             promptCount++;
-            if (prompts.length < 2) {
-              prompts.push((cleaned || "[Image]").slice(0, 200));
-            }
           }
         }
         if (p.type === "exec_command_end" && typeof p.duration?.secs === "number") {
@@ -156,7 +158,15 @@ export async function extractCodexSessionInfo(
 
       if (obj.type === "response_item") {
         const p = obj.payload || {};
-        if (p.type === "function_call") {
+        if (p.type === "message" && p.role === "user") {
+          const rawText = contentText(p.content);
+          const cleaned = normalizeDiscoveredUserMessage(rawText);
+          const imageKey = contentImageDedupeKey(p.content);
+          if (recordDiscoveredPrompt(promptSeen, prompts, obj.timestamp, cleaned, imageKey)) {
+            promptCount++;
+          }
+        }
+        if (isCodexToolCallType(p.type)) {
           toolCallCount++;
           if (isEditTool(p.name)) editCountEst++;
         }
@@ -279,16 +289,113 @@ function isEditTool(name?: string): boolean {
   return !!name && ["apply_patch", "edit", "write_file"].includes(name);
 }
 
-function cleanCodexUserMessage(text: string): string {
-  const withoutPrefix = text.includes(USER_MESSAGE_BEGIN)
-    ? text.slice(text.indexOf(USER_MESSAGE_BEGIN) + USER_MESSAGE_BEGIN.length)
-    : text;
-  return cleanPromptText(withoutPrefix);
+function normalizeDiscoveredUserMessage(text: string): string {
+  let normalized = text;
+  for (let i = 0; i < 2; i++) {
+    normalized = stripUserMessagePrefix(stripLeadingCodexContextBlocks(normalized)).trim();
+  }
+  return cleanPromptText(normalized);
 }
 
-function hasUserImages(payload: any): boolean {
-  return (
-    (Array.isArray(payload.images) && payload.images.length > 0) ||
-    (Array.isArray(payload.local_images) && payload.local_images.length > 0)
-  );
+function stripUserMessagePrefix(text: string): string {
+  const idx = text.indexOf(USER_MESSAGE_BEGIN);
+  return idx === -1 ? text : text.slice(idx + USER_MESSAGE_BEGIN.length);
+}
+
+function recordDiscoveredPrompt(
+  promptSeen: Map<string, number[]>,
+  prompts: string[],
+  timestamp: string | undefined,
+  text: string,
+  imageKey: string,
+): boolean {
+  const hasImages = imageKey.length > 0;
+  if (isCodexContextMessage(text)) return false;
+  if (text.length < 10 && !hasImages) return false;
+  const key = `${text}:images:${imageKey}`;
+  const time = timestamp ? Date.parse(timestamp) : Number.NaN;
+  const previous = promptSeen.get(key) || [];
+  const isDuplicate = Number.isNaN(time)
+    ? previous.length > 0
+    : previous.some((prev) => Math.abs(time - prev) <= 2_000);
+  if (isDuplicate) return false;
+  promptSeen.set(key, [...previous, Number.isNaN(time) ? Number.NEGATIVE_INFINITY : time]);
+  if (prompts.length < 2) prompts.push((text || "[Image]").slice(0, 200));
+  return true;
+}
+
+function contentText(content: any): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => {
+      if (typeof part === "string") return part;
+      if (part?.type === "output_text" || part?.type === "input_text" || part?.type === "text") {
+        return part.text || "";
+      }
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function isCodexContextMessage(text: string): boolean {
+  const trimmed = text.trim();
+  return CODEX_CONTEXT_TAGS.some((tag) => trimmed.startsWith(`<${tag}>`));
+}
+
+function stripLeadingCodexContextBlocks(text: string): string {
+  let remaining = text.trim();
+  let stripped = true;
+  while (stripped) {
+    stripped = false;
+    for (const tag of CODEX_CONTEXT_TAGS) {
+      const open = `<${tag}>`;
+      const close = `</${tag}>`;
+      if (!remaining.startsWith(open)) continue;
+      const closeIndex = remaining.indexOf(close);
+      if (closeIndex === -1) return "";
+      remaining = remaining.slice(closeIndex + close.length).trim();
+      stripped = true;
+      break;
+    }
+  }
+  return remaining;
+}
+
+function userImageDedupeKey(payload: any): string {
+  return [
+    ...(Array.isArray(payload.images) ? payload.images : []),
+    ...(Array.isArray(payload.local_images) ? payload.local_images : []),
+  ]
+    .filter((image): image is string => typeof image === "string" && image.length > 0)
+    .map(imageDedupeKey)
+    .join(",");
+}
+
+function contentImageDedupeKey(content: any): string {
+  if (!Array.isArray(content)) return "";
+  return content
+    .flatMap((part) => {
+      if (part?.type !== "input_image" && part?.type !== "image" && part?.type !== "local_image") {
+        return [];
+      }
+      const image =
+        typeof part.image_url === "string"
+          ? part.image_url
+          : typeof part.image_url?.url === "string"
+            ? part.image_url.url
+            : typeof part.source?.data === "string"
+              ? `data:${part.source.media_type || "image/png"};base64,${part.source.data}`
+              : typeof part.path === "string"
+                ? part.path
+                : "";
+      return image ? [image] : [];
+    })
+    .map(imageDedupeKey)
+    .join(",");
+}
+
+function imageDedupeKey(image: string): string {
+  return `${image.slice(0, 64)}:${image.length}:${image.slice(-32)}`;
 }
