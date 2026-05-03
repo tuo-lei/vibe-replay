@@ -124,6 +124,11 @@ async function runGitHubExport(
 }
 
 const DEV_MENU_ENABLED = process.env.VIBE_REPLAY_DEV_MENU === "1";
+
+function getDevViewerOpts(): { externalViewerUrl: string } | undefined {
+  if (!DEV_MENU_ENABLED) return undefined;
+  return { externalViewerUrl: `http://localhost:${process.env.VIBE_VIEWER_PORT || "5173"}` };
+}
 // Bumped v2 → v3 alongside the Cowork sessionId fix (see server.ts
 // sourcesCacheKey comment). Old caches carry the wrong Cowork identity and
 // must be thrown out so the next discovery sweep writes a correct one.
@@ -212,12 +217,7 @@ program
 
     // --dashboard: open Dashboard directly
     if (opts.dashboard) {
-      await startDashboard(
-        replayBaseDir,
-        DEV_MENU_ENABLED
-          ? { externalViewerUrl: `http://localhost:${process.env.VIBE_VIEWER_PORT || "5173"}` }
-          : undefined,
-      );
+      await startDashboard(replayBaseDir, getDevViewerOpts());
       return;
     }
 
@@ -255,12 +255,7 @@ program
       });
 
       if (topChoice === "dashboard") {
-        await startDashboard(
-          replayBaseDir,
-          DEV_MENU_ENABLED
-            ? { externalViewerUrl: `http://localhost:${process.env.VIBE_VIEWER_PORT || "5173"}` }
-            : undefined,
-        );
+        await startDashboard(replayBaseDir, getDevViewerOpts());
         return;
       }
 
@@ -627,9 +622,7 @@ program
     } else if (target === "editor") {
       await startServer(join(home, ".vibe-replay"), {
         openSlug: slug,
-        externalViewerUrl: DEV_MENU_ENABLED
-          ? `http://localhost:${process.env.VIBE_VIEWER_PORT || "5173"}`
-          : undefined,
+        ...getDevViewerOpts(),
       });
       return; // startServer blocks until Ctrl+C
     } else if (target === "cloud") {
