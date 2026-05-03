@@ -44,6 +44,10 @@ type Env = AuthEnv & {
   GITHUB_APP_ID?: string;
   GITHUB_APP_PRIVATE_KEY?: string;
   GITHUB_APP_INSTALLATION_ID?: string;
+  /** Test-only auth bypass. Honored only for localhost Better Auth URLs. */
+  TEST_AUTH_USER_ID?: string;
+  TEST_AUTH_USER_EMAIL?: string;
+  TEST_AUTH_USER_NAME?: string;
 };
 
 type HonoEnv = { Bindings: Env };
@@ -393,6 +397,16 @@ fetch('http://127.0.0.1:${encodeURIComponent(port)}/callback',{method:'POST',hea
 async function requireAuth(
   c: Context<HonoEnv>,
 ): Promise<{ userId: string; user: { id: string; name: string; email: string } } | Response> {
+  if (isDev(c.env) && c.env.TEST_AUTH_USER_ID && c.req.header("x-vibe-replay-test-auth") === "1") {
+    const id = c.req.header("x-vibe-replay-test-user-id") || c.env.TEST_AUTH_USER_ID;
+    const user = {
+      id,
+      name: c.env.TEST_AUTH_USER_NAME || "Test User",
+      email: c.env.TEST_AUTH_USER_EMAIL || `${id}@example.com`,
+    };
+    return { userId: user.id, user };
+  }
+
   const auth = createAuth(c.env);
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   if (!session) {
@@ -2138,15 +2152,27 @@ export default {
     // Cron deletes R2 objects after grace period, zeros sizeBytes to free quota.
     // D1 rows are kept permanently for history/analytics.
     const GRACE_DAYS = 7;
+    const cleanupCutoff = new Date(Date.now() - GRACE_DAYS * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .replace("T", " ")
+      .slice(0, 19);
+    const expiredReplayFilter = sql`
+      ${cloudReplays.expiresAt} IS NOT NULL
+      AND ${cloudReplays.expiresAt} < ${cleanupCutoff}
+      AND ${cloudReplays.sizeBytes} > 0
+    `;
+    const expiredFileFilter = sql`
+      ${userFiles.expiresAt} IS NOT NULL
+      AND ${userFiles.expiresAt} < ${cleanupCutoff}
+      AND ${userFiles.sizeBytes} > 0
+    `;
 
     // Clean expired cloud replays
     for (;;) {
       const expired = await db
         .select({ id: cloudReplays.id })
         .from(cloudReplays)
-        .where(
-          sql`${cloudReplays.expiresAt} IS NOT NULL AND ${cloudReplays.expiresAt} < datetime('now', '-${GRACE_DAYS} days') AND ${cloudReplays.sizeBytes} > 0`,
-        )
+        .where(expiredReplayFilter)
         .limit(BATCH);
 
       if (expired.length === 0) break;
@@ -2168,9 +2194,7 @@ export default {
       const expired = await db
         .select({ id: userFiles.id, contentType: userFiles.contentType })
         .from(userFiles)
-        .where(
-          sql`${userFiles.expiresAt} IS NOT NULL AND ${userFiles.expiresAt} < datetime('now', '-${GRACE_DAYS} days') AND ${userFiles.sizeBytes} > 0`,
-        )
+        .where(expiredFileFilter)
         .limit(BATCH);
 
       if (expired.length === 0) break;

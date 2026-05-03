@@ -63,9 +63,18 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4.20260501.1
         version: 4.20260501.1
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.19.13
       drizzle-kit:
         specifier: ^0.31.0
         version: 0.31.9
+      miniflare:
+        specifier: ^4.20260430.0
+        version: 4.20260430.0
+      vitest:
+        specifier: ^4.0.18
+        version: 4.0.18(@types/node@22.19.13)(esbuild@0.27.3)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2)
       wrangler:
         specifier: ^4.87.0
         version: 4.87.0(@cloudflare/workers-types@4.20260501.1)

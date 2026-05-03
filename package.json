@@ -17,6 +17,7 @@
     "dev:dashboard": "node scripts/dev.mjs -d",
     "dev:website": "node scripts/dev-website.mjs",
     "test": "pnpm --filter vibe-replay test && pnpm --filter @vibe-replay/viewer test",
+    "test:cloudflare": "pnpm --filter @vibe-replay/cloudflare test",
     "test:e2e": "vitest run --config e2e/vitest.config.ts",
     "lint": "oxlint --fix packages/ website/src cloudflare/src && oxfmt packages/ website/src cloudflare/src",
     "lint:check": "oxlint packages/ website/src cloudflare/src && oxfmt --check packages/ website/src cloudflare/src",

@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "vitest run --config vitest.config.ts",
     "deploy": "wrangler deploy",
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply vibe-replay-db --local",
@@ -17,7 +18,10 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260501.1",
+    "@types/node": "^22.10.0",
     "drizzle-kit": "^0.31.0",
+    "miniflare": "^4.20260430.0",
+    "vitest": "^4.0.18",
     "wrangler": "^4.87.0"
   }
 }
