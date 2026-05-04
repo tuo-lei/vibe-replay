@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { createInterface } from "node:readline";
@@ -216,7 +216,7 @@ async function readThreadRowsFromStateDb(): Promise<CodexThreadRow[]> {
   try {
     const mod = await import("sql.js");
     const SQL = await mod.default();
-    const dbBuffer = await import("node:fs/promises").then((fs) => fs.readFile(stateDbPath));
+    const dbBuffer = await readFile(stateDbPath);
     const db = new SQL.Database(dbBuffer);
     try {
       const result = db.exec(`
