@@ -17,7 +17,7 @@
     "nanoid": "^5.1.11"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260501.1",
+    "@cloudflare/workers-types": "^4.20260504.1",
     "@types/node": "^22.10.0",
     "drizzle-kit": "^0.31.0",
     "miniflare": "^4.20260430.0",
