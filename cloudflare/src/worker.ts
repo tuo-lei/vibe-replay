@@ -24,6 +24,10 @@ const VALID_VISIBILITY = new Set(["public", "unlisted", "private"]);
 // that still send large sync payloads stay under the database ceiling server-side too.
 const SAFE_DAILY_SYNC_DB_CHUNK = 90;
 
+// GitHub API constants — shared across user gist routes and worker-side fetches.
+const GITHUB_API_ACCEPT = "application/vnd.github+json";
+const WORKER_USER_AGENT = "vibe-replay-worker";
+
 function chunkItems<T>(items: T[], maxItems: number): T[][] {
   if (maxItems <= 0) return [items.slice()];
   const chunks: T[][] = [];
@@ -739,7 +743,7 @@ app.post("/api/gists", async (c) => {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
-      Accept: "application/vnd.github+json",
+      Accept: GITHUB_API_ACCEPT,
       "User-Agent": "vibe-replay",
       "Content-Type": "application/json",
     },
@@ -865,7 +869,7 @@ app.patch("/api/gists/:gistId", async (c) => {
     method: "PATCH",
     headers: {
       Authorization: `Bearer ${accessToken}`,
-      Accept: "application/vnd.github+json",
+      Accept: GITHUB_API_ACCEPT,
       "User-Agent": "vibe-replay",
       "Content-Type": "application/json",
     },
@@ -2400,8 +2404,8 @@ async function getInstallationToken(env: Env): Promise<string | null> {
         method: "POST",
         headers: {
           Authorization: `Bearer ${jwt}`,
-          Accept: "application/vnd.github+json",
-          "User-Agent": "vibe-replay-worker",
+          Accept: GITHUB_API_ACCEPT,
+          "User-Agent": WORKER_USER_AGENT,
         },
       },
     );
@@ -2446,8 +2450,8 @@ async function fetchGistMeta(
   installToken?: string | null,
 ): Promise<GistMeta | null> {
   const headers: Record<string, string> = {
-    "User-Agent": "vibe-replay-worker",
-    Accept: "application/vnd.github+json",
+    "User-Agent": WORKER_USER_AGENT,
+    Accept: GITHUB_API_ACCEPT,
   };
   if (installToken) {
     headers.Authorization = `token ${installToken}`;
@@ -2481,7 +2485,7 @@ async function fetchGistMeta(
     content = jsonFile.content;
   } else if (jsonFile.raw_url) {
     const rawResp = await fetch(jsonFile.raw_url, {
-      headers: { "User-Agent": "vibe-replay-worker" },
+      headers: { "User-Agent": WORKER_USER_AGENT },
     });
     if (!rawResp.ok) return null;
     content = await rawResp.text();
