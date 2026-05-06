@@ -6,7 +6,12 @@ import { createInterface } from "node:readline";
 import { cleanPromptText } from "../../clean-prompt.js";
 import type { SessionInfo } from "../../types.js";
 import { shortenPath } from "../../utils.js";
-import { CODEX_CONTEXT_TAGS, isCodexToolCallType, USER_MESSAGE_BEGIN } from "./constants.js";
+import {
+  CODEX_CONTEXT_TAGS,
+  isCodexToolCallType,
+  stripLeadingCodexContextBlocks,
+  stripUserMessagePrefix,
+} from "./constants.js";
 
 const STATE_DB_FILENAME = "state_5.sqlite";
 
@@ -297,11 +302,6 @@ function normalizeDiscoveredUserMessage(text: string): string {
   return cleanPromptText(normalized);
 }
 
-function stripUserMessagePrefix(text: string): string {
-  const idx = text.indexOf(USER_MESSAGE_BEGIN);
-  return idx === -1 ? text : text.slice(idx + USER_MESSAGE_BEGIN.length);
-}
-
 function recordDiscoveredPrompt(
   promptSeen: Map<string, number[]>,
   prompts: string[],
@@ -342,25 +342,6 @@ function contentText(content: any): string {
 function isCodexContextMessage(text: string): boolean {
   const trimmed = text.trim();
   return CODEX_CONTEXT_TAGS.some((tag) => trimmed.startsWith(`<${tag}>`));
-}
-
-function stripLeadingCodexContextBlocks(text: string): string {
-  let remaining = text.trim();
-  let stripped = true;
-  while (stripped) {
-    stripped = false;
-    for (const tag of CODEX_CONTEXT_TAGS) {
-      const open = `<${tag}>`;
-      const close = `</${tag}>`;
-      if (!remaining.startsWith(open)) continue;
-      const closeIndex = remaining.indexOf(close);
-      if (closeIndex === -1) return "";
-      remaining = remaining.slice(closeIndex + close.length).trim();
-      stripped = true;
-      break;
-    }
-  }
-  return remaining;
 }
 
 function userImageDedupeKey(payload: any): string {
