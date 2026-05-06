@@ -19,3 +19,27 @@ export function isCodexToolCallType(type?: string): boolean {
     type === "image_generation_call"
   );
 }
+
+export function stripUserMessagePrefix(text: string): string {
+  const idx = text.indexOf(USER_MESSAGE_BEGIN);
+  return idx === -1 ? text : text.slice(idx + USER_MESSAGE_BEGIN.length);
+}
+
+export function stripLeadingCodexContextBlocks(text: string): string {
+  let remaining = text.trim();
+  let stripped = true;
+  while (stripped) {
+    stripped = false;
+    for (const tag of CODEX_CONTEXT_TAGS) {
+      const open = `<${tag}>`;
+      const close = `</${tag}>`;
+      if (!remaining.startsWith(open)) continue;
+      const closeIndex = remaining.indexOf(close);
+      if (closeIndex === -1) return "";
+      remaining = remaining.slice(closeIndex + close.length).trim();
+      stripped = true;
+      break;
+    }
+  }
+  return remaining;
+}
