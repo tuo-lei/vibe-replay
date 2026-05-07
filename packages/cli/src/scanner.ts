@@ -121,13 +121,13 @@ export interface ProjectInsights {
   };
 }
 
-export interface BranchInfo {
+interface BranchInfo {
   branch: string;
   sessionIds: string[];
   prLinks?: PrLink[];
 }
 
-export interface ProjectMemory {
+interface ProjectMemory {
   memoryFiles: Array<{
     name: string;
     description?: string;
@@ -189,7 +189,7 @@ function percentile(sorted: number[], p: number): number {
   return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
 }
 
-export interface TurnDurationBucket {
+interface TurnDurationBucket {
   label: string;
   minMs: number;
   maxMs: number; // Infinity for last bucket (serialized as -1)
@@ -197,7 +197,7 @@ export interface TurnDurationBucket {
   pct: number; // 0-100
 }
 
-export interface TurnDurationHistogram {
+interface TurnDurationHistogram {
   buckets: TurnDurationBucket[];
   percentiles: { p50Ms: number; p75Ms: number; p90Ms: number };
   totalTurns: number;
