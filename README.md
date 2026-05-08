@@ -117,6 +117,7 @@ curl -o ~/.claude/skills/replay/SKILL.md \
 - **Share & export** — GitHub Gist, animated SVG, GIF, markdown summary, or cloud upload. Secret redaction built in
 - **Sub-agent visualization** — see delegated tool calls and sub-agent trees rendered inline
 - **Comments** — leave notes on any scene. Comments persist in the HTML and travel with the replay
+- **Live mode** — `vibe-replay live` streams a running Claude Code or Codex session into the viewer, pinned to the latest turn as it lands on disk
 
 ## Supported Providers
 
