@@ -1492,7 +1492,7 @@ function parseToolFormerBlock(
     input: mapToolArgs(name, paramsRaw, result),
     _result: result,
     ...(hasToolError(toolFormerData.result) ? { _isError: true } : {}),
-  } as any;
+  };
 }
 
 interface GlobalStateTurnEntry {
