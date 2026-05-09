@@ -11,7 +11,7 @@
 
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import type { Annotation, OverlaySource, ReplaySession, SceneOverlay } from "./types.js";
+import type { Annotation, OverlaySource, ReplaySession, Scene, SceneOverlay } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -888,17 +888,21 @@ export async function generateFeedback(
 // Translation
 // ---------------------------------------------------------------------------
 
-function buildTranslationPrompt(
-  session: ReplaySession,
-  opts: { targetLang: string; sourceLang?: string },
-): { prompt: string; translatableScenes: Array<{ index: number; content: string }> } {
-  const translatableScenes = session.scenes
+function collectTranslatableScenes(scenes: Scene[]): Array<{ index: number; content: string }> {
+  return scenes
     .map((s, i) =>
       s.type === "user-prompt" || s.type === "text-response"
         ? { index: i, content: s.content }
         : null,
     )
     .filter((s): s is { index: number; content: string } => s !== null);
+}
+
+function buildTranslationPrompt(
+  session: ReplaySession,
+  opts: { targetLang: string; sourceLang?: string },
+): { prompt: string; translatableScenes: Array<{ index: number; content: string }> } {
+  const translatableScenes = collectTranslatableScenes(session.scenes);
 
   const scenesBlock = translatableScenes
     .map((s) => `--- SCENE ${s.index} ---\n${s.content}`)
@@ -1018,13 +1022,7 @@ export async function generateTranslation(
   if (session.scenes.length === 0) return null;
 
   // Collect all translatable scenes
-  const allScenes = session.scenes
-    .map((s, i) =>
-      s.type === "user-prompt" || s.type === "text-response"
-        ? { index: i, content: s.content }
-        : null,
-    )
-    .filter((s): s is { index: number; content: string } => s !== null);
+  const allScenes = collectTranslatableScenes(session.scenes);
 
   if (allScenes.length === 0) return null;
 
