@@ -2774,10 +2774,8 @@ function inferEditStringsFromResult(resultText: string): {
   }
 
   const chunks =
-    parsed.diff &&
-    typeof parsed.diff === "object" &&
-    Array.isArray((parsed.diff as Record<string, any>).chunks)
-      ? ((parsed.diff as Record<string, any>).chunks as any[])
+    parsed.diff && typeof parsed.diff === "object" && Array.isArray(parsed.diff.chunks)
+      ? parsed.diff.chunks
       : [];
   const oldParts: string[] = [];
   const newParts: string[] = [];
