@@ -401,6 +401,12 @@ interface SourceSummaryRecord {
   filePaths: string[];
   toolPaths?: string[];
   hasSqlite?: boolean;
+  isStarred?: boolean;
+  spaceId?: string;
+  spaceIdSetBy?: string;
+  pluginsEnabled?: boolean;
+  skillsEnabled?: boolean;
+  fsDetectedFiles?: string[];
   timestamp: string;
   [key: string]: unknown;
 }
@@ -649,6 +655,12 @@ async function buildSourcesResult(
       durationMsEst: s.durationMsEst,
       editCountEst: s.editCountEst,
       hasPR: s.hasPR,
+      isStarred: s.isStarred,
+      spaceId: s.spaceId,
+      spaceIdSetBy: s.spaceIdSetBy,
+      pluginsEnabled: s.pluginsEnabled,
+      skillsEnabled: s.skillsEnabled,
+      fsDetectedFiles: s.fsDetectedFiles,
       expiresInDays:
         s.provider === "claude-code" && cleanupPeriodDays > 0
           ? computeDaysUntilCleanup(s.timestamp, cleanupPeriodDays)
@@ -3289,6 +3301,7 @@ export async function startDashboard(
 }
 
 export const __testables = {
+  buildSourcesResult,
   buildInsightsSyncBatches,
   countSessionStats,
   pickSourceRecordForSession,

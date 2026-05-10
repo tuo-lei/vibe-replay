@@ -35,8 +35,14 @@ interface CoworkSessionJson {
   model?: string;
   title?: string;
   isArchived?: boolean;
+  isStarred?: boolean;
   initialMessage?: string;
   processName?: string;
+  fsDetectedFiles?: unknown;
+  pluginsEnabled?: boolean;
+  skillsEnabled?: boolean;
+  spaceId?: string;
+  spaceIdSetBy?: string;
 }
 
 export async function discoverClaudeCoworkSessions(): Promise<SessionInfo[]> {
@@ -178,6 +184,9 @@ export async function extractCoworkSessionInfo(jsonPath: string): Promise<Sessio
 
   // Normalize model: strip Cowork-style suffixes (e.g. "claude-opus-4-6[1m]").
   const model = meta.model ? meta.model.replace(/\[[^\]]*\]$/, "") : undefined;
+  const fsDetectedFiles = Array.isArray(meta.fsDetectedFiles)
+    ? meta.fsDetectedFiles.filter((file): file is string => typeof file === "string")
+    : undefined;
 
   // Project label: every Cowork session runs inside its own sandbox dir, so the
   // real cwd is noise in the picker. Group all Cowork sessions under a single
@@ -202,6 +211,12 @@ export async function extractCoworkSessionInfo(jsonPath: string): Promise<Sessio
     promptCount,
     toolCallCount,
     model,
+    isStarred: meta.isStarred,
+    spaceId: meta.spaceId,
+    spaceIdSetBy: meta.spaceIdSetBy,
+    pluginsEnabled: meta.pluginsEnabled,
+    skillsEnabled: meta.skillsEnabled,
+    fsDetectedFiles,
   };
 }
 

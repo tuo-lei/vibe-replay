@@ -300,6 +300,11 @@ function nonDefaultBranch(branch?: string): string | undefined {
   return branch && branch !== "main" && branch !== "master" ? branch : undefined;
 }
 
+function shortCoworkSpaceId(spaceId: string): string {
+  const compact = spaceId.replace(/^space[_-]?/, "");
+  return compact.slice(0, 6) || spaceId.slice(0, 6);
+}
+
 function dataSourceBadgeClass(dataSource?: string, hasSqlite?: boolean): string {
   if (dataSource === "jsonl") return "bg-terminal-orange-subtle text-terminal-orange";
   if (dataSource === "global-state") return "bg-terminal-blue-subtle text-terminal-blue";
@@ -2065,6 +2070,8 @@ function SessionsPanel() {
                       displayDurationMs ||
                       displayEditCount ||
                       s.hasPR ||
+                      s.isStarred ||
+                      (s.fsDetectedFiles && s.fsDetectedFiles.length > 0) ||
                       (s.expiresInDays != null && s.expiresInDays <= EXPIRY_WARN_DAYS)) && (
                       <div className="flex items-center gap-1.5 flex-wrap">
                         {!!displayPromptCount && (
@@ -2101,6 +2108,22 @@ function SessionsPanel() {
                             PR
                           </span>
                         )}
+                        {s.isStarred && (
+                          <span
+                            className="inline-flex items-center gap-1 text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-orange-subtle text-terminal-orange"
+                            title="Starred in Claude Cowork"
+                          >
+                            starred
+                          </span>
+                        )}
+                        {s.fsDetectedFiles && s.fsDetectedFiles.length > 0 && (
+                          <span
+                            className="inline-flex items-center gap-1 text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim"
+                            title={s.fsDetectedFiles.join("\n")}
+                          >
+                            {s.fsDetectedFiles.length} files
+                          </span>
+                        )}
                         {s.expiresInDays != null && s.expiresInDays <= EXPIRY_WARN_DAYS && (
                           <span
                             className={`inline-flex items-center gap-1 text-xs font-mono px-1.5 py-0.5 rounded-md ${
@@ -2133,6 +2156,34 @@ function SessionsPanel() {
                       {displayModel && (
                         <span className="text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dimmer">
                           {shortModelName(displayModel)}
+                        </span>
+                      )}
+                      {s.spaceId && (
+                        <span
+                          className="text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dimmer"
+                          title={
+                            s.spaceIdSetBy
+                              ? `Cowork space ${s.spaceId} (${s.spaceIdSetBy})`
+                              : `Cowork space ${s.spaceId}`
+                          }
+                        >
+                          space-{shortCoworkSpaceId(s.spaceId)}
+                        </span>
+                      )}
+                      {s.pluginsEnabled && (
+                        <span
+                          className="text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dimmer"
+                          title="Claude Cowork plugins enabled"
+                        >
+                          plugins
+                        </span>
+                      )}
+                      {s.skillsEnabled && (
+                        <span
+                          className="text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dimmer"
+                          title="Claude Cowork skills enabled"
+                        >
+                          skills
                         </span>
                       )}
                       <span className="text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dimmer">

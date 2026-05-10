@@ -123,6 +123,40 @@ describe("extractCoworkSessionInfo", () => {
     expect(info?.toolCallCount).toBe(1);
     expect((info?.promptCount ?? 0) >= 1).toBe(true);
   });
+
+  it("preserves newly observed Cowork metadata fields", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vr-cowork-meta-"));
+    const metadataPath = join(root, "local_cowork-session-xyz789.json");
+    await writeFile(
+      metadataPath,
+      JSON.stringify({
+        sessionId: "local_cowork-session-002",
+        cwd: "/sessions/magical-laughing-wright/mnt/outputs",
+        createdAt: 1750000000000,
+        lastActivityAt: 1750000200000,
+        model: "claude-opus-4-6[1m]",
+        title: "Research Cowork session storage",
+        initialMessage:
+          "Please investigate how Cowork stores session data locally and summarize the format for me.",
+        isStarred: true,
+        pluginsEnabled: true,
+        skillsEnabled: true,
+        spaceId: "space_123",
+        spaceIdSetBy: "user",
+        fsDetectedFiles: ["README.md", "src/index.ts", 42],
+      }),
+    );
+
+    const { jsonPath } = await buildCoworkLayout({ metadataPath });
+    const info = await extractCoworkSessionInfo(jsonPath);
+
+    expect(info?.isStarred).toBe(true);
+    expect(info?.pluginsEnabled).toBe(true);
+    expect(info?.skillsEnabled).toBe(true);
+    expect(info?.spaceId).toBe("space_123");
+    expect(info?.spaceIdSetBy).toBe("user");
+    expect(info?.fsDetectedFiles).toEqual(["README.md", "src/index.ts"]);
+  });
 });
 
 // ---------------------------------------------------------------------------
