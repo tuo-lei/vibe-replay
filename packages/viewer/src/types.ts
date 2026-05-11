@@ -79,6 +79,12 @@ export interface SourceSession {
   durationMsEst?: number;
   editCountEst?: number;
   hasPR?: boolean;
+  isStarred?: boolean;
+  spaceId?: string;
+  spaceIdSetBy?: string;
+  pluginsEnabled?: boolean;
+  skillsEnabled?: boolean;
+  fsDetectedFiles?: string[];
   // Days until Claude Code cleanup (undefined for non-claude-code or if disabled)
   expiresInDays?: number;
 }

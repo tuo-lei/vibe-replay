@@ -1,3 +1,6 @@
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { __testables } from "../src/server.js";
 import type { SessionInfo } from "../src/types.js";
@@ -160,5 +163,35 @@ describe("sources enrichment helpers", () => {
     ] as any);
 
     expect(counts).toEqual({ promptCount: 1, toolCallCount: 2 });
+  });
+
+  it("preserves Cowork metadata in source API records", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "vr-sources-result-"));
+    const [source] = await __testables.buildSourcesResult(
+      [
+        makeCursorSession({
+          provider: "claude-cowork",
+          sessionId: "cowork-session-002",
+          slug: "cowork-s",
+          project: "Cowork",
+          cwd: "/sessions/cowork/mnt/outputs",
+          isStarred: true,
+          pluginsEnabled: true,
+          skillsEnabled: true,
+          spaceId: "space_123456",
+          spaceIdSetBy: "user",
+          fsDetectedFiles: ["README.md", "src/index.ts"],
+        }),
+      ],
+      baseDir,
+      tmpdir(),
+    );
+
+    expect(source?.isStarred).toBe(true);
+    expect(source?.pluginsEnabled).toBe(true);
+    expect(source?.skillsEnabled).toBe(true);
+    expect(source?.spaceId).toBe("space_123456");
+    expect(source?.spaceIdSetBy).toBe("user");
+    expect(source?.fsDetectedFiles).toEqual(["README.md", "src/index.ts"]);
   });
 });

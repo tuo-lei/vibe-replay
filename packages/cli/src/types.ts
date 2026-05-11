@@ -50,6 +50,12 @@ export interface SessionInfo {
   durationMsEst?: number; // sum of turn_duration durationMs values
   editCountEst?: number; // count of file-editing tool_use blocks (Edit/Write/MultiEdit etc.)
   hasPR?: boolean; // whether a pr-link event exists in the session
+  isStarred?: boolean; // provider-level favorite/star marker
+  spaceId?: string; // provider workspace/space identifier
+  spaceIdSetBy?: string; // source of provider workspace/space assignment
+  pluginsEnabled?: boolean; // provider session had plugins enabled
+  skillsEnabled?: boolean; // provider session had skills enabled
+  fsDetectedFiles?: string[]; // files detected by the provider during the session
 }
 
 export interface ParsedTurn {
