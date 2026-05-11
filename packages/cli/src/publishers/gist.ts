@@ -49,6 +49,10 @@ export async function publishGist(
   const filename = overwrite?.filename || `${sanitizeFilename(title)}.json`;
   const description = `vibe-replay: ${title}`;
   const apiUrl = getApiUrl();
+  const headers = {
+    "Content-Type": "application/json",
+    Cookie: `${getSessionCookieName(apiUrl)}=${auth.token}`,
+  };
 
   let gistId: string;
   let gistUrl: string;
@@ -59,10 +63,7 @@ export async function publishGist(
     // Update existing gist
     const resp = await fetch(`${apiUrl}/api/gists/${overwrite.gistId}`, {
       method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: `${getSessionCookieName(apiUrl)}=${auth.token}`,
-      },
+      headers,
       body: JSON.stringify({ filename, content, description }),
     });
     if (!resp.ok) {
@@ -80,10 +81,7 @@ export async function publishGist(
     // Create new gist
     const resp = await fetch(`${apiUrl}/api/gists`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: `${getSessionCookieName(apiUrl)}=${auth.token}`,
-      },
+      headers,
       body: JSON.stringify({ filename, content, description, public: true }),
     });
     if (!resp.ok) {
