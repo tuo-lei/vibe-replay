@@ -29,6 +29,7 @@ const CURSOR_PROJECTS_ROOT = join(homedir(), ".cursor", "projects");
 const SDK_STORE_SUBDIR = "sdk-agent-store";
 const SDK_INDEX_DB_BASENAME = "index.db";
 const MIN_INDEX_DB_SIZE = 1024;
+const MAX_SQLJS_DB_BYTES = 128 * 1024 * 1024;
 
 const execFileAsync = promisify(execFile);
 
@@ -495,6 +496,7 @@ async function openIndexDb(dbPath: string): Promise<IndexDbHandle | null> {
   } catch {
     return null;
   }
+  if (st.size > MAX_SQLJS_DB_BYTES) return null;
   const buffer = await readFile(dbPath).catch(() => null);
   if (!buffer) return null;
   const db = new SQL.Database(buffer);
@@ -538,8 +540,7 @@ const SQLITE_CLI_CHECK_TTL_MS = 30_000;
 
 async function canUseSqliteCliFor(dbPath: string): Promise<boolean> {
   const cached = sqliteCliCheckCache.get(dbPath);
-  if (cached?.canUse) return true;
-  if (cached && Date.now() - cached.checkedAt < SQLITE_CLI_CHECK_TTL_MS) return false;
+  if (cached && Date.now() - cached.checkedAt < SQLITE_CLI_CHECK_TTL_MS) return cached.canUse;
 
   let canUse = false;
   try {
@@ -559,20 +560,23 @@ async function canUseSqliteCliFor(dbPath: string): Promise<boolean> {
 
 async function listSdkIndexDbPaths(projectsRoot: string): Promise<string[]> {
   const projects = await readdir(projectsRoot).catch(() => [] as string[]);
-  const out: string[] = [];
-  for (const project of projects) {
-    const sdkRoot = join(projectsRoot, project, SDK_STORE_SUBDIR);
-    const sdkStat = await stat(sdkRoot).catch(() => null);
-    if (!sdkStat?.isDirectory()) continue;
-    const projectHashes = await readdir(sdkRoot).catch(() => [] as string[]);
-    for (const hash of projectHashes) {
-      const dbPath = join(sdkRoot, hash, SDK_INDEX_DB_BASENAME);
-      const dbStat = await stat(dbPath).catch(() => null);
-      if (!dbStat?.isFile() || dbStat.size < MIN_INDEX_DB_SIZE) continue;
-      out.push(dbPath);
-    }
-  }
-  return out;
+  const perProjectPaths = await Promise.all(
+    projects.map(async (project) => {
+      const out: string[] = [];
+      const sdkRoot = join(projectsRoot, project, SDK_STORE_SUBDIR);
+      const sdkStat = await stat(sdkRoot).catch(() => null);
+      if (!sdkStat?.isDirectory()) return out;
+      const projectHashes = await readdir(sdkRoot).catch(() => [] as string[]);
+      for (const hash of projectHashes) {
+        const dbPath = join(sdkRoot, hash, SDK_INDEX_DB_BASENAME);
+        const dbStat = await stat(dbPath).catch(() => null);
+        if (!dbStat?.isFile() || dbStat.size < MIN_INDEX_DB_SIZE) continue;
+        out.push(dbPath);
+      }
+      return out;
+    }),
+  );
+  return perProjectPaths.flat();
 }
 
 function sqlString(value: string): string {
