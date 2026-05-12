@@ -305,7 +305,11 @@ function shortCoworkSpaceId(spaceId: string): string {
   return compact.slice(0, 6) || spaceId.slice(0, 6);
 }
 
-function dataSourceBadgeClass(dataSource?: string, hasSqlite?: boolean): string {
+function dataSourceBadgeClass(dataSource?: string, hasSqlite?: boolean, hasSdk?: boolean): string {
+  // SDK gets its own distinct purple badge so users can spot Cursor SDK sessions
+  // at a glance (they're functionally different from IDE chats — different store,
+  // different agent runtime, different lifecycle).
+  if (hasSdk) return "bg-terminal-purple-subtle text-terminal-purple";
   if (dataSource === "jsonl") return "bg-terminal-orange-subtle text-terminal-orange";
   if (dataSource === "global-state") return "bg-terminal-blue-subtle text-terminal-blue";
   if (dataSource === "sqlite" || hasSqlite) return "bg-terminal-green-subtle text-terminal-green";
@@ -451,11 +455,11 @@ export function SessionDetailPopup({
                 {shortModelName(model)}
               </span>
             )}
-            {scanData?.dataSource && (
+            {(scanData?.dataSource || s.hasSdk) && (
               <span
-                className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full ${dataSourceBadgeClass(scanData.dataSource, s.hasSqlite)}`}
+                className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full ${dataSourceBadgeClass(scanData?.dataSource, s.hasSqlite, s.hasSdk)}`}
               >
-                {formatDataSourceLabel(s.hasSqlite, scanData.dataSource)}
+                {formatDataSourceLabel(s.hasSqlite, scanData?.dataSource, s.hasSdk)}
               </span>
             )}
             {scanData?.entrypoint && (
@@ -576,7 +580,7 @@ export function SessionDetailPopup({
               )}
               <InfoRow
                 label="Data"
-                value={formatDataSourceLabel(s.hasSqlite, scanData?.dataSource)}
+                value={formatDataSourceLabel(s.hasSqlite, scanData?.dataSource, s.hasSdk)}
               />
             </div>
 
@@ -1970,7 +1974,11 @@ function SessionsPanel() {
                 const displayDurationMs = scanData?.durationMs ?? s.durationMsEst;
                 const displayEditCount = scanData?.editCount ?? s.editCountEst;
                 const displayModel = scanData?.model || s.model;
-                const dataSourceLabel = formatDataSourceLabel(s.hasSqlite, scanData?.dataSource);
+                const dataSourceLabel = formatDataSourceLabel(
+                  s.hasSqlite,
+                  scanData?.dataSource,
+                  s.hasSdk,
+                );
                 const isArchived = archivedSlugs.has(s.slug);
                 return (
                   <div
@@ -2194,9 +2202,9 @@ function SessionsPanel() {
                           {s.filePaths.length} parts
                         </span>
                       )}
-                      {(s.hasSqlite || scanData?.dataSource) && (
+                      {(s.hasSqlite || s.hasSdk || scanData?.dataSource) && (
                         <span
-                          className={`text-xs font-mono px-1.5 py-0.5 rounded-md ${dataSourceBadgeClass(scanData?.dataSource, s.hasSqlite)}`}
+                          className={`text-xs font-mono px-1.5 py-0.5 rounded-md ${dataSourceBadgeClass(scanData?.dataSource, s.hasSqlite, s.hasSdk)}`}
                           title={dataSourceLabel}
                         >
                           {dataSourceLabel}

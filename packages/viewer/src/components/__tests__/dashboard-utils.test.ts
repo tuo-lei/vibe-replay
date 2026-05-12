@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   agentWorktreeParent,
+  formatDataSourceLabel,
   rollupProject,
   rollupTopProjects,
   type TopProjectEntry,
@@ -184,5 +185,25 @@ describe("rollupTopProjects", () => {
     rollupTopProjects([parent, worktree]);
     expect(parent.sessions).toBe(1);
     expect(parent.sessionsPerDay).toEqual({ "2026-04-01": 1 });
+  });
+});
+
+describe("formatDataSourceLabel", () => {
+  it("labels Cursor SDK sessions distinctly when hasSdk is true", () => {
+    expect(formatDataSourceLabel(false, "jsonl+tools", true)).toBe(
+      "Cursor SDK + JSONL + agent-tools",
+    );
+    expect(formatDataSourceLabel(false, "jsonl", true)).toBe("Cursor SDK + JSONL");
+    expect(formatDataSourceLabel(false, undefined, true)).toBe("Cursor SDK");
+  });
+
+  it("falls back to existing labels when hasSdk is not set", () => {
+    expect(formatDataSourceLabel(false, "jsonl+tools")).toBe("JSONL + agent-tools");
+    expect(formatDataSourceLabel(true, "jsonl+tools")).toBe("JSONL + agent-tools fallback");
+    expect(formatDataSourceLabel(false, "jsonl")).toBe("JSONL transcript");
+    expect(formatDataSourceLabel(true, "sqlite")).toBe("SQLite + JSONL supplement");
+    expect(formatDataSourceLabel(false, "global-state")).toBe("Cursor global state");
+    expect(formatDataSourceLabel(true)).toBe("SQLite + JSONL");
+    expect(formatDataSourceLabel()).toBe("JSONL");
   });
 });
