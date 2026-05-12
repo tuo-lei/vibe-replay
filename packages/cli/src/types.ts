@@ -41,6 +41,7 @@ export interface SessionInfo {
   toolPaths?: string[]; // cursor tool outputs associated with this session
   workspacePath?: string; // absolute workspace path for Cursor lookup
   hasSqlite?: boolean; // true if any Cursor SQLite source exists (store.db or global state DB)
+  hasSdk?: boolean; // true if a Cursor SDK agent record exists in sdk-agent-store/index.db
   firstPrompt: string;
   prompts?: string[]; // first N meaningful user prompts (cleaned)
   promptCount?: number; // total user prompts (counted via lightweight scan)

@@ -2685,10 +2685,12 @@ function buildStoreTurnStats(turns: ParsedTurn[]): TurnStat[] {
 export function mapCursorToolName(name: string): string {
   const mapping: Record<string, string> = {
     Shell: "Bash",
+    shell: "Bash", // Cursor SDK lowercase tool name
     run_terminal_command_v2: "Bash",
     run_terminal_cmd: "Bash",
     Read: "Read",
     ReadFile: "Read",
+    read: "Read", // Cursor SDK lowercase tool name
     read_file_v2: "Read",
     read_file: "Read",
     read_lints: "ReadLints",
@@ -2706,6 +2708,7 @@ export function mapCursorToolName(name: string): string {
     LS: "Glob",
     StrReplace: "Edit",
     EditFile: "Edit",
+    edit: "Edit", // Cursor SDK lowercase tool name
     edit_file_v2: "Edit",
     edit_file: "Edit",
     search_replace: "Edit",

@@ -69,6 +69,7 @@ export interface SourceSession {
   filePaths: string[];
   toolPaths?: string[];
   hasSqlite?: boolean;
+  hasSdk?: boolean;
   gitBranch?: string;
   existingReplay: string | null;
   projectExists?: boolean;

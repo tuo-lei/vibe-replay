@@ -401,6 +401,7 @@ interface SourceSummaryRecord {
   filePaths: string[];
   toolPaths?: string[];
   hasSqlite?: boolean;
+  hasSdk?: boolean;
   isStarred?: boolean;
   spaceId?: string;
   spaceIdSetBy?: string;
@@ -650,6 +651,7 @@ async function buildSourcesResult(
       filePaths: s.filePaths,
       toolPaths: s.toolPaths,
       hasSqlite: s.hasSqlite,
+      hasSdk: s.hasSdk,
       gitBranch: s.gitBranch,
       model: s.model,
       durationMsEst: s.durationMsEst,
@@ -865,7 +867,9 @@ export async function startServer(
   // caches stored cliSessionId (inner-subprocess UUID) as the Cowork session's
   // identity, which never matches what the parser reads from audit.jsonl and
   // permanently broke replay-to-source linking. Bumping discards those caches.
-  const sourcesCacheKey = `dashboard-sources-v3-${cacheKeySuffix}`;
+  // v3 → v4: added `hasSdk` flag for Cursor SDK-backed sessions; old caches
+  // omit the field so the dashboard can't render the SDK badge until refreshed.
+  const sourcesCacheKey = `dashboard-sources-v4-${cacheKeySuffix}`;
   const replaysCacheKey = `dashboard-replays-v1-${cacheKeySuffix}`;
   const scanResultsCacheKey = `dashboard-scan-results-v1-${cacheKeySuffix}`;
   const insightsCacheKey = `dashboard-insights-v1-${cacheKeySuffix}`;

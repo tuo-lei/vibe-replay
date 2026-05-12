@@ -525,7 +525,19 @@ export function computeProjectLabels(projects: string[]): Map<string, string> {
   return labels;
 }
 
-export function formatDataSourceLabel(hasSqlite?: boolean, dataSource?: string): string {
+export function formatDataSourceLabel(
+  hasSqlite?: boolean,
+  dataSource?: string,
+  hasSdk?: boolean,
+): string {
+  // Cursor SDK gets a dedicated label whenever the SDK store is present, since
+  // its agent stream is the source of structured tool results — independent of
+  // whether an IDE chat store.db also exists for the same workspace.
+  if (hasSdk) {
+    if (dataSource === "jsonl+tools") return "Cursor SDK + JSONL + agent-tools";
+    if (dataSource === "jsonl") return "Cursor SDK + JSONL";
+    return "Cursor SDK";
+  }
   if (dataSource === "sqlite") return hasSqlite ? "SQLite + JSONL supplement" : "SQLite";
   if (dataSource === "global-state") return "Cursor global state";
   if (dataSource === "jsonl") return hasSqlite ? "JSONL fallback" : "JSONL transcript";

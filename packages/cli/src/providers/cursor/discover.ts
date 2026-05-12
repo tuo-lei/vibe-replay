@@ -8,6 +8,7 @@ import {
   discoverSqliteOnlySessions,
   listStoreDbSessionIds,
 } from "./sqlite-reader.js";
+import { discoverSdkAgents, type SdkAgent } from "./sdk-reader.js";
 import { sanitizeCursorUserText } from "./sanitize.js";
 
 const CURSOR_DIR = join(homedir(), ".cursor", "projects");
@@ -76,8 +77,40 @@ export async function discoverCursorSessions(): Promise<SessionInfo[]> {
     session.hasSqlite = hasStoreDb || globalState.sessionIds.has(session.sessionId);
   }
 
+  // Cursor SDK sessions live alongside Cursor IDE chats but in their own SQLite
+  // store. Mark transcripts that also have an SDK record so the parser can enrich
+  // them with structured tool results, run timing, and per-turn model.
+  await enrichWithSdkAgents(sessions);
+
   sessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   return sessions;
+}
+
+async function enrichWithSdkAgents(sessions: SessionInfo[]): Promise<void> {
+  let sdkAgents: SdkAgent[] = [];
+  try {
+    sdkAgents = await discoverSdkAgents();
+  } catch {
+    return;
+  }
+  if (sdkAgents.length === 0) return;
+
+  const sessionsByAgentId = new Map<string, SessionInfo>();
+  for (const session of sessions) {
+    sessionsByAgentId.set(session.sessionId, session);
+  }
+
+  for (const agent of sdkAgents) {
+    const existing = sessionsByAgentId.get(agent.agentId);
+    if (!existing) continue;
+    existing.hasSdk = true;
+    // SDK store knows the workspace path authoritatively — backfill if the
+    // transcript-only path was best-effort guessed.
+    if (agent.workspaceRef && (!existing.cwd || existing.cwd.startsWith("/-"))) {
+      existing.cwd = agent.workspaceRef;
+      existing.workspacePath = agent.workspaceRef;
+    }
+  }
 }
 
 /**
