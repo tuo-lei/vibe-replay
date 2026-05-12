@@ -449,9 +449,9 @@ export function applySdkEnrichmentToTurns(
     const sdkCalls = enrichment.toolCallsByRun.get(run.runId) || [];
     for (const block of turn.blocks) {
       if (block.type !== "tool_use") continue;
-      // Only enrich when the JSONL block lacks a result. JSONL tool_use blocks come
-      // without tool_result entries for SDK sessions, so this is the common case.
-      if (typeof block._result === "string" && block._result.length > 0) continue;
+      // Only enrich when the JSONL block lacks a result. Empty-string results
+      // are valid tool outputs, so any string `_result` counts as already resolved.
+      if (typeof block._result === "string") continue;
 
       const sdkCall = sdkCalls[toolUseIdx];
       toolUseIdx++;
