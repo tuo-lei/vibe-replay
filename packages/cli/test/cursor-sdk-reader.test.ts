@@ -474,6 +474,31 @@ describe("applySdkEnrichmentToTurns", () => {
     expect(block._result).toBe("preexisting");
   });
 
+  it("does not consume SDK call slots for already-resolved tool blocks", () => {
+    const turns: ParsedTurn[] = [
+      { role: "user", blocks: [{ type: "text", text: "prompt" }] },
+      {
+        role: "assistant",
+        blocks: [
+          {
+            type: "tool_use",
+            id: "already-resolved",
+            name: "ToolOutput",
+            input: {},
+            _result: "preexisting sidecar result",
+          },
+          { type: "tool_use", id: "needs-sdk", name: "Bash", input: { command: "ls" } },
+        ],
+      },
+    ];
+    const result = applySdkEnrichmentToTurns(turns, makeEnrichment());
+    expect(result.toolCallsEnriched).toBe(1);
+    const blocks = turns[1].blocks;
+    if (blocks[0].type !== "tool_use" || blocks[1].type !== "tool_use") throw new Error("narrow");
+    expect(blocks[0]._result).toBe("preexisting sidecar result");
+    expect(blocks[1]._result).toBe("file1\nfile2");
+  });
+
   it("does not enrich running-only SDK calls as empty results", () => {
     const enrichment = makeEnrichment();
     const calls = enrichment.toolCallsByRun.get("r1") ?? [];
