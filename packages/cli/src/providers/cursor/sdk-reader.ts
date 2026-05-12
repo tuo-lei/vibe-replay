@@ -99,7 +99,7 @@ export interface SdkAgentEnrichment {
   /** Sum of per-run durations (ms). */
   totalDurationMs?: number;
   /** Most-recent model seen across runs. */
-  primaryModel?: string;
+  latestModel?: string;
 }
 
 interface IndexDbHandle {
@@ -207,6 +207,9 @@ export async function loadSdkAgentEnrichment(agent: SdkAgent): Promise<SdkAgentE
 
     const runIds = runs.map((r) => r.runId).filter(Boolean);
     if (runIds.length === 0) return { agent, runs, toolCallsByRun: new Map() };
+    // The dynamic IN list is built from run_id values read from this same local
+    // DB. Values are still SQLite-escaped, and the sqlite3 backend uses execFile
+    // (no shell), so this stays local-data-only and shell-injection safe.
     const inList = runIds.map(sqlString).join(", ");
     const eventRows = await queryIndexDb(
       handle,
@@ -235,7 +238,7 @@ function finalizeEnrichment(
   let finishedAt: string | undefined;
   let totalDurationMs = 0;
   let totalDurationSeen = false;
-  let primaryModel: string | undefined;
+  let latestModel: string | undefined;
 
   for (const run of runs) {
     if (run.startedAt && (!startedAt || run.startedAt < startedAt)) startedAt = run.startedAt;
@@ -248,7 +251,7 @@ function finalizeEnrichment(
         totalDurationSeen = true;
       }
     }
-    if (run.model) primaryModel = run.model;
+    if (run.model) latestModel = run.model;
   }
 
   return {
@@ -258,7 +261,7 @@ function finalizeEnrichment(
     startedAt,
     finishedAt,
     totalDurationMs: totalDurationSeen ? totalDurationMs : undefined,
-    primaryModel,
+    latestModel,
   };
 }
 
@@ -311,13 +314,14 @@ function collectToolCalls(rows: Record<string, any>[]): Map<string, SdkToolCall[
     } else {
       entry.lastSeq = seq;
       entry.status = status;
-      // Args sometimes get fleshed out across "running" updates — prefer the latest non-empty payload.
-      if (Object.keys(argsObj).length > Object.keys(entry.args).length) {
+      // Args sometimes get fleshed out across "running" updates — prefer the
+      // latest non-empty payload even when the key count stays the same.
+      if (Object.keys(argsObj).length > 0) {
         entry.args = argsObj;
       }
     }
 
-    if (status === "completed" || status === "error" || message.result !== undefined) {
+    if (message.result !== undefined) {
       const formatted = formatSdkToolResult(rawName, message.result);
       entry.result = formatted.text;
       entry.isError = formatted.isError || status === "error";
@@ -415,6 +419,9 @@ export function applySdkEnrichmentToTurns(
   }
 
   // Walk JSONL turns; each user turn (after the first) advances to the next SDK run.
+  // toolUseIdx intentionally spans assistant-turn boundaries within a run: the
+  // SDK call stream is flat per run, while JSONL can split one run across
+  // multiple assistant messages.
   let runIdx = -1;
   let toolUseIdx = 0;
   let toolCallsEnriched = 0;
@@ -449,8 +456,11 @@ export function applySdkEnrichmentToTurns(
       // Only enrich when the JSONL block lacks a result. JSONL tool_use blocks come
       // without tool_result entries for SDK sessions, so this is the common case.
       if (typeof block._result === "string" && block._result.length > 0) continue;
+      // A running-only SDK event has no result payload. Leave it missing rather
+      // than converting "not yet known" into a concrete empty result.
+      if (sdkCall.result === undefined) continue;
 
-      block._result = sdkCall.result || "";
+      block._result = sdkCall.result;
       if (sdkCall.isError) block._isError = true;
       // Re-run the Cursor arg mapper so Edit blocks pick up old/new strings from the
       // result we just attached.

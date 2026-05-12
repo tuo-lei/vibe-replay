@@ -271,6 +271,62 @@ describe("collectToolCalls", () => {
     expect(__testables.collectToolCalls(rows).size).toBe(0);
   });
 
+  it("keeps latest non-empty args even when key count does not change", () => {
+    const rows = [
+      {
+        run_id: "r1",
+        seq: 1,
+        payload_json: JSON.stringify({
+          message: {
+            type: "tool_call",
+            call_id: "call_a",
+            name: "shell",
+            status: "running",
+            args: { command: "echo partial" },
+          },
+        }),
+      },
+      {
+        run_id: "r1",
+        seq: 2,
+        payload_json: JSON.stringify({
+          message: {
+            type: "tool_call",
+            call_id: "call_a",
+            name: "shell",
+            status: "completed",
+            args: { command: "echo full command" },
+            result: { status: "success", value: { exitCode: 0, stdout: "ok\n", stderr: "" } },
+          },
+        }),
+      },
+    ];
+    const list = __testables.collectToolCalls(rows).get("r1") ?? [];
+    expect(list[0].args).toEqual({ command: "echo full command" });
+  });
+
+  it("does not synthesize an empty result from running-only events", () => {
+    const rows = [
+      {
+        run_id: "r1",
+        seq: 1,
+        payload_json: JSON.stringify({
+          message: {
+            type: "tool_call",
+            call_id: "call_running",
+            name: "shell",
+            status: "running",
+            args: { command: "sleep 10" },
+          },
+        }),
+      },
+    ];
+    const list = __testables.collectToolCalls(rows).get("r1") ?? [];
+    expect(list).toHaveLength(1);
+    expect(list[0].status).toBe("running");
+    expect(list[0].result).toBeUndefined();
+  });
+
   it("preserves intra-run ordering by firstSeq", () => {
     const rows = [
       {
@@ -362,7 +418,7 @@ describe("applySdkEnrichmentToTurns", () => {
       startedAt: "2026-01-01T00:00:00.000Z",
       finishedAt: "2026-01-01T00:00:15.000Z",
       totalDurationMs: 10000,
-      primaryModel: "composer-2",
+      latestModel: "composer-2",
     };
   }
 
@@ -416,6 +472,29 @@ describe("applySdkEnrichmentToTurns", () => {
     const block = turns[1].blocks[0];
     if (block.type !== "tool_use") throw new Error("type narrow");
     expect(block._result).toBe("preexisting");
+  });
+
+  it("does not enrich running-only SDK calls as empty results", () => {
+    const enrichment = makeEnrichment();
+    const calls = enrichment.toolCallsByRun.get("r1") ?? [];
+    calls[0] = {
+      ...calls[0],
+      status: "running",
+      result: undefined,
+    };
+
+    const turns: ParsedTurn[] = [
+      { role: "user", blocks: [{ type: "text", text: "prompt" }] },
+      {
+        role: "assistant",
+        blocks: [{ type: "tool_use", id: "j1", name: "Bash", input: { command: "sleep 10" } }],
+      },
+    ];
+    const result = applySdkEnrichmentToTurns(turns, enrichment);
+    expect(result.toolCallsEnriched).toBe(0);
+    const block = turns[1].blocks[0];
+    if (block.type !== "tool_use") throw new Error("type narrow");
+    expect(block._result).toBeUndefined();
   });
 
   it("handles JSONL having more tool_use blocks than SDK calls", () => {
@@ -557,7 +636,7 @@ describe("loadSdkAgentEnrichment + listSdkIndexDbPaths (integration with synthet
     expect(enrichment.runs).toHaveLength(1);
     expect(enrichment.runs[0].runId).toBe("run-fixture-r1");
     expect(enrichment.runs[0].model).toBe("composer-2");
-    expect(enrichment.primaryModel).toBe("composer-2");
+    expect(enrichment.latestModel).toBe("composer-2");
     expect(enrichment.totalDurationMs).toBe(29000);
 
     const calls = enrichment.toolCallsByRun.get("run-fixture-r1") ?? [];

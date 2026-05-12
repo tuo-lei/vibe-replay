@@ -113,6 +113,9 @@ export async function parseCursorSession(
   // Cursor SDK enrichment — Cursor SDK agents only have a JSONL transcript
   // (no IDE chat store.db), so the SDK index.db is the only place tool *results*
   // are recorded. Apply now so the replay has results, durations, and per-turn model.
+  // If Cursor ever also backfills SDK agents into IDE store.db, keep that path
+  // SQLite-first and only add SDK enrichment after deciding how to reconcile
+  // duplicate tool streams.
   // We accept the sessionId from explicit sessionInfo OR from the transcript filename
   // (Cursor names SDK transcripts `<agentId>.jsonl`, which is exactly what the SDK
   // store keys agents on).
@@ -130,8 +133,8 @@ export async function parseCursorSession(
           `cursor-sdk index.db (tool results +${toolCallsEnriched}, model tags +${assistantTurnsModelTagged})`,
         );
       }
-      if (enrichment.primaryModel && !jsonlResult.model) {
-        jsonlResult.model = enrichment.primaryModel;
+      if (enrichment.latestModel && !jsonlResult.model) {
+        jsonlResult.model = enrichment.latestModel;
       }
       if (enrichment.startedAt && !jsonlResult.startTime) {
         jsonlResult.startTime = enrichment.startedAt;
