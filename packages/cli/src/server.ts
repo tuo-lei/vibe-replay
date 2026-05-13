@@ -2260,7 +2260,7 @@ export async function startServer(
   // The BFF proxy follows the TOKEN, not the env var: if no token for the
   // current VIBE_REPLAY_API_URL, it uses whatever token is available and
   // proxies to that token's origin (e.g. production) instead.
-  const cloudApiBaseUrl = getApiUrl().replace(/\/$/, "");
+  const cloudApiBaseUrl = getApiUrl();
 
   function readLocalAuthSession(): {
     token: string;
@@ -2283,7 +2283,7 @@ export async function startServer(
       return {
         token: fallback.token,
         user: fallback.user as { id: string; name: string; email?: string; image?: string },
-        targetApi: fallback.origin.replace(/\/$/, ""),
+        targetApi: fallback.origin,
       };
     }
     return null;
@@ -2305,7 +2305,7 @@ export async function startServer(
     if (exact) candidates.push({ token: exact.token, apiUrl: cloudApiBaseUrl });
     const fallback = loadAnyAuthToken();
     if (fallback) {
-      const fallbackApi = fallback.origin.replace(/\/$/, "");
+      const fallbackApi = fallback.origin;
       if (fallbackApi !== cloudApiBaseUrl) {
         candidates.push({ token: fallback.token, apiUrl: fallbackApi });
       }
