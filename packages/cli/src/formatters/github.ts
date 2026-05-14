@@ -632,6 +632,21 @@ function selectKeyPhases(phases: Phase[], max: number): Phase[] {
   return phases.slice(0, max);
 }
 
+function buildSvgFooter(
+  session: ReplaySession,
+  opts: GitHubFormatOptions,
+): { footerLeft: string; footerRight: string } {
+  const duration = formatDuration(session.meta.stats.durationMs);
+  const tStats = computeToolStats(session.scenes);
+  const parts: (string | null)[] = [duration];
+  if (tStats.responses > 0) parts.push(`${tStats.responses} responses`);
+  if (tStats.totalTools > 0) parts.push(`${tStats.totalTools} tools`);
+  return {
+    footerLeft: parts.filter(Boolean).join(" · "),
+    footerRight: opts.replayUrl ? "View full replay →" : "vibe-replay.com",
+  };
+}
+
 function renderSvg(
   frames: SvgFrame[],
   session: ReplaySession,
@@ -657,14 +672,7 @@ function renderSvg(
     })
     .join("\n");
 
-  // Footer
-  const duration = formatDuration(session.meta.stats.durationMs);
-  const tStats = computeToolStats(session.scenes);
-  const footerParts = [duration];
-  if (tStats.responses > 0) footerParts.push(`${tStats.responses} responses`);
-  if (tStats.totalTools > 0) footerParts.push(`${tStats.totalTools} tools`);
-  const footerLeft = footerParts.filter(Boolean).join(" · ");
-  const footerRight = opts.replayUrl ? "View full replay →" : "vibe-replay.com";
+  const { footerLeft, footerRight } = buildSvgFooter(session, opts);
 
   // Build frame SVG content
   const framesSvg = frames.map((f, i) => renderFrame(f, i)).join("\n\n");
@@ -906,13 +914,7 @@ export function renderStaticFrameSvg(
   session: ReplaySession,
   opts: GitHubFormatOptions = {},
 ): string {
-  const duration = formatDuration(session.meta.stats.durationMs);
-  const tStats = computeToolStats(session.scenes);
-  const footerParts = [duration];
-  if (tStats.responses > 0) footerParts.push(`${tStats.responses} responses`);
-  if (tStats.totalTools > 0) footerParts.push(`${tStats.totalTools} tools`);
-  const footerLeft = footerParts.filter(Boolean).join(" · ");
-  const footerRight = opts.replayUrl ? "View full replay →" : "vibe-replay.com";
+  const { footerLeft, footerRight } = buildSvgFooter(session, opts);
 
   // Reuse shared rendering logic (no animation class needed)
   let frameContent: string;
