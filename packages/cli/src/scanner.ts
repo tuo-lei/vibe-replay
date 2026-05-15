@@ -818,14 +818,14 @@ function estimateParsedCost(parsed: ProviderParseResult): number | undefined {
 const SCAN_CACHE_KEY = "session-scans-v1";
 const SCAN_CONCURRENCY = 4;
 
-export async function readScanCache(): Promise<ScanCacheData | null> {
+async function readScanCache(): Promise<ScanCacheData | null> {
   const cached = await readFileCache<ScanCacheData>(SCAN_CACHE_KEY);
   if (!cached) return null;
   if (cached.data.scannerVersion !== SCANNER_VERSION) return null;
   return cached.data;
 }
 
-export async function writeScanCache(data: ScanCacheData): Promise<void> {
+async function writeScanCache(data: ScanCacheData): Promise<void> {
   await writeFileCache(SCAN_CACHE_KEY, data);
 }
 
