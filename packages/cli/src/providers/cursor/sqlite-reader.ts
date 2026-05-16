@@ -426,11 +426,6 @@ export async function resolveCursorLiveWatchPaths(sessionId: string): Promise<st
   return [...paths];
 }
 
-export async function storeDbExists(_workspacePath: string, sessionId: string): Promise<boolean> {
-  const dbPath = await findStoreDb(sessionId);
-  return dbPath !== null;
-}
-
 export async function listStoreDbSessionIds(forceRefresh = false): Promise<Set<string>> {
   return new Set((await getStoreDbIndex(forceRefresh)).keys());
 }
