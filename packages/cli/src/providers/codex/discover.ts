@@ -6,11 +6,7 @@ import { createInterface } from "node:readline";
 import { cleanPromptText } from "../../clean-prompt.js";
 import type { SessionInfo } from "../../types.js";
 import { shortenPath } from "../../utils.js";
-import {
-  CODEX_CONTEXT_TAGS,
-  codexStripTwoPass,
-  isCodexToolCallType,
-} from "./constants.js";
+import { CODEX_CONTEXT_TAGS, codexStripTwoPass, isCodexToolCallType } from "./constants.js";
 
 const STATE_DB_FILENAME = "state_5.sqlite";
 
