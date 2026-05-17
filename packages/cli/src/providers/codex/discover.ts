@@ -8,9 +8,8 @@ import type { SessionInfo } from "../../types.js";
 import { shortenPath } from "../../utils.js";
 import {
   CODEX_CONTEXT_TAGS,
+  codexStripTwoPass,
   isCodexToolCallType,
-  stripLeadingCodexContextBlocks,
-  stripUserMessagePrefix,
 } from "./constants.js";
 
 const STATE_DB_FILENAME = "state_5.sqlite";
@@ -295,11 +294,7 @@ function isEditTool(name?: string): boolean {
 }
 
 function normalizeDiscoveredUserMessage(text: string): string {
-  let normalized = text;
-  for (let i = 0; i < 2; i++) {
-    normalized = stripUserMessagePrefix(stripLeadingCodexContextBlocks(normalized)).trim();
-  }
-  return cleanPromptText(normalized);
+  return cleanPromptText(codexStripTwoPass(text));
 }
 
 function recordDiscoveredPrompt(

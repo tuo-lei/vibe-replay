@@ -43,3 +43,11 @@ export function stripLeadingCodexContextBlocks(text: string): string {
   }
   return remaining;
 }
+
+export function codexStripTwoPass(text: string): string {
+  let result = text;
+  for (let i = 0; i < 2; i++) {
+    result = stripUserMessagePrefix(stripLeadingCodexContextBlocks(result)).trim();
+  }
+  return result;
+}
