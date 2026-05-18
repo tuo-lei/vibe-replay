@@ -264,6 +264,11 @@ button,
   animation: nav-focus-pulse 0.9s ease-in-out 2;
 }
 
+/* Lightweight sticky turn context; keep it stable during fast scrolling. */
+.turn-sticky-summary {
+  background: linear-gradient(var(--green-subtle), var(--green-subtle)), var(--surface);
+}
+
 /* Landing page start button pulse */
 @keyframes landing-glow {
   0%,

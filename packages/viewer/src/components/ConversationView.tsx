@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
 import type { OverlayActions } from "../hooks/useOverlays";
 import type { EffectivePrefs } from "../hooks/useViewPrefs";
 import type { Scene, TurnStat } from "../types";
@@ -72,6 +72,13 @@ export default function ConversationView({
   isLive,
   liveSessionState,
 }: Props & { onSeek?: (index: number) => void }) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [activeStickyPrompt, setActiveStickyPrompt] = useState<{
+    index: number;
+    turnNumber?: number;
+    content: string;
+  } | null>(null);
+
   // Pre-compute ALL groups once — stable across playback ticks
   const allGroups = useMemo(() => {
     const result: TurnGroup[] = [];
@@ -166,23 +173,140 @@ export default function ConversationView({
     return gaps;
   }, [displayGroups]);
 
+  const displaySections = useMemo(() => {
+    const sections: {
+      key: string;
+      hasUserPrompt: boolean;
+      groups: { group: TurnGroup; gi: number }[];
+    }[] = [];
+    let current: (typeof sections)[number] | null = null;
+
+    for (let gi = 0; gi < displayGroups.length; gi++) {
+      const group = displayGroups[gi];
+      const firstIndex = group.scenes[0]?.index ?? gi;
+
+      if (group.type === "user") {
+        current = {
+          key: `turn-${firstIndex}`,
+          hasUserPrompt: true,
+          groups: [{ group, gi }],
+        };
+        sections.push(current);
+        continue;
+      }
+
+      if (current) {
+        current.groups.push({ group, gi });
+      } else {
+        sections.push({
+          key: `prelude-${firstIndex}`,
+          hasUserPrompt: false,
+          groups: [{ group, gi }],
+        });
+      }
+    }
+
+    return sections;
+  }, [displayGroups]);
+
+  const userPromptSummaries = useMemo(
+    () =>
+      displayGroups
+        .filter((group) => group.type === "user")
+        .map((group) => {
+          const item = group.scenes[0];
+          if (!item || item.scene.type !== "user-prompt") return null;
+          return {
+            index: item.index,
+            turnNumber: group.turnNumber,
+            content: item.scene.content,
+          };
+        })
+        .filter((item): item is { index: number; turnNumber?: number; content: string } =>
+          Boolean(item),
+        ),
+    [displayGroups],
+  );
+
+  useEffect(() => {
+    const root = rootRef.current;
+    const scroller = root?.closest("[data-replay-scroll-container]");
+    if (!(root instanceof HTMLElement) || !(scroller instanceof HTMLElement)) return;
+
+    let frame = 0;
+    let lastIndex: number | null = null;
+    const update = () => {
+      frame = 0;
+      const scrollerTop = scroller.getBoundingClientRect().top;
+      let active: (typeof userPromptSummaries)[number] | null = null;
+
+      for (const prompt of userPromptSummaries) {
+        const el = root.querySelector(`[data-scene-index="${prompt.index}"]`);
+        if (!(el instanceof HTMLElement)) continue;
+        if (el.getBoundingClientRect().bottom <= scrollerTop + 2) {
+          active = prompt;
+        } else {
+          break;
+        }
+      }
+
+      const nextIndex = active?.index ?? null;
+      if (nextIndex !== lastIndex) {
+        lastIndex = nextIndex;
+        setActiveStickyPrompt(active);
+      }
+    };
+    const schedule = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(update);
+    };
+
+    update();
+    scroller.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      scroller.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+    };
+  }, [userPromptSummaries]);
+
   return (
-    <div className="max-w-4xl mx-auto space-y-5 pb-6">
-      {displayGroups.map((group, gi) => (
-        <LazyGroup key={gi} forceRender={gi >= currentGroupIdx - 15 && gi <= currentGroupIdx + 5}>
-          {timeGaps.has(gi) && <TimeGapIndicator gapMs={timeGaps.get(gi)!} />}
-          <GroupCard
-            group={group}
-            currentIndex={currentIndex}
-            effectivePrefs={effectivePrefs}
-            focusIndex={focusIndex}
-            annotatedScenes={annotatedScenes}
-            annotationCounts={annotationCounts}
-            onComment={onComment}
-            overlayActions={overlayActions}
-            turnStats={turnStats}
-          />
-        </LazyGroup>
+    <div ref={rootRef} className="max-w-4xl mx-auto space-y-5 pb-6">
+      <ActiveStickyPrompt prompt={activeStickyPrompt} />
+      {displaySections.map((section) => (
+        <div
+          key={section.key}
+          className={section.hasUserPrompt ? "relative space-y-5" : "space-y-5"}
+        >
+          {section.groups.map(({ group, gi }) => {
+            const card = (
+              <>
+                {timeGaps.has(gi) && <TimeGapIndicator gapMs={timeGaps.get(gi)!} />}
+                <GroupCard
+                  group={group}
+                  currentIndex={currentIndex}
+                  effectivePrefs={effectivePrefs}
+                  focusIndex={focusIndex}
+                  annotatedScenes={annotatedScenes}
+                  annotationCounts={annotationCounts}
+                  onComment={onComment}
+                  overlayActions={overlayActions}
+                  turnStats={turnStats}
+                />
+              </>
+            );
+            if (group.type === "user") return <Fragment key={gi}>{card}</Fragment>;
+            return (
+              <LazyGroup
+                key={gi}
+                forceRender={gi >= currentGroupIdx - 15 && gi <= currentGroupIdx + 5}
+              >
+                {card}
+              </LazyGroup>
+            );
+          })}
+        </div>
       ))}
       {state === "paused" && visibleCount < scenes.length && (
         <div className="pt-4 pb-12 flex items-center justify-center animate-in fade-in slide-in-from-bottom-2 duration-700 ease-out select-none">
@@ -275,6 +399,30 @@ export default function ConversationView({
       )}
 
       {visibleCount >= scenes.length && isLive && <LiveStateCard sessionState={liveSessionState} />}
+    </div>
+  );
+}
+
+function ActiveStickyPrompt({
+  prompt,
+}: {
+  prompt: { index: number; turnNumber?: number; content: string } | null;
+}) {
+  if (!prompt) return null;
+
+  return (
+    <div className="sticky top-0 z-30 h-0">
+      <div
+        className="turn-sticky-summary pointer-events-none -translate-y-3 mx-auto flex max-w-4xl items-center gap-3 rounded-full border border-terminal-green/25 px-4 py-1.5 font-mono text-xs leading-5 text-terminal-green shadow-layer-md"
+        title={prompt.content}
+      >
+        <span className="min-w-0 flex-1 truncate">{prompt.content}</span>
+        {prompt.turnNumber !== undefined && (
+          <span className="shrink-0 text-[10px] font-bold text-terminal-dimmer">
+            #{String(prompt.turnNumber).padStart(2, "0")}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
