@@ -173,7 +173,7 @@ describe("cursor sqlite metrics helpers", () => {
           },
           bubble: { type: 1, tokenCount: { inputTokens: 0, outputTokens: 0 } },
         },
-      ] as any,
+      ],
       "claude-4.6-opus-high-thinking",
     );
 
@@ -198,7 +198,7 @@ describe("cursor sqlite metrics helpers", () => {
             thinkingDurationMs: 2000,
           },
         },
-      ] as any,
+      ],
       undefined,
     );
 
@@ -235,7 +235,7 @@ describe("cursor sqlite metrics helpers", () => {
             thinkingDurationMs: 4476,
           },
         },
-      ] as any,
+      ],
       undefined,
     );
 
@@ -364,12 +364,8 @@ describe("cursor sqlite metrics helpers", () => {
 
   it("merges turn stats by preferring primary fields and enrichment gaps", () => {
     expect(__testables.mergeTurnStats(undefined, undefined)).toBeUndefined();
-    expect(__testables.mergeTurnStats([{ turnIndex: 0 } as any], undefined)).toEqual([
-      { turnIndex: 0 },
-    ]);
-    expect(__testables.mergeTurnStats(undefined, [{ turnIndex: 1 } as any])).toEqual([
-      { turnIndex: 1 },
-    ]);
+    expect(__testables.mergeTurnStats([{ turnIndex: 0 }], undefined)).toEqual([{ turnIndex: 0 }]);
+    expect(__testables.mergeTurnStats(undefined, [{ turnIndex: 1 }])).toEqual([{ turnIndex: 1 }]);
 
     expect(
       __testables.mergeTurnStats(
@@ -387,7 +383,7 @@ describe("cursor sqlite metrics helpers", () => {
               cacheReadTokens: 0,
             },
           },
-        ] as any,
+        ],
         [
           {
             turnIndex: 0,
@@ -398,7 +394,7 @@ describe("cursor sqlite metrics helpers", () => {
             turnIndex: 1,
             model: "claude-4.6-opus-high-thinking",
           },
-        ] as any,
+        ],
       ),
     ).toEqual([
       {
@@ -443,7 +439,7 @@ describe("cursor sqlite metrics helpers", () => {
           ],
         },
       },
-    ] as any);
+    ]);
 
     expect(links).toEqual([
       {
@@ -474,7 +470,7 @@ describe("cursor sqlite metrics helpers", () => {
           },
         },
       },
-    ] as any);
+    ]);
 
     expect(apiErrors).toEqual([
       {
@@ -494,7 +490,7 @@ describe("cursor sqlite metrics helpers", () => {
             recentlyViewedFiles: [{ path: "docs/plan.md" }],
           },
         },
-      ] as any,
+      ],
       [
         {
           terminalFiles: [{ filePath: "logs/dev.log" }],
@@ -555,7 +551,7 @@ describe("cursor sqlite metrics helpers", () => {
           "</user_query>",
         ].join("\n"),
       },
-    ] as any);
+    ]);
 
     expect(blocks).toEqual([{ type: "text", text: "Fix the Cursor replay" }]);
   });
@@ -613,7 +609,7 @@ describe("cursor sqlite metrics helpers", () => {
           toolName: "ReadFile",
           args: { path: "/tmp/demo.ts" },
         },
-      ] as any,
+      ],
       new Map(),
     );
 
@@ -641,7 +637,7 @@ describe("cursor sqlite metrics helpers", () => {
             "I should explain why before I fix it.",
           ].join("\n"),
         },
-      ] as any,
+      ],
       new Map(),
     );
 
@@ -669,7 +665,7 @@ describe("cursor sqlite metrics helpers", () => {
           },
         },
       },
-    ] as any);
+    ]);
 
     expect(apiErrors).toEqual([
       {
@@ -908,7 +904,7 @@ describe("cursor sqlite metrics helpers", () => {
             relevantFiles: [{ uri: "file:///Users/test/project/src/auth%20flow.ts" }],
           },
         },
-      ] as any,
+      ],
       [],
     );
 
@@ -956,7 +952,7 @@ describe("cursor sqlite metrics helpers", () => {
       {
         role: "assistant",
         model: "gpt-5.3-codex-high",
-        blocks: [{ type: "tool_use", id: "1", name: "Bash", input: {}, _durationMs: 1200 } as any],
+        blocks: [{ type: "tool_use", id: "1", name: "Bash", input: {}, _durationMs: 1200 }],
       },
       {
         role: "user",
@@ -966,7 +962,7 @@ describe("cursor sqlite metrics helpers", () => {
         role: "assistant",
         blocks: [{ type: "text", text: "plain reply without tool duration" }],
       },
-    ] as any);
+    ]);
 
     expect(turnStats).toHaveLength(2);
     expect(turnStats[0]).toMatchObject({ turnIndex: 0, durationMs: 1200 });
