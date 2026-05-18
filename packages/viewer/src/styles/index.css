@@ -266,7 +266,8 @@ button,
 
 /* Lightweight sticky turn context; keep it stable during fast scrolling. */
 .turn-sticky-summary {
-  background: linear-gradient(var(--green-subtle), var(--green-subtle)), var(--surface);
+  background-color: var(--surface);
+  background-image: linear-gradient(var(--green-subtle), var(--green-subtle));
 }
 
 /* Landing page start button pulse */

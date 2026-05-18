@@ -1,4 +1,4 @@
-import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { OverlayActions } from "../hooks/useOverlays";
 import type { EffectivePrefs } from "../hooks/useViewPrefs";
 import type { Scene, TurnStat } from "../types";
@@ -219,13 +219,13 @@ export default function ConversationView({
           return {
             index: item.index,
             turnNumber: group.turnNumber,
-            content: item.scene.content,
+            content: overlayActions?.getEffectiveContent(item.index) ?? item.scene.content,
           };
         })
         .filter((item): item is { index: number; turnNumber?: number; content: string } =>
           Boolean(item),
         ),
-    [displayGroups],
+    [displayGroups, overlayActions],
   );
 
   useEffect(() => {
@@ -241,7 +241,7 @@ export default function ConversationView({
       let active: (typeof userPromptSummaries)[number] | null = null;
 
       for (const prompt of userPromptSummaries) {
-        const el = root.querySelector(`[data-scene-index="${prompt.index}"]`);
+        const el = root.querySelector(`[data-sticky-prompt-index="${prompt.index}"]`);
         if (!(el instanceof HTMLElement)) continue;
         if (el.getBoundingClientRect().bottom <= scrollerTop + 2) {
           active = prompt;
@@ -275,10 +275,7 @@ export default function ConversationView({
     <div ref={rootRef} className="max-w-4xl mx-auto space-y-5 pb-6">
       <ActiveStickyPrompt prompt={activeStickyPrompt} />
       {displaySections.map((section) => (
-        <div
-          key={section.key}
-          className={section.hasUserPrompt ? "relative space-y-5" : "space-y-5"}
-        >
+        <div key={section.key} className="space-y-5">
           {section.groups.map(({ group, gi }) => {
             const card = (
               <>
@@ -296,11 +293,12 @@ export default function ConversationView({
                 />
               </>
             );
-            if (group.type === "user") return <Fragment key={gi}>{card}</Fragment>;
+            const firstIndex = group.scenes[0]?.index;
             return (
               <LazyGroup
                 key={gi}
                 forceRender={gi >= currentGroupIdx - 15 && gi <= currentGroupIdx + 5}
+                stickyPromptIndex={group.type === "user" ? firstIndex : undefined}
               >
                 {card}
               </LazyGroup>
@@ -524,9 +522,11 @@ function TimeGapIndicator({ gapMs }: { gapMs: number }) {
 const LazyGroup = memo(function LazyGroup({
   children,
   forceRender,
+  stickyPromptIndex,
 }: {
   children: React.ReactNode;
   forceRender: boolean;
+  stickyPromptIndex?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [inView, setInView] = useState(false);
@@ -560,6 +560,7 @@ const LazyGroup = memo(function LazyGroup({
   return (
     <div
       ref={ref}
+      data-sticky-prompt-index={stickyPromptIndex}
       style={!shouldRender && heightRef.current > 0 ? { minHeight: heightRef.current } : undefined}
     >
       {shouldRender ? children : null}
