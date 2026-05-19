@@ -709,7 +709,7 @@ function buildScanResultFromParsed(
   const fileEditCounts = new Map<string, number>();
 
   for (const turn of parsed.turns) {
-    if (turn.role === "user" && turn.subtype !== "compaction-summary") {
+    if (turn.role === "user" && !turn.subtype) {
       const hasText = turn.blocks.some(
         (block) =>
           block.type === "text" && typeof block.text === "string" && block.text.trim().length > 0,
@@ -805,7 +805,7 @@ function buildScanResultFromParsed(
 
 function firstUserPrompt(turns: ProviderParseResult["turns"]): string | undefined {
   for (const turn of turns) {
-    if (turn.role !== "user" || turn.subtype === "compaction-summary") continue;
+    if (turn.role !== "user" || turn.subtype) continue;
     for (const block of turn.blocks) {
       if (block.type !== "text") continue;
       const text = block.text.replace(/\s+/g, " ").trim();

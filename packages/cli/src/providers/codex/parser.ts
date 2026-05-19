@@ -386,6 +386,11 @@ export function parseCodexLines(
       : undefined;
   const turnStats = buildCodexTurnStats(turns, tokenSnapshots, taskDurations, model);
   const summedTaskDurationMs = taskDurations.reduce((sum, duration) => sum + duration, 0);
+  const userPromptTurnCount = turns.filter((turn) => turn.role === "user" && !turn.subtype).length;
+  const completeTaskDurationMs =
+    userPromptTurnCount > 0 && taskDurations.length >= userPromptTurnCount
+      ? summedTaskDurationMs
+      : undefined;
 
   return {
     sessionId,
@@ -395,7 +400,7 @@ export function parseCodexLines(
     model,
     startTime,
     endTime,
-    totalDurationMs: summedTaskDurationMs || estimateActiveDuration(allTimestamps),
+    totalDurationMs: completeTaskDurationMs || estimateActiveDuration(allTimestamps),
     turns,
     tokenUsage,
     tokenUsageByModel,

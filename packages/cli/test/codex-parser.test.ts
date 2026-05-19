@@ -806,6 +806,36 @@ describe("Codex parser", () => {
     expect(result.turnStats?.[0]).toMatchObject({ turnIndex: 0, durationMs: 5000 });
   });
 
+  it("keeps timestamp fallback duration when Codex task_complete coverage is partial", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-04-26T10:36:00.000Z",
+          type: "session_meta",
+          payload: { id: "codex-session-partial-duration", cwd: "/Users/test/project" },
+        },
+        {
+          timestamp: "2026-04-26T10:36:01.000Z",
+          type: "event_msg",
+          payload: { type: "user_message", message: "First prompt." },
+        },
+        {
+          timestamp: "2026-04-26T10:36:03.000Z",
+          type: "event_msg",
+          payload: { type: "task_complete", duration_ms: 1000 },
+        },
+        {
+          timestamp: "2026-04-26T10:36:10.000Z",
+          type: "event_msg",
+          payload: { type: "user_message", message: "Second prompt." },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    expect(result.turnStats).toHaveLength(2);
+    expect(result.totalDurationMs).toBe(10_000);
+  });
+
   it("tracks current Codex compaction events", () => {
     const result = parseCodexLines(
       [
