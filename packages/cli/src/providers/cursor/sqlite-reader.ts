@@ -23,6 +23,7 @@ const MAX_CURSOR_REQUEST_CONTEXT_ROWS = 500;
 const SQLITE_CLI_MAX_BUFFER = 256 * 1024 * 1024;
 const SQLITE_CLI_QUERY_TIMEOUT_MS = 120_000;
 const MAX_CURSOR_GLOBAL_STATE_TOOL_RESULT_CHARS = 10_000;
+const GLOBAL_STATE_BUBBLE_KEY_CHUNK_SIZE = 200;
 const execFileAsync = promisify(execFile);
 
 function createRetryableInit<T>(factory: () => Promise<T>): () => Promise<T> {
@@ -152,10 +153,22 @@ function sqlString(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
-function sqlLikePrefix(prefix: string): string {
-  return sqlString(
-    `${prefix.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`,
-  );
+function nextStringPrefix(prefix: string): string | null {
+  if (!prefix) return null;
+  const chars = [...prefix];
+  const last = chars.pop();
+  if (!last) return null;
+  const codePoint = last.codePointAt(0);
+  if (codePoint === undefined || codePoint >= 0x10ffff) return null;
+  const next = codePoint + 1;
+  if (next >= 0xd800 && next <= 0xdfff) return null;
+  return `${chars.join("")}${String.fromCodePoint(next)}`;
+}
+
+function sqlKeyPrefixRange(prefix: string): string {
+  const upperBound = nextStringPrefix(prefix);
+  if (!upperBound) return `key >= ${sqlString(prefix)}`;
+  return `key >= ${sqlString(prefix)} AND key < ${sqlString(upperBound)}`;
 }
 
 function projectedCursorBubbleSelectSql(): string {
@@ -235,6 +248,14 @@ async function querySqliteCli(dbPath: string, sql: string): Promise<Record<strin
   return JSON.parse(trimmed) as Record<string, any>[];
 }
 
+async function querySqliteCliText(dbPath: string, sql: string): Promise<string> {
+  const { stdout } = await execFileAsync("sqlite3", ["-readonly", dbPath, sql], {
+    maxBuffer: SQLITE_CLI_MAX_BUFFER,
+    timeout: SQLITE_CLI_QUERY_TIMEOUT_MS,
+  });
+  return stdout.replace(/\r?\n$/, "");
+}
+
 function sqlJsRows(db: any, sql: string): Record<string, any>[] {
   const result = db.exec(sql);
   if (!result.length) return [];
@@ -256,6 +277,26 @@ async function queryGlobalStateRows(
     return querySqliteCli(globalStateDb.dbPath, sql);
   }
   return sqlJsRows(globalStateDb.db, sql);
+}
+
+async function queryGlobalStateTextValue(
+  globalStateDb: CachedGlobalStateDb,
+  key: string,
+): Promise<string | null> {
+  if (globalStateDb.backend === "sqlite-cli") {
+    const value = await querySqliteCliText(
+      globalStateDb.dbPath,
+      `SELECT CAST(value AS TEXT) FROM cursorDiskKV WHERE key = ${sqlString(key)} LIMIT 1`,
+    );
+    return value || null;
+  }
+
+  const rows = sqlJsRows(
+    globalStateDb.db,
+    `SELECT value FROM cursorDiskKV WHERE key = ${sqlString(key)} LIMIT 1`,
+  );
+  if (rows.length === 0) return null;
+  return valueToString(rows[0].value) || null;
 }
 
 async function openGlobalStateDb(): Promise<CachedGlobalStateDb | null> {
@@ -1026,9 +1067,9 @@ export async function discoverGlobalStateOnlySessions(
             "json_extract(value,'$.createdAt') AS createdAt,",
             "json_extract(value,'$.name') AS title,",
             "length(value) AS fileSize",
-            "FROM cursorDiskKV WHERE key LIKE 'composerData:%' AND json_valid(value)",
+            `FROM cursorDiskKV WHERE ${sqlKeyPrefixRange("composerData:")} AND json_valid(value)`,
           ].join(" ")
-        : "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'";
+        : `SELECT key, value FROM cursorDiskKV WHERE ${sqlKeyPrefixRange("composerData:")}`;
     const rows = await queryGlobalStateRows(globalStateDb, composerDiscoverySql);
     if (rows.length === 0) return { sessions: [], sessionIds };
 
@@ -1854,9 +1895,9 @@ async function loadCursorRequestContexts(
 ): Promise<Record<string, any>[]> {
   const rows = await queryGlobalStateRows(
     globalStateDb,
-    `SELECT value FROM cursorDiskKV WHERE key LIKE ${sqlLikePrefix(
+    `SELECT value FROM cursorDiskKV WHERE ${sqlKeyPrefixRange(
       `messageRequestContext:${sessionId}:`,
-    )} ESCAPE '\\' LIMIT ${MAX_CURSOR_REQUEST_CONTEXT_ROWS}`,
+    )} LIMIT ${MAX_CURSOR_REQUEST_CONTEXT_ROWS}`,
   );
 
   const contexts: Record<string, any>[] = [];
@@ -1874,11 +1915,30 @@ async function countCursorCheckpointEntries(
 ): Promise<number> {
   const rows = await queryGlobalStateRows(
     globalStateDb,
-    `SELECT COUNT(*) AS count FROM cursorDiskKV WHERE key LIKE ${sqlLikePrefix(
+    `SELECT COUNT(*) AS count FROM cursorDiskKV WHERE ${sqlKeyPrefixRange(
       `checkpointId:${sessionId}:`,
-    )} ESCAPE '\\'`,
+    )}`,
   );
   return toNonNegativeInt(rows[0]?.count);
+}
+
+async function loadProjectedBubbleRowsByKeys(
+  globalStateDb: CachedGlobalStateDb,
+  keys: string[],
+): Promise<Record<string, any>[]> {
+  const rows: Record<string, any>[] = [];
+  for (let i = 0; i < keys.length; i += GLOBAL_STATE_BUBBLE_KEY_CHUNK_SIZE) {
+    const chunk = keys.slice(i, i + GLOBAL_STATE_BUBBLE_KEY_CHUNK_SIZE);
+    rows.push(
+      ...(await queryGlobalStateRows(
+        globalStateDb,
+        `SELECT ${projectedCursorBubbleSelectSql()} FROM cursorDiskKV WHERE key IN (${chunk
+          .map(sqlString)
+          .join(",")}) AND json_valid(value)`,
+      )),
+    );
+  }
+  return rows;
 }
 
 function mergeUniqueStrings(...groups: Array<string[] | undefined>): string[] | undefined {
@@ -2353,13 +2413,11 @@ async function parseCursorGlobalStateDb(
   if (!resolvedGlobalStateDb) return null;
 
   try {
-    const composerRows = await queryGlobalStateRows(
+    const rawComposer = await queryGlobalStateTextValue(
       resolvedGlobalStateDb,
-      `SELECT value FROM cursorDiskKV WHERE key = ${sqlString(`composerData:${sessionId}`)}`,
+      `composerData:${sessionId}`,
     );
-    if (composerRows.length === 0) return null;
-
-    const rawComposer = valueToString(composerRows[0].value);
+    if (!rawComposer) return null;
     const composer = parseJson<Record<string, any>>(rawComposer);
     if (!composer) return null;
 
@@ -2390,10 +2448,11 @@ async function parseCursorGlobalStateDb(
         bubbleIds.map((bubbleId) => `bubbleId:${sessionId}:${bubbleId}`),
       );
       const bubblesByKey = new Map<string, Record<string, any>>();
-      const rows = await queryGlobalStateRows(
-        resolvedGlobalStateDb,
-        `SELECT ${projectedCursorBubbleSelectSql()} FROM cursorDiskKV WHERE key LIKE ${sqlLikePrefix(`bubbleId:${sessionId}:`)} AND json_valid(value)`,
-      );
+      // The composer header list is the authoritative conversation order, so
+      // only fetch referenced bubble rows instead of every stale key for the session.
+      const rows = await loadProjectedBubbleRowsByKeys(resolvedGlobalStateDb, [
+        ...expectedBubbleKeys,
+      ]);
       for (const row of rows) {
         const key = valueToString(row.key);
         if (!expectedBubbleKeys.has(key)) continue;
@@ -3068,9 +3127,11 @@ export const __testables = {
   inferProjectRootFromPathHint,
   normalizeTurnText,
   normalizeCursorModelName,
+  nextStringPrefix,
   bubbleToTurn,
   parseThinking,
   parseUserContent,
   projectedCursorBubbleRowToBubble,
   projectedCursorBubbleSelectSql,
+  sqlKeyPrefixRange,
 };
