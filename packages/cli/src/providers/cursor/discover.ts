@@ -160,7 +160,8 @@ async function decodeProjectDirUncached(encoded: string): Promise<string> {
   const parts = encoded.split("-");
   const startIdx = parts[0] ? 0 : 1;
   const resolved = await resolveEncodedProjectParts(parts, startIdx, "/");
-  return resolved || `/${encoded.replace(/-/g, "/")}`;
+  const fallbackEncoded = encoded.startsWith("-") ? encoded.slice(1) : encoded;
+  return `/${resolved ? resolved.slice(1) : fallbackEncoded.replace(/-/g, "/")}`;
 }
 
 async function resolveEncodedProjectParts(
@@ -177,7 +178,9 @@ async function resolveEncodedProjectParts(
   if (entries.length === 0) return null;
 
   const dirNames = new Set(
-    entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name),
+    entries
+      .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+      .map((entry) => entry.name),
   );
 
   // Try slash boundaries first to preserve the old behavior, but only explore
@@ -379,3 +382,7 @@ async function mapLimit<T, R>(
 
   return results;
 }
+
+export const __testables = {
+  decodeProjectDir,
+};
