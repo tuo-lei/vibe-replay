@@ -41,6 +41,12 @@ interface TurnGroup {
   turnNumber?: number;
 }
 
+interface StickyPromptSummary {
+  index: number;
+  turnNumber?: number;
+  content: string;
+}
+
 function formatTime(iso?: string): string {
   if (!iso) return "";
   try {
@@ -73,11 +79,7 @@ export default function ConversationView({
   liveSessionState,
 }: Props & { onSeek?: (index: number) => void }) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const [activeStickyPrompt, setActiveStickyPrompt] = useState<{
-    index: number;
-    turnNumber?: number;
-    content: string;
-  } | null>(null);
+  const [activeStickyPrompt, setActiveStickyPrompt] = useState<StickyPromptSummary | null>(null);
 
   // Pre-compute ALL groups once — stable across playback ticks
   const allGroups = useMemo(() => {
@@ -213,18 +215,17 @@ export default function ConversationView({
     () =>
       displayGroups
         .filter((group) => group.type === "user")
-        .map((group) => {
+        .flatMap<StickyPromptSummary>((group) => {
           const item = group.scenes[0];
-          if (!item || item.scene.type !== "user-prompt") return null;
-          return {
-            index: item.index,
-            turnNumber: group.turnNumber,
-            content: overlayActions?.getEffectiveContent(item.index) ?? item.scene.content,
-          };
-        })
-        .filter((item): item is { index: number; turnNumber?: number; content: string } =>
-          Boolean(item),
-        ),
+          if (!item || item.scene.type !== "user-prompt") return [];
+          return [
+            {
+              index: item.index,
+              turnNumber: group.turnNumber,
+              content: overlayActions?.getEffectiveContent(item.index) ?? item.scene.content,
+            },
+          ];
+        }),
     [displayGroups, overlayActions],
   );
 
@@ -238,7 +239,7 @@ export default function ConversationView({
     const update = () => {
       frame = 0;
       const scrollerTop = scroller.getBoundingClientRect().top;
-      let active: (typeof userPromptSummaries)[number] | null = null;
+      let active: StickyPromptSummary | null = null;
 
       for (const prompt of userPromptSummaries) {
         const el = root.querySelector(`[data-sticky-prompt-index="${prompt.index}"]`);
@@ -401,11 +402,7 @@ export default function ConversationView({
   );
 }
 
-function ActiveStickyPrompt({
-  prompt,
-}: {
-  prompt: { index: number; turnNumber?: number; content: string } | null;
-}) {
+function ActiveStickyPrompt({ prompt }: { prompt: StickyPromptSummary | null }) {
   if (!prompt) return null;
 
   return (
