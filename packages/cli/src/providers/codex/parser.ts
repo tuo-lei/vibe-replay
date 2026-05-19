@@ -66,6 +66,7 @@ export function parseCodexLines(
   let entrypoint: string | undefined;
   let permissionMode: string | undefined;
   let approvalPolicy: string | undefined;
+  let memoryMode: string | undefined;
 
   const turns: ParsedTurn[] = [];
   const allTimestamps: string[] = [];
@@ -102,6 +103,7 @@ export function parseCodexLines(
       gitBranch = gitBranch || p.git?.branch || p.git_branch;
       if (gitBranch) pushUnique(gitBranches, gitBranch);
       entrypoint = entrypoint || p.originator || p.source;
+      memoryMode = memoryMode || asOptionalString(p.memory_mode);
       continue;
     }
 
@@ -337,6 +339,7 @@ export function parseCodexLines(
     gitBranches: gitBranches.length > 1 ? gitBranches : undefined,
     entrypoint,
     permissionMode: approvalPolicy || permissionMode,
+    memoryMode,
     skillsUsed: skillsUsed.size > 0 ? [...skillsUsed].sort() : undefined,
     mcpServersUsed: mcpServersUsed.size > 0 ? [...mcpServersUsed].sort() : undefined,
     dataSource: "jsonl",
@@ -347,6 +350,10 @@ export function parseCodexLines(
       notes: ["Discovered from Codex state and parsed from rollout JSONL (local beta)."],
     },
   };
+}
+
+function asOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
 }
 
 function userMessageBlocks(payload: any): ContentBlock[] {

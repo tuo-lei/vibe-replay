@@ -183,6 +183,7 @@ export function transformToReplay(
       ...(parsed.gitBranches ? { gitBranches: parsed.gitBranches } : {}),
       ...(parsed.entrypoint ? { entrypoint: parsed.entrypoint } : {}),
       ...(parsed.permissionMode ? { permissionMode: parsed.permissionMode } : {}),
+      ...(parsed.memoryMode ? { memoryMode: parsed.memoryMode } : {}),
       ...(parsed.apiErrors && parsed.apiErrors.length > 0 ? { apiErrors: parsed.apiErrors } : {}),
       ...(parsed.trackedFiles && parsed.trackedFiles.length > 0
         ? { trackedFiles: parsed.trackedFiles.map(redactPath) }

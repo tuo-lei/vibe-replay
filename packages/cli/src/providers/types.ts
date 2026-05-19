@@ -49,6 +49,8 @@ export interface ProviderParseResult {
   gitBranches?: string[];
   entrypoint?: string;
   permissionMode?: string;
+  /** Codex session memory setting from session_meta.memory_mode */
+  memoryMode?: string;
   apiErrors?: Array<{
     timestamp: string;
     statusCode?: number;
