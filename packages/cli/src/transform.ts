@@ -170,7 +170,9 @@ export function transformToReplay(
         costEstimate,
         ...(parsed.turnStats ? { turnStats: parsed.turnStats } : {}),
       },
-      ...(parsed.model ? { contextLimit: getModelContextLimit(parsed.model) } : {}),
+      ...(parsed.contextLimit || parsed.model
+        ? { contextLimit: parsed.contextLimit || getModelContextLimit(parsed.model || "") }
+        : {}),
       ...(parsed.tokenUsageByModel ? { tokenUsageByModel: parsed.tokenUsageByModel } : {}),
       ...(parsed.prLinks && parsed.prLinks.length > 0 ? { prLinks: parsed.prLinks } : {}),
       compactions: parsed.compactions,

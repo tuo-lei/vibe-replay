@@ -62,7 +62,7 @@ https://your-host/viewer.html?url=https://example.com/replay.json
 |----------|--------|
 | Claude Code | Supported |
 | Cursor | Supported |
-| Codex | Planned |
+| Codex | Supported |
 | Gemini CLI | Planned |
 
 ## Options

@@ -34,6 +34,8 @@ export interface ProviderParseResult {
   compactions?: Compaction[];
   /** Per-turn metrics (indexed by user-prompt turn, 0-based) */
   turnStats?: TurnStat[];
+  /** Provider-reported context window limit for the primary model, if available */
+  contextLimit?: number;
   /** PR links associated with the session */
   prLinks?: PrLink[];
   /** Summary of subagents used in this session */

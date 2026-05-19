@@ -1623,7 +1623,7 @@ function SessionsPanel() {
         <div className="text-center space-y-2">
           <div className="text-terminal-dim font-mono text-sm">No AI sessions found</div>
           <div className="text-terminal-dimmer font-mono text-xs">
-            Start a coding session with Claude Code or Cursor, then come back here
+            Start Claude, Cursor, or Codex, then come back here
           </div>
         </div>
       </div>

@@ -338,6 +338,47 @@ describe("scanSession", () => {
     expect(result.filesModified).toEqual([]);
   });
 
+  it("excludes Codex developer context injections from prompt analytics", async () => {
+    const codexFixturePath = join(tmpDir, "codex-context-session.jsonl");
+    await writeFile(
+      codexFixturePath,
+      [
+        makeLine({
+          timestamp: "2026-04-26T10:30:00.000Z",
+          type: "session_meta",
+          payload: { id: "codex-context-session", cwd: "/Users/test/project", source: "cli" },
+        }),
+        makeLine({
+          timestamp: "2026-04-26T10:30:01.000Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "developer",
+            content: [{ type: "input_text", text: "Use the repo testing instructions." }],
+          },
+        }),
+        makeLine({
+          timestamp: "2026-04-26T10:30:02.000Z",
+          type: "event_msg",
+          payload: { type: "user_message", message: "Run the tests." },
+        }),
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "codex-context-session",
+      provider: "codex",
+      project: "~/test/project",
+      slug: "codex-context",
+      filePaths: [codexFixturePath],
+      timestamp: "2026-04-26T10:30:00.000Z",
+    });
+
+    expect(result.promptCount).toBe(1);
+    expect(result.firstPrompt).toBe("Run the tests.");
+  });
+
   it("defers rich Cursor SQLite parsing for background scans", async () => {
     const result = await scanSession({
       sessionId: "cursor-sqlite-session",

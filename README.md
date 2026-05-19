@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/vibe-replay)](https://www.npmjs.com/package/vibe-replay)
 [![license](https://img.shields.io/npm/l/vibe-replay)](./LICENSE)
 
-Turn Claude Code and Cursor sessions into shareable, interactive replays.
+Turn Claude Code, Cursor, and Codex sessions into shareable, interactive replays.
 
 ### The problem
 
@@ -31,7 +31,7 @@ npx vibe-replay
 
 ### All your sessions, one place
 
-Launch with `npx vibe-replay -d` and see every Claude Code and Cursor session across all projects — with activity heatmaps, cost totals, and project analytics.
+Launch with `npx vibe-replay -d` and see every Claude Code, Cursor, and Codex session across all projects — with activity heatmaps, cost totals, and project analytics.
 
 <p align="center">
   <img src="docs/screenshots/dashboard.png" alt="Local dashboard — browse sessions, activity heatmap, project analytics" width="800" />

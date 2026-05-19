@@ -210,6 +210,43 @@ describe("generateGitHubMarkdown", () => {
     expect(md).toContain("`src/app.ts` modified 5x");
   });
 
+  it("counts provider edit tools that report multiple file paths", () => {
+    const session = makeSession({
+      scenes: [
+        { type: "user-prompt", content: "Patch two files" },
+        {
+          type: "tool-call",
+          toolName: "Edit",
+          input: {
+            file_paths: ["~/project/src/app.ts", "~/project/src/auth.ts"],
+          },
+          result: "Changed files",
+        },
+      ],
+      meta: {
+        ...makeSession().meta,
+        stats: { sceneCount: 2, userPrompts: 1, toolCalls: 1 },
+      },
+    });
+
+    const md = generateGitHubMarkdown(session);
+    expect(md).toContain("2 files changed");
+  });
+
+  it("shows compaction signal when provider reports compaction metadata only", () => {
+    const session = makeSession({
+      scenes: [{ type: "user-prompt", content: "Continue after compaction" }],
+      meta: {
+        ...makeSession().meta,
+        compactions: [{ timestamp: "2026-01-01T00:00:00Z", trigger: "codex" }],
+        stats: { sceneCount: 1, userPrompts: 1, toolCalls: 0 },
+      },
+    });
+
+    const md = generateGitHubMarkdown(session);
+    expect(md).toContain("Session was compacted");
+  });
+
   it("handles empty sessions gracefully", () => {
     const session = makeSession({
       scenes: [],

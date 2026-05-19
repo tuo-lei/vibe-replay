@@ -20,7 +20,13 @@ import { parseCodexSession } from "./providers/codex/parser.js";
 import { parseCursorSession } from "./providers/cursor/parser.js";
 import type { ProviderParseResult } from "./providers/types.js";
 import type { DataSource, PrLink, SessionInfo, TokenUsage } from "./types.js";
-import { FILE_EDIT_TOOLS, extractToolFilePath, localDayKey, shortenPath } from "./utils.js";
+import {
+  FILE_EDIT_TOOLS,
+  extractToolFilePath,
+  extractToolFilePaths,
+  localDayKey,
+  shortenPath,
+} from "./utils.js";
 
 // Bump this when we extract new fields — forces re-scan of all sessions.
 const SCANNER_VERSION = 8;
@@ -703,7 +709,7 @@ function buildScanResultFromParsed(
   const fileEditCounts = new Map<string, number>();
 
   for (const turn of parsed.turns) {
-    if (turn.role === "user" && turn.subtype !== "compaction-summary") {
+    if (turn.role === "user" && !turn.subtype) {
       const hasText = turn.blocks.some(
         (block) =>
           block.type === "text" && typeof block.text === "string" && block.text.trim().length > 0,
@@ -743,11 +749,13 @@ function buildScanResultFromParsed(
 
       if (!FILE_EDIT_TOOLS.has(block.name)) continue;
 
-      const rawPath = extractToolFilePath(block.input);
-      if (!rawPath) continue;
+      const rawPaths = extractToolFilePaths(block.input);
+      if (rawPaths.length === 0) continue;
       editCount++;
-      const short = shortenPath(rawPath);
-      fileEditCounts.set(short, (fileEditCounts.get(short) || 0) + 1);
+      for (const rawPath of rawPaths) {
+        const short = shortenPath(rawPath);
+        fileEditCounts.set(short, (fileEditCounts.get(short) || 0) + 1);
+      }
     }
   }
 
@@ -797,7 +805,7 @@ function buildScanResultFromParsed(
 
 function firstUserPrompt(turns: ProviderParseResult["turns"]): string | undefined {
   for (const turn of turns) {
-    if (turn.role !== "user" || turn.subtype === "compaction-summary") continue;
+    if (turn.role !== "user" || turn.subtype) continue;
     for (const block of turn.blocks) {
       if (block.type !== "text") continue;
       const text = block.text.replace(/\s+/g, " ").trim();

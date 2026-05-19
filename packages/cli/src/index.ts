@@ -292,7 +292,9 @@ program
                       ? chalk.hex("#F472B6")("cowork")
                       : provider === "cursor"
                         ? chalk.hex("#0096FF")("cursor")
-                        : chalk.yellow(provider);
+                        : provider === "codex"
+                          ? chalk.hex("#B392F0")("codex")
+                          : chalk.yellow(provider);
               replayEntries.push({
                 name: `${providerBadge} ${chalk.dim(`[${time}]`)} ${chalk.white(title)} ${chalk.dim(`(${scenes} scenes)`)}`,
                 value: slug,
@@ -1157,7 +1159,7 @@ function formatSessionChoices(sessions: SessionInfo[], cleanupPeriodDays?: numbe
       const prompt = s.firstPrompt.replace(/\n/g, " ").slice(0, 50);
 
       // Claude: orange-brown (#D97706), Desktop: purple (#C084FC),
-      // Cowork: pink (#F472B6), Cursor: blue (#0096FF)
+      // Cowork: pink (#F472B6), Cursor: blue (#0096FF), Codex: purple (#B392F0)
       const providerBadge =
         s.provider === "claude-code"
           ? chalk.hex("#D97706")("claude")
@@ -1167,7 +1169,9 @@ function formatSessionChoices(sessions: SessionInfo[], cleanupPeriodDays?: numbe
               ? chalk.hex("#F472B6")("cowork")
               : s.provider === "cursor"
                 ? chalk.hex("#0096FF")("cursor")
-                : chalk.yellow(s.provider);
+                : s.provider === "codex"
+                  ? chalk.hex("#B392F0")("codex")
+                  : chalk.yellow(s.provider);
 
       const titleStr = s.title ? chalk.white(` "${s.title}"`) : "";
 

@@ -402,6 +402,7 @@ export const PROVIDER_BADGE_COLORS: Record<string, string> = {
   "claude-code": "bg-terminal-orange-subtle text-terminal-orange",
   "claude-desktop": "bg-terminal-orange-subtle text-terminal-orange",
   "claude-cowork": "bg-terminal-orange-subtle text-terminal-orange",
+  codex: "bg-terminal-purple-subtle text-terminal-purple",
   cursor: "bg-terminal-blue-subtle text-terminal-blue",
 };
 
@@ -409,6 +410,7 @@ const PROVIDER_BADGE_LABELS: Record<string, string> = {
   "claude-code": "Claude",
   "claude-desktop": "Desktop",
   "claude-cowork": "Cowork",
+  codex: "Codex",
   cursor: "Cursor",
 };
 
@@ -418,6 +420,7 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   "claude-code": "Claude Code",
   "claude-desktop": "Claude Desktop",
   "claude-cowork": "Claude Cowork",
+  codex: "Codex",
   cursor: "Cursor",
 };
 
@@ -427,20 +430,22 @@ const PROVIDER_BAR_COLORS: Record<string, string> = {
   "claude-code": "bg-terminal-orange",
   "claude-desktop": "bg-terminal-orange",
   "claude-cowork": "bg-terminal-orange",
+  codex: "bg-terminal-purple",
   cursor: "bg-terminal-blue",
 };
 
 // Provider "color family" for home-page chip UI that composes several tint
 // variants together (bg/8, text/80, text, dot). Returning the token name keeps
 // Tailwind's static-class extraction happy and avoids template-string bugs.
-const PROVIDER_FAMILY: Record<string, "orange" | "blue" | "dim"> = {
+const PROVIDER_FAMILY: Record<string, "orange" | "blue" | "purple" | "dim"> = {
   "claude-code": "orange",
   "claude-desktop": "orange",
   "claude-cowork": "orange",
+  codex: "purple",
   cursor: "blue",
 };
 
-export function providerFamily(provider: string): "orange" | "blue" | "dim" {
+export function providerFamily(provider: string): "orange" | "blue" | "purple" | "dim" {
   return PROVIDER_FAMILY[provider] || "dim";
 }
 

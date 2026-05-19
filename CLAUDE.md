@@ -2,7 +2,7 @@
 
 ## What is this
 
-vibe-replay turns AI coding sessions into animated, interactive web replays as self-contained HTML files. Supports Claude Code and Cursor.
+vibe-replay turns AI coding sessions into animated, interactive web replays as self-contained HTML files. Supports Claude Code, Cursor, and Codex.
 
 pnpm monorepo: `packages/cli` (npm: `vibe-replay`), `packages/viewer` (React → single HTML), `packages/types` (shared types), `website/` (Astro), `cloudflare/` (Workers API).
 

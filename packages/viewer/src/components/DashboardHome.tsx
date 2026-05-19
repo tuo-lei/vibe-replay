@@ -358,9 +358,7 @@ function RecentSessionsList({
   if (sessions.length === 0) {
     return (
       <div className="text-center py-6 text-terminal-dimmer text-xs font-mono">
-        {isLoading
-          ? "Loading sessions..."
-          : "No sessions found. Start a coding session with Claude Code or Cursor."}
+        {isLoading ? "Loading sessions..." : "No sessions found. Start Claude, Cursor, or Codex."}
       </div>
     );
   }

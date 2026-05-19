@@ -11,8 +11,28 @@ interface ModelPricing {
 // Tiered pricing (higher rates above 200k tokens) exists per-request but we only
 // have aggregate token counts, so we use base rates which match per-message reality
 // (individual messages rarely exceed the 200k threshold).
-// Source: LiteLLM model pricing data (used by ccusage).
+// Sources:
+// - Claude: LiteLLM model pricing data (used by ccusage).
+// - GPT-5.x: OpenAI API pricing page (standard rates for context lengths under 270K).
 const MODEL_PRICING: Record<string, ModelPricing> = {
+  "gpt-5.5": {
+    inputRate: 5,
+    outputRate: 30,
+    cacheCreateRate: 5,
+    cacheReadRate: 0.5,
+  },
+  "gpt-5.4": {
+    inputRate: 2.5,
+    outputRate: 15,
+    cacheCreateRate: 2.5,
+    cacheReadRate: 0.25,
+  },
+  "gpt-5.4-mini": {
+    inputRate: 0.75,
+    outputRate: 4.5,
+    cacheCreateRate: 0.75,
+    cacheReadRate: 0.075,
+  },
   // Opus 4.6/4.5
   "opus-4-new": {
     inputRate: 5,
@@ -72,6 +92,11 @@ const DEFAULT_PRICING = MODEL_PRICING.sonnet;
  */
 export function getModelPricing(model: string): ModelPricing {
   const lower = model.toLowerCase();
+  // GPT-5.x prices from OpenAI's public API pricing table.
+  // Check mini before gpt-5.4 so "gpt-5.4-mini" is not shadowed.
+  if (lower.includes("gpt-5.4-mini")) return MODEL_PRICING["gpt-5.4-mini"];
+  if (lower.includes("gpt-5.5")) return MODEL_PRICING["gpt-5.5"];
+  if (lower.includes("gpt-5.4")) return MODEL_PRICING["gpt-5.4"];
   // Opus: 4.6/4.5 → new pricing, 4.1 and earlier → legacy
   if (lower.includes("opus-4-6") || lower.includes("opus-4-5")) return MODEL_PRICING["opus-4-new"];
   if (lower.includes("opus")) return MODEL_PRICING.opus;
@@ -88,6 +113,9 @@ export function getModelPricing(model: string): ModelPricing {
 
 // Non-Claude context window limits. Claude models are handled by name detection below.
 const MODEL_CONTEXT_LIMITS: Record<string, number> = {
+  "gpt-5.5": 270_000,
+  "gpt-5.4-mini": 270_000,
+  "gpt-5.4": 270_000,
   "gpt-4o": 128_000,
   "gpt-4-turbo": 128_000,
   "gpt-4": 8_192,

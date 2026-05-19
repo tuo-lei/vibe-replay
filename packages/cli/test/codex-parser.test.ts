@@ -80,7 +80,17 @@ const lines = [
           output_tokens: 50,
           total_tokens: 1050,
         },
+        model_context_window: 258400,
       },
+    },
+  },
+  {
+    timestamp: "2026-04-26T05:00:06.000Z",
+    type: "event_msg",
+    payload: {
+      type: "task_complete",
+      duration_ms: 12345,
+      turn_id: "turn-1",
     },
   },
 ].map((line) => JSON.stringify(line));
@@ -93,6 +103,9 @@ describe("Codex parser", () => {
     expect(result.cwd).toBe("/Users/test/project");
     expect(result.model).toBe("gpt-5.4");
     expect(result.gitBranch).toBe("main");
+    expect(result.contextLimit).toBe(258400);
+    expect(result.totalDurationMs).toBe(12345);
+    expect(result.turnStats?.[0]?.durationMs).toBe(12345);
     expect(result.memoryMode).toBe("enabled");
     expect(result.tokenUsage).toMatchObject({
       inputTokens: 700,
@@ -595,6 +608,280 @@ describe("Codex parser", () => {
       name: "web_search",
       _result: "[Search: Codex rollout schema]",
     });
+  });
+
+  it("merges Codex web_search_call with matching web_search_end events", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-04-26T10:10:00.000Z",
+          type: "session_meta",
+          payload: { id: "codex-session-web", cwd: "/Users/test/project", source: "cli" },
+        },
+        {
+          timestamp: "2026-04-26T10:10:01.000Z",
+          type: "response_item",
+          payload: {
+            type: "web_search_call",
+            status: "completed",
+            action: { type: "search", query: "Codex rollout schema" },
+          },
+        },
+        {
+          timestamp: "2026-04-26T10:10:01.100Z",
+          type: "event_msg",
+          payload: {
+            type: "web_search_end",
+            call_id: "ws_1",
+            query: "Codex rollout schema",
+            action: { query: "Codex rollout schema", type: "search" },
+          },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    const tools = result.turns.flatMap((turn) =>
+      turn.blocks.filter((block) => block.type === "tool_use"),
+    );
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({
+      type: "tool_use",
+      name: "web_search",
+      _result: "[Search: Codex rollout schema]",
+    });
+  });
+
+  it("keeps Codex web_search_end events that omit query text", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-04-26T10:11:00.000Z",
+          type: "session_meta",
+          payload: { id: "codex-session-web-empty", cwd: "/Users/test/project", source: "cli" },
+        },
+        {
+          timestamp: "2026-04-26T10:11:01.000Z",
+          type: "event_msg",
+          payload: {
+            type: "web_search_end",
+            call_id: "ws_empty",
+            query: "",
+            action: { type: "open_page" },
+          },
+        },
+        {
+          timestamp: "2026-04-26T10:11:01.001Z",
+          type: "response_item",
+          payload: {
+            type: "web_search_call",
+            status: "completed",
+            action: { type: "open_page" },
+          },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    const tools = result.turns.flatMap((turn) =>
+      turn.blocks.filter((block) => block.type === "tool_use"),
+    );
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({
+      type: "tool_use",
+      name: "web_search",
+      _result: "[Web search: open_page]",
+    });
+  });
+
+  it("uses Codex patch_apply_end metadata to attribute edited files", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-04-26T10:20:00.000Z",
+          type: "session_meta",
+          payload: { id: "codex-session-patch", cwd: "/Users/test/project", source: "cli" },
+        },
+        {
+          timestamp: "2026-04-26T10:20:01.000Z",
+          type: "response_item",
+          payload: {
+            type: "custom_tool_call",
+            name: "apply_patch",
+            call_id: "patch_1",
+            input: "*** Begin Patch\n*** Update File: src/app.ts\n*** End Patch",
+          },
+        },
+        {
+          timestamp: "2026-04-26T10:20:02.000Z",
+          type: "event_msg",
+          payload: {
+            type: "patch_apply_end",
+            call_id: "patch_1",
+            status: "completed",
+            success: true,
+            changes: {
+              "/Users/test/project/src/app.ts": { status: "modified" },
+              "/Users/test/project/src/auth.ts": { status: "modified" },
+            },
+          },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    const tool = result.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.type === "tool_use");
+    expect(tool).toMatchObject({
+      type: "tool_use",
+      name: "Edit",
+      input: {
+        file_paths: ["/Users/test/project/src/app.ts", "/Users/test/project/src/auth.ts"],
+      },
+      _result: expect.stringContaining("Changed files:"),
+    });
+  });
+
+  it("parses Codex developer messages as context injections", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-04-26T10:30:00.000Z",
+          type: "session_meta",
+          payload: { id: "codex-session-dev", cwd: "/Users/test/project", source: "cli" },
+        },
+        {
+          timestamp: "2026-04-26T10:30:01.000Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "developer",
+            content: [{ type: "input_text", text: "Use the repo testing instructions." }],
+          },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    expect(result.turns[0]).toMatchObject({
+      role: "user",
+      subtype: "context-injection",
+    });
+    const replay = transformToReplay(result, "codex", "~/project");
+    expect(replay.scenes[0]).toMatchObject({
+      type: "context-injection",
+      content: "Use the repo testing instructions.",
+    });
+    expect(replay.meta.stats.userPrompts).toBe(0);
+  });
+
+  it("does not align task durations against Codex context injections", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-04-26T10:35:00.000Z",
+          type: "session_meta",
+          payload: { id: "codex-session-duration", cwd: "/Users/test/project", source: "cli" },
+        },
+        {
+          timestamp: "2026-04-26T10:35:01.000Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "developer",
+            content: [{ type: "input_text", text: "Use project rules." }],
+          },
+        },
+        {
+          timestamp: "2026-04-26T10:35:02.000Z",
+          type: "event_msg",
+          payload: { type: "user_message", message: "Run the tests." },
+        },
+        {
+          timestamp: "2026-04-26T10:35:05.000Z",
+          type: "event_msg",
+          payload: { type: "task_complete", duration_ms: 5000 },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    expect(result.turnStats).toHaveLength(1);
+    expect(result.turnStats?.[0]).toMatchObject({ turnIndex: 0, durationMs: 5000 });
+  });
+
+  it("keeps timestamp fallback duration when Codex task_complete coverage is partial", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-04-26T10:36:00.000Z",
+          type: "session_meta",
+          payload: { id: "codex-session-partial-duration", cwd: "/Users/test/project" },
+        },
+        {
+          timestamp: "2026-04-26T10:36:01.000Z",
+          type: "event_msg",
+          payload: { type: "user_message", message: "First prompt." },
+        },
+        {
+          timestamp: "2026-04-26T10:36:03.000Z",
+          type: "event_msg",
+          payload: { type: "task_complete", duration_ms: 1000 },
+        },
+        {
+          timestamp: "2026-04-26T10:36:10.000Z",
+          type: "event_msg",
+          payload: { type: "user_message", message: "Second prompt." },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    expect(result.turnStats).toHaveLength(2);
+    expect(result.totalDurationMs).toBe(10_000);
+  });
+
+  it("tracks current Codex compaction events", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-04-26T10:40:00.000Z",
+          type: "session_meta",
+          payload: { id: "codex-session-compact", cwd: "/Users/test/project", source: "cli" },
+        },
+        {
+          timestamp: "2026-04-26T10:40:01.000Z",
+          type: "event_msg",
+          payload: { type: "context_compacted" },
+        },
+        {
+          timestamp: "2026-04-26T10:40:02.000Z",
+          type: "compacted",
+          payload: { message: "", replacement_history: [] },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    expect(result.compactions).toMatchObject([{ trigger: "codex-context" }]);
+  });
+
+  it("prefers the specific Codex context compaction trigger when duplicate events arrive", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-04-26T10:41:00.000Z",
+          type: "session_meta",
+          payload: { id: "codex-session-compact-order", cwd: "/Users/test/project", source: "cli" },
+        },
+        {
+          timestamp: "2026-04-26T10:41:01.000Z",
+          type: "compacted",
+          payload: { message: "", replacement_history: [] },
+        },
+        {
+          timestamp: "2026-04-26T10:41:02.000Z",
+          type: "event_msg",
+          payload: { type: "context_compacted" },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    expect(result.compactions).toMatchObject([{ trigger: "codex-context" }]);
   });
 
   it("parses current Codex response-item user messages without duplicating event messages", () => {
