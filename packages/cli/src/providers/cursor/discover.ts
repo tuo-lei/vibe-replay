@@ -145,6 +145,8 @@ async function enrichWithSdkAgents(sessions: SessionInfo[]): Promise<void> {
 async function decodeProjectDir(encoded: string): Promise<string> {
   let cached = decodedProjectDirCache.get(encoded);
   if (!cached) {
+    // Cursor project dirs are stable for the lifetime of the CLI/server process;
+    // cache the resolved path so repeated discovery doesn't re-walk the same tree.
     cached = decodeProjectDirUncached(encoded).catch((err) => {
       decodedProjectDirCache.delete(encoded);
       throw err;
@@ -156,7 +158,11 @@ async function decodeProjectDir(encoded: string): Promise<string> {
 
 async function decodeProjectDirUncached(encoded: string): Promise<string> {
   const parts = encoded.split("-");
-  const resolved = await resolveEncodedProjectParts(parts, 0, "/");
+  // Match the old resolver's root handling:
+  //   "Users-me-proj"  -> start at "/Users"
+  //   "-Users-me-proj" -> start at "/"
+  const startPath = parts[0] ? `/${parts[0]}` : "/";
+  const resolved = await resolveEncodedProjectParts(parts, 1, startPath);
   return resolved || `/${encoded.replace(/-/g, "/")}`;
 }
 
@@ -165,7 +171,10 @@ async function resolveEncodedProjectParts(
   idx: number,
   current: string,
 ): Promise<string | null> {
-  if (idx >= parts.length) return current;
+  if (idx >= parts.length) {
+    const currentStat = await stat(current).catch(() => null);
+    return currentStat?.isDirectory() ? current : null;
+  }
 
   const entries = await readdir(current, { withFileTypes: true }).catch(() => []);
   if (entries.length === 0) return null;

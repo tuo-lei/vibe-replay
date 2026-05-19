@@ -160,7 +160,9 @@ function nextStringPrefix(prefix: string): string | null {
   if (!last) return null;
   const codePoint = last.codePointAt(0);
   if (codePoint === undefined || codePoint >= 0x10ffff) return null;
-  return `${chars.join("")}${String.fromCodePoint(codePoint + 1)}`;
+  const next = codePoint + 1;
+  if (next >= 0xd800 && next <= 0xdfff) return null;
+  return `${chars.join("")}${String.fromCodePoint(next)}`;
 }
 
 function sqlKeyPrefixRange(prefix: string): string {
@@ -251,7 +253,7 @@ async function querySqliteCliText(dbPath: string, sql: string): Promise<string> 
     maxBuffer: SQLITE_CLI_MAX_BUFFER,
     timeout: SQLITE_CLI_QUERY_TIMEOUT_MS,
   });
-  return stdout.endsWith("\n") ? stdout.slice(0, -1) : stdout;
+  return stdout.replace(/\r?\n$/, "");
 }
 
 function sqlJsRows(db: any, sql: string): Record<string, any>[] {
@@ -294,7 +296,7 @@ async function queryGlobalStateTextValue(
     `SELECT value FROM cursorDiskKV WHERE key = ${sqlString(key)} LIMIT 1`,
   );
   if (rows.length === 0) return null;
-  return valueToString(rows[0].value);
+  return valueToString(rows[0].value) || null;
 }
 
 async function openGlobalStateDb(): Promise<CachedGlobalStateDb | null> {
@@ -2451,6 +2453,8 @@ async function parseCursorGlobalStateDb(
         bubbleIds.map((bubbleId) => `bubbleId:${sessionId}:${bubbleId}`),
       );
       const bubblesByKey = new Map<string, Record<string, any>>();
+      // The composer header list is the authoritative conversation order, so
+      // only fetch referenced bubble rows instead of every stale key for the session.
       const rows = await loadProjectedBubbleRowsByKeys(resolvedGlobalStateDb, [
         ...expectedBubbleKeys,
       ]);
@@ -3128,9 +3132,11 @@ export const __testables = {
   inferProjectRootFromPathHint,
   normalizeTurnText,
   normalizeCursorModelName,
+  nextStringPrefix,
   bubbleToTurn,
   parseThinking,
   parseUserContent,
   projectedCursorBubbleRowToBubble,
   projectedCursorBubbleSelectSql,
+  sqlKeyPrefixRange,
 };
