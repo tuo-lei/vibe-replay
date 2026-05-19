@@ -30,6 +30,7 @@ interface CodexTokenSnapshot {
   timestamp?: string;
   total?: CodexTokenInfo;
   last?: CodexTokenInfo;
+  contextLimit?: number;
 }
 
 function asCodexTokenInfo(value: unknown): CodexTokenInfo | undefined {
@@ -78,6 +79,7 @@ export function parseCodexLines(
   const tools = new Map<string, PendingTool>();
   const toolResults = new Map<string, ToolResult>();
   const tokenSnapshots: CodexTokenSnapshot[] = [];
+  const taskDurations: number[] = [];
   const mcpServersUsed = new Set<string>();
   const skillsUsed = new Set<string>();
   const gitBranches: string[] = [];
@@ -174,11 +176,40 @@ export function parseCodexLines(
           timestamp: obj.timestamp,
           total: asCodexTokenInfo(p.info?.total_token_usage),
           last: asCodexTokenInfo(p.info?.last_token_usage),
+          contextLimit:
+            typeof p.info?.model_context_window === "number"
+              ? p.info.model_context_window
+              : undefined,
         });
         continue;
       }
-      if (p.type === "web_search_end" && p.query) {
-        const callId = p.call_id || `web_search:${obj.timestamp}`;
+      if (p.type === "task_complete" && typeof p.duration_ms === "number") {
+        if (p.duration_ms > 0) taskDurations.push(p.duration_ms);
+        continue;
+      }
+      if (p.type === "context_compacted") {
+        recordCompaction(compactions, obj.timestamp || "", "codex-context");
+        continue;
+      }
+      if (p.type === "patch_apply_end" && p.call_id) {
+        const tool = tools.get(p.call_id);
+        const changedFiles = patchApplyChangedFiles(p);
+        if (tool && changedFiles.length > 0) {
+          tool.input = mergeToolFilePaths(tool.input, changedFiles);
+        }
+        mergeToolResult(toolResults, p.call_id, {
+          result: formatPatchApplyResult(p),
+          isError: typeof p.success === "boolean" ? !p.success : undefined,
+          timestamp: obj.timestamp,
+        });
+        continue;
+      }
+      if (p.type === "web_search_end") {
+        const callId =
+          (p.call_id && tools.has(p.call_id) ? p.call_id : undefined) ||
+          findWebSearchToolId(tools, toolResults, p, obj.timestamp) ||
+          p.call_id ||
+          `web_search:${obj.timestamp}`;
         if (!tools.has(callId)) {
           tools.set(callId, {
             id: callId,
@@ -188,7 +219,7 @@ export function parseCodexLines(
           });
         }
         mergeToolResult(toolResults, callId, {
-          result: `[Search: ${typeof p.query === "string" ? p.query : JSON.stringify(p.query)}]`,
+          result: formatWebSearchResult(p),
           timestamp: obj.timestamp,
         });
       }
@@ -211,8 +242,35 @@ export function parseCodexLines(
       continue;
     }
 
+    if (obj.type === "compacted") {
+      recordCompaction(compactions, obj.timestamp || "", "codex");
+      const text = compactedSummaryText(obj.payload);
+      if (text) {
+        turns.push({
+          role: "user",
+          subtype: "compaction-summary",
+          timestamp: obj.timestamp,
+          blocks: [{ type: "text", text }],
+        });
+      }
+      continue;
+    }
+
     if (obj.type !== "response_item") continue;
     const p = obj.payload || {};
+
+    if (p.type === "message" && p.role === "developer") {
+      const text = contentText(p.content);
+      if (text.trim()) {
+        turns.push({
+          role: "user",
+          subtype: "context-injection",
+          timestamp: obj.timestamp,
+          blocks: [{ type: "text", text }],
+        });
+      }
+      continue;
+    }
 
     if (p.type === "message" && p.role === "user") {
       const blocks = userMessageBlocksFromContent(p.content);
@@ -243,10 +301,7 @@ export function parseCodexLines(
     }
 
     if (p.type === "compaction") {
-      compactions.push({
-        timestamp: obj.timestamp || "",
-        trigger: "codex",
-      });
+      recordCompaction(compactions, obj.timestamp || "", "codex");
       continue;
     }
 
@@ -263,7 +318,12 @@ export function parseCodexLines(
     }
 
     if (isCodexToolCallType(p.type)) {
-      const callId = p.call_id || p.id || `${p.type}:${obj.timestamp}:${tools.size}`;
+      const existingWebSearchId =
+        p.type === "web_search_call" && !p.call_id && !p.id
+          ? findWebSearchToolId(tools, toolResults, p, obj.timestamp, { includeResolved: true })
+          : undefined;
+      const callId =
+        p.call_id || p.id || existingWebSearchId || `${p.type}:${obj.timestamp}:${tools.size}`;
       const name = p.name || normalizeCodexToolName(p.type);
       const input = inputForResponseItem(p);
       tools.set(callId, { id: callId, name, input, timestamp: obj.timestamp });
@@ -317,13 +377,15 @@ export function parseCodexLines(
   turns.sort((a, b) => (a.timestamp || "").localeCompare(b.timestamp || ""));
 
   const tokenUsage = tokenUsageFromSnapshots(tokenSnapshots);
+  const contextLimit = [...tokenSnapshots].toReversed().find((s) => s.contextLimit)?.contextLimit;
   const tokenUsageByModel =
     tokenUsage && model
       ? {
           [model]: tokenUsage,
         }
       : undefined;
-  const turnStats = buildCodexTurnStats(turns, tokenSnapshots, model);
+  const turnStats = buildCodexTurnStats(turns, tokenSnapshots, taskDurations, model);
+  const summedTaskDurationMs = taskDurations.reduce((sum, duration) => sum + duration, 0);
 
   return {
     sessionId,
@@ -333,12 +395,13 @@ export function parseCodexLines(
     model,
     startTime,
     endTime,
-    totalDurationMs: estimateActiveDuration(allTimestamps),
+    totalDurationMs: summedTaskDurationMs || estimateActiveDuration(allTimestamps),
     turns,
     tokenUsage,
     tokenUsageByModel,
     compactions: compactions.length > 0 ? compactions : undefined,
     turnStats: turnStats.length > 0 ? turnStats : undefined,
+    contextLimit,
     gitBranch,
     gitBranches: gitBranches.length > 1 ? gitBranches : undefined,
     entrypoint,
@@ -503,6 +566,22 @@ function inputForResponseItem(payload: any): Record<string, any> {
   return parseArguments(payload.arguments ?? payload.action ?? {});
 }
 
+function patchApplyChangedFiles(payload: any): string[] {
+  const changes = payload?.changes;
+  if (!changes || typeof changes !== "object" || Array.isArray(changes)) return [];
+  return Object.keys(changes).filter((file) => file.trim().length > 0);
+}
+
+function mergeToolFilePaths(input: Record<string, any>, filePaths: string[]): Record<string, any> {
+  const unique = [...new Set(filePaths)];
+  if (unique.length === 0) return input;
+  return {
+    ...input,
+    file_paths: unique,
+    ...(input.file_path || unique.length !== 1 ? {} : { file_path: unique[0] }),
+  };
+}
+
 function localShellActionInput(action: any): Record<string, any> {
   const command = Array.isArray(action?.command)
     ? action.command.map(String).join(" ")
@@ -549,6 +628,29 @@ function formatExecResult(payload: any): string {
   return [output, status, exit].filter(Boolean).join("\n");
 }
 
+function formatPatchApplyResult(payload: any): string {
+  const status = payload.status ? `Status: ${payload.status}` : "";
+  const stdout = payload.stdout || "";
+  const stderr = payload.stderr || "";
+  const files = patchApplyChangedFiles(payload);
+  const changed =
+    files.length > 0 ? `Changed files:\n${files.map((file) => `- ${file}`).join("\n")}` : "";
+  return [stdout, stderr, status, changed].filter(Boolean).join("\n");
+}
+
+function formatWebSearchResult(payload: any): string {
+  if (typeof payload.query === "string" && payload.query.trim()) {
+    return `[Search: ${payload.query}]`;
+  }
+  const action = payload.action || {};
+  if (typeof action.url === "string" && action.url.trim()) return `[Open: ${action.url}]`;
+  if (typeof action.pattern === "string" && action.pattern.trim())
+    return `[Find: ${action.pattern}]`;
+  if (typeof action.query === "string" && action.query.trim()) return `[Search: ${action.query}]`;
+  if (typeof action.type === "string" && action.type.trim()) return `[Web search: ${action.type}]`;
+  return "[Web search]";
+}
+
 function formatOutputPayload(payload: any): string {
   if (typeof payload.output === "string") return payload.output;
   if (Array.isArray(payload.output)) return formatContentItems(payload.output);
@@ -593,6 +695,48 @@ function isMcpToolError(payload: any): boolean {
   );
 }
 
+function findWebSearchToolId(
+  tools: Map<string, PendingTool>,
+  toolResults: Map<string, ToolResult>,
+  payload: any,
+  timestamp?: string,
+  options: { includeResolved?: boolean } = {},
+): string | undefined {
+  for (const tool of tools.values()) {
+    if (tool.name !== "web_search") continue;
+    if (!options.includeResolved && toolResults.has(tool.id)) continue;
+    if (!sameWebSearchAction(tool.input, payload.action || { query: payload.query })) continue;
+    if (!timestamp || !tool.timestamp) return tool.id;
+    const diff = Math.abs(Date.parse(timestamp) - Date.parse(tool.timestamp));
+    if (!Number.isFinite(diff) || diff <= 5_000) return tool.id;
+  }
+  return undefined;
+}
+
+function sameWebSearchAction(a: any, b: any): boolean {
+  try {
+    return JSON.stringify(a || {}) === JSON.stringify(b || {});
+  } catch {
+    return false;
+  }
+}
+
+function compactedSummaryText(payload: any): string {
+  if (typeof payload?.message === "string" && payload.message.trim()) return payload.message.trim();
+  return "";
+}
+
+function recordCompaction(compactions: Compaction[], timestamp: string, trigger: string): void {
+  const time = Date.parse(timestamp);
+  const isDuplicate = compactions.some((compaction) => {
+    const previous = Date.parse(compaction.timestamp);
+    return Number.isFinite(time) && Number.isFinite(previous)
+      ? Math.abs(time - previous) <= 2_000
+      : compaction.timestamp === timestamp;
+  });
+  if (!isDuplicate) compactions.push({ timestamp, trigger });
+}
+
 function formatContentItems(items: any[]): string {
   return items
     .map((item) => {
@@ -627,7 +771,12 @@ function tokenUsageFromSnapshots(snapshots: CodexTokenSnapshot[]): TokenUsage | 
   };
 }
 
-function buildCodexTurnStats(turns: ParsedTurn[], snapshots: CodexTokenSnapshot[], model?: string) {
+function buildCodexTurnStats(
+  turns: ParsedTurn[],
+  snapshots: CodexTokenSnapshot[],
+  taskDurations: number[],
+  model?: string,
+) {
   const userTurns = turns.filter((t) => t.role === "user");
   const usable = snapshots.filter((s) => s.last);
   return userTurns.map((turn, i) => {
@@ -652,7 +801,10 @@ function buildCodexTurnStats(turns: ParsedTurn[], snapshots: CodexTokenSnapshot[
       stat.contextTokens = input;
     }
     const nextUser = userTurns[i + 1]?.timestamp;
-    if (turn.timestamp) {
+    const taskDuration = taskDurations[i];
+    if (typeof taskDuration === "number" && taskDuration > 0) {
+      stat.durationMs = taskDuration;
+    } else if (turn.timestamp) {
       const end = nextUser || usable[i]?.timestamp;
       if (end) {
         const diff = Date.parse(end) - Date.parse(turn.timestamp);

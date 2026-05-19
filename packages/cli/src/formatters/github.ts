@@ -107,7 +107,7 @@ export function generateGitHubMarkdown(
   }
 
   // Risk signals
-  const risks = detectRiskSignals(session.scenes, filesChanged);
+  const risks = detectRiskSignals(session, filesChanged);
   if (risks.length > 0) {
     lines.push("**Signals:**");
     for (const risk of risks) {
@@ -323,10 +323,10 @@ function parseToolCall(scene: Extract<Scene, { type: "tool-call" }>): RawAction 
       return { kind: "read", file: baseName(input.file_path || input.path || "") };
 
     case "Edit":
-      return { kind: "edit", file: baseName(input.file_path || "") };
+      return { kind: "edit", file: baseName(firstFilePath(input) || "") };
 
     case "Write":
-      return { kind: "create", file: baseName(input.file_path || "") };
+      return { kind: "create", file: baseName(firstFilePath(input) || "") };
 
     case "Bash": {
       const cmd = (input.command || "").split("\n")[0];
@@ -416,8 +416,9 @@ function groupActions(raw: RawAction[]): GroupedAction[] {
 
 // ─── Risk signals ──────────────────────────────────────────
 
-function detectRiskSignals(scenes: Scene[], filesChanged: Map<string, number>): string[] {
+function detectRiskSignals(session: ReplaySession, filesChanged: Map<string, number>): string[] {
   const risks: string[] = [];
+  const { scenes } = session;
 
   // Files modified many times (possible struggle)
   for (const [file, count] of filesChanged) {
@@ -452,7 +453,10 @@ function detectRiskSignals(scenes: Scene[], filesChanged: Map<string, number>): 
   }
 
   // Compactions
-  if (scenes.some((s) => s.type === "compaction-summary")) {
+  if (
+    scenes.some((s) => s.type === "compaction-summary") ||
+    (session.meta.compactions?.length || 0) > 0
+  ) {
     risks.push("Session was compacted (very long conversation)");
   }
 
@@ -957,14 +961,27 @@ function collectFilesChanged(scenes: Scene[]): Map<string, number> {
   for (const scene of scenes) {
     if (scene.type !== "tool-call") continue;
     if (scene.toolName === "Edit" || scene.toolName === "Write") {
-      const fp = scene.input.file_path;
-      if (fp) {
+      for (const fp of filePathsFromInput(scene.input)) {
         const name = shortPath(fp);
         files.set(name, (files.get(name) || 0) + 1);
       }
     }
   }
   return files;
+}
+
+function firstFilePath(input: Record<string, any>): string | undefined {
+  return filePathsFromInput(input)[0];
+}
+
+function filePathsFromInput(input: Record<string, any>): string[] {
+  const plural = input.file_paths || input.filePaths || input.paths;
+  const paths = Array.isArray(plural)
+    ? plural.filter((fp): fp is string => typeof fp === "string" && fp.trim().length > 0)
+    : [];
+  const singular = input.file_path || input.filePath || input.path || input.relativeWorkspacePath;
+  if (typeof singular === "string" && singular.trim()) paths.unshift(singular);
+  return [...new Set(paths)];
 }
 
 /** Show last 2 path segments for disambiguation (avoids basename collisions) */

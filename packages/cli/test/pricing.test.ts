@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { estimateCost, estimateCostSimple, getModelPricing } from "../src/pricing.js";
+import {
+  estimateCost,
+  estimateCostSimple,
+  getModelContextLimit,
+  getModelPricing,
+} from "../src/pricing.js";
 import type { TokenUsage } from "../src/providers/types.js";
 
 // ---------------------------------------------------------------------------
@@ -54,6 +59,30 @@ describe("getModelPricing — model family detection", () => {
     expect(p.cacheReadRate).toBe(0.1);
   });
 
+  it("returns GPT-5.5 pricing for Codex model IDs", () => {
+    const p = getModelPricing("gpt-5.5");
+    expect(p.inputRate).toBe(5);
+    expect(p.outputRate).toBe(30);
+    expect(p.cacheCreateRate).toBe(5);
+    expect(p.cacheReadRate).toBe(0.5);
+  });
+
+  it("returns GPT-5.4 pricing for Codex model IDs", () => {
+    const p = getModelPricing("gpt-5.4-high");
+    expect(p.inputRate).toBe(2.5);
+    expect(p.outputRate).toBe(15);
+    expect(p.cacheCreateRate).toBe(2.5);
+    expect(p.cacheReadRate).toBe(0.25);
+  });
+
+  it("returns GPT-5.4 mini pricing before generic GPT-5.4", () => {
+    const p = getModelPricing("gpt-5.4-mini");
+    expect(p.inputRate).toBe(0.75);
+    expect(p.outputRate).toBe(4.5);
+    expect(p.cacheCreateRate).toBe(0.75);
+    expect(p.cacheReadRate).toBe(0.075);
+  });
+
   it("returns legacy Haiku pricing for haiku-3-5", () => {
     const p = getModelPricing("claude-3-5-haiku-20241022");
     expect(p.inputRate).toBe(0.8);
@@ -76,6 +105,14 @@ describe("getModelPricing — model family detection", () => {
     expect(getModelPricing("Claude-OPUS-4-6").inputRate).toBe(5);
     expect(getModelPricing("CLAUDE-SONNET-4-6").inputRate).toBe(3);
     expect(getModelPricing("claude-HAIKU-4-5").inputRate).toBe(1);
+  });
+});
+
+describe("getModelContextLimit", () => {
+  it("returns GPT-5.x public pricing threshold as fallback context limit", () => {
+    expect(getModelContextLimit("gpt-5.5")).toBe(270_000);
+    expect(getModelContextLimit("gpt-5.4-high")).toBe(270_000);
+    expect(getModelContextLimit("gpt-5.4-mini")).toBe(270_000);
   });
 });
 

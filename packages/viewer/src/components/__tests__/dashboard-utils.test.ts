@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   agentWorktreeParent,
   formatDataSourceLabel,
+  providerBadgeClass,
+  providerBadgeLabel,
+  providerBarClass,
+  providerDisplayName,
+  providerFamily,
   rollupProject,
   rollupTopProjects,
   type TopProjectEntry,
@@ -205,5 +210,15 @@ describe("formatDataSourceLabel", () => {
     expect(formatDataSourceLabel(false, "global-state")).toBe("Cursor global state");
     expect(formatDataSourceLabel(true)).toBe("SQLite + JSONL");
     expect(formatDataSourceLabel()).toBe("JSONL");
+  });
+});
+
+describe("provider display helpers", () => {
+  it("labels Codex as a first-class provider", () => {
+    expect(providerBadgeLabel("codex")).toBe("Codex");
+    expect(providerDisplayName("codex")).toBe("Codex");
+    expect(providerBadgeClass("codex")).toContain("terminal-purple");
+    expect(providerBarClass("codex")).toBe("bg-terminal-purple");
+    expect(providerFamily("codex")).toBe("purple");
   });
 });

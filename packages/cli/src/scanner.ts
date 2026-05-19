@@ -20,7 +20,13 @@ import { parseCodexSession } from "./providers/codex/parser.js";
 import { parseCursorSession } from "./providers/cursor/parser.js";
 import type { ProviderParseResult } from "./providers/types.js";
 import type { DataSource, PrLink, SessionInfo, TokenUsage } from "./types.js";
-import { FILE_EDIT_TOOLS, extractToolFilePath, localDayKey, shortenPath } from "./utils.js";
+import {
+  FILE_EDIT_TOOLS,
+  extractToolFilePath,
+  extractToolFilePaths,
+  localDayKey,
+  shortenPath,
+} from "./utils.js";
 
 // Bump this when we extract new fields — forces re-scan of all sessions.
 const SCANNER_VERSION = 8;
@@ -743,11 +749,13 @@ function buildScanResultFromParsed(
 
       if (!FILE_EDIT_TOOLS.has(block.name)) continue;
 
-      const rawPath = extractToolFilePath(block.input);
-      if (!rawPath) continue;
+      const rawPaths = extractToolFilePaths(block.input);
+      if (rawPaths.length === 0) continue;
       editCount++;
-      const short = shortenPath(rawPath);
-      fileEditCounts.set(short, (fileEditCounts.get(short) || 0) + 1);
+      for (const rawPath of rawPaths) {
+        const short = shortenPath(rawPath);
+        fileEditCounts.set(short, (fileEditCounts.get(short) || 0) + 1);
+      }
     }
   }
 
