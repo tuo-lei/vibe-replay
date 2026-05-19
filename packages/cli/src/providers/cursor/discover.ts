@@ -158,11 +158,8 @@ async function decodeProjectDir(encoded: string): Promise<string> {
 
 async function decodeProjectDirUncached(encoded: string): Promise<string> {
   const parts = encoded.split("-");
-  // Match the old resolver's root handling:
-  //   "Users-me-proj"  -> start at "/Users"
-  //   "-Users-me-proj" -> start at "/"
-  const startPath = parts[0] ? `/${parts[0]}` : "/";
-  const resolved = await resolveEncodedProjectParts(parts, 1, startPath);
+  const startIdx = parts[0] ? 0 : 1;
+  const resolved = await resolveEncodedProjectParts(parts, startIdx, "/");
   return resolved || `/${encoded.replace(/-/g, "/")}`;
 }
 
