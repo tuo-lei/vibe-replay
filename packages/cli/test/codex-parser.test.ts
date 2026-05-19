@@ -17,6 +17,7 @@ const lines = [
       originator: "Codex CLI",
       cli_version: "0.125.0",
       source: "cli",
+      memory_mode: "enabled",
       git: { branch: "main" },
     },
   },
@@ -92,6 +93,7 @@ describe("Codex parser", () => {
     expect(result.cwd).toBe("/Users/test/project");
     expect(result.model).toBe("gpt-5.4");
     expect(result.gitBranch).toBe("main");
+    expect(result.memoryMode).toBe("enabled");
     expect(result.tokenUsage).toMatchObject({
       inputTokens: 700,
       cacheReadTokens: 300,
@@ -114,6 +116,7 @@ describe("Codex parser", () => {
     const replay = transformToReplay(parsed, "codex", "~/project");
 
     expect(replay.meta.provider).toBe("codex");
+    expect(replay.meta.memoryMode).toBe("enabled");
     expect(replay.scenes.some((scene) => scene.type === "user-prompt")).toBe(true);
     const bash = replay.scenes.find(
       (scene) => scene.type === "tool-call" && scene.toolName === "Bash",

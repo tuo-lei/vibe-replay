@@ -141,11 +141,16 @@ export default function StatsPanel({ session }: Props) {
             )}
           </div>
         )}
-        {(meta.entrypoint || meta.permissionMode) && (
+        {(meta.entrypoint || meta.permissionMode || meta.memoryMode) && (
           <div className="text-terminal-dim mt-0.5 flex items-center gap-1.5 flex-wrap text-[10px]">
             {meta.entrypoint && (
               <span className="px-1 py-0.5 rounded bg-terminal-surface text-terminal-dim">
                 {meta.entrypoint}
+              </span>
+            )}
+            {meta.memoryMode && (
+              <span className="px-1 py-0.5 rounded bg-terminal-surface text-terminal-dim">
+                memory: {meta.memoryMode}
               </span>
             )}
             {meta.permissionMode === "bypassPermissions" && (

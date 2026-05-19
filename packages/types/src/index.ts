@@ -286,6 +286,8 @@ export interface ReplaySession {
     entrypoint?: string;
     /** Permission mode: "default" | "bypassPermissions" */
     permissionMode?: string;
+    /** Codex memory mode, when reported by session_meta.memory_mode */
+    memoryMode?: string;
     /** API errors encountered during the session */
     apiErrors?: Array<{
       timestamp: string;
