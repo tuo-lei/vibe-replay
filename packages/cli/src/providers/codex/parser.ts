@@ -37,6 +37,10 @@ function asCodexTokenInfo(value: unknown): CodexTokenInfo | undefined {
   return value as CodexTokenInfo;
 }
 
+function asOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
 export async function parseCodexSession(
   filePaths: string | string[],
   sessionInfo?: SessionInfo,
@@ -350,10 +354,6 @@ export function parseCodexLines(
       notes: ["Discovered from Codex state and parsed from rollout JSONL (local beta)."],
     },
   };
-}
-
-function asOptionalString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value : undefined;
 }
 
 function userMessageBlocks(payload: any): ContentBlock[] {
