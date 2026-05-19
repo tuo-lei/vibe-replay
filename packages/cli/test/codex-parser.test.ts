@@ -634,7 +634,7 @@ describe("Codex parser", () => {
             type: "web_search_end",
             call_id: "ws_1",
             query: "Codex rollout schema",
-            action: { type: "search", query: "Codex rollout schema" },
+            action: { query: "Codex rollout schema", type: "search" },
           },
         },
       ].map((line) => JSON.stringify(line)),
@@ -772,6 +772,40 @@ describe("Codex parser", () => {
     expect(replay.meta.stats.userPrompts).toBe(0);
   });
 
+  it("does not align task durations against Codex context injections", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-04-26T10:35:00.000Z",
+          type: "session_meta",
+          payload: { id: "codex-session-duration", cwd: "/Users/test/project", source: "cli" },
+        },
+        {
+          timestamp: "2026-04-26T10:35:01.000Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "developer",
+            content: [{ type: "input_text", text: "Use project rules." }],
+          },
+        },
+        {
+          timestamp: "2026-04-26T10:35:02.000Z",
+          type: "event_msg",
+          payload: { type: "user_message", message: "Run the tests." },
+        },
+        {
+          timestamp: "2026-04-26T10:35:05.000Z",
+          type: "event_msg",
+          payload: { type: "task_complete", duration_ms: 5000 },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    expect(result.turnStats).toHaveLength(1);
+    expect(result.turnStats?.[0]).toMatchObject({ turnIndex: 0, durationMs: 5000 });
+  });
+
   it("tracks current Codex compaction events", () => {
     const result = parseCodexLines(
       [
@@ -789,6 +823,30 @@ describe("Codex parser", () => {
           timestamp: "2026-04-26T10:40:02.000Z",
           type: "compacted",
           payload: { message: "", replacement_history: [] },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    expect(result.compactions).toMatchObject([{ trigger: "codex-context" }]);
+  });
+
+  it("prefers the specific Codex context compaction trigger when duplicate events arrive", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-04-26T10:41:00.000Z",
+          type: "session_meta",
+          payload: { id: "codex-session-compact-order", cwd: "/Users/test/project", source: "cli" },
+        },
+        {
+          timestamp: "2026-04-26T10:41:01.000Z",
+          type: "compacted",
+          payload: { message: "", replacement_history: [] },
+        },
+        {
+          timestamp: "2026-04-26T10:41:02.000Z",
+          type: "event_msg",
+          payload: { type: "context_compacted" },
         },
       ].map((line) => JSON.stringify(line)),
     );

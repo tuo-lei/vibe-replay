@@ -114,6 +114,7 @@ export function getModelPricing(model: string): ModelPricing {
 // Non-Claude context window limits. Claude models are handled by name detection below.
 const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   "gpt-5.5": 270_000,
+  "gpt-5.4-mini": 270_000,
   "gpt-5.4": 270_000,
   "gpt-4o": 128_000,
   "gpt-4-turbo": 128_000,

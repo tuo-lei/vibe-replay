@@ -715,10 +715,24 @@ function findWebSearchToolId(
 
 function sameWebSearchAction(a: any, b: any): boolean {
   try {
-    return JSON.stringify(a || {}) === JSON.stringify(b || {});
+    return stableStringify(a || {}) === stableStringify(b || {});
   } catch {
     return false;
   }
+}
+
+function stableStringify(value: any): string {
+  return JSON.stringify(stableNormalize(value));
+}
+
+function stableNormalize(value: any): any {
+  if (Array.isArray(value)) return value.map(stableNormalize);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, nested]) => [key, stableNormalize(nested)]),
+  );
 }
 
 function compactedSummaryText(payload: any): string {
@@ -728,13 +742,25 @@ function compactedSummaryText(payload: any): string {
 
 function recordCompaction(compactions: Compaction[], timestamp: string, trigger: string): void {
   const time = Date.parse(timestamp);
-  const isDuplicate = compactions.some((compaction) => {
+  const duplicateIndex = compactions.findIndex((compaction) => {
     const previous = Date.parse(compaction.timestamp);
     return Number.isFinite(time) && Number.isFinite(previous)
       ? Math.abs(time - previous) <= 2_000
       : compaction.timestamp === timestamp;
   });
-  if (!isDuplicate) compactions.push({ timestamp, trigger });
+  if (duplicateIndex >= 0) {
+    if (compactionPriority(trigger) > compactionPriority(compactions[duplicateIndex].trigger)) {
+      compactions[duplicateIndex] = { ...compactions[duplicateIndex], trigger };
+    }
+    return;
+  }
+  compactions.push({ timestamp, trigger });
+}
+
+function compactionPriority(trigger: string): number {
+  if (trigger === "codex-context") return 2;
+  if (trigger === "codex") return 1;
+  return 0;
 }
 
 function formatContentItems(items: any[]): string {
@@ -777,7 +803,7 @@ function buildCodexTurnStats(
   taskDurations: number[],
   model?: string,
 ) {
-  const userTurns = turns.filter((t) => t.role === "user");
+  const userTurns = turns.filter((t) => t.role === "user" && !t.subtype);
   const usable = snapshots.filter((s) => s.last);
   return userTurns.map((turn, i) => {
     const usage = usable[i]?.last;
