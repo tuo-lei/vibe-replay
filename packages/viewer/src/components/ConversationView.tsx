@@ -175,10 +175,10 @@ export default function ConversationView({
     return gaps;
   }, [displayGroups]);
 
+  const getEffectiveContent = overlayActions?.getEffectiveContent;
   const displaySections = useMemo(() => {
     const sections: {
       key: string;
-      hasUserPrompt: boolean;
       groups: { group: TurnGroup; gi: number }[];
     }[] = [];
     let current: (typeof sections)[number] | null = null;
@@ -190,7 +190,6 @@ export default function ConversationView({
       if (group.type === "user") {
         current = {
           key: `turn-${firstIndex}`,
-          hasUserPrompt: true,
           groups: [{ group, gi }],
         };
         sections.push(current);
@@ -202,7 +201,6 @@ export default function ConversationView({
       } else {
         sections.push({
           key: `prelude-${firstIndex}`,
-          hasUserPrompt: false,
           groups: [{ group, gi }],
         });
       }
@@ -222,11 +220,11 @@ export default function ConversationView({
             {
               index: item.index,
               turnNumber: group.turnNumber,
-              content: overlayActions?.getEffectiveContent(item.index) ?? item.scene.content,
+              content: getEffectiveContent?.(item.index) ?? item.scene.content,
             },
           ];
         }),
-    [displayGroups, overlayActions],
+    [displayGroups, getEffectiveContent],
   );
 
   useEffect(() => {
@@ -273,131 +271,135 @@ export default function ConversationView({
   }, [userPromptSummaries]);
 
   return (
-    <div ref={rootRef} className="max-w-4xl mx-auto space-y-5 pb-6">
+    <div ref={rootRef} className="max-w-4xl mx-auto pb-6">
       <ActiveStickyPrompt prompt={activeStickyPrompt} />
-      {displaySections.map((section) => (
-        <div key={section.key} className="space-y-5">
-          {section.groups.map(({ group, gi }) => {
-            const card = (
-              <>
-                {timeGaps.has(gi) && <TimeGapIndicator gapMs={timeGaps.get(gi)!} />}
-                <GroupCard
-                  group={group}
-                  currentIndex={currentIndex}
-                  effectivePrefs={effectivePrefs}
-                  focusIndex={focusIndex}
-                  annotatedScenes={annotatedScenes}
-                  annotationCounts={annotationCounts}
-                  onComment={onComment}
-                  overlayActions={overlayActions}
-                  turnStats={turnStats}
-                />
-              </>
-            );
-            const firstIndex = group.scenes[0]?.index;
-            return (
-              <LazyGroup
-                key={gi}
-                forceRender={gi >= currentGroupIdx - 15 && gi <= currentGroupIdx + 5}
-                stickyPromptIndex={group.type === "user" ? firstIndex : undefined}
-              >
-                {card}
-              </LazyGroup>
-            );
-          })}
-        </div>
-      ))}
-      {state === "paused" && visibleCount < scenes.length && (
-        <div className="pt-4 pb-12 flex items-center justify-center animate-in fade-in slide-in-from-bottom-2 duration-700 ease-out select-none">
-          <div className="group/pause relative flex items-center gap-8 px-4 py-2 bg-transparent backdrop-blur-sm">
-            {/* Ambient Glow */}
-            <div className="absolute inset-0 bg-terminal-orange/5 opacity-0 group-hover/pause:opacity-100 transition-opacity duration-700 blur-2xl -z-10" />
+      <div className="space-y-5">
+        {displaySections.map((section) => (
+          <div key={section.key} className="space-y-5">
+            {section.groups.map(({ group, gi }) => {
+              const card = (
+                <>
+                  {timeGaps.has(gi) && <TimeGapIndicator gapMs={timeGaps.get(gi)!} />}
+                  <GroupCard
+                    group={group}
+                    currentIndex={currentIndex}
+                    effectivePrefs={effectivePrefs}
+                    focusIndex={focusIndex}
+                    annotatedScenes={annotatedScenes}
+                    annotationCounts={annotationCounts}
+                    onComment={onComment}
+                    overlayActions={overlayActions}
+                    turnStats={turnStats}
+                  />
+                </>
+              );
+              const firstIndex = group.scenes[0]?.index;
+              return (
+                <LazyGroup
+                  key={gi}
+                  forceRender={gi >= currentGroupIdx - 15 && gi <= currentGroupIdx + 5}
+                  stickyPromptIndex={group.type === "user" ? firstIndex : undefined}
+                >
+                  {card}
+                </LazyGroup>
+              );
+            })}
+          </div>
+        ))}
+        {state === "paused" && visibleCount < scenes.length && (
+          <div className="pt-4 pb-12 flex items-center justify-center animate-in fade-in slide-in-from-bottom-2 duration-700 ease-out select-none">
+            <div className="group/pause relative flex items-center gap-8 px-4 py-2 bg-transparent backdrop-blur-sm">
+              {/* Ambient Glow */}
+              <div className="absolute inset-0 bg-terminal-orange/5 opacity-0 group-hover/pause:opacity-100 transition-opacity duration-700 blur-2xl -z-10" />
 
-            {/* Left: Status Label */}
-            <div className="flex items-center gap-2.5 pr-8 border-r border-terminal-border/20">
-              <div className="relative flex h-2 w-2">
-                <div className="animate-ping absolute inline-flex h-full w-full rounded-full bg-terminal-orange opacity-40"></div>
-                <div className="relative inline-flex rounded-full h-2 w-2 bg-terminal-orange/80 shadow-[0_0_8px_rgba(251,146,60,0.5)]"></div>
-              </div>
-              <span className="text-[10px] font-sans font-black text-terminal-orange uppercase tracking-[.25em] drop-shadow-sm">
-                Paused
-              </span>
-            </div>
-
-            {/* Right: Interaction Hints */}
-            <div className="flex items-center gap-8">
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-terminal-surface-hover/80 border border-terminal-border-subtle/50 text-terminal-text shadow-sm">
-                  <span className="text-[11px] font-mono font-bold">&darr;</span>
+              {/* Left: Status Label */}
+              <div className="flex items-center gap-2.5 pr-8 border-r border-terminal-border/20">
+                <div className="relative flex h-2 w-2">
+                  <div className="animate-ping absolute inline-flex h-full w-full rounded-full bg-terminal-orange opacity-40"></div>
+                  <div className="relative inline-flex rounded-full h-2 w-2 bg-terminal-orange/80 shadow-[0_0_8px_rgba(251,146,60,0.5)]"></div>
                 </div>
-                <span className="text-[10px] font-sans font-bold text-terminal-dim uppercase tracking-widest opacity-80">
-                  Explore
+                <span className="text-[10px] font-sans font-black text-terminal-orange uppercase tracking-[.25em] drop-shadow-sm">
+                  Paused
                 </span>
               </div>
 
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-terminal-surface-hover/80 border border-terminal-border-subtle/50 text-terminal-text shadow-sm">
-                  <span className="text-[9px] font-mono font-black tracking-tight">SPACE</span>
+              {/* Right: Interaction Hints */}
+              <div className="flex items-center gap-8">
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-terminal-surface-hover/80 border border-terminal-border-subtle/50 text-terminal-text shadow-sm">
+                    <span className="text-[11px] font-mono font-bold">&darr;</span>
+                  </div>
+                  <span className="text-[10px] font-sans font-bold text-terminal-dim uppercase tracking-widest opacity-80">
+                    Explore
+                  </span>
                 </div>
-                <span className="text-[10px] font-sans font-bold text-terminal-dim uppercase tracking-widest opacity-80">
-                  Resume
-                </span>
+
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-terminal-surface-hover/80 border border-terminal-border-subtle/50 text-terminal-text shadow-sm">
+                    <span className="text-[9px] font-mono font-black tracking-tight">SPACE</span>
+                  </div>
+                  <span className="text-[10px] font-sans font-bold text-terminal-dim uppercase tracking-widest opacity-80">
+                    Resume
+                  </span>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {visibleCount >= scenes.length && !isLive && (
-        <div className="pt-12 pb-24 flex flex-col items-center justify-center animate-in fade-in zoom-in-95 duration-1000 ease-out select-none">
-          <div className="h-px w-8 bg-terminal-border-subtle mb-6" />
-          <div className="flex flex-col items-center gap-1">
-            <div className="text-[10px] font-mono font-bold text-terminal-dimmer uppercase tracking-[0.3em]">
-              the end
+        {visibleCount >= scenes.length && !isLive && (
+          <div className="pt-12 pb-24 flex flex-col items-center justify-center animate-in fade-in zoom-in-95 duration-1000 ease-out select-none">
+            <div className="h-px w-8 bg-terminal-border-subtle mb-6" />
+            <div className="flex flex-col items-center gap-1">
+              <div className="text-[10px] font-mono font-bold text-terminal-dimmer uppercase tracking-[0.3em]">
+                the end
+              </div>
+              <div className="text-[9px] font-mono text-terminal-border uppercase tracking-widest mt-1">
+                session replay complete
+              </div>
             </div>
-            <div className="text-[9px] font-mono text-terminal-border uppercase tracking-widest mt-1">
-              session replay complete
-            </div>
-          </div>
 
-          <div className="mt-8 flex flex-col items-center gap-6">
-            <button
-              onClick={() => onSeek?.(0)}
-              className="group flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-terminal-surface/30 border border-terminal-border-subtle text-terminal-dimmer hover:text-terminal-green hover:border-terminal-green/30 hover:bg-terminal-green/5 transition-all duration-300"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="transition-transform duration-300 group-hover:-translate-y-0.5"
+            <div className="mt-8 flex flex-col items-center gap-6">
+              <button
+                onClick={() => onSeek?.(0)}
+                className="group flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-terminal-surface/30 border border-terminal-border-subtle text-terminal-dimmer hover:text-terminal-green hover:border-terminal-green/30 hover:bg-terminal-green/5 transition-all duration-300"
               >
-                <path d="m18 15-6-6-6 6" />
-              </svg>
-              <span className="text-[10px] font-mono font-bold uppercase tracking-widest transition-colors">
-                Back to Top
-              </span>
-              <span className="text-[9px] font-mono font-bold opacity-0 group-hover:opacity-60 transition-opacity">
-                {" "}
-                [Home]
-              </span>
-            </button>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="transition-transform duration-300 group-hover:-translate-y-0.5"
+                >
+                  <path d="m18 15-6-6-6 6" />
+                </svg>
+                <span className="text-[10px] font-mono font-bold uppercase tracking-widest transition-colors">
+                  Back to Top
+                </span>
+                <span className="text-[9px] font-mono font-bold opacity-0 group-hover:opacity-60 transition-opacity">
+                  {" "}
+                  [Home]
+                </span>
+              </button>
 
-            <div className="flex items-center gap-3 opacity-20">
-              <div className="w-1 h-1 rounded-full bg-terminal-green" />
-              <div className="w-1 h-1 rounded-full bg-terminal-blue" />
-              <div className="w-1 h-1 rounded-full bg-terminal-orange" />
+              <div className="flex items-center gap-3 opacity-20">
+                <div className="w-1 h-1 rounded-full bg-terminal-green" />
+                <div className="w-1 h-1 rounded-full bg-terminal-blue" />
+                <div className="w-1 h-1 rounded-full bg-terminal-orange" />
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {visibleCount >= scenes.length && isLive && <LiveStateCard sessionState={liveSessionState} />}
+        {visibleCount >= scenes.length && isLive && (
+          <LiveStateCard sessionState={liveSessionState} />
+        )}
+      </div>
     </div>
   );
 }
