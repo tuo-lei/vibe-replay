@@ -1,6 +1,6 @@
 {
   "name": "vibe-replay",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Turn AI coding sessions into animated, interactive web replays. One command, one HTML file, share anywhere.",
   "keywords": [
     "ai",
@@ -44,7 +44,7 @@
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
     "gifenc": "^1.0.3",
-    "hono": "^4.12.16",
+    "hono": "^4.12.19",
     "open": "^10.2.0",
     "ora": "^8.1.0",
     "sql.js": "^1.14.1"

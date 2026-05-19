@@ -788,6 +788,7 @@ export default function Player({
                 )}
                 <div
                   ref={scrollRef}
+                  data-replay-scroll-container
                   className="flex-1 overflow-y-auto overflow-x-hidden px-5 py-5 pb-10 overscroll-contain"
                 >
                   <ConversationView

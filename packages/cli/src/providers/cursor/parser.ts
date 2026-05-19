@@ -9,6 +9,12 @@ import {
   sanitizeCursorUserText,
 } from "./sanitize.js";
 import {
+  applySdkEnrichmentToTurns,
+  findSdkAgentById,
+  loadSdkAgentEnrichment,
+  type SdkAgentEnrichment,
+} from "./sdk-reader.js";
+import {
   isSystemContextText,
   mapCursorToolName,
   mapToolArgs,
@@ -103,7 +109,70 @@ export async function parseCursorSession(
       sqliteFallbackNote,
     );
   }
+
+  // Cursor SDK enrichment — Cursor SDK agents only have a JSONL transcript
+  // (no IDE chat store.db), so the SDK index.db is the only place tool *results*
+  // are recorded. Apply now so the replay has results, durations, and per-turn model.
+  // If Cursor ever also backfills SDK agents into IDE store.db, keep that path
+  // SQLite-first and only add SDK enrichment after deciding how to reconcile
+  // duplicate tool streams.
+  // We accept the sessionId from explicit sessionInfo OR from the transcript filename
+  // (Cursor names SDK transcripts `<agentId>.jsonl`, which is exactly what the SDK
+  // store keys agents on).
+  const sdkSessionId = sessionInfo?.sessionId || deriveSessionIdFromTranscript(transcriptPaths);
+  if (sdkSessionId) {
+    const enrichment = await tryLoadSdkEnrichment(sdkSessionId);
+    if (enrichment) {
+      const { toolCallsEnriched, assistantTurnsModelTagged } = applySdkEnrichmentToTurns(
+        jsonlResult.turns,
+        enrichment,
+      );
+      if (toolCallsEnriched > 0 || assistantTurnsModelTagged > 0) {
+        jsonlResult.dataSourceInfo = withSupplement(
+          jsonlResult.dataSourceInfo || defaultDataSourceInfo(jsonlResult.dataSource),
+          `cursor-sdk index.db (tool results +${toolCallsEnriched}, model tags +${assistantTurnsModelTagged})`,
+        );
+      }
+      if (enrichment.latestModel && !jsonlResult.model) {
+        jsonlResult.model = enrichment.latestModel;
+      }
+      if (enrichment.startedAt && !jsonlResult.startTime) {
+        jsonlResult.startTime = enrichment.startedAt;
+      }
+      if (enrichment.finishedAt && !jsonlResult.endTime) {
+        jsonlResult.endTime = enrichment.finishedAt;
+      }
+      if (enrichment.totalDurationMs && !jsonlResult.totalDurationMs) {
+        jsonlResult.totalDurationMs = enrichment.totalDurationMs;
+      }
+    }
+  }
   return jsonlResult;
+}
+
+async function tryLoadSdkEnrichment(sessionId: string): Promise<SdkAgentEnrichment | null> {
+  // SDK agent IDs are prefixed `agent-`. Skip the lookup for plain UUID sessions
+  // (Cursor IDE chats) to avoid touching SDK SQLite when we know it won't match.
+  if (!sessionId.startsWith("agent-")) return null;
+  try {
+    const agent = await findSdkAgentById(sessionId);
+    if (!agent) return null;
+    return await loadSdkAgentEnrichment(agent);
+  } catch {
+    return null;
+  }
+}
+
+function deriveSessionIdFromTranscript(transcriptPaths: string[]): string | null {
+  // Pick the latest transcript by name (sortedTranscriptPaths inside parseCursorJsonl
+  // sorts by mtime, but here we only need *some* transcript to extract the agent id;
+  // for SDK sessions every transcript filename is identical to the agent id).
+  for (let i = transcriptPaths.length - 1; i >= 0; i--) {
+    const p = transcriptPaths[i];
+    const base = basename(p, ".jsonl");
+    if (base.startsWith("agent-")) return base;
+  }
+  return null;
 }
 
 interface ParseJsonlOptions {

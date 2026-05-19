@@ -148,7 +148,7 @@ export function getAuthFilePath(): string {
 }
 
 export function getApiUrl(): string {
-  return process.env.VIBE_REPLAY_API_URL || DEFAULT_API_URL;
+  return (process.env.VIBE_REPLAY_API_URL || DEFAULT_API_URL).replace(/\/$/, "");
 }
 
 /** HTTPS targets use __Secure- prefixed cookie names (Better Auth convention) */

@@ -27,7 +27,7 @@
   },
   "devDependencies": {
     "@hono/node-server": "^1.19.11",
-    "hono": "^4.12.16",
+    "hono": "^4.12.19",
     "lefthook": "^2.1.6",
     "oxfmt": "^0.46.0",
     "oxlint": "^1.61.0",

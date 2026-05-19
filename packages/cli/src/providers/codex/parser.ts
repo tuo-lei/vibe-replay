@@ -4,11 +4,7 @@ import { extname } from "node:path";
 import { estimateActiveDuration } from "../../duration.js";
 import type { ContentBlock, ParsedTurn, SessionInfo } from "../../types.js";
 import type { Compaction, ProviderParseResult, TokenUsage } from "../types.js";
-import {
-  isCodexToolCallType,
-  stripLeadingCodexContextBlocks,
-  stripUserMessagePrefix,
-} from "./constants.js";
+import { codexStripTwoPass, isCodexToolCallType } from "./constants.js";
 
 interface PendingTool {
   id: string;
@@ -665,11 +661,7 @@ function pushUnique(items: string[], value: string): void {
 }
 
 function normalizeUserMessageText(text: string): string {
-  let normalized = text;
-  for (let i = 0; i < 2; i++) {
-    normalized = stripUserMessagePrefix(stripLeadingCodexContextBlocks(normalized)).trim();
-  }
-  return normalized;
+  return codexStripTwoPass(text);
 }
 
 function localImageToDataUrl(path: string): string | undefined {

@@ -401,6 +401,7 @@ interface SourceSummaryRecord {
   filePaths: string[];
   toolPaths?: string[];
   hasSqlite?: boolean;
+  hasSdk?: boolean;
   isStarred?: boolean;
   spaceId?: string;
   spaceIdSetBy?: string;
@@ -650,6 +651,7 @@ async function buildSourcesResult(
       filePaths: s.filePaths,
       toolPaths: s.toolPaths,
       hasSqlite: s.hasSqlite,
+      hasSdk: s.hasSdk,
       gitBranch: s.gitBranch,
       model: s.model,
       durationMsEst: s.durationMsEst,
@@ -865,7 +867,9 @@ export async function startServer(
   // caches stored cliSessionId (inner-subprocess UUID) as the Cowork session's
   // identity, which never matches what the parser reads from audit.jsonl and
   // permanently broke replay-to-source linking. Bumping discards those caches.
-  const sourcesCacheKey = `dashboard-sources-v3-${cacheKeySuffix}`;
+  // v3 → v4: added `hasSdk` flag for Cursor SDK-backed sessions; old caches
+  // omit the field so the dashboard can't render the SDK badge until refreshed.
+  const sourcesCacheKey = `dashboard-sources-v4-${cacheKeySuffix}`;
   const replaysCacheKey = `dashboard-replays-v1-${cacheKeySuffix}`;
   const scanResultsCacheKey = `dashboard-scan-results-v1-${cacheKeySuffix}`;
   const insightsCacheKey = `dashboard-insights-v1-${cacheKeySuffix}`;
@@ -2256,7 +2260,7 @@ export async function startServer(
   // The BFF proxy follows the TOKEN, not the env var: if no token for the
   // current VIBE_REPLAY_API_URL, it uses whatever token is available and
   // proxies to that token's origin (e.g. production) instead.
-  const cloudApiBaseUrl = getApiUrl().replace(/\/$/, "");
+  const cloudApiBaseUrl = getApiUrl();
 
   function readLocalAuthSession(): {
     token: string;
@@ -2279,7 +2283,7 @@ export async function startServer(
       return {
         token: fallback.token,
         user: fallback.user as { id: string; name: string; email?: string; image?: string },
-        targetApi: fallback.origin.replace(/\/$/, ""),
+        targetApi: fallback.origin,
       };
     }
     return null;
@@ -2301,7 +2305,7 @@ export async function startServer(
     if (exact) candidates.push({ token: exact.token, apiUrl: cloudApiBaseUrl });
     const fallback = loadAnyAuthToken();
     if (fallback) {
-      const fallbackApi = fallback.origin.replace(/\/$/, "");
+      const fallbackApi = fallback.origin;
       if (fallbackApi !== cloudApiBaseUrl) {
         candidates.push({ token: fallback.token, apiUrl: fallbackApi });
       }

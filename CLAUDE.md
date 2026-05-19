@@ -53,6 +53,7 @@ pnpm db:migrate:remote    # Apply to production D1 (requires auth)
 - **Self-contained HTML**: Output must make zero external requests. Everything inlined.
 - **Multi-file sessions**: Claude Code `/resume` creates new JSONL files. Parser accepts `string | string[]` and merges by slug+project.
 - **Cursor tri-source**: Sessions come from SQLite `store.db` (primary), `globalStorage/state.vscdb`, or JSONL (fallback). Discovery merges all sources. DB data is source of truth; JSONL supplements missing thinking/images.
+- **Cursor SDK**: SDK agents (TypeScript `@cursor/sdk`) write to `~/.cursor/projects/<workspace>/sdk-agent-store/<projectHash>/index.db` (tables: `agents`, `runs`, `run_events`) and a parallel JSONL transcript at `agent-transcripts/<agentId>/<agentId>.jsonl`. The transcript is the source of user prompts (SDK doesn't store them in events) and the SDK index.db supplies tool *results*, structured per-run timing, and per-turn model. See `providers/cursor/sdk-reader.ts`. Detection is by sessionId prefix `agent-` — IDE chat sessions (UUID-only) skip the SDK SQLite probe.
 - **Skip `progress` lines**: These are subagent streaming artifacts in JSONL.
 - **sql.js (WASM)**: Used instead of native SQLite bindings for portability — no C++ compiler needed.
 - **Session discovery cache**: CLI picker + local dashboard use file cache at `~/.vibe-replay/cache/*.json` (stale-while-refresh UX). Cache validity is tied to CLI release version (`CLI_VERSION`) plus envelope version, so caches auto-invalidate across releases. Keep cache writes best-effort and never block generation/parsing on cache failures.
@@ -97,6 +98,7 @@ If tag/release is updated but `packages/cli/package.json` is not, CLI will still
 | HTML generation | `packages/cli/src/generator.ts` |
 | Editor server | `packages/cli/src/server.ts` |
 | Provider interface | `packages/cli/src/providers/types.ts` |
+| Cursor SDK reader | `packages/cli/src/providers/cursor/sdk-reader.ts` |
 | Viewer entry | `packages/viewer/src/App.tsx` |
 | Playback engine (pure) | `packages/viewer/src/engine/` |
 | Playback hook | `packages/viewer/src/hooks/usePlayback.ts` |
