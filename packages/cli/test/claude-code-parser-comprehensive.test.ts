@@ -2,6 +2,10 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseClaudeCodeSession } from "../src/providers/claude-code/parser.js";
 import { transformToReplay } from "../src/transform.js";
+import type { ContentBlock } from "../src/types.js";
+
+type TextBlock = Extract<ContentBlock, { type: "text" }>;
+type ToolUseBlock = Extract<ContentBlock, { type: "tool_use" }>;
 
 const fixture = (name: string) => join(import.meta.dirname, `fixtures/${name}`);
 
@@ -17,8 +21,10 @@ describe("Claude Code parser — multi-file sessions", () => {
     expect(result.turns.length).toBeGreaterThan(2);
     const userTurns = result.turns.filter((t) => t.role === "user");
     expect(userTurns.length).toBe(2);
-    expect((userTurns[0].blocks[0] as any).text).toBe("Refactor the database module");
-    expect((userTurns[1].blocks[0] as any).text).toBe("Now add error handling to the queries");
+    expect((userTurns[0].blocks[0] as TextBlock).text).toBe("Refactor the database module");
+    expect((userTurns[1].blocks[0] as TextBlock).text).toBe(
+      "Now add error handling to the queries",
+    );
   });
 
   it("extracts metadata from first file only", async () => {
@@ -38,9 +44,9 @@ describe("Claude Code parser — multi-file sessions", () => {
     const assistantTurns = result.turns.filter((t) => t.role === "assistant");
     const editBlock = assistantTurns
       .flatMap((t) => t.blocks)
-      .find((b) => b.type === "tool_use" && (b as any).name === "Edit");
+      .find((b) => b.type === "tool_use" && (b as ToolUseBlock).name === "Edit");
     expect(editBlock).toBeDefined();
-    expect((editBlock as any)._result).toBe("File edited successfully.");
+    expect((editBlock as ToolUseBlock)._result).toBe("File edited successfully.");
   });
 
   it("produces valid replay from multi-file parse", async () => {
@@ -75,7 +81,7 @@ describe("Claude Code parser — edge cases", () => {
   it("filters all system-generated user messages", async () => {
     const result = await parseClaudeCodeSession(EDGE);
     const userTurns = result.turns.filter((t) => t.role === "user");
-    const userTexts = userTurns.map((t) => (t.blocks[0] as any).text);
+    const userTexts = userTurns.map((t) => (t.blocks[0] as TextBlock).text);
     // Only real user prompt + compaction summary should survive
     expect(userTexts).not.toContain("[Request interrupted by user");
     expect(userTexts).not.toContain("<command-name>some command</command-name>");
@@ -88,7 +94,7 @@ describe("Claude Code parser — edge cases", () => {
     const result = await parseClaudeCodeSession(EDGE);
     const userTurns = result.turns.filter((t) => t.role === "user" && !t.subtype);
     expect(userTurns.length).toBe(1);
-    expect((userTurns[0].blocks[0] as any).text).toBe("This is the real user prompt");
+    expect((userTurns[0].blocks[0] as TextBlock).text).toBe("This is the real user prompt");
   });
 
   it("detects compaction summary messages", async () => {
@@ -97,7 +103,9 @@ describe("Claude Code parser — edge cases", () => {
       (t) => t.role === "user" && t.subtype === "compaction-summary",
     );
     expect(compactionTurns.length).toBe(1);
-    expect((compactionTurns[0].blocks[0] as any).text).toContain("This session is being continued");
+    expect((compactionTurns[0].blocks[0] as TextBlock).text).toContain(
+      "This session is being continued",
+    );
   });
 
   it("records compaction events from compact_boundary", async () => {
@@ -113,7 +121,7 @@ describe("Claude Code parser — edge cases", () => {
     const allText = result.turns
       .flatMap((t) => t.blocks)
       .filter((b) => b.type === "text")
-      .map((b) => (b as any).text)
+      .map((b) => (b as TextBlock).text)
       .join(" ");
     expect(allText).not.toContain("subagent streaming progress");
   });
@@ -209,7 +217,7 @@ describe("Claude Code parser — ToolSearch response filtering", () => {
     const userTexts = userTurns.map((t) =>
       t.blocks
         .filter((b) => b.type === "text")
-        .map((b) => (b as any).text)
+        .map((b) => (b as TextBlock).text)
         .join(""),
     );
     expect(userTexts).toContain("Search for the config file");
@@ -222,7 +230,7 @@ describe("Claude Code parser — ToolSearch response filtering", () => {
     const assistantTurns = result.turns.filter((t) => t.role === "assistant");
     const toolUse = assistantTurns.flatMap((t) => t.blocks).find((b) => b.type === "tool_use");
     expect(toolUse).toBeDefined();
-    expect((toolUse as any)._result).toContain("config.ts");
+    expect((toolUse as ToolUseBlock)._result).toContain("config.ts");
   });
 });
 
@@ -336,15 +344,15 @@ describe("Claude Code parser — multiple tools in one message", () => {
     const firstAssistant = assistantTurns[0];
     const toolUseBlocks = firstAssistant.blocks.filter((b) => b.type === "tool_use");
     expect(toolUseBlocks.length).toBe(2);
-    expect((toolUseBlocks[0] as any).name).toBe("Read");
-    expect((toolUseBlocks[1] as any).name).toBe("Read");
+    expect((toolUseBlocks[0] as ToolUseBlock).name).toBe("Read");
+    expect((toolUseBlocks[1] as ToolUseBlock).name).toBe("Read");
   });
 
   it("pairs each tool result to correct tool_use by ID", async () => {
     const result = await parseClaudeCodeSession(MULTI);
     const assistantTurns = result.turns.filter((t) => t.role === "assistant");
     const firstAssistant = assistantTurns[0];
-    const toolBlocks = firstAssistant.blocks.filter((b) => b.type === "tool_use") as any[];
+    const toolBlocks = firstAssistant.blocks.filter((b) => b.type === "tool_use") as ToolUseBlock[];
     expect(toolBlocks[0]._result).toContain("const x = 1");
     expect(toolBlocks[1]._result).toContain("export const helper");
   });
@@ -405,7 +413,7 @@ describe("Claude Code parser — tool result content types", () => {
     const assistantTurns = result.turns.filter((t) => t.role === "assistant");
     const toolBlock = assistantTurns.flatMap((t) => t.blocks).find((b) => b.type === "tool_use");
     // Should extract text from the array content
-    expect((toolBlock as any)._result).toContain("Screenshot captured");
+    expect((toolBlock as ToolUseBlock)._result).toContain("Screenshot captured");
   });
 
   it("does not pollute result text with image block JSON", async () => {
@@ -417,7 +425,7 @@ describe("Claude Code parser — tool result content types", () => {
       .filter((t) => t.role === "assistant")
       .flatMap((t) => t.blocks)
       .find((b) => b.type === "tool_use");
-    const resultText = (toolBlock as any)._result as string;
+    const resultText = (toolBlock as ToolUseBlock)._result as string;
     expect(resultText).toBe("Screenshot captured");
     expect(resultText).not.toContain("base64");
     expect(resultText).not.toContain('"type":"image"');
@@ -474,7 +482,7 @@ describe("Claude Code parser — tool result content types", () => {
       .filter((t) => t.role === "assistant")
       .flatMap((t) => t.blocks)
       .find((b) => b.type === "tool_use");
-    const resultText = (tool as any)._result as string;
+    const resultText = (tool as ToolUseBlock)._result as string;
     expect(resultText).toBe("actual preview line 1\nactual preview line 2");
     expect(resultText).not.toContain("<persisted-output>");
     expect(resultText).not.toContain("Output too large");
@@ -523,7 +531,7 @@ describe("Claude Code parser — tool result content types", () => {
       .filter((t) => t.role === "assistant")
       .flatMap((t) => t.blocks)
       .find((b) => b.type === "tool_use");
-    expect((tool as any)._result).toBe("array-path preview");
+    expect((tool as ToolUseBlock)._result).toBe("array-path preview");
   });
 
   it("unwraps multiple <persisted-output> blocks in a single result", async () => {
@@ -565,7 +573,7 @@ describe("Claude Code parser — tool result content types", () => {
       .filter((t) => t.role === "assistant")
       .flatMap((t) => t.blocks)
       .find((b) => b.type === "tool_use");
-    const resultText = (tool as any)._result as string;
+    const resultText = (tool as ToolUseBlock)._result as string;
     expect(resultText).toContain("first");
     expect(resultText).toContain("second");
     expect(resultText).not.toContain("<persisted-output>");
@@ -614,7 +622,7 @@ describe("Claude Code parser — tool result content types", () => {
       .filter((t) => t.role === "assistant")
       .flatMap((t) => t.blocks)
       .find((b) => b.type === "tool_use");
-    expect((tool as any)._result).toBe("real content");
+    expect((tool as ToolUseBlock)._result).toBe("real content");
   });
 });
 
