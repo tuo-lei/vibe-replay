@@ -37,6 +37,19 @@ describe("countComposerConversationHeaders", () => {
 });
 
 describe("cursor sqlite metrics helpers", () => {
+  it("builds index-friendly key prefix ranges", () => {
+    expect(__testables.sqlKeyPrefixRange("composerData:")).toBe(
+      "key >= 'composerData:' AND key < 'composerData;'",
+    );
+    expect(__testables.sqlKeyPrefixRange("checkpointId:abc:")).toBe(
+      "key >= 'checkpointId:abc:' AND key < 'checkpointId:abc;'",
+    );
+  });
+
+  it("does not build invalid surrogate prefix bounds", () => {
+    expect(__testables.nextStringPrefix("\ud7ff")).toBeNull();
+  });
+
   it("projects global-state bubble values with bounded tool results", () => {
     const sql = __testables.projectedCursorBubbleSelectSql();
 

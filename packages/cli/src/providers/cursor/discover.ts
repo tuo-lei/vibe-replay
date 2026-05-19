@@ -12,6 +12,10 @@ import { discoverSdkAgents, type SdkAgent } from "./sdk-reader.js";
 import { sanitizeCursorUserText } from "./sanitize.js";
 
 const CURSOR_DIR = join(homedir(), ".cursor", "projects");
+const PROJECT_DISCOVERY_CONCURRENCY = 6;
+const TRANSCRIPT_INFO_CONCURRENCY = 6;
+const ENTRY_STAT_CONCURRENCY = 32;
+const decodedProjectDirCache = new Map<string, Promise<string>>();
 
 export async function discoverCursorSessions(): Promise<SessionInfo[]> {
   const sessions: SessionInfo[] = [];
@@ -23,39 +27,11 @@ export async function discoverCursorSessions(): Promise<SessionInfo[]> {
     return sessions;
   }
 
-  for (const projDir of projectDirs) {
-    const transcriptsDir = join(CURSOR_DIR, projDir, "agent-transcripts");
-    const dirStat = await stat(transcriptsDir).catch(() => null);
-    if (!dirStat?.isDirectory()) continue;
-
-    const project = await decodeProjectDir(projDir);
-    const transcriptEntries = await collectTranscriptEntries(transcriptsDir);
-    if (transcriptEntries.length === 0) continue;
-    transcriptEntries.sort((a, b) => a.mtimeMs - b.mtimeMs);
-
-    const toolEntries = await collectToolEntries(join(CURSOR_DIR, projDir, "agent-tools"));
-    toolEntries.sort((a, b) => a.mtimeMs - b.mtimeMs);
-
-    for (let i = 0; i < transcriptEntries.length; i++) {
-      const transcript = transcriptEntries[i];
-      const prevMtimeMs = i === 0 ? Number.NEGATIVE_INFINITY : transcriptEntries[i - 1].mtimeMs;
-      const toolPaths = toolEntries
-        .filter((t) => t.mtimeMs > prevMtimeMs && t.mtimeMs <= transcript.mtimeMs)
-        .map((t) => t.path);
-
-      const info = await extractSessionInfo(
-        transcript.path,
-        transcript.fileSize,
-        transcript.mtimeMs,
-        project,
-        toolPaths,
-      );
-      if (!info) continue;
-
-      info.workspacePath = project;
-      info.hasSqlite = false;
-      sessions.push(info);
-    }
+  const projectSessions = await mapLimit(projectDirs, PROJECT_DISCOVERY_CONCURRENCY, (projDir) =>
+    discoverProjectSessions(projDir),
+  );
+  for (const projectSessionList of projectSessions) {
+    sessions.push(...projectSessionList);
   }
 
   // Discover SQLite-only sessions (devcontainer, SSH-remote, etc.)
@@ -84,6 +60,54 @@ export async function discoverCursorSessions(): Promise<SessionInfo[]> {
 
   sessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   return sessions;
+}
+
+async function discoverProjectSessions(projDir: string): Promise<SessionInfo[]> {
+  const transcriptsDir = join(CURSOR_DIR, projDir, "agent-transcripts");
+  const dirStat = await stat(transcriptsDir).catch(() => null);
+  if (!dirStat?.isDirectory()) return [];
+
+  const project = await decodeProjectDir(projDir);
+  const transcriptEntries = await collectTranscriptEntries(transcriptsDir);
+  if (transcriptEntries.length === 0) return [];
+  transcriptEntries.sort((a, b) => a.mtimeMs - b.mtimeMs);
+
+  const toolEntries = await collectToolEntries(join(CURSOR_DIR, projDir, "agent-tools"));
+  toolEntries.sort((a, b) => a.mtimeMs - b.mtimeMs);
+
+  const jobs: Array<TranscriptEntry & { toolPaths: string[] }> = [];
+  let toolStart = 0;
+  let toolEnd = 0;
+  for (let i = 0; i < transcriptEntries.length; i++) {
+    const transcript = transcriptEntries[i];
+    const prevMtimeMs = i === 0 ? Number.NEGATIVE_INFINITY : transcriptEntries[i - 1].mtimeMs;
+    while (toolStart < toolEntries.length && toolEntries[toolStart].mtimeMs <= prevMtimeMs) {
+      toolStart++;
+    }
+    while (toolEnd < toolEntries.length && toolEntries[toolEnd].mtimeMs <= transcript.mtimeMs) {
+      toolEnd++;
+    }
+    jobs.push({
+      ...transcript,
+      toolPaths: toolEntries.slice(toolStart, toolEnd).map((tool) => tool.path),
+    });
+  }
+
+  const infos = await mapLimit(jobs, TRANSCRIPT_INFO_CONCURRENCY, async (job) => {
+    const info = await extractSessionInfo(
+      job.path,
+      job.fileSize,
+      job.mtimeMs,
+      project,
+      job.toolPaths,
+    );
+    if (!info) return null;
+    info.workspacePath = project;
+    info.hasSqlite = false;
+    return info;
+  });
+
+  return infos.filter((info): info is SessionInfo => info !== null);
 }
 
 async function enrichWithSdkAgents(sessions: SessionInfo[]): Promise<void> {
@@ -119,24 +143,56 @@ async function enrichWithSdkAgents(sessions: SessionInfo[]): Promise<void> {
  * so we resolve ambiguity by checking which paths actually exist on disk.
  */
 async function decodeProjectDir(encoded: string): Promise<string> {
-  const parts = encoded.split("-");
+  let cached = decodedProjectDirCache.get(encoded);
+  if (!cached) {
+    // Cursor project dirs are stable for the lifetime of the CLI/server process;
+    // cache the resolved path so repeated discovery doesn't re-walk the same tree.
+    cached = decodeProjectDirUncached(encoded).catch((err) => {
+      decodedProjectDirCache.delete(encoded);
+      throw err;
+    });
+    decodedProjectDirCache.set(encoded, cached);
+  }
+  return cached;
+}
 
-  async function resolve(idx: number, current: string): Promise<string | null> {
-    if (idx >= parts.length) {
-      const s = await stat(current).catch(() => null);
-      return s?.isDirectory() ? current : null;
-    }
-    // Try `/` (path separator) first — more common
-    const withSlash = `${current}/${parts[idx]}`;
-    const slashResult = await resolve(idx + 1, withSlash);
-    if (slashResult) return slashResult;
-    // Try `-` (literal hyphen in directory name)
-    const withHyphen = `${current}-${parts[idx]}`;
-    return resolve(idx + 1, withHyphen);
+async function decodeProjectDirUncached(encoded: string): Promise<string> {
+  const parts = encoded.split("-");
+  const startIdx = parts[0] ? 0 : 1;
+  const resolved = await resolveEncodedProjectParts(parts, startIdx, "/");
+  const fallbackEncoded = encoded.startsWith("-") ? encoded.slice(1) : encoded;
+  return `/${resolved ? resolved.slice(1) : fallbackEncoded.replace(/-/g, "/")}`;
+}
+
+async function resolveEncodedProjectParts(
+  parts: string[],
+  idx: number,
+  current: string,
+): Promise<string | null> {
+  if (idx >= parts.length) {
+    const currentStat = await stat(current).catch(() => null);
+    return currentStat?.isDirectory() ? current : null;
   }
 
-  const result = await resolve(1, `/${parts[0]}`);
-  return result || `/${encoded.replace(/-/g, "/")}`;
+  const entries = await readdir(current, { withFileTypes: true }).catch(() => []);
+  if (entries.length === 0) return null;
+
+  const dirNames = new Set(
+    entries
+      .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+      .map((entry) => entry.name),
+  );
+
+  // Try slash boundaries first to preserve the old behavior, but only explore
+  // names that are real child directories instead of stat-ing every split.
+  for (let end = idx + 1; end <= parts.length; end++) {
+    const candidate = parts.slice(idx, end).join("-");
+    if (!dirNames.has(candidate)) continue;
+    const resolved = await resolveEncodedProjectParts(parts, end, join(current, candidate));
+    if (resolved) return resolved;
+  }
+
+  return null;
 }
 
 async function extractSessionInfo(
@@ -148,27 +204,9 @@ async function extractSessionInfo(
 ): Promise<SessionInfo | null> {
   try {
     const content = await readFile(filePath, "utf-8");
-    const lines = content.split("\n").filter((l) => l.trim());
-    if (lines.length < 2) return null; // too short to be useful
 
     const sessionId = basename(filePath, ".jsonl");
     let firstPrompt = "";
-
-    // Find first user prompt
-    for (const line of lines.slice(0, 10)) {
-      try {
-        const obj = JSON.parse(line);
-        if (obj.role === "user") {
-          const textBlock = obj.message?.content?.find?.((b: any) => b.type === "text");
-          if (textBlock?.text) {
-            firstPrompt = sanitizeCursorUserText(textBlock.text).slice(0, 200);
-            break;
-          }
-        }
-      } catch {}
-    }
-
-    if (!firstPrompt) return null;
 
     // Count user prompts and tool calls — data already in memory, zero extra I/O
     // Only count user messages that are actual prompts, not tool_result messages.
@@ -180,10 +218,29 @@ async function extractSessionInfo(
     let toolCallCount = 0;
     let editCountEst = 0;
     let model: string | undefined;
+    let lineCount = 0;
+    let promptScanCount = 0;
     const toolUseRe = /"type"\s*:\s*"tool_use"/g;
     const editToolRe = /"name"\s*:\s*"(edit_file|file_edit|create_file)"/;
     const modelRe = /"model(?:Id)?"\s*:\s*"([^"]+)"/;
-    for (const line of lines) {
+    for (const rawLine of content.split("\n")) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      lineCount++;
+
+      if (!firstPrompt && promptScanCount < 10) {
+        promptScanCount++;
+        try {
+          const obj = JSON.parse(line);
+          if (obj.role === "user") {
+            const textBlock = obj.message?.content?.find?.((b: any) => b.type === "text");
+            if (textBlock?.text) {
+              firstPrompt = sanitizeCursorUserText(textBlock.text).slice(0, 200);
+            }
+          }
+        } catch {}
+      }
+
       if (
         (line.includes('"role":"user"') || line.includes('"role": "user"')) &&
         !line.includes('"tool_result"')
@@ -201,6 +258,9 @@ async function extractSessionInfo(
         if (m) model = m[1];
       }
     }
+    if (lineCount < 2) return null; // too short to be useful
+    if (!firstPrompt) return null;
+
     // Cursor transcript markers can be missing in some flows; tool artifacts are
     // a better lower bound for real tool activity in the same time window.
     toolCallCount = Math.max(toolCallCount, toolPaths.length);
@@ -216,7 +276,7 @@ async function extractSessionInfo(
       cwd: project,
       version: "",
       timestamp,
-      lineCount: lines.length,
+      lineCount,
       fileSize,
       filePath,
       filePaths: [filePath],
@@ -251,34 +311,32 @@ async function collectTranscriptEntries(transcriptsDir: string): Promise<Transcr
     return [];
   }
 
-  const transcripts: TranscriptEntry[] = [];
-  for (const entry of entries) {
+  const transcripts = await mapLimit(entries, ENTRY_STAT_CONCURRENCY, async (entry) => {
     const entryPath = join(transcriptsDir, entry);
     const entryStat = await stat(entryPath).catch(() => null);
-    if (!entryStat) continue;
+    if (!entryStat) return null;
 
     if (entry.endsWith(".jsonl") && entryStat.isFile()) {
-      transcripts.push({
+      return {
         path: entryPath,
         fileSize: entryStat.size,
         mtimeMs: entryStat.mtimeMs,
-      });
-      continue;
+      };
     }
 
-    if (!entryStat.isDirectory()) continue;
+    if (!entryStat.isDirectory()) return null;
 
     // Nested transcript form: agent-transcripts/<id>/<id>.jsonl
     const innerPath = join(entryPath, `${entry}.jsonl`);
     const innerStat = await stat(innerPath).catch(() => null);
-    if (!innerStat?.isFile()) continue;
-    transcripts.push({
+    if (!innerStat?.isFile()) return null;
+    return {
       path: innerPath,
       fileSize: innerStat.size,
       mtimeMs: innerStat.mtimeMs,
-    });
-  }
-  return transcripts;
+    };
+  });
+  return transcripts.filter((entry): entry is TranscriptEntry => entry !== null);
 }
 
 async function collectToolEntries(toolDir: string): Promise<ToolEntry[]> {
@@ -292,13 +350,39 @@ async function collectToolEntries(toolDir: string): Promise<ToolEntry[]> {
     return [];
   }
 
-  const tools: ToolEntry[] = [];
-  for (const entry of entries) {
-    if (!entry.endsWith(".txt")) continue;
+  const toolFiles = entries.filter((entry) => entry.endsWith(".txt"));
+  const tools = await mapLimit(toolFiles, ENTRY_STAT_CONCURRENCY, async (entry) => {
     const entryPath = join(toolDir, entry);
     const entryStat = await stat(entryPath).catch(() => null);
-    if (!entryStat?.isFile()) continue;
-    tools.push({ path: entryPath, mtimeMs: entryStat.mtimeMs });
-  }
-  return tools;
+    if (!entryStat?.isFile()) return null;
+    return { path: entryPath, mtimeMs: entryStat.mtimeMs };
+  });
+  return tools.filter((entry): entry is ToolEntry => entry !== null);
 }
+
+async function mapLimit<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  if (items.length === 0) return [];
+  const results: R[] = [];
+  results.length = items.length;
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex++;
+        results[index] = await worker(items[index], index);
+      }
+    }),
+  );
+
+  return results;
+}
+
+export const __testables = {
+  decodeProjectDir,
+};
