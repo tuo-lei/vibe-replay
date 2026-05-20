@@ -113,7 +113,7 @@ curl -o ~/.claude/skills/replay/SKILL.md \
 
 - **Zero config** — one command, no setup, no account. Works instantly with existing sessions
 - **Single HTML file** — self-contained, works offline, zero external requests. Drop it in Slack, email it, open it anywhere
-- **Claude Code + Cursor** — both providers auto-discovered, including multi-file and resumed sessions
+- **Claude Code, Cursor, and Codex** — all providers auto-discovered, including multi-file and resumed sessions
 - **Share & export** — GitHub Gist, animated SVG, GIF, markdown summary, or cloud upload. Secret redaction built in
 - **Sub-agent visualization** — see delegated tool calls and sub-agent trees rendered inline
 - **Comments** — leave notes on any scene. Comments persist in the HTML and travel with the replay
@@ -126,7 +126,7 @@ curl -o ~/.claude/skills/replay/SKILL.md \
 | Claude Code | Supported |
 | Claude Desktop | Supported |
 | Claude Cowork | Supported (agent-mode sessions) |
-| Codex | Supported |
+| Codex | Supported (web search, GPT-5.x models, task timings, memory mode) |
 | Cursor | Supported (SQLite + JSONL + SDK store, auto-discovered) |
 | More coming soon | — |
 
