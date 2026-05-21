@@ -24,7 +24,7 @@ export function previewPrompt(text: string): string {
  * Strip system-injected boilerplate from user prompts.
  * Shared by discover (session scanning) and server (API responses).
  */
-export function cleanPromptText(text: string): string {
+export function cleanPromptText(text: unknown): string {
   if (typeof text !== "string") return "";
 
   let cleaned = text.trim();
