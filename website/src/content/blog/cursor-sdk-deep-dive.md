@@ -43,6 +43,8 @@ On macOS, every SDK agent lands at:
 ~/.cursor/projects/<workspace-slug>/sdk-agent-store/<projectHash>/index.db
 ```
 
+(Same shape on Linux. On Windows, it's the same path under your user-profile home — `homedir()`-relative, not under `%APPDATA%`.)
+
 A few things worth flagging right away:
 
 - **`<workspace-slug>`** is the same folder the existing Cursor provider already walks for IDE transcripts. The SDK is reusing the per-project root, just in a new `sdk-agent-store/` subdirectory.
@@ -88,6 +90,8 @@ What you find on inspection:
 | `created_at` / `updated_at` | ISO timestamps |
 | `latest_checkpoint_ref_json` | Pointer into the blob store |
 
+We don't read `latest_checkpoint_ref_json` in vibe-replay — it's a pointer into the per-agent `store.db` we never need to open. Mentioning it for completeness; if you ever want raw blob recovery, this is the column to start from.
+
 The `agent-` prefix on `agent_id` is load-bearing for tooling — it's the only reliable way to tell an SDK agent apart from a plain IDE chat session (which is a bare UUID).
 
 ### `runs`
@@ -116,6 +120,8 @@ This is the firehose. Every streamed SDK message becomes a row:
 | `seq` | Monotonic sequence within a run |
 | `event_type` | Always `run_stream_event` in our reads |
 | `payload_json` | The actual `sdk_message` envelope |
+
+In practice we only `SELECT run_id, seq, payload_json` — `event_type` is on the schema but we never branch on it, because every row in this table has been `run_stream_event` so far. If Cursor introduces other event types later, that's the column to start filtering on.
 
 `payload_json` is the JSON payload from the SDK's `agent.events()` stream. Each row's `message.type` tells you what kind of event it is — assistant text deltas, tool calls, tool results, thinking blocks, and so on.
 
@@ -162,9 +168,9 @@ A few things to notice:
 
 1. **The same `call_id` appears multiple times.** You get a `running` event first, then one or more updates, then a terminal `completed` / `error`. To replay correctly you have to collapse them per `call_id` and take the last status / result you see.
 2. **`result` is a `{ status, value }` envelope.** Not raw text. For Bash-shaped tools `value` carries `stdout`, `stderr`, `exitCode`. For file reads `value.content`. For edits `value.diffString`.
-3. **`args` may grow across updates.** Sometimes the early "running" event has a thin args object and the args fill in by the next update. The right strategy is to take the latest non-empty `args`, not the first one we see.
+3. **`args` may grow across updates.** Sometimes the early "running" event has a thin args object and the args fill in by the next update. The right strategy is to overwrite `args` on *every* update where the new payload is non-empty — not just the terminal event. By the time you reach `completed`, you have the fullest known args object.
 
-That last one bit me. My first pass just used the args from the first `running` event and missed late-arriving fields on long-running tools. Switching to "latest non-empty wins" fixed it.
+That last one bit me. My first pass just used the args from the first `running` event and missed late-arriving fields on long-running tools. Switching to "non-empty update wins" fixed it.
 
 ---
 
