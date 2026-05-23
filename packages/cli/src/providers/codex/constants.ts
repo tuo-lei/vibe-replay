@@ -1,4 +1,4 @@
-export const USER_MESSAGE_BEGIN = "## My request for Codex:";
+const USER_MESSAGE_BEGIN = "## My request for Codex:";
 export const CODEX_CONTEXT_TAGS = [
   "environment_context",
   "permissions instructions",
@@ -20,12 +20,12 @@ export function isCodexToolCallType(type?: string): boolean {
   );
 }
 
-export function stripUserMessagePrefix(text: string): string {
+function stripUserMessagePrefix(text: string): string {
   const idx = text.indexOf(USER_MESSAGE_BEGIN);
   return idx === -1 ? text : text.slice(idx + USER_MESSAGE_BEGIN.length);
 }
 
-export function stripLeadingCodexContextBlocks(text: string): string {
+function stripLeadingCodexContextBlocks(text: string): string {
   let remaining = text.trim();
   let stripped = true;
   while (stripped) {
