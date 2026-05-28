@@ -85,6 +85,7 @@ interface GlobalStateDiscoveryCache {
 }
 
 export interface CursorLiveDiagnostics {
+  // Keep in sync with LiveCursorDiagnostics in packages/viewer/src/hooks/useSessionLoader.ts.
   source: "global-state";
   signature: string;
   probedAt: string;
@@ -551,6 +552,7 @@ export async function readCursorLiveDiagnostics(
   const latest = latestBubbleId
     ? bubbleRowsByKey.get(`bubbleId:${sessionId}:${latestBubbleId}`) || {}
     : {};
+  const latestToolName = valueToString(latest.toolName).trim();
   let toolCallCount = 0;
   let toolResultCount = 0;
   let pendingToolCount = 0;
@@ -593,11 +595,9 @@ export async function readCursorLiveDiagnostics(
     ...(valueToString(latest.text).trim()
       ? { latestTextPreview: valueToString(latest.text).replace(/\s+/g, " ").trim().slice(0, 160) }
       : {}),
-    ...(valueToString(latest.toolName).trim()
-      ? { latestToolName: valueToString(latest.toolName) }
-      : {}),
-    ...(latest.toolHasResult !== undefined
-      ? { latestToolHasResult: Boolean(Number(latest.toolHasResult)) }
+    ...(latestToolName ? { latestToolName } : {}),
+    ...(latestToolName && latest.toolHasResult !== undefined
+      ? { latestToolHasResult: Number(latest.toolHasResult) !== 0 }
       : {}),
     ...(latest.toolResultLength !== null && latest.toolResultLength !== undefined
       ? { latestToolResultLength: toNonNegativeInt(latest.toolResultLength) }
@@ -624,6 +624,7 @@ function cursorLiveDiagnosticsSignature(
     diagnostics.toolResultCount,
     diagnostics.pendingToolCount,
     diagnostics.composerBytes,
+    diagnostics.composerLastUpdatedAt || "",
     diagnostics.latestBubbleId || "",
     diagnostics.latestBubbleCreatedAt || "",
     diagnostics.latestBubbleUpdatedAt || "",

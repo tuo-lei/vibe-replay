@@ -102,6 +102,7 @@ describe("cursor sqlite metrics helpers", () => {
       walMtimeMs: 2,
       walSize: 3,
       composerBytes: 100,
+      composerLastUpdatedAt: "2026-01-01T00:00:00.000Z",
       headerCount: 2,
       latestBubbleId: "bubble-1",
       latestBubbleCreatedAt: "2026-01-01T00:00:01.000Z",
@@ -126,6 +127,12 @@ describe("cursor sqlite metrics helpers", () => {
         ...base,
         toolResultCount: 1,
         pendingToolCount: 0,
+      }),
+    ).not.toBe(__testables.cursorLiveDiagnosticsSignature(base));
+    expect(
+      __testables.cursorLiveDiagnosticsSignature({
+        ...base,
+        composerLastUpdatedAt: "2026-01-01T00:00:02.000Z",
       }),
     ).not.toBe(__testables.cursorLiveDiagnosticsSignature(base));
   });

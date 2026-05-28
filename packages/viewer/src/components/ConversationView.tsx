@@ -493,8 +493,12 @@ function LiveStateCard({
           {latestAge ? ` · durable ${latestAge}` : ""}
         </div>
         <div className="text-[9px] font-mono text-terminal-dimmer mt-1 tracking-wide">
-          {cursorDiagnostics.bubbleCount} bubbles · {cursorDiagnostics.toolResultCount}/
-          {cursorDiagnostics.toolCallCount} tool results · {rowState}
+          {cursorDiagnostics.bubbleCount} bubbles
+          {cursorDiagnostics.toolCallCount > 0
+            ? ` · ${cursorDiagnostics.toolResultCount}/${cursorDiagnostics.toolCallCount} tool results`
+            : ""}
+          {" · "}
+          {rowState}
           {probeAge ? ` · probed ${probeAge}` : ""}
         </div>
       </div>
@@ -561,7 +565,8 @@ function formatCompactAge(iso?: string): string {
   if (!Number.isFinite(ms) || ms < 0) return "";
   if (ms < 60_000) return `${Math.max(1, Math.round(ms / 1000))}s ago`;
   if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m ago`;
-  return `${Math.round(ms / 3_600_000)}h ago`;
+  if (ms < 86_400_000) return `${Math.round(ms / 3_600_000)}h ago`;
+  return `${Math.round(ms / 86_400_000)}d ago`;
 }
 
 function TimeGapIndicator({ gapMs }: { gapMs: number }) {

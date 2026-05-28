@@ -40,6 +40,7 @@ export interface LiveStatus {
 }
 
 export interface LiveCursorDiagnostics {
+  // Keep in sync with CursorLiveDiagnostics in packages/cli/src/providers/cursor/sqlite-reader.ts.
   source: "global-state";
   signature: string;
   probedAt: string;
