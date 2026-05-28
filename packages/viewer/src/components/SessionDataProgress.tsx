@@ -1,7 +1,7 @@
 import type { SourceSession } from "../types";
 import type { SourcesEnrichmentStatus } from "./dashboard-utils";
 
-export type SessionDataLevel = "basic" | "loading" | "details" | "counts" | "metrics";
+export type SessionDataLevel = "basic" | "details" | "counts" | "metrics";
 
 export interface SessionDataState {
   level: SessionDataLevel;
@@ -24,7 +24,7 @@ interface SessionMetricSnapshot {
   prLinks?: Array<unknown>;
 }
 
-const STAGES: Array<{ level: Exclude<SessionDataLevel, "loading">; label: string }> = [
+const STAGES: Array<{ level: SessionDataLevel; label: string }> = [
   { level: "basic", label: "basic" },
   { level: "details", label: "details" },
   { level: "counts", label: "counts" },
@@ -168,10 +168,9 @@ export function SessionDataPipeline({
   compact?: boolean;
   className?: string;
 }) {
-  const level = state.level === "loading" ? "details" : state.level;
   const activeIndex = Math.max(
     0,
-    STAGES.findIndex((stage) => stage.level === level),
+    STAGES.findIndex((stage) => stage.level === state.level),
   );
   const fillPct = Math.max(12, ((activeIndex + 1) / STAGES.length) * 100);
 

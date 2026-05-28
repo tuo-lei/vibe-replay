@@ -757,7 +757,7 @@ program
   .action(async (opts: SessionsCommandOptions) => {
     const discoverSpinner = opts.json ? undefined : ora("Discovering local sessions...").start();
     try {
-      const sessions = await discoverAllSessions();
+      const sessions = mergeSameSessions(await discoverAllSessions());
       discoverSpinner?.succeed(`Found ${sessions.length} sessions`);
 
       const scanSpinner =

@@ -1523,6 +1523,10 @@ function SessionsPanel() {
       } else if (wasEnrichingRef.current) {
         wasEnrichingRef.current = false;
         await refreshSourcesFromCache();
+        if (timer) {
+          window.clearInterval(timer);
+          timer = undefined;
+        }
       }
     };
     void poll();

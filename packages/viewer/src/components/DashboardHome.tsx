@@ -208,6 +208,10 @@ function useDashboardData() {
       } else if (wasEnrichingRef.current) {
         wasEnrichingRef.current = false;
         await maybeRefreshSourcesFromCache();
+        if (timer) {
+          window.clearInterval(timer);
+          timer = undefined;
+        }
       }
     };
 

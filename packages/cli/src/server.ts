@@ -614,7 +614,10 @@ function mergeEnrichmentHints(
 }
 
 function uniqueStrings(values: string[]): string[] {
-  return [...new Set(values.filter((value) => typeof value === "string" && value.trim()))];
+  return [...new Set(values.filter((value) => typeof value === "string" && value.trim()))].slice(
+    0,
+    200,
+  );
 }
 
 function enrichmentHintsFromBody(value: unknown): EnrichmentHints {
@@ -634,6 +637,14 @@ function stringArrayFromUnknown(value: unknown): string[] | undefined {
     (item): item is string => typeof item === "string" && item.trim().length > 0,
   );
   return strings.length > 0 ? [...new Set(strings)] : undefined;
+}
+
+function normalizeSessionProjectsForHome(sessions: SessionInfo[], home: string): SessionInfo[] {
+  return sessions.map((session) =>
+    session.project.startsWith(home)
+      ? { ...session, project: `~${session.project.slice(home.length)}` }
+      : { ...session },
+  );
 }
 
 function countSessionStats(turns: ParsedTurn[]): {
@@ -1067,6 +1078,7 @@ export async function startServer(
     baseSources: SourceSummaryRecord[];
     hints: EnrichmentHints;
   } | null = null;
+  let lastDiscoveredMergedSessions: SessionInfo[] = [];
 
   const enrichCursorStatsInBackground = (
     merged: SessionInfo[],
@@ -1107,9 +1119,10 @@ export async function startServer(
       return;
     }
 
+    const enrichedSources = baseSources.map((s) => ({ ...s }));
+
     void (async () => {
       let changed = false;
-      const enrichedSources = baseSources.map((s) => ({ ...s }));
       const bySessionId = new Map<string, SourceSummaryRecord>();
       const byKey = new Map<string, SourceSummaryRecord>();
       for (const source of enrichedSources) {
@@ -1208,7 +1221,7 @@ export async function startServer(
       const pending = pendingSourcesEnrichment;
       pendingSourcesEnrichment = null;
       if (pending) {
-        enrichCursorStatsInBackground(pending.merged, pending.baseSources, pending.hints);
+        enrichCursorStatsInBackground(pending.merged, enrichedSources, pending.hints);
       }
     });
   };
@@ -1431,6 +1444,7 @@ export async function startServer(
             s.project = `~${s.project.slice(home.length)}`;
           }
         }
+        lastDiscoveredMergedSessions = merged.map((session) => ({ ...session }));
 
         // Build scan inputs, then rank the catch-up order so new and UI-hinted
         // sessions land in the scan cache before long-tail unchanged history.
@@ -2037,12 +2051,19 @@ export async function startServer(
     const cursorProvider = getProvider("cursor");
     if (!cursorProvider) return c.json({ ok: false, message: "Cursor provider unavailable" }, 404);
 
-    const cursorSessions = mergeSameSessions(await cursorProvider.discover());
     const home = homedir();
-    for (const session of cursorSessions) {
-      if (session.project.startsWith(home)) {
-        session.project = `~${session.project.slice(home.length)}`;
-      }
+    let cursorSessions = lastDiscoveredMergedSessions.filter(
+      (session) => session.provider === "cursor",
+    );
+    if (cursorSessions.length === 0) {
+      cursorSessions = normalizeSessionProjectsForHome(
+        mergeSameSessions(await cursorProvider.discover()),
+        home,
+      );
+      lastDiscoveredMergedSessions = [
+        ...lastDiscoveredMergedSessions.filter((session) => session.provider !== "cursor"),
+        ...cursorSessions,
+      ];
     }
     const wasRunning = sourcesEnrichmentStatus.running;
     enrichCursorStatsInBackground(cursorSessions, cached.data, hints);
@@ -2063,6 +2084,7 @@ export async function startServer(
       }
 
       const merged = mergeSameSessions(allSessions);
+      lastDiscoveredMergedSessions = normalizeSessionProjectsForHome(merged, homedir());
       const previous = await readFileCache<SourceSummaryRecord[]>(sourcesCacheKey);
       const result = await buildSourcesResult(
         merged,
@@ -2104,6 +2126,7 @@ export async function startServer(
         }
 
         const merged = mergeSameSessions(allSessions);
+        lastDiscoveredMergedSessions = normalizeSessionProjectsForHome(merged, homedir());
         const previous = await readFileCache<SourceSummaryRecord[]>(sourcesCacheKey);
         const result = await buildSourcesResult(
           merged,
