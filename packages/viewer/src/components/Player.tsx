@@ -804,6 +804,9 @@ export default function Player({
                     overlayActions={overlayActions}
                     turnStats={session.meta.stats.turnStats}
                     isLive={isLive}
+                    liveCursorDiagnostics={live?.cursorDiagnostics}
+                    liveCursorProbeAt={live?.lastCursorProbe}
+                    liveCursorRowsChanged={live?.cursorRowsChanged}
                     liveSessionState={live?.sessionState}
                     onComment={
                       isReadOnly

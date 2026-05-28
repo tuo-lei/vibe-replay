@@ -31,6 +31,39 @@ export interface LiveStatus {
    * the existing always-live UI rather than misreporting "stopped".
    */
   sessionState?: "busy" | "idle" | "stopped" | "unknown";
+  /** Cursor-specific row-level probe of the durable SQLite/global-state source. */
+  cursorDiagnostics?: LiveCursorDiagnostics;
+  /** True when the latest Cursor probe changed session rows; false when only a DB/WAL event fired. */
+  cursorRowsChanged?: boolean;
+  /** Time of the last Cursor diagnostics probe received by the viewer. */
+  lastCursorProbe?: number;
+}
+
+export interface LiveCursorDiagnostics {
+  source: "global-state";
+  signature: string;
+  probedAt: string;
+  dbPath: string;
+  dbMtimeMs: number;
+  walMtimeMs: number;
+  walSize: number;
+  composerBytes: number;
+  headerCount: number;
+  composerLastUpdatedAt?: string;
+  latestBubbleId?: string;
+  latestBubbleCreatedAt?: string;
+  latestBubbleUpdatedAt?: string;
+  latestBubbleType?: number;
+  latestTextPreview?: string;
+  latestToolName?: string;
+  latestToolHasResult?: boolean;
+  latestToolResultLength?: number;
+  bubbleCount: number;
+  toolCallCount: number;
+  toolResultCount: number;
+  pendingToolCount: number;
+  maxBubbleBytes: number;
+  totalBubbleBytes: number;
 }
 
 interface LoadResult {
@@ -176,6 +209,8 @@ function startLiveStream(
       session?: ReplaySession;
       message?: string;
       state?: LiveStatus["sessionState"];
+      cursorDiagnostics?: LiveCursorDiagnostics;
+      cursorRowsChanged?: boolean;
     };
     try {
       payload = JSON.parse(ev.data);
@@ -190,6 +225,18 @@ function startLiveStream(
         lastUpdate: Date.now(),
         error: undefined,
         sessionState: payload.state ?? liveStatus.sessionState,
+        cursorDiagnostics: payload.cursorDiagnostics ?? liveStatus.cursorDiagnostics,
+        cursorRowsChanged: payload.cursorRowsChanged ?? liveStatus.cursorRowsChanged,
+        lastCursorProbe: payload.cursorDiagnostics ? Date.now() : liveStatus.lastCursorProbe,
+      };
+      emit();
+    } else if (payload.type === "diagnostics" && payload.cursorDiagnostics) {
+      liveStatus = {
+        ...liveStatus,
+        state: "open",
+        cursorDiagnostics: payload.cursorDiagnostics,
+        cursorRowsChanged: payload.cursorRowsChanged,
+        lastCursorProbe: Date.now(),
       };
       emit();
     } else if (payload.type === "state" && payload.state) {

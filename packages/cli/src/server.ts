@@ -35,7 +35,10 @@ import { mergeInsights, readInsightsStore, writeInsightsStore } from "./insights
 import { loadOverlays, sessionWithEffectiveContent } from "./overlays.js";
 import { parseClaudeCodeLines } from "./providers/claude-code/parser.js";
 import { parseCodexLines } from "./providers/codex/parser.js";
-import { resolveCursorLiveWatchPaths } from "./providers/cursor/sqlite-reader.js";
+import {
+  readCursorLiveDiagnostics,
+  resolveCursorLiveWatchPaths,
+} from "./providers/cursor/sqlite-reader.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
 import {
   getApiUrl,
@@ -1609,6 +1612,7 @@ export async function startServer(
       let inFlight = false;
       let dirty = false;
       let lastSignature: string | null = null;
+      let lastCursorDiagnosticsSignature: string | null = null;
       // Live session state (busy / idle / stopped / unknown) — populated
       // from `~/.claude/sessions/<pid>.json` for Claude. Other providers
       // don't write that file, so they get "unknown" and the viewer keeps
@@ -1767,6 +1771,24 @@ export async function startServer(
           // silently go stale.
           ensureWatchersFor(paths);
           await ensureCursorDbWatchersFor(info);
+          const cursorDiagnostics =
+            isCursorProvider && info.hasSqlite
+              ? await readCursorLiveDiagnostics(info.sessionId).catch(() => null)
+              : null;
+          if (
+            cursorDiagnostics &&
+            lastCursorDiagnosticsSignature === cursorDiagnostics.signature &&
+            lastSignature !== null
+          ) {
+            await stream.writeSSE({
+              data: JSON.stringify({
+                type: "diagnostics",
+                cursorDiagnostics,
+                cursorRowsChanged: false,
+              }),
+            });
+            return;
+          }
           let parsed;
           if (isJsonlLiveProvider) {
             // Tail-based fast path. Concat already-cached lines from every
@@ -1811,6 +1833,9 @@ export async function startServer(
             lastLiveState = await readClaudeSessionState(sessionId);
           }
           const signature = JSON.stringify(replay.scenes);
+          if (cursorDiagnostics) {
+            lastCursorDiagnosticsSignature = cursorDiagnostics.signature;
+          }
           if (signature !== lastSignature) {
             lastSignature = signature;
             await stream.writeSSE({
@@ -1818,6 +1843,15 @@ export async function startServer(
                 type: "session",
                 session: replay,
                 state: lastLiveState,
+                ...(cursorDiagnostics ? { cursorDiagnostics, cursorRowsChanged: true } : {}),
+              }),
+            });
+          } else if (cursorDiagnostics) {
+            await stream.writeSSE({
+              data: JSON.stringify({
+                type: "diagnostics",
+                cursorDiagnostics,
+                cursorRowsChanged: true,
               }),
             });
           }
