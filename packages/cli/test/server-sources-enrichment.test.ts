@@ -111,6 +111,84 @@ describe("sources enrichment helpers", () => {
     expect(candidates.map((s) => s.sessionId)).toEqual(["cursor-new", "cursor-old"]);
   });
 
+  it("prioritizes hinted cursor sessions before default recency", () => {
+    const merged = [
+      makeCursorSession({
+        sessionId: "cursor-old-visible",
+        slug: "visible0",
+        timestamp: "2026-01-01T00:00:00.000Z",
+      }),
+      makeCursorSession({
+        sessionId: "cursor-new",
+        slug: "newnew00",
+        timestamp: "2026-01-03T00:00:00.000Z",
+      }),
+      makeCursorSession({
+        sessionId: "cursor-mid",
+        slug: "midmid00",
+        timestamp: "2026-01-02T00:00:00.000Z",
+      }),
+    ];
+
+    const baseSources = merged.map((source) => ({
+      provider: "cursor",
+      sessionId: source.sessionId,
+      slug: source.slug,
+      project: source.project,
+      timestamp: source.timestamp,
+      filePaths: source.filePaths,
+      promptCount: undefined,
+      toolCallCount: undefined,
+    })) as any[];
+
+    const candidates = __testables.selectCursorEnrichmentCandidates(merged, baseSources, {
+      slugs: ["visible0"],
+      limit: 2,
+    });
+    expect(candidates.map((s) => s.sessionId)).toEqual(["cursor-old-visible", "cursor-new"]);
+  });
+
+  it("prioritizes unscanned and hinted sessions during scan catch-up", () => {
+    const inputs = [
+      {
+        sessionId: "already-new",
+        provider: "cursor",
+        project: "~/project-a",
+        slug: "new",
+        filePaths: ["/tmp/new.jsonl"],
+        timestamp: "2026-01-03T00:00:00.000Z",
+      },
+      {
+        sessionId: "unscanned-old",
+        provider: "cursor",
+        project: "~/project-a",
+        slug: "old",
+        filePaths: ["/tmp/old.jsonl"],
+        timestamp: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        sessionId: "hinted-mid",
+        provider: "cursor",
+        project: "~/project-a",
+        slug: "mid",
+        filePaths: ["/tmp/mid.jsonl"],
+        timestamp: "2026-01-02T00:00:00.000Z",
+      },
+    ] as any[];
+
+    const ordered = __testables.prioritizeScanInputs(
+      inputs,
+      [{ sessionId: "already-new" }, { sessionId: "hinted-mid" }] as any[],
+      { slugs: ["mid"] },
+    );
+
+    expect(ordered.map((input) => input.sessionId)).toEqual([
+      "hinted-mid",
+      "unscanned-old",
+      "already-new",
+    ]);
+  });
+
   it("does not cross-provider match by sessionId when picking cache records", () => {
     const current = makeCursorSession({ sessionId: "shared-id", slug: "aaaaaaaa" });
     const bySessionId = new Map<string, any>([
