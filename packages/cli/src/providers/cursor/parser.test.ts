@@ -63,6 +63,52 @@ describe("parseCursorSession", () => {
     expect(mockedParseCursorSqlite).toHaveBeenCalledWith("/repo", "sqlite-session");
   });
 
+  it("parses explicit Cursor store.db session paths without discovery metadata", async () => {
+    const sessionId = "ee3500f9-cfc2-4396-a5f2-1b556f8ac573";
+    mockedParseCursorSqlite.mockResolvedValueOnce({
+      sessionId,
+      slug: "ee3500f9",
+      cwd: "",
+      turns: [{ role: "user", blocks: [{ type: "text", text: "hello" }] }],
+      dataSource: "sqlite",
+      dataSourceInfo: {
+        primary: "sqlite",
+        sources: ["cursor/chats/<workspace-hash>/<session-id>/store.db"],
+      },
+    });
+
+    const parsed = await parseCursorSession([
+      `/Users/test/.cursor/chats/workspace-hash/${sessionId}/store.db`,
+    ]);
+
+    expect(parsed.dataSource).toBe("sqlite");
+    expect(parsed.sessionId).toBe(sessionId);
+    expect(mockedParseCursorSqlite).toHaveBeenCalledWith("", sessionId);
+  });
+
+  it("parses explicit Cursor global-state session paths without discovery metadata", async () => {
+    const sessionId = "38bca9d6-9996-498d-b461-f9d8ae4b8cb4";
+    mockedParseCursorSqlite.mockResolvedValueOnce({
+      sessionId,
+      slug: "38bca9d6",
+      cwd: "",
+      turns: [{ role: "user", blocks: [{ type: "text", text: "hello" }] }],
+      dataSource: "global-state",
+      dataSourceInfo: {
+        primary: "global-state",
+        sources: ["cursor/user/globalStorage/state.vscdb"],
+      },
+    });
+
+    const parsed = await parseCursorSession([
+      `/Users/test/Library/Application Support/Cursor/User/globalStorage/state.vscdb#composerData:${sessionId}`,
+    ]);
+
+    expect(parsed.dataSource).toBe("global-state");
+    expect(parsed.sessionId).toBe(sessionId);
+    expect(mockedParseCursorSqlite).toHaveBeenCalledWith("", sessionId);
+  });
+
   it("falls back to JSONL when sqlite parsing throws", async () => {
     mockedParseCursorSqlite.mockRejectedValueOnce(new Error("no such table: meta"));
 

@@ -26,7 +26,7 @@ Do not use this for live dashboard enrichment behavior. Dashboard enrichment is 
 From this repo during development:
 
 ```bash
-pnpm --filter vibe-replay dev -- sessions --query "<terms>" --limit 10 --json
+pnpm --filter vibe-replay dev sessions --query "<terms>" --limit 10 --json
 ```
 
 After building from source:

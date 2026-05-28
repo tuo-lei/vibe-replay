@@ -448,7 +448,12 @@ program
 
       const info = displayedSessions.find((s) => s.filePath === chosen);
       sessionInfo = info;
-      sessionPaths = info ? [...info.filePaths, ...(info.toolPaths || [])] : [chosen];
+      const sourcePaths = info
+        ? info.filePaths.length > 0
+          ? info.filePaths
+          : [info.filePath]
+        : [chosen];
+      sessionPaths = [...sourcePaths, ...(info?.toolPaths || [])];
       providerName = info?.provider || opts.provider;
     }
 
