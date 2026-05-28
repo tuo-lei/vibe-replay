@@ -39,6 +39,16 @@ import {
   useScanInsightsContext,
 } from "./InsightsPanel";
 import ProjectsPanel from "./ProjectsPanel";
+import {
+  DataLevelBadge,
+  hasEnrichedSourceDetails,
+  hasPromptOrToolCounts,
+  hasRichScanMetrics,
+  ReadinessRow,
+  SessionDataPipeline,
+  SessionLoadingToast,
+  sessionDataState,
+} from "./SessionDataProgress";
 import { formatDuration } from "./StatsPanel";
 
 export type Tab = "home" | "sessions" | "replays" | "projects" | "insights";
@@ -341,6 +351,7 @@ export function SessionDetailPopup({
   isArchived: boolean;
 }) {
   const [scanData, setScanData] = useState<SessionScanData | null>(initialScanData);
+  const [scanLoading, setScanLoading] = useState(!initialScanData);
   const fallbackSuggested = sourceSuggestedTitle(s);
   const suggested = sourceDisplayTitle(s, scanData);
   const [titleValue, setTitleValue] = useState(s.replay?.title || suggested);
@@ -371,12 +382,17 @@ export function SessionDetailPopup({
 
   // Fetch scan results for richer data (cached at module level)
   useEffect(() => {
-    if (initialScanData) return;
+    if (initialScanData) {
+      setScanLoading(false);
+      return;
+    }
     let cancelled = false;
+    setScanLoading(true);
     fetchScanResults().then((results) => {
-      if (cancelled || !results) return;
-      const match = results.find((r) => r.slug === s.slug);
+      if (cancelled) return;
+      const match = results?.find((r) => r.slug === s.slug);
       if (match) setScanData(match);
+      setScanLoading(false);
     });
     return () => {
       cancelled = true;
@@ -406,6 +422,8 @@ export function SessionDetailPopup({
   const model = scanData?.model || s.model;
   const prompts = sessionPromptPreview(s, scanData, suggested);
   const dataQualityNotes = scanData?.dataQualityNotes || [];
+  const dataState = sessionDataState(s, scanData);
+  const dataPipelineActive = scanLoading && !hasRichScanMetrics(scanData);
 
   // Use scan data when available, fall back to discovery estimates
   const promptCount = scanData?.promptCount ?? s.promptCount;
@@ -450,6 +468,7 @@ export function SessionDetailPopup({
         <div className="flex items-center justify-between px-7 pt-5 pb-3">
           <div className="flex items-center gap-2">
             <ProviderBadge provider={s.provider} />
+            <DataLevelBadge state={dataState} compact />
             {model && (
               <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-terminal-surface-2 text-terminal-dimmer">
                 {shortModelName(model)}
@@ -623,6 +642,38 @@ export function SessionDetailPopup({
                   value={`#${pr.prNumber} (${pr.prRepository})`}
                 />
               ))}
+            </div>
+          </div>
+
+          <div className="bg-terminal-surface rounded-xl px-5 py-4">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div className="text-[10px] font-sans uppercase tracking-widest text-terminal-dimmer">
+                Data Readiness
+              </div>
+              <DataLevelBadge state={dataState} active={dataPipelineActive} />
+            </div>
+            <SessionDataPipeline state={dataState} active={dataPipelineActive} className="mb-3" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-5 gap-y-2">
+              <ReadinessRow
+                ready
+                label="Basic discovery loaded"
+                pendingLabel="Waiting for discovery"
+              />
+              <ReadinessRow
+                ready={hasEnrichedSourceDetails(s)}
+                label="Title, prompt previews, or model enriched"
+                pendingLabel="Title and prompt previews not enriched yet"
+              />
+              <ReadinessRow
+                ready={hasPromptOrToolCounts(s, scanData)}
+                label="Prompt/tool counts loaded"
+                pendingLabel="Prompt/tool counts not loaded yet"
+              />
+              <ReadinessRow
+                ready={hasRichScanMetrics(scanData)}
+                label="Rich metrics loaded"
+                pendingLabel="Rich metrics deferred for this source"
+              />
             </div>
           </div>
 
@@ -1351,6 +1402,7 @@ function SessionsPanel() {
     return () => window.removeEventListener("vibe-open-session", handler);
   }, []);
   const wasEnrichingRef = useRef(false);
+  const requestedEnrichmentSignatureRef = useRef("");
   const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());
   const [enrichmentStatus, setEnrichmentStatus] = useState<SourcesEnrichmentStatus | null>(null);
   const hasCursorSources = sources.some((source) => source.provider === "cursor");
@@ -1586,6 +1638,33 @@ function SessionsPanel() {
       )
     : projectSessions;
   const refreshAge = lastRefreshedAt ? formatCompactAge(lastRefreshedAt, refreshClockMs) : null;
+  const priorityEnrichmentSlugs = new Set(filtered.slice(0, 25).map((session) => session.slug));
+
+  useEffect(() => {
+    if (loading || filtered.length === 0) return;
+    const prioritySessions = filtered.slice(0, 25);
+    const slugs = prioritySessions.map((session) => session.slug);
+    const sessionIds = prioritySessions
+      .map((session) => session.sessionId)
+      .filter(
+        (sessionId): sessionId is string => typeof sessionId === "string" && sessionId.length > 0,
+      );
+    const projects = selectedProjectKey === ALL_PROJECTS ? [] : [selectedProjectKey];
+    const signature = JSON.stringify({ slugs, selectedProjectKey });
+    if (requestedEnrichmentSignatureRef.current === signature) return;
+    requestedEnrichmentSignatureRef.current = signature;
+
+    fetch("/api/sources/enrich", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        slugs,
+        sessionIds,
+        projects,
+        limit: Math.max(30, prioritySessions.length),
+      }),
+    }).catch(() => {});
+  }, [filtered, loading, selectedProjectKey]);
 
   const showInitialLoading = loading && sources.length === 0;
 
@@ -1835,37 +1914,27 @@ function SessionsPanel() {
           </div>
         </div>
 
-        {(showInitialLoading || refreshing || staleCachedAt) && (
-          <div className="mx-4 mb-2 flex items-center gap-2 rounded-lg px-3 py-2.5 text-xs font-mono bg-terminal-blue-subtle text-terminal-blue shrink-0 shadow-layer-sm">
-            {showInitialLoading ? (
-              <>
-                <span className="w-1.5 h-1.5 rounded-full bg-terminal-blue animate-pulse" />
-                <span>FETCHING SESSIONS...</span>
-              </>
-            ) : refreshing ? (
-              <>
-                <span className="w-1.5 h-1.5 rounded-full bg-terminal-blue animate-pulse" />
-                <span>SCANNING LATEST SESSIONS...</span>
-                {staleCachedAt && (
-                  <span className="text-terminal-dim">
-                    Showing stale cache ({formatCacheAge(staleCachedAt)})
-                  </span>
-                )}
-              </>
-            ) : staleCachedAt ? (
-              <span>Showing stale cache ({formatCacheAge(staleCachedAt)})</span>
-            ) : null}
-          </div>
-        )}
-
-        {enrichmentStatus?.running && enrichmentStatus.total > 0 && (
-          <div className="mx-4 mb-2 flex items-center gap-2 rounded-lg px-3 py-2.5 text-xs font-mono bg-terminal-blue-subtle text-terminal-blue shrink-0 shadow-layer-sm">
-            <span className="w-1.5 h-1.5 rounded-full bg-terminal-blue animate-pulse" />
-            <span>
-              BACKFILLING CURSOR STATS... {enrichmentStatus.processed}/{enrichmentStatus.total}
-            </span>
-          </div>
-        )}
+        {showInitialLoading ? (
+          <SessionLoadingToast
+            title="Fetching local sessions"
+            description="Reading cached session lists first, then refreshing local providers in the background."
+          />
+        ) : refreshing ? (
+          <SessionLoadingToast
+            title="Scanning latest sessions"
+            description={
+              staleCachedAt
+                ? `Showing stale cache (${formatCacheAge(staleCachedAt)}) while refreshing.`
+                : "Refreshing provider session lists and lightweight metadata."
+            }
+          />
+        ) : enrichmentStatus?.running && enrichmentStatus.total > 0 ? (
+          <SessionLoadingToast
+            status={enrichmentStatus}
+            title="Loading richer details for visible sessions"
+            description="Visible cards update in place as local data is enriched."
+          />
+        ) : null}
 
         {/* Error toast */}
         {refreshError && (
@@ -1979,12 +2048,19 @@ function SessionsPanel() {
                   scanData?.dataSource,
                   s.hasSdk,
                 );
+                const isPriorityEnriching =
+                  Boolean(enrichmentStatus?.running) &&
+                  priorityEnrichmentSlugs.has(s.slug) &&
+                  !hasRichScanMetrics(scanData);
+                const dataState = sessionDataState(s, scanData);
                 const isArchived = archivedSlugs.has(s.slug);
                 return (
                   <div
                     key={`${s.provider}-${s.slug}`}
                     onClick={() => setSelectedSlug(s.slug)}
-                    className={`bg-terminal-surface rounded-xl px-5 py-4 hover:bg-terminal-surface-hover transition-all duration-300 ease-material space-y-2.5 shadow-layer-sm cursor-pointer hover-lift ${isArchived ? "opacity-50" : ""}`}
+                    className={`bg-terminal-surface rounded-xl px-5 py-4 hover:bg-terminal-surface-hover transition-all duration-300 ease-material space-y-2.5 shadow-layer-sm cursor-pointer hover-lift ${
+                      isPriorityEnriching ? "ring-1 ring-terminal-blue/20" : ""
+                    } ${isArchived ? "opacity-50" : ""}`}
                   >
                     {/* Row 1: title + meta (left) / time + actions (right) */}
                     <div className="flex items-start justify-between gap-3">
@@ -1996,6 +2072,7 @@ function SessionsPanel() {
                           <div className="text-[11px] font-mono text-terminal-dimmer truncate">
                             slug: <span className="text-terminal-dim">{s.slug}</span>
                           </div>
+                          <DataLevelBadge state={dataState} compact active={isPriorityEnriching} />
                           {branch && (
                             <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-terminal-surface-2 text-terminal-dim shrink-0 inline-flex items-center gap-0.5">
                               <svg

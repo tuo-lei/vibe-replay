@@ -32,6 +32,7 @@ import {
 import { publishLocal } from "./publishers/local.js";
 import { scanForSecrets } from "./scan.js";
 import { startDashboard, startServer } from "./server.js";
+import { formatSessionQueryText, queryLocalSessions } from "./session-query.js";
 import { transformToReplay } from "./transform.js";
 import type { ReplaySession, SessionInfo } from "./types.js";
 import { normalizeTitle } from "./utils.js";
@@ -729,6 +730,58 @@ program
     console.log(chalk.bold.green("  ✓ Done!"));
     console.log(chalk.dim("  File: ") + chalk.white(outputPath));
     console.log();
+  });
+
+// ---------------------------------------------------------------------------
+// sessions — agent-friendly local session search
+// ---------------------------------------------------------------------------
+
+interface SessionsCommandOptions {
+  query?: string;
+  project?: string;
+  provider?: string;
+  limit?: number;
+  scan?: boolean;
+  json?: boolean;
+}
+
+program
+  .command("sessions")
+  .description("Search local AI coding sessions (agent-friendly)")
+  .option("-q, --query <text>", "Search title, prompt, project, branch, model, or slug")
+  .option("--project <text>", "Filter by project path substring")
+  .option("-p, --provider <name>", "Filter by provider (claude-code, cursor, codex, ...)")
+  .option("-l, --limit <number>", "Maximum sessions to return", (value) => Number(value), 10)
+  .option("--scan", "Run richer per-session scan for efficiency metrics")
+  .option("--json", "Print machine-readable JSON")
+  .action(async (opts: SessionsCommandOptions) => {
+    const discoverSpinner = opts.json ? undefined : ora("Discovering local sessions...").start();
+    try {
+      const sessions = await discoverAllSessions();
+      discoverSpinner?.succeed(`Found ${sessions.length} sessions`);
+
+      const scanSpinner =
+        opts.scan && !opts.json ? ora("Scanning matching sessions...").start() : undefined;
+      const matches = await queryLocalSessions(sessions, opts);
+      scanSpinner?.succeed(`Prepared ${matches.length} session result(s)`);
+
+      if (opts.json) {
+        console.log(JSON.stringify({ sessions: matches }, null, 2));
+      } else {
+        console.log();
+        console.log(formatSessionQueryText(matches));
+        console.log();
+      }
+    } catch (err) {
+      discoverSpinner?.fail("Session search failed");
+      const message = err instanceof Error ? err.message : String(err);
+      if (opts.json) {
+        console.error(message);
+      } else {
+        console.error(chalk.red(`\n  ✗ ${message}\n`));
+      }
+      process.exit(1);
+    }
   });
 
 // ---------------------------------------------------------------------------

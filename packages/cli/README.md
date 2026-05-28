@@ -78,6 +78,17 @@ Options:
   -h, --help              Display help
 ```
 
+## Search Local Sessions
+
+For agent-friendly lookup and retros:
+
+```bash
+vibe-replay sessions --query "codex parser" --limit 10 --json
+vibe-replay sessions --project "vibe-replay" --scan --json
+```
+
+Use `--scan` to include efficiency metrics such as prompt count, tool calls, edits, duration, compactions, and API errors.
+
 ## Run from Source
 
 ```bash

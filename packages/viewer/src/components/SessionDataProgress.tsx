@@ -1,0 +1,287 @@
+import type { SourceSession } from "../types";
+import type { SourcesEnrichmentStatus } from "./dashboard-utils";
+
+export type SessionDataLevel = "basic" | "loading" | "details" | "counts" | "metrics";
+
+export interface SessionDataState {
+  level: SessionDataLevel;
+  label: string;
+  description: string;
+  className: string;
+}
+
+interface SessionMetricSnapshot {
+  promptCount?: number;
+  toolCallCount?: number;
+  editCount?: number;
+  durationMs?: number;
+  costEstimate?: number;
+  tokenUsage?: unknown;
+  apiErrorCount?: number;
+  compactionCount?: number;
+  subAgentCount?: number;
+  filesModified?: Array<unknown>;
+  prLinks?: Array<unknown>;
+}
+
+const STAGES: Array<{ level: Exclude<SessionDataLevel, "loading">; label: string }> = [
+  { level: "basic", label: "basic" },
+  { level: "details", label: "details" },
+  { level: "counts", label: "counts" },
+  { level: "metrics", label: "metrics" },
+];
+
+export function hasEnrichedSourceDetails(session: SourceSession): boolean {
+  return Boolean(
+    session.title ||
+    (session.prompts && session.prompts.length > 1) ||
+    session.model ||
+    session.gitBranch ||
+    session.promptCount != null ||
+    session.toolCallCount != null ||
+    session.durationMsEst != null ||
+    session.editCountEst != null,
+  );
+}
+
+export function hasPromptOrToolCounts(
+  session: SourceSession,
+  scanData: SessionMetricSnapshot | null | undefined,
+): boolean {
+  return Boolean(
+    scanData?.promptCount != null ||
+    scanData?.toolCallCount != null ||
+    session.promptCount != null ||
+    session.toolCallCount != null,
+  );
+}
+
+export function hasRichScanMetrics(scanData: SessionMetricSnapshot | null | undefined): boolean {
+  return Boolean(
+    scanData &&
+    ((scanData.filesModified && scanData.filesModified.length > 0) ||
+      (scanData.editCount ?? 0) > 0 ||
+      Boolean(scanData.durationMs) ||
+      Boolean(scanData.costEstimate) ||
+      (scanData.apiErrorCount ?? 0) > 0 ||
+      (scanData.compactionCount ?? 0) > 0 ||
+      (scanData.subAgentCount ?? 0) > 0 ||
+      Boolean(scanData.tokenUsage) ||
+      Boolean(scanData.prLinks?.length)),
+  );
+}
+
+export function sessionDataState(
+  session: SourceSession,
+  scanData: SessionMetricSnapshot | null | undefined,
+): SessionDataState {
+  if (hasRichScanMetrics(scanData)) {
+    return {
+      level: "metrics",
+      label: "metrics ready",
+      description:
+        "Rich scan metrics are available: files, edits, duration, errors, cost, tokens, or PR links.",
+      className: "bg-terminal-green-subtle text-terminal-green",
+    };
+  }
+  if (scanData || hasPromptOrToolCounts(session, scanData)) {
+    return {
+      level: "counts",
+      label: "counts ready",
+      description: "Prompt/tool counts are available, but richer metrics may still be deferred.",
+      className: "bg-terminal-green-subtle text-terminal-green",
+    };
+  }
+  if (hasEnrichedSourceDetails(session)) {
+    return {
+      level: "details",
+      label: "details ready",
+      description:
+        "Discovery has richer title, prompt previews, model, or lightweight counts for this session.",
+      className: "bg-terminal-purple-subtle text-terminal-purple",
+    };
+  }
+  return {
+    level: "basic",
+    label: "basic",
+    description: "Only lightweight discovery data is available so far.",
+    className: "bg-terminal-surface-2 text-terminal-dimmer",
+  };
+}
+
+export function DataLevelBadge({
+  state,
+  compact = false,
+  active = false,
+}: {
+  state: SessionDataState;
+  compact?: boolean;
+  active?: boolean;
+}) {
+  return (
+    <span
+      className={`relative inline-flex items-center gap-1 overflow-hidden font-mono rounded-md ${
+        state.className
+      } ${active ? "ring-1 ring-terminal-blue/25" : ""} ${
+        compact ? "text-[10px] px-1.5 py-0.5" : "text-xs px-1.5 py-0.5"
+      }`}
+      title={state.description}
+    >
+      {active && (
+        <span className="absolute inset-y-0 left-0 w-0.5 bg-terminal-blue animate-pulse" />
+      )}
+      {active && <span className="w-1 h-1 rounded-full bg-current animate-pulse" />}
+      {state.label}
+    </span>
+  );
+}
+
+export function ReadinessRow({
+  ready,
+  label,
+  pendingLabel,
+}: {
+  ready: boolean;
+  label: string;
+  pendingLabel: string;
+}) {
+  return (
+    <div className="flex items-center gap-2 text-xs font-mono">
+      <span className={ready ? "text-terminal-green" : "text-terminal-dimmer"}>
+        {ready ? "✓" : "○"}
+      </span>
+      <span className={ready ? "text-terminal-dim" : "text-terminal-dimmer"}>
+        {ready ? label : pendingLabel}
+      </span>
+    </div>
+  );
+}
+
+export function SessionDataPipeline({
+  state,
+  active = false,
+  compact = false,
+  className = "",
+}: {
+  state: SessionDataState;
+  active?: boolean;
+  compact?: boolean;
+  className?: string;
+}) {
+  const level = state.level === "loading" ? "details" : state.level;
+  const activeIndex = Math.max(
+    0,
+    STAGES.findIndex((stage) => stage.level === level),
+  );
+  const fillPct = Math.max(12, ((activeIndex + 1) / STAGES.length) * 100);
+
+  return (
+    <div className={className} title={state.description}>
+      <div className="flex items-center gap-1.5">
+        {STAGES.map((stage, index) => {
+          const reached = index <= activeIndex;
+          const current = index === activeIndex;
+          return (
+            <div key={stage.level} className="flex items-center gap-1 min-w-0">
+              <span
+                className={`h-1.5 w-1.5 rounded-full shrink-0 ${
+                  reached
+                    ? active && current
+                      ? "bg-terminal-blue animate-pulse"
+                      : "bg-terminal-green"
+                    : "bg-terminal-surface-2"
+                }`}
+              />
+              {!compact && (
+                <span
+                  className={`text-[10px] font-mono uppercase tracking-wide ${
+                    reached ? "text-terminal-dim" : "text-terminal-dimmer"
+                  }`}
+                >
+                  {stage.label}
+                </span>
+              )}
+              {index < STAGES.length - 1 && (
+                <span
+                  className={`h-px w-4 shrink-0 ${
+                    index < activeIndex ? "bg-terminal-green/50" : "bg-terminal-surface-2"
+                  }`}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div
+        className={`mt-1.5 h-1 overflow-hidden rounded-full bg-terminal-bg ${
+          compact ? "max-w-32" : "w-full"
+        }`}
+      >
+        <div
+          className={`h-full rounded-full transition-all duration-500 ${
+            active ? "bg-terminal-blue animate-pulse" : "bg-terminal-green"
+          }`}
+          style={{ width: `${fillPct}%` }}
+        />
+      </div>
+      {!compact && (
+        <div className="mt-1 text-[10px] font-mono text-terminal-dimmer">
+          {active ? "Fetching richer local session data..." : state.description}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function SessionLoadingRibbon({
+  status,
+  title,
+  description,
+}: {
+  status?: SourcesEnrichmentStatus | null;
+  title: string;
+  description: string;
+}) {
+  const total = status?.total ?? 0;
+  const processed = status?.processed ?? 0;
+  const pct = total > 0 ? Math.max(4, Math.min(100, Math.round((processed / total) * 100))) : 35;
+
+  return (
+    <div className="rounded-lg border border-terminal-blue/20 bg-terminal-blue-subtle/95 px-3 py-2 text-terminal-blue shadow-layer-md backdrop-blur-sm">
+      <div className="flex items-start gap-2.5">
+        <div className="mt-1.5 h-1.5 w-1.5 rounded-full bg-terminal-blue animate-pulse shrink-0" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-xs font-mono truncate">{title}</div>
+            {total > 0 && (
+              <div className="text-[10px] font-mono tabular-nums text-terminal-blue/75">
+                {processed}/{total}
+              </div>
+            )}
+          </div>
+          <div className="mt-0.5 text-[10px] font-mono text-terminal-blue/70 leading-relaxed">
+            {description}
+          </div>
+          <div className="mt-2 h-1 overflow-hidden rounded-full bg-terminal-bg/60">
+            <div
+              className="h-full rounded-full bg-terminal-blue transition-all duration-500 animate-pulse"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function SessionLoadingToast(props: {
+  status?: SourcesEnrichmentStatus | null;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="fixed right-4 top-16 z-50 w-[calc(100vw-2rem)] max-w-sm pointer-events-none animate-in fade-in slide-in-from-top-2 duration-300">
+      <SessionLoadingRibbon {...props} />
+    </div>
+  );
+}
