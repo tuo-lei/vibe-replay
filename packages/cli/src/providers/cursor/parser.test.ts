@@ -109,6 +109,22 @@ describe("parseCursorSession", () => {
     expect(mockedParseCursorSqlite).toHaveBeenCalledWith("", sessionId);
   });
 
+  it("surfaces sqlite errors for inferred store.db sessions without a transcript fallback", async () => {
+    const sessionId = "ee3500f9-cfc2-4396-a5f2-1b556f8ac573";
+    mockedParseCursorSqlite.mockRejectedValueOnce(new Error("no such table: ItemTable"));
+
+    await expect(
+      parseCursorSession([`/Users/test/.cursor/chats/workspace-hash/${sessionId}/store.db`]),
+    ).rejects.toThrow(/no such table: ItemTable/);
+  });
+
+  it("does not infer arbitrary parent directories as Cursor store.db session IDs", async () => {
+    await expect(parseCursorSession(["/tmp/store.db"])).rejects.toThrow(
+      /requires at least one transcript \.jsonl path/,
+    );
+    expect(mockedParseCursorSqlite).not.toHaveBeenCalled();
+  });
+
   it("falls back to JSONL when sqlite parsing throws", async () => {
     mockedParseCursorSqlite.mockRejectedValueOnce(new Error("no such table: meta"));
 

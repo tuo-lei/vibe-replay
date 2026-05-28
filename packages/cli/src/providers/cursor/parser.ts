@@ -21,6 +21,8 @@ import {
   parseCursorSqlite,
 } from "./sqlite-reader.js";
 
+const CURSOR_UUID_SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function toErrorMessage(err: unknown): string {
   if (err instanceof Error && err.message) return err.message;
   return String(err);
@@ -50,11 +52,7 @@ export async function parseCursorSession(
     sqliteAttempted = true;
     let sqliteResult: ProviderParseResult | null = null;
     try {
-      const preferredWorkspacePath =
-        sessionInfo?.workspacePath ||
-        sessionInfo?.cwd ||
-        inferredSqliteSession?.workspacePath ||
-        "";
+      const preferredWorkspacePath = sessionInfo?.workspacePath || sessionInfo?.cwd || "";
       sqliteResult = await parseCursorSqlite(preferredWorkspacePath, sqliteSessionId);
     } catch (err) {
       // Cursor DB schemas can vary across versions/hosts; fall back to JSONL when available.
@@ -156,12 +154,7 @@ export async function parseCursorSession(
   return jsonlResult;
 }
 
-interface InferredCursorSqliteSession {
-  sessionId: string;
-  workspacePath?: string;
-}
-
-function inferCursorSqliteSession(paths: string[]): InferredCursorSqliteSession | undefined {
+function inferCursorSqliteSession(paths: string[]): { sessionId: string } | undefined {
   for (const path of paths) {
     const sessionId = sessionIdFromGlobalStatePath(path) || sessionIdFromStoreDbPath(path);
     if (sessionId) return { sessionId };
@@ -185,7 +178,8 @@ function sessionIdFromStoreDbPath(path: string): string | undefined {
   const parts = normalized.split("/");
   if (parts.at(-1) !== "store.db") return undefined;
   const rawSessionId = parts.at(-2)?.trim();
-  return rawSessionId || undefined;
+  if (!rawSessionId || !CURSOR_UUID_SESSION_ID_RE.test(rawSessionId)) return undefined;
+  return rawSessionId;
 }
 
 async function tryLoadSdkEnrichment(sessionId: string): Promise<SdkAgentEnrichment | null> {
