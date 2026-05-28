@@ -66,19 +66,26 @@ export interface SessionQueryBrief {
   suggestedNextAction: string;
 }
 
+interface ScoredSessionInfo {
+  session: SessionInfo;
+  query: SessionQueryScore;
+}
+
+const HIGH_TOOL_DENSITY_THRESHOLD = 20;
+
 export async function queryLocalSessions(
   sessions: SessionInfo[],
   options: SessionQueryOptions = {},
 ): Promise<SessionQueryMatch[]> {
   const limit = normalizeLimit(options.limit);
   const terms = splitTerms(options.query);
-  const filtered = filterSessionInfos(sessions, options).slice(0, limit);
-  const matches = filtered.map((session) => sessionInfoToMatch(session, terms));
+  const filtered = filterScoredSessionInfos(sessions, options).slice(0, limit);
+  const matches = filtered.map(({ session, query }) => sessionInfoToMatch(session, terms, query));
 
   if (!options.scan && !options.brief) return matches;
 
   const scanned = await Promise.all(
-    filtered.map(async (session) => {
+    filtered.map(async ({ session }) => {
       try {
         return await scanSession(scanInputFromSession(session));
       } catch {
@@ -102,6 +109,13 @@ export function filterSessionInfos(
   sessions: SessionInfo[],
   options: Pick<SessionQueryOptions, "query" | "project" | "provider" | "any" | "dedupe"> = {},
 ): SessionInfo[] {
+  return filterScoredSessionInfos(sessions, options).map(({ session }) => session);
+}
+
+function filterScoredSessionInfos(
+  sessions: SessionInfo[],
+  options: Pick<SessionQueryOptions, "query" | "project" | "provider" | "any" | "dedupe"> = {},
+): ScoredSessionInfo[] {
   const terms = splitTerms(options.query);
   const projectTerm = normalizeSearch(options.project);
   const provider = normalizeSearch(options.provider);
@@ -127,10 +141,9 @@ export function filterSessionInfos(
         if (scoreDelta) return scoreDelta;
       }
       return b.session.timestamp.localeCompare(a.session.timestamp);
-    })
-    .map(({ session }) => session);
+    });
 
-  return options.dedupe ? dedupeSimilarSessions(filtered) : filtered;
+  return options.dedupe ? dedupeSimilarScoredSessions(filtered) : filtered;
 }
 
 export function scanInputFromSession(session: SessionInfo): ScanInput {
@@ -190,8 +203,12 @@ export function formatSessionQueryText(matches: SessionQueryMatch[]): string {
     .join("\n\n");
 }
 
-function sessionInfoToMatch(session: SessionInfo, terms: string[] = []): SessionQueryMatch {
-  const query = scoreSession(session, terms);
+function sessionInfoToMatch(
+  session: SessionInfo,
+  terms: string[] = [],
+  precomputedScore?: SessionQueryScore,
+): SessionQueryMatch {
+  const query = precomputedScore || scoreSession(session, terms);
   return {
     provider: session.provider,
     sessionId: session.sessionId,
@@ -298,7 +315,9 @@ function scoreSession(session: SessionInfo, terms: string[]): SessionQueryScore 
   }
 
   if (matchedTerms.length === terms.length && terms.length > 1) score += 5;
-  if (session.hasPR) score += 2;
+  if (session.hasPR && terms.some((term) => ["pr", "review", "pull", "merge"].includes(term))) {
+    score += 2;
+  }
   if (session.promptCount && session.promptCount > 10) score += 1;
 
   return {
@@ -343,7 +362,7 @@ function classifyTaskType(
   scan: SessionQueryScanSummary | undefined,
 ): string {
   if (/(review|pr|pull request|merge|ai review)/i.test(text) || match.hasPR) return "PR/review";
-  if (/(latest main|branch|current feature|what.*working|做什么feature)/i.test(text)) {
+  if (/(latest main|branch|current feature|what.*working)/i.test(text)) {
     return "context recovery";
   }
   if (/(skill|dev space|devspaces)/i.test(text)) return "skill workflow";
@@ -360,12 +379,10 @@ function sessionSignals(
   const signals: string[] = [];
   const promptCount = scan?.promptCount ?? match.promptCount ?? 0;
   const toolCount = scan?.toolCallCount ?? match.toolCallCount ?? 0;
-  const toolsPerPrompt = scan?.toolCallsPerPrompt;
+  const toolsPerPrompt = scan?.toolCallsPerPrompt ?? ratio(toolCount, promptCount);
 
-  if (toolsPerPrompt !== undefined && toolsPerPrompt >= 30) {
+  if (toolsPerPrompt !== undefined && toolsPerPrompt >= HIGH_TOOL_DENSITY_THRESHOLD) {
     signals.push(`high tool density (${toolsPerPrompt.toFixed(1)} tools/prompt)`);
-  } else if (promptCount > 0 && toolCount / promptCount >= 20) {
-    signals.push(`high tool density (${Math.round(toolCount / promptCount)} tools/prompt)`);
   }
   if (promptCount >= 40) signals.push(`long conversation (${promptCount} prompts)`);
   if ((scan?.editCount ?? match.editCount ?? 0) >= 50) {
@@ -431,14 +448,15 @@ function textMatchesTerm(text: string, term: string): boolean {
   return text.includes(term);
 }
 
-function dedupeSimilarSessions(sessions: SessionInfo[]): SessionInfo[] {
+function dedupeSimilarScoredSessions(scoredSessions: ScoredSessionInfo[]): ScoredSessionInfo[] {
   const seen = new Set<string>();
-  const deduped: SessionInfo[] = [];
-  for (const session of sessions) {
+  const deduped: ScoredSessionInfo[] = [];
+  for (const scored of scoredSessions) {
+    const { session } = scored;
     const key = duplicateSessionKey(session);
     if (key && seen.has(key)) continue;
     if (key) seen.add(key);
-    deduped.push(session);
+    deduped.push(scored);
   }
   return deduped;
 }
@@ -448,6 +466,7 @@ function duplicateSessionKey(session: SessionInfo): string | undefined {
   if (prompt.length >= 60) return `prompt:${prompt.slice(0, 240)}`;
   const title = normalizeSearch(cleanPromptText(session.title || ""));
   if (title.length >= 60) return `title:${title.slice(0, 240)}`;
+  // Short prompts/titles are too ambiguous to dedupe safely.
   return undefined;
 }
 
