@@ -2,7 +2,11 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ParsedTurn, SessionInfo } from "../src/types.js";
+import type { ContentBlock, ParsedTurn, SessionInfo } from "../src/types.js";
+
+type ThinkingBlock = Extract<ContentBlock, { type: "thinking" }>;
+type TextBlock = Extract<ContentBlock, { type: "text" }>;
+type UserImagesBlock = Extract<ContentBlock, { type: "_user_images" }>;
 
 const { mockParseCursorSqlite } = vi.hoisted(() => ({
   mockParseCursorSqlite: vi.fn(),
@@ -30,7 +34,7 @@ const ONE_BY_ONE_PNG_BASE64 =
 describe("mergeJsonlThinkingIntoCursorTurns", () => {
   it("prepends missing JSONL thinking into matched assistant turn", () => {
     const primaryTurns: ParsedTurn[] = [
-      { role: "user", blocks: [{ type: "text", text: "Fix auth bug" }] as any },
+      { role: "user", blocks: [{ type: "text", text: "Fix auth bug" }] },
       {
         role: "assistant",
         blocks: [
@@ -40,25 +44,25 @@ describe("mergeJsonlThinkingIntoCursorTurns", () => {
             id: "tool-1",
             name: "Read",
             input: { file_path: "/src/auth.ts" },
-          } as any,
-        ] as any,
+          },
+        ],
       },
     ];
     const jsonlTurns: ParsedTurn[] = [
-      { role: "user", blocks: [{ type: "text", text: "Fix auth bug" }] as any },
+      { role: "user", blocks: [{ type: "text", text: "Fix auth bug" }] },
       {
         role: "assistant",
         blocks: [
           { type: "thinking", thinking: "Inspecting auth flow" },
           { type: "text", text: "I found the issue." },
-        ] as any,
+        ],
       },
     ];
 
     const merged = mergeJsonlThinkingIntoCursorTurns(primaryTurns, jsonlTurns);
     const assistant = merged.find((t) => t.role === "assistant")!;
-    expect((assistant.blocks[0] as any).type).toBe("thinking");
-    expect((assistant.blocks[0] as any).thinking).toBe("Inspecting auth flow");
+    expect(assistant.blocks[0].type).toBe("thinking");
+    expect((assistant.blocks[0] as ThinkingBlock).thinking).toBe("Inspecting auth flow");
     expect(assistant.blocks.some((b: any) => b.type === "tool_use")).toBe(true);
   });
 
@@ -69,13 +73,13 @@ describe("mergeJsonlThinkingIntoCursorTurns", () => {
         blocks: [
           { type: "thinking", thinking: "Inspecting auth flow" },
           { type: "text", text: "Done." },
-        ] as any,
+        ],
       },
     ];
     const jsonlTurns: ParsedTurn[] = [
       {
         role: "assistant",
-        blocks: [{ type: "thinking", thinking: "Inspecting auth flow" }] as any,
+        blocks: [{ type: "thinking", thinking: "Inspecting auth flow" }],
       },
     ];
 
@@ -86,28 +90,28 @@ describe("mergeJsonlThinkingIntoCursorTurns", () => {
 
   it("appends extra assistant thinking turns when JSONL has more assistant turns", () => {
     const primaryTurns: ParsedTurn[] = [
-      { role: "assistant", blocks: [{ type: "text", text: "Step 1" }] as any },
+      { role: "assistant", blocks: [{ type: "text", text: "Step 1" }] },
     ];
     const jsonlTurns: ParsedTurn[] = [
-      { role: "assistant", blocks: [{ type: "text", text: "Step 1" }] as any },
+      { role: "assistant", blocks: [{ type: "text", text: "Step 1" }] },
       {
         role: "assistant",
-        blocks: [{ type: "thinking", thinking: "Waiting for command output" }] as any,
+        blocks: [{ type: "thinking", thinking: "Waiting for command output" }],
       },
     ];
 
     const merged = mergeJsonlThinkingIntoCursorTurns(primaryTurns, jsonlTurns);
     expect(merged).toHaveLength(2);
-    expect((merged[1].blocks[0] as any).type).toBe("thinking");
-    expect((merged[1].blocks[0] as any).thinking).toContain("Waiting for command output");
+    expect(merged[1].blocks[0].type).toBe("thinking");
+    expect((merged[1].blocks[0] as ThinkingBlock).thinking).toContain("Waiting for command output");
   });
 });
 
 describe("mergeJsonlSupplementsIntoCursorTurns", () => {
   it("merges missing user images from JSONL into primary user turns", () => {
     const primaryTurns: ParsedTurn[] = [
-      { role: "user", blocks: [{ type: "text", text: "Investigate issue" }] as any },
-      { role: "assistant", blocks: [{ type: "text", text: "I will check logs." }] as any },
+      { role: "user", blocks: [{ type: "text", text: "Investigate issue" }] },
+      { role: "assistant", blocks: [{ type: "text", text: "I will check logs." }] },
     ];
     const jsonlTurns: ParsedTurn[] = [
       {
@@ -115,13 +119,13 @@ describe("mergeJsonlSupplementsIntoCursorTurns", () => {
         blocks: [
           { type: "text", text: "Investigate issue" },
           { type: "_user_images", images: ["data:image/png;base64,abc"] },
-        ] as any,
+        ],
       },
     ];
 
     const merged = mergeJsonlSupplementsIntoCursorTurns(primaryTurns, jsonlTurns);
     const userTurn = merged.find((t) => t.role === "user")!;
-    const imageBlock = (userTurn.blocks as any[]).find((b) => b.type === "_user_images");
+    const imageBlock = userTurn.blocks.find((b): b is UserImagesBlock => b.type === "_user_images");
     expect(imageBlock).toBeTruthy();
     expect(imageBlock.images).toEqual(["data:image/png;base64,abc"]);
   });
@@ -212,11 +216,11 @@ describe("parseCursorSession + JSONL thinking supplement", () => {
     );
 
     const assistant = result.turns.find((t) => t.role === "assistant")!;
-    expect((assistant.blocks[0] as any).type).toBe("thinking");
-    expect((assistant.blocks[0] as any).thinking).toBe("Inspecting logs");
-    expect((assistant.blocks[1] as any).type).toBe("text");
+    expect(assistant.blocks[0].type).toBe("thinking");
+    expect((assistant.blocks[0] as ThinkingBlock).thinking).toBe("Inspecting logs");
+    expect(assistant.blocks[1].type).toBe("text");
     const user = result.turns.find((t) => t.role === "user")!;
-    const userImageBlock = (user.blocks as any[]).find((b) => b.type === "_user_images");
+    const userImageBlock = user.blocks.find((b): b is UserImagesBlock => b.type === "_user_images");
     expect(userImageBlock).toBeTruthy();
     expect(userImageBlock.images).toHaveLength(1);
     expect(userImageBlock.images[0]).toMatch(/^data:image\/png;base64,/);
@@ -244,7 +248,7 @@ describe("parseCursorSession + JSONL thinking supplement", () => {
 
     expect(result.dataSource).toBe("sqlite");
     expect(result.turns).toHaveLength(1);
-    expect((result.turns[0].blocks[0] as any).text).toBe("DB only data");
+    expect((result.turns[0].blocks[0] as TextBlock).text).toBe("DB only data");
     expect(result.dataSourceInfo).toBeUndefined();
   });
 });
