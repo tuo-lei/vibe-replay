@@ -9,6 +9,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseClaudeCodeSession } from "../src/providers/claude-code/parser.js";
 import { transformToReplay } from "../src/transform.js";
+import type { ContentBlock } from "../src/types.js";
+
+type TextBlock = Extract<ContentBlock, { type: "text" }>;
 
 const FIXTURE = join(import.meta.dirname, "fixtures/claude-code-source-insights.jsonl");
 
@@ -19,7 +22,9 @@ describe("Claude Code source insights: isCompactSummary flag", () => {
       (t) => t.role === "user" && t.subtype === "compaction-summary",
     );
     expect(compactionTurns).toHaveLength(1);
-    expect((compactionTurns[0].blocks[0] as any).text).toContain("This session is being continued");
+    expect((compactionTurns[0].blocks[0] as TextBlock).text).toContain(
+      "This session is being continued",
+    );
   });
 
   it("transforms compaction summary to compaction-summary scene", async () => {
@@ -37,13 +42,13 @@ describe("Claude Code source insights: isMeta as context-injection", () => {
       (t) => t.role === "user" && t.subtype === "context-injection",
     );
     expect(injections).toHaveLength(1);
-    expect((injections[0].blocks[0] as any).text).toContain("Base directory for this skill");
+    expect((injections[0].blocks[0] as TextBlock).text).toContain("Base directory for this skill");
   });
 
   it("does not include isMeta messages in regular user turns", async () => {
     const result = await parseClaudeCodeSession(FIXTURE);
     const regularTurns = result.turns.filter((t) => t.role === "user" && !t.subtype);
-    const texts = regularTurns.map((t) => (t.blocks[0] as any).text);
+    const texts = regularTurns.map((t) => (t.blocks[0] as TextBlock).text);
     expect(texts).toContain("Build the auth system");
     expect(texts).toContain("Continue building the auth middleware");
     expect(regularTurns).toHaveLength(2);
@@ -98,7 +103,7 @@ describe("Claude Code source insights: stop_reason tracking", () => {
     const parsed = await parseClaudeCodeSession(FIXTURE);
     const replay = transformToReplay(parsed, "claude-code", "~/test");
     const truncatedScene = replay.scenes.find(
-      (s) => s.type === "text-response" && (s as any).isTruncated === true,
+      (s) => s.type === "text-response" && s.isTruncated === true,
     );
     expect(truncatedScene).toBeDefined();
     expect(truncatedScene!.type === "text-response" && truncatedScene!.content).toContain(

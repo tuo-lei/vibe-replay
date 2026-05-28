@@ -4,6 +4,10 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseCursorSession } from "../src/providers/cursor/parser.js";
 import { transformToReplay } from "../src/transform.js";
+import type { ContentBlock } from "../src/types.js";
+
+type TextBlock = Extract<ContentBlock, { type: "text" }>;
+type UserImagesBlock = Extract<ContentBlock, { type: "_user_images" }>;
 
 const FIXTURE = join(import.meta.dirname, "fixtures/cursor-session.jsonl");
 const TOOL_FIXTURE_1 = join(import.meta.dirname, "fixtures/cursor-tool-1.txt");
@@ -28,7 +32,7 @@ describe("Cursor parser", () => {
   it("strips <user_query> wrapper from user prompts", async () => {
     const result = await parseCursorSession(FIXTURE);
     const firstUser = result.turns.find((t) => t.role === "user")!;
-    const text = (firstUser.blocks[0] as any).text;
+    const text = (firstUser.blocks[0] as TextBlock).text;
     expect(text).not.toContain("<user_query>");
     expect(text).not.toContain("</user_query>");
     expect(text).toBe("Fix the login bug in auth.ts");
@@ -61,7 +65,7 @@ describe("Cursor parser", () => {
     try {
       const result = await parseCursorSession(jsonlPath);
       const firstUser = result.turns.find((t) => t.role === "user")!;
-      expect((firstUser.blocks[0] as any).text).toBe("Replay this Cursor session");
+      expect((firstUser.blocks[0] as TextBlock).text).toBe("Replay this Cursor session");
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }
@@ -87,7 +91,7 @@ describe("Cursor parser", () => {
     try {
       const result = await parseCursorSession(jsonlPath);
       const firstUser = result.turns.find((t) => t.role === "user")!;
-      expect((firstUser.blocks[0] as any).text).toBe(
+      expect((firstUser.blocks[0] as TextBlock).text).toBe(
         "Why is `<timestamp>2026-04-28</timestamp>` valid XML in our schema?",
       );
     } finally {
@@ -119,8 +123,10 @@ describe("Cursor parser", () => {
     try {
       const result = await parseCursorSession(jsonlPath);
       const firstUser = result.turns.find((t) => t.role === "user")!;
-      const textBlock = (firstUser.blocks as any[]).find((b) => b.type === "text");
-      const imageBlock = (firstUser.blocks as any[]).find((b) => b.type === "_user_images");
+      const textBlock = firstUser.blocks.find((b): b is TextBlock => b.type === "text")!;
+      const imageBlock = firstUser.blocks.find(
+        (b): b is UserImagesBlock => b.type === "_user_images",
+      )!;
       expect(textBlock.text).toBe("Please investigate this bug");
       expect(imageBlock).toBeTruthy();
       expect(imageBlock.images).toHaveLength(1);
@@ -134,7 +140,7 @@ describe("Cursor parser", () => {
     const result = await parseCursorSession(FIXTURE);
     const userTurns = result.turns.filter((t) => t.role === "user");
     const third = userTurns[2];
-    const text = (third.blocks[0] as any).text;
+    const text = (third.blocks[0] as TextBlock).text;
     expect(text).toBe("Now add rate limiting");
   });
 

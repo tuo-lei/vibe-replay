@@ -793,7 +793,7 @@ const authCmd = program.command("auth").description("Manage authentication");
 authCmd
   .command("login")
   .description("Log in to vibe-replay with GitHub")
-  .option("--api-url <url>", "API base URL", "https://vibe-replay.com")
+  .option("--api-url <url>", "API base URL", DEFAULT_API_URL)
   .action(async (opts) => {
     const crypto = await import("node:crypto");
     const apiUrl = opts.apiUrl.replace(/\/$/, "");
@@ -906,7 +906,7 @@ authCmd
 authCmd
   .command("logout")
   .description("Log out of vibe-replay")
-  .option("--api-url <url>", "API base URL", "https://vibe-replay.com")
+  .option("--api-url <url>", "API base URL", DEFAULT_API_URL)
   .action(async (opts) => {
     const apiUrl = opts.apiUrl.replace(/\/$/, "");
     const auth = loadAuthToken(apiUrl);
@@ -922,7 +922,7 @@ authCmd
 authCmd
   .command("status")
   .description("Show current authentication status")
-  .option("--api-url <url>", "API base URL", "https://vibe-replay.com")
+  .option("--api-url <url>", "API base URL", DEFAULT_API_URL)
   .action(async (opts) => {
     const apiUrl = opts.apiUrl.replace(/\/$/, "");
     const auth = loadAuthToken(apiUrl);
@@ -1167,7 +1167,7 @@ program
 program
   .command("login", { hidden: true })
   .description("Log in to vibe-replay (alias for auth login)")
-  .option("--api-url <url>", "API base URL", "https://vibe-replay.com")
+  .option("--api-url <url>", "API base URL", DEFAULT_API_URL)
   .action(async () => {
     // Delegate to auth login
     await authCmd.commands
