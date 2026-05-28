@@ -66,6 +66,36 @@ describe("session query", () => {
     expect(result.map((s) => s.sessionId)).toEqual(["newer"]);
   });
 
+  it("can broaden multi-term queries with any-term matching", () => {
+    expect(filterSessionInfos(sessions, { query: "codex auth" })).toHaveLength(0);
+
+    const result = filterSessionInfos(sessions, { query: "codex auth", any: true });
+
+    expect(result.map((s) => s.sessionId)).toEqual(["other-project", "newer"]);
+  });
+
+  it("does not match short acronym terms inside longer words", () => {
+    const result = filterSessionInfos(
+      [
+        session({
+          sessionId: "pricing",
+          slug: "pricing",
+          title: "Cursor model pricing",
+          firstPrompt: "Update model prices",
+        }),
+        session({
+          sessionId: "pr-review",
+          slug: "pr-review",
+          title: "PR review CI followup",
+          firstPrompt: "Review the PR and CI checks",
+        }),
+      ],
+      { query: "PR CI", any: true },
+    );
+
+    expect(result.map((s) => s.sessionId)).toEqual(["pr-review"]);
+  });
+
   it("filters by project and provider, sorted newest first", () => {
     const result = filterSessionInfos(sessions, {
       project: "vibe-replay",
@@ -83,6 +113,89 @@ describe("session query", () => {
     expect(result[0]?.sessionId).toBe("other-project");
     expect(text).toContain("Fix auth flow");
     expect(text).toContain("first prompt: Debug login callback failures");
+  });
+
+  it("adds scored match context and scan-backed briefs", async () => {
+    const result = await queryLocalSessions(sessions, {
+      query: "codex auth",
+      any: true,
+      brief: true,
+      limit: 2,
+    });
+
+    expect(result.map((s) => s.sessionId)).toEqual(["other-project", "newer"]);
+    expect(result[0]?.matchedTerms).toEqual(["auth"]);
+    expect(result[0]?.unmatchedTerms).toEqual(["codex"]);
+    expect(result[0]?.matchQuality).toBe("weak");
+    expect(result[0]?.whyMatched?.[0]).toContain("auth in title");
+    expect(result[0]?.brief?.taskType).toBe("auth/debugging");
+    expect(result[0]?.brief?.suggestedNextAction).toContain("filePaths");
+  });
+
+  it("keeps weak broad matches but makes match quality explicit", async () => {
+    const result = await queryLocalSessions(
+      [
+        session({
+          sessionId: "one-term",
+          title: "Toast fix",
+          firstPrompt: "Make the toast nicer",
+        }),
+        session({
+          sessionId: "two-terms",
+          title: "Toast style loading polish",
+          firstPrompt: "Improve loading toast style",
+        }),
+      ],
+      { query: "toast style loading metrics", any: true, brief: true },
+    );
+
+    expect(result.map((s) => s.sessionId)).toEqual(["two-terms", "one-term"]);
+    expect(result[0]?.matchQuality).toBe("strong");
+    expect(result[0]?.matchedTerms).toEqual(["toast", "style", "loading"]);
+    expect(result[0]?.unmatchedTerms).toEqual(["metrics"]);
+    expect(result[1]?.matchQuality).toBe("weak");
+    expect(result[1]?.matchedTerms).toEqual(["toast"]);
+    expect(result[1]?.unmatchedTerms).toEqual(["style", "loading", "metrics"]);
+  });
+
+  it("keeps explicit any-term matching broad", () => {
+    const result = filterSessionInfos(
+      [
+        session({
+          sessionId: "one-term",
+          title: "Toast style fix",
+          firstPrompt: "Make the toast nicer",
+        }),
+      ],
+      { query: "toast unknown metrics", any: true },
+    );
+
+    expect(result.map((s) => s.sessionId)).toEqual(["one-term"]);
+  });
+
+  it("deduplicates repeated long-prompt sessions when requested", () => {
+    const repeatedPrompt =
+      "https://github.rbx.com/Roblox/skills/pull/162 canonical skill migration decision and sync strategy";
+    const result = filterSessionInfos(
+      [
+        session({
+          sessionId: "newer-copy",
+          title: repeatedPrompt,
+          firstPrompt: repeatedPrompt,
+          timestamp: "2026-05-04T10:00:00Z",
+        }),
+        session({
+          sessionId: "older-copy",
+          title: repeatedPrompt,
+          firstPrompt: repeatedPrompt,
+          project: "/Users/test/Code/other-workspace",
+          timestamp: "2026-05-03T10:00:00Z",
+        }),
+      ],
+      { query: "canonical skill", dedupe: true },
+    );
+
+    expect(result.map((s) => s.sessionId)).toEqual(["newer-copy"]);
   });
 
   it("maps discovery sessions into scanner input", () => {

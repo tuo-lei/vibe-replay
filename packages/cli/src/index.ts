@@ -742,6 +742,9 @@ interface SessionsCommandOptions {
   provider?: string;
   limit?: number;
   scan?: boolean;
+  any?: boolean;
+  brief?: boolean;
+  dedupe?: boolean;
   json?: boolean;
 }
 
@@ -753,6 +756,9 @@ program
   .option("-p, --provider <name>", "Filter by provider (claude-code, cursor, codex, ...)")
   .option("-l, --limit <number>", "Maximum sessions to return", (value) => Number(value), 10)
   .option("--scan", "Run richer per-session scan for efficiency metrics")
+  .option("--any", "Match any query term instead of requiring all terms")
+  .option("--brief", "Include scan-backed session briefs and match evidence")
+  .option("--dedupe", "Collapse near-duplicate sessions with the same long prompt/title")
   .option("--json", "Print machine-readable JSON")
   .action(async (opts: SessionsCommandOptions) => {
     const discoverSpinner = opts.json ? undefined : ora("Discovering local sessions...").start();

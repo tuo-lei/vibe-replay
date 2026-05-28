@@ -47,15 +47,19 @@ Useful filters:
 vibe-replay sessions --project "vibe-replay" --json
 vibe-replay sessions --provider cursor --query "auth bug" --json
 vibe-replay sessions --query "codex parser" --scan --json
+vibe-replay sessions --query "PR review CI" --any --brief --dedupe --json
 ```
 
 ## Workflow
 
 1. Start shallow: use `--query` or `--project`, `--limit 10`, and `--json`.
 2. Rank matches by timestamp, project, title/first prompt match quality, provider, and user intent.
-3. Only add `--scan` for the narrowed candidate set when the user asks about retro, efficiency, prompt quality, cost, tool usage, compactions, API errors, files modified, or session quality.
-4. Summarize the best matching sessions with provider, timestamp, project, title, first prompt preview, file path, and why each matched.
-5. For deep review of one session, use the returned `filePath` or `filePaths` with the replay skill or `vibe-replay --provider <provider> --session <path> --github`.
+3. If a remembered query has several loose terms and returns nothing, retry with `--any` for explicit broad recall.
+4. Add `--brief` when the user asks a fuzzy retrospective question; it runs a targeted scan and adds `matchQuality`, matched/unmatched terms, `whyMatched`, `brief`, `signals`, and `suggestedNextAction`.
+5. Add `--dedupe` when repeated long-prompt sessions from multiple workspaces clutter the result set.
+6. Only add plain `--scan` for a narrowed candidate set when the user asks about retro, efficiency, prompt quality, cost, tool usage, compactions, API errors, files modified, or session quality.
+7. Summarize the best matching sessions with provider, timestamp, project, title, first prompt preview, file path, and why each matched.
+8. For deep review of one session, use the returned `filePath` or `filePaths` with the replay skill or `vibe-replay --provider <provider> --session <path> --github`.
 
 Avoid broad `--scan` over many sessions. It is intentionally available, but expensive compared with metadata search.
 
@@ -77,6 +81,7 @@ For search results, return a short ranked list. Include:
 - Title or prompt preview.
 - Provider, project, timestamp, and slug/session id.
 - Why it matched.
+- Match quality, matched/unmatched terms, brief/signals/next action when using `--brief`.
 - Whether deeper scan/replay is recommended.
 
 For retros, include the key metrics from `--scan` and a concise prompt/process diagnosis.
