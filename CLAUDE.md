@@ -57,6 +57,7 @@ pnpm db:migrate:remote    # Apply to production D1 (requires auth)
 - **Skip `progress` lines**: These are subagent streaming artifacts in JSONL.
 - **sql.js (WASM)**: Used instead of native SQLite bindings for portability — no C++ compiler needed.
 - **Session discovery cache**: CLI picker + local dashboard use file cache at `~/.vibe-replay/cache/*.json` (stale-while-refresh UX). Cache validity is tied to CLI release version (`CLI_VERSION`) plus envelope version, so caches auto-invalidate across releases. Keep cache writes best-effort and never block generation/parsing on cache failures.
+- **Windows support**: Cursor encodes workspace dirs as `C:\a\b` → `C-a-b` (drive colon dropped, separators → `-`); `decodeProjectDir` has a `win32` branch that resolves these against the real filesystem (POSIX uses `/` root, Windows uses the drive root). Cursor on Windows stores IDE chats only in the `globalStorage/state.vscdb` under `%APPDATA%\Cursor` (there is no `~/.cursor/chats` dir). Replay output normalizes file paths to `/` for cross-platform display via `redactFilePath` in `transform.ts` — never apply that to prose. Build scripts shell out to `scripts/copy-file.mjs` instead of `mkdir -p`/`cp` (not available in PowerShell). `.gitattributes` forces `eol=lf` so Windows clones don't trip `oxfmt --check` with CRLF.
 
 ## Rules
 

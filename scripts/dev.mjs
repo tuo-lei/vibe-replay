@@ -8,9 +8,8 @@
  *   node scripts/dev.mjs -d         # explicit dashboard mode (same as default)
  *   node scripts/dev.mjs --menu     # interactive CLI menu mode
  */
-import { spawn } from "node:child_process";
 import { watch } from "node:fs";
-import { findFreePort } from "./dev-utils.mjs";
+import { findFreePort, spawnPnpm, spawnTsx, viewerLogPath } from "./dev-utils.mjs";
 
 const VITE_PREFERRED = 5173;
 const API_PREFERRED = 13456;
@@ -39,14 +38,14 @@ console.log();
 
 // Start Vite dev server (backgrounded) — port + strictPort via env vars in vite.config.ts
 const cloudApiUrl = process.env.VIBE_REPLAY_API_URL || "http://localhost:8787";
-const vite = spawn("pnpm", ["--filter", "@vibe-replay/viewer", "dev"], {
+const vite = spawnPnpm(["--filter", "@vibe-replay/viewer", "dev"], {
   stdio: ["ignore", "pipe", "pipe"],
   env: { ...process.env, VITE_PORT: String(vitePort), VITE_API_PORT: String(apiPort), VITE_CLOUD_API_URL: cloudApiUrl },
 });
 
 // Pipe Vite output to a log file
 const { createWriteStream } = await import("node:fs");
-const logPath = `/tmp/vibe-replay-viewer-${vitePort}.log`;
+const logPath = viewerLogPath(vitePort);
 const logStream = createWriteStream(logPath);
 vite.stdout.pipe(logStream);
 vite.stderr.pipe(logStream);
@@ -74,14 +73,15 @@ let shuttingDown = false;
 let hasOpenedBrowser = false;
 
 function startCli() {
-  // Use node_modules/.bin/tsx directly instead of npx to avoid an extra
-  // wrapper process that swallows signals (making Ctrl+C unreliable).
+  // Run tsx via `node --import tsx` (see spawnTsx) instead of the
+  // node_modules/.bin/tsx shim — the shim is a .cmd on Windows that spawn()
+  // can't exec directly, and spawning Node directly keeps Ctrl+C reliable.
   const cliEnvForRun = {
     ...cliEnv,
     // Open browser only once per dev launcher process to avoid tab spam on restarts.
     VIBE_REPLAY_NO_AUTO_OPEN: hasOpenedBrowser ? "1" : "0",
   };
-  cli = spawn("node_modules/.bin/tsx", [cliScript, ...cliExtraArgs], {
+  cli = spawnTsx([cliScript, ...cliExtraArgs], {
     stdio: "inherit",
     env: cliEnvForRun,
   });

@@ -729,7 +729,8 @@ async function buildSourcesResult(
   const projectExistsMap = new Map<string, boolean>();
   const projectIsGitMap = new Map<string, boolean>();
   for (const p of uniqueProjects) {
-    const resolved = p.startsWith("~/") ? join(home, p.slice(2)) : p === "~" ? home : p;
+    const resolved =
+      p === "~" ? home : p.startsWith("~/") || p.startsWith("~\\") ? join(home, p.slice(2)) : p;
     try {
       const s = await stat(resolved);
       projectExistsMap.set(p, s.isDirectory());
@@ -2896,7 +2897,9 @@ export async function startServer(
       versionArgs: string[] = ["--version"],
       extraCheck?: (run: RunCommand) => Promise<ExtraCheckResult>,
     ): Promise<ToolCheck> {
-      const whichResult = await runCommand("which", [cmd]);
+      // Windows has no `which`; `where` is the builtin equivalent.
+      const locator = process.platform === "win32" ? "where" : "which";
+      const whichResult = await runCommand(locator, [cmd]);
       if (!whichResult.ok) {
         if (whichResult.timedOut) {
           return { name, label, purpose, installed: false, detail: CHECK_TIMEOUT_DETAIL };

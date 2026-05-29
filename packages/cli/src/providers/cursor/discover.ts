@@ -157,11 +157,36 @@ async function decodeProjectDir(encoded: string): Promise<string> {
 }
 
 async function decodeProjectDirUncached(encoded: string): Promise<string> {
+  if (process.platform === "win32") return decodeWindowsProjectDir(encoded);
   const parts = encoded.split("-");
   const startIdx = parts[0] ? 0 : 1;
   const resolved = await resolveEncodedProjectParts(parts, startIdx, "/");
   const fallbackEncoded = encoded.startsWith("-") ? encoded.slice(1) : encoded;
   return `/${resolved ? resolved.slice(1) : fallbackEncoded.replace(/-/g, "/")}`;
+}
+
+/**
+ * Windows variant of {@link decodeProjectDir}. Cursor encodes `C:\a\b` as
+ * `C-a-b`, dropping the drive colon and turning every separator into `-`.
+ * The first segment is the drive letter; the rest are resolved against the
+ * real filesystem so directory names that legitimately contain `-`
+ * (e.g. `vibe-replay`) are not split apart.
+ */
+async function decodeWindowsProjectDir(encoded: string): Promise<string> {
+  const parts = encoded.split("-").filter((part, idx) => part !== "" || idx !== 0);
+  if (parts.length === 0) return encoded;
+
+  const drive = parts[0];
+  // Bail out for non-path project dirs (e.g. `empty-window`, numeric ids):
+  // a real Windows drive is a single ASCII letter.
+  if (!/^[a-zA-Z]$/.test(drive)) {
+    return parts.join("\\");
+  }
+
+  const root = `${drive.toUpperCase()}:\\`;
+  const resolved = await resolveEncodedProjectParts(parts, 1, root);
+  if (resolved) return resolved;
+  return parts.length === 1 ? root : `${root}${parts.slice(1).join("\\")}`;
 }
 
 async function resolveEncodedProjectParts(

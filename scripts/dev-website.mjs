@@ -8,8 +8,7 @@
  * Usage:
  *   node scripts/dev-website.mjs
  */
-import { spawn } from "node:child_process";
-import { findFreePort } from "./dev-utils.mjs";
+import { findFreePort, spawnPnpm, viewerLogPath } from "./dev-utils.mjs";
 
 const VITE_PREFERRED = 5173;
 const ASTRO_PREFERRED = 4321;
@@ -30,13 +29,13 @@ console.log(`[vibe-replay] /view/  →     redirects to Vite viewer`);
 console.log();
 
 // Start Vite viewer dev (backgrounded, logs to file)
-const vite = spawn("pnpm", ["--filter", "@vibe-replay/viewer", "dev"], {
+const vite = spawnPnpm(["--filter", "@vibe-replay/viewer", "dev"], {
   stdio: ["ignore", "pipe", "pipe"],
   env: { ...process.env, VITE_PORT: String(vitePort) },
 });
 
 const { createWriteStream } = await import("node:fs");
-const logPath = `/tmp/vibe-replay-viewer-${vitePort}.log`;
+const logPath = viewerLogPath(vitePort);
 const logStream = createWriteStream(logPath);
 vite.stdout.pipe(logStream);
 vite.stderr.pipe(logStream);
@@ -52,7 +51,7 @@ vite.on("exit", (code) => {
 });
 
 // Start Astro website dev (foreground, inherits stdio)
-const astro = spawn("pnpm", ["--filter", "@vibe-replay/website", "dev", "--port", String(astroPort)], {
+const astro = spawnPnpm(["--filter", "@vibe-replay/website", "dev", "--port", String(astroPort)], {
   stdio: "inherit",
   env: {
     ...process.env,

@@ -1,0 +1,20 @@
+# Normalize line endings to LF on checkout for every platform.
+# Without this, Windows clones (core.autocrlf=true) get CRLF working trees,
+# which makes oxfmt --check fail on every file. eol=lf overrides autocrlf.
+* text=auto eol=lf
+
+# Explicitly mark binary assets so they are never line-ending normalized.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.pdf binary
+*.wasm binary
+*.mp4 binary
+*.mov binary

@@ -434,7 +434,9 @@ function normalizeImagePlaceholderLines(text: string): string {
 }
 
 function resolveImagePath(pathValue: string): string {
-  if (pathValue.startsWith("~/")) return join(homedir(), pathValue.slice(2));
+  if (pathValue.startsWith("~/") || pathValue.startsWith("~\\")) {
+    return join(homedir(), pathValue.slice(2));
+  }
   return pathValue;
 }
 
@@ -452,7 +454,9 @@ function extractImageFilePathsFromText(text: string): { cleanedText: string; pat
   let match: RegExpExecArray | null;
   while ((match = blockPattern.exec(text)) !== null) {
     const blockContent = match[1];
-    const pathRegex = /(?:^|\n)\s*(?:\d+\.\s*)?((?:~\/|\/)[^\n]+\.(?:png|jpe?g|gif|webp))/gi;
+    // Match POSIX (`~/`, `/`) and Windows (`~\`, `\`, `C:\`) absolute image paths.
+    const pathRegex =
+      /(?:^|\n)\s*(?:\d+\.\s*)?((?:~[\\/]|[\\/]|[A-Za-z]:[\\/])[^\n]+\.(?:png|jpe?g|gif|webp))/gi;
     let pathMatch: RegExpExecArray | null;
     while ((pathMatch = pathRegex.exec(blockContent)) !== null) {
       const pathValue = pathMatch[1].trim();
