@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import type { CursorSidecars, PrLink, TokenUsage, TurnStat } from "@vibe-replay/types";
 import { readFileCache, writeFileCache } from "../../cache.js";
@@ -1959,7 +1959,9 @@ function addContextFilesFromAttachedFolderResult(
           ? normalizeCursorContextFile((file as Record<string, any>).name)
           : normalizeCursorContextFile(file);
       if (directory && name) {
-        addUniqueContextFile(files, seen, join(directory, name));
+        // Workspace-relative context paths are always POSIX-style; never use the
+        // OS-specific separator here (it would emit `src\\utils.ts` on Windows).
+        addUniqueContextFile(files, seen, posix.join(directory, name));
         continue;
       }
 

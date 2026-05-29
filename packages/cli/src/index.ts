@@ -193,17 +193,6 @@ program
   .action(async (opts) => {
     console.log(chalk.bold.cyan("\n  vibe-replay") + chalk.dim(` v${CLI_VERSION}\n`));
 
-    // Windows is not supported yet (see https://github.com/tuo-lei/vibe-replay/issues/26)
-    if (process.platform === "win32") {
-      console.log(chalk.yellow("  ⚠ Windows is not supported yet.\n"));
-      console.log(chalk.dim("  We're working on it! Follow progress and updates:"));
-      console.log(
-        chalk.dim("  → ") + chalk.white("https://github.com/tuo-lei/vibe-replay/issues/26"),
-      );
-      console.log(chalk.dim("  → ") + chalk.white("https://vibe-replay.com\n"));
-      process.exit(1);
-    }
-
     const { join: pathJoin } = await import("node:path");
     const { homedir } = await import("node:os");
     const replayBaseDir = pathJoin(homedir(), ".vibe-replay");
@@ -1092,11 +1081,6 @@ program
   .option("-p, --provider <name>", "Provider name (default: auto-detect)")
   .option("-s, --session <sessionId>", "Specific session ID to watch")
   .action(async (opts: { provider?: string; session?: string }) => {
-    if (process.platform === "win32") {
-      console.log(chalk.yellow("\n  ⚠ Windows is not supported yet.\n"));
-      process.exit(1);
-    }
-
     const { join: pathJoin } = await import("node:path");
     const { homedir } = await import("node:os");
     const replayBaseDir = pathJoin(homedir(), ".vibe-replay");

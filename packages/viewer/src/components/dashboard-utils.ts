@@ -506,6 +506,81 @@ export function getErrorMessage(err: unknown): string {
   return "Unknown error";
 }
 
+/**
+ * True when `fetch()` rejected at the network/transport layer (the request never
+ * got an HTTP response) rather than the server returning an error status.
+ *
+ * The dashboard talks to a *local* CLI server. In dev that server restarts on
+ * source changes (and on Windows the tsx cold-boot widens the restart window to
+ * a couple of seconds), so an in-flight request can land while the port is
+ * momentarily closed. The browser surfaces that as `TypeError: Failed to fetch`
+ * — which is meaningless to a user and looks like a hard failure even though the
+ * server comes right back. We use this to retry instead of erroring.
+ */
+export function isNetworkError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  // A failed fetch rejects with a TypeError (undici also uses TypeError), but the
+  // message differs across engines: "Failed to fetch" (Chromium), "NetworkError
+  // when attempting to fetch resource" (Firefox), "Load failed" (Safari), or
+  // "fetch failed" (undici). Match the message rather than the bare type so we
+  // don't classify unrelated TypeErrors (real programming bugs) as retryable.
+  return /failed to fetch|networkerror|load failed|fetch failed/i.test(err.message);
+}
+
+/** A user-facing message that explains a dropped local-server connection. */
+export function getFriendlyErrorMessage(err: unknown): string {
+  if (isNetworkError(err)) {
+    return "Couldn't reach the local vibe-replay server — it may be starting up or restarting. Try again in a moment.";
+  }
+  return getErrorMessage(err);
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * `fetch` wrapper that retries transient failures against the local CLI server.
+ *
+ * Retries on (a) network-level rejections (server restarting / not yet listening)
+ * and (b) gateway statuses the Vite dev proxy returns while the upstream is down
+ * (502/503/504). Real application errors (4xx, 500 with a JSON body) are returned
+ * to the caller unchanged so existing error handling still works.
+ *
+ * Only retries when the connection itself failed (no HTTP response), so a request
+ * that reached the server is never silently re-sent. It is therefore safe for GETs
+ * and for *idempotent* mutations whose effect is keyed and overwritten in place
+ * (e.g. generate/regenerate, keyed by session slug). Do not use it for mutations
+ * that accumulate or are otherwise unsafe to repeat.
+ */
+export async function fetchWithRetry(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  opts?: { retries?: number; baseDelayMs?: number },
+): Promise<Response> {
+  const retries = opts?.retries ?? 4;
+  const baseDelayMs = opts?.baseDelayMs ?? 250;
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const resp = await fetch(input, init);
+      if (
+        (resp.status === 502 || resp.status === 503 || resp.status === 504) &&
+        attempt < retries
+      ) {
+        await sleep(baseDelayMs * 2 ** attempt);
+        continue;
+      }
+      return resp;
+    } catch (err) {
+      lastErr = err;
+      if (!isNetworkError(err) || attempt === retries) throw err;
+      await sleep(baseDelayMs * 2 ** attempt);
+    }
+  }
+  // Unreachable when retries >= 0 (the final iteration always returns or throws),
+  // but required to satisfy control-flow analysis and to handle a retries < 0 call.
+  throw lastErr ?? new Error("fetchWithRetry: no attempts were made");
+}
+
 /** Shorten a path to fit the sidebar, keeping first + last meaningful segments */
 export function shortenPath(path: string): string {
   const special = specialProjectLabel(path);

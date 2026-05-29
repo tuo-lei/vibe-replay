@@ -29,9 +29,10 @@ describe("workspaceHash", () => {
 describe("storeDbPath", () => {
   it("constructs correct path", () => {
     const path = storeDbPath("/Users/me/project", "abc-123");
-    expect(path).toContain(".cursor/chats/");
+    // Use join() so the separator matches the host OS (\ on Windows, / elsewhere).
+    expect(path).toContain(join(".cursor", "chats"));
     expect(path).toContain(workspaceHash("/Users/me/project"));
-    expect(path).toContain("abc-123/store.db");
+    expect(path).toContain(join("abc-123", "store.db"));
   });
 });
 

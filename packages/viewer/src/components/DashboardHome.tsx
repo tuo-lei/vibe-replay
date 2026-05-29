@@ -4,6 +4,7 @@ import type { SessionSummary, SourceSession } from "../types";
 import { localDayKey } from "../utils/date";
 import { SessionDetailPopup } from "./Dashboard";
 import {
+  fetchWithRetry,
   formatCompactDuration,
   isCacheFresh,
   navigateTo,
@@ -128,7 +129,7 @@ function useDashboardData() {
               // SSE failed — fall back to regular fetch
               es.close();
               setScanProgress(null);
-              fetch("/api/sources")
+              fetchWithRetry("/api/sources")
                 .then((r) => {
                   if (!r.ok) throw new Error("Failed to load sources");
                   return r.json();
@@ -147,7 +148,7 @@ function useDashboardData() {
 
       if (!replayFresh) {
         refreshPromises.push(
-          fetch("/api/sessions")
+          fetchWithRetry("/api/sessions")
             .then((r) => {
               if (!r.ok) throw new Error("Failed to load replays");
               return r.json();
@@ -718,7 +719,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     setGenerateErrorSlug(null);
     try {
       const title = sourceSuggestedTitle(source);
-      const resp = await fetch("/api/generate", {
+      const resp = await fetchWithRetry("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -747,7 +748,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     setGeneratingSlug(source.slug);
     setGenerateErrorSlug(null);
     try {
-      const resp = await fetch("/api/generate", {
+      const resp = await fetchWithRetry("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
