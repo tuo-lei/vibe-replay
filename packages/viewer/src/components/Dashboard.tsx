@@ -1295,6 +1295,8 @@ function RegenerateAllButton() {
     setError(null);
     setResult(null);
     try {
+      // Retry transient network drops: regeneration overwrites every replay in
+      // place (keyed by slug), so re-issuing the request is idempotent.
       const res = await fetchWithRetry("/api/regenerate-all", { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed");

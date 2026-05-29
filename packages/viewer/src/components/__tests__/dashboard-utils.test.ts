@@ -238,6 +238,10 @@ describe("isNetworkError", () => {
     expect(isNetworkError("some string")).toBe(false);
     expect(isNetworkError(undefined)).toBe(false);
   });
+
+  it("does not treat an unrelated TypeError (a real bug) as retryable", () => {
+    expect(isNetworkError(new TypeError("x is not a function"))).toBe(false);
+  });
 });
 
 describe("getFriendlyErrorMessage", () => {

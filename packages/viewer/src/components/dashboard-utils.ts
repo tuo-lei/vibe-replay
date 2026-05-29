@@ -518,15 +518,13 @@ export function getErrorMessage(err: unknown): string {
  * server comes right back. We use this to retry instead of erroring.
  */
 export function isNetworkError(err: unknown): boolean {
-  // Browsers throw a TypeError for connection refused / reset / DNS failures.
-  // The message differs across engines ("Failed to fetch", "NetworkError when
-  // attempting to fetch resource", "Load failed"), so match the type plus a
-  // loose message check rather than an exact string.
-  if (err instanceof TypeError) return true;
-  if (err instanceof Error) {
-    return /failed to fetch|networkerror|load failed|fetch failed/i.test(err.message);
-  }
-  return false;
+  if (!(err instanceof Error)) return false;
+  // A failed fetch rejects with a TypeError (undici also uses TypeError), but the
+  // message differs across engines: "Failed to fetch" (Chromium), "NetworkError
+  // when attempting to fetch resource" (Firefox), "Load failed" (Safari), or
+  // "fetch failed" (undici). Match the message rather than the bare type so we
+  // don't classify unrelated TypeErrors (real programming bugs) as retryable.
+  return /failed to fetch|networkerror|load failed|fetch failed/i.test(err.message);
 }
 
 /** A user-facing message that explains a dropped local-server connection. */
@@ -547,8 +545,11 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
  * (502/503/504). Real application errors (4xx, 500 with a JSON body) are returned
  * to the caller unchanged so existing error handling still works.
  *
- * Safe for idempotent GETs; do not use for non-idempotent mutations that may have
- * partially applied before the connection dropped.
+ * Only retries when the connection itself failed (no HTTP response), so a request
+ * that reached the server is never silently re-sent. It is therefore safe for GETs
+ * and for *idempotent* mutations whose effect is keyed and overwritten in place
+ * (e.g. generate/regenerate, keyed by session slug). Do not use it for mutations
+ * that accumulate or are otherwise unsafe to repeat.
  */
 export async function fetchWithRetry(
   input: RequestInfo | URL,
@@ -575,7 +576,9 @@ export async function fetchWithRetry(
       await sleep(baseDelayMs * 2 ** attempt);
     }
   }
-  throw lastErr;
+  // Unreachable when retries >= 0 (the final iteration always returns or throws),
+  // but required to satisfy control-flow analysis and to handle a retries < 0 call.
+  throw lastErr ?? new Error("fetchWithRetry: no attempts were made");
 }
 
 /** Shorten a path to fit the sidebar, keeping first + last meaningful segments */
