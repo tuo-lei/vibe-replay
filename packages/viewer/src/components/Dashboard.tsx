@@ -12,7 +12,9 @@ import {
   formatDataSourceLabel,
   formatDate,
   formatSize,
+  fetchWithRetry,
   getErrorMessage,
+  getFriendlyErrorMessage,
   isCacheFresh,
   navigateTo,
   navigateToLive,
@@ -1293,14 +1295,14 @@ function RegenerateAllButton() {
     setError(null);
     setResult(null);
     try {
-      const res = await fetch("/api/regenerate-all", { method: "POST" });
+      const res = await fetchWithRetry("/api/regenerate-all", { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed");
       setResult({ regenerated: data.regenerated, total: data.total });
       // Reload after short delay to show updated replays
       setTimeout(() => window.location.reload(), 1500);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to regenerate");
+      setError(getFriendlyErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -1444,7 +1446,7 @@ function SessionsPanel() {
     }
 
     try {
-      const freshResp = await fetch("/api/sources");
+      const freshResp = await fetchWithRetry("/api/sources");
       if (!freshResp.ok) throw new Error("Failed to load sessions");
       const fresh = (await freshResp.json()) as {
         sessions: SourceSession[];
@@ -1456,7 +1458,7 @@ function SessionsPanel() {
       setStaleCachedAt(null);
     } catch (err) {
       if (!servedFromCache) {
-        setError(getErrorMessage(err) || "Failed to load sessions");
+        setError(getFriendlyErrorMessage(err) || "Failed to load sessions");
       } else {
         setRefreshError("Failed to refresh latest sessions. Showing cached data.");
       }
@@ -1567,7 +1569,10 @@ function SessionsPanel() {
     setGenerateError(null);
 
     try {
-      const resp = await fetch("/api/generate", {
+      // Retry transient network drops (the local server may be mid-restart):
+      // generation is keyed by session slug/project and overwrites in place, so
+      // re-issuing the request is safe.
+      const resp = await fetchWithRetry("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1583,7 +1588,7 @@ function SessionsPanel() {
       if (!resp.ok) throw new Error(data.error || "Generation failed");
       navigateTo({ view: null, session: data.slug });
     } catch (err) {
-      setGenerateError(getErrorMessage(err));
+      setGenerateError(getFriendlyErrorMessage(err));
     } finally {
       setGeneratingSlug(null);
     }
@@ -2402,7 +2407,7 @@ function ReplaysPanel() {
       }
 
       try {
-        const resp = await fetch("/api/sessions");
+        const resp = await fetchWithRetry("/api/sessions");
         if (!resp.ok) throw new Error("Failed to load sessions");
         const data = (await resp.json()) as SessionSummary[];
         if (!mounted) return;
@@ -2473,7 +2478,7 @@ function ReplaysPanel() {
   const handleRegenerate = async (s: SessionSummary) => {
     setRegeneratingSlug(s.slug);
     try {
-      const resp = await fetch("/api/generate", {
+      const resp = await fetchWithRetry("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -1,7 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   agentWorktreeParent,
+  fetchWithRetry,
   formatDataSourceLabel,
+  getFriendlyErrorMessage,
+  isNetworkError,
   providerBadgeClass,
   providerBadgeLabel,
   providerBarClass,
@@ -220,5 +223,84 @@ describe("provider display helpers", () => {
     expect(providerBadgeClass("codex")).toContain("terminal-purple");
     expect(providerBarClass("codex")).toBe("bg-terminal-purple");
     expect(providerFamily("codex")).toBe("purple");
+  });
+});
+
+describe("isNetworkError", () => {
+  it("treats fetch TypeErrors (failed/network/load) as network errors", () => {
+    expect(isNetworkError(new TypeError("Failed to fetch"))).toBe(true);
+    expect(isNetworkError(new Error("NetworkError when attempting to fetch resource."))).toBe(true);
+    expect(isNetworkError(new Error("Load failed"))).toBe(true);
+  });
+
+  it("does not treat application errors as network errors", () => {
+    expect(isNetworkError(new Error("Generation failed"))).toBe(false);
+    expect(isNetworkError("some string")).toBe(false);
+    expect(isNetworkError(undefined)).toBe(false);
+  });
+});
+
+describe("getFriendlyErrorMessage", () => {
+  it("rewrites raw network failures into an actionable message", () => {
+    expect(getFriendlyErrorMessage(new TypeError("Failed to fetch"))).toMatch(
+      /local vibe-replay server/i,
+    );
+  });
+
+  it("passes through real application error messages", () => {
+    expect(getFriendlyErrorMessage(new Error("Generation failed"))).toBe("Generation failed");
+  });
+});
+
+describe("fetchWithRetry", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("retries a transient network rejection then succeeds", async () => {
+    const ok = new Response("{}", { status: 200 });
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(ok);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resp = await fetchWithRetry("/api/sources", undefined, { baseDelayMs: 1 });
+    expect(resp.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries gateway statuses (503) from the dev proxy", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response("", { status: 503 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resp = await fetchWithRetry("/api/sources", undefined, { baseDelayMs: 1 });
+    expect(resp.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a real application error response (500)", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response('{"error":"boom"}', { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resp = await fetchWithRetry("/api/generate", { method: "POST" }, { baseDelayMs: 1 });
+    expect(resp.status).toBe(500);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives up after exhausting retries and rethrows the network error", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockRejectedValue(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchWithRetry("/api/sources", undefined, { retries: 2, baseDelayMs: 1 }),
+    ).rejects.toThrow(/failed to fetch/i);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });
