@@ -7,7 +7,7 @@
     "dev": "bash ./scripts/run-with-required-node.sh dev",
     "build": "bash ./scripts/run-with-required-node.sh build",
     "preview": "bash ./scripts/run-with-required-node.sh preview",
-    "check": "astro check"
+    "check": "bash ./scripts/run-with-required-node.sh check"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.9",

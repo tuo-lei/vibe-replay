@@ -21,7 +21,7 @@
     "test:e2e": "vitest run --config e2e/vitest.config.ts",
     "lint": "oxlint --fix packages/ website/src cloudflare/src && oxfmt packages/ website/src cloudflare/src",
     "lint:check": "oxlint packages/ website/src cloudflare/src && oxfmt --check packages/ website/src cloudflare/src",
-    "typecheck": "tsc --noEmit -p packages/types/tsconfig.json && tsc --noEmit -p packages/cli/tsconfig.json && tsc --noEmit -p packages/viewer/tsconfig.json && tsc --noEmit -p cloudflare/tsconfig.json",
+    "typecheck": "tsc --noEmit -p packages/types/tsconfig.json && tsc --noEmit -p packages/cli/tsconfig.json && tsc --noEmit -p packages/viewer/tsconfig.json && tsc --noEmit -p cloudflare/tsconfig.json && pnpm --filter @vibe-replay/website check",
     "fmt": "oxfmt packages/ website/src cloudflare/src",
     "prepare": "lefthook install"
   },
