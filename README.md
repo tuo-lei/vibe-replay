@@ -70,6 +70,7 @@ vibe-replay is also available as a [Claude Code plugin](https://code.claude.com/
 ### What the plugin gives your agent
 
 - **Auto-discover sessions** — finds the current session's JSONL file via `$CLAUDE_SESSION_ID`
+- **Search past sessions** — uses `vibe-replay sessions` to find Claude Code, Cursor, and Codex sessions by project, provider, or fuzzy query
 - **Generate PR artifacts** — markdown summary + animated GIF + SVG, ready for PR descriptions
 - **Generate HTML replays** — self-contained interactive replay files
 - **PR workflow integration** — agent automatically embeds replay context when you create PRs
@@ -85,9 +86,19 @@ Or install via CLI:
 /plugin install vibe-replay@vibe-replay
 ```
 
+### Agent Skills install (Cursor, Codex, and others)
+
+vibe-replay also ships a portable `SKILL.md` under `skills/replay/`, so agents that support the Agent Skills standard can install the same replay workflow without the Claude plugin marketplace.
+
+```bash
+npx skills add tuo-lei/vibe-replay --skill replay -g
+```
+
+This installs the `replay` skill globally through the Agent Skills CLI. Cursor discovers global skills from `~/.agents/skills/` and `~/.cursor/skills/`, so this is the recommended install path for Cursor users.
+
 ### Manual install (single file)
 
-If you prefer not to install the full plugin:
+If you prefer not to install through a marketplace or the Agent Skills CLI:
 
 ```bash
 mkdir -p ~/.claude/skills/replay

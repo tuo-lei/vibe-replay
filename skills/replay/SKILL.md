@@ -80,9 +80,22 @@ Search workflow:
 
 Avoid broad `--scan` over many sessions. It is intentionally available, but expensive compared with metadata search.
 
+If `--json` returns an empty array, verify `vibe-replay` is installed and accessible:
+
+```bash
+npx vibe-replay --version
+```
+
+Then broaden or drop the query, retry with `--any`, filter by project/provider, or ask the user for a session path directly.
+
 For search results, return a short ranked list with provider, timestamp, project, title or first prompt preview, slug/session id, why it matched, and whether deeper scan/replay is recommended. Do not dump full raw prompts unless the user asks.
 
-## Step 2 - Generate the artifacts
+After choosing a session, branch by intent:
+
+- **PR sharing or replay export** - continue with Steps 2-5, then Step 7.
+- **Session retro or efficiency analysis** - skip PR artifact cleanup and use Step 6.
+
+## Step 2 - PR sharing path: generate the artifacts
 
 Once you have a session path and provider, run `vibe-replay` with the provider when known:
 
@@ -181,9 +194,21 @@ Style guide:
 - Friendly: warm and collaborative, like messaging a teammate
 ```
 
-## Step 6 - Session retro guidance
+## Step 6 - Alternative path: session retro guidance
 
-If the user asked for a session retro instead of PR sharing, use the `vibe-replay sessions --scan --json` result and separate observations from recommendations.
+If the user asked for a session retro instead of PR sharing, do not generate or clean `github-summary.md`. Narrow the candidate set first, then use scan-backed results:
+
+```bash
+npx vibe-replay sessions --project "<project>" --limit 5 --scan --json
+```
+
+If the user gave search terms instead of a project, use a narrowed query:
+
+```bash
+npx vibe-replay sessions --query "<terms>" --limit 5 --scan --json
+```
+
+Separate observations from recommendations.
 
 For efficiency analysis, look at:
 
@@ -207,12 +232,13 @@ To append (recommended default):
 ```bash
 # Read existing body, then write existing + separator + cleaned summary
 gh pr view --json body --jq .body > /tmp/pr-body.md
+SUMMARY=$(ls ~/.vibe-replay/<slug>/github-summary.clean.md 2>/dev/null || echo ~/.vibe-replay/<slug>/github-summary.md)
 echo "" >> /tmp/pr-body.md
 echo "---" >> /tmp/pr-body.md
 echo "" >> /tmp/pr-body.md
 echo "## Session Replay" >> /tmp/pr-body.md
 echo "" >> /tmp/pr-body.md
-cat ~/.vibe-replay/<slug>/github-summary.clean.md >> /tmp/pr-body.md
+cat "$SUMMARY" >> /tmp/pr-body.md
 gh pr edit --body-file /tmp/pr-body.md
 ```
 
@@ -228,5 +254,6 @@ If saving locally only, the cleaned version is already at `~/.vibe-replay/<slug>
 
 - The skip-the-image rule still applies: by default, do NOT include the GIF reference (first line of the original markdown) when pasting into a PR. Committing a binary GIF bloats git history. Only include it if the user explicitly asks for the GIF.
 - `github-summary.clean.md` is the only shareable markdown file the skill edits. The original `github-summary.md` is treated as read-only so the user can always recover the raw output.
+- The literal `${CLAUDE_SESSION_ID}` is interpolated by the Claude Code harness when this skill runs. If it is empty or no file matches, ask the user which session to use or search with `vibe-replay sessions`.
 - Session data may contain private code, credentials, internal links, or frustrated wording. Quote only the minimum needed.
 - Treat `vibe-replay sessions` as metadata/subsequence search, not semantic search. If results are weak, broaden terms, filter by project/provider, or inspect a small number of returned transcripts.
