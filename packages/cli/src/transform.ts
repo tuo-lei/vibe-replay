@@ -247,10 +247,7 @@ function buildFileDiff(
     return {
       filePath: redactFilePath(input.file_path),
       oldContent: "",
-      newContent: truncate(
-        redactPath(typeof input.content === "string" ? input.content : ""),
-        3000,
-      ),
+      newContent: truncate(redactDiffContent(input.content), 3000),
     };
   }
   if (toolName === "Delete" && input.file_path) {
