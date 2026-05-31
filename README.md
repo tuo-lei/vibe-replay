@@ -135,7 +135,7 @@ curl -o ~/.claude/skills/replay/SKILL.md \
 ```
 AI session files  →  vibe-replay  →  self-contained HTML
 (Claude Code,        (discover,       (animated viewer,
- Cursor)              parse,           insights panel,
+ Cursor, Codex)       parse,           insights panel,
                       redact,          offline-ready,
                       transform)       shareable)
 ```
