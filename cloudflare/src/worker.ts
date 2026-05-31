@@ -41,6 +41,10 @@ function isDev(env: { BETTER_AUTH_URL?: string }): boolean {
   return !!env.BETTER_AUTH_URL?.startsWith("http://localhost");
 }
 
+function isSafeCallbackPath(value: string): boolean {
+  return value.startsWith("/") && !value.startsWith("//");
+}
+
 type Env = AuthEnv & {
   ASSETS: Fetcher;
   REPLAY_BUCKET: R2Bucket;
@@ -55,6 +59,16 @@ type Env = AuthEnv & {
 };
 
 type HonoEnv = { Bindings: Env };
+
+type JsonBodyResult = { ok: true; body: any } | { ok: false; response: Response };
+
+async function readJsonBody(c: Context<HonoEnv>): Promise<JsonBodyResult> {
+  try {
+    return { ok: true, body: await c.req.json() };
+  } catch {
+    return { ok: false, response: c.json({ error: "Invalid JSON body" }, 400) };
+  }
+}
 
 // ---------------------------------------------------------------------------
 // App
@@ -147,7 +161,7 @@ app.on(["GET", "POST"], "/api/auth/*", async (c) => {
     try {
       const body = (await cloned.json()) as { callbackURL?: unknown };
       if (typeof body.callbackURL === "string") {
-        if (!body.callbackURL.startsWith("/") || body.callbackURL.startsWith("//")) {
+        if (!isSafeCallbackPath(body.callbackURL)) {
           return c.json({ error: "Invalid callbackURL" }, 400);
         }
       }
@@ -166,7 +180,7 @@ app.on(["GET", "POST"], "/api/auth/*", async (c) => {
 
 app.get("/auth/login", async (c) => {
   const callbackURL = c.req.query("callback") || "/auth/success";
-  if (callbackURL.startsWith("//") || /^https?:/.test(callbackURL)) {
+  if (!isSafeCallbackPath(callbackURL)) {
     return c.text("Invalid callback URL", 400);
   }
   const auth = createAuth(c.env);
@@ -453,7 +467,9 @@ app.post("/api/cloud-replays", async (c) => {
   if (authResult instanceof Response) return authResult;
   const { userId } = authResult;
 
-  const body = await c.req.json();
+  const parsedBody = await readJsonBody(c);
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.body;
   if (!body.replay || typeof body.replay !== "object") {
     return c.json({ error: "replay object required" }, 400);
   }
@@ -644,7 +660,9 @@ app.patch("/api/cloud-replays/:id", async (c) => {
     return c.json({ error: "Invalid ID" }, 400);
   }
 
-  const body = await c.req.json();
+  const parsedBody = await readJsonBody(c);
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.body;
   const { visibility } = body;
   if (!visibility || !VALID_VISIBILITY.has(visibility)) {
     return c.json({ error: "Invalid visibility (must be public, unlisted, or private)" }, 400);
@@ -1106,7 +1124,9 @@ app.post("/api/insights/sync", async (c) => {
   if (authResult instanceof Response) return authResult;
   const { userId } = authResult;
 
-  const body = await c.req.json();
+  const parsedBody = await readJsonBody(c);
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.body;
   if (!Array.isArray(body.days) || body.days.length === 0) {
     return c.json({ error: "days array required" }, 400);
   }
@@ -1383,10 +1403,23 @@ const DEFAULT_PROFILE_CONFIG = {
 
 type ProfileConfig = typeof DEFAULT_PROFILE_CONFIG;
 
+function sanitizeProfileConfig(
+  raw: unknown,
+  base: ProfileConfig = DEFAULT_PROFILE_CONFIG,
+): ProfileConfig {
+  const incoming =
+    raw && typeof raw === "object" ? (raw as Partial<Record<keyof ProfileConfig, unknown>>) : {};
+  const config: ProfileConfig = { ...base };
+  for (const key of Object.keys(DEFAULT_PROFILE_CONFIG) as (keyof ProfileConfig)[]) {
+    const value = incoming[key];
+    config[key] = typeof value === "boolean" ? value : base[key];
+  }
+  return config;
+}
+
 function parseProfileConfig(raw: string): ProfileConfig {
   try {
-    const parsed = JSON.parse(raw);
-    return { ...DEFAULT_PROFILE_CONFIG, ...parsed };
+    return sanitizeProfileConfig(JSON.parse(raw));
   } catch {
     return { ...DEFAULT_PROFILE_CONFIG };
   }
@@ -1451,29 +1484,21 @@ app.post("/api/insights/profile", async (c) => {
     return c.json({ error: "Invalid slug (2-40 chars, alphanumeric, hyphens, underscores)" }, 400);
   }
 
-  const config: ProfileConfig = {
-    ...DEFAULT_PROFILE_CONFIG,
-    ...(body.config && typeof body.config === "object" ? body.config : {}),
-  };
-  // Sanitize: only allow boolean values
-  for (const key of Object.keys(config) as (keyof ProfileConfig)[]) {
-    if (typeof config[key] !== "boolean") {
-      config[key] = DEFAULT_PROFILE_CONFIG[key];
-    }
-  }
-
   const db = drizzle(c.env.DB);
   const [existing] = await db
     .select({
       id: insightProfiles.id,
       slug: insightProfiles.slug,
       enabled: insightProfiles.enabled,
+      config: insightProfiles.config,
     })
     .from(insightProfiles)
     .where(eq(insightProfiles.userId, userId))
     .limit(1);
 
   const now = new Date().toISOString().replace("T", " ").slice(0, 19);
+  const baseConfig = existing ? parseProfileConfig(existing.config) : { ...DEFAULT_PROFILE_CONFIG };
+  const config = sanitizeProfileConfig(body.config, baseConfig);
 
   if (existing) {
     // Update existing profile — only change enabled if explicitly provided
@@ -1804,7 +1829,9 @@ app.post("/api/files", async (c) => {
   if (authResult instanceof Response) return authResult;
   const { userId } = authResult;
 
-  const body = await c.req.json();
+  const parsedBody = await readJsonBody(c);
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.body;
   const { content, contentType, filename, parentReplayId, visibility: vis } = body;
 
   if (!content || typeof content !== "string") {
