@@ -356,6 +356,17 @@ describe("Claude Code parser — max_tokens truncation", () => {
 // Transform: synthetic messages produce text-response scenes
 // ---------------------------------------------------------------------------
 describe("Claude Code → transform — synthetic and edge scenes", () => {
+  it("counts synthetic API error messages in parsed metadata", async () => {
+    const result = await parseClaudeCodeSession(REAL);
+
+    expect(result.apiErrors).toEqual([
+      {
+        timestamp: "2025-01-30T10:00:15Z",
+        errorType: "api_error_message",
+      },
+    ]);
+  });
+
   it("produces text-response scene from API error synthetic message", async () => {
     const result = await parseClaudeCodeSession(REAL);
     const replay = transformToReplay(result, "claude-code", "~/test/realproject");

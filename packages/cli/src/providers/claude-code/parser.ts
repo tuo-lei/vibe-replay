@@ -270,6 +270,19 @@ export async function parseClaudeCodeLines(
 
     const { role, content: msgContent, id: msgId } = obj.message;
 
+    if (obj.isApiErrorMessage && obj.timestamp) {
+      const text = extractMessageText(msgContent);
+      const errorType = inferApiErrorMessageType(text);
+      if (
+        !apiErrors.some((err) => err.timestamp === obj.timestamp && err.errorType === errorType)
+      ) {
+        apiErrors.push({
+          timestamp: obj.timestamp,
+          ...(errorType ? { errorType } : {}),
+        });
+      }
+    }
+
     // Capture system-injected messages: extract skill names and emit meaningful ones as scenes
     if (obj.isMeta && role === "user") {
       const text = extractMessageText(msgContent);
@@ -617,6 +630,14 @@ function extractMessageText(content: string | ContentBlock[]): string {
       .join("\n");
   }
   return "";
+}
+
+function inferApiErrorMessageType(text: string): string | undefined {
+  const lower = text.toLowerCase();
+  if (lower.includes("rate limit")) return "rate_limit_error";
+  if (lower.includes("overloaded")) return "overloaded_error";
+  if (lower.includes("api error")) return "api_error_message";
+  return undefined;
 }
 
 function extractImages(block: ContentBlock): string[] {
