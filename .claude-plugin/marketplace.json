@@ -10,7 +10,7 @@
     {
       "name": "vibe-replay",
       "description": "Generate interactive HTML replays and GitHub PR artifacts from AI coding sessions",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "author": {
         "name": "Tuo Lei"
       },
