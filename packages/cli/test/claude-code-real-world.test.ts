@@ -362,7 +362,7 @@ describe("Claude Code → transform — synthetic and edge scenes", () => {
     expect(result.apiErrors).toEqual([
       {
         timestamp: "2025-01-30T10:00:15Z",
-        errorType: "api_error_message",
+        errorType: "api_error",
       },
     ]);
   });
