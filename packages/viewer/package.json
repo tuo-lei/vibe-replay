@@ -19,16 +19,16 @@
   },
   "devDependencies": {
     "@types/diff": "^6.0.0",
-    "@types/react": "^19.0.0",
+    "@types/react": "^19.2.15",
     "@types/react-dom": "^19.0.0",
-    "@vitejs/plugin-react": "^6.0.1",
+    "@vitejs/plugin-react": "^6.0.2",
     "@vitest/coverage-v8": "4.0.18",
     "autoprefixer": "^10.4.20",
-    "postcss": "^8.5.14",
+    "postcss": "^8.5.15",
     "tailwindcss": "^3.4.17",
     "typescript": "^6.0.3",
     "vite": "npm:rolldown-vite@^7.3.1",
-    "vite-plugin-singlefile": "^2.0.3",
+    "vite-plugin-singlefile": "^2.3.3",
     "vitest": "^4.0.18"
   }
 }
