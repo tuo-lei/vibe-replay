@@ -42,7 +42,7 @@ function isDev(env: { BETTER_AUTH_URL?: string }): boolean {
 }
 
 function isSafeCallbackPath(value: string): boolean {
-  return value.startsWith("/") && !value.startsWith("//");
+  return value.startsWith("/") && !value.startsWith("//") && !value.startsWith("/\\");
 }
 
 type Env = AuthEnv & {
@@ -1472,12 +1472,9 @@ app.post("/api/insights/profile", async (c) => {
   if (authResult instanceof Response) return authResult;
   const { userId, user } = authResult;
 
-  let body: any;
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.json({ error: "Invalid JSON body" }, 400);
-  }
+  const parsedBody = await readJsonBody(c);
+  if (!parsedBody.ok) return parsedBody.response;
+  const body = parsedBody.body;
 
   const slug = body.slug ? String(body.slug).toLowerCase().trim() : null;
   if (slug && !SLUG_RE.test(slug)) {

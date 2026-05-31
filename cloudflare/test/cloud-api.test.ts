@@ -242,11 +242,26 @@ describe("Cloud API integration", () => {
   });
 
   it("rejects unsafe browser login callbacks before starting OAuth", async () => {
-    for (const callback of ["javascript:alert(1)", "profile", "//evil.example/callback"]) {
+    for (const callback of [
+      "javascript:alert(1)",
+      "profile",
+      "//evil.example/callback",
+      "/\\evil.example/callback",
+    ]) {
       const response = await dispatch(`/auth/login?callback=${encodeURIComponent(callback)}`);
       expect(response.status).toBe(400);
       await expect(response.text()).resolves.toBe("Invalid callback URL");
     }
+  });
+
+  it("rejects malformed insight profile JSON with a 400 response", async () => {
+    const response = await dispatch("/api/insights/profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{",
+    });
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "Invalid JSON body" });
   });
 
   it("hides private replays from other authenticated users", async () => {
