@@ -212,8 +212,16 @@ async function resolveEncodedProjectParts(
   // names that are real child directories instead of stat-ing every split.
   for (let end = idx + 1; end <= parts.length; end++) {
     const candidate = parts.slice(idx, end).join("-");
-    if (!dirNames.has(candidate)) continue;
-    const resolved = await resolveEncodedProjectParts(parts, end, join(current, candidate));
+    const candidatePath = join(current, candidate);
+    if (!dirNames.has(candidate)) {
+      // Windows temp/profile paths can contain 8.3 short-name segments such as
+      // RUNNER~1. They are valid paths but do not appear in readdir(), so use a
+      // targeted stat fallback before giving up on this split.
+      if (process.platform !== "win32") continue;
+      const candidateStat = await stat(candidatePath).catch(() => null);
+      if (!candidateStat?.isDirectory()) continue;
+    }
+    const resolved = await resolveEncodedProjectParts(parts, end, candidatePath);
     if (resolved) return resolved;
   }
 

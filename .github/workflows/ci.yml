@@ -43,10 +43,14 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter vibe-replay test
-      - run: pnpm --filter @vibe-replay/viewer test
-      - run: pnpm build
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Test CLI
+        run: pnpm --filter vibe-replay test
+      - name: Test viewer
+        run: pnpm --filter @vibe-replay/viewer test
+      - name: Build
+        run: pnpm build
 
   build:
     runs-on: ubuntu-latest
