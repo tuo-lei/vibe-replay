@@ -1,4 +1,5 @@
 import type { SessionSummary, SourceSession } from "../types";
+import { safeStorageGet, safeStorageRemove, safeStorageSet } from "../utils/safe-storage";
 
 // ─── Shared types ────────────────────────────────────────────────────
 
@@ -303,9 +304,9 @@ export function navigateTo(
       if (v) dashboardState[p] = v;
     });
     if (Object.keys(dashboardState).length > 0) {
-      sessionStorage.setItem("vibe_dashboard_state", JSON.stringify(dashboardState));
+      safeStorageSet(sessionStorage, "vibe_dashboard_state", JSON.stringify(dashboardState));
     } else {
-      sessionStorage.removeItem("vibe_dashboard_state");
+      safeStorageRemove(sessionStorage, "vibe_dashboard_state");
     }
   }
 
@@ -325,7 +326,7 @@ export function navigateTo(
   // 3. If we are going back to dashboard, restored saved state if URL is empty
   const goingToDashboard = params.view === "dashboard" || (params.session === null && !params.view);
   if (goingToDashboard) {
-    const saved = sessionStorage.getItem("vibe_dashboard_state");
+    const saved = safeStorageGet(sessionStorage, "vibe_dashboard_state");
     if (saved) {
       try {
         const state = JSON.parse(saved);

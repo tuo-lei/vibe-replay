@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { safeStorageGet, safeStorageSet } from "../utils/safe-storage";
 
 export type Theme = "dark" | "light";
 
@@ -8,7 +9,7 @@ export function useTheme() {
     const urlTheme = params.get("theme");
     if (urlTheme === "light" || urlTheme === "dark") return urlTheme;
 
-    const stored = localStorage.getItem("vibe-replay-theme");
+    const stored = safeStorageGet(localStorage, "vibe-replay-theme");
     if (stored === "light" || stored === "dark") return stored;
     return "dark";
   });
@@ -19,7 +20,7 @@ export function useTheme() {
     el.classList.add("theme-transition");
     el.classList.toggle("dark", theme === "dark");
     el.classList.toggle("light", theme === "light");
-    localStorage.setItem("vibe-replay-theme", theme);
+    safeStorageSet(localStorage, "vibe-replay-theme", theme);
     // Remove transition class after animation completes to avoid interfering
     const timer = setTimeout(() => el.classList.remove("theme-transition"), 300);
     return () => clearTimeout(timer);
