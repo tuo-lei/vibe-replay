@@ -236,6 +236,8 @@ function projectedCursorBubbleSelectSql(): string {
 }
 
 function replayableGlobalStateBubblePredicateSql(valueExpr: string): string {
+  // Discovery only needs a cheap positive signal; bubbleToTurn remains the
+  // authoritative parser and may still filter system-context-only text later.
   const nonEmptyText = (path: string) =>
     `(json_type(${valueExpr}, ${sqlString(path)}) = 'text' AND length(trim(COALESCE(json_extract(${valueExpr}, ${sqlString(
       path,

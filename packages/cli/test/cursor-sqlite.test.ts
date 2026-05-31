@@ -53,6 +53,12 @@ describe("Cursor global-state replayability", () => {
     expect(
       __testables.isReplayableGlobalStateBubble({
         type: 2,
+        thinking: "I should inspect the logs",
+      }),
+    ).toBe(true);
+    expect(
+      __testables.isReplayableGlobalStateBubble({
+        type: 2,
         toolFormerData: { name: "read_file", params: "{}", result: "ok" },
       }),
     ).toBe(true);
