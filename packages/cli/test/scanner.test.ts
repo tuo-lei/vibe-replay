@@ -250,6 +250,46 @@ describe("scanSession", () => {
     expect(result.durationMs).toBe(9000);
   });
 
+  it("counts synthetic assistant API error messages", async () => {
+    const path = join(tmpDir, "api-error-message.jsonl");
+    await writeFile(
+      path,
+      [
+        makeLine({
+          type: "assistant",
+          timestamp: "2025-03-20T10:00:00Z",
+          isApiErrorMessage: true,
+          message: {
+            role: "assistant",
+            id: "msg-api-error",
+            content: [{ type: "text", text: "API Error: Claude's response failed." }],
+          },
+        }),
+        makeLine({
+          type: "assistant",
+          timestamp: "2025-03-20T10:00:01Z",
+          isApiErrorMessage: false,
+          message: {
+            role: "assistant",
+            id: "msg-no-response",
+            content: [{ type: "text", text: "No response requested." }],
+          },
+        }),
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "test-session-api-error-message",
+      provider: "claude-code",
+      project: "~/project",
+      slug: "api-error-message",
+      filePaths: [path],
+    });
+
+    expect(result.apiErrorCount).toBe(1);
+  });
+
   it("extracts token usage and cost", async () => {
     const result = await scanSession({
       sessionId: "test-session-1",

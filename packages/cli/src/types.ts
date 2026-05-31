@@ -110,6 +110,10 @@ export interface RawMessage {
     | "attachment";
   subtype?: string;
   timestamp?: string;
+  /** Optional provider URL attached to newer Claude Code system messages. */
+  url?: string;
+  /** True when Claude Code writes a synthetic assistant message describing an API failure. */
+  isApiErrorMessage?: boolean;
   message?: {
     role: "user" | "assistant";
     id?: string;

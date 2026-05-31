@@ -406,6 +406,10 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
         continue;
       }
 
+      if (obj.type === "assistant" && obj.isApiErrorMessage) {
+        apiErrorCount++;
+      }
+
       // Extract skill/command names from isMeta messages
       if (obj.isMeta) {
         const text = extractMetaText(obj.message?.content);
