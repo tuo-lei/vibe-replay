@@ -2,6 +2,16 @@ import { describe, expect, it, vi } from "vitest";
 import { safeStorageGet, safeStorageRemove, safeStorageSet } from "../safe-storage";
 
 describe("safe storage helpers", () => {
+  it("returns stored values when getItem succeeds", () => {
+    const storage = {
+      getItem: vi.fn(() => "hello"),
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+    } as unknown as Storage;
+
+    expect(safeStorageGet(storage, "key")).toBe("hello");
+  });
+
   it("returns null when getItem throws", () => {
     const storage = {
       getItem: vi.fn(() => {

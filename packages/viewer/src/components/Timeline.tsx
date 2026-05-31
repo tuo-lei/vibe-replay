@@ -194,7 +194,7 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
             className="flex-1 transition-opacity duration-150"
             style={{
               backgroundColor: sceneColor(seg.type),
-              opacity: seg.startIndex <= currentIndex ? 1 : 0.15,
+              opacity: seg.startIndex <= clampedCurrentIndex ? 1 : 0.15,
             }}
           />
         ))}
