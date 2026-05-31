@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { OverlayActions } from "../hooks/useOverlays";
+import type { LiveCursorDiagnostics } from "../hooks/useSessionLoader";
 import type { EffectivePrefs } from "../hooks/useViewPrefs";
 import type { Scene, TurnStat } from "../types";
 import { displayToolName } from "../utils/toolName";
@@ -32,6 +33,9 @@ interface Props {
    *  - unknown: non-Claude provider, no metadata file → fall back to BUSY UX.
    *  Only consulted when `isLive` is true. */
   liveSessionState?: "busy" | "idle" | "stopped" | "unknown";
+  liveCursorDiagnostics?: LiveCursorDiagnostics;
+  liveCursorRowsChanged?: boolean;
+  liveCursorProbeAt?: number;
 }
 
 interface TurnGroup {
@@ -77,6 +81,9 @@ export default function ConversationView({
   turnStats,
   isLive,
   liveSessionState,
+  liveCursorDiagnostics,
+  liveCursorRowsChanged,
+  liveCursorProbeAt,
 }: Props & { onSeek?: (index: number) => void }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [activeStickyPrompt, setActiveStickyPrompt] = useState<StickyPromptSummary | null>(null);
@@ -397,7 +404,12 @@ export default function ConversationView({
         )}
 
         {visibleCount >= scenes.length && isLive && (
-          <LiveStateCard sessionState={liveSessionState} />
+          <LiveStateCard
+            cursorDiagnostics={liveCursorDiagnostics}
+            cursorRowsChanged={liveCursorRowsChanged}
+            cursorProbeAt={liveCursorProbeAt}
+            sessionState={liveSessionState}
+          />
         )}
       </div>
     </div>
@@ -440,11 +452,58 @@ function ActiveStickyPrompt({ prompt }: { prompt: StickyPromptSummary | null }) 
  *                         (Cursor / Codex etc.) where we can't tell.
  */
 function LiveStateCard({
+  cursorDiagnostics,
+  cursorRowsChanged,
+  cursorProbeAt,
   sessionState,
 }: {
+  cursorDiagnostics?: LiveCursorDiagnostics;
+  cursorRowsChanged?: boolean;
+  cursorProbeAt?: number;
   sessionState?: "busy" | "idle" | "stopped" | "unknown";
 }) {
   const effective = sessionState ?? "busy";
+
+  if (effective === "unknown" && cursorDiagnostics) {
+    const latestAt =
+      cursorDiagnostics.latestBubbleUpdatedAt ||
+      cursorDiagnostics.latestBubbleCreatedAt ||
+      cursorDiagnostics.composerLastUpdatedAt;
+    const latestAge = formatCompactAge(latestAt);
+    const probeAge = cursorProbeAt ? formatCompactAge(new Date(cursorProbeAt).toISOString()) : "";
+    const latestLabel = cursorDiagnostics.latestToolName
+      ? `${displayToolName(cursorDiagnostics.latestToolName)} ${
+          cursorDiagnostics.latestToolHasResult ? "result persisted" : "waiting for result"
+        }`
+      : cursorDiagnostics.latestTextPreview
+        ? "assistant text persisted"
+        : "session rows persisted";
+    const rowState = cursorRowsChanged === false ? "db event, rows unchanged" : "rows updated";
+    return (
+      <div className="pt-10 pb-24 flex flex-col items-center justify-center select-none">
+        <div className="h-px w-8 bg-terminal-border-subtle mb-5" />
+        <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-terminal-blue-subtle/40 border border-terminal-blue/20">
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-terminal-blue" />
+          <span className="text-[10px] font-mono font-bold text-terminal-blue uppercase tracking-[0.25em]">
+            Cursor Live
+          </span>
+        </div>
+        <div className="text-[9px] font-mono text-terminal-dimmer mt-3 tracking-wide">
+          {latestLabel}
+          {latestAge ? ` · durable ${latestAge}` : ""}
+        </div>
+        <div className="text-[9px] font-mono text-terminal-dimmer mt-1 tracking-wide">
+          {cursorDiagnostics.bubbleCount} bubbles
+          {cursorDiagnostics.toolCallCount > 0
+            ? ` · ${cursorDiagnostics.toolResultCount}/${cursorDiagnostics.toolCallCount} tool results`
+            : ""}
+          {" · "}
+          {rowState}
+          {probeAge ? ` · probed ${probeAge}` : ""}
+        </div>
+      </div>
+    );
+  }
 
   if (effective === "stopped") {
     return (
@@ -498,6 +557,16 @@ function LiveStateCard({
       </div>
     </div>
   );
+}
+
+function formatCompactAge(iso?: string): string {
+  if (!iso) return "";
+  const ms = Date.now() - Date.parse(iso);
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  if (ms < 60_000) return `${Math.max(1, Math.round(ms / 1000))}s ago`;
+  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m ago`;
+  if (ms < 86_400_000) return `${Math.round(ms / 3_600_000)}h ago`;
+  return `${Math.round(ms / 86_400_000)}d ago`;
 }
 
 function TimeGapIndicator({ gapMs }: { gapMs: number }) {

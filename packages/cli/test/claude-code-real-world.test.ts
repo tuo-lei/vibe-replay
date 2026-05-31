@@ -2,6 +2,11 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseClaudeCodeSession } from "../src/providers/claude-code/parser.js";
 import { transformToReplay } from "../src/transform.js";
+import type { ContentBlock } from "../src/types.js";
+
+type TextBlock = Extract<ContentBlock, { type: "text" }>;
+type ToolUseBlock = Extract<ContentBlock, { type: "tool_use" }>;
+type ThinkingBlock = Extract<ContentBlock, { type: "thinking" }>;
 
 const fixture = (name: string) => join(import.meta.dirname, `fixtures/${name}`);
 const REAL = fixture("claude-code-real-world-edges.jsonl");
@@ -38,7 +43,7 @@ describe("Claude Code parser — unknown top-level types", () => {
     expect(result.sessionId).toBe("real-edge-001");
     const allText = result.turns
       .flatMap((t) => t.blocks)
-      .map((b) => (b as any).text)
+      .map((b) => (b as TextBlock).text)
       .join(" ");
     expect(allText).not.toContain("queued prompt");
   });
@@ -47,7 +52,7 @@ describe("Claude Code parser — unknown top-level types", () => {
     const result = await parseClaudeCodeSession(REAL);
     const allText = result.turns
       .flatMap((t) => t.blocks)
-      .map((b) => (b as any).text)
+      .map((b) => (b as TextBlock).text)
       .join(" ");
     expect(allText).not.toContain("some last prompt");
   });
@@ -56,7 +61,7 @@ describe("Claude Code parser — unknown top-level types", () => {
     const result = await parseClaudeCodeSession(REAL);
     const allText = result.turns
       .flatMap((t) => t.blocks)
-      .map((b) => (b as any).text)
+      .map((b) => (b as TextBlock).text)
       .join(" ");
     expect(allText).not.toContain("github.com");
   });
@@ -70,7 +75,7 @@ describe("Claude Code parser — system subtypes", () => {
     const result = await parseClaudeCodeSession(REAL);
     const allText = result.turns
       .flatMap((t) => t.blocks)
-      .map((b) => (b as any).text)
+      .map((b) => (b as TextBlock).text)
       .join(" ");
     expect(allText).not.toContain("Session renamed");
   });
@@ -79,7 +84,7 @@ describe("Claude Code parser — system subtypes", () => {
     const result = await parseClaudeCodeSession(REAL);
     const allText = result.turns
       .flatMap((t) => t.blocks)
-      .map((b) => (b as any).text)
+      .map((b) => (b as TextBlock).text)
       .join(" ");
     expect(allText).not.toContain("bridge ready");
   });
@@ -100,7 +105,7 @@ describe("Claude Code parser — extended system message filtering", () => {
     const userTexts = result.turns
       .filter((t) => t.role === "user")
       .flatMap((t) => t.blocks)
-      .map((b) => (b as any).text)
+      .map((b) => (b as TextBlock).text)
       .filter(Boolean);
     expect(userTexts).not.toContain(expect.stringContaining("<bash-input>"));
   });
@@ -110,7 +115,7 @@ describe("Claude Code parser — extended system message filtering", () => {
     const userTexts = result.turns
       .filter((t) => t.role === "user")
       .flatMap((t) => t.blocks)
-      .map((b) => (b as any).text)
+      .map((b) => (b as TextBlock).text)
       .filter(Boolean);
     expect(userTexts).not.toContain(expect.stringContaining("<bash-stdout>"));
   });
@@ -120,7 +125,7 @@ describe("Claude Code parser — extended system message filtering", () => {
     const userTexts = result.turns
       .filter((t) => t.role === "user")
       .flatMap((t) => t.blocks)
-      .map((b) => (b as any).text)
+      .map((b) => (b as TextBlock).text)
       .filter(Boolean);
     expect(userTexts).not.toContain(expect.stringContaining("<command-message>"));
   });
@@ -130,7 +135,7 @@ describe("Claude Code parser — extended system message filtering", () => {
     const userTurns = result.turns.filter((t) => t.role === "user" && !t.subtype);
     // Only the real prompt — isMeta skill injection is now correctly filtered out
     expect(userTurns.length).toBe(1);
-    const texts = userTurns.map((t) => (t.blocks[0] as any).text);
+    const texts = userTurns.map((t) => (t.blocks[0] as TextBlock).text);
     expect(texts).toContain("Implement the feature");
   });
 });
@@ -149,7 +154,7 @@ describe("Claude Code parser — isMeta skill injection messages", () => {
     const injectionText = injections
       .flatMap((t) => t.blocks)
       .filter((b) => b.type === "text")
-      .map((b) => (b as any).text);
+      .map((b) => (b as TextBlock).text);
     expect(injectionText.some((t: string) => t.includes("Base directory for this skill"))).toBe(
       true,
     );
@@ -161,7 +166,7 @@ describe("Claude Code parser — isMeta skill injection messages", () => {
     const regularText = regularTurns
       .flatMap((t) => t.blocks)
       .filter((b) => b.type === "text")
-      .map((b) => (b as any).text);
+      .map((b) => (b as TextBlock).text);
     expect(regularText.some((t: string) => t.includes("Base directory for this skill"))).toBe(
       false,
     );
@@ -178,7 +183,9 @@ describe("Claude Code parser — compaction with isCompactSummary flag", () => {
       (t) => t.role === "user" && t.subtype === "compaction-summary",
     );
     expect(compactionTurns.length).toBe(1);
-    expect((compactionTurns[0].blocks[0] as any).text).toContain("This session is being continued");
+    expect((compactionTurns[0].blocks[0] as TextBlock).text).toContain(
+      "This session is being continued",
+    );
   });
 });
 
@@ -192,7 +199,7 @@ describe("Claude Code parser — synthetic messages", () => {
     const allText = assistantTurns
       .flatMap((t) => t.blocks)
       .filter((b) => b.type === "text")
-      .map((b) => (b as any).text);
+      .map((b) => (b as TextBlock).text);
     expect(allText.some((t: string) => t.includes("API Error"))).toBe(true);
   });
 
@@ -202,7 +209,7 @@ describe("Claude Code parser — synthetic messages", () => {
     const allText = assistantTurns
       .flatMap((t) => t.blocks)
       .filter((b) => b.type === "text")
-      .map((b) => (b as any).text);
+      .map((b) => (b as TextBlock).text);
     expect(allText).toContain("No response requested.");
   });
 
@@ -244,9 +251,9 @@ describe("Claude Code parser — error tool results", () => {
     const assistantTurns = result.turns.filter((t) => t.role === "assistant");
     const bashBlock = assistantTurns
       .flatMap((t) => t.blocks)
-      .find((b) => b.type === "tool_use" && (b as any).name === "Bash");
+      .find((b) => b.type === "tool_use" && (b as ToolUseBlock).name === "Bash");
     expect(bashBlock).toBeDefined();
-    expect((bashBlock as any)._result).toContain("permission denied");
+    expect((bashBlock as ToolUseBlock)._result).toContain("permission denied");
   });
 
   it("transform produces tool-call scene from error result", async () => {
@@ -271,10 +278,11 @@ describe("Claude Code parser — empty tool input/result", () => {
       .flatMap((t) => t.blocks)
       .find(
         (b) =>
-          b.type === "tool_use" && (b as any).name === "mcp__claude-in-chrome__tabs_context_mcp",
+          b.type === "tool_use" &&
+          (b as ToolUseBlock).name === "mcp__claude-in-chrome__tabs_context_mcp",
       );
     expect(mcpBlock).toBeDefined();
-    expect((mcpBlock as any).input).toEqual({});
+    expect((mcpBlock as ToolUseBlock).input).toEqual({});
   });
 
   it("handles empty string tool result", async () => {
@@ -284,10 +292,11 @@ describe("Claude Code parser — empty tool input/result", () => {
       .flatMap((t) => t.blocks)
       .find(
         (b) =>
-          b.type === "tool_use" && (b as any).name === "mcp__claude-in-chrome__tabs_context_mcp",
+          b.type === "tool_use" &&
+          (b as ToolUseBlock).name === "mcp__claude-in-chrome__tabs_context_mcp",
       );
     expect(mcpBlock).toBeDefined();
-    expect((mcpBlock as any)._result).toBe("");
+    expect((mcpBlock as ToolUseBlock)._result).toBe("");
   });
 
   it("transform handles empty input MCP tool gracefully", async () => {
@@ -315,9 +324,9 @@ describe("Claude Code parser — thinking block signature", () => {
       .flatMap((t) => t.blocks)
       .find((b) => b.type === "thinking");
     expect(thinkingBlock).toBeDefined();
-    expect((thinkingBlock as any).thinking).toBe("Let me analyze this request.");
+    expect((thinkingBlock as ThinkingBlock).thinking).toBe("Let me analyze this request.");
     // signature should not be preserved in the parsed output
-    expect((thinkingBlock as any).signature).toBeUndefined();
+    expect((thinkingBlock as ThinkingBlock).signature).toBeUndefined();
   });
 });
 
@@ -333,7 +342,7 @@ describe("Claude Code parser — max_tokens truncation", () => {
     expect(truncatedTurn).toBeDefined();
     const thinking = truncatedTurn!.blocks.find((b) => b.type === "thinking");
     expect(thinking).toBeDefined();
-    expect((thinking as any).thinking).toContain("truncated");
+    expect((thinking as ThinkingBlock).thinking).toContain("truncated");
   });
 
   it("includes max_tokens message usage in totals", async () => {

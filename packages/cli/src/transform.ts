@@ -14,6 +14,18 @@ function redactPath(s: string): string {
   return s.replaceAll(HOME, "~");
 }
 
+/**
+ * Like {@link redactPath} but, on Windows only, also normalizes `\` separators
+ * to `/` so replays generated on Windows display POSIX-style paths consistently
+ * with macOS/Linux. Gated to win32 because on POSIX a backslash is a legal
+ * filename character and must be preserved. Used only for genuine file-path
+ * fields — never apply to free-form prose.
+ */
+function redactFilePath(s: string): string {
+  const redacted = redactPath(s);
+  return process.platform === "win32" ? redacted.replaceAll("\\", "/") : redacted;
+}
+
 export function transformToReplay(
   parsed: ProviderParseResult,
   provider: string,
@@ -157,7 +169,7 @@ export function transformToReplay(
       startTime: parsed.startTime || new Date().toISOString(),
       endTime: parsed.endTime,
       model: parsed.model,
-      cwd: redactPath(parsed.cwd),
+      cwd: redactFilePath(parsed.cwd),
       project,
       ...(options?.generator ? { generator: options.generator } : {}),
       stats: {
@@ -188,10 +200,10 @@ export function transformToReplay(
       ...(parsed.memoryMode ? { memoryMode: parsed.memoryMode } : {}),
       ...(parsed.apiErrors && parsed.apiErrors.length > 0 ? { apiErrors: parsed.apiErrors } : {}),
       ...(parsed.trackedFiles && parsed.trackedFiles.length > 0
-        ? { trackedFiles: parsed.trackedFiles.map(redactPath) }
+        ? { trackedFiles: parsed.trackedFiles.map(redactFilePath) }
         : {}),
       ...(parsed.contextFiles && parsed.contextFiles.length > 0
-        ? { contextFiles: parsed.contextFiles.map(redactPath) }
+        ? { contextFiles: parsed.contextFiles.map(redactFilePath) }
         : {}),
       ...(parsed.cursorSidecars ? { cursorSidecars: parsed.cursorSidecars } : {}),
       ...(parsed.serviceTier ? { serviceTier: parsed.serviceTier } : {}),
@@ -212,7 +224,7 @@ function buildFileDiff(
 ): ToolCallScene["diff"] | undefined {
   if (toolName === "Edit" && input.file_path) {
     return {
-      filePath: redactPath(input.file_path),
+      filePath: redactFilePath(input.file_path),
       oldContent: input.old_string ?? "",
       newContent: input.new_string ?? "",
     };
@@ -225,7 +237,7 @@ function buildFileDiff(
       // MultiEdit records independent replacements, not full before/after file
       // states. Show a synthetic chunk list so the replay still surfaces what changed.
       return {
-        filePath: redactPath(input.file_path),
+        filePath: redactFilePath(input.file_path),
         oldContent: edits.map((edit) => edit.old_string ?? "").join("\n\n"),
         newContent: edits.map((edit) => edit.new_string ?? "").join("\n\n"),
       };
@@ -233,14 +245,14 @@ function buildFileDiff(
   }
   if (toolName === "Write" && input.file_path) {
     return {
-      filePath: redactPath(input.file_path),
+      filePath: redactFilePath(input.file_path),
       oldContent: "",
       newContent: truncate(input.content || "", 3000),
     };
   }
   if (toolName === "Delete" && input.file_path) {
     return {
-      filePath: redactPath(input.file_path),
+      filePath: redactFilePath(input.file_path),
       oldContent: input.old_string ?? "(file deleted)",
       newContent: "",
     };

@@ -9,9 +9,28 @@
  * Experimental feature — output quality depends on the model behind the CLI.
  */
 
-import { spawn } from "node:child_process";
+import { type ChildProcessByStdio, spawn, type SpawnOptions } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import type { Readable, Writable } from "node:stream";
 import type { Annotation, OverlaySource, ReplaySession, Scene, SceneOverlay } from "./types.js";
+
+const IS_WINDOWS = process.platform === "win32";
+
+type PipedChild = ChildProcessByStdio<Writable, Readable, Readable>;
+
+/**
+ * Spawn an external AI CLI cross-platform. On Windows these tools are installed
+ * as `.cmd`/`.ps1` shims that `spawn()` cannot exec directly, so route through
+ * the shell (quoting the command path, which may contain spaces). All callers
+ * use piped stdio, so the return is typed as a fully-piped child process.
+ */
+function spawnTool(command: string, args: string[], options: SpawnOptions): PipedChild {
+  if (IS_WINDOWS) {
+    const quoted = /\s/.test(command) ? `"${command}"` : command;
+    return spawn(quoted, args, { ...options, shell: true }) as PipedChild;
+  }
+  return spawn(command, args, options) as PipedChild;
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -81,8 +100,8 @@ export async function detectFeedbackTools(): Promise<{
   const tools: FeedbackTool[] = [];
   for (const tool of candidates) {
     try {
-      const path = await shell(`which ${tool.cmd}`);
-      if (path.trim()) tools.push({ name: tool.name, command: path.trim() });
+      const located = await locateCommand(tool.cmd);
+      if (located) tools.push({ name: tool.name, command: located });
     } catch {
       /* not found */
     }
@@ -357,7 +376,7 @@ async function executeFeedback(prompt: string, tool: FeedbackTool): Promise<stri
 
 function runClaude(prompt: string, cmd: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const proc = spawn(cmd, ["-p", "--output-format", "json"], {
+    const proc = spawnTool(cmd, ["-p", "--output-format", "json"], {
       env: { ...process.env, NO_COLOR: "1" },
       timeout: 600_000,
       stdio: ["pipe", "pipe", "pipe"],
@@ -391,7 +410,7 @@ function runClaude(prompt: string, cmd: string): Promise<string> {
 function runOpencode(prompt: string, cmd: string): Promise<string> {
   return new Promise((resolve, reject) => {
     // Use stdin pipe: opencode reads from stdin when run without message args
-    const proc = spawn(cmd, ["run"], {
+    const proc = spawnTool(cmd, ["run"], {
       env: { ...process.env, NO_COLOR: "1", TERM: "dumb" },
       timeout: 600_000,
       stdio: ["pipe", "pipe", "pipe"],
@@ -419,7 +438,7 @@ function runOpencode(prompt: string, cmd: string): Promise<string> {
 
 function runAgent(prompt: string, cmd: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const proc = spawn(cmd, ["-p", "--output-format", "json", "--mode", "ask", "--trust"], {
+    const proc = spawnTool(cmd, ["-p", "--output-format", "json", "--mode", "ask", "--trust"], {
       env: { ...process.env, NO_COLOR: "1" },
       timeout: 600_000,
       stdio: ["pipe", "pipe", "pipe"],
@@ -1280,14 +1299,24 @@ export function stripAnsi(str: string): string {
   return str.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "").replace(/\x1B\][^\x07]*\x07/g, "");
 }
 
-function shell(cmd: string): Promise<string> {
+/**
+ * Resolve a command to its absolute path, cross-platform. Uses `where` on
+ * Windows and `which` elsewhere. Returns the first match, or `null` if not
+ * found. Both locators are real executables on PATH, so no shell is needed.
+ */
+function locateCommand(cmd: string): Promise<string | null> {
   return new Promise((resolve, reject) => {
-    const proc = spawn("sh", ["-c", cmd], { timeout: 5000 });
+    const locator = IS_WINDOWS ? "where" : "which";
+    const proc = spawn(locator, [cmd], { timeout: 5000 });
     let out = "";
     proc.stdout.on("data", (d) => (out += d.toString()));
     proc.on("close", (code) => {
-      if (code === 0) resolve(out);
-      else reject(new Error(`${cmd} failed`));
+      if (code !== 0) {
+        resolve(null);
+        return;
+      }
+      const first = out.split(/\r?\n/).find((line) => line.trim());
+      resolve(first ? first.trim() : null);
     });
     proc.on("error", reject);
   });

@@ -49,7 +49,7 @@ pnpm db:migrate:remote    # Apply to production D1 (requires auth)
 - **`</` escaping**: JSON in `<script>` tags MUST escape `</` as `<\/` — browsers close the tag otherwise (see `generator.ts`)
 - **`lastIndexOf("</head>")`**: Use `lastIndexOf`, not `indexOf` — minified JS in the viewer bundle may contain the string `</head>`
 - **Shared types**: `Scene`, `Annotation`, `DataSourceInfo`, `ReplaySession` live in `packages/types` (`@vibe-replay/types`). CLI and viewer re-export from there. Provider-specific and viewer-specific types remain in their respective packages.
-- **Viewer size limit**: Keep under 800KB after build. This is why we use `marked` instead of `react-markdown`. Watch for size regressions when adding features.
+- **Viewer size limit**: Keep under 1MB after build (current build is ~825KB). This is why we use `marked` instead of `react-markdown`. Watch for size regressions when adding features.
 - **Self-contained HTML**: Output must make zero external requests. Everything inlined.
 - **Multi-file sessions**: Claude Code `/resume` creates new JSONL files. Parser accepts `string | string[]` and merges by slug+project.
 - **Cursor tri-source**: Sessions come from SQLite `store.db` (primary), `globalStorage/state.vscdb`, or JSONL (fallback). Discovery merges all sources. DB data is source of truth; JSONL supplements missing thinking/images.
@@ -57,6 +57,7 @@ pnpm db:migrate:remote    # Apply to production D1 (requires auth)
 - **Skip `progress` lines**: These are subagent streaming artifacts in JSONL.
 - **sql.js (WASM)**: Used instead of native SQLite bindings for portability — no C++ compiler needed.
 - **Session discovery cache**: CLI picker + local dashboard use file cache at `~/.vibe-replay/cache/*.json` (stale-while-refresh UX). Cache validity is tied to CLI release version (`CLI_VERSION`) plus envelope version, so caches auto-invalidate across releases. Keep cache writes best-effort and never block generation/parsing on cache failures.
+- **Windows support**: Cursor encodes workspace dirs as `C:\a\b` → `C-a-b` (drive colon dropped, separators → `-`); `decodeProjectDir` has a `win32` branch that resolves these against the real filesystem (POSIX uses `/` root, Windows uses the drive root). Cursor on Windows stores IDE chats only in the `globalStorage/state.vscdb` under `%APPDATA%\Cursor` (there is no `~/.cursor/chats` dir). Replay output normalizes file paths to `/` for cross-platform display via `redactFilePath` in `transform.ts` — never apply that to prose. Build scripts shell out to `scripts/copy-file.mjs` instead of `mkdir -p`/`cp` (not available in PowerShell). `.gitattributes` forces `eol=lf` so Windows clones don't trip `oxfmt --check` with CRLF.
 
 ## Rules
 

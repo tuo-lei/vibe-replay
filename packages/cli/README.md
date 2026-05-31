@@ -78,6 +78,19 @@ Options:
   -h, --help              Display help
 ```
 
+## Search Local Sessions
+
+For agent-friendly lookup and retros:
+
+```bash
+vibe-replay sessions --query "codex parser" --limit 10 --json
+vibe-replay sessions --project "vibe-replay" --scan --json
+vibe-replay sessions --query "PR review CI" --any --brief --dedupe --json
+```
+
+Use `--scan` to include efficiency metrics such as prompt count, tool calls, edits, duration, compactions, and API errors.
+Use `--any` for explicit broad recall when you only remember loose keywords. Add `--brief` for scan-backed evidence (`matchQuality`, matched/unmatched terms, match reasons, brief, signals, and next action). Add `--dedupe` to collapse near-duplicate long-prompt sessions.
+
 ## Run from Source
 
 ```bash

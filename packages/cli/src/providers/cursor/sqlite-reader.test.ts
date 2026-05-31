@@ -93,6 +93,50 @@ describe("cursor sqlite metrics helpers", () => {
     expect(calls).toBe(2);
   });
 
+  it("builds live diagnostics signatures from session rows, not WAL probe metadata", () => {
+    const base = {
+      source: "global-state" as const,
+      probedAt: "2026-01-01T00:00:00.000Z",
+      dbPath: "/tmp/state.vscdb",
+      dbMtimeMs: 1,
+      walMtimeMs: 2,
+      walSize: 3,
+      composerBytes: 100,
+      composerLastUpdatedAt: "2026-01-01T00:00:00.000Z",
+      headerCount: 2,
+      latestBubbleId: "bubble-1",
+      latestBubbleCreatedAt: "2026-01-01T00:00:01.000Z",
+      bubbleCount: 2,
+      toolCallCount: 1,
+      toolResultCount: 0,
+      pendingToolCount: 1,
+      maxBubbleBytes: 80,
+      totalBubbleBytes: 120,
+    };
+
+    expect(
+      __testables.cursorLiveDiagnosticsSignature({
+        ...base,
+        probedAt: "2026-01-01T00:00:10.000Z",
+        walMtimeMs: 999,
+        walSize: 999,
+      }),
+    ).toBe(__testables.cursorLiveDiagnosticsSignature(base));
+    expect(
+      __testables.cursorLiveDiagnosticsSignature({
+        ...base,
+        toolResultCount: 1,
+        pendingToolCount: 0,
+      }),
+    ).not.toBe(__testables.cursorLiveDiagnosticsSignature(base));
+    expect(
+      __testables.cursorLiveDiagnosticsSignature({
+        ...base,
+        composerLastUpdatedAt: "2026-01-01T00:00:02.000Z",
+      }),
+    ).not.toBe(__testables.cursorLiveDiagnosticsSignature(base));
+  });
+
   it("computes token increments from cumulative snapshots", () => {
     const first = __testables.estimateTokenIncrement(
       {

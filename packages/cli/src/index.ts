@@ -32,6 +32,7 @@ import {
 import { publishLocal } from "./publishers/local.js";
 import { scanForSecrets } from "./scan.js";
 import { startDashboard, startServer } from "./server.js";
+import { formatSessionQueryText, queryLocalSessions } from "./session-query.js";
 import { transformToReplay } from "./transform.js";
 import type { ReplaySession, SessionInfo } from "./types.js";
 import { normalizeTitle } from "./utils.js";
@@ -191,17 +192,6 @@ program
   )
   .action(async (opts) => {
     console.log(chalk.bold.cyan("\n  vibe-replay") + chalk.dim(` v${CLI_VERSION}\n`));
-
-    // Windows is not supported yet (see https://github.com/tuo-lei/vibe-replay/issues/26)
-    if (process.platform === "win32") {
-      console.log(chalk.yellow("  ⚠ Windows is not supported yet.\n"));
-      console.log(chalk.dim("  We're working on it! Follow progress and updates:"));
-      console.log(
-        chalk.dim("  → ") + chalk.white("https://github.com/tuo-lei/vibe-replay/issues/26"),
-      );
-      console.log(chalk.dim("  → ") + chalk.white("https://vibe-replay.com\n"));
-      process.exit(1);
-    }
 
     const { join: pathJoin } = await import("node:path");
     const { homedir } = await import("node:os");
@@ -447,7 +437,12 @@ program
 
       const info = displayedSessions.find((s) => s.filePath === chosen);
       sessionInfo = info;
-      sessionPaths = info ? [...info.filePaths, ...(info.toolPaths || [])] : [chosen];
+      const sourcePaths = info
+        ? info.filePaths.length > 0
+          ? info.filePaths
+          : [info.filePath]
+        : [chosen];
+      sessionPaths = [...sourcePaths, ...(info?.toolPaths || [])];
       providerName = info?.provider || opts.provider;
     }
 
@@ -732,6 +727,64 @@ program
   });
 
 // ---------------------------------------------------------------------------
+// sessions — agent-friendly local session search
+// ---------------------------------------------------------------------------
+
+interface SessionsCommandOptions {
+  query?: string;
+  project?: string;
+  provider?: string;
+  limit?: number;
+  scan?: boolean;
+  any?: boolean;
+  brief?: boolean;
+  dedupe?: boolean;
+  json?: boolean;
+}
+
+program
+  .command("sessions")
+  .description("Search local AI coding sessions (agent-friendly)")
+  .option("-q, --query <text>", "Search title, prompt, project, branch, model, or slug")
+  .option("--project <text>", "Filter by project path substring")
+  .option("-p, --provider <name>", "Filter by provider (claude-code, cursor, codex, ...)")
+  .option("-l, --limit <number>", "Maximum sessions to return", (value) => Number(value), 10)
+  .option("--scan", "Run richer per-session scan for efficiency metrics")
+  .option("--any", "Match any query term instead of requiring all terms")
+  .option("--brief", "Include scan-backed session briefs and match evidence")
+  .option("--dedupe", "Collapse near-duplicate sessions with the same long prompt/title")
+  .option("--json", "Print machine-readable JSON")
+  .action(async (opts: SessionsCommandOptions) => {
+    const discoverSpinner = opts.json ? undefined : ora("Discovering local sessions...").start();
+    try {
+      const sessions = mergeSameSessions(await discoverAllSessions());
+      discoverSpinner?.succeed(`Found ${sessions.length} sessions`);
+
+      const scanSpinner =
+        opts.scan && !opts.json ? ora("Scanning matching sessions...").start() : undefined;
+      const matches = await queryLocalSessions(sessions, opts);
+      scanSpinner?.succeed(`Prepared ${matches.length} session result(s)`);
+
+      if (opts.json) {
+        console.log(JSON.stringify({ sessions: matches }, null, 2));
+      } else {
+        console.log();
+        console.log(formatSessionQueryText(matches));
+        console.log();
+      }
+    } catch (err) {
+      discoverSpinner?.fail("Session search failed");
+      const message = err instanceof Error ? err.message : String(err);
+      if (opts.json) {
+        console.error(message);
+      } else {
+        console.error(chalk.red(`\n  ✗ ${message}\n`));
+      }
+      process.exit(1);
+    }
+  });
+
+// ---------------------------------------------------------------------------
 // Auth command group — login, logout, status
 // ---------------------------------------------------------------------------
 
@@ -740,7 +793,7 @@ const authCmd = program.command("auth").description("Manage authentication");
 authCmd
   .command("login")
   .description("Log in to vibe-replay with GitHub")
-  .option("--api-url <url>", "API base URL", "https://vibe-replay.com")
+  .option("--api-url <url>", "API base URL", DEFAULT_API_URL)
   .action(async (opts) => {
     const crypto = await import("node:crypto");
     const apiUrl = opts.apiUrl.replace(/\/$/, "");
@@ -853,7 +906,7 @@ authCmd
 authCmd
   .command("logout")
   .description("Log out of vibe-replay")
-  .option("--api-url <url>", "API base URL", "https://vibe-replay.com")
+  .option("--api-url <url>", "API base URL", DEFAULT_API_URL)
   .action(async (opts) => {
     const apiUrl = opts.apiUrl.replace(/\/$/, "");
     const auth = loadAuthToken(apiUrl);
@@ -869,7 +922,7 @@ authCmd
 authCmd
   .command("status")
   .description("Show current authentication status")
-  .option("--api-url <url>", "API base URL", "https://vibe-replay.com")
+  .option("--api-url <url>", "API base URL", DEFAULT_API_URL)
   .action(async (opts) => {
     const apiUrl = opts.apiUrl.replace(/\/$/, "");
     const auth = loadAuthToken(apiUrl);
@@ -1028,11 +1081,6 @@ program
   .option("-p, --provider <name>", "Provider name (default: auto-detect)")
   .option("-s, --session <sessionId>", "Specific session ID to watch")
   .action(async (opts: { provider?: string; session?: string }) => {
-    if (process.platform === "win32") {
-      console.log(chalk.yellow("\n  ⚠ Windows is not supported yet.\n"));
-      process.exit(1);
-    }
-
     const { join: pathJoin } = await import("node:path");
     const { homedir } = await import("node:os");
     const replayBaseDir = pathJoin(homedir(), ".vibe-replay");
@@ -1114,7 +1162,7 @@ program
 program
   .command("login", { hidden: true })
   .description("Log in to vibe-replay (alias for auth login)")
-  .option("--api-url <url>", "API base URL", "https://vibe-replay.com")
+  .option("--api-url <url>", "API base URL", DEFAULT_API_URL)
   .action(async () => {
     // Delegate to auth login
     await authCmd.commands

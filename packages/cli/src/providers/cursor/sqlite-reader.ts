@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import type { CursorSidecars, PrLink, TokenUsage, TurnStat } from "@vibe-replay/types";
 import { readFileCache, writeFileCache } from "../../cache.js";
@@ -82,6 +82,34 @@ interface GlobalStateDiscoveryCache {
   decodedPathsHash: string;
   sessions: SessionInfo[];
   sessionIds: string[];
+}
+
+export interface CursorLiveDiagnostics {
+  // Keep in sync with LiveCursorDiagnostics in packages/viewer/src/hooks/useSessionLoader.ts.
+  source: "global-state";
+  signature: string;
+  probedAt: string;
+  dbPath: string;
+  dbMtimeMs: number;
+  walMtimeMs: number;
+  walSize: number;
+  composerBytes: number;
+  headerCount: number;
+  composerLastUpdatedAt?: string;
+  latestBubbleId?: string;
+  latestBubbleCreatedAt?: string;
+  latestBubbleUpdatedAt?: string;
+  latestBubbleType?: number;
+  latestTextPreview?: string;
+  latestToolName?: string;
+  latestToolHasResult?: boolean;
+  latestToolResultLength?: number;
+  bubbleCount: number;
+  toolCallCount: number;
+  toolResultCount: number;
+  pendingToolCount: number;
+  maxBubbleBytes: number;
+  totalBubbleBytes: number;
 }
 
 let cachedGlobalStateDb: CachedGlobalStateDb | null = null;
@@ -465,6 +493,146 @@ export async function resolveCursorLiveWatchPaths(sessionId: string): Promise<st
   }
 
   return [...paths];
+}
+
+export async function readCursorLiveDiagnostics(
+  sessionId: string,
+): Promise<CursorLiveDiagnostics | null> {
+  const globalStateDb = await openGlobalStateDb();
+  if (!globalStateDb || !(await hasGlobalStateSession(globalStateDb, sessionId))) return null;
+
+  const rawComposer = await queryGlobalStateTextValue(globalStateDb, `composerData:${sessionId}`);
+  const composer = parseJson<Record<string, any>>(rawComposer || "");
+  if (!composer) return null;
+
+  const headerBubbleIds = Array.isArray(composer.fullConversationHeadersOnly)
+    ? composer.fullConversationHeadersOnly
+        .map((header: any) =>
+          header && typeof header === "object" && typeof header.bubbleId === "string"
+            ? header.bubbleId
+            : "",
+        )
+        .filter(Boolean)
+    : Array.isArray(composer.conversation)
+      ? composer.conversation
+          .map((item: any) =>
+            item && typeof item === "object" && typeof item.bubbleId === "string"
+              ? item.bubbleId
+              : "",
+          )
+          .filter(Boolean)
+      : [];
+  const latestBubbleId = headerBubbleIds[headerBubbleIds.length - 1];
+
+  const bubbleRows: Record<string, any>[] = [];
+  const bubbleKeys = headerBubbleIds.map((bubbleId) => `bubbleId:${sessionId}:${bubbleId}`);
+  for (let i = 0; i < bubbleKeys.length; i += GLOBAL_STATE_BUBBLE_KEY_CHUNK_SIZE) {
+    const chunk = bubbleKeys.slice(i, i + GLOBAL_STATE_BUBBLE_KEY_CHUNK_SIZE);
+    bubbleRows.push(
+      ...(await queryGlobalStateRows(
+        globalStateDb,
+        [
+          "SELECT",
+          "key,",
+          "length(value) AS bytes,",
+          "json_extract(value,'$.type') AS type,",
+          "json_extract(value,'$.text') AS text,",
+          "json_extract(value,'$.createdAt') AS createdAt,",
+          "json_extract(value,'$.lastUpdatedAt') AS lastUpdatedAt,",
+          "json_extract(value,'$.toolFormerData.name') AS toolName,",
+          "json_extract(value,'$.toolFormerData.result') IS NOT NULL AS toolHasResult,",
+          "length(json_extract(value,'$.toolFormerData.result')) AS toolResultLength",
+          "FROM cursorDiskKV",
+          `WHERE key IN (${chunk.map(sqlString).join(",")}) AND json_valid(value)`,
+        ].join(" "),
+      )),
+    );
+  }
+  const bubbleRowsByKey = new Map(bubbleRows.map((row) => [valueToString(row.key), row]));
+  const latest = latestBubbleId
+    ? bubbleRowsByKey.get(`bubbleId:${sessionId}:${latestBubbleId}`) || {}
+    : {};
+  const latestToolName = valueToString(latest.toolName).trim();
+  let toolCallCount = 0;
+  let toolResultCount = 0;
+  let pendingToolCount = 0;
+  let maxBubbleBytes = 0;
+  let totalBubbleBytes = 0;
+  for (const row of bubbleRows) {
+    const bytes = toNonNegativeInt(row.bytes);
+    maxBubbleBytes = Math.max(maxBubbleBytes, bytes);
+    totalBubbleBytes += bytes;
+    if (!valueToString(row.toolName)) continue;
+    toolCallCount++;
+    if (Number(row.toolHasResult)) {
+      toolResultCount++;
+    } else {
+      pendingToolCount++;
+    }
+  }
+  const wal = await globalStateWalFingerprint(globalStateDb.dbPath);
+
+  const diagnostics: CursorLiveDiagnostics = {
+    source: "global-state",
+    probedAt: new Date().toISOString(),
+    dbPath: globalStateDb.dbPath,
+    dbMtimeMs: Math.round(globalStateDb.mtimeMs),
+    walMtimeMs: Math.round(wal.walMtimeMs),
+    walSize: Math.round(wal.walSize),
+    composerBytes: rawComposer ? Buffer.byteLength(rawComposer, "utf-8") : 0,
+    headerCount: headerBubbleIds.length,
+    ...(toIsoTimestamp(composer.lastUpdatedAt)
+      ? { composerLastUpdatedAt: toIsoTimestamp(composer.lastUpdatedAt) }
+      : {}),
+    ...(latestBubbleId ? { latestBubbleId } : {}),
+    ...(toIsoTimestamp(latest.createdAt)
+      ? { latestBubbleCreatedAt: toIsoTimestamp(latest.createdAt) }
+      : {}),
+    ...(toIsoTimestamp(latest.lastUpdatedAt)
+      ? { latestBubbleUpdatedAt: toIsoTimestamp(latest.lastUpdatedAt) }
+      : {}),
+    ...(typeof latest.type === "number" ? { latestBubbleType: latest.type } : {}),
+    ...(valueToString(latest.text).trim()
+      ? { latestTextPreview: valueToString(latest.text).replace(/\s+/g, " ").trim().slice(0, 160) }
+      : {}),
+    ...(latestToolName ? { latestToolName } : {}),
+    ...(latestToolName && latest.toolHasResult !== undefined
+      ? { latestToolHasResult: Number(latest.toolHasResult) !== 0 }
+      : {}),
+    ...(latest.toolResultLength !== null && latest.toolResultLength !== undefined
+      ? { latestToolResultLength: toNonNegativeInt(latest.toolResultLength) }
+      : {}),
+    bubbleCount: bubbleRows.length,
+    toolCallCount,
+    toolResultCount,
+    pendingToolCount,
+    maxBubbleBytes,
+    totalBubbleBytes,
+    signature: "",
+  };
+  diagnostics.signature = cursorLiveDiagnosticsSignature(diagnostics);
+  return diagnostics;
+}
+
+function cursorLiveDiagnosticsSignature(
+  diagnostics: Omit<CursorLiveDiagnostics, "signature">,
+): string {
+  return [
+    diagnostics.headerCount,
+    diagnostics.bubbleCount,
+    diagnostics.toolCallCount,
+    diagnostics.toolResultCount,
+    diagnostics.pendingToolCount,
+    diagnostics.composerBytes,
+    diagnostics.composerLastUpdatedAt || "",
+    diagnostics.latestBubbleId || "",
+    diagnostics.latestBubbleCreatedAt || "",
+    diagnostics.latestBubbleUpdatedAt || "",
+    diagnostics.latestToolName || "",
+    diagnostics.latestToolHasResult ? "1" : "0",
+    diagnostics.latestToolResultLength ?? "",
+    diagnostics.totalBubbleBytes,
+  ].join("|");
 }
 
 export async function listStoreDbSessionIds(forceRefresh = false): Promise<Set<string>> {
@@ -1791,7 +1959,9 @@ function addContextFilesFromAttachedFolderResult(
           ? normalizeCursorContextFile((file as Record<string, any>).name)
           : normalizeCursorContextFile(file);
       if (directory && name) {
-        addUniqueContextFile(files, seen, join(directory, name));
+        // Workspace-relative context paths are always POSIX-style; never use the
+        // OS-specific separator here (it would emit `src\\utils.ts` on Windows).
+        addUniqueContextFile(files, seen, posix.join(directory, name));
         continue;
       }
 
@@ -3133,5 +3303,6 @@ export const __testables = {
   parseUserContent,
   projectedCursorBubbleRowToBubble,
   projectedCursorBubbleSelectSql,
+  cursorLiveDiagnosticsSignature,
   sqlKeyPrefixRange,
 };

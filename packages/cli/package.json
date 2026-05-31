@@ -35,6 +35,7 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsx src/index.ts",
+    "eval:sessions": "tsx scripts/eval-session-query.ts",
     "test": "vitest run"
   },
   "dependencies": {

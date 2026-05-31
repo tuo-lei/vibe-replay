@@ -21,6 +21,8 @@ import {
   parseCursorSqlite,
 } from "./sqlite-reader.js";
 
+const CURSOR_UUID_SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function toErrorMessage(err: unknown): string {
   if (err instanceof Error && err.message) return err.message;
   return String(err);
@@ -39,17 +41,19 @@ export async function parseCursorSession(
   const paths = Array.isArray(filePaths) ? filePaths : [filePaths];
   const transcriptPaths = paths.filter((p) => p.endsWith(".jsonl"));
   const explicitToolPaths = paths.filter((p) => p.endsWith(".txt"));
+  const inferredSqliteSession = inferCursorSqliteSession(paths);
   let sqliteError: string | undefined;
   let sqliteFallbackNote: string | undefined;
   let sqliteAttempted = false;
 
   // Try SQLite first if session info is available
-  if (sessionInfo?.sessionId) {
+  const sqliteSessionId = sessionInfo?.sessionId || inferredSqliteSession?.sessionId;
+  if (sqliteSessionId) {
     sqliteAttempted = true;
     let sqliteResult: ProviderParseResult | null = null;
     try {
-      const preferredWorkspacePath = sessionInfo.workspacePath || sessionInfo.cwd || "";
-      sqliteResult = await parseCursorSqlite(preferredWorkspacePath, sessionInfo.sessionId);
+      const preferredWorkspacePath = sessionInfo?.workspacePath || sessionInfo?.cwd || "";
+      sqliteResult = await parseCursorSqlite(preferredWorkspacePath, sqliteSessionId);
     } catch (err) {
       // Cursor DB schemas can vary across versions/hosts; fall back to JSONL when available.
       sqliteError = compactErrorMessage(err);
@@ -148,6 +152,34 @@ export async function parseCursorSession(
     }
   }
   return jsonlResult;
+}
+
+function inferCursorSqliteSession(paths: string[]): { sessionId: string } | undefined {
+  for (const path of paths) {
+    const sessionId = sessionIdFromGlobalStatePath(path) || sessionIdFromStoreDbPath(path);
+    if (sessionId) return { sessionId };
+  }
+  return undefined;
+}
+
+function sessionIdFromGlobalStatePath(path: string): string | undefined {
+  const marker = "#composerData:";
+  const markerIndex = path.indexOf(marker);
+  if (markerIndex < 0) return undefined;
+  const rawSessionId = path
+    .slice(markerIndex + marker.length)
+    .split(/[/?#]/, 1)[0]
+    ?.trim();
+  return rawSessionId || undefined;
+}
+
+function sessionIdFromStoreDbPath(path: string): string | undefined {
+  const normalized = path.replaceAll("\\", "/");
+  const parts = normalized.split("/");
+  if (parts.at(-1) !== "store.db") return undefined;
+  const rawSessionId = parts.at(-2)?.trim();
+  if (!rawSessionId || !CURSOR_UUID_SESSION_ID_RE.test(rawSessionId)) return undefined;
+  return rawSessionId;
 }
 
 async function tryLoadSdkEnrichment(sessionId: string): Promise<SdkAgentEnrichment | null> {
@@ -402,7 +434,9 @@ function normalizeImagePlaceholderLines(text: string): string {
 }
 
 function resolveImagePath(pathValue: string): string {
-  if (pathValue.startsWith("~/")) return join(homedir(), pathValue.slice(2));
+  if (pathValue.startsWith("~/") || pathValue.startsWith("~\\")) {
+    return join(homedir(), pathValue.slice(2));
+  }
   return pathValue;
 }
 
@@ -420,7 +454,9 @@ function extractImageFilePathsFromText(text: string): { cleanedText: string; pat
   let match: RegExpExecArray | null;
   while ((match = blockPattern.exec(text)) !== null) {
     const blockContent = match[1];
-    const pathRegex = /(?:^|\n)\s*(?:\d+\.\s*)?((?:~\/|\/)[^\n]+\.(?:png|jpe?g|gif|webp))/gi;
+    // Match POSIX (`~/`, `/`) and Windows (`~\`, `\`, `C:\`) absolute image paths.
+    const pathRegex =
+      /(?:^|\n)\s*(?:\d+\.\s*)?((?:~[\\/]|[\\/]|[A-Za-z]:[\\/])[^\n]+\.(?:png|jpe?g|gif|webp))/gi;
     let pathMatch: RegExpExecArray | null;
     while ((pathMatch = pathRegex.exec(blockContent)) !== null) {
       const pathValue = pathMatch[1].trim();

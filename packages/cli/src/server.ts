@@ -35,7 +35,10 @@ import { mergeInsights, readInsightsStore, writeInsightsStore } from "./insights
 import { loadOverlays, sessionWithEffectiveContent } from "./overlays.js";
 import { parseClaudeCodeLines } from "./providers/claude-code/parser.js";
 import { parseCodexLines } from "./providers/codex/parser.js";
-import { resolveCursorLiveWatchPaths } from "./providers/cursor/sqlite-reader.js";
+import {
+  readCursorLiveDiagnostics,
+  resolveCursorLiveWatchPaths,
+} from "./providers/cursor/sqlite-reader.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
 import {
   getApiUrl,
@@ -467,6 +470,13 @@ interface PersistedInsightsCache {
   computedAt: string | null;
 }
 
+interface EnrichmentHints {
+  sessionIds?: string[];
+  slugs?: string[];
+  projects?: string[];
+  limit?: number;
+}
+
 function sourceSessionKey(provider: string, project: string, slug: string): string {
   return `${provider}::${project}::${slug}`;
 }
@@ -486,8 +496,13 @@ function pickSourceRecordForSession(
 function selectCursorEnrichmentCandidates(
   merged: SessionInfo[],
   baseSources: SourceSummaryRecord[],
-  limit = 30,
+  limitOrHints: number | EnrichmentHints = 30,
 ): SessionInfo[] {
+  const hints = typeof limitOrHints === "number" ? { limit: limitOrHints } : limitOrHints;
+  const limit = Math.max(1, Math.min(hints.limit ?? 30, 100));
+  const preferredSessionIds = new Set(hints.sessionIds || []);
+  const preferredSlugs = new Set(hints.slugs || []);
+  const preferredProjects = new Set(hints.projects || []);
   const mergedBySessionId = new Map<string, SessionInfo>();
   const mergedByKey = new Map<string, SessionInfo>();
   for (const session of merged) {
@@ -514,8 +529,125 @@ function selectCursorEnrichmentCandidates(
       return byId || mergedByKey.get(sourceSessionKey(s.provider, s.project, s.slug));
     })
     .filter((s): s is SessionInfo => Boolean(s))
-    .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+    .sort((a, b) => {
+      const scoreDelta =
+        enrichmentPriorityScore(b, preferredSessionIds, preferredSlugs, preferredProjects) -
+        enrichmentPriorityScore(a, preferredSessionIds, preferredSlugs, preferredProjects);
+      return scoreDelta || b.timestamp.localeCompare(a.timestamp);
+    })
     .slice(0, limit);
+}
+
+function enrichmentPriorityScore(
+  session: SessionInfo,
+  preferredSessionIds: Set<string>,
+  preferredSlugs: Set<string>,
+  preferredProjects: Set<string>,
+): number {
+  let score = 0;
+  if (preferredSessionIds.has(session.sessionId)) score += 1000;
+  if (preferredSlugs.has(session.slug)) score += 800;
+  if (preferredProjects.has(session.project)) score += 400;
+  if (session.timestamp && Date.now() - Date.parse(session.timestamp) <= 24 * 60 * 60 * 1000) {
+    score += 100;
+  }
+  if (session.hasPR) score += 25;
+  if (session.hasSqlite) score += 10;
+  return score;
+}
+
+function prioritizeScanInputs(
+  inputs: ScanInput[],
+  previousResults: SessionScanResult[],
+  hints: EnrichmentHints = {},
+): ScanInput[] {
+  const previousSessionIds = new Set(previousResults.map((result) => result.sessionId));
+  const preferredSessionIds = new Set(hints.sessionIds || []);
+  const preferredSlugs = new Set(hints.slugs || []);
+  const preferredProjects = new Set(hints.projects || []);
+
+  return [...inputs].sort((a, b) => {
+    const scoreDelta =
+      scanInputPriorityScore(
+        b,
+        previousSessionIds,
+        preferredSessionIds,
+        preferredSlugs,
+        preferredProjects,
+      ) -
+      scanInputPriorityScore(
+        a,
+        previousSessionIds,
+        preferredSessionIds,
+        preferredSlugs,
+        preferredProjects,
+      );
+    return scoreDelta || (b.timestamp || "").localeCompare(a.timestamp || "");
+  });
+}
+
+function scanInputPriorityScore(
+  input: ScanInput,
+  previousSessionIds: Set<string>,
+  preferredSessionIds: Set<string>,
+  preferredSlugs: Set<string>,
+  preferredProjects: Set<string>,
+): number {
+  let score = 0;
+  if (!previousSessionIds.has(input.sessionId)) score += 1000;
+  if (preferredSessionIds.has(input.sessionId)) score += 2000;
+  if (preferredSlugs.has(input.slug)) score += 1600;
+  if (preferredProjects.has(input.project)) score += 400;
+  if (input.timestamp && Date.now() - Date.parse(input.timestamp) <= 24 * 60 * 60 * 1000) {
+    score += 100;
+  }
+  return score;
+}
+
+function mergeEnrichmentHints(
+  existing: EnrichmentHints | undefined,
+  next: EnrichmentHints,
+): EnrichmentHints {
+  return {
+    sessionIds: uniqueStrings([...(existing?.sessionIds || []), ...(next.sessionIds || [])]),
+    slugs: uniqueStrings([...(existing?.slugs || []), ...(next.slugs || [])]),
+    projects: uniqueStrings([...(existing?.projects || []), ...(next.projects || [])]),
+    limit: Math.max(existing?.limit || 0, next.limit || 0) || undefined,
+  };
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.filter((value) => typeof value === "string" && value.trim()))].slice(
+    0,
+    200,
+  );
+}
+
+function enrichmentHintsFromBody(value: unknown): EnrichmentHints {
+  if (!value || typeof value !== "object") return {};
+  const body = value as Record<string, unknown>;
+  return {
+    sessionIds: stringArrayFromUnknown(body.sessionIds),
+    slugs: stringArrayFromUnknown(body.slugs),
+    projects: stringArrayFromUnknown(body.projects),
+    limit: typeof body.limit === "number" ? body.limit : undefined,
+  };
+}
+
+function stringArrayFromUnknown(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const strings = value.filter(
+    (item): item is string => typeof item === "string" && item.trim().length > 0,
+  );
+  return strings.length > 0 ? [...new Set(strings)] : undefined;
+}
+
+function normalizeSessionProjectsForHome(sessions: SessionInfo[], home: string): SessionInfo[] {
+  return sessions.map((session) =>
+    session.project.startsWith(home)
+      ? { ...session, project: `~${session.project.slice(home.length)}` }
+      : { ...session },
+  );
 }
 
 function countSessionStats(turns: ParsedTurn[]): {
@@ -597,7 +729,8 @@ async function buildSourcesResult(
   const projectExistsMap = new Map<string, boolean>();
   const projectIsGitMap = new Map<string, boolean>();
   for (const p of uniqueProjects) {
-    const resolved = p.startsWith("~/") ? join(home, p.slice(2)) : p === "~" ? home : p;
+    const resolved =
+      p === "~" ? home : p.startsWith("~/") || p.startsWith("~\\") ? join(home, p.slice(2)) : p;
     try {
       const s = await stat(resolved);
       projectExistsMap.set(p, s.isDirectory());
@@ -944,16 +1077,30 @@ export async function startServer(
     total: 0,
     updated: 0,
   };
+  let pendingSourcesEnrichment: {
+    merged: SessionInfo[];
+    baseSources: SourceSummaryRecord[];
+    hints: EnrichmentHints;
+  } | null = null;
+  let lastDiscoveredMergedSessions: SessionInfo[] = [];
 
   const enrichCursorStatsInBackground = (
     merged: SessionInfo[],
     baseSources: SourceSummaryRecord[],
+    hints: EnrichmentHints = {},
   ): void => {
-    if (sourcesEnrichmentStatus.running) return;
+    if (sourcesEnrichmentStatus.running) {
+      pendingSourcesEnrichment = {
+        merged,
+        baseSources,
+        hints: mergeEnrichmentHints(pendingSourcesEnrichment?.hints, hints),
+      };
+      return;
+    }
     const cursorProvider = getProvider("cursor");
     if (!cursorProvider) return;
 
-    const candidates = selectCursorEnrichmentCandidates(merged, baseSources);
+    const candidates = selectCursorEnrichmentCandidates(merged, baseSources, hints);
 
     sourcesEnrichmentStatus = {
       running: true,
@@ -976,9 +1123,10 @@ export async function startServer(
       return;
     }
 
+    const enrichedSources = baseSources.map((s) => ({ ...s }));
+
     void (async () => {
       let changed = false;
-      const enrichedSources = baseSources.map((s) => ({ ...s }));
       const bySessionId = new Map<string, SourceSummaryRecord>();
       const byKey = new Map<string, SourceSummaryRecord>();
       for (const source of enrichedSources) {
@@ -1062,6 +1210,11 @@ export async function startServer(
         running: false,
         finishedAt: new Date().toISOString(),
       };
+      const pending = pendingSourcesEnrichment;
+      pendingSourcesEnrichment = null;
+      if (pending) {
+        enrichCursorStatsInBackground(pending.merged, enrichedSources, pending.hints);
+      }
     })().catch(() => {
       sourcesEnrichmentStatus = {
         ...sourcesEnrichmentStatus,
@@ -1069,6 +1222,11 @@ export async function startServer(
         finishedAt: new Date().toISOString(),
         message: "Cursor stat backfill failed",
       };
+      const pending = pendingSourcesEnrichment;
+      pendingSourcesEnrichment = null;
+      if (pending) {
+        enrichCursorStatsInBackground(pending.merged, enrichedSources, pending.hints);
+      }
     });
   };
 
@@ -1258,7 +1416,7 @@ export async function startServer(
    * each one (newest first) to extract metadata for insights. Uses cache
    * so unchanged sessions are skipped.
    */
-  const startBackgroundScan = (): void => {
+  const startBackgroundScan = (hints: EnrichmentHints = {}): void => {
     if (scanState.running) return;
     const previousResults = scanState.results;
     const previousFinishedAt = scanState.finishedAt;
@@ -1290,25 +1448,31 @@ export async function startServer(
             s.project = `~${s.project.slice(home.length)}`;
           }
         }
+        lastDiscoveredMergedSessions = merged.map((session) => ({ ...session }));
 
-        // Build scan inputs (newest first — already sorted by discovery)
-        const scanInputs: ScanInput[] = merged.map((s) => ({
-          sessionId: s.sessionId,
-          provider: s.provider,
-          project: s.project,
-          slug: s.slug,
-          filePaths: s.filePaths,
-          toolPaths: s.toolPaths,
-          sourceFilePath: s.filePath,
-          sourceFileSize: s.fileSize,
-          sourceLineCount: s.lineCount,
-          workspacePath: s.workspacePath,
-          hasSqlite: s.hasSqlite,
-          deferRichCursorParse: s.provider === "cursor" && !!s.hasSqlite,
-          timestamp: s.timestamp,
-          title: s.title,
-          firstPrompt: s.firstPrompt,
-        }));
+        // Build scan inputs, then rank the catch-up order so new and UI-hinted
+        // sessions land in the scan cache before long-tail unchanged history.
+        const scanInputs: ScanInput[] = prioritizeScanInputs(
+          merged.map((s) => ({
+            sessionId: s.sessionId,
+            provider: s.provider,
+            project: s.project,
+            slug: s.slug,
+            filePaths: s.filePaths,
+            toolPaths: s.toolPaths,
+            sourceFilePath: s.filePath,
+            sourceFileSize: s.fileSize,
+            sourceLineCount: s.lineCount,
+            workspacePath: s.workspacePath,
+            hasSqlite: s.hasSqlite,
+            deferRichCursorParse: s.provider === "cursor" && !!s.hasSqlite,
+            timestamp: s.timestamp,
+            title: s.title,
+            firstPrompt: s.firstPrompt,
+          })),
+          previousResults,
+          hints,
+        );
 
         scanState.total = scanInputs.length;
 
@@ -1449,6 +1613,7 @@ export async function startServer(
       let inFlight = false;
       let dirty = false;
       let lastSignature: string | null = null;
+      let lastCursorDiagnosticsSignature: string | null = null;
       // Live session state (busy / idle / stopped / unknown) — populated
       // from `~/.claude/sessions/<pid>.json` for Claude. Other providers
       // don't write that file, so they get "unknown" and the viewer keeps
@@ -1607,6 +1772,24 @@ export async function startServer(
           // silently go stale.
           ensureWatchersFor(paths);
           await ensureCursorDbWatchersFor(info);
+          const cursorDiagnostics =
+            isCursorProvider && info.hasSqlite
+              ? await readCursorLiveDiagnostics(info.sessionId).catch(() => null)
+              : null;
+          if (
+            cursorDiagnostics &&
+            lastCursorDiagnosticsSignature === cursorDiagnostics.signature &&
+            lastSignature !== null
+          ) {
+            await stream.writeSSE({
+              data: JSON.stringify({
+                type: "diagnostics",
+                cursorDiagnostics,
+                cursorRowsChanged: false,
+              }),
+            });
+            return;
+          }
           let parsed;
           if (isJsonlLiveProvider) {
             // Tail-based fast path. Concat already-cached lines from every
@@ -1651,6 +1834,9 @@ export async function startServer(
             lastLiveState = await readClaudeSessionState(sessionId);
           }
           const signature = JSON.stringify(replay.scenes);
+          if (cursorDiagnostics) {
+            lastCursorDiagnosticsSignature = cursorDiagnostics.signature;
+          }
           if (signature !== lastSignature) {
             lastSignature = signature;
             await stream.writeSSE({
@@ -1658,6 +1844,15 @@ export async function startServer(
                 type: "session",
                 session: replay,
                 state: lastLiveState,
+                ...(cursorDiagnostics ? { cursorDiagnostics, cursorRowsChanged: true } : {}),
+              }),
+            });
+          } else if (cursorDiagnostics) {
+            await stream.writeSSE({
+              data: JSON.stringify({
+                type: "diagnostics",
+                cursorDiagnostics,
+                cursorRowsChanged: true,
               }),
             });
           }
@@ -1882,6 +2077,38 @@ export async function startServer(
     return c.json(sourcesEnrichmentStatus);
   });
 
+  app.post("/api/sources/enrich", async (c) => {
+    const hints = enrichmentHintsFromBody(await c.req.json().catch(() => undefined));
+    const cached = await readFileCache<SourceSummaryRecord[]>(sourcesCacheKey);
+    if (!cached?.data?.length) {
+      return c.json({ ok: false, message: "No sources cache available" }, 404);
+    }
+    const cursorProvider = getProvider("cursor");
+    if (!cursorProvider) return c.json({ ok: false, message: "Cursor provider unavailable" }, 404);
+
+    const home = homedir();
+    let cursorSessions = lastDiscoveredMergedSessions.filter(
+      (session) => session.provider === "cursor",
+    );
+    if (cursorSessions.length === 0) {
+      cursorSessions = normalizeSessionProjectsForHome(
+        mergeSameSessions(await cursorProvider.discover()),
+        home,
+      );
+      lastDiscoveredMergedSessions = [
+        ...lastDiscoveredMergedSessions.filter((session) => session.provider !== "cursor"),
+        ...cursorSessions,
+      ];
+    }
+    const wasRunning = sourcesEnrichmentStatus.running;
+    enrichCursorStatsInBackground(cursorSessions, cached.data, hints);
+    return c.json({
+      ok: true,
+      running: sourcesEnrichmentStatus.running,
+      queued: wasRunning,
+    });
+  });
+
   app.get("/api/sources", async (c) => {
     try {
       const providers = getAllProviders();
@@ -1892,6 +2119,7 @@ export async function startServer(
       }
 
       const merged = mergeSameSessions(allSessions);
+      lastDiscoveredMergedSessions = normalizeSessionProjectsForHome(merged, homedir());
       const previous = await readFileCache<SourceSummaryRecord[]>(sourcesCacheKey);
       const result = await buildSourcesResult(
         merged,
@@ -1933,6 +2161,7 @@ export async function startServer(
         }
 
         const merged = mergeSameSessions(allSessions);
+        lastDiscoveredMergedSessions = normalizeSessionProjectsForHome(merged, homedir());
         const previous = await readFileCache<SourceSummaryRecord[]>(sourcesCacheKey);
         const result = await buildSourcesResult(
           merged,
@@ -2119,7 +2348,8 @@ export async function startServer(
   // --- Session scanner: background metadata extraction for insights ---
 
   app.post("/api/scan/start", async (c) => {
-    startBackgroundScan();
+    const hints = enrichmentHintsFromBody(await c.req.json().catch(() => undefined));
+    startBackgroundScan(hints);
     return c.json({ ok: true, message: "Background scan started" });
   });
 
@@ -2667,7 +2897,9 @@ export async function startServer(
       versionArgs: string[] = ["--version"],
       extraCheck?: (run: RunCommand) => Promise<ExtraCheckResult>,
     ): Promise<ToolCheck> {
-      const whichResult = await runCommand("which", [cmd]);
+      // Windows has no `which`; `where` is the builtin equivalent.
+      const locator = process.platform === "win32" ? "where" : "which";
+      const whichResult = await runCommand(locator, [cmd]);
       if (!whichResult.ok) {
         if (whichResult.timedOut) {
           return { name, label, purpose, installed: false, detail: CHECK_TIMEOUT_DETAIL };
@@ -3309,6 +3541,7 @@ export const __testables = {
   buildInsightsSyncBatches,
   countSessionStats,
   pickSourceRecordForSession,
+  prioritizeScanInputs,
   selectCursorEnrichmentCandidates,
   sourceSessionKey,
 };

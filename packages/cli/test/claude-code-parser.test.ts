@@ -1,7 +1,12 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import type { ContentBlock } from "../src/types.js";
 import { parseClaudeCodeSession } from "../src/providers/claude-code/parser.js";
 import { transformToReplay } from "../src/transform.js";
+
+type TextBlock = Extract<ContentBlock, { type: "text" }>;
+type ToolUseBlock = Extract<ContentBlock, { type: "tool_use" }>;
+type UserImagesBlock = Extract<ContentBlock, { type: "_user_images" }>;
 
 const FIXTURE = join(import.meta.dirname, "fixtures/claude-code-session.jsonl");
 const IMG_FIXTURE = join(import.meta.dirname, "fixtures/claude-code-images.jsonl");
@@ -48,7 +53,7 @@ describe("Claude Code parser", () => {
       .flatMap((t) => t.blocks)
       .find((b) => b.type === "tool_use" && b.name === "Read");
     expect(readBlock).toBeDefined();
-    expect((readBlock as any)._result).toContain("export function login()");
+    expect((readBlock as ToolUseBlock)._result).toContain("export function login()");
   });
 
   it("computes total duration from turn_duration events", async () => {
@@ -62,7 +67,7 @@ describe("Claude Code parser", () => {
     const allText = result.turns
       .flatMap((t) => t.blocks)
       .filter((b) => b.type === "text")
-      .map((b) => (b as any).text)
+      .map((b) => (b as TextBlock).text)
       .join(" ");
     expect(allText).not.toContain("streaming");
   });
@@ -74,10 +79,10 @@ describe("Claude Code parser — images", () => {
     const userTurns = result.turns.filter((t) => t.role === "user");
     // User turn should have text + _user_images block
     const first = userTurns[0];
-    const imgBlock = first.blocks.find((b) => (b as any).type === "_user_images");
+    const imgBlock = first.blocks.find((b): b is UserImagesBlock => b.type === "_user_images");
     expect(imgBlock).toBeDefined();
-    expect((imgBlock as any).images).toHaveLength(1);
-    expect((imgBlock as any).images[0]).toMatch(/^data:image\/png;base64,/);
+    expect(imgBlock!.images).toHaveLength(1);
+    expect(imgBlock!.images[0]).toMatch(/^data:image\/png;base64,/);
   });
 
   it("extracts tool result images", async () => {
@@ -85,8 +90,8 @@ describe("Claude Code parser — images", () => {
     const assistantTurns = result.turns.filter((t) => t.role === "assistant");
     const toolUse = assistantTurns[0]?.blocks.find((b) => b.type === "tool_use");
     expect(toolUse).toBeDefined();
-    expect((toolUse as any)._images).toHaveLength(1);
-    expect((toolUse as any)._images[0]).toMatch(/^data:image\/jpeg;base64,/);
+    expect((toolUse as ToolUseBlock)._images).toHaveLength(1);
+    expect((toolUse as ToolUseBlock)._images![0]).toMatch(/^data:image\/jpeg;base64,/);
   });
 });
 

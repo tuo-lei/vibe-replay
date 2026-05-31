@@ -3,9 +3,9 @@ import { cleanPromptText } from "../src/clean-prompt.js";
 
 describe("cleanPromptText", () => {
   it("returns empty string for non-string input", () => {
-    expect(cleanPromptText(42 as any)).toBe("");
-    expect(cleanPromptText(null as any)).toBe("");
-    expect(cleanPromptText(undefined as any)).toBe("");
+    expect(cleanPromptText(42)).toBe("");
+    expect(cleanPromptText(null)).toBe("");
+    expect(cleanPromptText(undefined)).toBe("");
   });
 
   it("passes through normal user prompts unchanged", () => {

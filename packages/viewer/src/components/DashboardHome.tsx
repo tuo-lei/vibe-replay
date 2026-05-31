@@ -4,6 +4,7 @@ import type { SessionSummary, SourceSession } from "../types";
 import { localDayKey } from "../utils/date";
 import { SessionDetailPopup } from "./Dashboard";
 import {
+  fetchWithRetry,
   formatCompactDuration,
   isCacheFresh,
   navigateTo,
@@ -20,6 +21,7 @@ import {
 } from "./dashboard-utils";
 import { ContributionHeatmap } from "./InsightsPage";
 import { useScanInsightsContext } from "./InsightsPanel";
+import { DataLevelBadge, SessionLoadingToast, sessionDataState } from "./SessionDataProgress";
 import { formatDuration } from "./StatsPanel";
 
 // ─── Types ───────────────────────────────────────────────────────────
@@ -54,7 +56,7 @@ function useDashboardData() {
   const [loadingReplays, setLoadingReplays] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [, setScanProgress] = useState<number | null>(null);
-  const [, setEnrichmentStatus] = useState<SourcesEnrichmentStatus | null>(null);
+  const [enrichmentStatus, setEnrichmentStatus] = useState<SourcesEnrichmentStatus | null>(null);
   const wasEnrichingRef = useRef(false);
   const lastSourcesCachedAtRef = useRef<string | undefined>(undefined);
   const hasCursorSources = useMemo(
@@ -127,7 +129,7 @@ function useDashboardData() {
               // SSE failed — fall back to regular fetch
               es.close();
               setScanProgress(null);
-              fetch("/api/sources")
+              fetchWithRetry("/api/sources")
                 .then((r) => {
                   if (!r.ok) throw new Error("Failed to load sources");
                   return r.json();
@@ -146,7 +148,7 @@ function useDashboardData() {
 
       if (!replayFresh) {
         refreshPromises.push(
-          fetch("/api/sessions")
+          fetchWithRetry("/api/sessions")
             .then((r) => {
               if (!r.ok) throw new Error("Failed to load replays");
               return r.json();
@@ -207,6 +209,10 @@ function useDashboardData() {
       } else if (wasEnrichingRef.current) {
         wasEnrichingRef.current = false;
         await maybeRefreshSourcesFromCache();
+        if (timer) {
+          window.clearInterval(timer);
+          timer = undefined;
+        }
       }
     };
 
@@ -228,6 +234,7 @@ function useDashboardData() {
     loading,
     loadingSources,
     loadingReplays,
+    enrichmentStatus,
     error,
   };
 }
@@ -339,6 +346,7 @@ function ProviderBadge({ provider }: { provider: string }) {
 function RecentSessionsList({
   sessions,
   isLoading,
+  enrichmentStatus,
   onViewAll,
   onGenerate,
   onViewReplay,
@@ -348,6 +356,7 @@ function RecentSessionsList({
 }: {
   sessions: SourceSession[];
   isLoading: boolean;
+  enrichmentStatus?: SourcesEnrichmentStatus | null;
   onViewAll: () => void;
   onGenerate: (source: SourceSession) => void;
   onViewReplay: (slug: string) => void;
@@ -369,6 +378,8 @@ function RecentSessionsList({
         const hasReplay = !!s.existingReplay;
         const isGenerating = generatingSlug === s.slug;
         const hasError = generateErrorSlug === s.slug;
+        const isEnriching = Boolean(enrichmentStatus?.running) && s.provider === "cursor";
+        const dataState = sessionDataState(s, null);
         return (
           <div
             key={`${s.provider}-${s.slug}`}
@@ -380,9 +391,12 @@ function RecentSessionsList({
               <p className="text-sm font-sans text-terminal-text truncate">
                 {sourceSuggestedTitle(s)}
               </p>
-              <p className="text-[11px] font-mono text-terminal-dimmer truncate">
-                {projectName(s.project)}
-              </p>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <p className="text-[11px] font-mono text-terminal-dimmer truncate">
+                  {projectName(s.project)}
+                </p>
+                {isEnriching && <DataLevelBadge state={dataState} active compact />}
+              </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <span className="text-[11px] font-mono text-terminal-dimmer tabular-nums">
@@ -655,8 +669,16 @@ function SystemChecksSection() {
 // ─── Main Component ──────────────────────────────────────────────────
 
 export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
-  const { sources, setSources, replays, loading, loadingSources, loadingReplays, error } =
-    useDashboardData();
+  const {
+    sources,
+    setSources,
+    replays,
+    loading,
+    loadingSources,
+    loadingReplays,
+    enrichmentStatus,
+    error,
+  } = useDashboardData();
   const insights = useMemo(() => computeInsights(sources, replays), [sources, replays]);
   const { scanStatus, userInsights } = useScanInsightsContext();
   const [generatingSlug, setGeneratingSlug] = useState<string | null>(null);
@@ -668,6 +690,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [tick, setTick] = useState(0);
+  const requestedEnrichmentSignatureRef = useRef("");
   const syncPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const syncPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedSession = selectedSlug
@@ -696,7 +719,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     setGenerateErrorSlug(null);
     try {
       const title = sourceSuggestedTitle(source);
-      const resp = await fetch("/api/generate", {
+      const resp = await fetchWithRetry("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -725,7 +748,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     setGeneratingSlug(source.slug);
     setGenerateErrorSlug(null);
     try {
-      const resp = await fetch("/api/generate", {
+      const resp = await fetchWithRetry("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -867,6 +890,36 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     };
   }, []);
 
+  useEffect(() => {
+    if (loadingSources || insights.recentSources.length === 0) return;
+    const prioritySessions = insights.recentSources
+      .filter((session) => session.provider === "cursor")
+      .slice(0, 10);
+    if (prioritySessions.length === 0) return;
+
+    const slugs = prioritySessions.map((session) => session.slug);
+    const sessionIds = prioritySessions
+      .map((session) => session.sessionId)
+      .filter(
+        (sessionId): sessionId is string => typeof sessionId === "string" && sessionId.length > 0,
+      );
+    const projects = [...new Set(prioritySessions.map((session) => session.project))].slice(0, 5);
+    const signature = JSON.stringify({ slugs });
+    if (requestedEnrichmentSignatureRef.current === signature) return;
+    requestedEnrichmentSignatureRef.current = signature;
+
+    fetch("/api/sources/enrich", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        slugs,
+        sessionIds,
+        projects,
+        limit: Math.max(10, prioritySessions.length),
+      }),
+    }).catch(() => {});
+  }, [insights.recentSources, loadingSources]);
+
   // Tick every 30s to update "synced X ago" relative time
   useEffect(() => {
     if (!lastSyncedAt) return;
@@ -890,6 +943,10 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     return (
       <div className="flex-1 overflow-auto animate-in fade-in duration-500">
         <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 space-y-6">
+          <SessionLoadingToast
+            title="Fetching local sessions"
+            description="Loading cached sessions first, then enriching recent Cursor details in place."
+          />
           {/* Overview + activity skeleton */}
           <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm space-y-4">
             <div className="grid grid-cols-4 gap-6">
@@ -1049,6 +1106,22 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           </div>
         </div>
 
+        {(loadingSources || (enrichmentStatus?.running && enrichmentStatus.total > 0)) && (
+          <SessionLoadingToast
+            status={enrichmentStatus?.running ? enrichmentStatus : null}
+            title={
+              loadingSources
+                ? "Refreshing local session list"
+                : "Loading more local session details"
+            }
+            description={
+              loadingSources
+                ? "Home is using cached data while local providers refresh in the background."
+                : "Recent sessions will update in place as titles, prompt previews, counts, and metrics become available."
+            }
+          />
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-stretch">
           <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm flex flex-col">
             <div className="flex items-center justify-between mb-3">
@@ -1063,6 +1136,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
               <RecentSessionsList
                 sessions={insights.recentSources}
                 isLoading={loadingSources}
+                enrichmentStatus={enrichmentStatus}
                 onViewAll={() => onNavigate("sessions")}
                 onGenerate={handleGenerate}
                 onViewReplay={handleOpenReplay}
