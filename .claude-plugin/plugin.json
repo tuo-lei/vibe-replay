@@ -1,6 +1,6 @@
 {
   "name": "vibe-replay",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Generate interactive HTML replays of AI coding sessions. Record, share, and replay your Claude Code, Cursor, and Codex sessions.",
   "author": {
     "name": "vibe-replay",
