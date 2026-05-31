@@ -8,6 +8,27 @@ interface Props {
   annotatedScenes?: Set<number>;
 }
 
+export function clampTimelineIndex(index: number, sceneCount: number): number {
+  if (sceneCount <= 0) return 0;
+  return Math.max(0, Math.min(sceneCount - 1, index));
+}
+
+export function timelineIndexFromPointer(
+  offsetX: number,
+  width: number,
+  sceneCount: number,
+): number {
+  if (sceneCount <= 0 || width <= 0) return 0;
+  const pct = Math.max(0, Math.min(1, offsetX / width));
+  return clampTimelineIndex(Math.floor(pct * sceneCount), sceneCount);
+}
+
+export function timelineProgressPct(currentIndex: number, sceneCount: number): number {
+  if (sceneCount <= 0) return 0;
+  const completedScenes = Math.max(0, Math.min(sceneCount, currentIndex + 1));
+  return (completedScenes / sceneCount) * 100;
+}
+
 function sceneColor(type: Scene["type"]): string {
   switch (type) {
     case "user-prompt":
@@ -65,7 +86,8 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
     return result;
   }, [scenes]);
 
-  const progressPct = scenes.length > 0 ? ((currentIndex + 1) / scenes.length) * 100 : 0;
+  const clampedCurrentIndex = clampTimelineIndex(currentIndex, scenes.length);
+  const progressPct = timelineProgressPct(currentIndex, scenes.length);
 
   const barRef = useRef<HTMLDivElement>(null);
 
@@ -75,9 +97,7 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
       if (!bar) return;
       const rect = bar.getBoundingClientRect();
       const x = e.clientX - rect.left;
-      const pct = Math.max(0, Math.min(1, x / rect.width));
-      const idx = Math.floor(pct * scenes.length);
-      onSeek(idx);
+      onSeek(timelineIndexFromPointer(x, rect.width, scenes.length));
     },
     [scenes.length, onSeek],
   );
@@ -135,7 +155,7 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
       aria-label="Scene timeline"
       aria-valuemin={0}
       aria-valuemax={scenes.length - 1}
-      aria-valuenow={currentIndex}
+      aria-valuenow={clampedCurrentIndex}
       tabIndex={0}
     >
       {/* Annotation + compaction dots above timeline */}
@@ -174,7 +194,7 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
             className="flex-1 transition-opacity duration-150"
             style={{
               backgroundColor: sceneColor(seg.type),
-              opacity: seg.startIndex <= currentIndex ? 1 : 0.15,
+              opacity: seg.startIndex <= clampedCurrentIndex ? 1 : 0.15,
             }}
           />
         ))}

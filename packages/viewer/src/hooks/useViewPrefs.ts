@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { safeStorageGet, safeStorageSet } from "../utils/safe-storage";
 
 export type DisplayMode = "all" | "compact" | "custom";
 
@@ -56,7 +57,7 @@ const defaultPrefs: ViewPrefs = {
 
 function loadPrefs(): ViewPrefs {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const stored = safeStorageGet(localStorage, STORAGE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
       // Migration: old prefs without displayMode
@@ -75,7 +76,7 @@ export function useViewPrefs() {
   const updatePref = useCallback(<K extends keyof ViewPrefs>(key: K, value: ViewPrefs[K]) => {
     setPrefs((prev) => {
       const next = { ...prev, [key]: value };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      safeStorageSet(localStorage, STORAGE_KEY, JSON.stringify(next));
       return next;
     });
   }, []);
@@ -85,7 +86,7 @@ export function useViewPrefs() {
       const val = prev[key];
       if (typeof val !== "boolean") return prev;
       const next = { ...prev, [key]: !val };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      safeStorageSet(localStorage, STORAGE_KEY, JSON.stringify(next));
       return next;
     });
   }, []);
