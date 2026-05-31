@@ -128,7 +128,7 @@ function closeCachedSqlJsDb(): void {
 
 let cachedStoreDbIndex: Map<string, StoreDbIndexEntry> | null = null;
 const resolvedProjectRootCache = new Map<string, Promise<string | null>>();
-const GLOBAL_STATE_DISCOVERY_CACHE_PREFIX = "cursor-global-state-discovery-v3";
+const GLOBAL_STATE_DISCOVERY_CACHE_PREFIX = "cursor-global-state-discovery-v4";
 
 export function workspaceHash(absolutePath: string): string {
   return createHash("md5").update(absolutePath).digest("hex");
@@ -193,10 +193,10 @@ function nextStringPrefix(prefix: string): string | null {
   return `${chars.join("")}${String.fromCodePoint(next)}`;
 }
 
-function sqlKeyPrefixRange(prefix: string): string {
+function sqlKeyPrefixRange(prefix: string, column = "key"): string {
   const upperBound = nextStringPrefix(prefix);
-  if (!upperBound) return `key >= ${sqlString(prefix)}`;
-  return `key >= ${sqlString(prefix)} AND key < ${sqlString(upperBound)}`;
+  if (!upperBound) return `${column} >= ${sqlString(prefix)}`;
+  return `${column} >= ${sqlString(prefix)} AND ${column} < ${sqlString(upperBound)}`;
 }
 
 function projectedCursorBubbleSelectSql(): string {
@@ -233,6 +233,49 @@ function projectedCursorBubbleSelectSql(): string {
     `json_extract(${value}, '$.relevantFiles') AS relevantFiles`,
     `json_extract(${value}, '$.recentlyViewedFiles') AS recentlyViewedFiles`,
   ].join(", ");
+}
+
+function replayableGlobalStateBubblePredicateSql(valueExpr: string): string {
+  // Discovery only needs a cheap positive signal; bubbleToTurn remains the
+  // authoritative parser and may still filter system-context-only text later.
+  const nonEmptyText = (path: string) =>
+    `(json_type(${valueExpr}, ${sqlString(path)}) = 'text' AND length(trim(COALESCE(json_extract(${valueExpr}, ${sqlString(
+      path,
+    )}), ''))) > 0)`;
+  return [
+    nonEmptyText("$.text"),
+    nonEmptyText("$.thinking"),
+    nonEmptyText("$.thinking.text"),
+    nonEmptyText("$.toolFormerData.name"),
+  ].join(" OR ");
+}
+
+function replayableGlobalStateBubbleCountSql(
+  composerValueExpr: string,
+  composerKeyExpr: string,
+): string {
+  const inlineBubblePredicate = replayableGlobalStateBubblePredicateSql("conversation.value");
+  const referencedBubblePredicate = replayableGlobalStateBubblePredicateSql("bubble.value");
+  return [
+    "COALESCE((",
+    "SELECT COUNT(*) FROM json_each(",
+    composerValueExpr,
+    ", '$.conversation') AS conversation",
+    " WHERE json_type(conversation.value) = 'object' AND (",
+    inlineBubblePredicate,
+    ")",
+    "), 0) + COALESCE((",
+    "SELECT COUNT(*) FROM json_each(",
+    composerValueExpr,
+    ", '$.fullConversationHeadersOnly') AS header",
+    " JOIN cursorDiskKV AS bubble ON bubble.key = 'bubbleId:' || substr(",
+    composerKeyExpr,
+    ", length('composerData:') + 1) || ':' || json_extract(header.value, '$.bubbleId')",
+    " WHERE json_valid(bubble.value) AND (",
+    referencedBubblePredicate,
+    ")",
+    "), 0)",
+  ].join("");
 }
 
 interface SqliteCliUsabilityCacheEntry {
@@ -1171,6 +1214,51 @@ export function countComposerConversationHeaders(composer: Record<string, any>):
   return Math.max(fullHeaders, legacyConversation);
 }
 
+function composerHeaderBubbleIds(composer: Record<string, any>): string[] {
+  if (!Array.isArray(composer.fullConversationHeadersOnly)) return [];
+  return composer.fullConversationHeadersOnly
+    .map((header: any) =>
+      header && typeof header === "object" && typeof header.bubbleId === "string"
+        ? header.bubbleId
+        : "",
+    )
+    .filter((bubbleId: string) => Boolean(bubbleId));
+}
+
+function isReplayableGlobalStateBubble(bubble: Record<string, any>): boolean {
+  return bubbleToTurn(bubble) !== null;
+}
+
+async function hasReplayableGlobalStateComposer(
+  globalStateDb: CachedGlobalStateDb,
+  sessionId: string,
+  composer: Record<string, any>,
+): Promise<boolean> {
+  if (
+    Array.isArray(composer.conversation) &&
+    composer.conversation.some(
+      (item: unknown) =>
+        item &&
+        typeof item === "object" &&
+        isReplayableGlobalStateBubble(item as Record<string, any>),
+    )
+  ) {
+    return true;
+  }
+
+  const bubbleIds = composerHeaderBubbleIds(composer);
+  if (bubbleIds.length === 0) return false;
+
+  const rows = await loadProjectedBubbleRowsByKeys(
+    globalStateDb,
+    bubbleIds.map((bubbleId) => `bubbleId:${sessionId}:${bubbleId}`),
+  );
+  return rows.some((row) => {
+    const bubble = projectedCursorBubbleRowToBubble(row);
+    return bubble ? isReplayableGlobalStateBubble(bubble) : false;
+  });
+}
+
 function firstUserTextSnippet(turns: ParsedTurn[]): string | undefined {
   const firstUser = turns.find((t) => t.role === "user");
   const firstText = firstUser?.blocks.find(
@@ -1228,14 +1316,18 @@ export async function discoverGlobalStateOnlySessions(
     const composerDiscoverySql =
       globalStateDb.backend === "sqlite-cli"
         ? [
-            "SELECT key,",
-            "MAX(COALESCE(json_array_length(value,'$.fullConversationHeadersOnly'),0),",
-            "COALESCE(json_array_length(value,'$.conversation'),0)) AS headerCount,",
-            "json_extract(value,'$.lastUpdatedAt') AS lastUpdatedAt,",
-            "json_extract(value,'$.createdAt') AS createdAt,",
-            "json_extract(value,'$.name') AS title,",
-            "length(value) AS fileSize",
-            `FROM cursorDiskKV WHERE ${sqlKeyPrefixRange("composerData:")} AND json_valid(value)`,
+            "SELECT kv.key,",
+            "MAX(COALESCE(json_array_length(kv.value,'$.fullConversationHeadersOnly'),0),",
+            "COALESCE(json_array_length(kv.value,'$.conversation'),0)) AS headerCount,",
+            "json_extract(kv.value,'$.lastUpdatedAt') AS lastUpdatedAt,",
+            "json_extract(kv.value,'$.createdAt') AS createdAt,",
+            "json_extract(kv.value,'$.name') AS title,",
+            "length(kv.value) AS fileSize,",
+            `${replayableGlobalStateBubbleCountSql("kv.value", "kv.key")} AS replayableBubbleCount`,
+            `FROM cursorDiskKV AS kv WHERE ${sqlKeyPrefixRange(
+              "composerData:",
+              "kv.key",
+            )} AND json_valid(kv.value)`,
           ].join(" ")
         : `SELECT key, value FROM cursorDiskKV WHERE ${sqlKeyPrefixRange("composerData:")}`;
     const rows = await queryGlobalStateRows(globalStateDb, composerDiscoverySql);
@@ -1254,6 +1346,11 @@ export async function discoverGlobalStateOnlySessions(
         : toNonNegativeInt(row.headerCount);
       // Skip sessions without conversation headers: they cannot be replayed.
       if (headerCount === 0) continue;
+
+      const hasReplayableBubble = composer
+        ? await hasReplayableGlobalStateComposer(globalStateDb, sessionId, composer)
+        : toNonNegativeInt(row.replayableBubbleCount) > 0;
+      if (!hasReplayableBubble) continue;
 
       // Track only replayable global-state sessions for downstream hasSqlite marking.
       sessionIds.add(sessionId);
@@ -3285,6 +3382,7 @@ export const __testables = {
   extractCursorBranchMetadata,
   extractCursorContextSummary,
   extractCursorPrLinks,
+  isReplayableGlobalStateBubble,
   hasReplayableRootBlob,
   mapCursorToolName,
   mapToolArgs,

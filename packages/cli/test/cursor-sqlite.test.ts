@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parseCursorSession } from "../src/providers/cursor/parser.js";
 import {
+  __testables,
   parseCursorSqlite,
   storeDbPath,
   workspaceHash,
@@ -33,6 +34,34 @@ describe("storeDbPath", () => {
     expect(path).toContain(join(".cursor", "chats"));
     expect(path).toContain(workspaceHash("/Users/me/project"));
     expect(path).toContain(join("abc-123", "store.db"));
+  });
+});
+
+describe("Cursor global-state replayability", () => {
+  it("does not treat empty placeholder bubbles as replayable", () => {
+    expect(__testables.isReplayableGlobalStateBubble({ type: 1, text: "" })).toBe(false);
+  });
+
+  it("treats text, thinking, and tool bubbles as replayable", () => {
+    expect(__testables.isReplayableGlobalStateBubble({ type: 1, text: "Fix the bug" })).toBe(true);
+    expect(
+      __testables.isReplayableGlobalStateBubble({
+        type: 2,
+        thinking: { text: "I should inspect the logs" },
+      }),
+    ).toBe(true);
+    expect(
+      __testables.isReplayableGlobalStateBubble({
+        type: 2,
+        thinking: "I should inspect the logs",
+      }),
+    ).toBe(true);
+    expect(
+      __testables.isReplayableGlobalStateBubble({
+        type: 2,
+        toolFormerData: { name: "read_file", params: "{}", result: "ok" },
+      }),
+    ).toBe(true);
   });
 });
 
