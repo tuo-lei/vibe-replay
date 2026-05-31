@@ -225,8 +225,8 @@ function buildFileDiff(
   if (toolName === "Edit" && input.file_path) {
     return {
       filePath: redactFilePath(input.file_path),
-      oldContent: input.old_string ?? "",
-      newContent: input.new_string ?? "",
+      oldContent: redactDiffContent(input.old_string),
+      newContent: redactDiffContent(input.new_string),
     };
   }
   if (toolName === "MultiEdit" && input.file_path && Array.isArray(input.edits)) {
@@ -238,8 +238,8 @@ function buildFileDiff(
       // states. Show a synthetic chunk list so the replay still surfaces what changed.
       return {
         filePath: redactFilePath(input.file_path),
-        oldContent: edits.map((edit) => edit.old_string ?? "").join("\n\n"),
-        newContent: edits.map((edit) => edit.new_string ?? "").join("\n\n"),
+        oldContent: edits.map((edit) => redactDiffContent(edit.old_string)).join("\n\n"),
+        newContent: edits.map((edit) => redactDiffContent(edit.new_string)).join("\n\n"),
       };
     }
   }
@@ -247,17 +247,24 @@ function buildFileDiff(
     return {
       filePath: redactFilePath(input.file_path),
       oldContent: "",
-      newContent: truncate(input.content || "", 3000),
+      newContent: truncate(redactDiffContent(input.content), 3000),
     };
   }
   if (toolName === "Delete" && input.file_path) {
     return {
       filePath: redactFilePath(input.file_path),
-      oldContent: input.old_string ?? "(file deleted)",
+      oldContent:
+        typeof input.old_string === "string"
+          ? redactDiffContent(input.old_string)
+          : "(file deleted)",
       newContent: "",
     };
   }
   return undefined;
+}
+
+function redactDiffContent(value: unknown): string {
+  return typeof value === "string" ? redactSecrets(redactPath(value)) : "";
 }
 
 function buildToolScene(

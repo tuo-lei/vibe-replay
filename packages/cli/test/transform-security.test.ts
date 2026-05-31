@@ -421,6 +421,128 @@ describe("secret redaction in transform", () => {
     expect(JSON.stringify(scene.input)).not.toContain(token);
     expect(scene.input?.tokens[1]).toBe("safe-value");
   });
+
+  it("redacts secrets and home paths in Edit diff content", () => {
+    const parsed = makeParsed([
+      {
+        role: "assistant",
+        blocks: [
+          {
+            type: "tool_use",
+            id: "t1",
+            name: "Edit",
+            input: {
+              file_path: `${HOME}/project/auth.ts`,
+              old_string: `const token = "${EXAMPLE_GH_PAT}";\nconst path = "${HOME}/secret.env";`,
+              new_string: `const token = "${EXAMPLE_OPENAI_KEY}";\nconst path = "${HOME}/public.env";`,
+            },
+            _result: "ok",
+          } as any,
+        ],
+      },
+    ]);
+    const replay = transform(parsed);
+    const scene = replay.scenes.find((s) => s.type === "tool-call")!;
+    expect(scene.diff?.oldContent).not.toContain(EXAMPLE_GH_PAT);
+    expect(scene.diff?.newContent).not.toContain(EXAMPLE_OPENAI_KEY);
+    expect(scene.diff?.oldContent).not.toContain(HOME);
+    expect(scene.diff?.newContent).not.toContain(HOME);
+    expect(scene.diff?.oldContent).toContain("[REDACTED]");
+    expect(scene.diff?.newContent).toContain("[REDACTED]");
+    expect(scene.diff?.oldContent).toContain("~/secret.env");
+    expect(scene.diff?.newContent).toContain("~/public.env");
+  });
+
+  it("redacts secrets and home paths in MultiEdit diff content", () => {
+    const parsed = makeParsed([
+      {
+        role: "assistant",
+        blocks: [
+          {
+            type: "tool_use",
+            id: "t1",
+            name: "MultiEdit",
+            input: {
+              file_path: `${HOME}/project/auth.ts`,
+              edits: [
+                {
+                  old_string: `token=${EXAMPLE_GH_PAT}`,
+                  new_string: `token=${EXAMPLE_OPENAI_KEY}`,
+                },
+                {
+                  old_string: `path=${HOME}/before.env`,
+                  new_string: `path=${HOME}/after.env`,
+                },
+              ],
+            },
+            _result: "ok",
+          } as any,
+        ],
+      },
+    ]);
+    const replay = transform(parsed);
+    const scene = replay.scenes.find((s) => s.type === "tool-call")!;
+    expect(scene.diff?.oldContent).not.toContain(EXAMPLE_GH_PAT);
+    expect(scene.diff?.newContent).not.toContain(EXAMPLE_OPENAI_KEY);
+    expect(scene.diff?.oldContent).not.toContain(HOME);
+    expect(scene.diff?.newContent).not.toContain(HOME);
+    expect(scene.diff?.oldContent).toContain("[REDACTED]");
+    expect(scene.diff?.newContent).toContain("[REDACTED]");
+    expect(scene.diff?.oldContent).toContain("~/before.env");
+    expect(scene.diff?.newContent).toContain("~/after.env");
+  });
+
+  it("redacts secrets and home paths in Delete diff content", () => {
+    const parsed = makeParsed([
+      {
+        role: "assistant",
+        blocks: [
+          {
+            type: "tool_use",
+            id: "t1",
+            name: "Delete",
+            input: {
+              file_path: `${HOME}/project/auth.ts`,
+              old_string: `token=${EXAMPLE_GH_PAT}\npath=${HOME}/deleted.env`,
+            },
+            _result: "ok",
+          } as any,
+        ],
+      },
+    ]);
+    const replay = transform(parsed);
+    const scene = replay.scenes.find((s) => s.type === "tool-call")!;
+    expect(scene.diff?.oldContent).not.toContain(EXAMPLE_GH_PAT);
+    expect(scene.diff?.oldContent).not.toContain(HOME);
+    expect(scene.diff?.oldContent).toContain("[REDACTED]");
+    expect(scene.diff?.oldContent).toContain("~/deleted.env");
+  });
+
+  it("redacts secrets and home paths in Write diff content", () => {
+    const parsed = makeParsed([
+      {
+        role: "assistant",
+        blocks: [
+          {
+            type: "tool_use",
+            id: "t1",
+            name: "Write",
+            input: {
+              file_path: `${HOME}/project/auth.ts`,
+              content: `token=${EXAMPLE_GH_PAT}\npath=${HOME}/created.env`,
+            },
+            _result: "ok",
+          } as any,
+        ],
+      },
+    ]);
+    const replay = transform(parsed);
+    const scene = replay.scenes.find((s) => s.type === "tool-call")!;
+    expect(scene.diff?.newContent).not.toContain(EXAMPLE_GH_PAT);
+    expect(scene.diff?.newContent).not.toContain(HOME);
+    expect(scene.diff?.newContent).toContain("[REDACTED]");
+    expect(scene.diff?.newContent).toContain("~/created.env");
+  });
 });
 
 // ---------------------------------------------------------------------------
