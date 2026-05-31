@@ -2,7 +2,9 @@ import { homedir } from "node:os";
 import { describe, expect, it } from "vitest";
 import type { ProviderParseResult } from "../src/providers/types.js";
 import { transformToReplay } from "../src/transform.js";
-import type { ReplaySession } from "../src/types.js";
+import type { ReplaySession, Scene } from "../src/types.js";
+
+type ToolCallScene = Extract<Scene, { type: "tool-call" }>;
 
 const HOME = homedir();
 const EXAMPLE_OPENAI_KEY = ["sk", "proj", "abc123def456ghi789jkl012mno345pqr678"].join("-");
@@ -79,7 +81,7 @@ describe("path redaction", () => {
     const parsed = makeParsed([
       {
         role: "assistant",
-        blocks: [{ type: "thinking", thinking: `Reading ${HOME}/data/config.json` } as any],
+        blocks: [{ type: "thinking", thinking: `Reading ${HOME}/data/config.json` }],
       },
     ]);
     const replay = transform(parsed);
@@ -99,7 +101,7 @@ describe("path redaction", () => {
             name: "Read",
             input: { file_path: "/safe/path" },
             _result: `Content of ${HOME}/private/file.ts`,
-          } as any,
+          },
         ],
       },
     ]);
@@ -120,7 +122,7 @@ describe("path redaction", () => {
             name: "Read",
             input: { file_path: `${HOME}/project/src/index.ts` },
             _result: "ok",
-          } as any,
+          },
         ],
       },
     ]);
@@ -141,7 +143,7 @@ describe("path redaction", () => {
             name: "Bash",
             input: { command: `cat ${HOME}/secrets/env` },
             _result: "FOO=bar",
-          } as any,
+          },
         ],
       },
     ]);
@@ -162,7 +164,7 @@ describe("path redaction", () => {
             name: "Bash",
             input: { command: "pwd" },
             _result: `${HOME}/my-project`,
-          } as any,
+          },
         ],
       },
     ]);
@@ -187,7 +189,7 @@ describe("path redaction", () => {
               new_string: "fixed()",
             },
             _result: "ok",
-          } as any,
+          },
         ],
       },
     ]);
@@ -211,7 +213,7 @@ describe("path redaction", () => {
               content: "export const x = 1;",
             },
             _result: "ok",
-          } as any,
+          },
         ],
       },
     ]);
@@ -282,7 +284,7 @@ describe("secret redaction in transform", () => {
             name: "Bash",
             input: { command: "env" },
             _result: `AWS_ACCESS_KEY_ID=${EXAMPLE_AWS_KEY}\nAWS_SECRET=foo`,
-          } as any,
+          },
         ],
       },
     ]);
@@ -304,7 +306,7 @@ describe("secret redaction in transform", () => {
             name: "Bash",
             input: { command: `curl -H "Authorization: Bearer ${jwt}" http://api.example.com` },
             _result: "ok",
-          } as any,
+          },
         ],
       },
     ]);
@@ -353,7 +355,7 @@ describe("secret redaction in transform", () => {
             name: "Bash",
             input: { command: "cat .env" },
             _result: `API_KEY=${EXAMPLE_ENV_KEY}\nSECRET_TOKEN="myverylongsecretvalue"`,
-          } as any,
+          },
         ],
       },
     ]);
@@ -369,7 +371,7 @@ describe("secret redaction in transform", () => {
     const parsed = makeParsed([
       {
         role: "assistant",
-        blocks: [{ type: "thinking", thinking: `The vault token is ${token}` } as any],
+        blocks: [{ type: "thinking", thinking: `The vault token is ${token}` }],
       },
     ]);
     const replay = transform(parsed);
@@ -390,7 +392,7 @@ describe("secret redaction in transform", () => {
             name: "SomeApi",
             input: { headers: { authorization: key } },
             _result: "ok",
-          } as any,
+          },
         ],
       },
     ]);
@@ -412,7 +414,7 @@ describe("secret redaction in transform", () => {
             name: "Multi",
             input: { tokens: [token, "safe-value"] },
             _result: "ok",
-          } as any,
+          },
         ],
       },
     ]);
@@ -437,7 +439,7 @@ describe("secret redaction in transform", () => {
               new_string: `const token = "${EXAMPLE_OPENAI_KEY}";\nconst path = "${HOME}/public.env";`,
             },
             _result: "ok",
-          } as any,
+          },
         ],
       },
     ]);
@@ -476,7 +478,7 @@ describe("secret redaction in transform", () => {
               ],
             },
             _result: "ok",
-          } as any,
+          },
         ],
       },
     ]);
@@ -506,7 +508,7 @@ describe("secret redaction in transform", () => {
               old_string: `token=${EXAMPLE_GH_PAT}\npath=${HOME}/deleted.env`,
             },
             _result: "ok",
-          } as any,
+          },
         ],
       },
     ]);
@@ -532,7 +534,7 @@ describe("secret redaction in transform", () => {
               content: `token=${EXAMPLE_GH_PAT}\npath=${HOME}/created.env`,
             },
             _result: "ok",
-          } as any,
+          },
         ],
       },
     ]);
@@ -585,7 +587,7 @@ describe("email redaction", () => {
             name: "Bash",
             input: { command: `git commit --author="Name <${email}>"` },
             _result: "committed",
-          } as any,
+          },
         ],
       },
     ]);
@@ -606,7 +608,7 @@ describe("email redaction", () => {
             name: "Bash",
             input: { command: "git log -1" },
             _result: "Author: Jane Doe <jane@corp.com>\nCommitter: Jane Doe <jane@corp.com>",
-          } as any,
+          },
         ],
       },
     ]);
@@ -645,7 +647,7 @@ describe("email redaction", () => {
               content: "admin_email: admin@internal.net",
             },
             _result: "ok",
-          } as any,
+          },
         ],
       },
     ]);
@@ -673,7 +675,7 @@ describe("sanitizeInput", () => {
             name: "Write",
             input: { file_path: "/big.txt", content: longStr },
             _result: "ok",
-          } as any,
+          },
         ],
       },
     ]);
@@ -694,7 +696,7 @@ describe("sanitizeInput", () => {
             name: "Config",
             input: { count: 42, enabled: true, label: "safe" },
             _result: "ok",
-          } as any,
+          },
         ],
       },
     ]);
@@ -723,7 +725,7 @@ describe("tool result truncation", () => {
             name: "Bash",
             input: { command: "cat bigfile" },
             _result: longResult,
-          } as any,
+          },
         ],
       },
     ]);
@@ -746,7 +748,7 @@ describe("tool result truncation", () => {
             name: "Read",
             input: { file_path: "/f" },
             _result: prefix + secretTail,
-          } as any,
+          },
         ],
       },
     ]);
@@ -771,7 +773,7 @@ describe("tool result truncation", () => {
             name: "Read",
             input: { file_path: "/f" },
             _result: prefix + secretTail,
-          } as any,
+          },
         ],
       },
     ]);
@@ -801,7 +803,7 @@ describe("combined path + secret redaction", () => {
             name: "Bash",
             input: { command: `OPENAI_KEY=${key} node ${HOME}/app/run.js` },
             _result: "done",
-          } as any,
+          },
         ],
       },
     ]);
@@ -824,7 +826,7 @@ describe("combined path + secret redaction", () => {
             name: "Bash",
             input: { command: "git log" },
             _result: `commit abc123\nAuthor: User <user@corp.com>\n${HOME}/project/file.ts`,
-          } as any,
+          },
         ],
       },
     ]);
@@ -856,12 +858,14 @@ describe("tool diff generation", () => {
               new_string: "console.log('updated')",
             },
             _result: "ok",
-          } as any,
+          },
         ],
       },
     ]);
     const replay = transform(parsed);
-    const toolScene = replay.scenes.find((s) => s.type === "tool-call") as any;
+    const toolScene = replay.scenes.find((s) => s.type === "tool-call") as
+      | ToolCallScene
+      | undefined;
     expect(toolScene?.diff).toBeTruthy();
     expect(toolScene.diff.filePath).toBe("/project/src/app.ts");
     expect(toolScene.diff.oldContent).toBe("");
@@ -896,7 +900,7 @@ describe("redaction edge cases", () => {
     const parsed = makeParsed([
       { role: "user", blocks: [{ type: "text", text: "" }] },
       { role: "assistant", blocks: [{ type: "text", text: "" }] },
-      { role: "assistant", blocks: [{ type: "thinking", thinking: "" } as any] },
+      { role: "assistant", blocks: [{ type: "thinking", thinking: "" }] },
     ]);
     const replay = transform(parsed);
     expect(replay.scenes.length).toBe(0);
