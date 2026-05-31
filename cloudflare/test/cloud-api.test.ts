@@ -213,6 +213,57 @@ describe("Cloud API integration", () => {
     expect(await env.REPLAY_BUCKET.get(`replays/${uploaded.id}.json`)).toBeNull();
   });
 
+  it("rejects malformed JSON bodies with 400 responses", async () => {
+    const uploaded = await uploadReplay();
+    const invalidJson = {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{",
+    };
+
+    const cloudReplay = await dispatch("/api/cloud-replays", invalidJson);
+    expect(cloudReplay.status).toBe(400);
+    await expect(cloudReplay.json()).resolves.toEqual({ error: "Invalid JSON body" });
+
+    const patchReplay = await dispatch(`/api/cloud-replays/${uploaded.id}`, {
+      ...invalidJson,
+      method: "PATCH",
+    });
+    expect(patchReplay.status).toBe(400);
+    await expect(patchReplay.json()).resolves.toEqual({ error: "Invalid JSON body" });
+
+    const insightsSync = await dispatch("/api/insights/sync", invalidJson);
+    expect(insightsSync.status).toBe(400);
+    await expect(insightsSync.json()).resolves.toEqual({ error: "Invalid JSON body" });
+
+    const fileUpload = await dispatch("/api/files", invalidJson);
+    expect(fileUpload.status).toBe(400);
+    await expect(fileUpload.json()).resolves.toEqual({ error: "Invalid JSON body" });
+  });
+
+  it("rejects unsafe browser login callbacks before starting OAuth", async () => {
+    for (const callback of [
+      "javascript:alert(1)",
+      "profile",
+      "//evil.example/callback",
+      "/\\evil.example/callback",
+    ]) {
+      const response = await dispatch(`/auth/login?callback=${encodeURIComponent(callback)}`);
+      expect(response.status).toBe(400);
+      await expect(response.text()).resolves.toBe("Invalid callback URL");
+    }
+  });
+
+  it("rejects malformed insight profile JSON with a 400 response", async () => {
+    const response = await dispatch("/api/insights/profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{",
+    });
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "Invalid JSON body" });
+  });
+
   it("hides private replays from other authenticated users", async () => {
     const uploaded = await uploadReplay("private");
 
@@ -307,6 +358,60 @@ describe("Cloud API integration", () => {
       sessionsPerDay: { "2026-05-01": 2 },
       topProjects: [{ project: "/repo", sessions: 2 }],
     });
+  });
+
+  it("preserves insight profile privacy config when updating metadata only", async () => {
+    const create = await dispatch("/api/insights/profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        slug: "privacy-profile",
+        config: {
+          showCost: true,
+          showProjects: false,
+          showModels: false,
+          blurProjectNames: true,
+          unknownFlag: true,
+        },
+      }),
+    });
+    expect(create.status).toBe(200);
+    const createdProfile = (await create.json()) as {
+      profile: { config: Record<string, unknown> };
+    };
+    expect(createdProfile).toMatchObject({
+      profile: {
+        config: {
+          showCost: true,
+          showProjects: false,
+          showModels: false,
+          blurProjectNames: true,
+        },
+      },
+    });
+    expect(createdProfile.profile.config).not.toHaveProperty("unknownFlag");
+
+    const update = await dispatch("/api/insights/profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: false, displayName: "Private Profile" }),
+    });
+    expect(update.status).toBe(200);
+    const updatedProfile = (await update.json()) as {
+      profile: { config: Record<string, unknown> };
+    };
+    expect(updatedProfile).toMatchObject({
+      profile: {
+        enabled: false,
+        config: {
+          showCost: true,
+          showProjects: false,
+          showModels: false,
+          blurProjectNames: true,
+        },
+      },
+    });
+    expect(updatedProfile.profile.config).not.toHaveProperty("unknownFlag");
   });
 
   it("scheduled cleanup removes expired R2 objects and frees quota", async () => {
