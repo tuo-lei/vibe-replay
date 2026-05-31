@@ -33,6 +33,10 @@ const canonicalURL = canonicalPath
 const ogImage = ogImageProp
   ? new URL(ogImageProp, siteBase).href
   : new URL("/og.png", siteBase).href;
+
+function stringifyJsonLd(value: Record<string, unknown>): string {
+  return JSON.stringify(value).replace(/</g, "\\u003c");
+}
 ---
 
 <!doctype html>
@@ -93,7 +97,7 @@ const ogImage = ogImageProp
         ? (Array.isArray(jsonLdProp) ? jsonLdProp : [jsonLdProp])
         : [defaultJsonLd];
       return blocks.map((b) => (
-        <script type="application/ld+json" set:html={JSON.stringify(b)} />
+        <script is:inline type="application/ld+json" set:html={stringifyJsonLd(b)} />
       ));
     })()}
 
