@@ -394,7 +394,7 @@ async function loadSessionFromDisk(baseDir: string, slug: string): Promise<Repla
   return session;
 }
 
-interface SourceSummaryRecord {
+export interface SourceSummaryRecord {
   provider: string;
   slug: string;
   project: string;

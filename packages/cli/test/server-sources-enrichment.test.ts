@@ -2,6 +2,8 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import type { ScanInput } from "../src/scanner.js";
+import type { SourceSummaryRecord } from "../src/server.js";
 import { __testables } from "../src/server.js";
 import type { SessionInfo } from "../src/types.js";
 
@@ -33,7 +35,7 @@ describe("sources enrichment helpers", () => {
       }),
     ];
 
-    const baseSources = [
+    const baseSources: SourceSummaryRecord[] = [
       {
         provider: "cursor",
         sessionId: "cursor-session-a",
@@ -47,7 +49,7 @@ describe("sources enrichment helpers", () => {
         title: "Clean session title",
         model: "claude-sonnet-4-20250514",
       },
-    ] as any[];
+    ];
 
     const candidates = __testables.selectCursorEnrichmentCandidates(merged, baseSources);
     expect(candidates).toHaveLength(0);
@@ -72,7 +74,7 @@ describe("sources enrichment helpers", () => {
       }),
     ];
 
-    const baseSources = [
+    const baseSources: SourceSummaryRecord[] = [
       {
         provider: "cursor",
         sessionId: "cursor-old",
@@ -105,7 +107,7 @@ describe("sources enrichment helpers", () => {
         title: "Already enriched title",
         model: "claude-sonnet-4-20250514",
       },
-    ] as any[];
+    ];
 
     const candidates = __testables.selectCursorEnrichmentCandidates(merged, baseSources, 2);
     expect(candidates.map((s) => s.sessionId)).toEqual(["cursor-new", "cursor-old"]);
@@ -130,7 +132,7 @@ describe("sources enrichment helpers", () => {
       }),
     ];
 
-    const baseSources = merged.map((source) => ({
+    const baseSources: SourceSummaryRecord[] = merged.map((source) => ({
       provider: "cursor",
       sessionId: source.sessionId,
       slug: source.slug,
@@ -139,7 +141,7 @@ describe("sources enrichment helpers", () => {
       filePaths: source.filePaths,
       promptCount: undefined,
       toolCallCount: undefined,
-    })) as any[];
+    }));
 
     const candidates = __testables.selectCursorEnrichmentCandidates(merged, baseSources, {
       slugs: ["visible0"],
@@ -149,7 +151,7 @@ describe("sources enrichment helpers", () => {
   });
 
   it("prioritizes unscanned and hinted sessions during scan catch-up", () => {
-    const inputs = [
+    const inputs: ScanInput[] = [
       {
         sessionId: "already-new",
         provider: "cursor",
@@ -174,7 +176,7 @@ describe("sources enrichment helpers", () => {
         filePaths: ["/tmp/mid.jsonl"],
         timestamp: "2026-01-02T00:00:00.000Z",
       },
-    ] as any[];
+    ];
 
     const ordered = __testables.prioritizeScanInputs(
       inputs,
@@ -191,7 +193,7 @@ describe("sources enrichment helpers", () => {
 
   it("does not cross-provider match by sessionId when picking cache records", () => {
     const current = makeCursorSession({ sessionId: "shared-id", slug: "aaaaaaaa" });
-    const bySessionId = new Map<string, any>([
+    const bySessionId = new Map<string, SourceSummaryRecord>([
       [
         "shared-id",
         {
@@ -199,12 +201,14 @@ describe("sources enrichment helpers", () => {
           sessionId: "shared-id",
           slug: "claude01",
           project: "~/project-a",
+          timestamp: "2026-01-01T00:00:00.000Z",
+          filePaths: [],
           promptCount: 999,
           toolCallCount: 999,
         },
       ],
     ]);
-    const byKey = new Map<string, any>([
+    const byKey = new Map<string, SourceSummaryRecord>([
       [
         __testables.sourceSessionKey("cursor", "~/project-a", "aaaaaaaa"),
         {
@@ -212,6 +216,8 @@ describe("sources enrichment helpers", () => {
           sessionId: "cursor-real",
           slug: "aaaaaaaa",
           project: "~/project-a",
+          timestamp: "2026-01-01T00:00:00.000Z",
+          filePaths: [],
           promptCount: 5,
           toolCallCount: 3,
         },
