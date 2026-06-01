@@ -277,10 +277,19 @@ async function scanSessionsFromDir(baseDir: string): Promise<ReplaySummary[]> {
       let annotationCount = 0;
       try {
         const annRaw = await readFile(annotationsPath, "utf-8");
-        const anns = JSON.parse(annRaw) as Annotation[];
-        annotationCount = Array.isArray(anns) ? anns.length : 0;
-      } catch {
-        /* no annotations */
+        const anns = JSON.parse(annRaw) as unknown;
+        if (Array.isArray(anns)) {
+          annotationCount = anns.length;
+        } else {
+          warnRecoverable(
+            `Ignoring annotation count at ${annotationsPath}`,
+            new Error("expected JSON array"),
+          );
+        }
+      } catch (err) {
+        if (!isMissingFileError(err)) {
+          warnRecoverable(`Unable to count annotations at ${annotationsPath}`, err);
+        }
       }
 
       let gist: SavedGistInfo | undefined;
@@ -3586,7 +3595,6 @@ export const __testables = {
   buildSourcesResult,
   buildInsightsSyncBatches,
   countSessionStats,
-  formatRecoverableWarning,
   loadAnnotations,
   pickSourceRecordForSession,
   prioritizeScanInputs,
