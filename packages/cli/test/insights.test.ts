@@ -116,7 +116,7 @@ describe("mergeInsights", () => {
     const stale = makeInsight({ sessionId: "deleted-source", slug: "deleted-source" });
 
     const merged = mergeInsights(makeStore([existing, stale]), [
-      makeScan({ promptCount: 7, machineId: undefined } as Partial<SessionScanResult>),
+      makeScan({ promptCount: 7 }),
       makeScan({ sessionId: "session-b", slug: "session-b", promptCount: 3 }),
     ]);
 
@@ -139,6 +139,9 @@ describe("mergeInsights", () => {
 
 describe("aggregateDailyInsights", () => {
   it("groups sessions by local day with JSON breakdowns", () => {
+    const may1Morning = new Date(2026, 4, 1, 10).toISOString();
+    const may1Noon = new Date(2026, 4, 1, 12).toISOString();
+    const may2Morning = new Date(2026, 4, 2, 10).toISOString();
     const aggregate = aggregateDailyInsights(
       makeStore([
         makeInsight({
@@ -146,7 +149,7 @@ describe("aggregateDailyInsights", () => {
           project: "~/Code/app",
           provider: "claude-code",
           model: "sonnet",
-          startTime: "2026-05-01T10:00:00.000Z",
+          startTime: may1Morning,
           promptCount: 2,
           toolCallCount: 3,
           editCount: 1,
@@ -158,7 +161,7 @@ describe("aggregateDailyInsights", () => {
           project: "~/Code/app",
           provider: "cursor",
           model: "gpt-5.5",
-          startTime: "2026-05-01T12:00:00.000Z",
+          startTime: may1Noon,
           promptCount: 4,
           toolCallCount: 5,
           editCount: 2,
@@ -169,7 +172,7 @@ describe("aggregateDailyInsights", () => {
           sessionId: "session-c",
           project: "~/Code/other",
           provider: "claude-code",
-          startTime: "2026-05-02T10:00:00.000Z",
+          startTime: may2Morning,
           promptCount: 1,
         }),
         makeInsight({ sessionId: "missing-time", startTime: undefined }),
@@ -183,10 +186,14 @@ describe("aggregateDailyInsights", () => {
       toolCalls: 8,
       edits: 3,
       durationMs: 30_000,
-      cost: 0.30000000000000004,
     });
+    expect(aggregate.days[0].cost).toBeCloseTo(0.3);
     expect(JSON.parse(aggregate.days[0].projects)).toMatchObject({
       "~/Code/app": { sessions: 2, prompts: 6, toolCalls: 8, edits: 3, durationMs: 30_000 },
+    });
+    expect(JSON.parse(aggregate.days[0].models)).toEqual({
+      sonnet: { sessions: 1, cost: 0.1 },
+      "gpt-5.5": { sessions: 1, cost: 0.2 },
     });
     expect(JSON.parse(aggregate.days[0].providers)).toEqual({
       "claude-code": { sessions: 1, cost: 0.1 },
