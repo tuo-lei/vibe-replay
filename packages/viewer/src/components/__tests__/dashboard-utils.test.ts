@@ -1,19 +1,30 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   agentWorktreeParent,
+  cleanPrompt,
+  dataSourceBadgeClass,
   fetchWithRetry,
   formatDataSourceLabel,
   getFriendlyErrorMessage,
+  isCacheFresh,
   isNetworkError,
+  nonDefaultBranch,
+  parseCachedList,
   providerBadgeClass,
   providerBadgeLabel,
   providerBarClass,
   providerDisplayName,
   providerFamily,
+  replaySuggestedTitle,
   rollupProject,
   rollupTopProjects,
+  sessionPromptPreview,
+  shortCoworkSpaceId,
+  sourceDisplayTitle,
+  sourceSuggestedTitle,
   type TopProjectEntry,
 } from "../dashboard-utils";
+import type { SourceSession } from "../../types";
 
 function makeProject(overrides: Partial<TopProjectEntry> & { project: string }): TopProjectEntry {
   return {
@@ -31,6 +42,25 @@ function makeProject(overrides: Partial<TopProjectEntry> & { project: string }):
     ...overrides,
   };
 }
+
+function makeSource(overrides: Partial<SourceSession> = {}): SourceSession {
+  return {
+    provider: "cursor",
+    slug: "source-slug",
+    project: "~/Code/app",
+    timestamp: "2026-05-01T10:00:00.000Z",
+    fileSize: 1024,
+    lineCount: 10,
+    firstPrompt: "Build the dashboard",
+    filePaths: ["/tmp/session.jsonl"],
+    existingReplay: null,
+    ...overrides,
+  };
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("agentWorktreeParent", () => {
   it("returns the parent project for a Claude agent worktree path", () => {
@@ -196,6 +226,80 @@ describe("rollupTopProjects", () => {
   });
 });
 
+describe("cache response helpers", () => {
+  it("accepts cached list payloads and normalizes missing cachedAt", () => {
+    expect(parseCachedList<{ slug: string }>({ sessions: [{ slug: "a" }] })).toEqual({
+      sessions: [{ slug: "a" }],
+      cachedAt: undefined,
+    });
+    expect(parseCachedList({ sessions: [], cachedAt: "2026-05-01T00:00:00.000Z" })).toEqual({
+      sessions: [],
+      cachedAt: "2026-05-01T00:00:00.000Z",
+    });
+  });
+
+  it("rejects malformed cached list payloads", () => {
+    expect(parseCachedList(null)).toBeNull();
+    expect(parseCachedList({ sessions: "not-array" })).toBeNull();
+  });
+
+  it("treats only recent past timestamps as fresh", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-01T10:00:00.000Z"));
+
+    expect(isCacheFresh("2026-05-01T09:56:00.000Z")).toBe(true);
+    expect(isCacheFresh("2026-05-01T09:54:59.000Z")).toBe(false);
+    expect(isCacheFresh("2026-05-01T10:01:00.000Z")).toBe(false);
+    expect(isCacheFresh("not-a-date")).toBe(false);
+  });
+});
+
+describe("dashboard prompt and title helpers", () => {
+  it("cleans noisy prompt text before display", () => {
+    expect(cleanPrompt("<command-name>status</command-name>")).toBe("");
+    expect(cleanPrompt("1|Please refactor\n2|the dashboard")).toBe("Please refactor the dashboard");
+    expect(cleanPrompt("### AI Coding Session\n3 prompts, 4 tools, 10m\nShip it")).toBe("Ship it");
+  });
+
+  it("deduplicates prompt previews and hides a title duplicate", () => {
+    const prompts = sessionPromptPreview(
+      makeSource({
+        firstPrompt: "Build the dashboard",
+        prompts: ["Build the dashboard", "Then add tests", "Then add tests"],
+      }),
+      { firstPrompt: "Build the dashboard" },
+      "Build the dashboard",
+    );
+
+    expect(prompts).toEqual(["Then add tests"]);
+  });
+
+  it("falls back through source and replay titles predictably", () => {
+    const source = makeSource({
+      title: "<task-notification>hidden</task-notification>",
+      firstPrompt: "Implement search",
+      replay: {
+        slug: "source-slug",
+        title: "Replay title",
+        provider: "cursor",
+        project: "~/Code/app",
+        startTime: "2026-05-01T10:00:00.000Z",
+        endTime: "2026-05-01T10:10:00.000Z",
+        stats: { userPrompts: 1, toolCalls: 2 },
+        hasAnnotations: false,
+        annotationCount: 0,
+        messages: [],
+      },
+    });
+
+    expect(sourceSuggestedTitle(source)).toBe("Replay title");
+    expect(sourceDisplayTitle(source, { title: "Scan title" })).toBe("Scan title");
+    expect(replaySuggestedTitle({ ...source.replay!, firstMessage: "First replay prompt" })).toBe(
+      "Replay title",
+    );
+  });
+});
+
 describe("formatDataSourceLabel", () => {
   it("labels Cursor SDK sessions distinctly when hasSdk is true", () => {
     expect(formatDataSourceLabel(false, "jsonl+tools", true)).toBe(
@@ -213,6 +317,26 @@ describe("formatDataSourceLabel", () => {
     expect(formatDataSourceLabel(false, "global-state")).toBe("Cursor global state");
     expect(formatDataSourceLabel(true)).toBe("SQLite + JSONL");
     expect(formatDataSourceLabel()).toBe("JSONL");
+  });
+});
+
+describe("dashboard badge helpers", () => {
+  it("uses distinct data source badge classes", () => {
+    expect(dataSourceBadgeClass("jsonl")).toContain("terminal-orange");
+    expect(dataSourceBadgeClass("global-state")).toContain("terminal-blue");
+    expect(dataSourceBadgeClass("sqlite")).toContain("terminal-green");
+    expect(dataSourceBadgeClass(undefined, true)).toContain("terminal-green");
+    expect(dataSourceBadgeClass(undefined, false, true)).toContain("terminal-purple");
+    expect(dataSourceBadgeClass()).toContain("terminal-dimmer");
+  });
+
+  it("hides default branches and shortens Cowork space ids", () => {
+    expect(nonDefaultBranch("main")).toBeUndefined();
+    expect(nonDefaultBranch("master")).toBeUndefined();
+    expect(nonDefaultBranch("feature/dashboard")).toBe("feature/dashboard");
+    expect(shortCoworkSpaceId("space_abcdef123")).toBe("abcdef");
+    expect(shortCoworkSpaceId("space-xyz987")).toBe("xyz987");
+    expect(shortCoworkSpaceId("abc")).toBe("abc");
   });
 });
 

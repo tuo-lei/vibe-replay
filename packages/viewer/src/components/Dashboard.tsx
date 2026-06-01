@@ -6,6 +6,7 @@ import DashboardHome from "./DashboardHome";
 import {
   cleanPrompt,
   computeProjectLabels,
+  dataSourceBadgeClass,
   formatCacheAge,
   formatCompactAge,
   formatCost,
@@ -18,6 +19,7 @@ import {
   isCacheFresh,
   navigateTo,
   navigateToLive,
+  nonDefaultBranch,
   normalizeTitleText,
   parseCachedList,
   projectName,
@@ -25,8 +27,10 @@ import {
   providerBadgeLabel,
   replaySuggestedTitle,
   rollupProject,
+  sessionPromptPreview,
   type SourcesEnrichmentStatus,
   shortModelName,
+  shortCoworkSpaceId,
   sourceDisplayTitle,
   sourceSuggestedTitle,
   TITLE_MAX_CHARS,
@@ -281,51 +285,6 @@ export interface SessionScanData {
   gitBranches?: string[];
   dataSource?: string;
   dataQualityNotes?: string[];
-}
-
-function sessionPromptPreview(
-  session: Pick<SourceSession, "prompts" | "firstPrompt">,
-  scanData?: Pick<SessionScanData, "firstPrompt"> | null,
-  displayTitle?: string,
-): string[] {
-  const prompts: string[] = [];
-  const seen = new Set<string>();
-  const candidates = [scanData?.firstPrompt, ...(session.prompts || [])];
-  if (!scanData?.firstPrompt) candidates.push(session.firstPrompt);
-  for (const candidate of candidates) {
-    const cleaned = cleanPrompt(candidate || "");
-    if (!cleaned || seen.has(cleaned)) continue;
-    seen.add(cleaned);
-    prompts.push(cleaned);
-  }
-  const normalizedTitle = cleanPrompt(displayTitle || "");
-  if (prompts.length > 1 && normalizedTitle && prompts[0] === normalizedTitle) {
-    prompts.shift();
-  }
-  if (prompts.length > 1 && /^(?:and|but|or|so|then)\b/i.test(prompts[0] || "")) {
-    prompts.shift();
-  }
-  return prompts;
-}
-
-function nonDefaultBranch(branch?: string): string | undefined {
-  return branch && branch !== "main" && branch !== "master" ? branch : undefined;
-}
-
-function shortCoworkSpaceId(spaceId: string): string {
-  const compact = spaceId.replace(/^space[_-]?/, "");
-  return compact.slice(0, 6) || spaceId.slice(0, 6);
-}
-
-function dataSourceBadgeClass(dataSource?: string, hasSqlite?: boolean, hasSdk?: boolean): string {
-  // SDK gets its own distinct purple badge so users can spot Cursor SDK sessions
-  // at a glance (they're functionally different from IDE chats — different store,
-  // different agent runtime, different lifecycle).
-  if (hasSdk) return "bg-terminal-purple-subtle text-terminal-purple";
-  if (dataSource === "jsonl") return "bg-terminal-orange-subtle text-terminal-orange";
-  if (dataSource === "global-state") return "bg-terminal-blue-subtle text-terminal-blue";
-  if (dataSource === "sqlite" || hasSqlite) return "bg-terminal-green-subtle text-terminal-green";
-  return "bg-terminal-surface-2 text-terminal-dimmer";
 }
 
 /** Session detail popup — shows full metadata, editable title, Generate CTA */
