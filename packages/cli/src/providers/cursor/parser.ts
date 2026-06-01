@@ -20,6 +20,7 @@ import {
   mapToolArgs,
   parseCursorSqlite,
 } from "./sqlite-reader.js";
+import { addParseWarning } from "../warnings.js";
 
 const CURSOR_UUID_SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -69,6 +70,10 @@ export async function parseCursorSession(
         const jsonlThinking = await parseCursorJsonl(transcriptPaths, [], {
           inferToolPaths: false,
         });
+        sqliteResult.parseWarnings = mergeParseWarnings(
+          sqliteResult.parseWarnings,
+          jsonlThinking.parseWarnings,
+        );
         sqliteResult.turns = mergeJsonlSupplementsIntoCursorTurns(
           sqliteResult.turns,
           jsonlThinking.turns,
@@ -207,6 +212,15 @@ function deriveSessionIdFromTranscript(transcriptPaths: string[]): string | null
   return null;
 }
 
+function mergeParseWarnings(
+  base: ProviderParseResult["parseWarnings"],
+  extra: ProviderParseResult["parseWarnings"],
+): ProviderParseResult["parseWarnings"] {
+  if (!base?.length) return extra;
+  if (!extra?.length) return base;
+  return [...base, ...extra];
+}
+
 interface ParseJsonlOptions {
   inferToolPaths: boolean;
 }
@@ -253,18 +267,28 @@ async function parseCursorJsonl(
   const toolResults = new Map<string, CursorToolResult>();
   const toolErrors = new Map<string, boolean>();
   const toolImages = new Map<string, string[]>();
+  const parseWarnings: NonNullable<ProviderParseResult["parseWarnings"]> = [];
   const sortedTranscriptPaths = await sortByMtime(transcriptPaths);
   const sessionId = basename(sortedTranscriptPaths[sortedTranscriptPaths.length - 1], ".jsonl");
 
   for (const filePath of sortedTranscriptPaths) {
     const content = await readFile(filePath, "utf-8");
-    const lines = content.split("\n").filter((l) => l.trim());
+    const lines = content.split("\n");
 
-    for (const line of lines) {
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+      const line = lines[lineIndex];
+      if (!line.trim()) continue;
       let obj: any;
       try {
         obj = JSON.parse(line);
       } catch {
+        addParseWarning(parseWarnings, {
+          kind: "malformed-json",
+          source: "cursor transcript JSONL",
+          firstLine: lineIndex + 1,
+          message: "Skipped malformed JSONL line",
+          sample: line,
+        });
         continue;
       }
 
@@ -304,7 +328,17 @@ async function parseCursorJsonl(
 
       for (const imagePath of imageFilePaths) {
         const dataUrl = await readImageFileAsDataUrl(imagePath);
-        if (dataUrl) userImages.push(dataUrl);
+        if (dataUrl) {
+          userImages.push(dataUrl);
+        } else {
+          addParseWarning(parseWarnings, {
+            kind: "missing-image",
+            source: "cursor transcript image reference",
+            firstLine: lineIndex + 1,
+            message: "Skipped image reference because the file could not be read",
+            sample: imagePath,
+          });
+        }
       }
 
       if (role === "user" && textParts.length === 0 && userImages.length === 0) continue;
@@ -416,6 +450,7 @@ async function parseCursorJsonl(
         ...(hasToolData ? ["cursor/projects/agent-tools/*.txt"] : []),
       ],
     },
+    parseWarnings: parseWarnings.length > 0 ? parseWarnings : undefined,
   };
 }
 

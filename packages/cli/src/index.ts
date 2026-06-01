@@ -34,7 +34,7 @@ import { scanForSecrets } from "./scan.js";
 import { startDashboard, startServer } from "./server.js";
 import { formatSessionQueryText, queryLocalSessions } from "./session-query.js";
 import { transformToReplay } from "./transform.js";
-import type { ReplaySession, SessionInfo } from "./types.js";
+import type { ParseWarning, ReplaySession, SessionInfo } from "./types.js";
 import { normalizeTitle } from "./utils.js";
 import { CLI_VERSION } from "./version.js";
 
@@ -159,6 +159,41 @@ function suggestedReplayTitle(
   if (firstPromptTitle) return firstPromptTitle;
 
   return replayCandidate || slug || replaySlug;
+}
+
+function formatParseWarningSummary(warnings?: ParseWarning[]): string[] {
+  if (!warnings?.length) return [];
+  return warnings.map((warning) => {
+    const label =
+      warning.kind === "malformed-json"
+        ? "malformed JSONL line"
+        : warning.kind === "missing-image"
+          ? "image file"
+          : warning.kind === "unreadable-source"
+            ? "unreadable source"
+            : "item";
+    const plural = warning.count === 1 ? label : `${label}s`;
+    const location = warning.firstLine ? ` first at line ${warning.firstLine}` : "";
+    const source = warning.source ? ` in ${warning.source}` : "";
+    const sample = warning.sample ? ` Sample: ${warning.sample}` : "";
+    return `${warning.count} ${plural} skipped${source}${location}. ${warning.message}.${sample}`;
+  });
+}
+
+function printParseWarnings(warnings?: ParseWarning[]): void {
+  const lines = formatParseWarningSummary(warnings);
+  if (lines.length === 0) return;
+  const total = warnings?.reduce((sum, warning) => sum + warning.count, 0) ?? 0;
+  process.stderr.write(
+    `${chalk.yellow(`  ⚠ ${total} parser warning${total === 1 ? "" : "s"} detected`)}\n`,
+  );
+  for (const line of lines.slice(0, 4)) {
+    process.stderr.write(`${chalk.dim("    - ")}${chalk.yellow(line)}\n`);
+  }
+  if (lines.length > 4) {
+    process.stderr.write(chalk.dim(`    ... ${lines.length - 4} more warning group(s)\n`));
+  }
+  process.stderr.write("\n");
 }
 
 async function discoverAllSessions(): Promise<SessionInfo[]> {
@@ -550,6 +585,8 @@ program
         console.log(chalk.dim("  Continuing — user confirmed findings are safe.\n"));
       }
     }
+
+    printParseWarnings(replay.meta.parseWarnings);
 
     // --open: auto-open in browser and exit (non-interactive mode)
     if (opts.open) {

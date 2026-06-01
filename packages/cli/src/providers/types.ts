@@ -1,4 +1,10 @@
-import type { CursorSidecars, PrLink, TokenUsage, TurnStat } from "@vibe-replay/types";
+import type {
+  CursorSidecars,
+  ParseWarning,
+  PrLink,
+  TokenUsage,
+  TurnStat,
+} from "@vibe-replay/types";
 import type { DataSource, DataSourceInfo, ParsedTurn, SessionInfo } from "../types.js";
 
 export type { DataSource, DataSourceInfo, TokenUsage };
@@ -62,6 +68,8 @@ export interface ProviderParseResult {
   trackedFiles?: string[];
   contextFiles?: string[];
   cursorSidecars?: CursorSidecars;
+  /** Parser data-loss warnings collected while reading provider source data */
+  parseWarnings?: ParseWarning[];
   /** API service tier (e.g. "standard") from usage data */
   serviceTier?: string;
   /** Skills / slash commands used in the session (e.g. ["playwright-cli", "/insights"]) */

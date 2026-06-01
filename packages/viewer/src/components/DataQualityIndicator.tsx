@@ -4,6 +4,11 @@ import type { ReplaySession } from "../types";
 
 export function getSessionDataQualityNotes(meta: ReplaySession["meta"]): string[] {
   const notes = [...(meta.dataSourceInfo?.notes || [])];
+  for (const warning of meta.parseWarnings || []) {
+    notes.push(
+      `${warning.count} parser warning${warning.count === 1 ? "" : "s"}: ${warning.message}`,
+    );
+  }
 
   if (
     meta.provider === "cursor" &&

@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { estimateCost, estimateCostSimple, getModelContextLimit } from "./pricing.js";
 import type { ProviderParseResult } from "./providers/types.js";
+import { compactWarningSample } from "./providers/warnings.js";
 import type { ContentBlock, ReplaySession, Scene, SubAgent } from "./types.js";
 import { estimateTokens } from "./utils/tokenEstimate.js";
 
@@ -206,6 +207,19 @@ export function transformToReplay(
         ? { contextFiles: parsed.contextFiles.map(redactFilePath) }
         : {}),
       ...(parsed.cursorSidecars ? { cursorSidecars: parsed.cursorSidecars } : {}),
+      ...(parsed.parseWarnings && parsed.parseWarnings.length > 0
+        ? {
+            parseWarnings: parsed.parseWarnings.map((warning) => ({
+              ...warning,
+              message: redactWarningText(warning.message),
+              ...(warning.source ? { source: redactWarningText(warning.source) } : {}),
+              sample:
+                warning.kind !== "malformed-json" && warning.sample
+                  ? compactWarningSample(redactWarningText(warning.sample))
+                  : undefined,
+            })),
+          }
+        : {}),
       ...(parsed.serviceTier ? { serviceTier: parsed.serviceTier } : {}),
       ...(parsed.skillsUsed ? { skillsUsed: parsed.skillsUsed } : {}),
       ...(parsed.mcpServersUsed ? { mcpServersUsed: parsed.mcpServersUsed } : {}),
@@ -265,6 +279,27 @@ function buildFileDiff(
 
 function redactDiffContent(value: unknown): string {
   return typeof value === "string" ? redactSecrets(redactPath(value)) : "";
+}
+
+function redactWarningText(value: string): string {
+  return redactSecrets(redactWarningPaths(redactPath(value))).replace(
+    /[A-Za-z0-9_-]{4,}\.\.\.\[REDACTED\]/g,
+    "[REDACTED]",
+  );
+}
+
+function redactWarningPaths(value: string): string {
+  let result = value;
+  if (HOME) {
+    const slashEscapedHome = HOME.replaceAll("/", "\\/");
+    result = result.replaceAll(slashEscapedHome, "~");
+
+    const backslashEscapedHome = HOME.replaceAll("\\", "\\\\");
+    if (backslashEscapedHome !== HOME) {
+      result = result.replaceAll(backslashEscapedHome, "~");
+    }
+  }
+  return result.replace(/[A-Za-z]:(?:\\\\|\\)Users(?:\\\\|\\)[^\\/"\s]+/g, "~");
 }
 
 function buildToolScene(

@@ -124,6 +124,21 @@ describe("Codex parser", () => {
     });
   });
 
+  it("records malformed JSONL lines as parse warnings", () => {
+    const result = parseCodexLines([...lines.slice(0, 2), "{not-json", ...lines.slice(2)]);
+
+    expect(result.turns.length).toBeGreaterThan(0);
+    expect(result.parseWarnings).toEqual([
+      expect.objectContaining({
+        kind: "malformed-json",
+        count: 1,
+        source: "codex JSONL",
+        firstLine: 3,
+        message: "Skipped malformed JSONL line",
+      }),
+    ]);
+  });
+
   it("transforms Codex tool calls into replay scenes", () => {
     const parsed = parseCodexLines(lines);
     const replay = transformToReplay(parsed, "codex", "~/project");

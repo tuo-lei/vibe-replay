@@ -74,6 +74,99 @@ describe("transform — scene generation", () => {
     expect(replay.scenes[0].content).toBe("Hello world");
   });
 
+  it("propagates parse warnings into replay metadata", () => {
+    const replay = transformToReplay(
+      buildParsed({
+        turns: [userTurn("Hello world")],
+        parseWarnings: [
+          {
+            kind: "malformed-json",
+            count: 2,
+            message: "Skipped malformed JSONL line",
+            source: "test JSONL",
+            firstLine: 3,
+          },
+        ],
+      }),
+      "claude-code",
+      "~/test",
+    );
+
+    expect(replay.meta.parseWarnings).toEqual([
+      expect.objectContaining({ kind: "malformed-json", count: 2, source: "test JSONL" }),
+    ]);
+  });
+
+  it("redacts parse warning messages and drops malformed JSON samples", () => {
+    const replay = transformToReplay(
+      buildParsed({
+        turns: [userTurn("Hello world")],
+        parseWarnings: [
+          {
+            kind: "malformed-json",
+            count: 1,
+            message: "Skipped malformed JSONL line with sk-ant-1234567890abcdef1234567890",
+            sample: '{"token":"sk-ant-1234567890abcdef1234567890"}',
+          },
+        ],
+      }),
+      "claude-code",
+      "~/test",
+    );
+
+    const warning = replay.meta.parseWarnings?.[0];
+    expect(warning?.message).toContain("[REDACTED]");
+    expect(warning?.sample).toBeUndefined();
+    expect(JSON.stringify(warning)).not.toContain("sk-ant-1234567890abcdef1234567890");
+  });
+
+  it("redacts parse warning samples before truncating them", () => {
+    const crossingBoundaryToken = `sk-ant-${"a".repeat(40)}`;
+    const replay = transformToReplay(
+      buildParsed({
+        turns: [userTurn("Hello world")],
+        parseWarnings: [
+          {
+            kind: "unreadable-source",
+            count: 1,
+            message: "Skipped unreadable source",
+            sample: `${"x".repeat(150)}${crossingBoundaryToken}`,
+          },
+        ],
+      }),
+      "claude-code",
+      "~/test",
+    );
+
+    const sample = replay.meta.parseWarnings?.[0]?.sample || "";
+    expect(sample).toContain("[REDACTED]");
+    expect(sample).not.toContain("sk-ant-");
+    expect(sample).not.toContain(crossingBoundaryToken);
+  });
+
+  it("redacts JSON-escaped Windows user paths in parse warning samples", () => {
+    const replay = transformToReplay(
+      buildParsed({
+        turns: [userTurn("Hello world")],
+        parseWarnings: [
+          {
+            kind: "unreadable-source",
+            count: 1,
+            message: "Skipped unreadable source",
+            sample: '{"file":"C:\\\\Users\\\\alice\\\\project\\\\session.jsonl"}',
+          },
+        ],
+      }),
+      "cursor",
+      "~/test",
+    );
+
+    const sample = replay.meta.parseWarnings?.[0]?.sample || "";
+    expect(sample).not.toContain("alice");
+    expect(sample).not.toContain("C:\\\\Users");
+    expect(sample).toContain("~\\\\project");
+  });
+
   it("creates text-response scene from assistant text", () => {
     const replay = transformToReplay(
       buildParsed({ turns: [assistantTextTurn("The answer is 42.")] }),

@@ -4,6 +4,7 @@ import { extname } from "node:path";
 import { estimateActiveDuration } from "../../duration.js";
 import type { ContentBlock, ParsedTurn, SessionInfo } from "../../types.js";
 import type { Compaction, ProviderParseResult, TokenUsage } from "../types.js";
+import { addParseWarning } from "../warnings.js";
 import { codexStripTwoPass, isCodexToolCallType } from "./constants.js";
 
 interface PendingTool {
@@ -50,7 +51,7 @@ export async function parseCodexSession(
   const lines: string[] = [];
   for (const fp of paths) {
     const content = await readFile(fp, "utf-8");
-    lines.push(...content.split("\n").filter((l) => l.trim()));
+    lines.push(...content.split("\n"));
   }
   return parseCodexLines(lines, sessionInfo, paths);
 }
@@ -85,12 +86,22 @@ export function parseCodexLines(
   const gitBranches: string[] = [];
   const seenUserMessages = new Map<string, number[]>();
   const seenAssistantMessages = new Map<string, number[]>();
+  const parseWarnings: NonNullable<ProviderParseResult["parseWarnings"]> = [];
 
-  for (const line of lines) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    const line = lines[lineIndex];
+    if (!line.trim()) continue;
     let obj: any;
     try {
       obj = JSON.parse(line);
     } catch {
+      addParseWarning(parseWarnings, {
+        kind: "malformed-json",
+        source: "codex JSONL",
+        firstLine: lineIndex + 1,
+        message: "Skipped malformed JSONL line",
+        sample: line,
+      });
       continue;
     }
 
@@ -421,6 +432,7 @@ export function parseCodexLines(
       supplements: sourcePaths,
       notes: ["Discovered from Codex state and parsed from rollout JSONL (local beta)."],
     },
+    parseWarnings: parseWarnings.length > 0 ? parseWarnings : undefined,
   };
 }
 
