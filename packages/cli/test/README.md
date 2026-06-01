@@ -39,6 +39,9 @@ These tests protect **parser compatibility** with real-world session data from C
 | `cursor-thinking-merge.test.ts` | Thinking block merge algorithm | Merge correctness |
 | `clean-prompt.test.ts` | Prompt cleaning | Text cleanup |
 | `scan.test.ts` | Secret scanning patterns | **Security (do not weaken)** |
+| `cache.test.ts` | File cache envelope versioning, key sanitization, disable flag | Cache compatibility |
+| `insights.test.ts` | Durable insight conversion, merge provenance, daily aggregation, stats | Insights persistence |
+| `server-core.test.ts` | Server slug validation and error message helpers | Server helper contracts |
 | `pricing.test.ts` | Model pricing lookup + cost calculation | Per-model pricing |
 | `cost-estimation.test.ts` | Parser → transform cost integration | Multi-model cost accuracy |
 

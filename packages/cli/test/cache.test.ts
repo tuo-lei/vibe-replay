@@ -56,9 +56,20 @@ describe("file cache", () => {
 
     await mkdir(join(home, ".vibe-replay", "cache"), { recursive: true });
     await writeFile(cachePath(home, "bad-version"), JSON.stringify({ data: "stale" }), "utf-8");
+    await writeFile(
+      cachePath(home, "stale-app-version"),
+      JSON.stringify({
+        envelopeVersion: 1,
+        appVersion: "0.0.0",
+        updatedAt: new Date().toISOString(),
+        data: "stale",
+      }),
+      "utf-8",
+    );
     await writeFile(cachePath(home, "bad-json"), "{", "utf-8");
 
     await expect(readFileCache("bad-version")).resolves.toBeNull();
+    await expect(readFileCache("stale-app-version")).resolves.toBeNull();
     await expect(readFileCache("bad-json")).resolves.toBeNull();
     await expect(readFileCache("missing")).resolves.toBeNull();
   });
