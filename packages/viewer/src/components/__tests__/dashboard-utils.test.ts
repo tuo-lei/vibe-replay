@@ -309,7 +309,7 @@ describe("dashboard prompt and title helpers", () => {
         project: "~/Code/app",
         startTime: "2026-05-01T10:00:00.000Z",
         endTime: "2026-05-01T10:10:00.000Z",
-        stats: { userPrompts: 1, toolCalls: 2 },
+        stats: { sceneCount: 3, userPrompts: 1, toolCalls: 2 },
         hasAnnotations: false,
         annotationCount: 0,
         messages: [],
