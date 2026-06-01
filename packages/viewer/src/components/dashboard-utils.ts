@@ -509,7 +509,9 @@ export function dataSourceBadgeClass(
   // at a glance (they're functionally different from IDE chats — different store,
   // different agent runtime, different lifecycle).
   if (hasSdk) return "bg-terminal-purple-subtle text-terminal-purple";
-  if (dataSource === "jsonl") return "bg-terminal-orange-subtle text-terminal-orange";
+  if (dataSource === "jsonl" || dataSource === "jsonl+tools") {
+    return "bg-terminal-orange-subtle text-terminal-orange";
+  }
   if (dataSource === "global-state") return "bg-terminal-blue-subtle text-terminal-blue";
   if (dataSource === "sqlite" || hasSqlite) return "bg-terminal-green-subtle text-terminal-green";
   return "bg-terminal-surface-2 text-terminal-dimmer";
