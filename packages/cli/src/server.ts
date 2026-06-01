@@ -101,6 +101,24 @@ function getErrorMessage(err: unknown): string {
   return "Unknown error";
 }
 
+function getErrorCode(err: unknown): string | undefined {
+  if (typeof err !== "object" || err === null || !("code" in err)) return undefined;
+  const code = (err as { code?: unknown }).code;
+  return typeof code === "string" ? code : undefined;
+}
+
+function isMissingFileError(err: unknown): boolean {
+  return getErrorCode(err) === "ENOENT";
+}
+
+function formatRecoverableWarning(context: string, err: unknown): string {
+  return `${context}: ${getErrorMessage(err)}`;
+}
+
+function warnRecoverable(context: string, err: unknown): void {
+  console.warn(`Warning: ${formatRecoverableWarning(context, err)}`);
+}
+
 function normalizeProjectPath(project: string): string {
   const home = homedir();
   return project.startsWith(home) ? `~${project.slice(home.length)}` : project;
@@ -334,7 +352,11 @@ async function scanSessionsFromDir(baseDir: string): Promise<ReplaySummary[]> {
             }
           : undefined,
       });
-    } catch {}
+    } catch (err) {
+      if (!isMissingFileError(err)) {
+        warnRecoverable(`Skipping unreadable replay at ${replayPath}`, err);
+      }
+    }
   }
 
   return results;
@@ -949,11 +971,20 @@ function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
 async function loadAnnotations(baseDir: string, slug: string): Promise<Annotation[]> {
   const dirs = [join(baseDir, slug), resolve("./vibe-replay", slug)];
   for (const dir of dirs) {
+    const annotationsPath = join(dir, "annotations.json");
     try {
-      const raw = await readFile(join(dir, "annotations.json"), "utf-8");
-      const anns = JSON.parse(raw) as Annotation[];
-      if (Array.isArray(anns)) return anns;
-    } catch {}
+      const raw = await readFile(annotationsPath, "utf-8");
+      const anns = JSON.parse(raw) as unknown;
+      if (Array.isArray(anns)) return anns as Annotation[];
+      warnRecoverable(
+        `Ignoring annotations at ${annotationsPath}`,
+        new Error("expected JSON array"),
+      );
+    } catch (err) {
+      if (!isMissingFileError(err)) {
+        warnRecoverable(`Unable to load annotations at ${annotationsPath}`, err);
+      }
+    }
   }
   return [];
 }
@@ -1011,7 +1042,8 @@ export async function startServer(
       const sessions = await scanSessions(baseDir);
       await writeFileCache(replaysCacheKey, sessions);
       return sessions;
-    } catch {
+    } catch (err) {
+      warnRecoverable("Unable to refresh dashboard replay cache", err);
       // Best-effort cache refresh for dashboard listing.
       // Return null (not []) so callers can distinguish "scan failed" from "no replays".
       return null;
@@ -1067,7 +1099,8 @@ export async function startServer(
       if (changed) {
         await writeFileCache(sourcesCacheKey, updated);
       }
-    } catch {
+    } catch (err) {
+      warnRecoverable("Unable to sync sources cache with replay summaries", err);
       // Best-effort — never break core flows
     }
   };
@@ -1189,7 +1222,8 @@ export async function startServer(
               };
             }
           }
-        } catch {
+        } catch (err) {
+          warnRecoverable(`Unable to enrich Cursor stats for ${session.sessionId}`, err);
           // Best-effort enrichment only.
         } finally {
           sourcesEnrichmentStatus = {
@@ -1215,7 +1249,8 @@ export async function startServer(
       if (pending) {
         enrichCursorStatsInBackground(pending.merged, enrichedSources, pending.hints);
       }
-    })().catch(() => {
+    })().catch((err) => {
+      warnRecoverable("Cursor stat backfill failed", err);
       sourcesEnrichmentStatus = {
         ...sourcesEnrichmentStatus,
         running: false,
@@ -1373,7 +1408,9 @@ export async function startServer(
       const result = await syncInsightsToCloud();
       if (!result.error) lastAutoSyncDate = today;
     });
-    syncLock = job.catch(() => {});
+    syncLock = job.catch((err) => {
+      warnRecoverable("Auto-sync insights failed", err);
+    });
     return job;
   };
 
@@ -1502,11 +1539,16 @@ export async function startServer(
         // Persist insights to durable local store (survives source file deletion)
         persistInsightsFromScan(results)
           .then(() => autoSyncInsights()) // Auto-sync to cloud if logged in
-          .catch(() => {});
+          .catch((err) => {
+            warnRecoverable("Unable to persist or sync insights", err);
+          });
 
         // Pre-compute insights cache in background (non-blocking)
-        precomputeInsightsCache(results).catch(() => {});
-      } catch {
+        precomputeInsightsCache(results).catch((err) => {
+          warnRecoverable("Unable to precompute insights cache", err);
+        });
+      } catch (err) {
+        warnRecoverable("Background scan failed", err);
         scanState = {
           ...scanState,
           running: false,
@@ -2271,7 +2313,9 @@ export async function startServer(
       try {
         const sessions = mergeSameSessions(await provider.discover());
         allSessions.push(...sessions);
-      } catch {}
+      } catch (err) {
+        warnRecoverable(`Unable to discover ${provider.name} sessions for regeneration`, err);
+      }
     }
 
     let entries: string[];
@@ -2726,7 +2770,9 @@ export async function startServer(
               await saveAuthToken({ token: data.token, user: data.user }, cloudApiBaseUrl);
 
               // Auto-sync insights to cloud after login (fire-and-forget)
-              autoSyncInsights().catch(() => {});
+              autoSyncInsights().catch((err) => {
+                warnRecoverable("Unable to auto-sync insights after login", err);
+              });
             } catch {
               res.writeHead(400);
               res.end("Bad Request");
@@ -3540,8 +3586,11 @@ export const __testables = {
   buildSourcesResult,
   buildInsightsSyncBatches,
   countSessionStats,
+  formatRecoverableWarning,
+  loadAnnotations,
   pickSourceRecordForSession,
   prioritizeScanInputs,
+  scanSessionsFromDir,
   selectCursorEnrichmentCandidates,
   sourceSessionKey,
 };
