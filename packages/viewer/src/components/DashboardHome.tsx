@@ -3,6 +3,7 @@ import { AnimatedValue } from "../hooks/useAnimatedNumber";
 import type { SessionSummary, SourceSession } from "../types";
 import { localDayKey } from "../utils/date";
 import { SessionDetailPopup } from "./Dashboard";
+import { ProviderBadge } from "./dashboard/DashboardShared";
 import {
   fetchWithRetry,
   formatCompactDuration,
@@ -11,8 +12,6 @@ import {
   normalizeTitleText,
   parseCachedList,
   projectName,
-  providerBadgeClass,
-  providerBadgeLabel,
   replaySuggestedTitle,
   rollupTopProjects,
   type SourcesEnrichmentStatus,
@@ -330,16 +329,6 @@ function RecentProjectsSkeleton() {
       </div>
       <div className="h-8 mt-2 rounded-lg skeleton" />
     </div>
-  );
-}
-
-function ProviderBadge({ provider }: { provider: string }) {
-  return (
-    <span
-      className={`text-[10px] font-sans font-medium px-1.5 py-0.5 rounded-full uppercase tracking-wider ${providerBadgeClass(provider)}`}
-    >
-      {providerBadgeLabel(provider)}
-    </span>
   );
 }
 
