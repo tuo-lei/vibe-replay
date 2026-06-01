@@ -43,6 +43,7 @@ export function EditableTitle({
   const [value, setValue] = useState(suggestedTitle);
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const cancelledRef = useRef(false);
 
   useEffect(() => {
     setValue(suggestedTitle);
@@ -54,6 +55,10 @@ export function EditableTitle({
 
   const save = async () => {
     if (saving) return;
+    if (cancelledRef.current) {
+      cancelledRef.current = false;
+      return;
+    }
     setSaving(true);
     try {
       await onSave(slug, normalizeTitleText(value));
@@ -80,6 +85,7 @@ export function EditableTitle({
             onBlur={save}
             onKeyDown={(e) => {
               if (e.key === "Escape") {
+                cancelledRef.current = true;
                 setValue(suggestedTitle);
                 setEditing(false);
               }
@@ -100,7 +106,10 @@ export function EditableTitle({
   return (
     <div className="flex-1 min-w-0">
       <button
-        onClick={() => setEditing(true)}
+        onClick={() => {
+          cancelledRef.current = false;
+          setEditing(true);
+        }}
         className="group flex items-center gap-1 min-w-0 max-w-full text-left"
         title="Click to edit title"
       >
