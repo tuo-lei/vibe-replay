@@ -666,4 +666,65 @@ describe("aggregateUserInsights", () => {
       "2/2 Cursor sessions do not include per-turn stats.",
     );
   });
+
+  it("aggregates token totals and turn duration histogram percentiles", () => {
+    const insights = aggregateUserInsights([
+      {
+        sessionId: "s1",
+        provider: "claude-code",
+        project: "~/Code/proj-a",
+        slug: "slug-1",
+        startTime: "2025-03-18T10:00:00Z",
+        durationMs: 60_000,
+        promptCount: 1,
+        toolCallCount: 2,
+        editCount: 0,
+        filesModified: [],
+        tokenUsage: {
+          inputTokens: 100,
+          outputTokens: 50,
+          cacheReadTokens: 20,
+          cacheCreationTokens: 10,
+        },
+        turnDurations: [10_000, 45_000],
+        subAgentCount: 0,
+        apiErrorCount: 0,
+        compactionCount: 0,
+      },
+      {
+        sessionId: "s2",
+        provider: "claude-code",
+        project: "~/Code/proj-a",
+        slug: "slug-2",
+        startTime: "2025-03-18T11:00:00Z",
+        durationMs: 120_000,
+        promptCount: 1,
+        toolCallCount: 1,
+        editCount: 0,
+        filesModified: [],
+        tokenUsage: {
+          inputTokens: 300,
+          outputTokens: 75,
+          cacheReadTokens: 40,
+          cacheCreationTokens: 25,
+        },
+        turnDurations: [90_000, 720_000],
+        subAgentCount: 0,
+        apiErrorCount: 0,
+        compactionCount: 0,
+      },
+    ]);
+
+    expect(insights.tokenBreakdown).toEqual({
+      input: 400,
+      output: 125,
+      cacheRead: 60,
+      cacheCreation: 35,
+    });
+    expect(insights.medianTurnDurationMs).toBe(67500);
+    expect(insights.turnDurationHistogram?.totalTurns).toBe(4);
+    expect(insights.turnDurationHistogram?.buckets.map((bucket) => bucket.count)).toEqual([
+      1, 1, 1, 0, 0, 1,
+    ]);
+  });
 });

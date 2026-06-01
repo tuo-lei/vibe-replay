@@ -127,6 +127,46 @@ describe("resolveGenerateInputs", () => {
     expect(resolved.value.sessionInfo?.sessionId).toBe("cursor-session-b");
   });
 
+  it("falls back to matching by sessionId when the replay slug differs", () => {
+    const resolved = resolveGenerateInputs(
+      {
+        provider: "cursor",
+        filePaths: [],
+        sessionSlug: "oldslug0",
+        sessionId: "cursor-session-from-db",
+      },
+      [
+        makeSession({
+          slug: "newslug0",
+          sessionId: "cursor-session-from-db",
+          filePaths: [],
+          toolPaths: [],
+        }),
+      ],
+    );
+
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    expect(resolved.value.paths).toEqual([]);
+    expect(resolved.value.sessionInfo?.slug).toBe("newslug0");
+  });
+
+  it("uses explicit tool paths instead of discovered tool paths", () => {
+    const resolved = resolveGenerateInputs(
+      {
+        provider: "cursor",
+        filePaths: ["/explicit/session.jsonl"],
+        toolPaths: ["/explicit/tool.txt"],
+        sessionSlug: "aaaaaaaa",
+      },
+      [makeSession()],
+    );
+
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    expect(resolved.value.paths).toEqual(["/explicit/session.jsonl", "/explicit/tool.txt"]);
+  });
+
   it("still requires file paths for non-cursor providers", () => {
     const resolved = resolveGenerateInputs(
       {

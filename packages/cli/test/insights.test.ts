@@ -1,0 +1,214 @@
+import type { InsightsStore, SessionInsight } from "@vibe-replay/types";
+import { INSIGHTS_SCHEMA_VERSION } from "@vibe-replay/types";
+import { describe, expect, it } from "vitest";
+import {
+  aggregateDailyInsights,
+  getInsightsStats,
+  mergeInsights,
+  scanResultToInsight,
+} from "../src/insights.js";
+import type { SessionScanResult } from "../src/scanner.js";
+
+function makeScan(overrides: Partial<SessionScanResult> = {}): SessionScanResult {
+  return {
+    sessionId: "session-a",
+    provider: "claude-code",
+    project: "~/Code/app",
+    slug: "session-a",
+    startTime: "2026-05-01T10:00:00.000Z",
+    durationMs: 60_000,
+    model: "claude-sonnet-4-20250514",
+    promptCount: 2,
+    toolCallCount: 5,
+    editCount: 1,
+    filesModified: [{ file: "src/app.ts", count: 1 }],
+    tokenUsage: {
+      inputTokens: 100,
+      outputTokens: 20,
+      cacheReadTokens: 30,
+      cacheCreationTokens: 40,
+    },
+    costEstimate: 0.25,
+    subAgentCount: 1,
+    apiErrorCount: 0,
+    compactionCount: 0,
+    dataSource: "jsonl",
+    ...overrides,
+  };
+}
+
+function makeInsight(overrides: Partial<SessionInsight> = {}): SessionInsight {
+  return {
+    sessionId: "session-a",
+    slug: "session-a",
+    provider: "claude-code",
+    project: "~/Code/app",
+    startTime: "2026-04-30T10:00:00.000Z",
+    promptCount: 1,
+    toolCallCount: 1,
+    editCount: 0,
+    hasPR: false,
+    subAgentCount: 0,
+    apiErrorCount: 0,
+    compactionCount: 0,
+    capturedAt: "2026-04-30T11:00:00.000Z",
+    capturedByVersion: "0.0.0",
+    machineId: "machine-original",
+    machineName: "Original Machine",
+    ...overrides,
+  };
+}
+
+function makeStore(sessions: SessionInsight[]): InsightsStore {
+  return {
+    schemaVersion: INSIGHTS_SCHEMA_VERSION,
+    lastUpdated: "2026-05-01T00:00:00.000Z",
+    sessions,
+  };
+}
+
+describe("scanResultToInsight", () => {
+  it("maps scan metadata into durable insight records", () => {
+    const insight = scanResultToInsight(
+      makeScan({
+        prLinks: [
+          {
+            prNumber: 42,
+            prUrl: "https://github.com/tuo-lei/app/pull/42",
+            prRepository: "tuo-lei/app",
+          },
+        ],
+        skillsUsed: ["replay"],
+      }),
+    );
+
+    expect(insight).toMatchObject({
+      sessionId: "session-a",
+      provider: "claude-code",
+      project: "~/Code/app",
+      hasPR: true,
+      prLinks: [
+        {
+          prNumber: 42,
+          prUrl: "https://github.com/tuo-lei/app/pull/42",
+          prRepository: "tuo-lei/app",
+        },
+      ],
+      skillsUsed: ["replay"],
+      filesModified: [{ file: "src/app.ts", count: 1 }],
+      dataSource: "jsonl",
+    });
+    expect(typeof insight.capturedAt).toBe("string");
+    expect(typeof insight.capturedByVersion).toBe("string");
+  });
+
+  it("omits empty file lists and marks missing PRs as false", () => {
+    const insight = scanResultToInsight(makeScan({ filesModified: [], prLinks: [] }));
+
+    expect(insight.filesModified).toBeUndefined();
+    expect(insight.hasPR).toBe(false);
+  });
+});
+
+describe("mergeInsights", () => {
+  it("upserts fresh scans while preserving original capture provenance", () => {
+    const existing = makeInsight();
+    const stale = makeInsight({ sessionId: "deleted-source", slug: "deleted-source" });
+
+    const merged = mergeInsights(makeStore([existing, stale]), [
+      makeScan({ promptCount: 7, machineId: undefined } as Partial<SessionScanResult>),
+      makeScan({ sessionId: "session-b", slug: "session-b", promptCount: 3 }),
+    ]);
+
+    expect(merged.schemaVersion).toBe(INSIGHTS_SCHEMA_VERSION);
+    expect(merged.sessions.map((s) => s.sessionId)).toEqual([
+      "session-a",
+      "deleted-source",
+      "session-b",
+    ]);
+    const updated = merged.sessions.find((s) => s.sessionId === "session-a");
+    expect(updated).toMatchObject({
+      promptCount: 7,
+      capturedAt: "2026-04-30T11:00:00.000Z",
+      machineId: "machine-original",
+      machineName: "Original Machine",
+    });
+    expect(updated?.updatedAt).toBeDefined();
+  });
+});
+
+describe("aggregateDailyInsights", () => {
+  it("groups sessions by local day with JSON breakdowns", () => {
+    const aggregate = aggregateDailyInsights(
+      makeStore([
+        makeInsight({
+          sessionId: "session-a",
+          project: "~/Code/app",
+          provider: "claude-code",
+          model: "sonnet",
+          startTime: "2026-05-01T10:00:00.000Z",
+          promptCount: 2,
+          toolCallCount: 3,
+          editCount: 1,
+          durationMs: 10_000,
+          costEstimate: 0.1,
+        }),
+        makeInsight({
+          sessionId: "session-b",
+          project: "~/Code/app",
+          provider: "cursor",
+          model: "gpt-5.5",
+          startTime: "2026-05-01T12:00:00.000Z",
+          promptCount: 4,
+          toolCallCount: 5,
+          editCount: 2,
+          durationMs: 20_000,
+          costEstimate: 0.2,
+        }),
+        makeInsight({
+          sessionId: "session-c",
+          project: "~/Code/other",
+          provider: "claude-code",
+          startTime: "2026-05-02T10:00:00.000Z",
+          promptCount: 1,
+        }),
+        makeInsight({ sessionId: "missing-time", startTime: undefined }),
+      ]),
+    );
+
+    expect(aggregate.days.map((day) => day.date)).toEqual(["2026-05-01", "2026-05-02"]);
+    expect(aggregate.days[0]).toMatchObject({
+      sessions: 2,
+      prompts: 6,
+      toolCalls: 8,
+      edits: 3,
+      durationMs: 30_000,
+      cost: 0.30000000000000004,
+    });
+    expect(JSON.parse(aggregate.days[0].projects)).toMatchObject({
+      "~/Code/app": { sessions: 2, prompts: 6, toolCalls: 8, edits: 3, durationMs: 30_000 },
+    });
+    expect(JSON.parse(aggregate.days[0].providers)).toEqual({
+      "claude-code": { sessions: 1, cost: 0.1 },
+      cursor: { sessions: 1, cost: 0.2 },
+    });
+  });
+});
+
+describe("getInsightsStats", () => {
+  it("counts providers and unique projects", () => {
+    const stats = getInsightsStats(
+      makeStore([
+        makeInsight({ sessionId: "a", provider: "claude-code", project: "~/Code/app" }),
+        makeInsight({ sessionId: "b", provider: "cursor", project: "~/Code/app" }),
+        makeInsight({ sessionId: "c", provider: "cursor", project: "~/Code/other" }),
+      ]),
+    );
+
+    expect(stats).toEqual({
+      total: 3,
+      providers: { "claude-code": 1, cursor: 2 },
+      projects: 2,
+    });
+  });
+});
