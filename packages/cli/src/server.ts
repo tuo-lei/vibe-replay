@@ -11,7 +11,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { serve } from "@hono/node-server";
 import chalk from "chalk";
@@ -58,7 +58,7 @@ import {
   type SavedGistInfo,
 } from "./publishers/gist.js";
 import { scanForSecrets } from "./scan.js";
-import { saveAnnotations, saveOverlays } from "./server-persistence.js";
+import { loadAnnotations, saveAnnotations, saveOverlays } from "./server-persistence.js";
 import { registerSessionAssetRoutes } from "./server-routes/session-assets.js";
 import {
   buildInsightsSyncBatches,
@@ -80,13 +80,7 @@ import {
   type UserInsights,
 } from "./scanner.js";
 import { transformToReplay } from "./transform.js";
-import type {
-  Annotation,
-  ParsedTurn,
-  ReplaySession,
-  SessionInfo,
-  SessionOverlays,
-} from "./types.js";
+import type { ParsedTurn, ReplaySession, SessionInfo, SessionOverlays } from "./types.js";
 import { localDayKey, normalizeTitle } from "./utils.js";
 import { CLI_VERSION } from "./version.js";
 
@@ -134,15 +128,7 @@ async function scanSessionsFromDir(baseDir: string): Promise<ReplaySummary[]> {
     try {
       const raw = await readFile(replayPath, "utf-8");
       const session = JSON.parse(raw) as ReplaySession;
-      const annotationsPath = join(baseDir, entry, "annotations.json");
-      let annotationCount = 0;
-      try {
-        const annRaw = await readFile(annotationsPath, "utf-8");
-        const anns = JSON.parse(annRaw) as Annotation[];
-        annotationCount = Array.isArray(anns) ? anns.length : 0;
-      } catch {
-        /* no annotations */
-      }
+      const annotationCount = (await loadAnnotations(baseDir, entry)).length;
 
       let gist: SavedGistInfo | undefined;
       try {
@@ -258,16 +244,9 @@ async function loadSessionFromDisk(baseDir: string, slug: string): Promise<Repla
   const raw = await readFile(replayPath, "utf-8");
   const session = JSON.parse(raw) as ReplaySession;
 
-  const sessionDir = dirname(replayPath);
-  const annotationsPath = join(sessionDir, "annotations.json");
-  try {
-    const annRaw = await readFile(annotationsPath, "utf-8");
-    const anns = JSON.parse(annRaw) as Annotation[];
-    if (Array.isArray(anns) && anns.length > 0) {
-      session.annotations = anns;
-    }
-  } catch {
-    /* no annotations */
+  const annotations = await loadAnnotations(baseDir, slug);
+  if (annotations.length > 0) {
+    session.annotations = annotations;
   }
 
   return session;
