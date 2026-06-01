@@ -5,6 +5,7 @@ import { isSystemGeneratedMessage } from "../../clean-prompt.js";
 import { estimateActiveDuration } from "../../duration.js";
 import type { ContentBlock, ParsedTurn, RawMessage } from "../../types.js";
 import type { Compaction, ProviderParseResult, TokenUsage } from "../types.js";
+import { addParseWarning } from "../warnings.js";
 
 export async function parseClaudeCodeSession(
   filePaths: string | string[],
@@ -15,7 +16,7 @@ export async function parseClaudeCodeSession(
   const allLines: string[] = [];
   for (const fp of paths) {
     const content = await readFile(fp, "utf-8");
-    allLines.push(...content.split("\n").filter((l) => l.trim()));
+    allLines.push(...content.split("\n"));
   }
 
   return parseClaudeCodeLines(allLines, { subagentsSourcePath: paths[0] });
@@ -124,12 +125,22 @@ export async function parseClaudeCodeLines(
 
   // All JSONL entry timestamps — used to estimate active duration when turn_duration events are missing
   const allTimestamps: string[] = [];
+  const parseWarnings: NonNullable<ProviderParseResult["parseWarnings"]> = [];
 
-  for (const line of lines) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    const line = lines[lineIndex];
+    if (!line.trim()) continue;
     let obj: RawMessage;
     try {
       obj = JSON.parse(line);
     } catch {
+      addParseWarning(parseWarnings, {
+        kind: "malformed-json",
+        source: "claude-code JSONL",
+        firstLine: lineIndex + 1,
+        message: "Skipped malformed JSONL line",
+        sample: line,
+      });
       continue;
     }
 
@@ -435,7 +446,7 @@ export async function parseClaudeCodeLines(
   // Read subagent JSONL files: extract full conversations + token usage.
   // Must happen before enrichment so subAgentData is available.
   const subAgentData = options.subagentsSourcePath
-    ? await readSubagents(options.subagentsSourcePath, usageByMsgId)
+    ? await readSubagents(options.subagentsSourcePath, usageByMsgId, parseWarnings)
     : new Map<string, SubAgentParsed>();
 
   // Build assistant turns with enriched blocks
@@ -615,6 +626,7 @@ export async function parseClaudeCodeLines(
     agentName,
     worktree,
     queueOperationStats,
+    parseWarnings: parseWarnings.length > 0 ? parseWarnings : undefined,
   };
 }
 
@@ -851,6 +863,7 @@ async function readSubagents(
       model?: string;
     }
   >,
+  parseWarnings: NonNullable<ProviderParseResult["parseWarnings"]>,
 ): Promise<Map<string, SubAgentParsed>> {
   const result = new Map<string, SubAgentParsed>();
   const sessionDir = mainFilePath.replace(/\.jsonl$/, "");
@@ -907,12 +920,21 @@ async function readSubagents(
     const saAssistantOrder: string[] = [];
     const saAssistantTimestamps = new Map<string, string>();
 
+    let lineNumber = 0;
     for (const line of content.split("\n")) {
+      lineNumber++;
       if (!line.trim()) continue;
       let obj: any;
       try {
         obj = JSON.parse(line);
       } catch {
+        addParseWarning(parseWarnings, {
+          kind: "malformed-json",
+          source: "claude-code subagent JSONL",
+          firstLine: lineNumber,
+          message: "Skipped malformed subagent JSONL line",
+          sample: line,
+        });
         continue;
       }
 

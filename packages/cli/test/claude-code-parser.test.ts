@@ -1,3 +1,5 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ContentBlock } from "../src/types.js";
@@ -70,6 +72,35 @@ describe("Claude Code parser", () => {
       .map((b) => (b as TextBlock).text)
       .join(" ");
     expect(allText).not.toContain("streaming");
+  });
+
+  it("records malformed JSONL lines as parse warnings", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-claude-malformed-"));
+    const jsonlPath = join(tempDir, "session.jsonl");
+    const validLine = JSON.stringify({
+      type: "user",
+      sessionId: "warn-session",
+      slug: "warn-session",
+      cwd: "/tmp/project",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      message: { role: "user", content: "Fix malformed parser reporting" },
+    });
+    await writeFile(jsonlPath, `${validLine}\n{not-json\n`, "utf-8");
+
+    try {
+      const result = await parseClaudeCodeSession(jsonlPath);
+      expect(result.turns).toHaveLength(1);
+      expect(result.parseWarnings).toEqual([
+        expect.objectContaining({
+          kind: "malformed-json",
+          count: 1,
+          source: "claude-code JSONL",
+          firstLine: 2,
+        }),
+      ]);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   });
 });
 

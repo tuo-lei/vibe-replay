@@ -136,6 +136,71 @@ describe("Cursor parser", () => {
     }
   });
 
+  it("records malformed JSONL lines as parse warnings", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-cursor-malformed-"));
+    const jsonlPath = join(tempDir, "malformed-session.jsonl");
+    const validLine = JSON.stringify({
+      role: "user",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      message: {
+        content: [{ type: "text", text: "<user_query>\nFix malformed data\n</user_query>" }],
+      },
+    });
+    await writeFile(jsonlPath, `${validLine}\n{not-json\n`, "utf-8");
+
+    try {
+      const result = await parseCursorSession(jsonlPath);
+      expect(result.turns).toHaveLength(1);
+      expect(result.parseWarnings).toEqual([
+        expect.objectContaining({
+          kind: "malformed-json",
+          count: 1,
+          source: "cursor transcript JSONL",
+          firstLine: 2,
+        }),
+      ]);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("records unreadable image references as parse warnings", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-cursor-missing-image-"));
+    const missingImagePath = join(tempDir, "missing.png");
+    const jsonlPath = join(tempDir, "missing-image-session.jsonl");
+    await writeFile(
+      jsonlPath,
+      JSON.stringify({
+        role: "user",
+        message: {
+          content: [
+            {
+              type: "text",
+              text: `<user_query>\n[Image]\nPlease inspect this\n<image_files>\n1. ${missingImagePath}\n</image_files>\n</user_query>`,
+            },
+          ],
+        },
+      }),
+      "utf-8",
+    );
+
+    try {
+      const result = await parseCursorSession(jsonlPath);
+      expect(result.turns).toHaveLength(1);
+      expect(result.parseWarnings).toEqual([
+        expect.objectContaining({
+          kind: "missing-image",
+          count: 1,
+          source: "cursor transcript image reference",
+          firstLine: 1,
+          sample: missingImagePath,
+        }),
+      ]);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("handles prompts without <user_query> wrapper", async () => {
     const result = await parseCursorSession(FIXTURE);
     const userTurns = result.turns.filter((t) => t.role === "user");

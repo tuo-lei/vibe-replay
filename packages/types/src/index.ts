@@ -31,6 +31,21 @@ export interface CursorSidecars {
   hasWorkspaceRules?: boolean;
 }
 
+export type ParseWarningKind =
+  | "malformed-json"
+  | "missing-image"
+  // Reserved for provider source-read failures, such as unreadable or corrupt sidecars.
+  | "unreadable-source";
+
+export interface ParseWarning {
+  kind: ParseWarningKind;
+  count: number;
+  message: string;
+  source?: string;
+  firstLine?: number;
+  sample?: string;
+}
+
 export interface SubAgent {
   agentId: string;
   agentType: string;
@@ -301,6 +316,8 @@ export interface ReplaySession {
     contextFiles?: string[];
     /** Cursor-only sidecar coverage from global-state session metadata */
     cursorSidecars?: CursorSidecars;
+    /** Parser data-loss warnings collected while reading provider source data */
+    parseWarnings?: ParseWarning[];
     /** API service tier observed (e.g. "standard") */
     serviceTier?: string;
     /** Skills / slash commands used (e.g. ["playwright-cli", "/insights"]) */

@@ -1,3 +1,5 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -54,6 +56,12 @@ describe("normalizeCoworkLine", () => {
   it("returns null for unparseable JSON", () => {
     expect(normalizeCoworkLine("not json")).toBeNull();
     expect(normalizeCoworkLine("")).toBeNull();
+  });
+
+  it("reports malformed JSON through the optional callback", () => {
+    let malformedCount = 0;
+    expect(normalizeCoworkLine("not json", () => malformedCount++)).toBeNull();
+    expect(malformedCount).toBe(1);
   });
 
   it("passes through unrelated fields unchanged", () => {
@@ -161,5 +169,33 @@ describe("parseClaudeCoworkSession", () => {
 
     // Audit has model claude-opus-4-6 on the assistant turn — parsed value must win.
     expect(result.model).toBe("claude-opus-4-6");
+  });
+
+  it("records malformed audit JSONL lines as parse warnings", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-cowork-malformed-"));
+    const auditPath = join(tempDir, "audit.jsonl");
+    const validLine = JSON.stringify({
+      type: "user",
+      session_id: "cowork-warning-session",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      message: { role: "user", content: "Investigate malformed cowork data" },
+    });
+    await writeFile(auditPath, `${validLine}\n{not-json\n`, "utf-8");
+
+    try {
+      const result = await parseClaudeCoworkSession(auditPath);
+      expect(result.turns).toHaveLength(1);
+      expect(result.parseWarnings).toEqual([
+        expect.objectContaining({
+          kind: "malformed-json",
+          count: 1,
+          source: "claude-cowork audit JSONL",
+          firstLine: 2,
+          message: "Skipped malformed JSONL line",
+        }),
+      ]);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   });
 });

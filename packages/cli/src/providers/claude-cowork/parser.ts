@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { parseClaudeCodeLines } from "../claude-code/parser.js";
 import type { ProviderParseResult } from "../types.js";
+import { addParseWarning } from "../warnings.js";
 import type { SessionInfo } from "../../types.js";
 
 /**
@@ -15,11 +16,12 @@ import type { SessionInfo } from "../../types.js";
  *   - Extra types like `rate_limit_event`, `tool_use_summary` — parser ignores them.
  *   - Missing `cwd` / `gitBranch` / `custom-title` — supplied by sibling metadata JSON.
  */
-export function normalizeCoworkLine(line: string): string | null {
+export function normalizeCoworkLine(line: string, onMalformedJson?: () => void): string | null {
   let obj: Record<string, unknown>;
   try {
     obj = JSON.parse(line);
   } catch {
+    onMalformedJson?.();
     return null;
   }
   if (!obj || typeof obj !== "object") return null;
@@ -50,12 +52,23 @@ export async function parseClaudeCoworkSession(
 ): Promise<ProviderParseResult> {
   const paths = Array.isArray(filePaths) ? filePaths : [filePaths];
   const normalized: string[] = [];
+  const parseWarnings: NonNullable<ProviderParseResult["parseWarnings"]> = [];
   for (const fp of paths) {
     const content = await readFile(fp, "utf-8");
-    for (const raw of content.split("\n")) {
+    const lines = content.split("\n");
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+      const raw = lines[lineIndex];
       const t = raw.trim();
       if (!t) continue;
-      const line = normalizeCoworkLine(t);
+      const line = normalizeCoworkLine(t, () => {
+        addParseWarning(parseWarnings, {
+          kind: "malformed-json",
+          source: "claude-cowork audit JSONL",
+          firstLine: lineIndex + 1,
+          message: "Skipped malformed JSONL line",
+          sample: t,
+        });
+      });
       if (line) normalized.push(line);
     }
   }
@@ -63,6 +76,9 @@ export async function parseClaudeCoworkSession(
   // Cowork transcripts are self-contained — no sibling `agents/` directory, so
   // subagentsSourcePath is intentionally omitted (parser will use an empty map).
   const result = await parseClaudeCodeLines(normalized);
+  if (parseWarnings.length > 0) {
+    result.parseWarnings = [...parseWarnings, ...(result.parseWarnings || [])];
+  }
 
   // Overlay metadata that audit.jsonl does not carry but the sibling JSON does.
   // Only fall back to the overlay — parsed values always win when present.

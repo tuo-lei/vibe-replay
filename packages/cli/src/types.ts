@@ -9,6 +9,7 @@ export type {
   DataSourceInfo,
   InsightsStore,
   OverlaySource,
+  ParseWarning,
   PrLink,
   ReplaySession,
   Scene,
