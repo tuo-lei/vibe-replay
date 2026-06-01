@@ -39,6 +39,14 @@ describe("server persistence", () => {
     await writeFile(join(baseDir, "bad", "annotations.json"), JSON.stringify({ nope: true }));
     await expect(loadAnnotations(baseDir, "bad")).resolves.toEqual([]);
 
+    const primaryAnnotation = makeAnnotation({ id: "primary" });
+    await mkdir(join(baseDir, "primary"), { recursive: true });
+    await writeFile(
+      join(baseDir, "primary", "annotations.json"),
+      JSON.stringify([primaryAnnotation]),
+    );
+    await expect(loadAnnotations(baseDir, "primary")).resolves.toEqual([primaryAnnotation]);
+
     const fallbackAnnotation = makeAnnotation({ id: "fallback" });
     await mkdir(join(root, "vibe-replay", "fallback"), { recursive: true });
     await writeFile(
