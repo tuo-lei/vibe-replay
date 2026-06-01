@@ -14,11 +14,12 @@ import {
   sanitizeCursorReasoningText,
   sanitizeCursorUserText,
 } from "./sanitize.js";
+import { createRetryableInit, CURSOR_CHATS_DIR, storeDbPath, workspaceHash } from "./sqlite-io.js";
 import { mapCursorToolName } from "./tool-mapping.js";
 
+export { storeDbPath, workspaceHash } from "./sqlite-io.js";
 export { mapCursorToolName } from "./tool-mapping.js";
 
-const CURSOR_CHATS_DIR = join(homedir(), ".cursor", "chats");
 const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const MIN_STORE_DB_SIZE = 8192;
@@ -28,19 +29,6 @@ const SQLITE_CLI_QUERY_TIMEOUT_MS = 120_000;
 const MAX_CURSOR_GLOBAL_STATE_TOOL_RESULT_CHARS = 10_000;
 const GLOBAL_STATE_BUBBLE_KEY_CHUNK_SIZE = 200;
 const execFileAsync = promisify(execFile);
-
-function createRetryableInit<T>(factory: () => Promise<T>): () => Promise<T> {
-  let promise: Promise<T> | null = null;
-  return async () => {
-    if (!promise) {
-      promise = factory().catch((err) => {
-        promise = null;
-        throw err;
-      });
-    }
-    return promise;
-  };
-}
 
 const getSqlJs = createRetryableInit(async () => {
   const mod = await import("sql.js");
@@ -132,14 +120,6 @@ function closeCachedSqlJsDb(): void {
 let cachedStoreDbIndex: Map<string, StoreDbIndexEntry> | null = null;
 const resolvedProjectRootCache = new Map<string, Promise<string | null>>();
 const GLOBAL_STATE_DISCOVERY_CACHE_PREFIX = "cursor-global-state-discovery-v4";
-
-export function workspaceHash(absolutePath: string): string {
-  return createHash("md5").update(absolutePath).digest("hex");
-}
-
-export function storeDbPath(workspacePath: string, sessionId: string): string {
-  return join(CURSOR_CHATS_DIR, workspaceHash(workspacePath), sessionId, "store.db");
-}
 
 function globalStateDbCandidates(): string[] {
   const candidates = [
