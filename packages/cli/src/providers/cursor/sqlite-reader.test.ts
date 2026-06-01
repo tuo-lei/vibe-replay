@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { __testables, countComposerConversationHeaders } from "./sqlite-reader.js";
+import {
+  __testables,
+  countComposerConversationHeaders,
+  isSystemContextText,
+} from "./sqlite-reader.js";
 
 describe("countComposerConversationHeaders", () => {
   it("returns zero when headers are missing", () => {
@@ -1048,6 +1052,22 @@ describe("cursor sqlite metrics helpers", () => {
       "<user_query>\n<system_reminder>\ninternal only\n</system_reminder>\n</user_query>",
     );
     expect(blocks).toEqual([]);
+  });
+
+  it("classifies common Cursor wrapper payloads as system context", () => {
+    expect(isSystemContextText("<system_reminder>\ninternal only\n</system_reminder>")).toBe(true);
+    expect(isSystemContextText("<agent_transcripts>\nsummary\n</agent_transcripts>")).toBe(true);
+    expect(isSystemContextText("Ship the dashboard refactor")).toBe(false);
+  });
+
+  it("drops mixed system-only user content arrays while preserving human text", () => {
+    const blocks = __testables.parseUserContent([
+      { type: "text", text: "<system_reminder>\ninternal only\n</system_reminder>" },
+      { type: "text", text: "<user_query>\nSplit sqlite-reader.ts\n</user_query>" },
+    ]) as any[];
+
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toEqual({ type: "text", text: "Split sqlite-reader.ts" });
   });
 
   it("keeps normal user_query content from sqlite user content", () => {
