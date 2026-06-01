@@ -42,6 +42,7 @@ These tests protect **parser compatibility** with real-world session data from C
 | `cache.test.ts` | File cache envelope versioning, key sanitization, disable flag | Cache compatibility |
 | `insights.test.ts` | Durable insight conversion, merge provenance, daily aggregation, stats | Insights persistence |
 | `server-core.test.ts` | Server slug validation and error message helpers | Server helper contracts |
+| `server-persistence.test.ts` | Annotation and overlay persistence read/write behavior | Server persistence |
 | `pricing.test.ts` | Model pricing lookup + cost calculation | Per-model pricing |
 | `cost-estimation.test.ts` | Parser → transform cost integration | Multi-model cost accuracy |
 
