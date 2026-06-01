@@ -274,6 +274,30 @@ describe("dashboard prompt and title helpers", () => {
     expect(prompts).toEqual(["Then add tests"]);
   });
 
+  it("keeps a single prompt even when it matches the title", () => {
+    const prompts = sessionPromptPreview(
+      makeSource({
+        firstPrompt: "Build the dashboard",
+        prompts: [],
+      }),
+      null,
+      "Build the dashboard",
+    );
+
+    expect(prompts).toEqual(["Build the dashboard"]);
+  });
+
+  it("drops leading continuation prompts when later context exists", () => {
+    const prompts = sessionPromptPreview(
+      makeSource({
+        firstPrompt: "",
+        prompts: ["Then add tests", "Ship docs"],
+      }),
+    );
+
+    expect(prompts).toEqual(["Ship docs"]);
+  });
+
   it("falls back through source and replay titles predictably", () => {
     const source = makeSource({
       title: "<task-notification>hidden</task-notification>",
@@ -323,6 +347,7 @@ describe("formatDataSourceLabel", () => {
 describe("dashboard badge helpers", () => {
   it("uses distinct data source badge classes", () => {
     expect(dataSourceBadgeClass("jsonl")).toContain("terminal-orange");
+    expect(dataSourceBadgeClass("jsonl+tools")).toContain("terminal-orange");
     expect(dataSourceBadgeClass("global-state")).toContain("terminal-blue");
     expect(dataSourceBadgeClass("sqlite")).toContain("terminal-green");
     expect(dataSourceBadgeClass(undefined, true)).toContain("terminal-green");
