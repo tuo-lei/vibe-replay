@@ -58,6 +58,8 @@ import {
   type SavedGistInfo,
 } from "./publishers/gist.js";
 import { scanForSecrets } from "./scan.js";
+import { saveAnnotations, saveOverlays } from "./server-persistence.js";
+import { registerSessionAssetRoutes } from "./server-routes/session-assets.js";
 import {
   buildInsightsSyncBatches,
   getErrorMessage,
@@ -820,40 +822,6 @@ function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
 
   result.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   return result;
-}
-
-/** Load annotations from disk for a given slug */
-async function loadAnnotations(baseDir: string, slug: string): Promise<Annotation[]> {
-  const dirs = [join(baseDir, slug), resolve("./vibe-replay", slug)];
-  for (const dir of dirs) {
-    try {
-      const raw = await readFile(join(dir, "annotations.json"), "utf-8");
-      const anns = JSON.parse(raw) as Annotation[];
-      if (Array.isArray(anns)) return anns;
-    } catch {}
-  }
-  return [];
-}
-
-/** Save annotations to disk for a given slug */
-async function saveAnnotations(
-  baseDir: string,
-  slug: string,
-  annotations: Annotation[],
-): Promise<void> {
-  const annPath = join(baseDir, slug, "annotations.json");
-  await writeFile(annPath, JSON.stringify(annotations, null, 2), "utf-8");
-}
-
-// ─── Overlay persistence ────────────────────────────────────────────────────
-
-async function saveOverlays(
-  baseDir: string,
-  slug: string,
-  overlays: SessionOverlays,
-): Promise<void> {
-  const overlayPath = join(baseDir, slug, "overlays.json");
-  await writeFile(overlayPath, JSON.stringify(overlays, null, 2), "utf-8");
 }
 
 export async function startServer(
@@ -2333,30 +2301,7 @@ export async function startServer(
     return c.json(memory);
   });
 
-  // --- Annotations (requires slug) ---
-  app.get("/api/annotations", async (c) => {
-    const result = requireSlug(c.req.query("slug"));
-    if ("error" in result) return c.json({ error: result.error }, 400);
-    const anns = await loadAnnotations(baseDir, result.slug);
-    return c.json(anns);
-  });
-
-  app.post("/api/annotations", async (c) => {
-    const result = requireSlug(c.req.query("slug"));
-    if ("error" in result) return c.json({ error: result.error }, 400);
-    let body: Annotation[];
-    try {
-      body = await c.req.json<Annotation[]>();
-    } catch {
-      return c.json({ error: "invalid JSON body" }, 400);
-    }
-    try {
-      await saveAnnotations(baseDir, result.slug, body);
-    } catch (err) {
-      return c.json({ error: `Failed to save annotations: ${getErrorMessage(err)}` }, 500);
-    }
-    return c.json({ ok: true });
-  });
+  registerSessionAssetRoutes(app, { baseDir });
 
   // GitHub CLI status
   app.get("/api/gh-status", (c) => {
@@ -3185,34 +3130,6 @@ export async function startServer(
     } catch (err) {
       return c.json({ error: getErrorMessage(err) }, 500);
     }
-  });
-
-  // --- Overlays (requires slug) ---
-  app.get("/api/overlays", async (c) => {
-    const result = requireSlug(c.req.query("slug"));
-    if ("error" in result) return c.json({ error: result.error }, 400);
-    const overlays = await loadOverlays(baseDir, result.slug);
-    return c.json(overlays);
-  });
-
-  app.post("/api/overlays", async (c) => {
-    const result = requireSlug(c.req.query("slug"));
-    if ("error" in result) return c.json({ error: result.error }, 400);
-    let body: SessionOverlays;
-    try {
-      body = await c.req.json<SessionOverlays>();
-    } catch {
-      return c.json({ error: "invalid JSON body" }, 400);
-    }
-    if (!body || !Array.isArray(body.overlays)) {
-      return c.json({ error: "invalid overlays shape" }, 400);
-    }
-    try {
-      await saveOverlays(baseDir, result.slug, body);
-    } catch (err) {
-      return c.json({ error: `Failed to save overlays: ${getErrorMessage(err)}` }, 500);
-    }
-    return c.json({ ok: true });
   });
 
   // After generation, fix originalValue to be the TRUE original from the unmodified session
