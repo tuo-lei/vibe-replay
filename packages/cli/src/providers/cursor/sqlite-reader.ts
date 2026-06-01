@@ -14,6 +14,9 @@ import {
   sanitizeCursorReasoningText,
   sanitizeCursorUserText,
 } from "./sanitize.js";
+import { mapCursorToolName } from "./tool-mapping.js";
+
+export { mapCursorToolName } from "./tool-mapping.js";
 
 const CURSOR_CHATS_DIR = join(homedir(), ".cursor", "chats");
 const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -3001,62 +3004,6 @@ function buildStoreTurnStats(turns: ParsedTurn[]): TurnStat[] {
   }
 
   return turnStats;
-}
-
-export function mapCursorToolName(name: string): string {
-  const mapping: Record<string, string> = {
-    Shell: "Bash",
-    shell: "Bash", // Cursor SDK lowercase tool name
-    run_terminal_command_v2: "Bash",
-    run_terminal_cmd: "Bash",
-    Read: "Read",
-    ReadFile: "Read",
-    read: "Read", // Cursor SDK lowercase tool name
-    read_file_v2: "Read",
-    read_file: "Read",
-    read_lints: "ReadLints",
-    Grep: "Grep",
-    ripgrep_raw_search: "Grep",
-    ripgrep: "Grep",
-    rg: "Grep",
-    grep: "Grep",
-    grep_search: "Grep",
-    Glob: "Glob",
-    glob_file_search: "Glob",
-    file_search: "Glob",
-    list_dir: "Glob",
-    list_dir_v2: "Glob",
-    LS: "Glob",
-    StrReplace: "Edit",
-    EditFile: "Edit",
-    edit: "Edit", // Cursor SDK lowercase tool name
-    edit_file_v2: "Edit",
-    edit_file: "Edit",
-    search_replace: "Edit",
-    ApplyPatch: "Edit",
-    apply_patch: "Edit",
-    MultiEdit: "MultiEdit",
-    multi_edit: "MultiEdit",
-    Write: "Write",
-    WriteFile: "Write",
-    write: "Write",
-    Delete: "Delete",
-    delete_file: "Delete",
-    Task: "Agent",
-    task_v2: "Agent",
-    todo_write: "TodoWrite",
-    ask_question: "AskQuestion",
-    semantic_search_full: "SemanticSearch",
-    codebase_search: "SemanticSearch",
-    web_search: "WebSearch",
-    WebFetch: "WebFetch",
-    web_fetch: "WebFetch",
-    create_plan: "Plan",
-  };
-  if (mapping[name]) return mapping[name];
-  if (name.startsWith("mcp-cursor-ide-browser-cursor-ide-browser-browser_")) return "Browser";
-  if (name.startsWith("chrome-devtools-")) return "Browser";
-  return name;
 }
 
 function parseDiffStringSnippet(diffString: string): { oldText: string; newText: string } {
