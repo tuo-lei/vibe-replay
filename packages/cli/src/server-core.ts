@@ -31,7 +31,7 @@ function normalizeProjectPath(project: string): string {
 // Keep cloud sync requests comfortably below the current D1 bind / batch ceiling.
 export const MAX_INSIGHTS_SYNC_DAYS_PER_REQUEST = 90;
 
-export function chunkItems<T>(items: T[], maxItems: number): T[][] {
+function chunkItems<T>(items: T[], maxItems: number): T[][] {
   if (maxItems <= 0) return [items.slice()];
   const chunks: T[][] = [];
   for (let i = 0; i < items.length; i += maxItems) {
@@ -61,7 +61,7 @@ export interface GenerateRequestBody {
   sessionId?: string;
 }
 
-interface ResolvedGenerateInputs {
+export interface ResolvedGenerateInputs {
   paths: string[];
   sessionInfo?: SessionInfo;
 }
