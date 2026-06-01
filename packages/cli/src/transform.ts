@@ -282,6 +282,8 @@ function redactDiffContent(value: unknown): string {
 }
 
 function redactWarningText(value: string): string {
+  // Warning samples are user-visible diagnostics, so fully hide even the short
+  // secret prefix that redactSecrets keeps for normal replay content context.
   return redactSecrets(redactWarningPaths(redactPath(value))).replace(
     /[A-Za-z0-9_-]{4,}\.\.\.\[REDACTED\]/g,
     "[REDACTED]",
@@ -291,6 +293,8 @@ function redactWarningText(value: string): string {
 function redactWarningPaths(value: string): string {
   let result = value;
   if (HOME) {
+    // Raw JSON snippets can contain slash-escaped POSIX paths like
+    // "\/Users\/name" that the literal redactPath pass above will not see.
     const slashEscapedHome = HOME.replaceAll("/", "\\/");
     result = result.replaceAll(slashEscapedHome, "~");
 

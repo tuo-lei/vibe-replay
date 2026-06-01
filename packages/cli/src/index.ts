@@ -176,7 +176,7 @@ function formatParseWarningSummary(warnings?: ParseWarning[]): string[] {
     const location = warning.firstLine ? ` first at line ${warning.firstLine}` : "";
     const source = warning.source ? ` in ${warning.source}` : "";
     const sample = warning.sample ? ` Sample: ${warning.sample}` : "";
-    return `${warning.count} ${plural} skipped${source}${location}. ${warning.message}.${sample}`;
+    return `${warning.count} ${plural} skipped${source}${location}.${sample}`;
   });
 }
 

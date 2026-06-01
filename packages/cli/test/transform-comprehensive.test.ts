@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { describe, expect, it } from "vitest";
 import type { ProviderParseResult, TokenUsage } from "../src/providers/types.js";
 import { transformToReplay } from "../src/transform.js";
@@ -165,6 +166,31 @@ describe("transform — scene generation", () => {
     expect(sample).not.toContain("alice");
     expect(sample).not.toContain("C:\\\\Users");
     expect(sample).toContain("~\\\\project");
+  });
+
+  it("redacts JSON slash-escaped home paths in parse warning samples", () => {
+    const home = homedir();
+    const escapedHome = home.replaceAll("/", "\\/");
+    const replay = transformToReplay(
+      buildParsed({
+        turns: [userTurn("Hello world")],
+        parseWarnings: [
+          {
+            kind: "unreadable-source",
+            count: 1,
+            message: "Skipped unreadable source",
+            sample: `{"path":"${escapedHome}\\/secret.jsonl"}`,
+          },
+        ],
+      }),
+      "cursor",
+      "~/test",
+    );
+
+    const sample = replay.meta.parseWarnings?.[0]?.sample || "";
+    expect(sample).not.toContain(home);
+    expect(sample).not.toContain(escapedHome);
+    expect(sample).toContain("~\\/secret.jsonl");
   });
 
   it("creates text-response scene from assistant text", () => {

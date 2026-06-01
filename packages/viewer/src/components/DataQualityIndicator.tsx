@@ -2,12 +2,27 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ReplaySession } from "../types";
 
+function formatParseWarningNote(
+  warning: NonNullable<ReplaySession["meta"]["parseWarnings"]>[number],
+): string {
+  const label =
+    warning.kind === "malformed-json"
+      ? "malformed JSONL line"
+      : warning.kind === "missing-image"
+        ? "image file"
+        : warning.kind === "unreadable-source"
+          ? "unreadable source"
+          : "item";
+  const plural = warning.count === 1 ? label : `${label}s`;
+  const source = warning.source ? ` in ${warning.source}` : "";
+  const location = warning.firstLine ? ` first at line ${warning.firstLine}` : "";
+  return `${warning.count} ${plural} skipped${source}${location}.`;
+}
+
 export function getSessionDataQualityNotes(meta: ReplaySession["meta"]): string[] {
   const notes = [...(meta.dataSourceInfo?.notes || [])];
   for (const warning of meta.parseWarnings || []) {
-    notes.push(
-      `${warning.count} parser warning${warning.count === 1 ? "" : "s"}: ${warning.message}`,
-    );
+    notes.push(formatParseWarningNote(warning));
   }
 
   if (

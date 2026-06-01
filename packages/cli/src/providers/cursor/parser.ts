@@ -216,9 +216,11 @@ function mergeParseWarnings(
   base: ProviderParseResult["parseWarnings"],
   extra: ProviderParseResult["parseWarnings"],
 ): ProviderParseResult["parseWarnings"] {
-  if (!base?.length) return extra;
-  if (!extra?.length) return base;
-  return [...base, ...extra];
+  const merged: NonNullable<ProviderParseResult["parseWarnings"]> = [];
+  for (const warning of [...(base || []), ...(extra || [])]) {
+    addParseWarning(merged, warning);
+  }
+  return merged.length > 0 ? merged : undefined;
 }
 
 interface ParseJsonlOptions {

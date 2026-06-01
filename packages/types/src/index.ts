@@ -31,7 +31,11 @@ export interface CursorSidecars {
   hasWorkspaceRules?: boolean;
 }
 
-export type ParseWarningKind = "malformed-json" | "missing-image" | "unreadable-source";
+export type ParseWarningKind =
+  | "malformed-json"
+  | "missing-image"
+  // Reserved for provider source-read failures, such as unreadable or corrupt sidecars.
+  | "unreadable-source";
 
 export interface ParseWarning {
   kind: ParseWarningKind;
