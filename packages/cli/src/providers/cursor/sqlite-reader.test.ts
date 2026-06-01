@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { __testables, countComposerConversationHeaders } from "./sqlite-reader.js";
+import {
+  __testables,
+  countComposerConversationHeaders,
+  isSystemContextText,
+} from "./sqlite-reader.js";
 
 describe("countComposerConversationHeaders", () => {
   it("returns zero when headers are missing", () => {
@@ -1048,6 +1052,29 @@ describe("cursor sqlite metrics helpers", () => {
       "<user_query>\n<system_reminder>\ninternal only\n</system_reminder>\n</user_query>",
     );
     expect(blocks).toEqual([]);
+  });
+
+  it("classifies common Cursor wrapper payloads as system context", () => {
+    expect(isSystemContextText("<user_info>\nuser metadata\n</user_info>")).toBe(true);
+    expect(isSystemContextText("<system_reminder>\ninternal only\n</system_reminder>")).toBe(true);
+    expect(isSystemContextText("<agent_transcripts>\nsummary\n</agent_transcripts>")).toBe(true);
+    expect(isSystemContextText("<rules>\nworkspace rules\n</rules>")).toBe(true);
+    expect(isSystemContextText("<git_status>\nclean\n</git_status>")).toBe(true);
+    expect(
+      isSystemContextText("<system_reminder_extra>\nuser text\n</system_reminder_extra>"),
+    ).toBe(false);
+    expect(isSystemContextText("Ship the dashboard refactor")).toBe(false);
+  });
+
+  it("drops mixed system-only user content arrays while preserving human text", () => {
+    const blocks = __testables.parseUserContent([
+      { type: "text", text: "<system_reminder>\ninternal only\n</system_reminder>" },
+      { type: "image_url" },
+      { type: "text", text: "<user_query>\nSplit sqlite-reader.ts\n</user_query>" },
+    ]) as any[];
+
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toEqual({ type: "text", text: "Split sqlite-reader.ts" });
   });
 
   it("keeps normal user_query content from sqlite user content", () => {
