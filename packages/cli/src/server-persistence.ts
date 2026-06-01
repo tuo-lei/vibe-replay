@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { Annotation, SessionOverlays } from "./types.js";
 
@@ -21,15 +21,18 @@ export async function saveAnnotations(
   slug: string,
   annotations: Annotation[],
 ): Promise<void> {
+  await mkdir(join(baseDir, slug), { recursive: true });
   const annPath = join(baseDir, slug, "annotations.json");
   await writeFile(annPath, JSON.stringify(annotations, null, 2), "utf-8");
 }
 
+/** Save scene overlays to disk for a given slug */
 export async function saveOverlays(
   baseDir: string,
   slug: string,
   overlays: SessionOverlays,
 ): Promise<void> {
+  await mkdir(join(baseDir, slug), { recursive: true });
   const overlayPath = join(baseDir, slug, "overlays.json");
   await writeFile(overlayPath, JSON.stringify(overlays, null, 2), "utf-8");
 }
