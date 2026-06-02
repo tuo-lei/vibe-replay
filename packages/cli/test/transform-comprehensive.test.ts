@@ -49,13 +49,13 @@ function assistantToolTurn(
     role: "assistant",
     blocks: [
       {
-        type: "tool_use",
+        type: "tool_use" as const,
         id: `tool_${Math.random().toString(36).slice(2, 8)}`,
         name,
         input,
         _result: result,
-        ...(opts.images ? { _images: opts.images } : {}),
-      } as any,
+        _images: opts.images,
+      },
     ],
   };
 }
@@ -263,14 +263,16 @@ describe("transform — scene generation", () => {
       role: "user",
       blocks: [
         { type: "text", text: "Check this screenshot" },
-        { type: "_user_images", images: ["data:image/png;base64,abc123"] } as any,
+        { type: "_user_images", images: ["data:image/png;base64,abc123"] },
       ],
     };
     const replay = transformToReplay(buildParsed({ turns: [turn] }), "claude-code", "~/test");
     expect(replay.scenes).toHaveLength(1);
     expect(replay.scenes[0].type).toBe("user-prompt");
     expect(replay.scenes[0].content).toBe("Check this screenshot");
-    expect((replay.scenes[0] as any).images).toEqual(["data:image/png;base64,abc123"]);
+    expect((replay.scenes[0] as { images?: string[] }).images).toEqual([
+      "data:image/png;base64,abc123",
+    ]);
   });
 
   it("creates '(image)' content for image-only user prompt", () => {
@@ -278,13 +280,13 @@ describe("transform — scene generation", () => {
       role: "user",
       blocks: [
         { type: "text", text: "" },
-        { type: "_user_images", images: ["data:image/png;base64,abc123"] } as any,
+        { type: "_user_images", images: ["data:image/png;base64,abc123"] },
       ],
     };
     const replay = transformToReplay(buildParsed({ turns: [turn] }), "claude-code", "~/test");
     expect(replay.scenes).toHaveLength(1);
     expect(replay.scenes[0].content).toBe("(image)");
-    expect((replay.scenes[0] as any).images).toHaveLength(1);
+    expect((replay.scenes[0] as { images?: string[] }).images).toHaveLength(1);
   });
 });
 
