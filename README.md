@@ -123,6 +123,7 @@ curl -o ~/.claude/skills/replay/SKILL.md \
 ## Features
 
 - **Zero config** — one command, no setup, no account. Works instantly with existing sessions
+- **Cross-platform** — runs on macOS, Linux, and Windows
 - **Single HTML file** — self-contained, works offline, zero external requests. Drop it in Slack, email it, open it anywhere
 - **Claude Code, Cursor, and Codex** — all providers auto-discovered, including multi-file and resumed sessions
 - **Share & export** — GitHub Gist, animated SVG, GIF, markdown summary, or cloud upload. Secret redaction built in
