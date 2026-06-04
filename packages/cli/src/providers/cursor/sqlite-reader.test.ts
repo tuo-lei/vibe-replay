@@ -754,7 +754,7 @@ describe("cursor sqlite metrics helpers", () => {
           },
         },
       },
-    ] as any);
+    ]);
 
     expect(apiErrors).toEqual([
       {
@@ -1071,19 +1071,17 @@ describe("cursor sqlite metrics helpers", () => {
       { type: "text", text: "<system_reminder>\ninternal only\n</system_reminder>" },
       { type: "image_url" },
       { type: "text", text: "<user_query>\nSplit sqlite-reader.ts\n</user_query>" },
-    ]) as any[];
+    ]);
 
     expect(blocks).toHaveLength(1);
     expect(blocks[0]).toEqual({ type: "text", text: "Split sqlite-reader.ts" });
   });
 
   it("keeps normal user_query content from sqlite user content", () => {
-    const blocks = __testables.parseUserContent(
-      "<user_query>\nShip this fix\n</user_query>",
-    ) as any[];
+    const blocks = __testables.parseUserContent("<user_query>\nShip this fix\n</user_query>");
     expect(blocks).toHaveLength(1);
     expect(blocks[0].type).toBe("text");
-    expect(blocks[0].text).toBe("Ship this fix");
+    expect((blocks[0] as { text: string }).text).toBe("Ship this fix");
   });
 
   it("normalizes turn text and drops wrapped system context", () => {
