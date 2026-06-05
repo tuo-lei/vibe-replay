@@ -74,6 +74,97 @@ describe("Claude Code parser", () => {
     expect(allText).not.toContain("streaming");
   });
 
+  it("handles newer Claude Code schema-drift fields", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-claude-schema-"));
+    const jsonlPath = join(tempDir, "session.jsonl");
+    const lines = [
+      {
+        type: "system",
+        subtype: "init",
+        sessionId: "schema-session",
+        cwd: "/tmp/project",
+        timestamp: "2026-06-02T00:00:00.000Z",
+        hookCount: 1,
+        hookInfos: [{ command: "echo ok" }],
+        hookErrors: [],
+        preventedContinuation: false,
+        toolUseID: "tool_1",
+      },
+      {
+        type: "user",
+        sessionId: "schema-session",
+        cwd: "/tmp/project",
+        timestamp: "2026-06-02T00:00:01.000Z",
+        message: { role: "user", content: "Check schema drift" },
+      },
+      {
+        type: "assistant",
+        sessionId: "schema-session",
+        cwd: "/tmp/project",
+        timestamp: "2026-06-02T00:00:02.000Z",
+        attributionMcpServer: "sourcegraph",
+        attributionMcpTool: "search",
+        attributionSkill: "schema-watch",
+        message: {
+          role: "assistant",
+          id: "msg_schema",
+          model: "claude-sonnet-4-20250514",
+          content: [{ type: "tool_use", id: "tool_1", name: "Read", input: { file_path: "a.ts" } }],
+          usage: { input_tokens: 10, output_tokens: 2 },
+        },
+      },
+      {
+        type: "user",
+        sessionId: "schema-session",
+        cwd: "/tmp/project",
+        timestamp: "2026-06-02T00:00:03.000Z",
+        sourceToolUseID: "tool_1",
+        origin: "tool_result",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "tool_1", content: "file content" }],
+        },
+      },
+      {
+        type: "assistant",
+        sessionId: "schema-session",
+        cwd: "/tmp/project",
+        timestamp: "2026-06-02T00:00:04.000Z",
+        isApiErrorMessage: true,
+        apiErrorStatus: "overloaded_error 529",
+        message: {
+          role: "assistant",
+          id: "msg_api",
+          model: "<synthetic>",
+          content: [{ type: "text", text: "Claude API error" }],
+        },
+      },
+    ];
+    await writeFile(
+      jsonlPath,
+      `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`,
+      "utf-8",
+    );
+
+    try {
+      const result = await parseClaudeCodeSession(jsonlPath);
+      const userTurns = result.turns.filter((turn) => turn.role === "user");
+      expect(userTurns).toHaveLength(1);
+      expect(result.slug).toBe("");
+      expect(result.mcpServersUsed).toEqual(["sourcegraph"]);
+      expect(result.skillsUsed).toEqual(["schema-watch"]);
+      expect(result.apiErrors).toEqual([
+        expect.objectContaining({ statusCode: 529, errorType: "overloaded_error" }),
+      ]);
+      const toolUse = result.turns
+        .flatMap((turn) => turn.blocks)
+        .find((block): block is ToolUseBlock => block.type === "tool_use" && block.id === "tool_1");
+      expect(toolUse?._result).toBe("file content");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("records malformed JSONL lines as parse warnings", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-claude-malformed-"));
     const jsonlPath = join(tempDir, "session.jsonl");

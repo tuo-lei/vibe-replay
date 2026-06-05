@@ -99,10 +99,10 @@ export async function parseClaudeCodeLines(
   // Service tier (from API usage data, e.g. "standard")
   let serviceTier: string | undefined;
 
-  // Skills used in the session (extracted from isMeta skill injection messages)
+  // Skills used in the session (extracted from isMeta skill injection messages and attribution fields)
   const skillsUsed = new Set<string>();
 
-  // MCP servers used (extracted from mcp__server__tool naming convention)
+  // MCP servers used (extracted from mcp__server__tool naming convention and attribution fields)
   const mcpServersUsed = new Set<string>();
 
   // Group assistant messages by message.id
@@ -281,11 +281,13 @@ export async function parseClaudeCodeLines(
 
     const { role, content: msgContent, id: msgId } = obj.message;
 
-    if (obj.isApiErrorMessage && obj.timestamp) {
+    if ((obj.isApiErrorMessage || obj.apiErrorStatus !== undefined) && obj.timestamp) {
       const text = extractMessageText(msgContent);
-      const errorType = inferApiErrorMessageType(text);
+      const statusCode = apiErrorStatusCode(obj.apiErrorStatus);
+      const errorType = errorTypeFromStatus(obj.apiErrorStatus) || inferApiErrorMessageType(text);
       apiErrors.push({
         timestamp: obj.timestamp,
+        ...(statusCode ? { statusCode } : {}),
         ...(errorType ? { errorType } : {}),
       });
       // Fall through so the synthetic assistant message still renders as text.
@@ -345,9 +347,11 @@ export async function parseClaudeCodeLines(
 
     // User message with array content (may contain text + images, or tool_results)
     if (role === "user" && Array.isArray(msgContent)) {
-      // ToolSearch automated responses have sourceToolAssistantUUID on the raw object.
-      // Process tool_result blocks for result matching, but skip emitting a user turn.
-      const isToolSearchResponse = !!obj.sourceToolAssistantUUID;
+      // ToolSearch/tool-originated automated responses have sourceToolAssistantUUID
+      // or newer sourceToolUseID/origin fields on the raw object. Process
+      // tool_result blocks for result matching, but skip emitting a user turn.
+      const isToolSearchResponse =
+        !!obj.sourceToolAssistantUUID || !!obj.sourceToolUseID || obj.origin === "tool_result";
 
       const textParts: string[] = [];
       const userImages: string[] = [];
@@ -397,6 +401,8 @@ export async function parseClaudeCodeLines(
     // Assistant message — group by message.id
     if (role === "assistant" && msgId && Array.isArray(msgContent)) {
       if (!model && obj.message.model) model = obj.message.model;
+      if (obj.attributionMcpServer) mcpServersUsed.add(obj.attributionMcpServer);
+      if (obj.attributionSkill) skillsUsed.add(obj.attributionSkill);
 
       // Track usage per message ID — overwrite so we keep the last (final) value
       const usage = obj.message.usage;
@@ -646,6 +652,22 @@ function inferApiErrorMessageType(text: string): string | undefined {
   if (lower.includes("rate limit")) return "rate_limit_error";
   if (lower.includes("overloaded")) return "overloaded_error";
   if (lower.includes("api error")) return "api_error";
+  return undefined;
+}
+
+function apiErrorStatusCode(status: unknown): number | undefined {
+  if (typeof status === "number" && Number.isFinite(status)) return status;
+  if (typeof status !== "string") return undefined;
+  const match = status.match(/\b(\d{3})\b/);
+  return match ? Number(match[1]) : undefined;
+}
+
+function errorTypeFromStatus(status: unknown): string | undefined {
+  if (typeof status !== "string") return undefined;
+  const lower = status.toLowerCase();
+  if (lower.includes("rate")) return "rate_limit_error";
+  if (lower.includes("overload")) return "overloaded_error";
+  if (lower.includes("error")) return lower.replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
   return undefined;
 }
 
