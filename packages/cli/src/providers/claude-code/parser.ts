@@ -403,6 +403,9 @@ export async function parseClaudeCodeLines(
       if (!model && obj.message.model) model = obj.message.model;
       if (obj.attributionMcpServer) mcpServersUsed.add(obj.attributionMcpServer);
       if (obj.attributionSkill) skillsUsed.add(obj.attributionSkill);
+      // attributionMcpTool is tool-level detail; the replay metadata currently
+      // summarizes MCP usage by server only, so keep the typed field for
+      // forward compatibility without surfacing another aggregate today.
 
       // Track usage per message ID — overwrite so we keep the last (final) value
       const usage = obj.message.usage;
@@ -667,7 +670,12 @@ function errorTypeFromStatus(status: unknown): string | undefined {
   const lower = status.toLowerCase();
   if (lower.includes("rate")) return "rate_limit_error";
   if (lower.includes("overload")) return "overloaded_error";
-  if (lower.includes("error")) return lower.replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+  if (lower.includes("error")) {
+    return lower
+      .replace(/[^a-z0-9_]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .replace(/_\d+$/, "");
+  }
   return undefined;
 }
 

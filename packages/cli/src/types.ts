@@ -180,6 +180,7 @@ export interface RawMessage {
   hookInfos?: unknown[];
   hasOutput?: boolean;
   preventedContinuation?: boolean;
+  /** Top-level hook stop reason; distinct from message.stop_reason on assistant messages. */
   stopReason?: string;
   toolUseID?: string;
 }

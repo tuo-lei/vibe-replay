@@ -131,7 +131,7 @@ describe("Claude Code parser", () => {
         cwd: "/tmp/project",
         timestamp: "2026-06-02T00:00:04.000Z",
         isApiErrorMessage: true,
-        apiErrorStatus: "overloaded_error 529",
+        apiErrorStatus: "authentication_error 401",
         message: {
           role: "assistant",
           id: "msg_api",
@@ -154,7 +154,7 @@ describe("Claude Code parser", () => {
       expect(result.mcpServersUsed).toEqual(["sourcegraph"]);
       expect(result.skillsUsed).toEqual(["schema-watch"]);
       expect(result.apiErrors).toEqual([
-        expect.objectContaining({ statusCode: 529, errorType: "overloaded_error" }),
+        expect.objectContaining({ statusCode: 401, errorType: "authentication_error" }),
       ]);
       const toolUse = result.turns
         .flatMap((turn) => turn.blocks)
