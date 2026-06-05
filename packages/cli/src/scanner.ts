@@ -18,6 +18,7 @@ import { estimateActiveDuration } from "./duration.js";
 import { estimateCost, estimateCostSimple } from "./pricing.js";
 import { parseCodexSession } from "./providers/codex/parser.js";
 import { parseCursorSession } from "./providers/cursor/parser.js";
+import { parsePiSession } from "./providers/pi/parser.js";
 import type { ProviderParseResult } from "./providers/types.js";
 import type { DataSource, PrLink, SessionInfo, TokenUsage } from "./types.js";
 import {
@@ -295,6 +296,14 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
     } catch {
       // Fall through to the lightweight scanner so a partial Codex rollout
       // still appears in insights if the richer parser hits an unknown event.
+    }
+  }
+  if (input.provider === "pi") {
+    try {
+      return await scanPiSession(input);
+    } catch {
+      // Fall through to the lightweight scanner so Pi sessions still show up
+      // if the richer parser hits an unknown entry shape.
     }
   }
 
@@ -634,6 +643,27 @@ async function scanCodexSession(input: ScanInput): Promise<SessionScanResult> {
   };
 
   const parsed = await parseCodexSession(input.filePaths, sessionInfo);
+  return buildScanResultFromParsed(input, parsed);
+}
+
+async function scanPiSession(input: ScanInput): Promise<SessionScanResult> {
+  const sessionInfo: SessionInfo = {
+    provider: "pi",
+    sessionId: input.sessionId,
+    slug: input.slug,
+    title: input.title,
+    project: input.project,
+    cwd: input.workspacePath || input.project,
+    version: "",
+    timestamp: input.timestamp || new Date().toISOString(),
+    lineCount: 0,
+    fileSize: 0,
+    filePath: input.filePaths[0] || "",
+    filePaths: input.filePaths,
+    firstPrompt: input.firstPrompt || input.title || "(pi session)",
+  };
+
+  const parsed = await parsePiSession(input.filePaths, sessionInfo);
   return buildScanResultFromParsed(input, parsed);
 }
 
