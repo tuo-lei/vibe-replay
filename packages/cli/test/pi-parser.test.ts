@@ -187,6 +187,8 @@ describe("Pi parser", () => {
         cacheCreationTokens: 7,
         cacheReadTokens: 15,
       });
+      expect(parsed.dataSourceInfo?.sources).toContain("~/.pi/agent/sessions");
+      expect(parsed.turnStats?.map((stat) => stat.contextTokens)).toEqual([300]);
 
       const replay = transformToReplay(parsed, "pi", "~/project");
       expect(replay.meta.provider).toBe("pi");
@@ -276,6 +278,7 @@ describe("Pi parser", () => {
       expect(text).toContain("New branch prompt");
       expect(text).toContain("New branch answer");
       expect(text).not.toContain("Old branch answer");
+      expect(parsed.dataSourceInfo?.notes).toEqual(["1 off-branch Pi entries were omitted."]);
     });
   });
 });

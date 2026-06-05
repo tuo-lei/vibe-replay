@@ -1,9 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
+import { shortenPath } from "../../utils.js";
 import type { ContentBlock, ParsedTurn, SessionInfo } from "../../types.js";
 import type { ProviderParseResult, TokenUsage } from "../types.js";
 import { addParseWarning } from "../warnings.js";
-import { readPiModelContextWindows } from "./config.js";
+import { getPiSessionsDir, readPiModelContextWindows } from "./config.js";
 
 interface PiHeader {
   type: "session";
@@ -106,6 +107,7 @@ export async function parsePiSession(
   return parsePiLines(allLines, {
     sourcePath: paths[0],
     sessionInfo,
+    sessionsDir: getPiSessionsDir(),
     modelContextWindows: await readPiModelContextWindows(),
   });
 }
@@ -113,6 +115,7 @@ export async function parsePiSession(
 interface ParsePiLinesOptions {
   sourcePath?: string;
   sessionInfo?: SessionInfo;
+  sessionsDir?: string;
   modelContextWindows?: ReadonlyMap<string, number>;
 }
 
@@ -179,10 +182,8 @@ export function parsePiLines(
     }
 
     if (entry.type === "session_info") {
-      const name =
-        typeof (entry as { name?: unknown }).name === "string"
-          ? (entry as { name: string }).name.trim()
-          : "";
+      const sessionInfoEntry = entry as PiEntryBase & { name?: unknown };
+      const name = typeof sessionInfoEntry.name === "string" ? sessionInfoEntry.name.trim() : "";
       title = name || title;
       continue;
     }
@@ -322,7 +323,7 @@ export function parsePiLines(
     dataSource: "jsonl",
     dataSourceInfo: {
       primary: "jsonl",
-      sources: ["~/.pi/agent/sessions"],
+      sources: [shortenPath(options.sessionsDir || getPiSessionsDir())],
       ...(branchSelection.abandonedEntries > 0
         ? { notes: [`${branchSelection.abandonedEntries} off-branch Pi entries were omitted.`] }
         : {}),
@@ -366,7 +367,7 @@ function selectActiveBranch(
     if (!current.id || seen.has(current.id)) break;
     seen.add(current.id);
     branch.unshift(current);
-    const parentId = current.parentId;
+    const parentId: string | null | undefined = current.parentId;
     current = typeof parentId === "string" ? byId.get(parentId) : undefined;
   }
   return branch.length > 0
@@ -450,7 +451,7 @@ function buildBashExecutionBlock(
     name: "Bash",
     input: { command: message.command || "" },
     _result: outputParts.join(""),
-    ...(message.exitCode && message.exitCode !== 0 ? { _isError: true } : {}),
+    ...(message.exitCode !== undefined && message.exitCode !== 0 ? { _isError: true } : {}),
   };
 }
 
