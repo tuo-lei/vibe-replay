@@ -187,7 +187,9 @@ describe("Pi parser", () => {
         cacheCreationTokens: 7,
         cacheReadTokens: 15,
       });
-      expect(parsed.dataSourceInfo?.sources).toContain("~/.pi/agent/sessions");
+      expect(
+        parsed.dataSourceInfo?.sources.map((source) => source.replaceAll("\\", "/")),
+      ).toContain("~/.pi/agent/sessions");
       expect(parsed.turnStats?.map((stat) => stat.contextTokens)).toEqual([300]);
 
       const replay = transformToReplay(parsed, "pi", "~/project");
