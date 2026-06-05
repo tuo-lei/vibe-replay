@@ -83,9 +83,13 @@ export interface RawMessage {
   sessionId: string;
   version: string;
   gitBranch?: string;
-  slug: string;
+  slug?: string;
   /** UUID of the assistant message that triggered the tool whose result this message carries */
   sourceToolAssistantUUID?: string;
+  /** Newer Claude Code field for tool-originated user messages. */
+  sourceToolUseID?: string;
+  /** Source classification for user messages (for example, tool-originated messages). */
+  origin?: string;
   type:
     | "user"
     | "assistant"
@@ -115,6 +119,12 @@ export interface RawMessage {
   url?: string;
   /** True when Claude Code writes a synthetic assistant message describing an API failure. */
   isApiErrorMessage?: boolean;
+  /** Newer Claude Code API error status field on assistant entries. */
+  apiErrorStatus?: number | string;
+  /** Claude Code attribution for assistant output/tool calls that came from MCP or skills. */
+  attributionMcpServer?: string;
+  attributionMcpTool?: string;
+  attributionSkill?: string;
   message?: {
     role: "user" | "assistant";
     id?: string;
@@ -164,6 +174,15 @@ export interface RawMessage {
   };
   statusCode?: number;
   retryAttempt?: number;
+  /** Hook summary fields on newer system messages. Parsed leniently as metadata-only. */
+  hookCount?: number;
+  hookErrors?: unknown[];
+  hookInfos?: unknown[];
+  hasOutput?: boolean;
+  preventedContinuation?: boolean;
+  /** Top-level hook stop reason; distinct from message.stop_reason on assistant messages. */
+  stopReason?: string;
+  toolUseID?: string;
 }
 
 export type ContentBlock =
