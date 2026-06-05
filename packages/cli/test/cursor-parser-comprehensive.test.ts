@@ -3,7 +3,11 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseCursorSession } from "../src/providers/cursor/parser.js";
+import type { ContentBlock } from "../src/types.js";
 import { transformToReplay } from "../src/transform.js";
+
+type TextBlock = Extract<ContentBlock, { type: "text" }>;
+type UserImagesBlock = Extract<ContentBlock, { type: "_user_images" }>;
 
 const fixture = (name: string) => join(import.meta.dirname, `fixtures/${name}`);
 
@@ -27,7 +31,7 @@ describe("Cursor parser — edge cases", () => {
     for (const turn of userTurns) {
       for (const block of turn.blocks) {
         if (block.type === "text") {
-          expect((block as any).text.trim()).not.toBe("");
+          expect(block.text.trim()).not.toBe("");
         }
       }
     }
@@ -43,8 +47,8 @@ describe("Cursor parser — edge cases", () => {
     const result = await parseCursorSession(EDGE);
     const userTurns = result.turns.filter((t) => t.role === "user");
     expect(userTurns.length).toBe(2);
-    expect((userTurns[0].blocks[0] as any).text).toBe("First real prompt");
-    expect((userTurns[1].blocks[0] as any).text).toContain("Second prompt");
+    expect((userTurns[0].blocks[0] as TextBlock).text).toBe("First real prompt");
+    expect((userTurns[1].blocks[0] as TextBlock).text).toContain("Second prompt");
   });
 
   it("trailing marker becomes thinking when no tool files", async () => {
@@ -108,7 +112,7 @@ describe("Cursor parser — inline JSONL fixtures", () => {
     ]);
     const result = await parseCursorSession(path);
     const user = result.turns.find((t) => t.role === "user")!;
-    const imgBlock = (user.blocks as any[]).find((b) => b.type === "_user_images");
+    const imgBlock = user.blocks.find((b): b is UserImagesBlock => b.type === "_user_images");
     expect(imgBlock).toBeDefined();
     expect(imgBlock.images[0]).toMatch(/^data:image\/jpeg;base64,/);
   });
@@ -135,7 +139,7 @@ describe("Cursor parser — inline JSONL fixtures", () => {
     ]);
     const result = await parseCursorSession(path);
     const user = result.turns.find((t) => t.role === "user")!;
-    const imgBlock = (user.blocks as any[]).find((b) => b.type === "_user_images");
+    const imgBlock = user.blocks.find((b): b is UserImagesBlock => b.type === "_user_images");
     expect(imgBlock.images).toHaveLength(1);
   });
 
@@ -155,7 +159,7 @@ describe("Cursor parser — inline JSONL fixtures", () => {
     ]);
     const result = await parseCursorSession(path);
     const user = result.turns.find((t) => t.role === "user")!;
-    const text = (user.blocks[0] as any).text;
+    const text = (user.blocks[0] as TextBlock).text;
     expect(text).not.toContain("[Image]");
     expect(text).toBe("Describe what you see");
   });
@@ -493,7 +497,7 @@ describe("Cursor → transform — comprehensive", () => {
     const userScene = replay.scenes.find((s) => s.type === "user-prompt");
     expect(userScene).toBeDefined();
     expect(userScene?.content).toBe("(image)");
-    expect((userScene as any).images).toHaveLength(1);
+    expect((userScene as { images?: string[] })?.images).toHaveLength(1);
   });
 
   it("produces correct stats for mixed content", async () => {
@@ -564,7 +568,7 @@ describe("Cursor → transform — comprehensive", () => {
                   description: "Search auth patterns",
                   prompt: "Search auth patterns in the repo",
                 },
-              } as any,
+              },
             ],
           },
         ],
@@ -615,7 +619,7 @@ describe("Cursor → transform — comprehensive", () => {
                   description: "Run infra diagnostics",
                   prompt: "Run shell checks",
                 },
-              } as any,
+              },
             ],
           },
         ],
