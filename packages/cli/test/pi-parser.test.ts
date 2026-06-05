@@ -254,6 +254,12 @@ describe("Pi parser", () => {
         message: { role: "user", content: [{ type: "text", text: "New branch prompt" }] },
       },
       {
+        type: "session_info",
+        parentId: "branch-user",
+        timestamp: "2026-01-01T00:00:03.500Z",
+        name: "ID-less branch title",
+      },
+      {
         type: "message",
         id: "branch-answer",
         parentId: "branch-user",
@@ -280,6 +286,7 @@ describe("Pi parser", () => {
       expect(text).toContain("New branch prompt");
       expect(text).toContain("New branch answer");
       expect(text).not.toContain("Old branch answer");
+      expect(parsed.title).toBe("ID-less branch title");
       expect(parsed.dataSourceInfo?.notes).toEqual(["1 off-branch Pi entries were omitted."]);
     });
   });

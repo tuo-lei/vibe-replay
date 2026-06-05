@@ -360,19 +360,31 @@ function selectActiveBranch(
   const leaf = entries.toReversed().find((entry) => entry.id && byId.has(entry.id));
   if (!leaf?.id) return { entries, abandonedEntries: 0 };
 
+  const branchIds = new Set<string>();
   const branch: PiEntryBase[] = [];
   const seen = new Set<string>();
   let current: PiEntryBase | undefined = leaf;
   while (current) {
     if (!current.id || seen.has(current.id)) break;
     seen.add(current.id);
+    branchIds.add(current.id);
     branch.unshift(current);
     const parentId: string | null | undefined = current.parentId;
     current = typeof parentId === "string" ? byId.get(parentId) : undefined;
   }
-  return branch.length > 0
-    ? { entries: branch, abandonedEntries: Math.max(0, entries.length - branch.length) }
-    : { entries, abandonedEntries: 0 };
+  if (branch.length === 0) return { entries, abandonedEntries: 0 };
+
+  const idlessEntries = entries.filter((entry) => !entry.id);
+  if (idlessEntries.length === 0) {
+    return { entries: branch, abandonedEntries: Math.max(0, entries.length - branch.length) };
+  }
+
+  const selected = new Set<PiEntryBase>(branch);
+  const branchWithIdless = entries.filter((entry) => selected.has(entry) || !entry.id);
+  return {
+    entries: branchWithIdless,
+    abandonedEntries: entries.filter((entry) => entry.id && !branchIds.has(entry.id)).length,
+  };
 }
 
 function collectToolResults(entries: PiEntryBase[]): Map<string, ToolResultData> {
@@ -496,6 +508,8 @@ function normalizeToolInput(name: string, input: Record<string, unknown>): Recor
     };
   }
   if (normalized === "edit") {
+    // Pi's edit tool can carry multiple replacements, but the viewer renders
+    // one diff per tool call, so map the first edit as the representative diff.
     const firstEdit = Array.isArray(input.edits) ? input.edits[0] : undefined;
     const edit =
       firstEdit && typeof firstEdit === "object" ? (firstEdit as Record<string, unknown>) : input;
