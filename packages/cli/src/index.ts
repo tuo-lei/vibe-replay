@@ -1,7 +1,7 @@
 import http from "node:http";
 import { Separator, select } from "@inquirer/prompts";
 import chalk from "chalk";
-import { program } from "commander";
+import { Command, program } from "commander";
 import ora from "ora";
 import { readFileCache, writeFileCache } from "./cache.js";
 import { cleanPromptText } from "./clean-prompt.js";
@@ -319,7 +319,9 @@ program
                         ? chalk.hex("#0096FF")("cursor")
                         : provider === "codex"
                           ? chalk.hex("#B392F0")("codex")
-                          : chalk.yellow(provider);
+                          : provider === "pi"
+                            ? chalk.hex("#14B8A6")("pi")
+                            : chalk.yellow(provider);
               replayEntries.push({
                 name: `${providerBadge} ${chalk.dim(`[${time}]`)} ${chalk.white(title)} ${chalk.dim(`(${scenes} scenes)`)}`,
                 value: slug,
@@ -771,6 +773,7 @@ interface SessionsCommandOptions {
   query?: string;
   project?: string;
   provider?: string;
+  providerFilter?: string;
   limit?: number;
   scan?: boolean;
   any?: boolean;
@@ -784,22 +787,26 @@ program
   .description("Search local AI coding sessions (agent-friendly)")
   .option("-q, --query <text>", "Search title, prompt, project, branch, model, or slug")
   .option("--project <text>", "Filter by project path substring")
-  .option("-p, --provider <name>", "Filter by provider (claude-code, cursor, codex, ...)")
+  .option(
+    "-P, --provider-filter <name>",
+    "Filter by provider (claude-code, cursor, codex, pi, ...)",
+  )
   .option("-l, --limit <number>", "Maximum sessions to return", (value) => Number(value), 10)
   .option("--scan", "Run richer per-session scan for efficiency metrics")
   .option("--any", "Match any query term instead of requiring all terms")
   .option("--brief", "Include scan-backed session briefs and match evidence")
   .option("--dedupe", "Collapse near-duplicate sessions with the same long prompt/title")
   .option("--json", "Print machine-readable JSON")
-  .action(async (opts: SessionsCommandOptions) => {
+  .action(async (opts: SessionsCommandOptions, command: Command) => {
     const discoverSpinner = opts.json ? undefined : ora("Discovering local sessions...").start();
     try {
+      const queryOptions = normalizeSessionsCommandOptions(opts, command);
       const sessions = mergeSameSessions(await discoverAllSessions());
       discoverSpinner?.succeed(`Found ${sessions.length} sessions`);
 
       const scanSpinner =
         opts.scan && !opts.json ? ora("Scanning matching sessions...").start() : undefined;
-      const matches = await queryLocalSessions(sessions, opts);
+      const matches = await queryLocalSessions(sessions, queryOptions);
       scanSpinner?.succeed(`Prepared ${matches.length} session result(s)`);
 
       if (opts.json) {
@@ -1117,7 +1124,7 @@ program
   .description("Watch a running AI coding session live in the browser")
   .option("-p, --provider <name>", "Provider name (default: auto-detect)")
   .option("-s, --session <sessionId>", "Specific session ID to watch")
-  .action(async (opts: { provider?: string; session?: string }) => {
+  .action(async (opts: { provider?: string; session?: string }, command: Command) => {
     const { join: pathJoin } = await import("node:path");
     const { homedir } = await import("node:os");
     const replayBaseDir = pathJoin(homedir(), ".vibe-replay");
@@ -1128,7 +1135,7 @@ program
 
     if (opts.session) {
       // Explicit session id — find which provider owns it
-      const providerHint = opts.provider;
+      const providerHint = normalizeCommandProviderOption(opts.provider, command);
       const providers = providerHint
         ? [getProvider(providerHint)].filter((p): p is NonNullable<typeof p> => !!p)
         : getAllProviders();
@@ -1153,8 +1160,9 @@ program
       const ora = (await import("ora")).default;
       const spinner = ora("Finding the most recent session...").start();
       const all: SessionInfo[] = [];
-      const providers = opts.provider
-        ? [getProvider(opts.provider)].filter((p): p is NonNullable<typeof p> => !!p)
+      const providerHint = normalizeCommandProviderOption(opts.provider, command);
+      const providers = providerHint
+        ? [getProvider(providerHint)].filter((p): p is NonNullable<typeof p> => !!p)
         : getAllProviders();
       for (const provider of providers) {
         try {
@@ -1209,6 +1217,34 @@ program
 
 program.parse();
 
+function normalizeSessionsCommandOptions(
+  opts: SessionsCommandOptions,
+  command: Command,
+): SessionsCommandOptions {
+  const provider = opts.providerFilter || normalizeCommandProviderOption(opts.provider, command);
+  return {
+    ...opts,
+    ...(provider ? { provider } : {}),
+  };
+}
+
+function normalizeCommandProviderOption(
+  provider: string | undefined,
+  command: Command,
+): string | undefined {
+  if (command.getOptionValueSource("provider") === "cli") {
+    return provider;
+  }
+
+  const parent = command.parent;
+  if (parent?.getOptionValueSource("provider") === "cli") {
+    const parentProvider = parent.opts<{ provider?: string }>().provider;
+    return parentProvider;
+  }
+
+  return undefined;
+}
+
 function formatSessionChoices(sessions: SessionInfo[], cleanupPeriodDays?: number) {
   // Merge sessions with the same slug under the same project
   const merged = mergeSameSessions(sessions);
@@ -1244,7 +1280,7 @@ function formatSessionChoices(sessions: SessionInfo[], cleanupPeriodDays?: numbe
       const prompt = s.firstPrompt.replace(/\n/g, " ").slice(0, 50);
 
       // Claude: orange-brown (#D97706), Desktop: purple (#C084FC),
-      // Cowork: pink (#F472B6), Cursor: blue (#0096FF), Codex: purple (#B392F0)
+      // Cowork: pink (#F472B6), Cursor: blue (#0096FF), Codex: purple (#B392F0), Pi: teal (#14B8A6)
       const providerBadge =
         s.provider === "claude-code"
           ? chalk.hex("#D97706")("claude")
@@ -1256,7 +1292,9 @@ function formatSessionChoices(sessions: SessionInfo[], cleanupPeriodDays?: numbe
                 ? chalk.hex("#0096FF")("cursor")
                 : s.provider === "codex"
                   ? chalk.hex("#B392F0")("codex")
-                  : chalk.yellow(s.provider);
+                  : s.provider === "pi"
+                    ? chalk.hex("#14B8A6")("pi")
+                    : chalk.yellow(s.provider);
 
       const titleStr = s.title ? chalk.white(` "${s.title}"`) : "";
 

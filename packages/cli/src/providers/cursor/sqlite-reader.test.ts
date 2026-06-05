@@ -754,7 +754,7 @@ describe("cursor sqlite metrics helpers", () => {
           },
         },
       },
-    ] as any);
+    ]);
 
     expect(apiErrors).toEqual([
       {
@@ -1071,19 +1071,17 @@ describe("cursor sqlite metrics helpers", () => {
       { type: "text", text: "<system_reminder>\ninternal only\n</system_reminder>" },
       { type: "image_url" },
       { type: "text", text: "<user_query>\nSplit sqlite-reader.ts\n</user_query>" },
-    ]) as any[];
+    ]);
 
     expect(blocks).toHaveLength(1);
     expect(blocks[0]).toEqual({ type: "text", text: "Split sqlite-reader.ts" });
   });
 
   it("keeps normal user_query content from sqlite user content", () => {
-    const blocks = __testables.parseUserContent(
-      "<user_query>\nShip this fix\n</user_query>",
-    ) as any[];
+    const blocks = __testables.parseUserContent("<user_query>\nShip this fix\n</user_query>");
     expect(blocks).toHaveLength(1);
     expect(blocks[0].type).toBe("text");
-    expect(blocks[0].text).toBe("Ship this fix");
+    expect((blocks[0] as { text: string }).text).toBe("Ship this fix");
   });
 
   it("normalizes turn text and drops wrapped system context", () => {
@@ -1107,7 +1105,7 @@ describe("cursor sqlite metrics helpers", () => {
     const mapped = __testables.mapToolArgs(
       "ApplyPatch",
       "*** Begin Patch\n*** Update File: /tmp/demo.ts\n@@\n-old line\n+new line\n*** End Patch",
-    ) as any;
+    );
     expect(mapped.file_path).toBe("/tmp/demo.ts");
     expect(mapped.old_string).toContain("old line");
     expect(mapped.new_string).toContain("new line");
@@ -1122,7 +1120,7 @@ describe("cursor sqlite metrics helpers", () => {
           chunks: [{ diffString: "@@\n-old c\n+new c" }],
         },
       }),
-    ) as any;
+    );
     expect(mapped.file_path).toBe("src/c.ts");
     expect(mapped.old_string).toContain("old c");
     expect(mapped.new_string).toContain("new c");
@@ -1132,7 +1130,7 @@ describe("cursor sqlite metrics helpers", () => {
     const mapped = __testables.mapToolArgs(
       "ApplyPatch",
       "*** Begin Patch\n*** Update File: /tmp/ctx.ts\n@@\n shared before\n-old value\n+new value\n shared after\n*** End Patch",
-    ) as any;
+    );
     expect(mapped.old_string).toContain("shared before");
     expect(mapped.old_string).toContain("shared after");
     expect(mapped.new_string).toContain("shared before");
@@ -1165,7 +1163,7 @@ describe("cursor sqlite metrics helpers", () => {
       description: "Search auth patterns",
       prompt: "Search auth patterns in the repo",
       subagentType: "Explore",
-    }) as any;
+    });
     expect(mapped).toEqual({
       description: "Search auth patterns",
       prompt: "Search auth patterns in the repo",
@@ -1177,12 +1175,12 @@ describe("cursor sqlite metrics helpers", () => {
     const run = __testables.mapToolArgs("run_terminal_cmd", {
       command: "git status",
       requireUserApproval: true,
-    }) as any;
+    });
     expect(run).toMatchObject({ command: "git status", requireUserApproval: true });
 
     const read = __testables.mapToolArgs("read_file", {
       targetFile: "/tmp/a.ts",
-    }) as any;
+    });
     expect(read).toEqual({ file_path: "/tmp/a.ts" });
   });
 
@@ -1195,7 +1193,7 @@ describe("cursor sqlite metrics helpers", () => {
           chunks: [{ diffString: "@@\n-const a = 1;\n+const a = 2;" }],
         },
       }),
-    ) as any;
+    );
     expect(mapped.file_path).toBe("/tmp/a.ts");
     expect(mapped.old_string).toContain("const a = 1;");
     expect(mapped.new_string).toContain("const a = 2;");
@@ -1210,7 +1208,7 @@ describe("cursor sqlite metrics helpers", () => {
           chunks: [{ diffString: "@@\n-old value\n+new value" }],
         },
       }),
-    ) as any;
+    );
     expect(mapped.file_path).toBe("src/a.ts");
     expect(mapped.old_string).toContain("old value");
     expect(mapped.new_string).toContain("new value");
@@ -1221,7 +1219,7 @@ describe("cursor sqlite metrics helpers", () => {
       relativeWorkspacePath: "src/b.ts",
       oldStr: "a",
       newStr: "b",
-    }) as any;
+    });
     expect(mapped).toEqual({ file_path: "src/b.ts", old_string: "a", new_string: "b" });
   });
 
@@ -1229,12 +1227,12 @@ describe("cursor sqlite metrics helpers", () => {
     const write = __testables.mapToolArgs("write", {
       relativeWorkspacePath: "/tmp/doc.md",
       code: { code: "# title" },
-    }) as any;
+    });
     expect(write).toEqual({ file_path: "/tmp/doc.md", content: "# title" });
 
     const ls = __testables.mapToolArgs("list_dir", {
       targetDirectory: "/tmp",
-    }) as any;
+    });
     expect(ls).toEqual({ path: "/tmp" });
   });
 
@@ -1242,24 +1240,24 @@ describe("cursor sqlite metrics helpers", () => {
     const mapped = __testables.mapToolArgs("Write", {
       relativeWorkspacePath: "docs/readme.md",
       code: { code: "hello" },
-    }) as any;
+    });
     expect(mapped).toEqual({ file_path: "docs/readme.md", content: "hello" });
   });
 
   it("maps Delete args across Cursor variants", () => {
     const canonical = __testables.mapToolArgs("Delete", {
       path: "docs/old.md",
-    }) as any;
+    });
     expect(canonical).toEqual({ file_path: "docs/old.md" });
 
     const legacy = __testables.mapToolArgs("delete_file", {
       relativeWorkspacePath: "src/obsolete.ts",
-    }) as any;
+    });
     expect(legacy).toEqual({ file_path: "src/obsolete.ts" });
   });
 
   it("keeps string tool args as raw text for unknown tools", () => {
-    const mapped = __testables.mapToolArgs("CustomTool", "plain text payload") as any;
+    const mapped = __testables.mapToolArgs("CustomTool", "plain text payload");
     expect(mapped).toEqual({ raw: "plain text payload" });
   });
 });

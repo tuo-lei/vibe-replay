@@ -35,6 +35,7 @@ import { mergeInsights, readInsightsStore, writeInsightsStore } from "./insights
 import { loadOverlays, sessionWithEffectiveContent } from "./overlays.js";
 import { parseClaudeCodeLines } from "./providers/claude-code/parser.js";
 import { parseCodexLines } from "./providers/codex/parser.js";
+import { parsePiLines } from "./providers/pi/parser.js";
 import {
   readCursorLiveDiagnostics,
   resolveCursorLiveWatchPaths,
@@ -1445,7 +1446,8 @@ export async function startServer(
       const isClaudeProvider = providerName === "claude-code";
       const isCursorProvider = providerName === "cursor";
       const isCodexProvider = providerName === "codex";
-      const isJsonlLiveProvider = isClaudeProvider || isCodexProvider;
+      const isPiProvider = providerName === "pi";
+      const isJsonlLiveProvider = isClaudeProvider || isCodexProvider || isPiProvider;
       let lastLiveState: LiveSessionState = isClaudeProvider ? "busy" : "unknown";
       let cursorDbWatchAttached = false;
       const cursorDbWatchedSessionIds = new Set<string>();
@@ -1628,7 +1630,9 @@ export async function startServer(
             }
             parsed = isClaudeProvider
               ? await parseClaudeCodeLines(allLines, { subagentsSourcePath: paths[0] })
-              : parseCodexLines(allLines, info, paths);
+              : isCodexProvider
+                ? parseCodexLines(allLines, info, paths)
+                : parsePiLines(allLines, { sourcePath: paths[0], sessionInfo: info });
           } else {
             parsed = await provider.parse(paths, info);
           }

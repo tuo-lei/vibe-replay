@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/vibe-replay)](https://www.npmjs.com/package/vibe-replay)
 [![license](https://img.shields.io/npm/l/vibe-replay)](https://github.com/tuo-lei/vibe-replay/blob/main/LICENSE)
 
-Turn AI coding sessions into animated, interactive web replays.
+Turn AI coding sessions from Claude Code, Cursor, Codex, and Pi into animated, interactive web replays.
 
 One command. One HTML file. Share anywhere.
 
@@ -63,6 +63,7 @@ https://your-host/viewer.html?url=https://example.com/replay.json
 | Claude Code | Supported |
 | Cursor | Supported |
 | Codex | Supported |
+| Pi | Supported |
 | Gemini CLI | Planned |
 
 ## Options
@@ -72,7 +73,7 @@ Usage: vibe-replay [options]
 
 Options:
   -s, --session <path>    Path to a specific JSONL session file
-  -p, --provider <name>   Provider name (default: claude-code)
+  -p, --provider <name>   Provider name (default: claude-code; supports pi)
   --dev                   Write demo.json for HMR development
   -V, --version           Output the version number
   -h, --help              Display help
