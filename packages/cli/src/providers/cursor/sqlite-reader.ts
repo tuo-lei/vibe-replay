@@ -1471,6 +1471,11 @@ interface CursorMessage {
 interface CursorAgentKvBlobMessage {
   role: "system" | "user" | "assistant" | "tool";
   content?: string;
+  toolCallId?: string;
+  tool_call_id?: string;
+  toolName?: string;
+  tool_name?: string;
+  args?: Record<string, any>;
 }
 
 function extractAgentKvBlobIds(value: unknown): string[] {
@@ -1545,18 +1550,23 @@ function appendAgentKvBlobMessages(
     const raw = valueToString(row.value);
     const parsed = parseJson<CursorAgentKvBlobMessage>(raw);
     if (!parsed) continue;
-    const toolRef =
-      parsed.role === "assistant"
-        ? raw.match(/(?:toolCallId|tool_call_id)["'\s:=]+([A-Za-z0-9_-]+)/i)
-        : null;
-    if (toolRef) pendingToolCallId = toolRef[1];
-    if (parsed.role === "assistant") {
-      const toolName = raw.match(/(?:toolName|tool_name)["'\s:=]+([A-Za-z0-9_-]+)/i);
-      if (toolName) pendingToolName = toolName[1];
-    }
+    const toolCallId =
+      parsed.toolCallId ||
+      parsed.tool_call_id ||
+      (parsed.role === "assistant"
+        ? raw.match(/(?:toolCallId|tool_call_id)["'\s:=]+([A-Za-z0-9_-]+)/i)?.[1]
+        : undefined);
+    if (toolCallId) pendingToolCallId = toolCallId;
+    const toolName =
+      parsed.toolName ||
+      parsed.tool_name ||
+      (parsed.role === "assistant"
+        ? raw.match(/(?:toolName|tool_name)["'\s:=]+([A-Za-z0-9_-]+)/i)?.[1]
+        : undefined);
+    if (toolName) pendingToolName = toolName;
     const message = agentKvBlobMessageToCursorMessage({
       ...parsed,
-      ...(pendingToolCallId && parsed.role === "assistant" && toolRef
+      ...(pendingToolCallId && parsed.role === "assistant" && toolCallId
         ? { toolCallId: pendingToolCallId, toolName: pendingToolName }
         : {}),
       ...(parsed.role === "tool"
@@ -1566,6 +1576,10 @@ function appendAgentKvBlobMessages(
     if (!message) continue;
     messages.push(message);
     appended++;
+    if (parsed.role === "tool") {
+      pendingToolCallId = "";
+      pendingToolName = "CursorAgentKv";
+    }
   }
   return appended;
 }
@@ -1674,18 +1688,22 @@ async function parseCursorStoreDb(
     stmt.free();
 
     if (agentKvBlobIds.length > 0) {
-      const agentKvStmt = db.prepare("SELECT key, value FROM cursorDiskKV WHERE key = ?");
       try {
-        for (const id of agentKvBlobIds) {
-          agentKvStmt.bind([`${CURSOR_AGENTKV_BLOB_PREFIX}${id}`]);
-          if (agentKvStmt.step()) {
-            const row = agentKvStmt.getAsObject() as Record<string, unknown>;
-            appendAgentKvBlobMessages(messages, [{ key: row.key, value: row.value }]);
+        const agentKvStmt = db.prepare("SELECT key, value FROM cursorDiskKV WHERE key = ?");
+        try {
+          for (const id of agentKvBlobIds) {
+            agentKvStmt.bind([`${CURSOR_AGENTKV_BLOB_PREFIX}${id}`]);
+            if (agentKvStmt.step()) {
+              const row = agentKvStmt.getAsObject() as Record<string, unknown>;
+              appendAgentKvBlobMessages(messages, [{ key: row.key, value: row.value }]);
+            }
+            agentKvStmt.reset();
           }
-          agentKvStmt.reset();
+        } finally {
+          agentKvStmt.free();
         }
-      } finally {
-        agentKvStmt.free();
+      } catch {
+        // Older or session-scoped store.db files may not have cursorDiskKV.
       }
     }
 
@@ -1752,19 +1770,23 @@ async function parseCursorStoreDbWithSqliteCli(
   }
 
   if (agentKvBlobIds.length > 0) {
-    const rows = await querySqliteCli(
-      dbPath,
-      `SELECT key, value FROM cursorDiskKV WHERE key IN (${agentKvBlobIds
-        .map((id) => sqlString(`${CURSOR_AGENTKV_BLOB_PREFIX}${id}`))
-        .join(",")})`,
-    );
-    const rowsByKey = new Map(rows.map((row) => [valueToString(row.key), row]));
-    appendAgentKvBlobMessages(
-      messages,
-      agentKvBlobIds
-        .map((id) => rowsByKey.get(`${CURSOR_AGENTKV_BLOB_PREFIX}${id}`))
-        .filter((row): row is { key: unknown; value: unknown } => Boolean(row)),
-    );
+    try {
+      const rows = await querySqliteCli(
+        dbPath,
+        `SELECT key, value FROM cursorDiskKV WHERE key IN (${agentKvBlobIds
+          .map((id) => sqlString(`${CURSOR_AGENTKV_BLOB_PREFIX}${id}`))
+          .join(",")})`,
+      );
+      const rowsByKey = new Map(rows.map((row) => [valueToString(row.key), row]));
+      appendAgentKvBlobMessages(
+        messages,
+        agentKvBlobIds
+          .map((id) => rowsByKey.get(`${CURSOR_AGENTKV_BLOB_PREFIX}${id}`))
+          .filter((row): row is { key: unknown; value: unknown } => Boolean(row)),
+      );
+    } catch {
+      // Older or session-scoped store.db files may not have cursorDiskKV.
+    }
   }
 
   return buildCursorStoreResult(sessionId, workspacePath, metaJson, messages);

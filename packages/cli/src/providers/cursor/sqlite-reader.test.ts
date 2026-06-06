@@ -118,6 +118,59 @@ describe("cursor sqlite metrics helpers", () => {
     expect(turns.at(-1)?.blocks[0]).toMatchObject({ type: "text", text: "Done" });
   });
 
+  it("prefers structured agentKv tool fields over text heuristics", () => {
+    const messages: any[] = [];
+    __testables.appendAgentKvBlobMessages(messages, [
+      {
+        key: "agentKv:blob:assistant-tool",
+        value: JSON.stringify({
+          role: "assistant",
+          toolCallId: "call_2",
+          toolName: "run_terminal_cmd",
+          args: { command: "pnpm test" },
+          content: "",
+        }),
+      },
+      {
+        key: "agentKv:blob:tool",
+        value: JSON.stringify({ role: "tool", content: "all green" }),
+      },
+    ]);
+
+    const { turns } = __testables.messagesToTurns(messages);
+    expect(turns[0].blocks[0]).toMatchObject({
+      type: "tool_use",
+      id: "call_2",
+      name: "Bash",
+      _result: "all green",
+    });
+  });
+
+  it("does not leak agentKv pending tool IDs across unrelated tool results", () => {
+    const messages: any[] = [];
+    __testables.appendAgentKvBlobMessages(messages, [
+      {
+        key: "agentKv:blob:assistant-tool",
+        value: JSON.stringify({
+          role: "assistant",
+          toolCallId: "call_1",
+          toolName: "run_terminal_cmd",
+        }),
+      },
+      {
+        key: "agentKv:blob:tool",
+        value: JSON.stringify({ role: "tool", content: "first result" }),
+      },
+      {
+        key: "agentKv:blob:tool-unrelated",
+        value: JSON.stringify({ role: "tool", content: "orphan result" }),
+      },
+    ]);
+
+    expect(messages[1].content[0].toolCallId).toBe("call_1");
+    expect(messages[2].content[0].toolCallId).toBe("agentkv-tool-result");
+  });
+
   it("rebuilds projected global-state bubble rows with truncated tool results", () => {
     const bubble = __testables.projectedCursorBubbleRowToBubble({
       key: "bubbleId:session-1:bubble-1",
