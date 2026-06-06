@@ -1263,9 +1263,11 @@ function formatSessionChoices(sessions: SessionInfo[], cleanupPeriodDays?: numbe
   for (let pi = 0; pi < projectEntries.length; pi++) {
     const [project, projectSessions] = projectEntries[pi];
 
-    // Prominent separator between projects
+    // Prominent separator between projects — show gitRepo when available
+    const gitRepo = projectSessions[0]?.gitRepo;
+    const heading = gitRepo ? `${project} ${chalk.dim(`(${gitRepo})`)}` : project;
     if (pi > 0) choices.push(new Separator(""));
-    choices.push(new Separator(chalk.bold.white(`  ─── ${project} ───`)));
+    choices.push(new Separator(chalk.bold.white(`  ─── ${heading} ───`)));
 
     for (const s of projectSessions) {
       const date = new Date(s.timestamp);

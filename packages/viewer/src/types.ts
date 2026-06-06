@@ -71,6 +71,7 @@ export interface SourceSession {
   hasSqlite?: boolean;
   hasSdk?: boolean;
   gitBranch?: string;
+  gitRepo?: string;
   existingReplay: string | null;
   projectExists?: boolean;
   isGitRepo?: boolean;

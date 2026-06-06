@@ -581,7 +581,7 @@ function RecentSessionsList({
               {sourceSuggestedTitle(primary)}
             </p>
             <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-mono text-terminal-dimmer">
-              <span className="truncate">{projectName(primary.project)}</span>
+              <span className="truncate">{primary.gitRepo || projectName(primary.project)}</span>
               {primaryPromptCount > 0 && <span>{primaryPromptCount} prompts</span>}
               {primaryToolCount > 0 && <span>{primaryToolCount} tools</span>}
               <span className={primaryHasReplay ? "text-terminal-green" : "text-terminal-blue"}>
@@ -610,7 +610,7 @@ function RecentSessionsList({
                 </p>
                 <div className="flex items-center gap-1.5 min-w-0">
                   <p className="text-[11px] font-mono text-terminal-dimmer truncate">
-                    {projectName(s.project)}
+                    {s.gitRepo || projectName(s.project)}
                   </p>
                   {isEnriching && <DataLevelBadge state={dataState} active compact />}
                 </div>
@@ -924,7 +924,6 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     (total, source) => total + (source.toolCallCount ?? source.replay?.stats.toolCalls ?? 0),
     0,
   );
-  const latestActivityTimestamp = insights.recentSources[0]?.timestamp;
   const activityWindowLabel = activityWindow === "today" ? "Today" : "This week";
   const activityDateLabel =
     activityWindow === "today"
@@ -1236,6 +1235,9 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
                 <h2 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
                   {activityWindowLabel}
                 </h2>
+                <span className="text-[10px] font-mono text-terminal-dimmer">
+                  {activityDateLabel}
+                </span>
                 <InfoTooltip>
                   Short-term local activity for the selected window. Use this to see whether recent
                   AI work is still actively flowing before jumping into sessions.
@@ -1258,7 +1260,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-4 gap-2 lg:grid-cols-2">
               <div className="rounded-lg bg-terminal-bg px-3 py-2">
                 <div className="text-xl font-mono font-bold text-terminal-green tabular-nums">
                   <AnimatedValue value={activeSessions} />
@@ -1291,15 +1293,6 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
                   tools
                 </div>
               </div>
-            </div>
-
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono text-terminal-dimmer">
-              <span>{activityDateLabel}</span>
-              <span>
-                {latestActivityTimestamp
-                  ? `latest ${timeAgo(latestActivityTimestamp)}`
-                  : "No activity yet"}
-              </span>
             </div>
           </div>
 

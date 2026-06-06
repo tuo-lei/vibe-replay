@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { cleanPromptText, isSystemGeneratedMessage } from "../../clean-prompt.js";
 import type { SessionInfo } from "../../types.js";
-import { shortenPath } from "../../utils.js";
+import { readGitRepo, shortenPath } from "../../utils.js";
 
 const CLAUDE_DIR = join(homedir(), ".claude", "projects");
 
@@ -33,6 +33,11 @@ export async function discoverClaudeCodeSessions(): Promise<SessionInfo[]> {
       continue;
     }
 
+    // Resolve gitRepo once per project dir using the first session's cwd
+    // (decodeProjectDir is lossy for paths with hyphens, but session cwd is accurate)
+    let gitRepo: string | undefined;
+    let gitRepoResolved = false;
+
     for (const file of files) {
       if (!file.endsWith(".jsonl")) continue;
 
@@ -41,7 +46,14 @@ export async function discoverClaudeCodeSessions(): Promise<SessionInfo[]> {
       if (!fileStat) continue;
 
       const info = await extractSessionInfo(filePath, fileStat.size, project);
-      if (info) sessions.push(info);
+      if (info) {
+        if (!gitRepoResolved && info.cwd) {
+          gitRepo = await readGitRepo(info.cwd);
+          gitRepoResolved = true;
+        }
+        info.gitRepo = gitRepo;
+        sessions.push(info);
+      }
     }
   }
 
