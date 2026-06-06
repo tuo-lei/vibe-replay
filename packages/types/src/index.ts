@@ -29,6 +29,12 @@ export interface CursorSidecars {
   checkpointCount?: number;
   /** Whether Cursor request context included workspace rules */
   hasWorkspaceRules?: boolean;
+  /** Cursor composerData conversationCheckpointLastUpdatedAt timestamp, if reported */
+  conversationCheckpointLastUpdatedAt?: string;
+  /** Cursor composerData flag limiting agent mode switches */
+  restrictAgentModeSwitching?: boolean;
+  /** Cursor Background Agent / Glass parent-agent reference, if reported */
+  glassMetaParentAgent?: string;
 }
 
 export type ParseWarningKind =

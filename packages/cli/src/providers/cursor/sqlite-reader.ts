@@ -760,6 +760,24 @@ function toIsoTimestamp(value: unknown): string | undefined {
   return undefined;
 }
 
+function cursorComposerSidecarMetadata(composer: Record<string, any>): CursorSidecars | undefined {
+  const conversationCheckpointLastUpdatedAt = toIsoTimestamp(
+    composer.conversationCheckpointLastUpdatedAt,
+  );
+  const restrictAgentModeSwitching =
+    typeof composer.restrictAgentModeSwitching === "boolean"
+      ? composer.restrictAgentModeSwitching
+      : undefined;
+  const glassMetaParentAgent = valueToString(composer.glassMetaParentAgent);
+
+  const metadata: CursorSidecars = {
+    ...(conversationCheckpointLastUpdatedAt ? { conversationCheckpointLastUpdatedAt } : {}),
+    ...(restrictAgentModeSwitching !== undefined ? { restrictAgentModeSwitching } : {}),
+    ...(glassMetaParentAgent ? { glassMetaParentAgent } : {}),
+  };
+  return Object.keys(metadata).length > 0 ? metadata : undefined;
+}
+
 function maxIsoTimestamp(values: Array<unknown>): string | undefined {
   let maxMs: number | undefined;
   for (const value of values) {
@@ -2306,17 +2324,34 @@ function mergeCursorSidecars(
 ): CursorSidecars | undefined {
   if (!primary && !enrichment) return undefined;
 
-  const merged: CursorSidecars = {
-    ...((primary?.requestContextCount ?? enrichment?.requestContextCount)
-      ? { requestContextCount: primary?.requestContextCount ?? enrichment?.requestContextCount }
-      : {}),
-    ...((primary?.checkpointCount ?? enrichment?.checkpointCount)
-      ? { checkpointCount: primary?.checkpointCount ?? enrichment?.checkpointCount }
-      : {}),
-    ...((primary?.hasWorkspaceRules ?? enrichment?.hasWorkspaceRules) !== undefined
-      ? { hasWorkspaceRules: primary?.hasWorkspaceRules ?? enrichment?.hasWorkspaceRules }
-      : {}),
-  };
+  const merged: CursorSidecars = {};
+  if (primary?.requestContextCount ?? enrichment?.requestContextCount) {
+    merged.requestContextCount = primary?.requestContextCount ?? enrichment?.requestContextCount;
+  }
+  if (primary?.checkpointCount ?? enrichment?.checkpointCount) {
+    merged.checkpointCount = primary?.checkpointCount ?? enrichment?.checkpointCount;
+  }
+  if ((primary?.hasWorkspaceRules ?? enrichment?.hasWorkspaceRules) !== undefined) {
+    merged.hasWorkspaceRules = primary?.hasWorkspaceRules ?? enrichment?.hasWorkspaceRules;
+  }
+  if (
+    primary?.conversationCheckpointLastUpdatedAt ||
+    enrichment?.conversationCheckpointLastUpdatedAt
+  ) {
+    merged.conversationCheckpointLastUpdatedAt =
+      primary?.conversationCheckpointLastUpdatedAt ??
+      enrichment?.conversationCheckpointLastUpdatedAt;
+  }
+  if (
+    primary?.restrictAgentModeSwitching !== undefined ||
+    enrichment?.restrictAgentModeSwitching !== undefined
+  ) {
+    merged.restrictAgentModeSwitching =
+      primary?.restrictAgentModeSwitching ?? enrichment?.restrictAgentModeSwitching;
+  }
+  if (primary?.glassMetaParentAgent || enrichment?.glassMetaParentAgent) {
+    merged.glassMetaParentAgent = primary?.glassMetaParentAgent ?? enrichment?.glassMetaParentAgent;
+  }
 
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
@@ -2741,6 +2776,7 @@ async function parseCursorGlobalStateDb(
     const startTime = toIsoTimestamp(composer.createdAt);
     const endTime = maxIsoTimestamp([
       composer.lastUpdatedAt,
+      composer.conversationCheckpointLastUpdatedAt,
       ...turns.map((turn) => turn.timestamp).filter(Boolean),
     ]);
     const sessionTokenUsage = tokenUsageFromCursorTokenCount(composer.tokenCount);
@@ -2785,14 +2821,28 @@ async function parseCursorGlobalStateDb(
         "Context files are inferred from Cursor relevantFiles and request-context sidecars.",
       );
     }
+    const composerSidecarMetadata = cursorComposerSidecarMetadata(composer);
+    if (composerSidecarMetadata?.conversationCheckpointLastUpdatedAt) {
+      notes.push("Cursor composerData reports a conversation checkpoint timestamp.");
+    }
+    if (composerSidecarMetadata?.restrictAgentModeSwitching !== undefined) {
+      notes.push("Cursor composerData reports agent mode switching restrictions.");
+    }
+    if (composerSidecarMetadata?.glassMetaParentAgent) {
+      notes.push("Cursor composerData links this session to a Glass parent agent.");
+    }
     const cursorSidecars =
-      contextSummary.requestContextCount || checkpointCount > 0 || contextSummary.hasCursorRules
+      contextSummary.requestContextCount ||
+      checkpointCount > 0 ||
+      contextSummary.hasCursorRules ||
+      composerSidecarMetadata
         ? {
             ...(contextSummary.requestContextCount
               ? { requestContextCount: contextSummary.requestContextCount }
               : {}),
             ...(checkpointCount > 0 ? { checkpointCount } : {}),
             ...(contextSummary.hasCursorRules ? { hasWorkspaceRules: true } : {}),
+            ...composerSidecarMetadata,
           }
         : undefined;
 
@@ -3004,6 +3054,7 @@ export const __testables = {
   createRetryableInit,
   estimateTokenIncrement,
   extractCursorApiErrors,
+  cursorComposerSidecarMetadata,
   extractCursorBranchMetadata,
   extractCursorContextSummary,
   extractCursorPrLinks,

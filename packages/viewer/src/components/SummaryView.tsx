@@ -394,7 +394,10 @@ export default function SummaryView({ session }: Props) {
           meta.cursorSidecars &&
           (meta.cursorSidecars.requestContextCount ||
             meta.cursorSidecars.checkpointCount ||
-            meta.cursorSidecars.hasWorkspaceRules) && (
+            meta.cursorSidecars.hasWorkspaceRules ||
+            meta.cursorSidecars.conversationCheckpointLastUpdatedAt ||
+            meta.cursorSidecars.restrictAgentModeSwitching !== undefined ||
+            meta.cursorSidecars.glassMetaParentAgent) && (
             <div className="rounded border border-terminal-border-subtle bg-terminal-surface/40 px-3 py-2">
               <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-1">
                 Cursor Sidecars
@@ -417,6 +420,26 @@ export default function SummaryView({ session }: Props) {
                     <span className="text-terminal-orange">checkpoint state:</span>{" "}
                     {meta.cursorSidecars.checkpointCount} entr
                     {meta.cursorSidecars.checkpointCount === 1 ? "y" : "ies"}
+                  </div>
+                ) : null}
+                {meta.cursorSidecars.conversationCheckpointLastUpdatedAt ? (
+                  <div>
+                    <span className="text-terminal-orange">checkpoint updated:</span>{" "}
+                    {new Date(
+                      meta.cursorSidecars.conversationCheckpointLastUpdatedAt,
+                    ).toLocaleString()}
+                  </div>
+                ) : null}
+                {meta.cursorSidecars.restrictAgentModeSwitching !== undefined ? (
+                  <div>
+                    <span className="text-terminal-blue">mode switching:</span>{" "}
+                    {meta.cursorSidecars.restrictAgentModeSwitching ? "restricted" : "allowed"}
+                  </div>
+                ) : null}
+                {meta.cursorSidecars.glassMetaParentAgent ? (
+                  <div>
+                    <span className="text-terminal-purple">glass parent:</span>{" "}
+                    {meta.cursorSidecars.glassMetaParentAgent}
                   </div>
                 ) : null}
               </div>
