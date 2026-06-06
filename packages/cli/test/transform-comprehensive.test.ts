@@ -699,6 +699,9 @@ describe("transform — metadata", () => {
           requestContextCount: 2,
           checkpointCount: 6,
           hasWorkspaceRules: true,
+          conversationCheckpointLastUpdatedAt: "2026-06-02T09:00:00.000Z",
+          restrictAgentModeSwitching: true,
+          glassMetaParentAgent: "agent-parent-1",
         },
       }),
       "cursor",
@@ -709,6 +712,9 @@ describe("transform — metadata", () => {
       requestContextCount: 2,
       checkpointCount: 6,
       hasWorkspaceRules: true,
+      conversationCheckpointLastUpdatedAt: "2026-06-02T09:00:00.000Z",
+      restrictAgentModeSwitching: true,
+      glassMetaParentAgent: "agent-parent-1",
     });
   });
 

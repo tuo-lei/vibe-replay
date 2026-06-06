@@ -311,6 +311,30 @@ describe("cursor sqlite metrics helpers", () => {
     ).toBe("2026-04-28T20:25:48.085Z");
   });
 
+  it("extracts new Cursor composerData sidecar metadata", () => {
+    expect(
+      __testables.cursorComposerSidecarMetadata({
+        conversationCheckpointLastUpdatedAt: 1_780_000_000_000,
+        restrictAgentModeSwitching: true,
+        glassMetaParentAgent: "agent-parent-1",
+      }),
+    ).toEqual({
+      conversationCheckpointLastUpdatedAt: "2026-05-28T20:26:40.000Z",
+      restrictAgentModeSwitching: true,
+      glassMetaParentAgent: "agent-parent-1",
+    });
+  });
+
+  it("preserves false Cursor mode-switching metadata", () => {
+    expect(
+      __testables.cursorComposerSidecarMetadata({ restrictAgentModeSwitching: false }),
+    ).toEqual({ restrictAgentModeSwitching: false });
+  });
+
+  it("omits empty Cursor composerData sidecar metadata", () => {
+    expect(__testables.cursorComposerSidecarMetadata({})).toBeUndefined();
+  });
+
   it("extracts Cursor branch metadata from composer payload", () => {
     const branchMeta = __testables.extractCursorBranchMetadata({
       createdOnBranch: "feature/start",
