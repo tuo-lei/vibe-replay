@@ -71,6 +71,7 @@ export function localDayKey(input: string | Date | number | undefined | null): s
  *   ssh://git@github.com/org/repo   → org/repo
  */
 export async function readGitRepo(projectDir: string): Promise<string | undefined> {
+  if (!projectDir.trim()) return undefined;
   try {
     const resolved = projectDir.startsWith("~") ? join(homedir(), projectDir.slice(1)) : projectDir;
     const config = await readFile(join(resolved, ".git", "config"), "utf-8");
