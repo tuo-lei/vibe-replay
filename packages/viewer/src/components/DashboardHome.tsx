@@ -380,9 +380,7 @@ function computeLocalTopProjects(
     branchCount: branches.size,
   }));
 
-  return rollupTopProjects(projects).sort((a, b) =>
-    (b.lastActivity || "").localeCompare(a.lastActivity || ""),
-  );
+  return rollupTopProjects(projects);
 }
 
 // ─── UI Components ───────────────────────────────────────────────────
