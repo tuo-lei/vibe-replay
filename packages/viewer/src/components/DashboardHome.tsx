@@ -402,10 +402,6 @@ function isLikelyActiveSource(s: SourceSession): boolean {
   return Number.isFinite(timestamp) && Date.now() - timestamp < ACTIVE_SESSION_GRACE_MS;
 }
 
-function localDayKeyMs(ms: number): string | undefined {
-  return localDayKey(new Date(ms));
-}
-
 function startOfLocalDay(date: Date): Date {
   const start = new Date(date);
   start.setHours(0, 0, 0, 0);
@@ -883,7 +879,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   >("idle");
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
-  const [tick, setTick] = useState(0);
+  const [, setTick] = useState(0);
   const [activityWindow, setActivityWindow] = useState<ActivityWindow>("today");
   const requestedEnrichmentSignatureRef = useRef("");
   const syncPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -911,13 +907,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     Object.keys(insights.sessionsPerDay).length > 0
       ? insights.sessionsPerDay
       : (userInsights?.sessionsPerDay ?? {});
-  const latestActivityMs = insights.recentSources[0]
-    ? new Date(insights.recentSources[0].timestamp).getTime()
-    : Date.now();
-  const now = useMemo(
-    () => (Number.isFinite(latestActivityMs) ? new Date(latestActivityMs) : new Date()),
-    [latestActivityMs],
-  );
+  const now = new Date();
   const activityStart = activityWindow === "today" ? startOfLocalDay(now) : startOfLocalWeek(now);
   const activityStartMs = activityStart.getTime();
   const activeSources = sources.filter((source) => {
@@ -940,16 +930,6 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     activityWindow === "today"
       ? now.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
       : `${activityStart.toLocaleDateString("en-US", { month: "short", day: "numeric" })}–${now.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
-  const localSessionsPerDay = displaySessionsPerDay;
-  const activitySessionsPerDay = useMemo(() => {
-    if (activityWindow !== "week") return localSessionsPerDay;
-    const overlay: Record<string, number> = { ...localSessionsPerDay };
-    for (let ms = activityStartMs; ms <= now.getTime(); ms += 24 * 60 * 60 * 1000) {
-      const key = localDayKeyMs(ms);
-      if (key) overlay[key] = Math.max(overlay[key] || 0, 1);
-    }
-    return overlay;
-  }, [activityStartMs, activityWindow, localSessionsPerDay, now]);
   const handleOpenReplay = (slug: string) => {
     navigateTo({ view: null, session: slug });
   };
@@ -1168,7 +1148,6 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   }, [lastSyncedAt]);
 
   // Recomputed on every tick (via setTick) to keep relative time fresh
-  void tick;
   const syncedAgoLabel = (() => {
     if (!lastSyncedAt) return null;
     const diffMs = Date.now() - lastSyncedAt;
@@ -1404,7 +1383,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
 
             <div className="mt-3 flex-1 rounded-lg bg-terminal-bg/70 p-2.5">
               <ContributionHeatmap
-                sessionsPerDay={activitySessionsPerDay}
+                sessionsPerDay={displaySessionsPerDay}
                 weeks={52}
                 showLegend={false}
               />
