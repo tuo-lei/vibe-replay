@@ -386,6 +386,38 @@ function computeLocalTopProjects(
 // ─── UI Components ───────────────────────────────────────────────────
 
 const HOME_RECENT_PROJECT_LIMIT = 6;
+const ACTIVE_SESSION_GRACE_MS = 5 * 60 * 1000;
+type ActivityWindow = "today" | "week";
+
+function InfoTooltip({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="instant-tooltip inline-flex h-4 w-4 items-center justify-center rounded-full border border-terminal-border-subtle text-[10px] font-mono text-terminal-dimmer">
+      ?<span className="instant-tooltip-text w-64 text-left">{children}</span>
+    </span>
+  );
+}
+
+function isLikelyActiveSource(s: SourceSession): boolean {
+  const timestamp = Date.parse(s.timestamp);
+  return Number.isFinite(timestamp) && Date.now() - timestamp < ACTIVE_SESSION_GRACE_MS;
+}
+
+function localDayKeyMs(ms: number): string | undefined {
+  return localDayKey(new Date(ms));
+}
+
+function startOfLocalDay(date: Date): Date {
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+  return start;
+}
+
+function startOfLocalWeek(date: Date): Date {
+  const start = startOfLocalDay(date);
+  const daysSinceMonday = (start.getDay() + 6) % 7;
+  start.setDate(start.getDate() - daysSinceMonday);
+  return start;
+}
 
 function RecentProjectsSkeleton() {
   return (
@@ -420,7 +452,6 @@ function RecentSessionsList({
   sessions,
   isLoading,
   enrichmentStatus,
-  onViewAll,
   onGenerate,
   onViewReplay,
   onSessionClick,
@@ -430,7 +461,6 @@ function RecentSessionsList({
   sessions: SourceSession[];
   isLoading: boolean;
   enrichmentStatus?: SourcesEnrichmentStatus | null;
-  onViewAll: () => void;
   onGenerate: (source: SourceSession) => void;
   onViewReplay: (slug: string) => void;
   onSessionClick: (source: SourceSession) => void;
@@ -440,98 +470,165 @@ function RecentSessionsList({
   if (sessions.length === 0) {
     return (
       <div className="text-center py-6 text-terminal-dimmer text-xs font-mono">
-        {isLoading ? "Loading sessions..." : "No sessions found. Start Claude, Cursor, or Codex."}
+        {isLoading
+          ? "Loading recent sessions..."
+          : "No sessions found. Start Claude, Cursor, or Codex."}
       </div>
     );
   }
 
+  const renderAction = (s: SourceSession, featured = false) => {
+    const hasReplay = !!s.existingReplay;
+    const isGenerating = generatingSlug === s.slug;
+    const hasError = generateErrorSlug === s.slug;
+    const sizeClass = featured ? "h-8 px-3.5" : "h-7 px-3";
+
+    if (hasReplay) {
+      return (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onViewReplay(s.existingReplay!);
+          }}
+          className={`${sizeClass} text-xs font-sans font-semibold rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 flex items-center gap-1 shrink-0`}
+        >
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+            <polygon points="4 2 14 8 4 14" />
+          </svg>
+          {featured ? "Open replay" : "Open"}
+        </button>
+      );
+    }
+
+    return (
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onGenerate(s);
+        }}
+        disabled={isGenerating}
+        className={`${sizeClass} text-xs font-sans font-semibold rounded-md transition-all duration-200 disabled:opacity-50 flex items-center gap-1 shrink-0 ${
+          hasError
+            ? "bg-terminal-red-subtle text-terminal-red"
+            : "bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis"
+        }`}
+      >
+        {isGenerating ? (
+          <span className="animate-pulse">{featured ? "Generating..." : "..."}</span>
+        ) : hasError ? (
+          "Failed"
+        ) : (
+          <>
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path d="M8 2v12M2 8h12" />
+            </svg>
+            Generate
+          </>
+        )}
+      </button>
+    );
+  };
+
+  const sessionKey = (s: SourceSession) => `${s.provider}-${s.project}-${s.slug}`;
+  const primary =
+    sessions.find((s) => !s.existingReplay && !isLikelyActiveSource(s)) ??
+    sessions.find((s) => !s.existingReplay) ??
+    sessions[0];
+  const primaryKey = sessionKey(primary);
+  const rest = sessions.filter((s) => sessionKey(s) !== primaryKey);
+  const primaryDataState = sessionDataState(primary, null);
+  const primaryIsEnriching = Boolean(enrichmentStatus?.running) && primary.provider === "cursor";
+  const primaryPromptCount = primary.promptCount ?? primary.prompts?.length ?? 0;
+  const primaryToolCount = primary.toolCallCount ?? primary.replay?.stats.toolCalls ?? 0;
+  const primaryHasReplay = !!primary.existingReplay;
+  const primaryIsActive = isLikelyActiveSource(primary);
+  const primaryToneClass = primaryHasReplay
+    ? "border-terminal-green/25 hover:border-terminal-green/45"
+    : "border-terminal-blue/25 hover:border-terminal-blue/45";
+
   return (
-    <div className="space-y-1 flex-1 flex flex-col">
-      {sessions.map((s) => {
-        const hasReplay = !!s.existingReplay;
-        const isGenerating = generatingSlug === s.slug;
-        const hasError = generateErrorSlug === s.slug;
-        const isEnriching = Boolean(enrichmentStatus?.running) && s.provider === "cursor";
-        const dataState = sessionDataState(s, null);
-        return (
-          <div
-            key={`${s.provider}-${s.slug}`}
-            onClick={() => onSessionClick(s)}
-            className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-terminal-surface-hover transition-colors duration-200 cursor-pointer"
-          >
-            <ProviderBadge provider={s.provider} />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-sans text-terminal-text truncate">
-                {sourceSuggestedTitle(s)}
-              </p>
-              <div className="flex items-center gap-1.5 min-w-0">
-                <p className="text-[11px] font-mono text-terminal-dimmer truncate">
-                  {projectName(s.project)}
-                </p>
-                {isEnriching && <DataLevelBadge state={dataState} active compact />}
-              </div>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <span className="text-[11px] font-mono text-terminal-dimmer tabular-nums">
-                {timeAgo(s.timestamp)}
+    <div className="space-y-3 flex-1 flex flex-col">
+      <div
+        onClick={() => onSessionClick(primary)}
+        className={`rounded-xl border bg-terminal-bg/55 px-3 py-3 cursor-pointer transition-all duration-200 hover:bg-terminal-bg/80 ${primaryToneClass}`}
+      >
+        <div className="flex items-start gap-3">
+          <ProviderBadge provider={primary.provider} />
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`rounded-full px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider ${
+                  primaryHasReplay
+                    ? "bg-terminal-green-subtle text-terminal-green"
+                    : "bg-terminal-blue-subtle text-terminal-blue"
+                }`}
+              >
+                {primaryHasReplay
+                  ? "Recent replay"
+                  : primaryIsActive
+                    ? "Current activity"
+                    : "Suggested next"}
               </span>
-              {hasReplay ? (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onViewReplay(s.existingReplay!);
-                  }}
-                  className="h-7 px-3 text-xs font-sans font-semibold rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 flex items-center gap-1"
-                >
-                  <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-                    <polygon points="4 2 14 8 4 14" />
-                  </svg>
-                  View
-                </button>
-              ) : (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onGenerate(s);
-                  }}
-                  disabled={isGenerating}
-                  className={`h-7 px-3 text-xs font-sans font-semibold rounded-md transition-all duration-200 disabled:opacity-50 flex items-center gap-1 ${
-                    hasError
-                      ? "bg-terminal-red-subtle text-terminal-red"
-                      : "bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis"
-                  }`}
-                >
-                  {isGenerating ? (
-                    <span className="animate-pulse">...</span>
-                  ) : hasError ? (
-                    "Failed"
-                  ) : (
-                    <>
-                      <svg
-                        width="10"
-                        height="10"
-                        viewBox="0 0 16 16"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                      >
-                        <path d="M8 2v12M2 8h12" />
-                      </svg>
-                      Generate
-                    </>
-                  )}
-                </button>
-              )}
+              <span className="text-[10px] font-mono text-terminal-dimmer tabular-nums">
+                {timeAgo(primary.timestamp)}
+              </span>
+              {primaryIsEnriching && <DataLevelBadge state={primaryDataState} active compact />}
+            </div>
+            <p className="mt-1 text-sm font-sans font-semibold text-terminal-text truncate">
+              {sourceSuggestedTitle(primary)}
+            </p>
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-mono text-terminal-dimmer">
+              <span className="truncate">{projectName(primary.project)}</span>
+              {primaryPromptCount > 0 && <span>{primaryPromptCount} prompts</span>}
+              {primaryToolCount > 0 && <span>{primaryToolCount} tools</span>}
+              <span className={primaryHasReplay ? "text-terminal-green" : "text-terminal-blue"}>
+                {primaryHasReplay ? "generated" : "not generated"}
+              </span>
             </div>
           </div>
-        );
-      })}
-      <button
-        onClick={onViewAll}
-        className="w-full py-2 mt-auto text-xs font-sans font-semibold rounded-lg bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200"
-      >
-        View all sessions &rarr;
-      </button>
+          {renderAction(primary, true)}
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        {rest.map((s) => {
+          const isEnriching = Boolean(enrichmentStatus?.running) && s.provider === "cursor";
+          const dataState = sessionDataState(s, null);
+          return (
+            <div
+              key={sessionKey(s)}
+              onClick={() => onSessionClick(s)}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-terminal-surface-hover transition-colors duration-200 cursor-pointer"
+            >
+              <ProviderBadge provider={s.provider} />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-sans text-terminal-text truncate">
+                  {sourceSuggestedTitle(s)}
+                </p>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <p className="text-[11px] font-mono text-terminal-dimmer truncate">
+                    {projectName(s.project)}
+                  </p>
+                  {isEnriching && <DataLevelBadge state={dataState} active compact />}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-[11px] font-mono text-terminal-dimmer tabular-nums">
+                  {timeAgo(s.timestamp)}
+                </span>
+                {renderAction(s)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -539,12 +636,10 @@ function RecentSessionsList({
 function RecentReplaysList({
   replays,
   isLoading,
-  onViewAll,
   onOpen,
 }: {
   replays: SessionSummary[];
   isLoading: boolean;
-  onViewAll: () => void;
   onOpen: (slug: string) => void;
 }) {
   if (replays.length === 0) {
@@ -598,12 +693,6 @@ function RecentReplaysList({
           </div>
         </button>
       ))}
-      <button
-        onClick={onViewAll}
-        className="w-full py-2 mt-auto text-xs font-sans font-semibold rounded-lg bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200"
-      >
-        View all replays &rarr;
-      </button>
     </div>
   );
 }
@@ -685,13 +774,45 @@ function SystemChecksSection() {
     };
   }, []);
 
+  const loadingChecks = checks.some((tool) => tool.loading);
+  const missingChecks = checks.filter((tool) => !tool.loading && !tool.installed);
+
+  if (loadingChecks) {
+    return (
+      <div className="bg-terminal-surface rounded-xl px-4 py-3 shadow-layer-sm">
+        <div className="flex items-center gap-2 text-xs font-mono text-terminal-dim">
+          <span className="w-1.5 h-1.5 rounded-full bg-terminal-blue animate-pulse" />
+          Checking local replay tools...
+        </div>
+      </div>
+    );
+  }
+
+  if (missingChecks.length === 0) {
+    return (
+      <div className="bg-terminal-surface rounded-xl px-4 py-3 shadow-layer-sm">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
+              System Ready
+            </h3>
+            <p className="mt-0.5 text-[10px] font-mono text-terminal-dimmer">
+              Local replay tooling is available.
+            </p>
+          </div>
+          <span className="text-[10px] font-mono text-terminal-green">all checks passed</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm">
       <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider mb-3">
-        System
+        System Attention Needed
       </h3>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-        {checks.map((t) => (
+        {missingChecks.map((t) => (
           <div
             key={t.name}
             className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg bg-terminal-bg"
@@ -763,6 +884,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [tick, setTick] = useState(0);
+  const [activityWindow, setActivityWindow] = useState<ActivityWindow>("today");
   const requestedEnrichmentSignatureRef = useRef("");
   const syncPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const syncPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -780,13 +902,54 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   const recentProjects = rolledUpTopProjects.length > 0 ? rolledUpTopProjects : localTopProjects;
   const showRecentProjectsSkeleton = loadingSources && recentProjects.length === 0;
   const displayProjectCount = Math.max(insights.projectCount, userInsights?.totalProjects ?? 0);
-  const displayTotalPrompts = userInsights?.totalPrompts ?? insights.totalPrompts;
-  const displayTotalToolCalls = userInsights?.totalToolCalls ?? insights.totalToolCalls;
+  const displayTotalPrompts = Math.max(insights.totalPrompts, userInsights?.totalPrompts ?? 0);
+  const displayTotalToolCalls = Math.max(
+    insights.totalToolCalls,
+    userInsights?.totalToolCalls ?? 0,
+  );
   const displaySessionsPerDay =
     Object.keys(insights.sessionsPerDay).length > 0
       ? insights.sessionsPerDay
       : (userInsights?.sessionsPerDay ?? {});
-
+  const latestActivityMs = insights.recentSources[0]
+    ? new Date(insights.recentSources[0].timestamp).getTime()
+    : Date.now();
+  const now = useMemo(
+    () => (Number.isFinite(latestActivityMs) ? new Date(latestActivityMs) : new Date()),
+    [latestActivityMs],
+  );
+  const activityStart = activityWindow === "today" ? startOfLocalDay(now) : startOfLocalWeek(now);
+  const activityStartMs = activityStart.getTime();
+  const activeSources = sources.filter((source) => {
+    const timestamp = new Date(source.timestamp).getTime();
+    return Number.isFinite(timestamp) && timestamp >= activityStartMs && timestamp <= now.getTime();
+  });
+  const activeSessions = activeSources.length;
+  const activeProjectCount = new Set(activeSources.map((source) => source.project)).size;
+  const activePrompts = activeSources.reduce(
+    (total, source) => total + (source.promptCount ?? source.prompts?.length ?? 0),
+    0,
+  );
+  const activeToolCalls = activeSources.reduce(
+    (total, source) => total + (source.toolCallCount ?? source.replay?.stats.toolCalls ?? 0),
+    0,
+  );
+  const latestActivityTimestamp = insights.recentSources[0]?.timestamp;
+  const activityWindowLabel = activityWindow === "today" ? "Today" : "This week";
+  const activityDateLabel =
+    activityWindow === "today"
+      ? now.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
+      : `${activityStart.toLocaleDateString("en-US", { month: "short", day: "numeric" })}–${now.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+  const localSessionsPerDay = displaySessionsPerDay;
+  const activitySessionsPerDay = useMemo(() => {
+    if (activityWindow !== "week") return localSessionsPerDay;
+    const overlay: Record<string, number> = { ...localSessionsPerDay };
+    for (let ms = activityStartMs; ms <= now.getTime(); ms += 24 * 60 * 60 * 1000) {
+      const key = localDayKeyMs(ms);
+      if (key) overlay[key] = Math.max(overlay[key] || 0, 1);
+    }
+    return overlay;
+  }, [activityStartMs, activityWindow, localSessionsPerDay, now]);
   const handleOpenReplay = (slug: string) => {
     navigateTo({ view: null, session: slug });
   };
@@ -1015,7 +1178,6 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     const hrs = Math.floor(mins / 60);
     return `${hrs}h ago`;
   })();
-
   if (loading && !sources.length && !replays.length) {
     return (
       <div className="flex-1 overflow-auto animate-in fade-in duration-500">
@@ -1087,99 +1249,166 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 space-y-6">
-        {/* Combined Overview + Activity */}
-        <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm">
-          {/* Compact stats row */}
-          <div className="grid grid-cols-4 gap-x-6 gap-y-1 mb-4">
-            <div>
-              <div className="text-2xl font-mono font-bold text-terminal-green tabular-nums">
-                <AnimatedValue value={insights.totalSessions} />
+      <div className="max-w-6xl mx-auto px-4 md:px-6 py-5 space-y-5">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(280px,0.72fr)_minmax(0,1.28fr)] lg:items-stretch">
+          <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm flex flex-col">
+            <div className="mb-3 flex min-h-7 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex min-w-0 items-center gap-2">
+                <h2 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
+                  {activityWindowLabel}
+                </h2>
+                <InfoTooltip>
+                  Short-term local activity for the selected window. Use this to see whether recent
+                  AI work is still actively flowing before jumping into sessions.
+                </InfoTooltip>
               </div>
-              <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest mt-0.5">
-                sessions
+              <div className="inline-flex h-7 shrink-0 items-center rounded-xl bg-terminal-bg p-0.5 shadow-layer-sm">
+                {(["today", "week"] as const).map((value) => (
+                  <button
+                    key={value}
+                    onClick={() => setActivityWindow(value)}
+                    className={`h-6 rounded-lg px-3 text-xs font-sans font-semibold transition-all duration-200 ${
+                      activityWindow === value
+                        ? "bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
+                        : "text-terminal-dim hover:text-terminal-text"
+                    }`}
+                  >
+                    {value === "today" ? "Today" : "Week"}
+                  </button>
+                ))}
               </div>
             </div>
-            <div>
-              <div className="text-2xl font-mono font-bold text-terminal-blue tabular-nums">
-                <AnimatedValue value={insights.totalReplays} />
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-lg bg-terminal-bg px-3 py-2">
+                <div className="text-xl font-mono font-bold text-terminal-green tabular-nums">
+                  <AnimatedValue value={activeSessions} />
+                </div>
+                <div className="text-[10px] font-sans font-bold uppercase tracking-widest text-terminal-dimmer">
+                  sessions
+                </div>
               </div>
-              <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest mt-0.5">
-                replays
+              <div className="rounded-lg bg-terminal-bg px-3 py-2">
+                <div className="text-xl font-mono font-bold text-terminal-blue tabular-nums">
+                  <AnimatedValue value={activeProjectCount} />
+                </div>
+                <div className="text-[10px] font-sans font-bold uppercase tracking-widest text-terminal-dimmer">
+                  projects
+                </div>
+              </div>
+              <div className="rounded-lg bg-terminal-bg px-3 py-2">
+                <div className="text-xl font-mono font-bold text-terminal-green tabular-nums">
+                  <AnimatedValue value={activePrompts} />
+                </div>
+                <div className="text-[10px] font-sans font-bold uppercase tracking-widest text-terminal-dimmer">
+                  turns
+                </div>
+              </div>
+              <div className="rounded-lg bg-terminal-bg px-3 py-2">
+                <div className="text-xl font-mono font-bold text-terminal-orange tabular-nums">
+                  <AnimatedValue value={activeToolCalls} />
+                </div>
+                <div className="text-[10px] font-sans font-bold uppercase tracking-widest text-terminal-dimmer">
+                  tools
+                </div>
               </div>
             </div>
-            <div>
-              <div className="text-2xl font-mono font-bold text-terminal-green tabular-nums">
-                <AnimatedValue value={displayTotalPrompts} />
-              </div>
-              <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest mt-0.5">
-                turns
-              </div>
-            </div>
-            <div>
-              <div className="text-2xl font-mono font-bold text-terminal-orange tabular-nums">
-                <AnimatedValue value={displayTotalToolCalls} />
-              </div>
-              <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest mt-0.5">
-                tool calls
-              </div>
+
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono text-terminal-dimmer">
+              <span>{activityDateLabel}</span>
+              <span>
+                {latestActivityTimestamp
+                  ? `latest ${timeAgo(latestActivityTimestamp)}`
+                  : "No activity yet"}
+              </span>
             </div>
           </div>
 
-          {/* Heatmap */}
-          <ContributionHeatmap sessionsPerDay={displaySessionsPerDay} weeks={52} />
+          <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm flex flex-col">
+            <div className="mb-3 flex min-h-7 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex min-w-0 items-center gap-2">
+                <h2 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
+                  Activity Insights
+                </h2>
+                <InfoTooltip>
+                  Long-term local AI coding totals and contribution-style activity across this
+                  machine. Cached data appears first, then provider scans enrich details in place.
+                </InfoTooltip>
+              </div>
+              <div className="inline-flex h-7 shrink-0 items-center rounded-xl bg-terminal-bg p-0.5 shadow-layer-sm">
+                <button
+                  onClick={() => onNavigate("insights")}
+                  className="h-6 rounded-lg px-3 text-xs font-sans font-semibold text-terminal-dim transition-all duration-200 hover:text-terminal-text"
+                >
+                  Insights
+                </button>
+                <button
+                  onClick={handleSyncInsights}
+                  disabled={syncStatus === "syncing" || syncStatus === "awaitingLogin"}
+                  className={`h-6 rounded-lg px-3 text-xs font-sans font-semibold transition-all duration-200 disabled:cursor-wait disabled:opacity-50 ${
+                    syncStatus === "done"
+                      ? "bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
+                      : syncStatus === "error"
+                        ? "bg-terminal-red-subtle text-terminal-red shadow-layer-sm"
+                        : "text-terminal-dim hover:text-terminal-text"
+                  }`}
+                  title={syncMessage || undefined}
+                >
+                  {syncStatus === "syncing"
+                    ? "Syncing..."
+                    : syncStatus === "done" && syncedAgoLabel
+                      ? `\u2713 ${syncedAgoLabel}`
+                      : syncStatus === "error"
+                        ? "Failed"
+                        : syncStatus === "awaitingLogin"
+                          ? "Waiting..."
+                          : "\u2191 Sync"}
+                </button>
+              </div>
+            </div>
 
-          {/* CTA buttons */}
-          <div className="flex gap-2 mt-3">
-            <button
-              onClick={() => onNavigate("insights")}
-              className="flex-1 py-2.5 text-xs font-sans font-semibold rounded-lg bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200"
-            >
-              View personal insights &rarr;
-            </button>
-            <button
-              onClick={handleSyncInsights}
-              disabled={syncStatus === "syncing" || syncStatus === "awaitingLogin"}
-              className={`py-2.5 px-4 text-xs font-sans font-semibold rounded-lg border transition-all duration-200 disabled:opacity-50 disabled:cursor-wait shrink-0 ${
-                syncStatus === "done"
-                  ? "bg-terminal-green/8 text-terminal-green border-terminal-green/20"
-                  : syncStatus === "error"
-                    ? "bg-red-400/8 text-red-400 border-red-400/20"
-                    : "bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover border-terminal-border"
-              }`}
-              title={syncMessage || undefined}
-            >
-              {syncStatus === "syncing"
-                ? "Syncing..."
-                : syncStatus === "done" && syncedAgoLabel
-                  ? `\u2713 Synced ${syncedAgoLabel}`
-                  : syncStatus === "error"
-                    ? "Sync failed"
-                    : syncStatus === "awaitingLogin"
-                      ? "Waiting..."
-                      : "\u2191 Sync to cloud"}
-            </button>
-            <a
-              href="https://vibe-replay.com/insights/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center justify-center w-9 h-9 rounded-lg text-terminal-dim hover:text-terminal-green hover:bg-terminal-surface-hover transition-colors shrink-0"
-              title="View insights on vibe-replay.com"
-            >
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                strokeWidth={2}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
-                />
-              </svg>
-            </a>
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+              <div className="rounded-lg bg-terminal-bg px-3 py-2">
+                <div className="text-xl font-mono font-bold text-terminal-green tabular-nums">
+                  <AnimatedValue value={insights.totalSessions} />
+                </div>
+                <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest">
+                  sessions
+                </div>
+              </div>
+              <div className="rounded-lg bg-terminal-bg px-3 py-2">
+                <div className="text-xl font-mono font-bold text-terminal-blue tabular-nums">
+                  <AnimatedValue value={displayProjectCount} />
+                </div>
+                <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest">
+                  projects
+                </div>
+              </div>
+              <div className="rounded-lg bg-terminal-bg px-3 py-2">
+                <div className="text-xl font-mono font-bold text-terminal-green tabular-nums">
+                  <AnimatedValue value={displayTotalPrompts} />
+                </div>
+                <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest">
+                  turns
+                </div>
+              </div>
+              <div className="rounded-lg bg-terminal-bg px-3 py-2">
+                <div className="text-xl font-mono font-bold text-terminal-orange tabular-nums">
+                  <AnimatedValue value={displayTotalToolCalls} />
+                </div>
+                <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest">
+                  tool calls
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3 flex-1 rounded-lg bg-terminal-bg/70 p-2.5">
+              <ContributionHeatmap
+                sessionsPerDay={activitySessionsPerDay}
+                weeks={52}
+                showLegend={false}
+              />
+            </div>
           </div>
         </div>
 
@@ -1199,22 +1428,26 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           />
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-stretch">
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)] gap-3 items-stretch">
           <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm flex flex-col">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
-                Recent Sessions
-              </h3>
+              <div className="flex min-w-0 items-center gap-2">
+                <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
+                  Recent Sessions
+                </h3>
+                <InfoTooltip>
+                  Pick up the sessions most likely to need your next action.
+                </InfoTooltip>
+              </div>
               <span className="text-[10px] font-mono text-terminal-dimmer tabular-nums">
                 {insights.totalSessions} total
               </span>
             </div>
-            <div className="flex-1 flex flex-col justify-between">
+            <div className="flex flex-1 flex-col justify-between">
               <RecentSessionsList
                 sessions={insights.recentSources}
                 isLoading={loadingSources}
                 enrichmentStatus={enrichmentStatus}
-                onViewAll={() => onNavigate("sessions")}
                 onGenerate={handleGenerate}
                 onViewReplay={handleOpenReplay}
                 onSessionClick={(s) => setSelectedSlug(s.slug)}
@@ -1222,37 +1455,54 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
                 generateErrorSlug={generateErrorSlug}
               />
             </div>
+            <button
+              onClick={() => onNavigate("sessions")}
+              className="mt-auto w-full py-2 text-xs font-sans font-semibold rounded-lg bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200"
+            >
+              View all sessions &rarr;
+            </button>
           </div>
 
           <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm flex flex-col">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
-                Recent Replays
-              </h3>
+              <div className="flex min-w-0 items-center gap-2">
+                <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
+                  Recent Replays
+                </h3>
+                <InfoTooltip>Open something already generated.</InfoTooltip>
+              </div>
               <span className="text-[10px] font-mono text-terminal-dimmer tabular-nums">
                 {insights.totalReplays} total
               </span>
             </div>
-            <div className="flex-1 flex flex-col justify-between">
+            <div className="flex flex-1 flex-col justify-between">
               <RecentReplaysList
                 replays={insights.recentReplays}
                 isLoading={loadingReplays}
-                onViewAll={() => onNavigate("replays")}
                 onOpen={handleOpenReplay}
               />
             </div>
+            <button
+              onClick={() => onNavigate("replays")}
+              className="mt-auto w-full py-2 text-xs font-sans font-semibold rounded-lg bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200"
+            >
+              View all replays &rarr;
+            </button>
           </div>
         </div>
 
-        {/* Recent Projects (below sessions/replays to match tab menu order) */}
+        {/* Project shortcuts: fast navigation back into a work context */}
         {showRecentProjectsSkeleton ? (
           <RecentProjectsSkeleton />
         ) : recentProjects.length > 1 ? (
           <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
-                Recent Projects
-              </h3>
+              <div className="flex min-w-0 items-center gap-2">
+                <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
+                  Project Shortcuts
+                </h3>
+                <InfoTooltip>Jump back into the projects with recent AI work.</InfoTooltip>
+              </div>
               <span className="text-[10px] font-mono text-terminal-dimmer tabular-nums">
                 {displayProjectCount} total
               </span>
@@ -1279,7 +1529,8 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
                           {name}
                         </span>
                         <span className="text-[10px] font-mono text-terminal-dimmer">
-                          {p.sessions} session{p.sessions > 1 ? "s" : ""} · {p.prompts} prompts
+                          {p.sessions} session{p.sessions > 1 ? "s" : ""} ·{" "}
+                          {timeAgo(p.lastActivity)}
                           {p.durationMs > 0 && ` · ${formatCompactDuration(p.durationMs)}`}
                         </span>
                       </div>

@@ -373,6 +373,14 @@ describe("provider display helpers", () => {
     expect(providerBarClass("codex")).toBe("bg-terminal-purple");
     expect(providerFamily("codex")).toBe("purple");
   });
+
+  it("labels Pi as a first-class provider", () => {
+    expect(providerBadgeLabel("pi")).toBe("Pi");
+    expect(providerDisplayName("pi")).toBe("Pi");
+    expect(providerBadgeClass("pi")).toContain("terminal-cyan");
+    expect(providerBarClass("pi")).toBe("bg-terminal-cyan");
+    expect(providerFamily("pi")).toBe("cyan");
+  });
 });
 
 describe("isNetworkError", () => {
