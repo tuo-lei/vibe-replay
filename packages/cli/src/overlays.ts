@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { ReplaySession, SessionOverlays } from "./types.js";
 
-export const EMPTY_OVERLAYS: SessionOverlays = { version: 1, overlays: [] };
+const EMPTY_OVERLAYS: SessionOverlays = { version: 1, overlays: [] };
 
 /**
  * Load overlays.json for a session, falling back to ./vibe-replay/<slug> for
