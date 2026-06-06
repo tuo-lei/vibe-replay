@@ -15,6 +15,7 @@ import {
   replaySuggestedTitle,
   rollupTopProjects,
   type SourcesEnrichmentStatus,
+  type TopProjectEntry,
   sourceSuggestedTitle,
   timeAgo,
 } from "./dashboard-utils";
@@ -301,7 +302,90 @@ function computeInsights(sources: SourceSession[], replays: SessionSummary[]): I
   };
 }
 
+type LocalProjectAccumulator = TopProjectEntry & {
+  branches: Set<string>;
+};
+
+function createLocalProject(project: string): LocalProjectAccumulator {
+  return {
+    project,
+    sessions: 0,
+    cost: 0,
+    prompts: 0,
+    durationMs: 0,
+    toolCalls: 0,
+    edits: 0,
+    branchCount: 0,
+    prCount: 0,
+    memoryFileCount: 0,
+    lastActivity: "",
+    sessionsPerDay: {},
+    branches: new Set(),
+  };
+}
+
+function computeLocalTopProjects(
+  sources: SourceSession[],
+  replays: SessionSummary[],
+): TopProjectEntry[] {
+  const byProject = new Map<string, LocalProjectAccumulator>();
+  const replayBySlug = new Map(replays.map((replay) => [replay.slug, replay]));
+  const countedReplaySlugs = new Set<string>();
+
+  const entryFor = (project: string) => {
+    const existing = byProject.get(project);
+    if (existing) return existing;
+    const created = createLocalProject(project);
+    byProject.set(project, created);
+    return created;
+  };
+
+  const bumpActivity = (entry: LocalProjectAccumulator, timestamp: string) => {
+    if (timestamp > entry.lastActivity) entry.lastActivity = timestamp;
+    const day = localDayKey(timestamp);
+    if (day) entry.sessionsPerDay[day] = (entry.sessionsPerDay[day] || 0) + 1;
+  };
+
+  for (const source of sources) {
+    const replay = replayBySlug.get(source.slug);
+    if (replay) countedReplaySlugs.add(replay.slug);
+
+    const entry = entryFor(source.project);
+    entry.sessions += 1;
+    entry.cost += replay?.stats.costEstimate ?? 0;
+    entry.prompts +=
+      source.promptCount ?? source.prompts?.length ?? (source.firstPrompt.trim() ? 1 : 0);
+    entry.toolCalls += Math.max(source.toolCallCount ?? 0, replay?.stats.toolCalls ?? 0);
+    entry.durationMs += source.durationMsEst ?? replay?.stats.durationMs ?? 0;
+    entry.edits += source.editCountEst ?? 0;
+    if (source.gitBranch) entry.branches.add(source.gitBranch);
+    if (source.hasPR) entry.prCount += 1;
+    bumpActivity(entry, source.timestamp);
+  }
+
+  for (const replay of replays) {
+    if (countedReplaySlugs.has(replay.slug)) continue;
+
+    const entry = entryFor(replay.project);
+    entry.sessions += 1;
+    entry.cost += replay.stats.costEstimate ?? 0;
+    entry.prompts += replay.stats.userPrompts ?? 0;
+    entry.toolCalls += replay.stats.toolCalls ?? 0;
+    entry.durationMs += replay.stats.durationMs ?? 0;
+    bumpActivity(entry, replay.startTime);
+  }
+
+  const projects = [...byProject.values()].map(({ branches, ...entry }) => ({
+    ...entry,
+    branchCount: branches.size,
+  }));
+
+  return rollupTopProjects(projects);
+}
+
 // ─── UI Components ───────────────────────────────────────────────────
+
+const HOME_RECENT_PROJECT_LIMIT = 6;
 
 function RecentProjectsSkeleton() {
   return (
@@ -311,7 +395,7 @@ function RecentProjectsSkeleton() {
         <div className="h-3 w-14 skeleton rounded" />
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-        {Array.from({ length: 5 }, (_, i) => (
+        {Array.from({ length: HOME_RECENT_PROJECT_LIMIT }, (_, i) => (
           <div
             key={i}
             className="flex items-center justify-between gap-2 px-3 py-3 rounded-lg bg-terminal-bg"
@@ -669,7 +753,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     error,
   } = useDashboardData();
   const insights = useMemo(() => computeInsights(sources, replays), [sources, replays]);
-  const { scanStatus, userInsights } = useScanInsightsContext();
+  const { userInsights } = useScanInsightsContext();
   const [generatingSlug, setGeneratingSlug] = useState<string | null>(null);
   const [generateErrorSlug, setGenerateErrorSlug] = useState<string | null>(null);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
@@ -685,12 +769,16 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   const selectedSession = selectedSlug
     ? (sources.find((s) => s.slug === selectedSlug) ?? null)
     : null;
-  const showRecentProjectsSkeleton =
-    !userInsights && (loadingSources || Boolean(scanStatus?.running) || sources.length > 0);
+  const localTopProjects = useMemo(
+    () => computeLocalTopProjects(sources, replays),
+    [sources, replays],
+  );
   const rolledUpTopProjects = useMemo(
     () => (userInsights ? rollupTopProjects(userInsights.topProjects) : []),
     [userInsights],
   );
+  const recentProjects = rolledUpTopProjects.length > 0 ? rolledUpTopProjects : localTopProjects;
+  const showRecentProjectsSkeleton = loadingSources && recentProjects.length === 0;
   const displayProjectCount = Math.max(insights.projectCount, userInsights?.totalProjects ?? 0);
   const displayTotalPrompts = userInsights?.totalPrompts ?? insights.totalPrompts;
   const displayTotalToolCalls = userInsights?.totalToolCalls ?? insights.totalToolCalls;
@@ -1159,7 +1247,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
         {/* Recent Projects (below sessions/replays to match tab menu order) */}
         {showRecentProjectsSkeleton ? (
           <RecentProjectsSkeleton />
-        ) : userInsights && rolledUpTopProjects.length > 1 ? (
+        ) : recentProjects.length > 1 ? (
           <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
@@ -1170,9 +1258,9 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
               </span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-              {[...rolledUpTopProjects]
+              {[...recentProjects]
                 .sort((a, b) => (b.lastActivity || "").localeCompare(a.lastActivity || ""))
-                .slice(0, 5)
+                .slice(0, HOME_RECENT_PROJECT_LIMIT)
                 .map((p) => {
                   const name = projectName(p.project);
                   return (
@@ -1204,7 +1292,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
                   );
                 })}
             </div>
-            {rolledUpTopProjects.length > 5 && (
+            {recentProjects.length > HOME_RECENT_PROJECT_LIMIT && (
               <button
                 onClick={() => onNavigate("projects")}
                 className="w-full py-2 mt-2 text-xs font-sans font-semibold rounded-lg bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200"
