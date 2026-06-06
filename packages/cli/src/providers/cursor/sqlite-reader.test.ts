@@ -62,6 +62,62 @@ describe("cursor sqlite metrics helpers", () => {
     expect(sql).toContain("toolResultLength");
   });
 
+  it("extracts explicit agentKv blob references", () => {
+    expect(
+      __testables.extractAgentKvBlobIds(
+        "prefix agentKv:blob:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA middle agentKv:blob:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      ),
+    ).toEqual([
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    ]);
+  });
+
+  it("does not treat plain agentKv mentions as blob references", () => {
+    expect(__testables.extractAgentKvBlobIds("tool output mentions agentKv but no hash")).toEqual(
+      [],
+    );
+  });
+
+  it("converts agentKv blob messages into Cursor turns", () => {
+    const messages: any[] = [];
+    const count = __testables.appendAgentKvBlobMessages(messages, [
+      {
+        key: "agentKv:blob:user",
+        value: JSON.stringify({ role: "user", content: "Run tests" }),
+      },
+      {
+        key: "agentKv:blob:assistant-tool",
+        value: JSON.stringify({
+          role: "assistant",
+          content: "calling toolCallId: call_1 toolName: run_terminal_cmd",
+        }),
+      },
+      {
+        key: "agentKv:blob:tool",
+        value: JSON.stringify({ role: "tool", content: "tests passed" }),
+      },
+      {
+        key: "agentKv:blob:assistant",
+        value: JSON.stringify({ role: "assistant", content: "Done" }),
+      },
+    ]);
+
+    expect(count).toBe(4);
+    const { turns } = __testables.messagesToTurns(messages);
+    expect(turns[0].role).toBe("user");
+    expect(turns[0].blocks[0]).toMatchObject({ type: "text", text: "Run tests" });
+    const toolBlock = turns
+      .flatMap((turn) => turn.blocks)
+      .find((block): block is any => block.type === "tool_use");
+    expect(toolBlock).toMatchObject({
+      id: "call_1",
+      name: "Bash",
+      _result: "tests passed",
+    });
+    expect(turns.at(-1)?.blocks[0]).toMatchObject({ type: "text", text: "Done" });
+  });
+
   it("rebuilds projected global-state bubble rows with truncated tool results", () => {
     const bubble = __testables.projectedCursorBubbleRowToBubble({
       key: "bubbleId:session-1:bubble-1",
