@@ -325,6 +325,16 @@ describe("cursor sqlite metrics helpers", () => {
     });
   });
 
+  it("preserves false Cursor mode-switching metadata", () => {
+    expect(
+      __testables.cursorComposerSidecarMetadata({ restrictAgentModeSwitching: false }),
+    ).toEqual({ restrictAgentModeSwitching: false });
+  });
+
+  it("omits empty Cursor composerData sidecar metadata", () => {
+    expect(__testables.cursorComposerSidecarMetadata({})).toBeUndefined();
+  });
+
   it("extracts Cursor branch metadata from composer payload", () => {
     const branchMeta = __testables.extractCursorBranchMetadata({
       createdOnBranch: "feature/start",
