@@ -41,7 +41,10 @@ export async function discoverCodexSessions(): Promise<SessionInfo[]> {
     const fileStat = await stat(filePath).catch(() => null);
     if (!fileStat?.isFile()) continue;
     const info = await extractCodexSessionInfo(filePath, fileStat.size);
-    if (info && !byId.has(info.sessionId)) byId.set(info.sessionId, info);
+    if (info && !byId.has(info.sessionId)) {
+      if (info.cwd) info.gitRepo = await readGitRepo(info.cwd);
+      byId.set(info.sessionId, info);
+    }
   }
 
   return [...byId.values()].sort((a, b) => b.timestamp.localeCompare(a.timestamp));

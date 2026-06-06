@@ -114,7 +114,7 @@ export async function extractDesktopSessionInfo(
     const info = await extractSessionInfo(jsonlPath, jsonlStat.size, desktop.cwd);
     if (!info) return null;
 
-    const gitRepo = info.gitRepo || (await readGitRepo(desktop.cwd));
+    const gitRepo = await readGitRepo(desktop.cwd);
 
     return {
       ...info,
