@@ -279,7 +279,7 @@ export function SessionLoadingToast(props: {
   description: string;
 }) {
   return (
-    <div className="fixed right-4 top-16 z-50 w-[calc(100vw-2rem)] max-w-sm pointer-events-none animate-in fade-in slide-in-from-top-2 duration-300">
+    <div className="fixed right-4 bottom-20 z-50 w-[calc(100vw-2rem)] max-w-sm pointer-events-none animate-in fade-in slide-in-from-bottom-2 duration-300">
       <SessionLoadingRibbon {...props} />
     </div>
   );
