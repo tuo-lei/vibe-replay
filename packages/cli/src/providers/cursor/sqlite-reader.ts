@@ -29,6 +29,7 @@ const SQLITE_CLI_MAX_BUFFER = 256 * 1024 * 1024;
 const SQLITE_CLI_QUERY_TIMEOUT_MS = 120_000;
 const MAX_CURSOR_GLOBAL_STATE_TOOL_RESULT_CHARS = 10_000;
 const GLOBAL_STATE_BUBBLE_KEY_CHUNK_SIZE = 200;
+const CURSOR_AGENTKV_BLOB_PREFIX = "agentKv:blob:";
 const execFileAsync = promisify(execFile);
 
 const getSqlJs = createRetryableInit(async () => {
@@ -332,6 +333,26 @@ async function queryGlobalStateRows(
     return querySqliteCli(globalStateDb.dbPath, sql);
   }
   return sqlJsRows(globalStateDb.db, sql);
+}
+
+async function queryCursorDiskKvRowsByKeys(
+  db: CachedGlobalStateDb,
+  keys: string[],
+): Promise<Array<{ key: unknown; value: unknown }>> {
+  if (keys.length === 0) return [];
+  const uniqueKeys = [...new Set(keys)];
+  const rows: Array<{ key: unknown; value: unknown }> = [];
+  for (let i = 0; i < uniqueKeys.length; i += GLOBAL_STATE_BUBBLE_KEY_CHUNK_SIZE) {
+    const chunk = uniqueKeys.slice(i, i + GLOBAL_STATE_BUBBLE_KEY_CHUNK_SIZE);
+    const chunkRows = await queryGlobalStateRows(
+      db,
+      `SELECT key, value FROM cursorDiskKV WHERE key IN (${chunk.map(sqlString).join(",")})`,
+    );
+    for (const row of chunkRows) {
+      if ("key" in row && "value" in row) rows.push({ key: row.key, value: row.value });
+    }
+  }
+  return rows;
 }
 
 async function queryGlobalStateTextValue(
@@ -1101,7 +1122,9 @@ function canUseComposerProjectHintDirectly(pathValue: string): boolean {
 
 function hasReplayableRootBlob(data: unknown): boolean {
   if (!(data instanceof Uint8Array) || data.length === 0) return false;
-  return extractChildBlobIds(data).length > 0;
+  return (
+    extractChildBlobIds(data).length > 0 || extractAgentKvBlobIds(valueToString(data)).length > 0
+  );
 }
 
 /**
@@ -1445,6 +1468,122 @@ interface CursorMessage {
   providerOptions?: any;
 }
 
+interface CursorAgentKvBlobMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content?: string;
+  toolCallId?: string;
+  tool_call_id?: string;
+  toolName?: string;
+  tool_name?: string;
+  args?: Record<string, any>;
+}
+
+function extractAgentKvBlobIds(value: unknown): string[] {
+  if (typeof value !== "string" || !value.includes(CURSOR_AGENTKV_BLOB_PREFIX)) return [];
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  const re = /agentKv:blob:([a-f0-9]{64})/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(value))) {
+    const id = match[1].toLowerCase();
+    if (seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+}
+
+function agentKvBlobMessageToCursorMessage(
+  message: CursorAgentKvBlobMessage,
+): CursorMessage | undefined {
+  if (!message || typeof message !== "object") return undefined;
+  if (!["system", "user", "assistant", "tool"].includes(message.role)) return undefined;
+  const content = typeof message.content === "string" ? message.content : "";
+  if (message.role === "assistant") {
+    const toolMessage = message as CursorAgentKvBlobMessage & {
+      toolCallId?: string;
+      toolName?: string;
+      args?: Record<string, any>;
+    };
+    if (toolMessage.toolCallId && toolMessage.toolName) {
+      return {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: toolMessage.toolCallId,
+            toolName: toolMessage.toolName,
+            args: toolMessage.args || {},
+          },
+        ],
+      };
+    }
+  }
+  if (message.role === "tool") {
+    const toolMessage = message as CursorAgentKvBlobMessage & {
+      toolCallId?: string;
+      toolName?: string;
+    };
+    return {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: toolMessage.toolCallId || "agentkv-tool-result",
+          toolName: toolMessage.toolName || "CursorAgentKv",
+          result: content,
+        },
+      ],
+    };
+  }
+  return { role: message.role, content };
+}
+
+function appendAgentKvBlobMessages(
+  messages: CursorMessage[],
+  blobRows: Array<{ key: unknown; value: unknown }>,
+): number {
+  let appended = 0;
+  let pendingToolCallId = "";
+  let pendingToolName = "CursorAgentKv";
+  for (const row of blobRows) {
+    const raw = valueToString(row.value);
+    const parsed = parseJson<CursorAgentKvBlobMessage>(raw);
+    if (!parsed) continue;
+    const toolCallId =
+      parsed.toolCallId ||
+      parsed.tool_call_id ||
+      (parsed.role === "assistant"
+        ? raw.match(/(?:toolCallId|tool_call_id)["'\s:=]+([A-Za-z0-9_-]+)/i)?.[1]
+        : undefined);
+    if (toolCallId) pendingToolCallId = toolCallId;
+    const toolName =
+      parsed.toolName ||
+      parsed.tool_name ||
+      (parsed.role === "assistant"
+        ? raw.match(/(?:toolName|tool_name)["'\s:=]+([A-Za-z0-9_-]+)/i)?.[1]
+        : undefined);
+    if (toolName) pendingToolName = toolName;
+    const message = agentKvBlobMessageToCursorMessage({
+      ...parsed,
+      ...(pendingToolCallId && parsed.role === "assistant" && toolCallId
+        ? { toolCallId: pendingToolCallId, toolName: pendingToolName }
+        : {}),
+      ...(parsed.role === "tool"
+        ? { toolCallId: pendingToolCallId, toolName: pendingToolName }
+        : {}),
+    } as CursorAgentKvBlobMessage & { toolCallId?: string; toolName?: string });
+    if (!message) continue;
+    messages.push(message);
+    appended++;
+    if (parsed.role === "tool") {
+      pendingToolCallId = "";
+      pendingToolName = "CursorAgentKv";
+    }
+  }
+  return appended;
+}
+
 function extractChildBlobIds(data: Uint8Array): string[] {
   const ids: string[] = [];
   let i = 0;
@@ -1525,7 +1664,8 @@ async function parseCursorStoreDb(
 
     const rootData = rootRows[0].values[0][0] as Uint8Array;
     const childIds = extractChildBlobIds(rootData);
-    if (childIds.length === 0) return null;
+    const agentKvBlobIds = extractAgentKvBlobIds(new TextDecoder().decode(rootData));
+    if (childIds.length === 0 && agentKvBlobIds.length === 0) return null;
 
     const messages: CursorMessage[] = [];
     const stmt = db.prepare("SELECT data FROM blobs WHERE id = ?");
@@ -1546,6 +1686,26 @@ async function parseCursorStoreDb(
       }
     }
     stmt.free();
+
+    if (agentKvBlobIds.length > 0) {
+      try {
+        const agentKvStmt = db.prepare("SELECT key, value FROM cursorDiskKV WHERE key = ?");
+        try {
+          for (const id of agentKvBlobIds) {
+            agentKvStmt.bind([`${CURSOR_AGENTKV_BLOB_PREFIX}${id}`]);
+            if (agentKvStmt.step()) {
+              const row = agentKvStmt.getAsObject() as Record<string, unknown>;
+              appendAgentKvBlobMessages(messages, [{ key: row.key, value: row.value }]);
+            }
+            agentKvStmt.reset();
+          }
+        } finally {
+          agentKvStmt.free();
+        }
+      } catch {
+        // Older or session-scoped store.db files may not have cursorDiskKV.
+      }
+    }
 
     return buildCursorStoreResult(sessionId, workspacePath, metaJson, messages);
   } finally {
@@ -1575,8 +1735,10 @@ async function parseCursorStoreDbWithSqliteCli(
   const rootDataHex = typeof rootRows[0]?.dataHex === "string" ? rootRows[0].dataHex : "";
   if (!rootDataHex) return null;
 
-  const childIds = extractChildBlobIds(Buffer.from(rootDataHex, "hex"));
-  if (childIds.length === 0) return null;
+  const rootData = Buffer.from(rootDataHex, "hex");
+  const childIds = extractChildBlobIds(rootData);
+  const agentKvBlobIds = extractAgentKvBlobIds(rootData.toString("utf-8"));
+  if (childIds.length === 0 && agentKvBlobIds.length === 0) return null;
 
   const blobHexById = new Map<string, string>();
   const chunkSize = 200;
@@ -1604,6 +1766,26 @@ async function parseCursorStoreDbWithSqliteCli(
       messages.push(JSON.parse(text));
     } catch {
       // binary or corrupted blob, skip
+    }
+  }
+
+  if (agentKvBlobIds.length > 0) {
+    try {
+      const rows = await querySqliteCli(
+        dbPath,
+        `SELECT key, value FROM cursorDiskKV WHERE key IN (${agentKvBlobIds
+          .map((id) => sqlString(`${CURSOR_AGENTKV_BLOB_PREFIX}${id}`))
+          .join(",")})`,
+      );
+      const rowsByKey = new Map(rows.map((row) => [valueToString(row.key), row]));
+      appendAgentKvBlobMessages(
+        messages,
+        agentKvBlobIds
+          .map((id) => rowsByKey.get(`${CURSOR_AGENTKV_BLOB_PREFIX}${id}`))
+          .filter((row): row is { key: unknown; value: unknown } => Boolean(row)),
+      );
+    } catch {
+      // Older or session-scoped store.db files may not have cursorDiskKV.
     }
   }
 
@@ -2139,6 +2321,25 @@ function extractCursorContextSummary(
     hasRequestContextSidecars,
     hasCursorRules,
   };
+}
+
+async function loadAgentKvBlobMessages(
+  globalStateDb: CachedGlobalStateDb,
+  agentKvBlobIds: string[],
+): Promise<CursorMessage[]> {
+  const messages: CursorMessage[] = [];
+  const rows = await queryCursorDiskKvRowsByKeys(
+    globalStateDb,
+    agentKvBlobIds.map((id) => `${CURSOR_AGENTKV_BLOB_PREFIX}${id}`),
+  );
+  const rowsByKey = new Map(rows.map((row) => [valueToString(row.key), row]));
+  appendAgentKvBlobMessages(
+    messages,
+    agentKvBlobIds
+      .map((id) => rowsByKey.get(`${CURSOR_AGENTKV_BLOB_PREFIX}${id}`))
+      .filter((row): row is { key: unknown; value: unknown } => Boolean(row)),
+  );
+  return messages;
 }
 
 function buildBubbleProjectHintData(entries: GlobalStateBubbleEntry[]): string {
@@ -2709,6 +2910,7 @@ async function parseCursorGlobalStateDb(
 
     const entries: GlobalStateTurnEntry[] = [];
     const bubbleEntries: GlobalStateBubbleEntry[] = [];
+    const agentKvBlobIds = extractAgentKvBlobIds(rawComposer);
 
     const addBubble = (bubble: Record<string, any>) => {
       bubbleEntries.push({
@@ -2752,6 +2954,24 @@ async function parseCursorGlobalStateDb(
     } else if (Array.isArray(composer.conversation)) {
       for (const item of composer.conversation) {
         if (item && typeof item === "object") addBubble(item as Record<string, any>);
+      }
+    }
+
+    if (agentKvBlobIds.length > 0) {
+      const { turns: agentKvTurns } = messagesToTurns(
+        await loadAgentKvBlobMessages(resolvedGlobalStateDb, agentKvBlobIds),
+      );
+      for (const turn of agentKvTurns) {
+        const bubble = {
+          type: turn.role === "user" ? 1 : 2,
+          text: turn.blocks
+            .filter(
+              (block): block is Extract<ContentBlock, { type: "text" }> => block.type === "text",
+            )
+            .map((block) => block.text)
+            .join("\n"),
+        };
+        entries.push({ turn, bubble });
       }
     }
 
@@ -3053,7 +3273,11 @@ export const __testables = {
   buildStoreTurnStats,
   createRetryableInit,
   estimateTokenIncrement,
+  agentKvBlobMessageToCursorMessage,
+  appendAgentKvBlobMessages,
+  extractAgentKvBlobIds,
   extractCursorApiErrors,
+  loadAgentKvBlobMessages,
   cursorComposerSidecarMetadata,
   extractCursorBranchMetadata,
   extractCursorContextSummary,
@@ -3064,6 +3288,7 @@ export const __testables = {
   mapToolArgs,
   maxIsoTimestamp,
   mergeCursorParseResults,
+  messagesToTurns,
   mergeTurnStats,
   parseAssistantContent,
   inferProjectFromComposerData,
