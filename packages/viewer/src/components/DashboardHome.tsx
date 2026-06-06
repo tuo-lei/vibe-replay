@@ -924,7 +924,6 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     (total, source) => total + (source.toolCallCount ?? source.replay?.stats.toolCalls ?? 0),
     0,
   );
-  const latestActivityTimestamp = insights.recentSources[0]?.timestamp;
   const activityWindowLabel = activityWindow === "today" ? "Today" : "This week";
   const activityDateLabel =
     activityWindow === "today"
