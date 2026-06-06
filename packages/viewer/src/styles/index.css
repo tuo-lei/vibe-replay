@@ -52,6 +52,7 @@ body {
 
   --cyan: #56d4dd;
   --cyan-subtle: rgba(86, 212, 221, 0.15);
+  --cyan-emphasis: rgba(86, 212, 221, 0.25);
 
   /* Layered shadow color (hue-matched to dark bg) */
   --shadow-color: 215 28% 4%;
@@ -100,6 +101,7 @@ body {
 
   --cyan: #0e7c86;
   --cyan-subtle: rgba(14, 124, 134, 0.1);
+  --cyan-emphasis: rgba(14, 124, 134, 0.2);
 
   /* Layered shadow color (warm gray for light mode) */
   --shadow-color: 220 10% 50%;

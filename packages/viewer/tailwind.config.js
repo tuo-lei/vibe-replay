@@ -31,6 +31,9 @@ export default {
           purple: "var(--purple)",
           "purple-subtle": "var(--purple-subtle)",
           "purple-emphasis": "var(--purple-emphasis)",
+          cyan: "var(--cyan)",
+          "cyan-subtle": "var(--cyan-subtle)",
+          "cyan-emphasis": "var(--cyan-emphasis)",
         },
       },
       fontFamily: {
