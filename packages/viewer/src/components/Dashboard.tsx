@@ -372,6 +372,7 @@ export function SessionDetailPopup({
                 Session Info
               </div>
               <InfoRow label="Project" value={projectName(s.project)} title={s.project} />
+              {s.gitRepo && <InfoRow label="Repo" value={s.gitRepo} />}
               {branch && <InfoRow label="Branch" value={branch} />}
               {scanData?.gitBranches && scanData.gitBranches.length > 1 && (
                 <InfoRow label="Branches" value={scanData.gitBranches.join(", ")} />

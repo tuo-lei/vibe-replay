@@ -4,6 +4,7 @@ import { basename, join } from "node:path";
 import { createInterface } from "node:readline";
 import { cleanPromptText } from "../../clean-prompt.js";
 import type { SessionInfo } from "../../types.js";
+import { readGitRepo } from "../../utils.js";
 import { getPiSessionsDir } from "./config.js";
 const PROMPT_SCAN_LIMIT = 2;
 
@@ -138,6 +139,7 @@ async function extractPiSessionInfo(
   if (!header || prompts.length === 0) return null;
 
   const cwd = header.cwd || decodeProjectDir(encodedProjectDir);
+  const gitRepo = await readGitRepo(cwd);
   const slug = basename(filePath, ".jsonl").replace(/^\d{4}-\d{2}-\d{2}T[^_]+_/, "");
   const fallbackTimestamp = timestamp || header.timestamp || new Date().toISOString();
 
@@ -149,6 +151,7 @@ async function extractPiSessionInfo(
     project: cwd,
     cwd,
     version: String(header.version || 1),
+    gitRepo,
     timestamp: fallbackTimestamp,
     lineCount,
     fileSize,

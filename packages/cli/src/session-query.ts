@@ -23,6 +23,7 @@ export interface SessionQueryMatch {
   cwd: string;
   timestamp: string;
   gitBranch?: string;
+  gitRepo?: string;
   model?: string;
   firstPrompt: string;
   prompts?: string[];
@@ -218,6 +219,7 @@ function sessionInfoToMatch(
     cwd: shortenPath(session.cwd),
     timestamp: session.timestamp,
     gitBranch: session.gitBranch,
+    gitRepo: session.gitRepo,
     model: session.model,
     firstPrompt: cleanPromptText(session.firstPrompt),
     prompts: session.prompts?.map(cleanPromptText).filter(Boolean),

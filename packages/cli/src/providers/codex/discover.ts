@@ -5,7 +5,7 @@ import { basename, join } from "node:path";
 import { createInterface } from "node:readline";
 import { cleanPromptText } from "../../clean-prompt.js";
 import type { SessionInfo } from "../../types.js";
-import { shortenPath } from "../../utils.js";
+import { readGitRepo, shortenPath } from "../../utils.js";
 import { CODEX_CONTEXT_TAGS, codexStripTwoPass, isCodexToolCallType } from "./constants.js";
 
 const STATE_DB_FILENAME = "state_5.sqlite";
@@ -59,15 +59,19 @@ async function sessionInfoFromThreadRow(row: CodexThreadRow): Promise<SessionInf
   const firstPrompt = rowFirstPrompt || extracted?.firstPrompt || "";
   if (!firstPrompt) return extracted;
 
+  const cwd = row.cwd || extracted?.cwd || "";
+  const gitRepo = await readGitRepo(cwd);
+
   return {
     provider: "codex",
     sessionId: row.id,
     slug: row.id.slice(0, 8),
     title: row.title || extracted?.title,
-    project: shortenPath(row.cwd || extracted?.cwd || ""),
-    cwd: row.cwd || extracted?.cwd || "",
+    project: shortenPath(cwd),
+    cwd,
     version: row.cli_version || extracted?.version || "",
     gitBranch: row.git_branch || extracted?.gitBranch,
+    gitRepo,
     timestamp:
       toIsoFlexible(row.updated_at_ms || row.updated_at) ||
       extracted?.timestamp ||

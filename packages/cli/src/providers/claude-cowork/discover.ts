@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { isSystemGeneratedMessage, previewPrompt } from "../../clean-prompt.js";
 import type { SessionInfo } from "../../types.js";
+import { readGitRepo } from "../../utils.js";
 
 /**
  * Claude Desktop stores Cowork (autonomous agent mode) sessions separately from
@@ -192,6 +193,7 @@ export async function extractCoworkSessionInfo(jsonPath: string): Promise<Sessio
   // real cwd is noise in the picker. Group all Cowork sessions under a single
   // "Cowork" heading — the session title is enough to tell them apart.
   const project = "Cowork";
+  const gitRepo = meta.cwd ? await readGitRepo(meta.cwd) : undefined;
 
   return {
     provider: "claude-cowork",
@@ -201,6 +203,7 @@ export async function extractCoworkSessionInfo(jsonPath: string): Promise<Sessio
     project,
     cwd: meta.cwd || "",
     version: "",
+    gitRepo,
     timestamp,
     lineCount,
     fileSize,

@@ -34,6 +34,7 @@ export interface SessionInfo {
   cwd: string;
   version: string;
   gitBranch?: string;
+  gitRepo?: string; // normalized remote origin (e.g. "tuo-lei/vibe-replay")
   timestamp: string; // ISO string of last activity (most recent record / lastActivityAt / file mtime depending on provider)
   lineCount: number;
   fileSize: number;

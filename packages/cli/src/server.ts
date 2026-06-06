@@ -645,6 +645,7 @@ async function buildSourcesResult(
       hasSqlite: s.hasSqlite,
       hasSdk: s.hasSdk,
       gitBranch: s.gitBranch,
+      gitRepo: s.gitRepo,
       model: s.model,
       durationMsEst: s.durationMsEst,
       editCountEst: s.editCountEst,

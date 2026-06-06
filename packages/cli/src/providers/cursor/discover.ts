@@ -2,7 +2,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { SessionInfo } from "../../types.js";
-import { shortenPath } from "../../utils.js";
+import { readGitRepo, shortenPath } from "../../utils.js";
 import {
   discoverGlobalStateOnlySessions,
   discoverSqliteOnlySessions,
@@ -68,6 +68,7 @@ async function discoverProjectSessions(projDir: string): Promise<SessionInfo[]> 
   if (!dirStat?.isDirectory()) return [];
 
   const project = await decodeProjectDir(projDir);
+  const gitRepo = await readGitRepo(project);
   const transcriptEntries = await collectTranscriptEntries(transcriptsDir);
   if (transcriptEntries.length === 0) return [];
   transcriptEntries.sort((a, b) => a.mtimeMs - b.mtimeMs);
@@ -104,6 +105,7 @@ async function discoverProjectSessions(projDir: string): Promise<SessionInfo[]> 
     if (!info) return null;
     info.workspacePath = project;
     info.hasSqlite = false;
+    info.gitRepo = gitRepo;
     return info;
   });
 

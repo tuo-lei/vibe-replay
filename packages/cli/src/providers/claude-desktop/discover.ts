@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { extractSessionInfo } from "../claude-code/discover.js";
 import type { SessionInfo } from "../../types.js";
+import { readGitRepo } from "../../utils.js";
 
 const DESKTOP_DIR = join(
   homedir(),
@@ -113,12 +114,15 @@ export async function extractDesktopSessionInfo(
     const info = await extractSessionInfo(jsonlPath, jsonlStat.size, desktop.cwd);
     if (!info) return null;
 
+    const gitRepo = info.gitRepo || (await readGitRepo(desktop.cwd));
+
     return {
       ...info,
       provider: "claude-desktop",
       title: desktop.title || info.title,
       model: desktop.model || info.model,
       timestamp: new Date(desktop.lastActivityAt).toISOString(),
+      gitRepo,
     };
   } catch {
     return null;
