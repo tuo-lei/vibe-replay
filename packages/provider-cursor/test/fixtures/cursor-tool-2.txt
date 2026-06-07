@@ -1,0 +1,4 @@
+https://example.com/docs
+# OAuth 2.0 for apps
+
+This page explains redirect_uri requirements for desktop clients.

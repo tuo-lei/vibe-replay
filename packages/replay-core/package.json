@@ -1,0 +1,35 @@
+{
+  "name": "@vibe-replay/replay-core",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "files": [
+    "src"
+  ],
+  "type": "module",
+  "exports": {
+    "./transform": {
+      "types": "./src/transform.ts",
+      "import": "./src/transform.ts"
+    },
+    "./pricing": {
+      "types": "./src/pricing.ts",
+      "import": "./src/pricing.ts"
+    },
+    "./utils/tokenEstimate": {
+      "types": "./src/utils/tokenEstimate.ts",
+      "import": "./src/utils/tokenEstimate.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@vibe-replay/provider-contract": "workspace:*",
+    "@vibe-replay/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "vitest": "^4.1.8"
+  }
+}

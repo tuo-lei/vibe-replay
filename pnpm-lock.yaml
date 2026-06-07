@@ -115,27 +115,6 @@ importers:
       '@types/node':
         specifier: ^22.10.0
         version: 22.19.13
-      '@vibe-replay/provider-claude-code':
-        specifier: workspace:*
-        version: link:../provider-claude-code
-      '@vibe-replay/provider-codex':
-        specifier: workspace:*
-        version: link:../provider-codex
-      '@vibe-replay/provider-contract':
-        specifier: workspace:*
-        version: link:../provider-contract
-      '@vibe-replay/provider-core':
-        specifier: workspace:*
-        version: link:../provider-core
-      '@vibe-replay/provider-cursor':
-        specifier: workspace:*
-        version: link:../provider-cursor
-      '@vibe-replay/provider-pi':
-        specifier: workspace:*
-        version: link:../provider-pi
-      '@vibe-replay/providers-default':
-        specifier: workspace:*
-        version: link:../providers-default
       '@vibe-replay/types':
         specifier: workspace:*
         version: link:../types
@@ -271,6 +250,22 @@ importers:
       '@vibe-replay/provider-pi':
         specifier: workspace:*
         version: link:../provider-pi
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.19.20
+      vitest:
+        specifier: ^4.1.8
+        version: 4.1.8(@types/node@22.19.20)(@vitest/coverage-v8@4.1.8)(vite@7.3.1(@types/node@22.19.20)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.22.4)(yaml@2.9.0))
+
+  packages/replay-core:
+    dependencies:
+      '@vibe-replay/provider-contract':
+        specifier: workspace:*
+        version: link:../provider-contract
+      '@vibe-replay/types':
+        specifier: workspace:*
+        version: link:../types
     devDependencies:
       '@types/node':
         specifier: ^22.10.0

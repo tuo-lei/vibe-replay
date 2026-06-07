@@ -5,7 +5,11 @@ export default defineConfig({
   format: ["esm"],
   target: "node20",
   splitting: false,
-  noExternal: [/^@vibe-replay\/provider/, "@vibe-replay/providers-default"],
+  noExternal: [
+    /^@vibe-replay\/provider/,
+    "@vibe-replay/providers-default",
+    "@vibe-replay/replay-core",
+  ],
   clean: true,
   banner: { js: "#!/usr/bin/env node" },
 });
