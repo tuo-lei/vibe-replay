@@ -195,10 +195,12 @@ export function EditableTitle({
 export function SessionMoreMenu({
   onArchive,
   onDelete,
+  onRawData,
   isArchived,
 }: {
   onArchive: () => void;
   onDelete?: () => void;
+  onRawData?: () => void;
   isArchived: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -225,6 +227,28 @@ export function SessionMoreMenu({
       </button>
       {open && (
         <div className="absolute right-0 top-full mt-1 z-50 min-w-[140px] rounded-lg bg-terminal-surface-2 border border-terminal-border shadow-layer-md py-1">
+          {onRawData && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onRawData();
+                setOpen(false);
+              }}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-sans text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors"
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              >
+                <path d="M5 3L2 8l3 5M11 3l3 5-3 5M7 12l2-8" />
+              </svg>
+              Raw JSON
+            </button>
+          )}
           <button
             onClick={(e) => {
               e.stopPropagation();
