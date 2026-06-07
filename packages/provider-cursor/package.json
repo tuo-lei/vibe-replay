@@ -1,0 +1,57 @@
+{
+  "name": "@vibe-replay/provider-cursor",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "files": [
+    "src"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/cursor/index.ts",
+      "import": "./src/cursor/index.ts"
+    },
+    "./discover": {
+      "types": "./src/cursor/discover.ts",
+      "import": "./src/cursor/discover.ts"
+    },
+    "./parser": {
+      "types": "./src/cursor/parser.ts",
+      "import": "./src/cursor/parser.ts"
+    },
+    "./sanitize": {
+      "types": "./src/cursor/sanitize.ts",
+      "import": "./src/cursor/sanitize.ts"
+    },
+    "./sdk-reader": {
+      "types": "./src/cursor/sdk-reader.ts",
+      "import": "./src/cursor/sdk-reader.ts"
+    },
+    "./sqlite-io": {
+      "types": "./src/cursor/sqlite-io.ts",
+      "import": "./src/cursor/sqlite-io.ts"
+    },
+    "./sqlite-reader": {
+      "types": "./src/cursor/sqlite-reader.ts",
+      "import": "./src/cursor/sqlite-reader.ts"
+    },
+    "./tool-mapping": {
+      "types": "./src/cursor/tool-mapping.ts",
+      "import": "./src/cursor/tool-mapping.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vibe-replay/provider-contract": "workspace:*",
+    "@vibe-replay/provider-core": "workspace:*",
+    "@vibe-replay/types": "workspace:*",
+    "sql.js": "^1.14.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "vitest": "^4.1.8"
+  }
+}

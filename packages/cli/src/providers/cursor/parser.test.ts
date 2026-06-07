@@ -13,7 +13,7 @@ vi.mock("./sqlite-reader.js", () => ({
   parseCursorSqlite: vi.fn(),
 }));
 
-import { transformToReplay } from "../../transform.js";
+import { transformToReplay } from "vibe-replay/internal/transform";
 import { parseCursorSession } from "./parser.js";
 import { parseCursorSqlite } from "./sqlite-reader.js";
 

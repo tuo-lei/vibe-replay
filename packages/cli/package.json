@@ -32,6 +32,32 @@
     "assets"
   ],
   "type": "module",
+  "exports": {
+    "./internal/cache": {
+      "types": "./src/cache.ts",
+      "import": "./src/cache.ts"
+    },
+    "./internal/clean-prompt": {
+      "types": "./src/clean-prompt.ts",
+      "import": "./src/clean-prompt.ts"
+    },
+    "./internal/duration": {
+      "types": "./src/duration.ts",
+      "import": "./src/duration.ts"
+    },
+    "./internal/transform": {
+      "types": "./src/transform.ts",
+      "import": "./src/transform.ts"
+    },
+    "./internal/utils": {
+      "types": "./src/utils.ts",
+      "import": "./src/utils.ts"
+    },
+    "./internal/providers/cursor/sqlite-reader": {
+      "types": "./src/providers/cursor/sqlite-reader.ts",
+      "import": "./src/providers/cursor/sqlite-reader.ts"
+    }
+  },
   "scripts": {
     "build": "tsup",
     "dev": "tsx src/index.ts",
@@ -42,6 +68,13 @@
     "@hono/node-server": "^1.19.11",
     "@inquirer/prompts": "^7.2.0",
     "@resvg/resvg-js": "^2.6.2",
+    "@vibe-replay/provider-claude-code": "workspace:*",
+    "@vibe-replay/provider-codex": "workspace:*",
+    "@vibe-replay/provider-contract": "workspace:*",
+    "@vibe-replay/provider-core": "workspace:*",
+    "@vibe-replay/provider-cursor": "workspace:*",
+    "@vibe-replay/provider-pi": "workspace:*",
+    "@vibe-replay/providers-default": "workspace:*",
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
     "gifenc": "^1.0.3",

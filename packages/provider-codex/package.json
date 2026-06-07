@@ -1,0 +1,40 @@
+{
+  "name": "@vibe-replay/provider-codex",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "files": [
+    "src"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/codex/index.ts",
+      "import": "./src/codex/index.ts"
+    },
+    "./discover": {
+      "types": "./src/codex/discover.ts",
+      "import": "./src/codex/discover.ts"
+    },
+    "./parser": {
+      "types": "./src/codex/parser.ts",
+      "import": "./src/codex/parser.ts"
+    },
+    "./constants": {
+      "types": "./src/codex/constants.ts",
+      "import": "./src/codex/constants.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vibe-replay/provider-contract": "workspace:*",
+    "@vibe-replay/provider-core": "workspace:*",
+    "sql.js": "^1.14.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "vitest": "^4.1.8"
+  }
+}
