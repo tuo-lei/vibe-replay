@@ -1,0 +1,30 @@
+{
+  "name": "@vibe-replay/providers-default",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "files": [
+    "src"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vibe-replay/provider-claude-code": "workspace:*",
+    "@vibe-replay/provider-codex": "workspace:*",
+    "@vibe-replay/provider-contract": "workspace:*",
+    "@vibe-replay/provider-cursor": "workspace:*",
+    "@vibe-replay/provider-pi": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "vitest": "^4.1.8"
+  }
+}

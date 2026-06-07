@@ -1,0 +1,38 @@
+{
+  "name": "@vibe-replay/provider-core",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "files": [
+    "src"
+  ],
+  "type": "module",
+  "exports": {
+    "./cache": {
+      "types": "./src/cache.ts",
+      "import": "./src/cache.ts"
+    },
+    "./clean-prompt": {
+      "types": "./src/clean-prompt.ts",
+      "import": "./src/clean-prompt.ts"
+    },
+    "./duration": {
+      "types": "./src/duration.ts",
+      "import": "./src/duration.ts"
+    },
+    "./utils": {
+      "types": "./src/utils.ts",
+      "import": "./src/utils.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vibe-replay/provider-contract": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "vitest": "^4.1.8"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "@vibe-replay/provider-contract",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "files": [
+    "src"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    },
+    "./warnings": {
+      "types": "./src/warnings.ts",
+      "import": "./src/warnings.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vibe-replay/types": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.8"
+  }
+}

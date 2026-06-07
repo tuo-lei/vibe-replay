@@ -1,0 +1,57 @@
+{
+  "name": "@vibe-replay/provider-claude-code",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "files": [
+    "src"
+  ],
+  "type": "module",
+  "exports": {
+    "./claude-code": {
+      "types": "./src/claude-code/index.ts",
+      "import": "./src/claude-code/index.ts"
+    },
+    "./claude-code/discover": {
+      "types": "./src/claude-code/discover.ts",
+      "import": "./src/claude-code/discover.ts"
+    },
+    "./claude-code/parser": {
+      "types": "./src/claude-code/parser.ts",
+      "import": "./src/claude-code/parser.ts"
+    },
+    "./claude-cowork": {
+      "types": "./src/claude-cowork/index.ts",
+      "import": "./src/claude-cowork/index.ts"
+    },
+    "./claude-cowork/discover": {
+      "types": "./src/claude-cowork/discover.ts",
+      "import": "./src/claude-cowork/discover.ts"
+    },
+    "./claude-cowork/parser": {
+      "types": "./src/claude-cowork/parser.ts",
+      "import": "./src/claude-cowork/parser.ts"
+    },
+    "./claude-desktop": {
+      "types": "./src/claude-desktop/index.ts",
+      "import": "./src/claude-desktop/index.ts"
+    },
+    "./claude-desktop/discover": {
+      "types": "./src/claude-desktop/discover.ts",
+      "import": "./src/claude-desktop/discover.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vibe-replay/provider-contract": "workspace:*",
+    "@vibe-replay/provider-core": "workspace:*",
+    "@vibe-replay/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@vibe-replay/replay-core": "workspace:*",
+    "vitest": "^4.1.8"
+  }
+}

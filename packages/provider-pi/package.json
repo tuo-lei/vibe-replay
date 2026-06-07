@@ -1,0 +1,40 @@
+{
+  "name": "@vibe-replay/provider-pi",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "files": [
+    "src"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/pi/index.ts",
+      "import": "./src/pi/index.ts"
+    },
+    "./config": {
+      "types": "./src/pi/config.ts",
+      "import": "./src/pi/config.ts"
+    },
+    "./discover": {
+      "types": "./src/pi/discover.ts",
+      "import": "./src/pi/discover.ts"
+    },
+    "./parser": {
+      "types": "./src/pi/parser.ts",
+      "import": "./src/pi/parser.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vibe-replay/provider-contract": "workspace:*",
+    "@vibe-replay/provider-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@vibe-replay/replay-core": "workspace:*",
+    "vitest": "^4.1.8"
+  }
+}

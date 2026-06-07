@@ -1,0 +1,1396 @@
+import { describe, expect, it } from "vitest";
+import {
+  __testables,
+  countComposerConversationHeaders,
+  isSystemContextText,
+} from "../src/cursor/sqlite-reader.js";
+
+describe("countComposerConversationHeaders", () => {
+  it("returns zero when headers are missing", () => {
+    expect(countComposerConversationHeaders({})).toBe(0);
+  });
+
+  it("returns zero when headers are not an array", () => {
+    expect(countComposerConversationHeaders({ fullConversationHeadersOnly: "oops" })).toBe(0);
+  });
+
+  it("returns array length for replayable composer payloads", () => {
+    expect(
+      countComposerConversationHeaders({
+        fullConversationHeadersOnly: [{ bubbleId: "a" }, { bubbleId: "b" }, { bubbleId: "c" }],
+      }),
+    ).toBe(3);
+  });
+
+  it("counts legacy inline conversation payloads", () => {
+    expect(
+      countComposerConversationHeaders({
+        conversation: [{ bubbleId: "a" }, { bubbleId: "b" }],
+      }),
+    ).toBe(2);
+  });
+
+  it("keeps legacy conversation replayable when an empty new header array is present", () => {
+    expect(
+      countComposerConversationHeaders({
+        fullConversationHeadersOnly: [],
+        conversation: [{ bubbleId: "a" }, { bubbleId: "b" }],
+      }),
+    ).toBe(2);
+  });
+});
+
+describe("cursor sqlite metrics helpers", () => {
+  it("builds index-friendly key prefix ranges", () => {
+    expect(__testables.sqlKeyPrefixRange("composerData:")).toBe(
+      "key >= 'composerData:' AND key < 'composerData;'",
+    );
+    expect(__testables.sqlKeyPrefixRange("checkpointId:abc:")).toBe(
+      "key >= 'checkpointId:abc:' AND key < 'checkpointId:abc;'",
+    );
+  });
+
+  it("does not build invalid surrogate prefix bounds", () => {
+    expect(__testables.nextStringPrefix("\ud7ff")).toBeNull();
+  });
+
+  it("projects global-state bubble values with bounded tool results", () => {
+    const sql = __testables.projectedCursorBubbleSelectSql();
+
+    expect(sql).toContain("$.toolFormerData.result");
+    expect(sql).toContain("substr");
+    expect(sql).toContain("toolResultLength");
+  });
+
+  it("extracts explicit agentKv blob references", () => {
+    expect(
+      __testables.extractAgentKvBlobIds(
+        "prefix agentKv:blob:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA middle agentKv:blob:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      ),
+    ).toEqual([
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    ]);
+  });
+
+  it("does not treat plain agentKv mentions as blob references", () => {
+    expect(__testables.extractAgentKvBlobIds("tool output mentions agentKv but no hash")).toEqual(
+      [],
+    );
+  });
+
+  it("converts agentKv blob messages into Cursor turns", () => {
+    const messages: any[] = [];
+    const count = __testables.appendAgentKvBlobMessages(messages, [
+      {
+        key: "agentKv:blob:user",
+        value: JSON.stringify({ role: "user", content: "Run tests" }),
+      },
+      {
+        key: "agentKv:blob:assistant-tool",
+        value: JSON.stringify({
+          role: "assistant",
+          content: "calling toolCallId: call_1 toolName: run_terminal_cmd",
+        }),
+      },
+      {
+        key: "agentKv:blob:tool",
+        value: JSON.stringify({ role: "tool", content: "tests passed" }),
+      },
+      {
+        key: "agentKv:blob:assistant",
+        value: JSON.stringify({ role: "assistant", content: "Done" }),
+      },
+    ]);
+
+    expect(count).toBe(4);
+    const { turns } = __testables.messagesToTurns(messages);
+    expect(turns[0].role).toBe("user");
+    expect(turns[0].blocks[0]).toMatchObject({ type: "text", text: "Run tests" });
+    const toolBlock = turns
+      .flatMap((turn) => turn.blocks)
+      .find((block): block is any => block.type === "tool_use");
+    expect(toolBlock).toMatchObject({
+      id: "call_1",
+      name: "Bash",
+      _result: "tests passed",
+    });
+    expect(turns.at(-1)?.blocks[0]).toMatchObject({ type: "text", text: "Done" });
+  });
+
+  it("prefers structured agentKv tool fields over text heuristics", () => {
+    const messages: any[] = [];
+    __testables.appendAgentKvBlobMessages(messages, [
+      {
+        key: "agentKv:blob:assistant-tool",
+        value: JSON.stringify({
+          role: "assistant",
+          toolCallId: "call_2",
+          toolName: "run_terminal_cmd",
+          args: { command: "pnpm test" },
+          content: "",
+        }),
+      },
+      {
+        key: "agentKv:blob:tool",
+        value: JSON.stringify({ role: "tool", content: "all green" }),
+      },
+    ]);
+
+    const { turns } = __testables.messagesToTurns(messages);
+    expect(turns[0].blocks[0]).toMatchObject({
+      type: "tool_use",
+      id: "call_2",
+      name: "Bash",
+      _result: "all green",
+    });
+  });
+
+  it("does not leak agentKv pending tool IDs across unrelated tool results", () => {
+    const messages: any[] = [];
+    __testables.appendAgentKvBlobMessages(messages, [
+      {
+        key: "agentKv:blob:assistant-tool",
+        value: JSON.stringify({
+          role: "assistant",
+          toolCallId: "call_1",
+          toolName: "run_terminal_cmd",
+        }),
+      },
+      {
+        key: "agentKv:blob:tool",
+        value: JSON.stringify({ role: "tool", content: "first result" }),
+      },
+      {
+        key: "agentKv:blob:tool-unrelated",
+        value: JSON.stringify({ role: "tool", content: "orphan result" }),
+      },
+    ]);
+
+    expect(messages[1].content[0].toolCallId).toBe("call_1");
+    expect(messages[2].content[0].toolCallId).toBe("agentkv-tool-result");
+  });
+
+  it("rebuilds projected global-state bubble rows with truncated tool results", () => {
+    const bubble = __testables.projectedCursorBubbleRowToBubble({
+      key: "bubbleId:session-1:bubble-1",
+      type: "ai",
+      text: "done",
+      toolName: "Read",
+      toolParams: '{"file_path":"/tmp/demo.ts"}',
+      toolResult: "const value = true;",
+      toolResultLength: 20_000,
+      relevantFiles: '["/tmp/demo.ts"]',
+    });
+
+    expect(bubble?.bubbleId).toBe("bubble-1");
+    expect(bubble?.toolFormerData).toMatchObject({
+      name: "Read",
+      params: { file_path: "/tmp/demo.ts" },
+    });
+    expect(bubble?.toolFormerData.result).toContain("truncated by vibe-replay");
+    expect(bubble?.relevantFiles).toEqual(["/tmp/demo.ts"]);
+  });
+
+  it("retries async initializer after a failure", async () => {
+    let calls = 0;
+    const init = __testables.createRetryableInit(async () => {
+      calls++;
+      if (calls === 1) throw new Error("init failed");
+      return "ok";
+    });
+
+    await expect(init()).rejects.toThrow("init failed");
+    await expect(init()).resolves.toBe("ok");
+    await expect(init()).resolves.toBe("ok");
+    expect(calls).toBe(2);
+  });
+
+  it("builds live diagnostics signatures from session rows, not WAL probe metadata", () => {
+    const base = {
+      source: "global-state" as const,
+      probedAt: "2026-01-01T00:00:00.000Z",
+      dbPath: "/tmp/state.vscdb",
+      dbMtimeMs: 1,
+      walMtimeMs: 2,
+      walSize: 3,
+      composerBytes: 100,
+      composerLastUpdatedAt: "2026-01-01T00:00:00.000Z",
+      headerCount: 2,
+      latestBubbleId: "bubble-1",
+      latestBubbleCreatedAt: "2026-01-01T00:00:01.000Z",
+      bubbleCount: 2,
+      toolCallCount: 1,
+      toolResultCount: 0,
+      pendingToolCount: 1,
+      maxBubbleBytes: 80,
+      totalBubbleBytes: 120,
+    };
+
+    expect(
+      __testables.cursorLiveDiagnosticsSignature({
+        ...base,
+        probedAt: "2026-01-01T00:00:10.000Z",
+        walMtimeMs: 999,
+        walSize: 999,
+      }),
+    ).toBe(__testables.cursorLiveDiagnosticsSignature(base));
+    expect(
+      __testables.cursorLiveDiagnosticsSignature({
+        ...base,
+        toolResultCount: 1,
+        pendingToolCount: 0,
+      }),
+    ).not.toBe(__testables.cursorLiveDiagnosticsSignature(base));
+    expect(
+      __testables.cursorLiveDiagnosticsSignature({
+        ...base,
+        composerLastUpdatedAt: "2026-01-01T00:00:02.000Z",
+      }),
+    ).not.toBe(__testables.cursorLiveDiagnosticsSignature(base));
+  });
+
+  it("computes token increments from cumulative snapshots", () => {
+    const first = __testables.estimateTokenIncrement(
+      {
+        inputTokens: 1000,
+        outputTokens: 100,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+      },
+      undefined,
+    );
+    expect(first.increment).toEqual({
+      inputTokens: 1000,
+      outputTokens: 100,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+    });
+
+    const second = __testables.estimateTokenIncrement(
+      {
+        inputTokens: 1500,
+        outputTokens: 140,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+      },
+      first.nextSnapshot,
+    );
+    expect(second.increment).toEqual({
+      inputTokens: 500,
+      outputTokens: 40,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+    });
+  });
+
+  it("handles token snapshot resets without negative deltas", () => {
+    const reset = __testables.estimateTokenIncrement(
+      {
+        inputTokens: 120,
+        outputTokens: 12,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+      },
+      {
+        inputTokens: 500,
+        outputTokens: 50,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+      },
+    );
+    expect(reset.increment).toEqual({
+      inputTokens: 120,
+      outputTokens: 12,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+    });
+  });
+
+  it("builds dense global-state turn stats aligned to user turns", () => {
+    const metrics = __testables.buildGlobalStateMetrics(
+      [
+        {
+          turn: {
+            role: "user",
+            timestamp: "2026-01-01T00:00:00.000Z",
+            blocks: [{ type: "text", text: "first prompt" }],
+          },
+          bubble: {
+            type: 1,
+            tokenCount: { inputTokens: 0, outputTokens: 0 },
+            timingInfo: { clientStartTime: Date.parse("2026-01-01T00:00:00.000Z") },
+          },
+        },
+        {
+          turn: {
+            role: "assistant",
+            timestamp: "2026-01-01T00:00:12.000Z",
+            blocks: [{ type: "text", text: "first reply" }],
+          },
+          bubble: {
+            type: 2,
+            tokenCount: { inputTokens: 1000, outputTokens: 80 },
+            modelInfo: { modelName: "claude-4.6-opus-high-thinking" },
+            timingInfo: { clientEndTime: Date.parse("2026-01-01T00:00:12.000Z") },
+          },
+        },
+        {
+          turn: {
+            role: "user",
+            timestamp: "2026-01-01T00:00:20.000Z",
+            blocks: [{ type: "text", text: "second prompt" }],
+          },
+          bubble: { type: 1, tokenCount: { inputTokens: 0, outputTokens: 0 } },
+        },
+      ],
+      "claude-4.6-opus-high-thinking",
+    );
+
+    expect(metrics.turnStats).toHaveLength(2);
+    expect(metrics.turnStats?.[0]?.durationMs).toBe(12_000);
+    expect(metrics.turnStats?.[0]?.tokenUsage?.outputTokens).toBe(80);
+    expect(metrics.turnStats?.[1]?.tokenUsage).toBeUndefined();
+  });
+
+  it("falls back to bubble-duration estimation when global-state timestamps are unavailable", () => {
+    const metrics = __testables.buildGlobalStateMetrics(
+      [
+        {
+          turn: { role: "user", blocks: [{ type: "text", text: "prompt" }] },
+          bubble: { type: 1, tokenCount: { inputTokens: 0, outputTokens: 0 } },
+        },
+        {
+          turn: { role: "assistant", blocks: [{ type: "text", text: "reply" }] },
+          bubble: {
+            type: 2,
+            tokenCount: { inputTokens: 500, outputTokens: 30 },
+            thinkingDurationMs: 2000,
+          },
+        },
+      ],
+      undefined,
+    );
+
+    expect(metrics.turnStats?.[0]?.durationMs).toBe(2000);
+    expect(metrics.totalDurationMs).toBe(2000);
+    expect(metrics.usedWallClock).toBe(false);
+  });
+
+  it("does not use clustered createdAt values as wall-clock durations", () => {
+    const metrics = __testables.buildGlobalStateMetrics(
+      [
+        {
+          turn: {
+            role: "user",
+            timestamp: "2026-04-29T02:41:02.875Z",
+            blocks: [{ type: "text", text: "prompt" }],
+          },
+          bubble: {
+            type: 1,
+            createdAt: "2026-04-29T02:41:02.875Z",
+            tokenCount: { inputTokens: 0, outputTokens: 0 },
+          },
+        },
+        {
+          turn: {
+            role: "assistant",
+            timestamp: "2026-04-29T02:41:02.899Z",
+            blocks: [{ type: "text", text: "reply" }],
+          },
+          bubble: {
+            type: 2,
+            createdAt: "2026-04-29T02:41:02.899Z",
+            tokenCount: { inputTokens: 500, outputTokens: 30 },
+            thinkingDurationMs: 4476,
+          },
+        },
+      ],
+      undefined,
+    );
+
+    expect(metrics.turnStats?.[0]?.durationMs).toBe(4476);
+    expect(metrics.totalDurationMs).toBe(4476);
+    expect(metrics.usedWallClock).toBe(false);
+  });
+
+  it("keeps global-state end time at least as recent as turn timestamps", () => {
+    expect(
+      __testables.maxIsoTimestamp(["2026-04-28T20:24:48.109Z", "2026-04-28T20:25:48.085Z"]),
+    ).toBe("2026-04-28T20:25:48.085Z");
+  });
+
+  it("extracts new Cursor composerData sidecar metadata", () => {
+    expect(
+      __testables.cursorComposerSidecarMetadata({
+        conversationCheckpointLastUpdatedAt: 1_780_000_000_000,
+        restrictAgentModeSwitching: true,
+        glassMetaParentAgent: "agent-parent-1",
+      }),
+    ).toEqual({
+      conversationCheckpointLastUpdatedAt: "2026-05-28T20:26:40.000Z",
+      restrictAgentModeSwitching: true,
+      glassMetaParentAgent: "agent-parent-1",
+    });
+  });
+
+  it("preserves false Cursor mode-switching metadata", () => {
+    expect(
+      __testables.cursorComposerSidecarMetadata({ restrictAgentModeSwitching: false }),
+    ).toEqual({ restrictAgentModeSwitching: false });
+  });
+
+  it("omits empty Cursor composerData sidecar metadata", () => {
+    expect(__testables.cursorComposerSidecarMetadata({})).toBeUndefined();
+  });
+
+  it("extracts Cursor branch metadata from composer payload", () => {
+    const branchMeta = __testables.extractCursorBranchMetadata({
+      createdOnBranch: "feature/start",
+      branches: [
+        { branchName: "main" },
+        { branchName: "feature/work" },
+        { branchName: "feature/work" },
+      ],
+      committedToBranch: "feature/work",
+      prBranchName: "feature/pr",
+      activeBranch: { branchName: "feature/final" },
+    });
+
+    expect(branchMeta.gitBranch).toBe("feature/final");
+    expect(branchMeta.gitBranches).toEqual([
+      "feature/start",
+      "main",
+      "feature/work",
+      "feature/pr",
+      "feature/final",
+    ]);
+  });
+
+  it("sorts Cursor branch history by last interaction before choosing current branch", () => {
+    const branchMeta = __testables.extractCursorBranchMetadata({
+      branches: [
+        { branchName: "feature/current", lastInteractionAt: 20 },
+        { branchName: "feature/old", lastInteractionAt: 10 },
+      ],
+      activeBranch: { branchName: "feature/current", lastInteractionAt: 20 },
+    });
+
+    expect(branchMeta.gitBranch).toBe("feature/current");
+    expect(branchMeta.gitBranches).toEqual(["feature/old", "feature/current"]);
+  });
+
+  it("extracts remote workspace roots from composer path hints", () => {
+    expect(
+      __testables.inferProjectRootFromPathHint("/workspaces/api/src/resolvers/export.ts\\"),
+    ).toBe("/workspaces/api");
+    expect(
+      __testables.inferProjectRootFromPathHint("/workspaces/.devcontainer/docker-compose.yml"),
+    ).toBe("/workspaces");
+    expect(__testables.inferProjectRootFromPathHint("/home/node/.config/git/config")).toBeNull();
+  });
+
+  it("prefers direct high-confidence composer project hints before filesystem probing", async () => {
+    await expect(
+      __testables.inferProjectFromComposerData(
+        JSON.stringify({
+          currentFile: "/workspaces/api/src/resolvers/export.ts",
+        }),
+        [],
+      ),
+    ).resolves.toBe("/workspaces/api");
+  });
+
+  it("infers projects from decoded workspace paths without filesystem probing", () => {
+    expect(
+      __testables.inferProjectFromComposerDataFast(
+        JSON.stringify({
+          relevantFiles: ["/Users/tlei/Code/ros/src/index.ts"],
+        }),
+        ["/Users/tlei/Code/ros", "/Users/tlei/Code/sandbox"],
+      ),
+    ).toBe("/Users/tlei/Code/ros");
+  });
+
+  it("infers devcontainer workspace roots from escaped tool cwd values", () => {
+    expect(
+      __testables.inferProjectFromComposerDataFast(
+        JSON.stringify({
+          fullConversationHeadersOnly: [{ bubbleId: "bubble-1" }],
+          toolFormerData: {
+            params: JSON.stringify({
+              command: "git status",
+              cwd: "/workspaces",
+            }),
+          },
+        }),
+        [],
+      ),
+    ).toBe("/workspaces");
+  });
+
+  it("keeps legacy high-confidence composer path hints discoverable", () => {
+    expect(
+      __testables.inferProjectFromComposerDataFast(
+        JSON.stringify({
+          humanChanges: [
+            {
+              renderedDiffs: [
+                {
+                  beforeContextLines: ["/Users/tlei/Code/ros/localstack/localstack-setup.sh"],
+                },
+              ],
+            },
+          ],
+        }),
+        [],
+      ),
+    ).toBe("/Users/tlei/Code/ros");
+  });
+
+  it("normalizes composite Cursor model labels to the latest distinct model", () => {
+    expect(
+      __testables.normalizeCursorModelName(
+        "gpt-5.2-high,claude-4.6-opus-high-thinking,claude-4.6-opus-high-thinking",
+      ),
+    ).toBe("claude-4.6-opus-high-thinking");
+  });
+
+  it("merges turn stats by preferring primary fields and enrichment gaps", () => {
+    expect(__testables.mergeTurnStats(undefined, undefined)).toBeUndefined();
+    expect(__testables.mergeTurnStats([{ turnIndex: 0 }], undefined)).toEqual([{ turnIndex: 0 }]);
+    expect(__testables.mergeTurnStats(undefined, [{ turnIndex: 1 }])).toEqual([{ turnIndex: 1 }]);
+
+    expect(
+      __testables.mergeTurnStats(
+        [
+          {
+            turnIndex: 0,
+            model: "gpt-5.4-high",
+          },
+          {
+            turnIndex: 2,
+            tokenUsage: {
+              inputTokens: 10,
+              outputTokens: 2,
+              cacheCreationTokens: 0,
+              cacheReadTokens: 0,
+            },
+          },
+        ],
+        [
+          {
+            turnIndex: 0,
+            durationMs: 4200,
+            contextTokens: 900,
+          },
+          {
+            turnIndex: 1,
+            model: "claude-4.6-opus-high-thinking",
+          },
+        ],
+      ),
+    ).toEqual([
+      {
+        turnIndex: 0,
+        model: "gpt-5.4-high",
+        durationMs: 4200,
+        contextTokens: 900,
+      },
+      {
+        turnIndex: 1,
+        model: "claude-4.6-opus-high-thinking",
+      },
+      {
+        turnIndex: 2,
+        tokenUsage: {
+          inputTokens: 10,
+          outputTokens: 2,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 0,
+        },
+      },
+    ]);
+  });
+
+  it("extracts Cursor PR links from bubble payloads and deduplicates by URL", () => {
+    const links = __testables.extractCursorPrLinks([
+      {
+        bubble: {
+          pullRequests: [
+            {
+              number: 42,
+              url: "https://github.com/acme/vibe-replay/pull/42",
+            },
+            {
+              prNumber: 42,
+              prUrl: "https://github.com/acme/vibe-replay/pull/42",
+            },
+            {
+              prUrl: "https://github.com/acme/another/pull/99",
+              prRepository: "acme/another",
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(links).toEqual([
+      {
+        prNumber: 42,
+        prUrl: "https://github.com/acme/vibe-replay/pull/42",
+        prRepository: "acme/vibe-replay",
+      },
+      {
+        prNumber: 99,
+        prUrl: "https://github.com/acme/another/pull/99",
+        prRepository: "acme/another",
+      },
+    ]);
+  });
+
+  it("extracts Cursor API errors from bubble errorDetails", () => {
+    const apiErrors = __testables.extractCursorApiErrors([
+      {
+        turnTimestamp: "2026-03-20T10:00:00.000Z",
+        bubble: {
+          createdAt: Date.parse("2026-03-20T10:00:00.000Z"),
+          retryAttempt: 2,
+          errorDetails: {
+            generationUUID: "gen-1",
+            message: "Error",
+            error:
+              '{"error":"ERROR_USER_ABORTED_REQUEST","details":{"title":"User aborted request."},"isExpected":true}',
+          },
+        },
+      },
+    ]);
+
+    expect(apiErrors).toEqual([
+      {
+        timestamp: "2026-03-20T10:00:00.000Z",
+        errorType: "ERROR_USER_ABORTED_REQUEST",
+        retryAttempt: 2,
+      },
+    ]);
+  });
+
+  it("extracts Cursor context files from bubbles and request sidecars", () => {
+    const summary = __testables.extractCursorContextSummary(
+      [
+        {
+          bubble: {
+            relevantFiles: ["src/auth.ts", "src/index.ts", "src/auth.ts"],
+            recentlyViewedFiles: [{ path: "docs/plan.md" }],
+          },
+        },
+      ],
+      [
+        {
+          terminalFiles: [{ filePath: "logs/dev.log" }],
+          cursorRules: ['{"name":"instructions","body":"Always lint"}'],
+          attachedFoldersListDirResults: [
+            '{"directoryRelativeWorkspacePath":"src","files":[{"name":"utils.ts"}]}',
+          ],
+        },
+      ],
+    );
+
+    expect(summary.contextFiles).toEqual([
+      "src/auth.ts",
+      "src/index.ts",
+      "docs/plan.md",
+      "logs/dev.log",
+      "src/utils.ts",
+    ]);
+    expect(summary.requestContextCount).toBe(1);
+    expect(summary.hasRequestContextSidecars).toBe(true);
+    expect(summary.hasCursorRules).toBe(true);
+  });
+
+  it("strips hidden planning text from Cursor thinking payloads", () => {
+    expect(
+      __testables.parseThinking(
+        [
+          "**Waiting for generation**",
+          "",
+          "I need to wait for the generation to complete before checking the page.",
+          "I might inspect the network if the button stays disabled.",
+        ].join("\n"),
+      ),
+    ).toBe("");
+
+    expect(
+      __testables.parseThinking(
+        [
+          "Short visible note",
+          "",
+          "**Planning next steps**",
+          "",
+          "I need to inspect the parser before deciding how to fix it.",
+          "I should compare the SQLite path too.",
+        ].join("\n"),
+      ),
+    ).toBe("Short visible note");
+  });
+
+  it("strips Cursor timestamp wrappers from store-backed user prompts", () => {
+    const blocks = __testables.parseUserContent([
+      {
+        type: "text",
+        text: [
+          "<timestamp>Tuesday, Apr 28, 2026, 4:43 PM (UTC-7)</timestamp>",
+          "<user_query>",
+          "Fix the Cursor replay",
+          "</user_query>",
+        ].join("\n"),
+      },
+    ]);
+
+    expect(blocks).toEqual([{ type: "text", text: "Fix the Cursor replay" }]);
+  });
+
+  it("parses legacy inline conversation bubbles with timingInfo timestamps", () => {
+    const userTurn = __testables.bubbleToTurn({
+      type: 1,
+      text: "old prompt",
+      timingInfo: { clientStartTime: Date.parse("2025-04-10T20:17:11.305Z") },
+    });
+    const assistantTurn = __testables.bubbleToTurn({
+      type: 2,
+      text: "old reply",
+      timingInfo: { clientStartTime: Date.parse("2025-04-10T20:17:54.751Z") },
+    });
+
+    expect(userTurn).toEqual({
+      role: "user",
+      timestamp: "2025-04-10T20:17:11.305Z",
+      blocks: [{ type: "text", text: "old prompt" }],
+    });
+    expect(assistantTurn).toEqual({
+      role: "assistant",
+      timestamp: "2025-04-10T20:17:54.751Z",
+      blocks: [{ type: "text", text: "old reply" }],
+    });
+  });
+
+  it("strips hidden planning tails from store-backed assistant content", () => {
+    const blocks = __testables.parseAssistantContent(
+      [
+        {
+          type: "text",
+          text: [
+            "我先验证一下本地生成链路。",
+            "",
+            "**Exploring tool functions**",
+            "",
+            "I need to inspect the current session and compare the SQLite path.",
+            "I should verify whether tool-call blocks already contain enough metadata.",
+          ].join("\n"),
+        },
+        {
+          type: "reasoning",
+          text: [
+            "**Waiting for generation**",
+            "",
+            "I need to wait for the replay generation to finish.",
+            "I might inspect the network if the page does not navigate.",
+          ].join("\n"),
+        },
+        {
+          type: "tool-call",
+          toolCallId: "tool-1",
+          toolName: "ReadFile",
+          args: { path: "/tmp/demo.ts" },
+        },
+      ],
+      new Map(),
+    );
+
+    expect(blocks).toEqual([
+      { type: "text", text: "我先验证一下本地生成链路。" },
+      {
+        type: "tool_use",
+        id: "tool-1",
+        name: "Read",
+        input: { file_path: "/tmp/demo.ts" },
+        _result: "",
+      },
+    ]);
+  });
+
+  it("keeps non-planning bold headings in assistant content", () => {
+    const blocks = __testables.parseAssistantContent(
+      [
+        {
+          type: "text",
+          text: [
+            "**Why this fix works**",
+            "",
+            "I need to mention that this function has a subtle bug.",
+            "I should explain why before I fix it.",
+          ].join("\n"),
+        },
+      ],
+      new Map(),
+    );
+
+    expect(blocks).toEqual([
+      {
+        type: "text",
+        text: [
+          "**Why this fix works**",
+          "",
+          "I need to mention that this function has a subtle bug.",
+          "I should explain why before I fix it.",
+        ].join("\n"),
+      },
+    ]);
+  });
+
+  it("extracts API errors even when the error bubble has no replayable turn content", () => {
+    const apiErrors = __testables.extractCursorApiErrors([
+      {
+        bubble: {
+          createdAt: Date.parse("2026-03-20T10:00:00.000Z"),
+          errorDetails: {
+            error:
+              '{"error":"ERROR_EXTENSION_HOST_TIMEOUT","details":{"title":"Agent Stream Start Timeout"}}',
+          },
+        },
+      },
+    ]);
+
+    expect(apiErrors).toEqual([
+      {
+        timestamp: "2026-03-20T10:00:00.000Z",
+        errorType: "ERROR_EXTENSION_HOST_TIMEOUT",
+      },
+    ]);
+  });
+
+  it("keeps distinct Cursor API errors when only the error type differs", () => {
+    const apiErrors = __testables.extractCursorApiErrors([
+      {
+        bubble: {
+          createdAt: Date.parse("2026-03-20T10:00:00.000Z"),
+          errorDetails: {
+            error: '{"error":"ERROR_EXTENSION_HOST_TIMEOUT"}',
+          },
+        },
+      },
+      {
+        bubble: {
+          createdAt: Date.parse("2026-03-20T10:00:00.000Z"),
+          errorDetails: {
+            error: '{"error":"ERROR_RATE_LIMITED"}',
+          },
+        },
+      },
+    ]);
+
+    expect(apiErrors).toEqual([
+      {
+        timestamp: "2026-03-20T10:00:00.000Z",
+        errorType: "ERROR_EXTENSION_HOST_TIMEOUT",
+      },
+      {
+        timestamp: "2026-03-20T10:00:00.000Z",
+        errorType: "ERROR_RATE_LIMITED",
+      },
+    ]);
+  });
+
+  it("merges global-state metadata into store-backed Cursor parses", () => {
+    const merged = __testables.mergeCursorParseResults(
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "",
+        turns: [{ role: "user", blocks: [{ type: "text", text: "prompt" }] }],
+        dataSource: "sqlite",
+        dataSourceInfo: {
+          primary: "sqlite",
+          sources: ["cursor/chats/<workspace-hash>/<session-id>/store.db"],
+          notes: ["Token usage is unavailable for this Cursor SQLite session."],
+        },
+      },
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "/workspace/project",
+        turns: [{ role: "assistant", blocks: [{ type: "text", text: "reply" }] }],
+        dataSource: "global-state",
+        dataSourceInfo: {
+          primary: "global-state",
+          sources: ["cursor/user/globalStorage/state.vscdb"],
+          notes: [
+            "Token usage is estimated from Cursor token snapshots.",
+            "Duration is estimated from Cursor thinking and tool execution timing.",
+            "Git branch is inferred from Cursor composer metadata.",
+          ],
+        },
+        model: "claude-4.6-opus-high-thinking",
+        totalDurationMs: 4200,
+        tokenUsage: {
+          inputTokens: 1200,
+          outputTokens: 80,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 0,
+        },
+        tokenUsageByModel: {
+          "claude-4.6-opus-high-thinking": {
+            inputTokens: 1200,
+            outputTokens: 80,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+          },
+        },
+        turnStats: [
+          {
+            turnIndex: 0,
+            model: "claude-4.6-opus-high-thinking",
+            durationMs: 4200,
+            tokenUsage: {
+              inputTokens: 1200,
+              outputTokens: 80,
+              cacheCreationTokens: 0,
+              cacheReadTokens: 0,
+            },
+          },
+        ],
+        gitBranch: "feat/auth",
+        apiErrors: [{ timestamp: "2026-03-20T10:00:00.000Z", errorType: "rate_limit_error" }],
+        contextFiles: ["src/auth.ts"],
+        cursorSidecars: {
+          requestContextCount: 2,
+          checkpointCount: 6,
+          hasWorkspaceRules: true,
+        },
+      },
+    );
+
+    expect(merged.dataSource).toBe("sqlite");
+    expect(merged.turns).toHaveLength(1);
+    expect(merged.cwd).toBe("/workspace/project");
+    expect(merged.gitBranch).toBe("feat/auth");
+    expect(merged.model).toBe("claude-4.6-opus-high-thinking");
+    expect(merged.totalDurationMs).toBe(4200);
+    expect(merged.tokenUsage).toMatchObject({ inputTokens: 1200, outputTokens: 80 });
+    expect(merged.tokenUsageByModel).toHaveProperty("claude-4.6-opus-high-thinking");
+    expect(merged.turnStats?.[0]).toMatchObject({
+      turnIndex: 0,
+      model: "claude-4.6-opus-high-thinking",
+      durationMs: 4200,
+    });
+    expect(merged.apiErrors).toEqual([
+      { timestamp: "2026-03-20T10:00:00.000Z", errorType: "rate_limit_error" },
+    ]);
+    expect(merged.contextFiles).toEqual(["src/auth.ts"]);
+    expect(merged.cursorSidecars).toEqual({
+      requestContextCount: 2,
+      checkpointCount: 6,
+      hasWorkspaceRules: true,
+    });
+    expect(merged.dataSourceInfo?.supplements).toContain("cursor/user/globalStorage/state.vscdb");
+  });
+
+  it("prefers global-state wall-clock duration over store tool runtime when merging", () => {
+    const merged = __testables.mergeCursorParseResults(
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "",
+        turns: [{ role: "user", blocks: [{ type: "text", text: "prompt" }] }],
+        dataSource: "sqlite",
+        totalDurationMs: 1200,
+        turnStats: [{ turnIndex: 0, durationMs: 1200 }],
+      },
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "/workspace/project",
+        turns: [{ role: "assistant", blocks: [{ type: "text", text: "reply" }] }],
+        dataSource: "global-state",
+        totalDurationMs: 4200,
+        turnStats: [{ turnIndex: 0, durationMs: 4200 }],
+      },
+    );
+
+    expect(merged.totalDurationMs).toBe(4200);
+    expect(merged.turnStats?.[0]?.durationMs).toBe(4200);
+  });
+
+  it("does not add enrichment notes when primary metadata already exists", () => {
+    const merged = __testables.mergeCursorParseResults(
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "",
+        gitBranch: "feat/existing",
+        turns: [{ role: "user", blocks: [{ type: "text", text: "prompt" }] }],
+        dataSource: "sqlite",
+        dataSourceInfo: {
+          primary: "sqlite",
+          sources: ["cursor/chats/<workspace-hash>/<session-id>/store.db"],
+          notes: ["Token usage is unavailable for this Cursor SQLite session."],
+        },
+      },
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "/workspace/project",
+        turns: [{ role: "assistant", blocks: [{ type: "text", text: "reply" }] }],
+        dataSource: "global-state",
+        dataSourceInfo: {
+          primary: "global-state",
+          sources: ["cursor/user/globalStorage/state.vscdb"],
+          notes: ["Git branch is inferred from Cursor composer metadata."],
+        },
+        gitBranch: "feat/enriched",
+      },
+    );
+
+    expect(merged.gitBranch).toBe("feat/existing");
+    expect(merged.dataSourceInfo?.notes).toEqual([
+      "Token usage is unavailable for this Cursor SQLite session.",
+    ]);
+  });
+
+  it("does not add enrichment notes when global-state contributes no merged metadata", () => {
+    const merged = __testables.mergeCursorParseResults(
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "/workspace/project",
+        turns: [{ role: "user", blocks: [{ type: "text", text: "prompt" }] }],
+        dataSource: "sqlite",
+        dataSourceInfo: {
+          primary: "sqlite",
+          sources: ["cursor/chats/<workspace-hash>/<session-id>/store.db"],
+          notes: ["Token usage is unavailable for this Cursor SQLite session."],
+        },
+      },
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "/workspace/project",
+        turns: [{ role: "assistant", blocks: [{ type: "text", text: "reply" }] }],
+        dataSource: "global-state",
+        dataSourceInfo: {
+          primary: "global-state",
+          sources: ["cursor/user/globalStorage/state.vscdb"],
+          notes: ["Duration is unavailable for this Cursor global-state session."],
+        },
+      },
+    );
+
+    expect(merged.dataSourceInfo?.notes).toEqual([
+      "Token usage is unavailable for this Cursor SQLite session.",
+    ]);
+  });
+
+  it("normalizes file URIs in Cursor context files", () => {
+    const summary = __testables.extractCursorContextSummary(
+      [
+        {
+          bubble: {
+            relevantFiles: [{ uri: "file:///Users/test/project/src/auth%20flow.ts" }],
+          },
+        },
+      ],
+      [],
+    );
+
+    expect(summary.contextFiles).toEqual(["/Users/test/project/src/auth flow.ts"]);
+  });
+
+  it("keeps existing Cursor sidecars when primary parse already has them", () => {
+    const merged = __testables.mergeCursorParseResults(
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "",
+        turns: [{ role: "user", blocks: [{ type: "text", text: "prompt" }] }],
+        cursorSidecars: {
+          requestContextCount: 1,
+          hasWorkspaceRules: false,
+        },
+      },
+      {
+        sessionId: "sess-1",
+        slug: "sess-1",
+        cwd: "/workspace/project",
+        turns: [{ role: "assistant", blocks: [{ type: "text", text: "reply" }] }],
+        cursorSidecars: {
+          requestContextCount: 2,
+          checkpointCount: 6,
+          hasWorkspaceRules: true,
+        },
+      },
+    );
+
+    expect(merged.cursorSidecars).toEqual({
+      requestContextCount: 1,
+      checkpointCount: 6,
+      hasWorkspaceRules: false,
+    });
+  });
+
+  it("builds dense store turn stats aligned to user turns", () => {
+    const turnStats = __testables.buildStoreTurnStats([
+      {
+        role: "user",
+        blocks: [{ type: "text", text: "first prompt" }],
+      },
+      {
+        role: "assistant",
+        model: "gpt-5.3-codex-high",
+        blocks: [{ type: "tool_use", id: "1", name: "Bash", input: {}, _durationMs: 1200 }],
+      },
+      {
+        role: "user",
+        blocks: [{ type: "text", text: "second prompt" }],
+      },
+      {
+        role: "assistant",
+        blocks: [{ type: "text", text: "plain reply without tool duration" }],
+      },
+    ]);
+
+    expect(turnStats).toHaveLength(2);
+    expect(turnStats[0]).toMatchObject({ turnIndex: 0, durationMs: 1200 });
+    expect(turnStats[1]).toMatchObject({ turnIndex: 1 });
+    expect(turnStats[1].durationMs).toBeUndefined();
+  });
+
+  it("treats empty store roots as non-replayable", () => {
+    expect(__testables.hasReplayableRootBlob(new Uint8Array())).toBe(false);
+    expect(__testables.hasReplayableRootBlob(new Uint8Array([0x00, 0x01, 0x02]))).toBe(false);
+  });
+
+  it("detects replayable store roots with linked child blob ids", () => {
+    const replayableRoot = new Uint8Array([
+      0xff,
+      0x0a,
+      0x20,
+      ...Array.from({ length: 32 }, (_, i) => i + 1),
+      0xee,
+    ]);
+    expect(__testables.hasReplayableRootBlob(replayableRoot)).toBe(true);
+  });
+
+  it("drops system context wrapped in user_query from sqlite user content", () => {
+    const blocks = __testables.parseUserContent(
+      "<user_query>\n<system_reminder>\ninternal only\n</system_reminder>\n</user_query>",
+    );
+    expect(blocks).toEqual([]);
+  });
+
+  it("classifies common Cursor wrapper payloads as system context", () => {
+    expect(isSystemContextText("<user_info>\nuser metadata\n</user_info>")).toBe(true);
+    expect(isSystemContextText("<system_reminder>\ninternal only\n</system_reminder>")).toBe(true);
+    expect(isSystemContextText("<agent_transcripts>\nsummary\n</agent_transcripts>")).toBe(true);
+    expect(isSystemContextText("<rules>\nworkspace rules\n</rules>")).toBe(true);
+    expect(isSystemContextText("<git_status>\nclean\n</git_status>")).toBe(true);
+    expect(
+      isSystemContextText("<system_reminder_extra>\nuser text\n</system_reminder_extra>"),
+    ).toBe(false);
+    expect(isSystemContextText("Ship the dashboard refactor")).toBe(false);
+  });
+
+  it("drops mixed system-only user content arrays while preserving human text", () => {
+    const blocks = __testables.parseUserContent([
+      { type: "text", text: "<system_reminder>\ninternal only\n</system_reminder>" },
+      { type: "image_url" },
+      { type: "text", text: "<user_query>\nSplit sqlite-reader.ts\n</user_query>" },
+    ]);
+
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toEqual({ type: "text", text: "Split sqlite-reader.ts" });
+  });
+
+  it("keeps normal user_query content from sqlite user content", () => {
+    const blocks = __testables.parseUserContent("<user_query>\nShip this fix\n</user_query>");
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("text");
+    expect((blocks[0] as { text: string }).text).toBe("Ship this fix");
+  });
+
+  it("normalizes turn text and drops wrapped system context", () => {
+    expect(
+      __testables.normalizeTurnText(
+        "<user_query>\n<agent_transcripts>\ninternal block\n</agent_transcripts>\n</user_query>",
+      ),
+    ).toBe("");
+    expect(__testables.normalizeTurnText("<user_query>\nFix auth bug\n</user_query>")).toBe(
+      "Fix auth bug",
+    );
+    expect(
+      __testables.normalizeTurnText(
+        "<timestamp>Tuesday, Apr 28, 2026, 4:43 PM (UTC-7)</timestamp>\n<user_query>\nFix auth bug\n</user_query>",
+      ),
+    ).toBe("Fix auth bug");
+  });
+
+  it("maps ApplyPatch into Edit with diff-like args", () => {
+    expect(__testables.mapCursorToolName("ApplyPatch")).toBe("Edit");
+    const mapped = __testables.mapToolArgs(
+      "ApplyPatch",
+      "*** Begin Patch\n*** Update File: /tmp/demo.ts\n@@\n-old line\n+new line\n*** End Patch",
+    );
+    expect(mapped.file_path).toBe("/tmp/demo.ts");
+    expect(mapped.old_string).toContain("old line");
+    expect(mapped.new_string).toContain("new line");
+  });
+
+  it("maps apply_patch object args with relativeWorkspacePath", () => {
+    const mapped = __testables.mapToolArgs(
+      "apply_patch",
+      { relativeWorkspacePath: "src/c.ts" },
+      JSON.stringify({
+        diff: {
+          chunks: [{ diffString: "@@\n-old c\n+new c" }],
+        },
+      }),
+    );
+    expect(mapped.file_path).toBe("src/c.ts");
+    expect(mapped.old_string).toContain("old c");
+    expect(mapped.new_string).toContain("new c");
+  });
+
+  it("preserves context lines when parsing ApplyPatch diff text", () => {
+    const mapped = __testables.mapToolArgs(
+      "ApplyPatch",
+      "*** Begin Patch\n*** Update File: /tmp/ctx.ts\n@@\n shared before\n-old value\n+new value\n shared after\n*** End Patch",
+    );
+    expect(mapped.old_string).toContain("shared before");
+    expect(mapped.old_string).toContain("shared after");
+    expect(mapped.new_string).toContain("shared before");
+    expect(mapped.new_string).toContain("shared after");
+  });
+
+  it("maps global-state Cursor tool aliases to canonical names", () => {
+    expect(__testables.mapCursorToolName("run_terminal_cmd")).toBe("Bash");
+    expect(__testables.mapCursorToolName("read_file")).toBe("Read");
+    expect(__testables.mapCursorToolName("search_replace")).toBe("Edit");
+    expect(__testables.mapCursorToolName("edit_file")).toBe("Edit");
+    expect(__testables.mapCursorToolName("write")).toBe("Write");
+    expect(__testables.mapCursorToolName("Task")).toBe("Agent");
+    expect(__testables.mapCursorToolName("task_v2")).toBe("Agent");
+    expect(__testables.mapCursorToolName("create_plan")).toBe("Plan");
+    expect(
+      __testables.mapCursorToolName("mcp-cursor-ide-browser-cursor-ide-browser-browser_navigate"),
+    ).toBe("Browser");
+    expect(__testables.mapCursorToolName("chrome-devtools-new_page")).toBe("Browser");
+    expect(__testables.mapCursorToolName("list_dir")).toBe("Glob");
+    expect(__testables.mapCursorToolName("rg")).toBe("Grep");
+    expect(__testables.mapCursorToolName("grep_search")).toBe("Grep");
+    expect(__testables.mapCursorToolName("ripgrep")).toBe("Grep");
+    expect(__testables.mapCursorToolName("file_search")).toBe("Glob");
+    expect(__testables.mapCursorToolName("codebase_search")).toBe("SemanticSearch");
+  });
+
+  it("maps Cursor task args into Agent-style subagent metadata", () => {
+    const mapped = __testables.mapToolArgs("task_v2", {
+      description: "Search auth patterns",
+      prompt: "Search auth patterns in the repo",
+      subagentType: "Explore",
+    });
+    expect(mapped).toEqual({
+      description: "Search auth patterns",
+      prompt: "Search auth patterns in the repo",
+      subagent_type: "Explore",
+    });
+  });
+
+  it("maps run_terminal_cmd and read_file args into normalized shape", () => {
+    const run = __testables.mapToolArgs("run_terminal_cmd", {
+      command: "git status",
+      requireUserApproval: true,
+    });
+    expect(run).toMatchObject({ command: "git status", requireUserApproval: true });
+
+    const read = __testables.mapToolArgs("read_file", {
+      targetFile: "/tmp/a.ts",
+    });
+    expect(read).toEqual({ file_path: "/tmp/a.ts" });
+  });
+
+  it("maps search_replace args and infers old/new snippets from result payload", () => {
+    const mapped = __testables.mapToolArgs(
+      "search_replace",
+      { relativeWorkspacePath: "/tmp/a.ts" },
+      JSON.stringify({
+        diff: {
+          chunks: [{ diffString: "@@\n-const a = 1;\n+const a = 2;" }],
+        },
+      }),
+    );
+    expect(mapped.file_path).toBe("/tmp/a.ts");
+    expect(mapped.old_string).toContain("const a = 1;");
+    expect(mapped.new_string).toContain("const a = 2;");
+  });
+
+  it("maps canonical Edit args when Cursor stores relativeWorkspacePath", () => {
+    const mapped = __testables.mapToolArgs(
+      "Edit",
+      { relativeWorkspacePath: "src/a.ts" },
+      JSON.stringify({
+        diff: {
+          chunks: [{ diffString: "@@\n-old value\n+new value" }],
+        },
+      }),
+    );
+    expect(mapped.file_path).toBe("src/a.ts");
+    expect(mapped.old_string).toContain("old value");
+    expect(mapped.new_string).toContain("new value");
+  });
+
+  it("maps EditFile args with relativeWorkspacePath", () => {
+    const mapped = __testables.mapToolArgs("EditFile", {
+      relativeWorkspacePath: "src/b.ts",
+      oldStr: "a",
+      newStr: "b",
+    });
+    expect(mapped).toEqual({ file_path: "src/b.ts", old_string: "a", new_string: "b" });
+  });
+
+  it("maps lowercase write and list_dir variants", () => {
+    const write = __testables.mapToolArgs("write", {
+      relativeWorkspacePath: "/tmp/doc.md",
+      code: { code: "# title" },
+    });
+    expect(write).toEqual({ file_path: "/tmp/doc.md", content: "# title" });
+
+    const ls = __testables.mapToolArgs("list_dir", {
+      targetDirectory: "/tmp",
+    });
+    expect(ls).toEqual({ path: "/tmp" });
+  });
+
+  it("maps canonical Write args when Cursor stores relativeWorkspacePath + code object", () => {
+    const mapped = __testables.mapToolArgs("Write", {
+      relativeWorkspacePath: "docs/readme.md",
+      code: { code: "hello" },
+    });
+    expect(mapped).toEqual({ file_path: "docs/readme.md", content: "hello" });
+  });
+
+  it("maps Delete args across Cursor variants", () => {
+    const canonical = __testables.mapToolArgs("Delete", {
+      path: "docs/old.md",
+    });
+    expect(canonical).toEqual({ file_path: "docs/old.md" });
+
+    const legacy = __testables.mapToolArgs("delete_file", {
+      relativeWorkspacePath: "src/obsolete.ts",
+    });
+    expect(legacy).toEqual({ file_path: "src/obsolete.ts" });
+  });
+
+  it("keeps string tool args as raw text for unknown tools", () => {
+    const mapped = __testables.mapToolArgs("CustomTool", "plain text payload");
+    expect(mapped).toEqual({ raw: "plain text payload" });
+  });
+});

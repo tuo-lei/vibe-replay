@@ -9,7 +9,7 @@ import type { ReplaySession } from "../packages/types/src/index.ts";
 const FIXTURE = join(
   import.meta.dirname,
   "..",
-  "packages/cli/test/fixtures/claude-code-session.jsonl",
+  "packages/provider-claude-code/test/fixtures/claude-code-session.jsonl",
 );
 
 /**
