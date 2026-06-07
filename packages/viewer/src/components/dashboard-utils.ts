@@ -6,6 +6,9 @@ import { safeStorageGet, safeStorageRemove, safeStorageSet } from "../utils/safe
 export type CachedListResponse<T> = {
   sessions: T[];
   cachedAt?: string;
+  discoveredAt?: string;
+  stale?: boolean;
+  staleProviders?: string[];
 };
 
 export interface SourcesEnrichmentStatus {
@@ -24,11 +27,22 @@ export const CACHE_REFRESH_TTL_MS = 5 * 60 * 1000;
 
 export function parseCachedList<T>(payload: unknown): CachedListResponse<T> | null {
   if (!payload || typeof payload !== "object") return null;
-  const obj = payload as { sessions?: unknown; cachedAt?: unknown };
+  const obj = payload as {
+    sessions?: unknown;
+    cachedAt?: unknown;
+    discoveredAt?: unknown;
+    stale?: unknown;
+    staleProviders?: unknown;
+  };
   if (!Array.isArray(obj.sessions)) return null;
   return {
     sessions: obj.sessions as T[],
     cachedAt: typeof obj.cachedAt === "string" ? obj.cachedAt : undefined,
+    discoveredAt: typeof obj.discoveredAt === "string" ? obj.discoveredAt : undefined,
+    stale: typeof obj.stale === "boolean" ? obj.stale : undefined,
+    staleProviders: Array.isArray(obj.staleProviders)
+      ? obj.staleProviders.filter((provider): provider is string => typeof provider === "string")
+      : undefined,
   };
 }
 
@@ -36,6 +50,15 @@ export function isCacheFresh(iso?: string, ttlMs = CACHE_REFRESH_TTL_MS): boolea
   if (!iso) return false;
   const ageMs = Date.now() - new Date(iso).getTime();
   return Number.isFinite(ageMs) && ageMs >= 0 && ageMs < ttlMs;
+}
+
+export function shouldRefreshCachedList<T>(
+  cached: CachedListResponse<T> | null | undefined,
+  ttlMs = CACHE_REFRESH_TTL_MS,
+): boolean {
+  // `stale` is the authoritative server-computed signal; `staleProviders` is diagnostic.
+  if (cached?.stale === true) return true;
+  return !isCacheFresh(cached?.discoveredAt || cached?.cachedAt, ttlMs);
 }
 
 // ─── Formatting helpers ──────────────────────────────────────────────

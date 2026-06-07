@@ -14,6 +14,7 @@ import {
   projectName,
   replaySuggestedTitle,
   rollupTopProjects,
+  shouldRefreshCachedList,
   type SourcesEnrichmentStatus,
   type TopProjectEntry,
   sourceSuggestedTitle,
@@ -90,7 +91,7 @@ function useDashboardData() {
         setLoading(false);
       }
 
-      const sourceFresh = isCacheFresh(cachedSources?.cachedAt);
+      const sourceFresh = !shouldRefreshCachedList(cachedSources);
       const replayFresh = isCacheFresh(cachedReplays?.cachedAt);
       const refreshPromises: Promise<void>[] = [];
 
