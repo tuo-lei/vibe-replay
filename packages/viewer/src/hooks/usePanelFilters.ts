@@ -40,6 +40,10 @@ function getReposFromUrl(): string[] {
   return getMultiFromUrl("repo");
 }
 
+function getReplayStatusesFromUrl(): string[] {
+  return getMultiFromUrl("replay");
+}
+
 /** Shared URL-synced filter state used by SessionsPanel and ReplaysPanel. */
 export function usePanelFilters() {
   const [selectedProject, setSelectedProject] = useState(getProjectFromUrl);
@@ -47,6 +51,7 @@ export function usePanelFilters() {
   const [showArchived, setShowArchived] = useState(getShowArchivedFromUrl);
   const [selectedProviders, setSelectedProviders] = useState(getProvidersFromUrl);
   const [selectedRepos, setSelectedRepos] = useState(getReposFromUrl);
+  const [selectedReplayStatuses, setSelectedReplayStatuses] = useState(getReplayStatusesFromUrl);
 
   useEffect(() => {
     const handler = () => {
@@ -55,6 +60,7 @@ export function usePanelFilters() {
       setShowArchived(getShowArchivedFromUrl());
       setSelectedProviders(getProvidersFromUrl());
       setSelectedRepos(getReposFromUrl());
+      setSelectedReplayStatuses(getReplayStatusesFromUrl());
     };
     window.addEventListener("popstate", handler);
     return () => window.removeEventListener("popstate", handler);
@@ -94,6 +100,18 @@ export function usePanelFilters() {
     handleRepoSet(next);
   };
 
+  const handleReplayStatusSet = (statuses: string[]) => {
+    setSelectedReplayStatuses(statuses);
+    navigateTo({ replay: multiParam(statuses) }, { notify: false });
+  };
+
+  const handleReplayStatusToggle = (status: string) => {
+    const next = selectedReplayStatuses.includes(status)
+      ? selectedReplayStatuses.filter((s) => s !== status)
+      : [...selectedReplayStatuses, status];
+    handleReplayStatusSet(next);
+  };
+
   const handleToggleArchived = () => {
     const next = !showArchived;
     setShowArchived(next);
@@ -107,7 +125,11 @@ export function usePanelFilters() {
     setFilter("");
     setSelectedProviders([]);
     setSelectedRepos([]);
-    navigateTo({ project: null, q: null, provider: null, repo: null }, { notify: false });
+    setSelectedReplayStatuses([]);
+    navigateTo(
+      { project: null, q: null, provider: null, repo: null, replay: null },
+      { notify: false },
+    );
   };
 
   return {
@@ -116,12 +138,15 @@ export function usePanelFilters() {
     showArchived,
     selectedProviders,
     selectedRepos,
+    selectedReplayStatuses,
     handleProjectChange,
     handleFilterChange,
     handleProviderSet,
     handleProviderToggle,
     handleRepoSet,
     handleRepoToggle,
+    handleReplayStatusSet,
+    handleReplayStatusToggle,
     handleToggleArchived,
     handleClearAllFilters,
   };
