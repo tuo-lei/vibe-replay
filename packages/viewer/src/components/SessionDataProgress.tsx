@@ -25,10 +25,10 @@ interface SessionMetricSnapshot {
 }
 
 const STAGES: Array<{ level: SessionDataLevel; label: string }> = [
-  { level: "basic", label: "basic" },
-  { level: "details", label: "details" },
-  { level: "counts", label: "counts" },
-  { level: "metrics", label: "metrics" },
+  { level: "basic", label: "discovered" },
+  { level: "details", label: "enriched" },
+  { level: "counts", label: "counted" },
+  { level: "metrics", label: "scanned" },
 ];
 
 export function hasEnrichedSourceDetails(session: SourceSession): boolean {
@@ -37,6 +37,7 @@ export function hasEnrichedSourceDetails(session: SourceSession): boolean {
     (session.prompts && session.prompts.length > 1) ||
     session.model ||
     session.gitBranch ||
+    session.gitRepo ||
     session.promptCount != null ||
     session.toolCallCount != null ||
     session.durationMsEst != null ||
@@ -78,7 +79,7 @@ export function sessionDataState(
   if (hasRichScanMetrics(scanData)) {
     return {
       level: "metrics",
-      label: "metrics ready",
+      label: "Scanned",
       description:
         "Rich scan metrics are available: files, edits, duration, errors, cost, tokens, or PR links.",
       className: "bg-terminal-green-subtle text-terminal-green",
@@ -87,23 +88,23 @@ export function sessionDataState(
   if (scanData || hasPromptOrToolCounts(session, scanData)) {
     return {
       level: "counts",
-      label: "counts ready",
-      description: "Prompt/tool counts are available, but richer metrics may still be deferred.",
+      label: "Counted",
+      description: "Prompt/tool counts are available; richer scan metrics may still be deferred.",
       className: "bg-terminal-green-subtle text-terminal-green",
     };
   }
   if (hasEnrichedSourceDetails(session)) {
     return {
       level: "details",
-      label: "details ready",
+      label: "Enriched",
       description:
-        "Discovery has richer title, prompt previews, model, or lightweight counts for this session.",
+        "Discovery has title, prompt preview, model, repo, branch, or other enriched details for this session.",
       className: "bg-terminal-purple-subtle text-terminal-purple",
     };
   }
   return {
     level: "basic",
-    label: "basic",
+    label: "Discovered",
     description: "Only lightweight discovery data is available so far.",
     className: "bg-terminal-surface-2 text-terminal-dimmer",
   };
