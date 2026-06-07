@@ -100,6 +100,47 @@ describe("sources enrichment helpers", () => {
     expect(updated.sessions[0]?.existingReplay).toBe("pi-a");
   });
 
+  it("merges non-discovery source catalog updates without dropping newer sessions", () => {
+    const current: Parameters<typeof __testables.mergeSourceCatalogSessionUpdates>[0] = [
+      {
+        provider: "pi",
+        sessionId: "pi-old-id",
+        slug: "pi-old",
+        project: "~/project-a",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        filePaths: ["/tmp/pi-old.jsonl"],
+        promptCount: 1,
+      },
+      {
+        provider: "pi",
+        sessionId: "pi-new-id",
+        slug: "pi-new",
+        project: "~/project-a",
+        timestamp: "2026-01-01T00:10:00.000Z",
+        filePaths: ["/tmp/pi-new.jsonl"],
+        promptCount: 1,
+      },
+    ];
+    const staleEnrichmentUpdate: Parameters<
+      typeof __testables.mergeSourceCatalogSessionUpdates
+    >[1] = [
+      {
+        provider: "pi",
+        sessionId: "pi-old-id",
+        slug: "pi-old",
+        project: "~/project-a",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        filePaths: ["/tmp/pi-old.jsonl"],
+        promptCount: 5,
+      },
+    ];
+
+    const merged = __testables.mergeSourceCatalogSessionUpdates(current, staleEnrichmentUpdate);
+    expect(merged).toHaveLength(2);
+    expect(merged.find((session) => session.slug === "pi-old")?.promptCount).toBe(5);
+    expect(merged.find((session) => session.slug === "pi-new")?.promptCount).toBe(1);
+  });
+
   it("marks Pi source sessions stale when a JSONL mtime is newer than discovery", async () => {
     const root = await mkdtemp(join(tmpdir(), "vr-pi-freshness-"));
     process.env.PI_CODING_AGENT_SESSION_DIR = root;
@@ -158,6 +199,74 @@ describe("sources enrichment helpers", () => {
         },
       }),
     ).resolves.toEqual([]);
+  });
+
+  it("marks Pi stale when cached provider state and cached sessions disagree", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vr-pi-count-mismatch-"));
+    process.env.PI_CODING_AGENT_SESSION_DIR = root;
+    const projectDir = join(root, "--tmp-project--");
+    await mkdir(projectDir, { recursive: true });
+    const sessionPath = join(projectDir, "2026-01-01T00-00-00-000Z_session.jsonl");
+    await writeFile(sessionPath, "{}\n", "utf-8");
+    const discovered = new Date("2026-01-01T00:00:00.000Z");
+    await utimes(sessionPath, discovered, discovered);
+    const discoveredProbe = await __testables.probePiSourceFreshness();
+
+    await expect(
+      __testables.getStaleSourceProviders({
+        sessions: [
+          {
+            provider: "pi",
+            slug: "session",
+            project: "~/project-a",
+            timestamp: "2026-01-01T00:00:00.000Z",
+            filePaths: [sessionPath],
+          },
+        ],
+        cachedAt: "2026-01-01T00:00:00.000Z",
+        discoveredAt: "2026-01-01T00:00:00.000Z",
+        providerStates: {
+          pi: {
+            provider: "pi",
+            discoveredAt: "2026-01-01T00:00:00.000Z",
+            sessionCount: 2,
+            newestSourceMtimeMs: discoveredProbe.newestSourceMtimeMs,
+            newestSourcePath: discoveredProbe.newestSourcePath,
+            fingerprint: __testables.sourceProviderFingerprint(discoveredProbe),
+          },
+        },
+      }),
+    ).resolves.toEqual(["pi"]);
+  });
+
+  it("builds Pi freshness metadata from discovered source records only", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vr-pi-discovered-freshness-"));
+    const projectDir = join(root, "--tmp-project--");
+    await mkdir(projectDir, { recursive: true });
+    const discoveredPath = join(projectDir, "2026-01-01T00-00-00-000Z_discovered.jsonl");
+    const unseenPath = join(projectDir, "2026-01-01T00-10-00-000Z_unseen.jsonl");
+    await writeFile(discoveredPath, "{}\n", "utf-8");
+    await writeFile(unseenPath, "{}\n", "utf-8");
+    const older = new Date("2026-01-01T00:00:00.000Z");
+    const newer = new Date("2026-01-01T00:10:00.000Z");
+    await utimes(discoveredPath, older, older);
+    await utimes(unseenPath, newer, newer);
+
+    const probe = await __testables.probeSourceRecordsFreshness(
+      [
+        {
+          provider: "pi",
+          slug: "discovered",
+          project: "~/project-a",
+          timestamp: "2026-01-01T00:00:00.000Z",
+          filePaths: [discoveredPath],
+        },
+      ],
+      "pi",
+    );
+
+    expect(probe.fileCount).toBe(1);
+    expect(probe.newestSourcePath).toBe(discoveredPath);
   });
 
   it("does not mark Pi stale when the sessions directory is missing", async () => {
