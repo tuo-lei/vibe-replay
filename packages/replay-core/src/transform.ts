@@ -34,6 +34,7 @@ export function transformToReplay(
   project: string,
   options?: {
     generator?: ReplaySession["meta"]["generator"];
+    gitRepo?: string;
   },
 ): ReplaySession {
   const scenes: Scene[] = [];
@@ -196,6 +197,10 @@ export function transformToReplay(
           ? { subAgentSummary: syntheticSubAgentSummary }
           : {}),
       ...(parsed.gitBranch ? { gitBranch: parsed.gitBranch } : {}),
+      // Provider metadata wins over caller fallback when both are present.
+      ...(parsed.gitRepo || options?.gitRepo
+        ? { gitRepo: parsed.gitRepo || options?.gitRepo }
+        : {}),
       ...(parsed.gitBranches ? { gitBranches: parsed.gitBranches } : {}),
       ...(parsed.entrypoint ? { entrypoint: parsed.entrypoint } : {}),
       ...(parsed.permissionMode ? { permissionMode: parsed.permissionMode } : {}),

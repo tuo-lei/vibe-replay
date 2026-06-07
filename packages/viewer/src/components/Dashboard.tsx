@@ -1039,7 +1039,9 @@ function ReplayCard({
       {/* Row 4: identity */}
       <div className="flex items-center gap-2 text-xs font-mono text-terminal-dimmer flex-wrap">
         <ProviderBadge provider={s.provider} />
-        <span title={isWorktreeReplay ? s.project : undefined}>{displayProject}</span>
+        <span title={s.gitRepo ? s.project : isWorktreeReplay ? s.project : undefined}>
+          {s.gitRepo || displayProject}
+        </span>
         {isWorktreeReplay && (
           <span
             className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple uppercase tracking-wider"
@@ -1123,34 +1125,6 @@ function replayStatus(s: SourceSession): { label: string; className: string; tit
     className: "bg-terminal-blue-subtle text-terminal-blue",
     title: "A local replay is ready to view.",
   };
-}
-
-type ReplayFilterStatus = "local" | "shared" | "outdated";
-
-function replayFilterStatus(s: SessionSummary): ReplayFilterStatus {
-  if (s.replayOutdated || s.gist?.outdated) return "outdated";
-  if (s.cloud || s.gist) return "shared";
-  return "local";
-}
-
-function replayFilterStatusLabel(status: ReplayFilterStatus): string {
-  if (status === "shared") return "Shared";
-  if (status === "outdated") return "Needs update";
-  return "Local only";
-}
-
-function replayStatusSortValue(status: ReplayFilterStatus): number {
-  if (status === "shared") return 0;
-  if (status === "local") return 1;
-  return 2;
-}
-
-function sortedReplayStatusEntries(counts: Map<string, number>) {
-  return [...counts.entries()].sort(
-    (a, b) =>
-      replayStatusSortValue(a[0] as ReplayFilterStatus) -
-      replayStatusSortValue(b[0] as ReplayFilterStatus),
-  );
 }
 
 function ActiveFilterChip({
@@ -2566,13 +2540,13 @@ function ReplaysPanel() {
     filter,
     showArchived,
     selectedProviders,
-    selectedReplayStatuses,
+    selectedRepos,
     handleProjectChange,
     handleFilterChange,
     handleProviderSet,
     handleProviderToggle,
-    handleReplayStatusSet,
-    handleReplayStatusToggle,
+    handleRepoSet,
+    handleRepoToggle,
     handleToggleArchived,
     handleClearAllFilters,
   } = usePanelFilters();
@@ -2720,13 +2694,13 @@ function ReplaysPanel() {
     : sessions.filter((s) => !archivedSlugs.has(s.slug));
 
   const selectedProviderSet = new Set(selectedProviders);
-  const selectedReplayStatusSet = new Set(selectedReplayStatuses);
+  const selectedRepoSet = new Set(selectedRepos);
   const query = filter.trim().toLowerCase();
 
   const matchesProviderFilter = (s: SessionSummary) =>
     selectedProviderSet.size === 0 || selectedProviderSet.has(s.provider);
-  const matchesReplayStatusFilter = (s: SessionSummary) =>
-    selectedReplayStatusSet.size === 0 || selectedReplayStatusSet.has(replayFilterStatus(s));
+  const matchesRepoFilter = (s: SessionSummary) =>
+    selectedRepoSet.size === 0 || selectedRepoSet.has(repoFilterValue(s));
   const matchesProjectFilter = (s: SessionSummary) =>
     selectedProjectKey === ALL_PROJECTS || rollupProject(s.project) === selectedProjectKey;
   const matchesSearchFilter = (s: SessionSummary) => {
@@ -2736,6 +2710,7 @@ function ReplaysPanel() {
       replaySuggestedTitle(s),
       s.slug,
       s.project,
+      s.gitRepo,
       s.provider,
       providerDisplayName(s.provider),
       s.model,
@@ -2748,21 +2723,19 @@ function ReplaysPanel() {
 
   const searchMatchedSessions = visibleSessions.filter(matchesSearchFilter);
   const providerFacetSessions = searchMatchedSessions.filter(
-    (s) => matchesReplayStatusFilter(s) && matchesProjectFilter(s),
+    (s) => matchesRepoFilter(s) && matchesProjectFilter(s),
   );
-  const replayStatusFacetSessions = searchMatchedSessions.filter(
+  const repoFacetSessions = searchMatchedSessions.filter(
     (s) => matchesProviderFilter(s) && matchesProjectFilter(s),
   );
   const projectFacetSessions = searchMatchedSessions.filter(
-    (s) => matchesProviderFilter(s) && matchesReplayStatusFilter(s),
+    (s) => matchesProviderFilter(s) && matchesRepoFilter(s),
   );
 
   const providerEntries = sortedFacetEntries(
     facetCountMap(providerFacetSessions, (s) => s.provider),
   );
-  const replayStatusEntries = sortedReplayStatusEntries(
-    facetCountMap(replayStatusFacetSessions, replayFilterStatus),
-  );
+  const repoEntries = sortedFacetEntries(facetCountMap(repoFacetSessions, repoFilterValue));
 
   // Group by project, rolling up Claude agent worktrees under their parent.
   const byProject = new Map<string, SessionSummary[]>();
@@ -2785,14 +2758,14 @@ function ReplaysPanel() {
   const hasActiveFilters =
     Boolean(filter) ||
     selectedProviders.length > 0 ||
-    selectedReplayStatuses.length > 0 ||
+    selectedRepos.length > 0 ||
     selectedProjectKey !== ALL_PROJECTS;
   const [renderLimit, setRenderLimit] = useState(SESSION_RENDER_BATCH_SIZE);
   const providerFilterKey = selectedProviders.join("\0");
-  const replayStatusFilterKey = selectedReplayStatuses.join("\0");
+  const repoFilterKey = selectedRepos.join("\0");
   useEffect(() => {
     setRenderLimit(SESSION_RENDER_BATCH_SIZE);
-  }, [filter, providerFilterKey, replayStatusFilterKey, selectedProjectKey, showArchived]);
+  }, [filter, providerFilterKey, repoFilterKey, selectedProjectKey, showArchived]);
   const renderedReplays = filtered.slice(0, renderLimit);
   const remainingRenderCount = Math.max(0, filtered.length - renderedReplays.length);
   const showInitialLoading = loading && sessions.length === 0;
@@ -2867,12 +2840,12 @@ function ReplaysPanel() {
           />
 
           <FacetSection
-            title="Replay status"
-            entries={replayStatusEntries}
-            selected={selectedReplayStatuses}
-            onToggle={handleReplayStatusToggle}
-            labelFor={(status) => replayFilterStatusLabel(status as ReplayFilterStatus)}
-            max={replayStatusEntries.length}
+            title="Git repo"
+            entries={repoEntries}
+            selected={selectedRepos}
+            onToggle={handleRepoToggle}
+            labelFor={repoFilterLabel}
+            max={8}
           />
 
           <div className="space-y-1 border-t border-terminal-border-subtle pt-4">
@@ -2966,24 +2939,24 @@ function ReplaysPanel() {
             // Single-select controls cannot represent desktop multi-select directly;
             // use a disabled sentinel so mobile still communicates active multi-filter state.
             value={
-              selectedReplayStatuses.length === 1
-                ? selectedReplayStatuses[0]
-                : selectedReplayStatuses.length > 1
+              selectedRepos.length === 1
+                ? selectedRepos[0]
+                : selectedRepos.length > 1
                   ? "__multiple__"
                   : ""
             }
-            onChange={(e) => handleReplayStatusSet(e.target.value ? [e.target.value] : [])}
+            onChange={(e) => handleRepoSet(e.target.value ? [e.target.value] : [])}
             className="w-full bg-terminal-surface rounded-lg px-3 py-2.5 text-sm font-sans text-terminal-text outline-none shadow-layer-sm"
           >
-            {selectedReplayStatuses.length > 1 && (
+            {selectedRepos.length > 1 && (
               <option value="__multiple__" disabled>
-                {selectedReplayStatuses.length} statuses selected
+                {selectedRepos.length} repos selected
               </option>
             )}
-            <option value="">All replay statuses ({replayStatusFacetSessions.length})</option>
-            {replayStatusEntries.map(([status, count]) => (
-              <option key={status} value={status}>
-                {replayFilterStatusLabel(status as ReplayFilterStatus)} ({count})
+            <option value="">All repos ({repoFacetSessions.length})</option>
+            {repoEntries.map(([repo, count]) => (
+              <option key={repo} value={repo}>
+                {repoFilterLabel(repo)} ({count})
               </option>
             ))}
           </select>
@@ -3054,12 +3027,12 @@ function ReplaysPanel() {
                     onRemove={() => handleProviderToggle(provider)}
                   />
                 ))}
-                {selectedReplayStatuses.map((status) => (
+                {selectedRepos.map((repo) => (
                   <ActiveFilterChip
-                    key={status}
-                    label="Status"
-                    value={replayFilterStatusLabel(status as ReplayFilterStatus)}
-                    onRemove={() => handleReplayStatusToggle(status)}
+                    key={repo}
+                    label="Repo"
+                    value={repoFilterLabel(repo)}
+                    onRemove={() => handleRepoToggle(repo)}
                   />
                 ))}
                 {selectedProjectKey !== ALL_PROJECTS && (
@@ -3097,7 +3070,7 @@ function ReplaysPanel() {
               <input
                 value={filter}
                 onChange={(e) => handleFilterChange(e.target.value)}
-                placeholder="Search title, prompt, slug, provider, project..."
+                placeholder="Search title, prompt, slug, provider, repo, project..."
                 className="w-full bg-terminal-surface rounded-lg pl-9 pr-3 py-2.5 text-sm font-mono text-terminal-text placeholder:text-terminal-dimmer outline-none ring-1 ring-transparent focus:ring-terminal-green/40 transition-shadow duration-200 shadow-layer-sm"
               />
             </div>
@@ -3170,12 +3143,12 @@ function ReplaysPanel() {
                   onRemove={() => handleProviderToggle(provider)}
                 />
               ))}
-              {selectedReplayStatuses.map((status) => (
+              {selectedRepos.map((repo) => (
                 <ActiveFilterChip
-                  key={status}
-                  label="Status"
-                  value={replayFilterStatusLabel(status as ReplayFilterStatus)}
-                  onRemove={() => handleReplayStatusToggle(status)}
+                  key={repo}
+                  label="Repo"
+                  value={repoFilterLabel(repo)}
+                  onRemove={() => handleRepoToggle(repo)}
                 />
               ))}
               {selectedProjectKey !== ALL_PROJECTS && (

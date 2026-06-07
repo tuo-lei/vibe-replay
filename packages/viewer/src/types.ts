@@ -25,6 +25,7 @@ export interface SessionSummary {
   title?: string;
   provider: string;
   model?: string;
+  gitRepo?: string;
   project: string;
   startTime: string;
   endTime?: string;

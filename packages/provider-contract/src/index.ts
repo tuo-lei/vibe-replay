@@ -256,6 +256,8 @@ export interface ProviderParseResult {
     model?: string;
   }>;
   gitBranch?: string;
+  /** Normalized git remote origin (for example, "owner/repo") */
+  gitRepo?: string;
   /** All branches seen during session in order (if >1) */
   gitBranches?: string[];
   entrypoint?: string;
