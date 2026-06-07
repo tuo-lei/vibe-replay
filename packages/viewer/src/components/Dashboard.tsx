@@ -45,12 +45,7 @@ import {
   SessionMoreMenu,
 } from "./dashboard/DashboardShared";
 import InsightsPage from "./InsightsPage";
-import {
-  ScanInsightsProvider,
-  TitleInsightsHeader,
-  TitleInsightsHeaderSkeleton,
-  useScanInsightsContext,
-} from "./InsightsPanel";
+import { ScanInsightsProvider, useScanInsightsContext } from "./InsightsPanel";
 import ProjectsPanel from "./ProjectsPanel";
 import {
   DataLevelBadge,
@@ -1077,17 +1072,18 @@ function repoFilterLabel(repo: string): string {
   return repo === NO_REPO_FILTER ? "No repo" : repo;
 }
 
+function projectFilterLabel(project: string, labels: Map<string, string>): string {
+  return labels.get(project) || projectName(project) || "(unknown project)";
+}
+
 function facetSortLabel(value: string): string {
   return value === NO_REPO_FILTER ? "zzz-no-repo" : value.toLowerCase();
 }
 
-function facetCountMap<T extends SourceSession>(
-  sessions: T[],
-  keyFor: (session: T) => string,
-): Map<string, number> {
+function facetCountMap<T>(items: T[], keyFor: (session: T) => string): Map<string, number> {
   const counts = new Map<string, number>();
-  for (const session of sessions) {
-    const key = keyFor(session);
+  for (const item of items) {
+    const key = keyFor(item);
     counts.set(key, (counts.get(key) || 0) + 1);
   }
   return counts;
@@ -1127,6 +1123,34 @@ function replayStatus(s: SourceSession): { label: string; className: string; tit
     className: "bg-terminal-blue-subtle text-terminal-blue",
     title: "A local replay is ready to view.",
   };
+}
+
+type ReplayFilterStatus = "local" | "shared" | "outdated";
+
+function replayFilterStatus(s: SessionSummary): ReplayFilterStatus {
+  if (s.replayOutdated || s.gist?.outdated) return "outdated";
+  if (s.cloud || s.gist) return "shared";
+  return "local";
+}
+
+function replayFilterStatusLabel(status: ReplayFilterStatus): string {
+  if (status === "shared") return "Shared";
+  if (status === "outdated") return "Needs update";
+  return "Local only";
+}
+
+function replayStatusSortValue(status: ReplayFilterStatus): number {
+  if (status === "shared") return 0;
+  if (status === "local") return 1;
+  return 2;
+}
+
+function sortedReplayStatusEntries(counts: Map<string, number>) {
+  return [...counts.entries()].sort(
+    (a, b) =>
+      replayStatusSortValue(a[0] as ReplayFilterStatus) -
+      replayStatusSortValue(b[0] as ReplayFilterStatus),
+  );
 }
 
 function ActiveFilterChip({
@@ -1715,7 +1739,7 @@ function SessionsPanel() {
             </svg>
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        <div className="flex-1 overflow-y-auto [scrollbar-gutter:stable] p-3 space-y-3">
           <button
             onClick={() => handleProjectChange(ALL_PROJECTS)}
             className={`w-full text-left px-3 py-3 text-xs font-sans rounded-xl transition-all duration-200 ease-material flex items-center justify-between border ${
@@ -1761,7 +1785,7 @@ function SessionsPanel() {
             {projectEntries.map(([project, sessions]) => {
               const replayCount = sessions.filter((s) => s.existingReplay).length;
               const isActive = selectedProjectKey === project;
-              const label = projectLabels.get(project) || projectName(project);
+              const label = projectFilterLabel(project, projectLabels);
               // After worktree rollup, sessions[0] may be from a deleted worktree;
               // treat the parent as existing if any session reports it exists.
               const exists = sessions.some((s) => s.projectExists !== false);
@@ -1839,6 +1863,8 @@ function SessionsPanel() {
         {/* Mobile facet selectors (shown instead of sidebar) */}
         <div className="md:hidden px-3 pt-3 grid grid-cols-1 gap-2">
           <select
+            // Single-select controls cannot represent desktop multi-select directly;
+            // use a disabled sentinel so mobile still communicates active multi-filter state.
             value={
               selectedProviders.length === 1
                 ? selectedProviders[0]
@@ -1862,6 +1888,8 @@ function SessionsPanel() {
             ))}
           </select>
           <select
+            // Single-select controls cannot represent desktop multi-select directly;
+            // use a disabled sentinel so mobile still communicates active multi-filter state.
             value={
               selectedRepos.length === 1
                 ? selectedRepos[0]
@@ -1892,7 +1920,7 @@ function SessionsPanel() {
             <option value={ALL_PROJECTS}>All projects ({projectFacetSources.length})</option>
             {projectEntries.map(([project, sessions]) => (
               <option key={project} value={project}>
-                {projectLabels.get(project) || projectName(project)} ({sessions.length})
+                {projectFilterLabel(project, projectLabels)} ({sessions.length})
               </option>
             ))}
           </select>
@@ -1963,7 +1991,7 @@ function SessionsPanel() {
                 {selectedProjectKey !== ALL_PROJECTS && (
                   <ActiveFilterChip
                     label="Project"
-                    value={projectLabels.get(selectedProjectKey) || projectName(selectedProjectKey)}
+                    value={projectFilterLabel(selectedProjectKey, projectLabels)}
                     onRemove={() => handleProjectChange(ALL_PROJECTS)}
                   />
                 )}
@@ -2042,7 +2070,7 @@ function SessionsPanel() {
               {selectedProjectKey !== ALL_PROJECTS && (
                 <ActiveFilterChip
                   label="Project"
-                  value={projectLabels.get(selectedProjectKey) || projectName(selectedProjectKey)}
+                  value={projectFilterLabel(selectedProjectKey, projectLabels)}
                   onRemove={() => handleProjectChange(ALL_PROJECTS)}
                 />
               )}
@@ -2126,7 +2154,7 @@ function SessionsPanel() {
         )}
 
         {/* Session list */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto [scrollbar-gutter:stable]">
           {showInitialLoading ? (
             <div className="text-center py-12 text-terminal-dim font-mono text-sm">
               Fetching sessions...
@@ -2537,27 +2565,21 @@ function ReplaysPanel() {
     selectedProject,
     filter,
     showArchived,
+    selectedProviders,
+    selectedReplayStatuses,
     handleProjectChange,
     handleFilterChange,
+    handleProviderSet,
+    handleProviderToggle,
+    handleReplayStatusSet,
+    handleReplayStatusToggle,
     handleToggleArchived,
+    handleClearAllFilters,
   } = usePanelFilters();
-
-  // Background scan + insights (shared singleton context)
-  const { userInsights, projectInsightsCache, fetchProjectInsights } = useScanInsightsContext();
 
   // Roll worktree paths up to the parent project so URL navigation to a
   // (possibly cleaned-up) worktree path still hits the parent's data.
   const selectedProjectKey = rollupProject(selectedProject);
-
-  // Fetch project insights when selected project changes
-  useEffect(() => {
-    if (selectedProjectKey !== ALL_PROJECTS) {
-      fetchProjectInsights(selectedProjectKey);
-    }
-  }, [selectedProjectKey, fetchProjectInsights]);
-
-  const projectInsights =
-    selectedProjectKey !== ALL_PROJECTS ? projectInsightsCache.get(selectedProjectKey) : undefined;
 
   useEffect(() => {
     let mounted = true;
@@ -2697,9 +2719,54 @@ function ReplaysPanel() {
     ? sessions
     : sessions.filter((s) => !archivedSlugs.has(s.slug));
 
+  const selectedProviderSet = new Set(selectedProviders);
+  const selectedReplayStatusSet = new Set(selectedReplayStatuses);
+  const query = filter.trim().toLowerCase();
+
+  const matchesProviderFilter = (s: SessionSummary) =>
+    selectedProviderSet.size === 0 || selectedProviderSet.has(s.provider);
+  const matchesReplayStatusFilter = (s: SessionSummary) =>
+    selectedReplayStatusSet.size === 0 || selectedReplayStatusSet.has(replayFilterStatus(s));
+  const matchesProjectFilter = (s: SessionSummary) =>
+    selectedProjectKey === ALL_PROJECTS || rollupProject(s.project) === selectedProjectKey;
+  const matchesSearchFilter = (s: SessionSummary) => {
+    if (!query) return true;
+    return [
+      s.title,
+      replaySuggestedTitle(s),
+      s.slug,
+      s.project,
+      s.provider,
+      providerDisplayName(s.provider),
+      s.model,
+      s.firstMessage,
+      ...(s.messages || []),
+    ]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(query));
+  };
+
+  const searchMatchedSessions = visibleSessions.filter(matchesSearchFilter);
+  const providerFacetSessions = searchMatchedSessions.filter(
+    (s) => matchesReplayStatusFilter(s) && matchesProjectFilter(s),
+  );
+  const replayStatusFacetSessions = searchMatchedSessions.filter(
+    (s) => matchesProviderFilter(s) && matchesProjectFilter(s),
+  );
+  const projectFacetSessions = searchMatchedSessions.filter(
+    (s) => matchesProviderFilter(s) && matchesReplayStatusFilter(s),
+  );
+
+  const providerEntries = sortedFacetEntries(
+    facetCountMap(providerFacetSessions, (s) => s.provider),
+  );
+  const replayStatusEntries = sortedReplayStatusEntries(
+    facetCountMap(replayStatusFacetSessions, replayFilterStatus),
+  );
+
   // Group by project, rolling up Claude agent worktrees under their parent.
   const byProject = new Map<string, SessionSummary[]>();
-  for (const s of visibleSessions) {
+  for (const s of projectFacetSessions) {
     const key = rollupProject(s.project);
     if (!byProject.has(key)) byProject.set(key, []);
     byProject.get(key)?.push(s);
@@ -2712,21 +2779,22 @@ function ReplaysPanel() {
 
   const projectLabels = computeProjectLabels(projectEntries.map(([p]) => p));
 
-  // Filter within selected project — `selectedProjectKey` is already rolled up.
-  const projectSessions =
-    selectedProjectKey === ALL_PROJECTS ? visibleSessions : byProject.get(selectedProjectKey) || [];
-
-  const filtered = filter
-    ? projectSessions.filter(
-        (s) =>
-          (s.title || "").toLowerCase().includes(filter.toLowerCase()) ||
-          s.slug.toLowerCase().includes(filter.toLowerCase()) ||
-          s.project.toLowerCase().includes(filter.toLowerCase()) ||
-          s.provider.toLowerCase().includes(filter.toLowerCase()) ||
-          (s.firstMessage || "").toLowerCase().includes(filter.toLowerCase()),
-      )
-    : projectSessions;
+  // Filter within selected facets — `selectedProjectKey` is already rolled up.
+  const filtered = projectFacetSessions.filter(matchesProjectFilter);
   const refreshAge = lastRefreshedAt ? formatCompactAge(lastRefreshedAt, refreshClockMs) : null;
+  const hasActiveFilters =
+    Boolean(filter) ||
+    selectedProviders.length > 0 ||
+    selectedReplayStatuses.length > 0 ||
+    selectedProjectKey !== ALL_PROJECTS;
+  const [renderLimit, setRenderLimit] = useState(SESSION_RENDER_BATCH_SIZE);
+  const providerFilterKey = selectedProviders.join("\0");
+  const replayStatusFilterKey = selectedReplayStatuses.join("\0");
+  useEffect(() => {
+    setRenderLimit(SESSION_RENDER_BATCH_SIZE);
+  }, [filter, providerFilterKey, replayStatusFilterKey, selectedProjectKey, showArchived]);
+  const renderedReplays = filtered.slice(0, renderLimit);
+  const remainingRenderCount = Math.max(0, filtered.length - renderedReplays.length);
   const showInitialLoading = loading && sessions.length === 0;
 
   // Non-server or empty: show simple centered layout
@@ -2758,113 +2826,176 @@ function ReplaysPanel() {
 
   return (
     <div className="flex flex-1 min-h-0">
-      {/* ─── Left sidebar: project navigation (hidden on mobile) ─── */}
-      <div className="hidden md:flex w-60 shrink-0 flex-col border-r border-terminal-border-subtle bg-terminal-surface/20">
+      {/* ─── Left sidebar: faceted replay explorer (hidden on mobile) ─── */}
+      <div className="hidden md:flex w-72 shrink-0 flex-col border-r border-terminal-border-subtle bg-terminal-surface/20">
         <div className="flex items-center justify-between px-4 py-3 border-b border-terminal-border-subtle">
           <div className="flex items-center gap-2">
             <span className="text-[10px] font-sans text-terminal-dimmer uppercase tracking-widest font-semibold">
-              Projects
+              Replays
             </span>
-            {refreshAge && (
-              <span className="text-[10px] font-mono text-terminal-dimmer tabular-nums">
-                {refreshAge}
-              </span>
-            )}
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
-          {/* All projects */}
+        <div className="flex-1 overflow-y-auto [scrollbar-gutter:stable] p-3 space-y-3">
           <button
             onClick={() => handleProjectChange(ALL_PROJECTS)}
-            className={`w-full text-left px-3 py-2.5 text-xs font-mono rounded-lg transition-all duration-200 ease-material flex items-center justify-between ${
-              selectedProject === ALL_PROJECTS
-                ? "bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
-                : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface"
+            className={`w-full text-left px-3 py-3 text-xs font-sans rounded-xl transition-all duration-200 ease-material flex items-center justify-between border ${
+              selectedProjectKey === ALL_PROJECTS
+                ? "border-terminal-green/25 bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
+                : "border-terminal-border-subtle bg-terminal-bg/25 text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface"
             }`}
           >
             <span className="font-medium">All replays</span>
             <span
               className={`tabular-nums px-1.5 py-0.5 rounded-md text-xs ${
-                selectedProject === ALL_PROJECTS
+                selectedProjectKey === ALL_PROJECTS
                   ? "bg-terminal-green-emphasis text-terminal-green"
                   : "bg-terminal-surface text-terminal-dimmer"
               }`}
             >
-              {visibleSessions.length}
+              {projectFacetSessions.length}
             </span>
           </button>
 
-          <div className="h-px bg-terminal-border-subtle mx-2 my-1.5" />
+          <FacetSection
+            title="Provider"
+            entries={providerEntries}
+            selected={selectedProviders}
+            onToggle={handleProviderToggle}
+            labelFor={providerDisplayName}
+            leadingFor={(provider) => <ProviderBadge provider={provider} compact />}
+            max={providerEntries.length}
+          />
 
-          {/* Per-project items */}
-          {projectEntries.map(([project, replays]) => {
-            const isActive = selectedProjectKey === project;
-            const label = projectLabels.get(project) || projectName(project);
-            const publishedCount = replays.filter((s) => s.gist?.gistId).length;
-            return (
-              <button
-                key={project}
-                onClick={() => handleProjectChange(project)}
-                title={project}
-                className={`w-full text-left px-3 py-2.5 rounded-lg transition-all duration-200 ease-material group ${
-                  isActive
-                    ? "bg-terminal-green-subtle shadow-layer-sm"
-                    : "hover:bg-terminal-surface"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-1.5">
-                  <span
-                    className={`text-xs font-mono truncate ${
-                      isActive
-                        ? "text-terminal-green font-medium"
-                        : "text-terminal-text group-hover:text-terminal-text"
-                    }`}
-                  >
-                    {label}
-                  </span>
-                  <span
-                    className={`tabular-nums px-1.5 py-0.5 rounded-md text-xs shrink-0 ${
-                      isActive
-                        ? "bg-terminal-green-emphasis text-terminal-green"
-                        : "bg-terminal-surface text-terminal-dimmer"
-                    }`}
-                  >
-                    {replays.length}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 mt-1 ml-0.5">
-                  <span
-                    className={`text-xs font-mono truncate ${isActive ? "text-terminal-dim" : "text-terminal-dimmer"}`}
-                  >
-                    {timeAgo(replays[0]?.startTime || "")}
-                  </span>
-                  {publishedCount > 0 && (
+          <FacetSection
+            title="Replay status"
+            entries={replayStatusEntries}
+            selected={selectedReplayStatuses}
+            onToggle={handleReplayStatusToggle}
+            labelFor={(status) => replayFilterStatusLabel(status as ReplayFilterStatus)}
+            max={replayStatusEntries.length}
+          />
+
+          <div className="space-y-1 border-t border-terminal-border-subtle pt-4">
+            <FacetHeader title="Project path" count={projectEntries.length} />
+            {projectEntries.map(([project, replays]) => {
+              const isActive = selectedProjectKey === project;
+              const label = projectFilterLabel(project, projectLabels);
+              const publishedCount = replays.filter((s) => s.gist?.gistId).length;
+              return (
+                <button
+                  key={project}
+                  onClick={() => handleProjectChange(isActive ? ALL_PROJECTS : project)}
+                  title={project}
+                  className={`w-full text-left px-3 py-2.5 rounded-lg transition-all duration-200 ease-material group ${
+                    isActive
+                      ? "bg-terminal-green-subtle shadow-layer-sm"
+                      : "hover:bg-terminal-surface"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1.5">
                     <span
-                      className={`text-xs font-mono ${isActive ? "text-terminal-purple" : "text-terminal-dimmer"}`}
+                      className={`text-xs font-mono truncate ${
+                        isActive
+                          ? "text-terminal-green font-medium"
+                          : "text-terminal-text group-hover:text-terminal-text"
+                      }`}
                     >
-                      {publishedCount} published
+                      {label}
                     </span>
-                  )}
-                </div>
-              </button>
-            );
-          })}
+                    <span
+                      className={`tabular-nums px-1.5 py-0.5 rounded-md text-xs shrink-0 ${
+                        isActive
+                          ? "bg-terminal-green-emphasis text-terminal-green"
+                          : "bg-terminal-surface text-terminal-dimmer"
+                      }`}
+                    >
+                      {replays.length}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 mt-1 ml-0.5">
+                    <span
+                      className={`text-xs font-mono truncate ${isActive ? "text-terminal-dim" : "text-terminal-dimmer"}`}
+                    >
+                      {timeAgo(replays[0]?.startTime || "")}
+                    </span>
+                    {publishedCount > 0 && (
+                      <span
+                        className={`text-xs font-mono ${isActive ? "text-terminal-purple" : "text-terminal-dimmer"}`}
+                      >
+                        {publishedCount} published
+                      </span>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
       {/* ─── Right: replay list ─── */}
       <div className="flex-1 flex flex-col min-h-0 min-w-0">
-        {/* Mobile project selector (shown instead of sidebar) */}
-        <div className="md:hidden px-3 pt-3">
+        {/* Mobile facet selectors (shown instead of sidebar) */}
+        <div className="md:hidden px-3 pt-3 grid grid-cols-1 gap-2">
+          <select
+            // Single-select controls cannot represent desktop multi-select directly;
+            // use a disabled sentinel so mobile still communicates active multi-filter state.
+            value={
+              selectedProviders.length === 1
+                ? selectedProviders[0]
+                : selectedProviders.length > 1
+                  ? "__multiple__"
+                  : ""
+            }
+            onChange={(e) => handleProviderSet(e.target.value ? [e.target.value] : [])}
+            className="w-full bg-terminal-surface rounded-lg px-3 py-2.5 text-sm font-sans text-terminal-text outline-none shadow-layer-sm"
+          >
+            {selectedProviders.length > 1 && (
+              <option value="__multiple__" disabled>
+                {selectedProviders.length} providers selected
+              </option>
+            )}
+            <option value="">All providers ({providerFacetSessions.length})</option>
+            {providerEntries.map(([provider, count]) => (
+              <option key={provider} value={provider}>
+                {providerDisplayName(provider)} ({count})
+              </option>
+            ))}
+          </select>
+          <select
+            // Single-select controls cannot represent desktop multi-select directly;
+            // use a disabled sentinel so mobile still communicates active multi-filter state.
+            value={
+              selectedReplayStatuses.length === 1
+                ? selectedReplayStatuses[0]
+                : selectedReplayStatuses.length > 1
+                  ? "__multiple__"
+                  : ""
+            }
+            onChange={(e) => handleReplayStatusSet(e.target.value ? [e.target.value] : [])}
+            className="w-full bg-terminal-surface rounded-lg px-3 py-2.5 text-sm font-sans text-terminal-text outline-none shadow-layer-sm"
+          >
+            {selectedReplayStatuses.length > 1 && (
+              <option value="__multiple__" disabled>
+                {selectedReplayStatuses.length} statuses selected
+              </option>
+            )}
+            <option value="">All replay statuses ({replayStatusFacetSessions.length})</option>
+            {replayStatusEntries.map(([status, count]) => (
+              <option key={status} value={status}>
+                {replayFilterStatusLabel(status as ReplayFilterStatus)} ({count})
+              </option>
+            ))}
+          </select>
           <select
             value={selectedProject}
             onChange={(e) => handleProjectChange(e.target.value)}
-            className="w-full bg-terminal-surface rounded-lg px-3 py-2.5 text-sm font-mono text-terminal-text outline-none shadow-layer-sm"
+            className="w-full bg-terminal-surface rounded-lg px-3 py-2.5 text-sm font-sans text-terminal-text outline-none shadow-layer-sm"
           >
-            <option value={ALL_PROJECTS}>All replays ({visibleSessions.length})</option>
+            <option value={ALL_PROJECTS}>All projects ({projectFacetSessions.length})</option>
             {projectEntries.map(([project, replays]) => (
               <option key={project} value={project}>
-                {projectLabels.get(project) || projectName(project)} ({replays.length})
+                {projectFilterLabel(project, projectLabels)} ({replays.length})
               </option>
             ))}
           </select>
@@ -2872,14 +3003,79 @@ function ReplaysPanel() {
 
         {/* Header + search */}
         <div className="px-4 pt-4 pb-2 space-y-3 shrink-0">
-          {/* Insights summary card — replaces old project title (desktop) */}
-          <div className="hidden md:block">
-            {projectInsights && selectedProject !== ALL_PROJECTS ? (
-              <TitleInsightsHeader insights={projectInsights} variant="project" />
-            ) : userInsights && selectedProject === ALL_PROJECTS ? (
-              <TitleInsightsHeader insights={userInsights} variant="all" />
-            ) : (
-              <TitleInsightsHeaderSkeleton />
+          <div className="hidden md:block border-b border-terminal-border-subtle pb-3">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="flex items-baseline gap-2 min-w-0">
+                  <h2 className="text-base font-sans font-semibold text-terminal-text truncate">
+                    Replays
+                  </h2>
+                  <span className="text-xs font-mono text-terminal-dimmer shrink-0">
+                    {hasActiveFilters
+                      ? `${filtered.length.toLocaleString()} matching`
+                      : `${visibleSessions.length.toLocaleString()} local replays`}
+                  </span>
+                </div>
+                <div className="mt-0.5 text-xs font-mono text-terminal-dimmer">
+                  {hasActiveFilters
+                    ? `Filtered from ${visibleSessions.length.toLocaleString()} local replays`
+                    : "Use sidebar facets or search to narrow the list"}
+                  {showArchived && " · including archived"}
+                </div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="text-[10px] font-sans uppercase tracking-widest text-terminal-dimmer">
+                  Last updated
+                </div>
+                <div className="mt-0.5 text-xs font-mono text-terminal-dim">
+                  {refreshing
+                    ? "Refreshing…"
+                    : refreshAge
+                      ? `Updated ${refreshAge} ago`
+                      : "Local cache"}
+                </div>
+              </div>
+            </div>
+
+            {hasActiveFilters && (
+              <div className="mt-3 flex items-center gap-2 flex-wrap">
+                {filter && (
+                  <ActiveFilterChip
+                    label="Search"
+                    value={filter}
+                    onRemove={() => handleFilterChange("")}
+                  />
+                )}
+                {selectedProviders.map((provider) => (
+                  <ActiveFilterChip
+                    key={provider}
+                    label="Provider"
+                    value={providerDisplayName(provider)}
+                    onRemove={() => handleProviderToggle(provider)}
+                  />
+                ))}
+                {selectedReplayStatuses.map((status) => (
+                  <ActiveFilterChip
+                    key={status}
+                    label="Status"
+                    value={replayFilterStatusLabel(status as ReplayFilterStatus)}
+                    onRemove={() => handleReplayStatusToggle(status)}
+                  />
+                ))}
+                {selectedProjectKey !== ALL_PROJECTS && (
+                  <ActiveFilterChip
+                    label="Project"
+                    value={projectFilterLabel(selectedProjectKey, projectLabels)}
+                    onRemove={() => handleProjectChange(ALL_PROJECTS)}
+                  />
+                )}
+                <button
+                  onClick={handleClearAllFilters}
+                  className="text-xs font-mono text-terminal-dimmer hover:text-terminal-text transition-colors"
+                >
+                  Clear all
+                </button>
+              </div>
             )}
           </div>
 
@@ -2901,7 +3097,7 @@ function ReplaysPanel() {
               <input
                 value={filter}
                 onChange={(e) => handleFilterChange(e.target.value)}
-                placeholder="Filter replays..."
+                placeholder="Search title, prompt, slug, provider, project..."
                 className="w-full bg-terminal-surface rounded-lg pl-9 pr-3 py-2.5 text-sm font-mono text-terminal-text placeholder:text-terminal-dimmer outline-none ring-1 ring-transparent focus:ring-terminal-green/40 transition-shadow duration-200 shadow-layer-sm"
               />
             </div>
@@ -2939,7 +3135,7 @@ function ReplaysPanel() {
               <input
                 value={filter}
                 onChange={(e) => handleFilterChange(e.target.value)}
-                placeholder="Filter replays..."
+                placeholder="Search replays..."
                 className="w-full bg-terminal-surface rounded-lg pl-9 pr-3 py-2.5 text-sm font-mono text-terminal-text placeholder:text-terminal-dimmer outline-none ring-1 ring-transparent focus:ring-terminal-green/40 transition-shadow duration-200 shadow-layer-sm"
               />
             </div>
@@ -2957,6 +3153,46 @@ function ReplaysPanel() {
               </button>
             )}
           </div>
+          {hasActiveFilters && (
+            <div className="md:hidden flex items-center gap-2 flex-wrap">
+              {filter && (
+                <ActiveFilterChip
+                  label="Search"
+                  value={filter}
+                  onRemove={() => handleFilterChange("")}
+                />
+              )}
+              {selectedProviders.map((provider) => (
+                <ActiveFilterChip
+                  key={provider}
+                  label="Provider"
+                  value={providerDisplayName(provider)}
+                  onRemove={() => handleProviderToggle(provider)}
+                />
+              ))}
+              {selectedReplayStatuses.map((status) => (
+                <ActiveFilterChip
+                  key={status}
+                  label="Status"
+                  value={replayFilterStatusLabel(status as ReplayFilterStatus)}
+                  onRemove={() => handleReplayStatusToggle(status)}
+                />
+              ))}
+              {selectedProjectKey !== ALL_PROJECTS && (
+                <ActiveFilterChip
+                  label="Project"
+                  value={projectFilterLabel(selectedProjectKey, projectLabels)}
+                  onRemove={() => handleProjectChange(ALL_PROJECTS)}
+                />
+              )}
+              <button
+                onClick={handleClearAllFilters}
+                className="text-xs font-mono text-terminal-dimmer hover:text-terminal-text transition-colors"
+              >
+                Clear all
+              </button>
+            </div>
+          )}
         </div>
 
         {(showInitialLoading || refreshing || staleCachedAt) && (
@@ -2996,18 +3232,18 @@ function ReplaysPanel() {
         )}
 
         {/* Replay list */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto [scrollbar-gutter:stable]">
           {showInitialLoading ? (
             <div className="text-center py-12 text-terminal-dim font-mono text-sm">
               Fetching replays...
             </div>
           ) : filtered.length === 0 ? (
             <div className="text-center py-12 text-terminal-dim font-mono text-sm">
-              {filter ? "No replays match your filter" : "No replays in this project"}
+              {hasActiveFilters ? "No replays match the current filters" : "No local replays found"}
             </div>
           ) : (
             <div className="space-y-2.5 px-4 py-3">
-              {filtered.map((s) => {
+              {renderedReplays.map((s) => {
                 const isArchived = archivedSlugs.has(s.slug);
                 return (
                   <ReplayCard
@@ -3024,6 +3260,18 @@ function ReplaysPanel() {
                   />
                 );
               })}
+              {remainingRenderCount > 0 && (
+                <div className="flex items-center justify-center py-3">
+                  <button
+                    onClick={() => setRenderLimit((limit) => limit + SESSION_RENDER_BATCH_SIZE)}
+                    className="rounded-lg bg-terminal-surface px-4 py-2 text-xs font-mono text-terminal-dim shadow-layer-sm ring-1 ring-terminal-border-subtle hover:bg-terminal-surface-hover hover:text-terminal-text transition-colors"
+                  >
+                    Showing {renderedReplays.length.toLocaleString()} of{" "}
+                    {filtered.length.toLocaleString()} · Show next{" "}
+                    {Math.min(SESSION_RENDER_BATCH_SIZE, remainingRenderCount).toLocaleString()}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -3130,7 +3378,16 @@ export default function Dashboard({
       const slug = (e as CustomEvent<{ slug: string }>).detail?.slug;
       if (!slug) return;
       setTab("sessions");
-      navigateTo({ tab: "sessions", selected: slug, project: null, q: null, archived: null });
+      navigateTo({
+        tab: "sessions",
+        selected: slug,
+        project: null,
+        q: null,
+        archived: null,
+        provider: null,
+        repo: null,
+        replay: null,
+      });
     };
     window.addEventListener("vibe-open-session", handler);
     return () => window.removeEventListener("vibe-open-session", handler);
@@ -3139,7 +3396,15 @@ export default function Dashboard({
   const handleTabChange = (id: Tab) => {
     setTab(id);
     // Reset cross-tab list state to avoid landing on empty views due to stale project/filter params.
-    navigateTo({ tab: id, project: null, q: null, archived: null });
+    navigateTo({
+      tab: id,
+      project: null,
+      q: null,
+      archived: null,
+      provider: null,
+      repo: null,
+      replay: null,
+    });
   };
 
   const tabButton = (id: Tab, label: string) => (

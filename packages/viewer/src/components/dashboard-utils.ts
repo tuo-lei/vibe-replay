@@ -346,7 +346,7 @@ export function navigateTo(
   options: { replace?: boolean; notify?: boolean } = {},
 ) {
   const url = new URL(window.location.href);
-  const DASHBOARD_PARAMS = ["tab", "project", "q", "archived", "provider", "repo"];
+  const DASHBOARD_PARAMS = ["tab", "project", "q", "archived", "provider", "repo", "replay"];
 
   // 1. If we are currently on dashboard, capture its state to sessionStorage
   const isCurrentlyDashboard =
@@ -440,6 +440,7 @@ export function navigateToLive(provider: string, sessionId: string) {
     "q",
     "archived",
     "repo",
+    "replay",
     "v",
     "s",
   ]) {
