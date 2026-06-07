@@ -22,6 +22,29 @@ import {
 } from "./sqlite-reader.js";
 import { addParseWarning } from "@vibe-replay/provider-contract/warnings";
 
+export interface CursorParserDependencies {
+  isSystemContextText: (text: string) => boolean;
+  mapCursorToolName: (name: string) => string;
+  mapToolArgs: (toolName: string, args: unknown, resultText?: string) => Record<string, any>;
+  parseCursorSqlite: (
+    workspacePath: string,
+    sessionId: string,
+  ) => Promise<ProviderParseResult | null>;
+}
+
+const defaultDependencies: CursorParserDependencies = {
+  isSystemContextText,
+  mapCursorToolName,
+  mapToolArgs,
+  parseCursorSqlite,
+};
+
+export function createCursorParser(deps: Partial<CursorParserDependencies> = {}) {
+  const resolved: CursorParserDependencies = { ...defaultDependencies, ...deps };
+  return (filePaths: string | string[], sessionInfo?: SessionInfo): Promise<ProviderParseResult> =>
+    parseCursorSessionWithDependencies(filePaths, sessionInfo, resolved);
+}
+
 const CURSOR_UUID_SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function toErrorMessage(err: unknown): string {
@@ -35,9 +58,12 @@ function compactErrorMessage(err: unknown, max = 180): string {
   return `${cleaned.slice(0, max)}...`;
 }
 
-export async function parseCursorSession(
+export const parseCursorSession = createCursorParser();
+
+async function parseCursorSessionWithDependencies(
   filePaths: string | string[],
-  sessionInfo?: SessionInfo,
+  sessionInfo: SessionInfo | undefined,
+  deps: CursorParserDependencies,
 ): Promise<ProviderParseResult> {
   const paths = Array.isArray(filePaths) ? filePaths : [filePaths];
   const transcriptPaths = paths.filter((p) => p.endsWith(".jsonl"));
@@ -54,7 +80,7 @@ export async function parseCursorSession(
     let sqliteResult: ProviderParseResult | null = null;
     try {
       const preferredWorkspacePath = sessionInfo?.workspacePath || sessionInfo?.cwd || "";
-      sqliteResult = await parseCursorSqlite(preferredWorkspacePath, sqliteSessionId);
+      sqliteResult = await deps.parseCursorSqlite(preferredWorkspacePath, sqliteSessionId);
     } catch (err) {
       // Cursor DB schemas can vary across versions/hosts; fall back to JSONL when available.
       sqliteError = compactErrorMessage(err);
@@ -67,9 +93,14 @@ export async function parseCursorSession(
       if (transcriptPaths.length > 0) {
         const thinkingBefore = countThinkingBlocks(sqliteResult.turns);
         const userImagesBefore = countUserImages(sqliteResult.turns);
-        const jsonlThinking = await parseCursorJsonl(transcriptPaths, [], {
-          inferToolPaths: false,
-        });
+        const jsonlThinking = await parseCursorJsonl(
+          transcriptPaths,
+          [],
+          {
+            inferToolPaths: false,
+          },
+          deps,
+        );
         sqliteResult.parseWarnings = mergeParseWarnings(
           sqliteResult.parseWarnings,
           jsonlThinking.parseWarnings,
@@ -105,9 +136,14 @@ export async function parseCursorSession(
     }
     throw new Error("Cursor parse requires at least one transcript .jsonl path");
   }
-  const jsonlResult = await parseCursorJsonl(transcriptPaths, explicitToolPaths, {
-    inferToolPaths: true,
-  });
+  const jsonlResult = await parseCursorJsonl(
+    transcriptPaths,
+    explicitToolPaths,
+    {
+      inferToolPaths: true,
+    },
+    deps,
+  );
   const preferredWorkspacePath = sessionInfo?.workspacePath || sessionInfo?.cwd || "";
   if (!jsonlResult.cwd && preferredWorkspacePath) {
     jsonlResult.cwd = preferredWorkspacePath;
@@ -263,6 +299,7 @@ async function parseCursorJsonl(
   transcriptPaths: string[],
   explicitToolPaths: string[],
   options: ParseJsonlOptions,
+  deps: CursorParserDependencies,
 ): Promise<ProviderParseResult> {
   const allTurns: ParsedTurn[] = [];
   let syntheticToolId = 0;
@@ -315,7 +352,7 @@ async function parseCursorJsonl(
           }
         } else if (block.type === "text" && block.text) {
           let text = stripUserQueryWrapper(block.text);
-          if (role === "user" && isSystemContextText(text)) continue;
+          if (role === "user" && deps.isSystemContextText(text)) continue;
           const extracted = extractImageFilePathsFromText(text);
           text = normalizeImagePlaceholderLines(extracted.cleanedText);
           for (const imagePath of extracted.paths) imageFilePaths.add(imagePath);
@@ -394,7 +431,7 @@ async function parseCursorJsonl(
         } else if (block.type === "tool_use") {
           const rawName =
             typeof block.name === "string" && block.name.trim() ? block.name.trim() : "Tool";
-          const name = mapCursorToolName(rawName);
+          const name = deps.mapCursorToolName(rawName);
           blocks.push({
             type: "tool_use",
             id:
@@ -404,7 +441,7 @@ async function parseCursorJsonl(
             name,
             // Keep the raw name here because Cursor raw tools carry different arg
             // schemas even when they map to the same canonical replay tool.
-            input: mapToolArgs(rawName, block.input),
+            input: deps.mapToolArgs(rawName, block.input),
           });
         }
       }
@@ -427,7 +464,7 @@ async function parseCursorJsonl(
         : [];
   const toolEvents = await loadToolEvents(toolPaths);
   attachToolEvents(allTurns, toolEvents);
-  attachToolResults(allTurns, toolResults, toolErrors, toolImages);
+  attachToolResults(allTurns, toolResults, toolErrors, toolImages, deps);
 
   // Derive slug from session ID
   const slug = sessionId.slice(0, 8);
@@ -586,6 +623,7 @@ function attachToolResults(
   toolResults: Map<string, CursorToolResult>,
   toolErrors: Map<string, boolean>,
   toolImages: Map<string, string[]>,
+  deps: CursorParserDependencies,
 ): void {
   for (const turn of turns) {
     if (turn.role !== "assistant") continue;
@@ -594,7 +632,7 @@ function attachToolResults(
       const result = toolResults.get(block.id);
       if (result !== undefined) {
         block._result = result.result;
-        block.input = mapToolArgs(block.name, block.input, result.result);
+        block.input = deps.mapToolArgs(block.name, block.input, result.result);
         const durationMs = durationBetween(turn.timestamp, result.timestamp);
         if (durationMs !== undefined) block._durationMs = durationMs;
       }

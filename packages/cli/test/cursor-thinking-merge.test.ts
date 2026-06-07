@@ -3,30 +3,27 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ContentBlock, ParsedTurn, SessionInfo } from "../src/types.js";
+import { mapCursorToolName, mapToolArgs } from "../src/providers/cursor/sqlite-reader.js";
 
 type ThinkingBlock = Extract<ContentBlock, { type: "thinking" }>;
 type TextBlock = Extract<ContentBlock, { type: "text" }>;
 type UserImagesBlock = Extract<ContentBlock, { type: "_user_images" }>;
 
-const { mockParseCursorSqlite } = vi.hoisted(() => ({
-  mockParseCursorSqlite: vi.fn(),
-}));
-
-vi.mock("../src/providers/cursor/sqlite-reader.js", () => ({
-  CURSOR_SYSTEM_CONTEXT_RE: /^<(?:user_info|system_reminder|agent_transcripts|rules|git_status)>/,
-  isSystemContextText: (text: string) =>
-    /^<(?:user_info|system_reminder|agent_transcripts|rules|git_status)>/.test(text.trim()),
-  mapCursorToolName: (name: string) => name,
-  mapToolArgs: (_toolName: string, args: unknown) =>
-    args && typeof args === "object" && !Array.isArray(args) ? args : {},
-  parseCursorSqlite: mockParseCursorSqlite,
-}));
+const mockParseCursorSqlite = vi.fn();
 
 import {
   mergeJsonlSupplementsIntoCursorTurns,
   mergeJsonlThinkingIntoCursorTurns,
-  parseCursorSession,
+  createCursorParser,
 } from "../src/providers/cursor/parser.js";
+
+const parseCursorSession = createCursorParser({
+  isSystemContextText: (text: string) =>
+    /^<(?:user_info|system_reminder|agent_transcripts|rules|git_status)>/.test(text.trim()),
+  mapCursorToolName,
+  mapToolArgs,
+  parseCursorSqlite: mockParseCursorSqlite,
+});
 
 const ONE_BY_ONE_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO8B6v8AAAAASUVORK5CYII=";

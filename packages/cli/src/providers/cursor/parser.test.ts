@@ -2,22 +2,18 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { transformToReplay } from "vibe-replay/internal/transform";
+import { createCursorParser } from "./parser.js";
+import { mapCursorToolName, mapToolArgs } from "./sqlite-reader.js";
 
-vi.mock("./sqlite-reader.js", () => ({
-  CURSOR_SYSTEM_CONTEXT_RE: /^<(?:user_info|system_reminder|agent_transcripts|rules|git_status)>/,
+const mockedParseCursorSqlite = vi.fn();
+const parseCursorSession = createCursorParser({
   isSystemContextText: (text: string) =>
     /^<(?:user_info|system_reminder|agent_transcripts|rules|git_status)>/.test(text.trim()),
-  mapCursorToolName: (name: string) => name,
-  mapToolArgs: (_toolName: string, args: unknown) =>
-    args && typeof args === "object" && !Array.isArray(args) ? args : {},
-  parseCursorSqlite: vi.fn(),
-}));
-
-import { transformToReplay } from "vibe-replay/internal/transform";
-import { parseCursorSession } from "./parser.js";
-import { parseCursorSqlite } from "./sqlite-reader.js";
-
-const mockedParseCursorSqlite = vi.mocked(parseCursorSqlite);
+  mapCursorToolName,
+  mapToolArgs,
+  parseCursorSqlite: mockedParseCursorSqlite,
+});
 
 describe("parseCursorSession", () => {
   const tempDirs: string[] = [];
@@ -232,7 +228,7 @@ describe("parseCursorSession", () => {
     const parsed = await parseCursorSession([transcript]);
     const replay = transformToReplay(parsed, "cursor", "~/test");
     const toolScene = replay.scenes.find(
-      (scene) => scene.type === "tool-call" && scene.toolName === "ReadFile",
+      (scene) => scene.type === "tool-call" && scene.toolName === "Read",
     );
 
     expect(
