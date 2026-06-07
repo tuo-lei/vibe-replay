@@ -5,6 +5,7 @@ export default defineConfig({
   format: ["esm"],
   target: "node20",
   splitting: false,
+  noExternal: [/^@vibe-replay\/provider/, "@vibe-replay/providers-default"],
   clean: true,
   banner: { js: "#!/usr/bin/env node" },
 });

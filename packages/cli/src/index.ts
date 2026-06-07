@@ -3,6 +3,7 @@ import { Separator, select } from "@inquirer/prompts";
 import chalk from "chalk";
 import { Command, program } from "commander";
 import ora from "ora";
+import { setFileCacheAppVersion } from "@vibe-replay/provider-core/cache";
 import { readFileCache, writeFileCache } from "./cache.js";
 import { cleanPromptText } from "./clean-prompt.js";
 import {
@@ -37,6 +38,8 @@ import { transformToReplay } from "./transform.js";
 import type { ParseWarning, ReplaySession, SessionInfo } from "./types.js";
 import { normalizeTitle } from "./utils.js";
 import { CLI_VERSION } from "./version.js";
+
+setFileCacheAppVersion(CLI_VERSION);
 
 interface GitHubExportResult {
   markdown: string;

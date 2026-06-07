@@ -4,8 +4,7 @@ import { claudeDesktopProvider } from "@vibe-replay/provider-claude-code/claude-
 import { codexProvider } from "@vibe-replay/provider-codex";
 import { cursorProvider } from "@vibe-replay/provider-cursor";
 import { piProvider } from "@vibe-replay/provider-pi";
-import type { Provider } from "@vibe-replay/provider-contract";
-import type { SessionInfo } from "@vibe-replay/provider-contract";
+import type { Provider, SessionInfo } from "@vibe-replay/provider-contract";
 
 const providers: Provider[] = [
   claudeCoworkProvider,
