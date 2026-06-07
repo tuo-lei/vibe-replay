@@ -1263,7 +1263,7 @@ function formatSessionChoices(sessions: SessionInfo[], cleanupPeriodDays?: numbe
     byProject.get(key)?.push(s);
   }
 
-  const choices: any[] = [];
+  const choices: (Separator | { name: string; value: string })[] = [];
   const projectEntries = [...byProject.entries()];
 
   for (let pi = 0; pi < projectEntries.length; pi++) {
