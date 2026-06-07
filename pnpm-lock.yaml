@@ -173,6 +173,9 @@ importers:
       '@types/node':
         specifier: ^22.10.0
         version: 22.19.20
+      '@vibe-replay/replay-core':
+        specifier: workspace:*
+        version: link:../replay-core
       vitest:
         specifier: ^4.1.8
         version: 4.1.8(@types/node@22.19.20)(@vitest/coverage-v8@4.1.8)(vite@7.3.1(@types/node@22.19.20)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.22.4)(yaml@2.9.0))
@@ -192,6 +195,9 @@ importers:
       '@types/node':
         specifier: ^22.10.0
         version: 22.19.20
+      '@vibe-replay/replay-core':
+        specifier: workspace:*
+        version: link:../replay-core
       vitest:
         specifier: ^4.1.8
         version: 4.1.8(@types/node@22.19.20)(@vitest/coverage-v8@4.1.8)(vite@7.3.1(@types/node@22.19.20)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.22.4)(yaml@2.9.0))
@@ -237,6 +243,9 @@ importers:
       '@types/node':
         specifier: ^22.10.0
         version: 22.19.20
+      '@vibe-replay/replay-core':
+        specifier: workspace:*
+        version: link:../replay-core
       vitest:
         specifier: ^4.1.8
         version: 4.1.8(@types/node@22.19.20)(@vitest/coverage-v8@4.1.8)(vite@7.3.1(@types/node@22.19.20)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.22.4)(yaml@2.9.0))
@@ -253,6 +262,9 @@ importers:
       '@types/node':
         specifier: ^22.10.0
         version: 22.19.20
+      '@vibe-replay/replay-core':
+        specifier: workspace:*
+        version: link:../replay-core
       vitest:
         specifier: ^4.1.8
         version: 4.1.8(@types/node@22.19.20)(@vitest/coverage-v8@4.1.8)(vite@7.3.1(@types/node@22.19.20)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.22.4)(yaml@2.9.0))

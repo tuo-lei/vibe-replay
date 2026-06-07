@@ -1,1 +1,1 @@
-export { transformToReplay } from "../../../replay-core/src/transform.js";
+export { transformToReplay } from "@vibe-replay/replay-core/transform";

@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { estimateCostSimple } from "../../replay-core/src/pricing.js";
+import { estimateCostSimple } from "@vibe-replay/replay-core/pricing";
 import { parseClaudeCodeSession } from "../src/claude-code/parser.js";
 import type { TokenUsage } from "@vibe-replay/provider-contract";
 import { transformToReplay } from "./helpers/transform.js";
