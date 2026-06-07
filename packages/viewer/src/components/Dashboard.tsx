@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useOutsideClick } from "../hooks/useOutsideClick";
 import { ALL_PROJECTS, usePanelFilters } from "../hooks/usePanelFilters";
 import type { SessionSummary, SourceSession } from "../types";
@@ -118,6 +118,297 @@ export interface SessionScanData {
   dataQualityNotes?: string[];
 }
 
+interface RawJsonItem {
+  id: string;
+  label: string;
+  description: string;
+  data?: unknown;
+  fetchReplaySlug?: string;
+}
+
+function sourceRawJsonItems(
+  source: SourceSession,
+  scanData: SessionScanData | null,
+): RawJsonItem[] {
+  const replaySlug = source.existingReplay || source.replay?.slug;
+  return [
+    {
+      id: "source",
+      label: "Session",
+      description: "Source session discovery JSON, plus the latest scan/enrichment data.",
+      data: {
+        sourceSession: source,
+        scanData,
+        replaySummary: source.replay ?? null,
+      },
+    },
+    ...(replaySlug
+      ? [
+          {
+            id: "replay",
+            label: "Replay",
+            description: "Full generated replay.json for this source session.",
+            fetchReplaySlug: replaySlug,
+          },
+        ]
+      : []),
+  ];
+}
+
+function replayRawJsonItems(summary: SessionSummary): RawJsonItem[] {
+  return [
+    {
+      id: "summary",
+      label: "Summary",
+      description: "Dashboard replay summary JSON.",
+      data: summary,
+    },
+    {
+      id: "replay",
+      label: "Replay",
+      description: "Full generated replay.json including scenes, metadata, and annotations.",
+      fetchReplaySlug: summary.slug,
+    },
+  ];
+}
+
+function formatRawJson(data: unknown): string {
+  try {
+    return JSON.stringify(data, null, 2);
+  } catch (err) {
+    return `/* Failed to stringify JSON: ${getErrorMessage(err)} */`;
+  }
+}
+
+function RawJsonModal({
+  title,
+  subtitle,
+  items,
+  initialItemId,
+  onClose,
+}: {
+  title: string;
+  subtitle?: string;
+  items: RawJsonItem[];
+  initialItemId?: string;
+  onClose: () => void;
+}) {
+  const [activeId, setActiveId] = useState(initialItemId || items[0]?.id || "");
+  const [remoteData, setRemoteData] = useState<Record<string, unknown>>({});
+  const [remoteErrors, setRemoteErrors] = useState<Record<string, string>>({});
+  const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const [retryNonce, setRetryNonce] = useState(0);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+
+  const activeItem = items.find((item) => item.id === activeId) || items[0];
+  const activeData = activeItem?.fetchReplaySlug ? remoteData[activeItem.id] : activeItem?.data;
+  const activeItemDataLoaded = activeItem ? remoteData[activeItem.id] !== undefined : true;
+  const jsonText = useMemo(
+    () => (activeData === undefined ? "" : formatRawJson(activeData)),
+    [activeData],
+  );
+
+  useEffect(() => {
+    previouslyFocusedRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeButtonRef.current?.focus();
+    return () => {
+      previouslyFocusedRef.current?.focus();
+    };
+  }, []);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        onClose();
+        return;
+      }
+
+      if (e.key !== "Tab") return;
+      const focusable = Array.from(
+        modalRef.current?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) || [],
+      ).filter((el) => !el.hasAttribute("disabled") && el.getAttribute("aria-hidden") !== "true");
+      if (focusable.length === 0) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handler, true);
+    return () => document.removeEventListener("keydown", handler, true);
+  }, [onClose]);
+
+  useEffect(() => {
+    const itemId = activeItem?.id;
+    const fetchReplaySlug = activeItem?.fetchReplaySlug;
+    if (!itemId || !fetchReplaySlug || activeItemDataLoaded) return;
+    let cancelled = false;
+    setLoadingId(itemId);
+    setRemoteErrors((prev) => ({ ...prev, [itemId]: "" }));
+    fetch(`/api/session?slug=${encodeURIComponent(fetchReplaySlug)}`)
+      .then(async (resp) => {
+        const data = await resp.json().catch(() => null);
+        if (!resp.ok) throw new Error(data?.error || "Failed to load replay JSON");
+        return data as unknown;
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setRemoteData((prev) => ({ ...prev, [itemId]: data }));
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setRemoteErrors((prev) => ({ ...prev, [itemId]: getFriendlyErrorMessage(err) }));
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingId(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeItem?.id, activeItem?.fetchReplaySlug, activeItemDataLoaded, retryNonce]);
+
+  const copyJson = async () => {
+    if (!jsonText) return;
+    try {
+      await navigator.clipboard.writeText(jsonText);
+      setCopyState("copied");
+    } catch {
+      setCopyState("failed");
+    }
+    setTimeout(() => setCopyState("idle"), 1500);
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="raw-json-modal-title"
+    >
+      <div
+        className="absolute inset-0 bg-black/70 backdrop-blur-md animate-in fade-in duration-200"
+        onClick={onClose}
+      />
+      <div
+        ref={modalRef}
+        className="relative w-full max-w-6xl max-h-[88vh] bg-terminal-bg border border-terminal-border-subtle rounded-2xl shadow-layer-xl animate-in zoom-in-95 fade-in duration-200 flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-terminal-border-subtle">
+          <div className="min-w-0">
+            <div className="text-[10px] font-sans uppercase tracking-widest text-terminal-dimmer mb-1">
+              Raw JSON
+            </div>
+            <h2
+              id="raw-json-modal-title"
+              className="text-lg font-sans font-semibold text-terminal-text truncate"
+            >
+              {title}
+            </h2>
+            {subtitle && (
+              <p className="mt-1 text-xs font-mono text-terminal-dimmer truncate">{subtitle}</p>
+            )}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={copyJson}
+              disabled={!jsonText}
+              className="h-8 px-3 text-xs font-sans font-semibold rounded-lg bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors disabled:opacity-40"
+            >
+              {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : "Copy"}
+            </button>
+            <button
+              ref={closeButtonRef}
+              onClick={onClose}
+              className="h-8 w-8 flex items-center justify-center rounded-lg text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors"
+              aria-label="Close raw JSON modal"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              >
+                <path d="M4 4l8 8M12 4l-8 8" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {items.length > 1 && (
+          <div className="flex items-center gap-2 px-6 py-3 border-b border-terminal-border-subtle bg-terminal-surface/30">
+            {items.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => {
+                  setActiveId(item.id);
+                  setCopyState("idle");
+                }}
+                className={`h-8 px-3 text-xs font-sans font-semibold rounded-lg transition-colors ${
+                  activeId === item.id
+                    ? "bg-terminal-green-subtle text-terminal-green"
+                    : "bg-terminal-surface text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="px-6 py-3 border-b border-terminal-border-subtle">
+          <p className="text-xs font-mono text-terminal-dimmer">
+            {activeItem?.description || "Inspect the raw JSON backing this dashboard row."}
+          </p>
+        </div>
+
+        <div className="flex-1 min-h-0 overflow-auto bg-[#050807]">
+          {loadingId === activeItem?.id ? (
+            <div className="p-6 text-sm font-mono text-terminal-dim animate-pulse">
+              Loading JSON...
+            </div>
+          ) : activeItem && remoteErrors[activeItem.id] ? (
+            <div className="p-6 flex items-center gap-3">
+              <span className="text-sm font-mono text-terminal-red">
+                {remoteErrors[activeItem.id]}
+              </span>
+              {activeItem.fetchReplaySlug && (
+                <button
+                  onClick={() => setRetryNonce((value) => value + 1)}
+                  className="h-8 px-3 text-xs font-sans font-semibold rounded-lg bg-terminal-red-subtle text-terminal-red hover:bg-terminal-red-emphasis transition-colors"
+                >
+                  Retry
+                </button>
+              )}
+            </div>
+          ) : jsonText ? (
+            <pre className="p-6 text-xs leading-relaxed font-mono text-terminal-dim whitespace-pre-wrap break-words">
+              {jsonText}
+            </pre>
+          ) : (
+            <div className="p-6 text-sm font-mono text-terminal-dimmer">No JSON available.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Session detail popup — shows full metadata, editable title, Generate CTA */
 export function SessionDetailPopup({
   session: s,
@@ -128,6 +419,7 @@ export function SessionDetailPopup({
   onArchive,
   onTitleSave,
   onDeleteReplay,
+  onRawData,
   isGenerating,
   isArchived,
 }: {
@@ -139,6 +431,7 @@ export function SessionDetailPopup({
   onArchive: (slug: string) => void;
   onTitleSave: (slug: string, title: string) => Promise<void>;
   onDeleteReplay: (slug: string) => void;
+  onRawData?: (session: SourceSession, scanData: SessionScanData | null) => void;
   isGenerating: boolean;
   isArchived: boolean;
 }) {
@@ -584,6 +877,24 @@ export function SessionDetailPopup({
         {/* Footer */}
         <div className="flex items-center justify-between px-7 py-4 border-t border-terminal-border-subtle">
           <div className="flex items-center gap-2">
+            {onRawData && (
+              <button
+                onClick={() => onRawData(s, scanData)}
+                className="h-9 px-3 text-xs font-sans rounded-lg text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors flex items-center gap-1.5"
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                >
+                  <path d="M5 3L2 8l3 5M11 3l3 5-3 5M7 12l2-8" />
+                </svg>
+                Raw JSON
+              </button>
+            )}
             <button
               onClick={() => {
                 onArchive(s.slug);
@@ -728,6 +1039,7 @@ function ReplayCard({
   onDelete,
   onRegenerate,
   onArchive,
+  onRawData,
   isDeleting: _isDeleting,
   isRegenerating,
   isArchived,
@@ -739,6 +1051,7 @@ function ReplayCard({
   onDelete?: () => void;
   onRegenerate?: () => void;
   onArchive?: () => void;
+  onRawData?: () => void;
   isDeleting?: boolean;
   isRegenerating?: boolean;
   isArchived?: boolean;
@@ -900,7 +1213,7 @@ function ReplayCard({
             </svg>
             View
           </button>
-          {(onDelete || onArchive) && (
+          {(onDelete || onArchive || onRawData) && (
             <div className="relative" ref={menuRef}>
               <button
                 onClick={(e) => {
@@ -919,6 +1232,28 @@ function ReplayCard({
               </button>
               {menuOpen && (
                 <div className="absolute right-0 top-full mt-1 z-50 min-w-[140px] rounded-lg bg-terminal-surface-2 border border-terminal-border shadow-layer-md py-1">
+                  {onRawData && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRawData();
+                        setMenuOpen(false);
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-sans text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors"
+                    >
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                      >
+                        <path d="M5 3L2 8l3 5M11 3l3 5-3 5M7 12l2-8" />
+                      </svg>
+                      Raw JSON
+                    </button>
+                  )}
                   {onArchive && (
                     <button
                       onClick={(e) => {
@@ -1285,6 +1620,10 @@ function SessionsPanel() {
   const [generatingSlug, setGeneratingSlug] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  const [rawSourceTarget, setRawSourceTarget] = useState<{
+    source: SourceSession;
+    scanData: SessionScanData | null;
+  } | null>(null);
   // When another panel (Projects → Timeline / Hot Files) opens a session via
   // the `vibe-open-session` event, route the slug into the popup. Two paths:
   //   1. If SessionsPanel just mounted (e.g. tab switched from Projects),
@@ -1384,6 +1723,10 @@ function SessionsPanel() {
   }, []);
 
   const toggleArchive = (slug: string) => toggleArchiveSlug(slug, archivedSlugs, setArchivedSlugs);
+
+  const openRawSourceJson = (source: SourceSession, scanData?: SessionScanData | null) => {
+    setRawSourceTarget({ source, scanData: scanData ?? scanResultsBySlug[source.slug] ?? null });
+  };
 
   useEffect(() => {
     void loadSources();
@@ -2273,6 +2616,7 @@ function SessionsPanel() {
                           <SessionMoreMenu
                             onArchive={() => toggleArchive(s.slug)}
                             onDelete={replaySlug ? () => handleDeleteReplay(s.slug) : undefined}
+                            onRawData={() => openRawSourceJson(s, scanData || null)}
                             isArchived={isArchived}
                           />
                         </div>
@@ -2515,8 +2859,17 @@ function SessionsPanel() {
             }}
             onTitleSave={handleTitleSave}
             onDeleteReplay={handleDeleteReplay}
+            onRawData={openRawSourceJson}
             isGenerating={generatingSlug === selectedSession.slug}
             isArchived={archivedSlugs.has(selectedSession.slug)}
+          />
+        )}
+        {rawSourceTarget && (
+          <RawJsonModal
+            title={sourceDisplayTitle(rawSourceTarget.source, rawSourceTarget.scanData)}
+            subtitle={`${rawSourceTarget.source.provider} · slug: ${rawSourceTarget.source.slug}`}
+            items={sourceRawJsonItems(rawSourceTarget.source, rawSourceTarget.scanData)}
+            onClose={() => setRawSourceTarget(null)}
           />
         )}
       </div>
@@ -2537,6 +2890,7 @@ function ReplaysPanel() {
   const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [regeneratingSlug, setRegeneratingSlug] = useState<string | null>(null);
+  const [rawReplayTarget, setRawReplayTarget] = useState<SessionSummary | null>(null);
 
   const {
     selectedProject,
@@ -3231,6 +3585,7 @@ function ReplaysPanel() {
                     onDelete={() => confirmDelete(s.slug)}
                     onRegenerate={() => handleRegenerate(s)}
                     onArchive={() => toggleArchive(s.slug)}
+                    onRawData={() => setRawReplayTarget(s)}
                     isRegenerating={regeneratingSlug === s.slug}
                     isArchived={isArchived}
                   />
@@ -3251,6 +3606,15 @@ function ReplaysPanel() {
             </div>
           )}
         </div>
+        {rawReplayTarget && (
+          <RawJsonModal
+            title={replaySuggestedTitle(rawReplayTarget)}
+            subtitle={`${rawReplayTarget.provider} · slug: ${rawReplayTarget.slug}`}
+            items={replayRawJsonItems(rawReplayTarget)}
+            initialItemId="replay"
+            onClose={() => setRawReplayTarget(null)}
+          />
+        )}
       </div>
     </div>
   );
