@@ -19,7 +19,7 @@ import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import open from "open";
-import { readFileCache, writeFileCache } from "./cache.js";
+import { readFileCache, writeFileCache, type FileCacheEntry } from "./cache.js";
 import { cleanPromptText, previewPrompt } from "./clean-prompt.js";
 import { computeDaysUntilCleanup, getClaudeCodeCleanupPeriod } from "./cleanup-warning.js";
 import {
@@ -35,6 +35,7 @@ import { mergeInsights, readInsightsStore, writeInsightsStore } from "./insights
 import { loadOverlays, sessionWithEffectiveContent } from "./overlays.js";
 import { parseClaudeCodeLines } from "./providers/claude-code/parser.js";
 import { parseCodexLines } from "./providers/codex/parser.js";
+import { getPiSessionsDir } from "./providers/pi/config.js";
 import { parsePiLines } from "./providers/pi/parser.js";
 import {
   readCursorLiveDiagnostics,
@@ -313,6 +314,40 @@ interface CachedSourceRecord extends SourceSummaryRecord {
   replay?: Omit<ReplaySummary, "baseDir" | "generatorVersion" | "replayOutdated">;
 }
 
+interface ProviderDiscoveryState {
+  provider: string;
+  discoveredAt: string;
+  sessionCount: number;
+  newestSourceMtimeMs?: number;
+  newestSourcePath?: string;
+  fingerprint?: string;
+}
+
+interface SourceSessionCatalogCache {
+  schemaVersion: 1;
+  discoveredAt: string;
+  updatedAt?: string;
+  providerStates?: Record<string, ProviderDiscoveryState>;
+  sessions: CachedSourceRecord[];
+}
+
+interface NormalizedSourceSessionCatalogCache {
+  sessions: CachedSourceRecord[];
+  cachedAt?: string;
+  discoveredAt?: string;
+  updatedAt?: string;
+  providerStates?: Record<string, ProviderDiscoveryState>;
+  legacy?: boolean;
+}
+
+interface SourceProviderFreshnessProbe {
+  provider: string;
+  sessionsRoot: string;
+  fileCount: number;
+  newestSourceMtimeMs?: number;
+  newestSourcePath?: string;
+}
+
 interface SourcesEnrichmentStatus {
   running: boolean;
   processed: number;
@@ -334,6 +369,173 @@ interface EnrichmentHints {
   slugs?: string[];
   projects?: string[];
   limit?: number;
+}
+
+function isSourceSessionCatalogCache(value: unknown): value is SourceSessionCatalogCache {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    (value as { schemaVersion?: unknown }).schemaVersion === 1 &&
+    typeof (value as { discoveredAt?: unknown }).discoveredAt === "string" &&
+    Array.isArray((value as { sessions?: unknown }).sessions)
+  );
+}
+
+function normalizeSourceSessionCatalogCache(
+  cached: FileCacheEntry<SourceSessionCatalogCache | CachedSourceRecord[]> | null,
+): NormalizedSourceSessionCatalogCache | null {
+  if (!cached) return null;
+  if (Array.isArray(cached.data)) {
+    return {
+      sessions: cached.data,
+      cachedAt: cached.updatedAt,
+      discoveredAt: cached.updatedAt,
+      updatedAt: cached.updatedAt,
+      legacy: true,
+    };
+  }
+  if (isSourceSessionCatalogCache(cached.data)) {
+    return {
+      sessions: cached.data.sessions,
+      cachedAt: cached.updatedAt,
+      discoveredAt: cached.data.discoveredAt || cached.updatedAt,
+      updatedAt: cached.data.updatedAt || cached.updatedAt,
+      providerStates: cached.data.providerStates,
+      legacy: false,
+    };
+  }
+  return null;
+}
+
+function buildProviderDiscoveryStates(
+  sources: SourceSummaryRecord[],
+  discoveredAt: string,
+): Record<string, ProviderDiscoveryState> {
+  const byProvider = new Map<string, SourceSummaryRecord[]>();
+  for (const source of sources) {
+    const bucket = byProvider.get(source.provider) || [];
+    bucket.push(source);
+    byProvider.set(source.provider, bucket);
+  }
+
+  const states: Record<string, ProviderDiscoveryState> = {};
+  for (const [provider, providerSources] of byProvider) {
+    states[provider] = {
+      provider,
+      discoveredAt,
+      sessionCount: providerSources.length,
+    };
+  }
+  return states;
+}
+
+function buildSourceSessionCatalogCache(
+  sessions: SourceSummaryRecord[],
+  discoveredAt: string,
+  previous?: NormalizedSourceSessionCatalogCache | null,
+): SourceSessionCatalogCache {
+  const providerStates = {
+    ...previous?.providerStates,
+    ...buildProviderDiscoveryStates(sessions, discoveredAt),
+  };
+  return {
+    schemaVersion: 1,
+    discoveredAt,
+    updatedAt: discoveredAt,
+    providerStates,
+    sessions: sessions as CachedSourceRecord[],
+  };
+}
+
+function updateSourceSessionCatalogSessions(
+  catalog: NormalizedSourceSessionCatalogCache,
+  sessions: CachedSourceRecord[],
+  updatedAt = new Date().toISOString(),
+): SourceSessionCatalogCache {
+  return {
+    schemaVersion: 1,
+    discoveredAt: catalog.discoveredAt || catalog.cachedAt || updatedAt,
+    updatedAt,
+    providerStates: catalog.providerStates,
+    sessions,
+  };
+}
+
+async function walkJsonlFreshness(
+  root: string,
+  provider: string,
+): Promise<SourceProviderFreshnessProbe> {
+  const probe: SourceProviderFreshnessProbe = {
+    provider,
+    sessionsRoot: root,
+    fileCount: 0,
+  };
+
+  async function walk(dir: string): Promise<void> {
+    let entries: Array<{ name: string; isDirectory: () => boolean; isFile: () => boolean }>;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    await Promise.all(
+      entries.map(async (entry) => {
+        const entryPath = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          await walk(entryPath);
+          return;
+        }
+        if (!entry.isFile() || !entry.name.endsWith(".jsonl")) return;
+        const fileStat = await stat(entryPath).catch(() => null);
+        if (!fileStat) return;
+        probe.fileCount += 1;
+        if (probe.newestSourceMtimeMs == null || fileStat.mtimeMs > probe.newestSourceMtimeMs) {
+          probe.newestSourceMtimeMs = fileStat.mtimeMs;
+          probe.newestSourcePath = entryPath;
+        }
+      }),
+    );
+  }
+
+  await walk(root);
+  return probe;
+}
+
+async function probePiSourceFreshness(): Promise<SourceProviderFreshnessProbe> {
+  return walkJsonlFreshness(getPiSessionsDir(), "pi");
+}
+
+function sourceProviderFingerprint(probe: SourceProviderFreshnessProbe): string {
+  return `${probe.fileCount}:${probe.newestSourcePath || ""}`;
+}
+
+async function getStaleSourceProviders(
+  catalog: NormalizedSourceSessionCatalogCache | null,
+): Promise<string[]> {
+  if (!catalog) return [];
+  const staleProviders: string[] = [];
+  const piProbe = await probePiSourceFreshness();
+  const piFingerprint = sourceProviderFingerprint(piProbe);
+  const previousPiFingerprint = catalog.providerStates?.pi?.fingerprint;
+  if (previousPiFingerprint) {
+    if (piFingerprint !== previousPiFingerprint) staleProviders.push("pi");
+    return staleProviders;
+  }
+
+  const piDiscoveredAt =
+    catalog.providerStates?.pi?.discoveredAt || catalog.discoveredAt || catalog.cachedAt;
+  const piDiscoveredMs = piDiscoveredAt ? Date.parse(piDiscoveredAt) : Number.NaN;
+  if (
+    piProbe.fileCount > 0 &&
+    piProbe.newestSourceMtimeMs != null &&
+    (catalog.legacy ||
+      !Number.isFinite(piDiscoveredMs) ||
+      piProbe.newestSourceMtimeMs > piDiscoveredMs)
+  ) {
+    staleProviders.push("pi");
+  }
+  return staleProviders;
 }
 
 function sourceSessionKey(provider: string, project: string, slug: string): string {
@@ -832,6 +1034,43 @@ export async function startServer(
   const replaysCacheKey = `dashboard-replays-v1-${cacheKeySuffix}`;
   const scanResultsCacheKey = `dashboard-scan-results-v1-${cacheKeySuffix}`;
   const insightsCacheKey = `dashboard-insights-v1-${cacheKeySuffix}`;
+  const readSourcesCatalogCache = async (): Promise<NormalizedSourceSessionCatalogCache | null> =>
+    normalizeSourceSessionCatalogCache(
+      await readFileCache<SourceSessionCatalogCache | CachedSourceRecord[]>(sourcesCacheKey),
+    );
+  const writeDiscoveredSourcesCatalog = async (
+    sessions: SourceSummaryRecord[],
+    previous?: NormalizedSourceSessionCatalogCache | null,
+  ): Promise<SourceSessionCatalogCache> => {
+    const discoveredAt = new Date().toISOString();
+    const catalog = buildSourceSessionCatalogCache(sessions, discoveredAt, previous);
+    try {
+      const piProbe = await probePiSourceFreshness();
+      catalog.providerStates = {
+        ...catalog.providerStates,
+        pi: {
+          ...(catalog.providerStates?.pi || {
+            provider: "pi",
+            discoveredAt,
+            sessionCount: 0,
+          }),
+          newestSourceMtimeMs: piProbe.newestSourceMtimeMs,
+          newestSourcePath: piProbe.newestSourcePath,
+          fingerprint: sourceProviderFingerprint(piProbe),
+        },
+      };
+    } catch {
+      // Freshness metadata is best-effort; discovery results are still valid.
+    }
+    await writeFileCache(sourcesCacheKey, catalog);
+    return catalog;
+  };
+  const writeUpdatedSourcesCatalog = async (
+    previous: NormalizedSourceSessionCatalogCache,
+    sessions: CachedSourceRecord[],
+  ): Promise<void> => {
+    await writeFileCache(sourcesCacheKey, updateSourceSessionCatalogSessions(previous, sessions));
+  };
   const refreshReplaysCache = async (): Promise<any[] | null> => {
     try {
       const sessions = await scanSessions(baseDir);
@@ -847,13 +1086,13 @@ export async function startServer(
   /** After replays change, sync the sources cache so existingReplay / replay stay consistent */
   const syncSourcesCacheWithReplays = async (replays: ReplaySummary[]): Promise<void> => {
     try {
-      const cached = await readFileCache<CachedSourceRecord[]>(sourcesCacheKey);
-      if (!cached?.data?.length) return;
+      const cached = await readSourcesCatalogCache();
+      if (!cached?.sessions.length) return;
 
       const { bySlug, bySessionId } = buildReplayMaps(replays);
 
       let changed = false;
-      const updated = cached.data.map((s) => {
+      const updated = cached.sessions.map((s) => {
         const replay =
           bySlug.get(s.slug) || (s.sessionId ? bySessionId.get(s.sessionId) : undefined);
         const hadReplay = !!s.existingReplay;
@@ -891,7 +1130,7 @@ export async function startServer(
       });
 
       if (changed) {
-        await writeFileCache(sourcesCacheKey, updated);
+        await writeUpdatedSourcesCatalog(cached, updated);
       }
     } catch {
       // Best-effort — never break core flows
@@ -1023,13 +1262,29 @@ export async function startServer(
             processed: sourcesEnrichmentStatus.processed + 1,
           };
           if (changed && sourcesEnrichmentStatus.processed % 5 === 0) {
-            await writeFileCache(sourcesCacheKey, enrichedSources);
+            const cached = await readSourcesCatalogCache();
+            await writeUpdatedSourcesCatalog(
+              cached || {
+                sessions: baseSources as CachedSourceRecord[],
+                discoveredAt: sourcesEnrichmentStatus.startedAt,
+                cachedAt: sourcesEnrichmentStatus.startedAt,
+              },
+              enrichedSources as CachedSourceRecord[],
+            );
           }
         }
       }
 
       if (changed) {
-        await writeFileCache(sourcesCacheKey, enrichedSources);
+        const cached = await readSourcesCatalogCache();
+        await writeUpdatedSourcesCatalog(
+          cached || {
+            sessions: baseSources as CachedSourceRecord[],
+            discoveredAt: sourcesEnrichmentStatus.startedAt,
+            cachedAt: sourcesEnrichmentStatus.startedAt,
+          },
+          enrichedSources as CachedSourceRecord[],
+        );
       }
       sourcesEnrichmentStatus = {
         ...sourcesEnrichmentStatus,
@@ -1812,23 +2067,29 @@ export async function startServer(
     });
   });
 
-  // --- Dashboard: list all sessions ---
-  app.get("/api/sessions/cached", async (c) => {
+  // --- Dashboard: list generated replays (legacy /api/sessions routes) ---
+  const getCachedReplays = async (c: Context) => {
     const cached = await readFileCache<any[]>(replaysCacheKey);
     return c.json({
       sessions: cached?.data || [],
       cachedAt: cached?.updatedAt,
     });
-  });
+  };
 
-  app.get("/api/sessions", async (c) => {
+  app.get("/api/sessions/cached", getCachedReplays);
+  app.get("/api/replays/cached", getCachedReplays);
+
+  const getReplays = async (c: Context) => {
     const sessions = await scanSessions(baseDir);
     await writeFileCache(replaysCacheKey, sessions);
     return c.json(sessions);
-  });
+  };
+
+  app.get("/api/sessions", getReplays);
+  app.get("/api/replays", getReplays);
 
   // --- Dashboard: update title ---
-  app.patch("/api/sessions/:slug", async (c) => {
+  const patchReplay = async (c: Context) => {
     const slug = safeSlug(c.req.param("slug"));
     if (!slug) return c.json({ error: "invalid slug" }, 400);
 
@@ -1856,10 +2117,13 @@ export async function startServer(
     } catch (err) {
       return c.json({ error: getErrorMessage(err) }, 500);
     }
-  });
+  };
+
+  app.patch("/api/sessions/:slug", patchReplay);
+  app.patch("/api/replays/:slug", patchReplay);
 
   // --- Dashboard: delete session ---
-  app.delete("/api/sessions/:slug", async (c) => {
+  const deleteReplay = async (c: Context) => {
     const slug = safeSlug(c.req.param("slug"));
     if (!slug) return c.json({ error: "invalid slug" }, 400);
     try {
@@ -1871,7 +2135,10 @@ export async function startServer(
     } catch (err) {
       return c.json({ error: getErrorMessage(err) }, 500);
     }
-  });
+  };
+
+  app.delete("/api/sessions/:slug", deleteReplay);
+  app.delete("/api/replays/:slug", deleteReplay);
 
   // --- Archive: directory-based, one marker file per slug ---
   app.get("/api/archived", async (c) => {
@@ -1893,23 +2160,33 @@ export async function startServer(
     return c.json({ ok: true });
   });
 
-  // --- Sources: discover AI coding sessions from all providers ---
-  app.get("/api/sources/cached", async (c) => {
-    const cached = await readFileCache<any[]>(sourcesCacheKey);
+  // --- Source sessions: discover raw AI coding sessions from all providers ---
+  const getCachedSourceSessions = async (c: Context) => {
+    const cached = await readSourcesCatalogCache();
+    const staleProviders = await getStaleSourceProviders(cached);
     return c.json({
-      sessions: cached?.data || [],
-      cachedAt: cached?.updatedAt,
+      sessions: cached?.sessions || [],
+      cachedAt: cached?.cachedAt,
+      discoveredAt: cached?.discoveredAt,
+      stale: staleProviders.length > 0,
+      staleProviders,
     });
-  });
+  };
 
-  app.get("/api/sources/enrichment-status", async (c) => {
+  app.get("/api/sources/cached", getCachedSourceSessions);
+  app.get("/api/source-sessions/cached", getCachedSourceSessions);
+
+  const getSourceSessionsEnrichmentStatus = async (c: Context) => {
     return c.json(sourcesEnrichmentStatus);
-  });
+  };
 
-  app.post("/api/sources/enrich", async (c) => {
+  app.get("/api/sources/enrichment-status", getSourceSessionsEnrichmentStatus);
+  app.get("/api/source-sessions/enrichment-status", getSourceSessionsEnrichmentStatus);
+
+  const postSourceSessionsEnrich = async (c: Context) => {
     const hints = enrichmentHintsFromBody(await c.req.json().catch(() => undefined));
-    const cached = await readFileCache<SourceSummaryRecord[]>(sourcesCacheKey);
-    if (!cached?.data?.length) {
+    const cached = await readSourcesCatalogCache();
+    if (!cached?.sessions.length) {
       return c.json({ ok: false, message: "No sources cache available" }, 404);
     }
     const cursorProvider = getProvider("cursor");
@@ -1930,15 +2207,18 @@ export async function startServer(
       ];
     }
     const wasRunning = sourcesEnrichmentStatus.running;
-    enrichCursorStatsInBackground(cursorSessions, cached.data, hints);
+    enrichCursorStatsInBackground(cursorSessions, cached.sessions, hints);
     return c.json({
       ok: true,
       running: sourcesEnrichmentStatus.running,
       queued: wasRunning,
     });
-  });
+  };
 
-  app.get("/api/sources", async (c) => {
+  app.post("/api/sources/enrich", postSourceSessionsEnrich);
+  app.post("/api/source-sessions/enrich", postSourceSessionsEnrich);
+
+  const getSourceSessions = async (c: Context) => {
     try {
       const providers = getAllProviders();
       const allSessions: SessionInfo[] = [];
@@ -1949,25 +2229,34 @@ export async function startServer(
 
       const merged = mergeSameSessions(allSessions);
       lastDiscoveredMergedSessions = normalizeSessionProjectsForHome(merged, homedir());
-      const previous = await readFileCache<SourceSummaryRecord[]>(sourcesCacheKey);
+      const previous = await readSourcesCatalogCache();
       const result = await buildSourcesResult(
         merged,
         baseDir,
         homedir(),
-        previous?.data || [],
+        previous?.sessions || [],
         cleanupPeriodDays,
       );
 
-      await writeFileCache(sourcesCacheKey, result);
+      const catalog = await writeDiscoveredSourcesCatalog(result, previous);
       enrichCursorStatsInBackground(merged, result);
-      return c.json({ sessions: result, cleanupPeriodDays });
+      return c.json({
+        sessions: result,
+        cleanupPeriodDays,
+        discoveredAt: catalog.discoveredAt,
+        stale: false,
+        staleProviders: [],
+      });
     } catch (err) {
       return c.json({ error: getErrorMessage(err) }, 500);
     }
-  });
+  };
 
-  // --- Sources SSE: stream discovery progress to the dashboard ---
-  app.get("/api/sources/stream", (c) => {
+  app.get("/api/sources", getSourceSessions);
+  app.get("/api/source-sessions", getSourceSessions);
+
+  // --- Source sessions SSE: stream discovery progress to the dashboard ---
+  const streamSourceSessions = (c: Context) => {
     return streamSSE(c, async (stream) => {
       try {
         const providers = getAllProviders();
@@ -1991,19 +2280,26 @@ export async function startServer(
 
         const merged = mergeSameSessions(allSessions);
         lastDiscoveredMergedSessions = normalizeSessionProjectsForHome(merged, homedir());
-        const previous = await readFileCache<SourceSummaryRecord[]>(sourcesCacheKey);
+        const previous = await readSourcesCatalogCache();
         const result = await buildSourcesResult(
           merged,
           baseDir,
           homedir(),
-          previous?.data || [],
+          previous?.sessions || [],
           cleanupPeriodDays,
         );
 
-        await writeFileCache(sourcesCacheKey, result);
+        const catalog = await writeDiscoveredSourcesCatalog(result, previous);
         enrichCursorStatsInBackground(merged, result);
         await stream.writeSSE({
-          data: JSON.stringify({ type: "complete", sessions: result, cleanupPeriodDays }),
+          data: JSON.stringify({
+            type: "complete",
+            sessions: result,
+            cleanupPeriodDays,
+            discoveredAt: catalog.discoveredAt,
+            stale: false,
+            staleProviders: [],
+          }),
         });
       } catch (err) {
         await stream.writeSSE({
@@ -2011,7 +2307,10 @@ export async function startServer(
         });
       }
     });
-  });
+  };
+
+  app.get("/api/sources/stream", streamSourceSessions);
+  app.get("/api/source-sessions/stream", streamSourceSessions);
 
   // --- Generate: parse a source session into a replay ---
   app.post("/api/generate", async (c) => {
@@ -3316,10 +3615,16 @@ export async function startDashboard(
 
 export const __testables = {
   buildSourcesResult,
+  buildSourceSessionCatalogCache,
   buildInsightsSyncBatches,
   countSessionStats,
+  getStaleSourceProviders,
+  normalizeSourceSessionCatalogCache,
   pickSourceRecordForSession,
+  probePiSourceFreshness,
   prioritizeScanInputs,
   selectCursorEnrichmentCandidates,
   sourceSessionKey,
+  sourceProviderFingerprint,
+  updateSourceSessionCatalogSessions,
 };

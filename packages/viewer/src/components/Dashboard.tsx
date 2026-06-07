@@ -26,6 +26,7 @@ import {
   replaySuggestedTitle,
   rollupProject,
   sessionPromptPreview,
+  shouldRefreshCachedList,
   type SourcesEnrichmentStatus,
   shortModelName,
   shortCoworkSpaceId,
@@ -1166,7 +1167,7 @@ function SessionsPanel() {
       .then((r) => (r.ok ? r.json() : null))
       .catch(() => null);
     const cachedData = parseCachedList<SourceSession>(cached);
-    const shouldSkipRefresh = !opts?.forceRefresh && isCacheFresh(cachedData?.cachedAt);
+    const shouldSkipRefresh = !opts?.forceRefresh && !shouldRefreshCachedList(cachedData);
     if (cachedData && cachedData.sessions.length > 0) {
       servedFromCache = true;
       setSources(cachedData.sessions);

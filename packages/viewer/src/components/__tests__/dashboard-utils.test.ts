@@ -19,6 +19,7 @@ import {
   rollupProject,
   rollupTopProjects,
   sessionPromptPreview,
+  shouldRefreshCachedList,
   shortCoworkSpaceId,
   sourceDisplayTitle,
   sourceSuggestedTitle,
@@ -231,10 +232,24 @@ describe("cache response helpers", () => {
     expect(parseCachedList<{ slug: string }>({ sessions: [{ slug: "a" }] })).toEqual({
       sessions: [{ slug: "a" }],
       cachedAt: undefined,
+      discoveredAt: undefined,
+      stale: undefined,
+      staleProviders: undefined,
     });
-    expect(parseCachedList({ sessions: [], cachedAt: "2026-05-01T00:00:00.000Z" })).toEqual({
+    expect(
+      parseCachedList({
+        sessions: [],
+        cachedAt: "2026-05-01T00:00:00.000Z",
+        discoveredAt: "2026-05-01T00:00:01.000Z",
+        stale: true,
+        staleProviders: ["pi", 42],
+      }),
+    ).toEqual({
       sessions: [],
       cachedAt: "2026-05-01T00:00:00.000Z",
+      discoveredAt: "2026-05-01T00:00:01.000Z",
+      stale: true,
+      staleProviders: ["pi"],
     });
   });
 
@@ -251,6 +266,34 @@ describe("cache response helpers", () => {
     expect(isCacheFresh("2026-05-01T09:54:59.000Z")).toBe(false);
     expect(isCacheFresh("2026-05-01T10:01:00.000Z")).toBe(false);
     expect(isCacheFresh("not-a-date")).toBe(false);
+  });
+
+  it("refreshes stale cached source-session responses even when cachedAt is fresh", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-01T10:00:00.000Z"));
+
+    expect(
+      shouldRefreshCachedList({
+        sessions: [],
+        cachedAt: "2026-05-01T09:59:00.000Z",
+        discoveredAt: "2026-05-01T09:59:00.000Z",
+        stale: true,
+        staleProviders: ["pi"],
+      }),
+    ).toBe(true);
+    expect(
+      shouldRefreshCachedList({
+        sessions: [],
+        cachedAt: "2026-05-01T09:59:00.000Z",
+      }),
+    ).toBe(false);
+    expect(
+      shouldRefreshCachedList({
+        sessions: [],
+        cachedAt: "2026-05-01T09:59:00.000Z",
+        discoveredAt: "2026-05-01T09:54:00.000Z",
+      }),
+    ).toBe(true);
   });
 });
 

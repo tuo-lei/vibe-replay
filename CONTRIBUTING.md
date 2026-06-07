@@ -45,6 +45,34 @@ Session files (JSONL / SQLite)
   → output                   vibe-replay/<slug>/index.html + replay.json
 ```
 
+### Dashboard terminology and caches
+
+The dashboard uses product terminology that distinguishes original AI sessions from generated replays:
+
+- **Sessions** in the UI are **Source Sessions**: raw/discovered AI coding sessions from providers such as Claude, Cursor, Codex, and Pi. They may or may not have a generated replay yet.
+- **Raw transcript/provider data** is provider-owned local storage, such as Claude JSONL, Codex JSONL, Pi JSONL under `~/.pi/agent/sessions`, or Cursor SQLite/globalStorage data.
+- **Replays** are generated Vibe Replay artifacts under `vibe-replay/<slug>/`, including `index.html` and `replay.json`.
+- **Replay Summaries** are lightweight listings of generated replay artifacts.
+- **Source Session Catalog Cache** is the dashboard's materialized cache of source-session summaries plus derived UI/linkage fields such as replay links. It is not raw transcript data.
+- **Enrichment** is optional background work, such as detailed Cursor parsing, that improves cached source-session summaries. Enrichment must not imply that provider discovery ran.
+
+Some localhost API names are legacy and must remain backward-compatible:
+
+| Clear term | Preferred route | Legacy route | Meaning |
+|------------|-----------------|--------------|---------|
+| Source Sessions | `/api/source-sessions*` | `/api/sources*` | Discovered provider sessions / UI Sessions |
+| Replays | `/api/replays*` | `/api/sessions*` | Generated replay summaries/artifacts |
+
+Do not change the existing semantics of the legacy routes. New response fields should be additive so older viewers, scripts, and skills can keep reading fields such as `sessions` and `cachedAt`.
+
+The source-session catalog has explicit discovery freshness metadata:
+
+- `discoveredAt` means the last successful provider discovery time.
+- Cache envelope `updatedAt` and API `cachedAt` mean the cache file was written. They may be updated by enrichment or replay-linkage sync and must not be used as a proxy for discovery freshness.
+- `providerStates` can store provider-specific discovery state and fingerprints. For Pi, `/api/source-sessions/cached` and `/api/sources/cached` cheaply stat JSONL files under `~/.pi/agent/sessions` and return `stale: true` with `staleProviders: ["pi"]` when provider files changed after discovery.
+
+Dashboard code should render cached source sessions immediately, then refresh discovery when `stale` is true or `discoveredAt` is outside the freshness window. When talking to an older server that lacks these fields, fall back to the legacy `cachedAt` TTL behavior.
+
 ### CLI structure
 
 ```
