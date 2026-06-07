@@ -343,10 +343,10 @@ export function replaySuggestedTitle(s: SessionSummary): string {
 
 export function navigateTo(
   params: Record<string, string | null>,
-  options: { replace?: boolean } = {},
+  options: { replace?: boolean; notify?: boolean } = {},
 ) {
   const url = new URL(window.location.href);
-  const DASHBOARD_PARAMS = ["tab", "project", "q", "archived"];
+  const DASHBOARD_PARAMS = ["tab", "project", "q", "archived", "provider", "repo"];
 
   // 1. If we are currently on dashboard, capture its state to sessionStorage
   const isCurrentlyDashboard =
@@ -411,9 +411,10 @@ export function navigateTo(
   } else {
     window.history.pushState({}, "", url.toString());
   }
-  // Only dispatch popstate for actual navigation (not filter typing).
-  // replace + no view/session change = filter update, skip popstate to avoid re-mount.
-  if (!options.replace && changed) {
+  // Only dispatch popstate for route-level navigation. Dashboard filter controls
+  // update their own local state and can opt out to avoid flashing the global
+  // session loader between two filtered list states.
+  if (!options.replace && changed && options.notify !== false) {
     window.dispatchEvent(new PopStateEvent("popstate"));
   }
 }
@@ -438,6 +439,7 @@ export function navigateToLive(provider: string, sessionId: string) {
     "project",
     "q",
     "archived",
+    "repo",
     "v",
     "s",
   ]) {

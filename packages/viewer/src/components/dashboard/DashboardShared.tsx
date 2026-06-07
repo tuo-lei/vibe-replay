@@ -62,11 +62,19 @@ function ProviderIcon({ provider }: { provider: string }) {
   );
 }
 
-export function ProviderBadge({ provider }: { provider: string }) {
+export function ProviderBadge({
+  provider,
+  compact = false,
+}: {
+  provider: string;
+  compact?: boolean;
+}) {
   const label = providerDisplayName(provider);
   return (
     <span
-      className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ring-1 ring-current/15 ${providerBadgeClass(provider)}`}
+      className={`inline-flex shrink-0 items-center justify-center ring-1 ring-current/15 ${
+        compact ? "h-5 w-5 rounded-md" : "h-6 w-6 rounded-lg"
+      } ${providerBadgeClass(provider)}`}
       title={label}
       aria-label={label}
     >
@@ -186,15 +194,21 @@ export function EditableTitle({
 /** "..." menu for session cards (archive only) */
 export function SessionMoreMenu({
   onArchive,
+  onDelete,
   isArchived,
 }: {
   onArchive: () => void;
+  onDelete?: () => void;
   isArchived: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  const close = useCallback(() => setOpen(false), []);
+  const close = useCallback(() => {
+    setOpen(false);
+    setConfirmingDelete(false);
+  }, []);
   useOutsideClick(ref, close, open);
 
   return (
@@ -231,6 +245,55 @@ export function SessionMoreMenu({
             </svg>
             {isArchived ? "Unarchive" : "Archive"}
           </button>
+          {onDelete && (
+            <>
+              <div className="mx-2 my-1 border-t border-terminal-border" />
+              {confirmingDelete ? (
+                <div className="flex items-center gap-1 px-2 py-1">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete();
+                      setConfirmingDelete(false);
+                      setOpen(false);
+                    }}
+                    className="h-6 px-2 text-xs font-sans rounded bg-terminal-red-subtle text-terminal-red hover:bg-terminal-red-emphasis transition-colors duration-200"
+                  >
+                    Confirm
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setConfirmingDelete(false);
+                    }}
+                    className="h-6 px-2 text-xs font-sans rounded text-terminal-dim hover:text-terminal-text transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setConfirmingDelete(true);
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-sans text-terminal-red hover:bg-terminal-red-subtle transition-colors"
+                >
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                  >
+                    <path d="M3 4h10M5.5 4V3a1 1 0 011-1h3a1 1 0 011 1v1M6.5 7v4M9.5 7v4M4.5 4l.5 9a1 1 0 001 1h4a1 1 0 001-1l.5-9" />
+                  </svg>
+                  Delete replay
+                </button>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>
