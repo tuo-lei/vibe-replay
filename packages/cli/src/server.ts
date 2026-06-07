@@ -447,6 +447,62 @@ function buildSourceSessionCatalogCache(
   };
 }
 
+async function probeSourceRecordsFreshness(
+  sources: SourceSummaryRecord[],
+  provider: string,
+): Promise<SourceProviderFreshnessProbe> {
+  const probe: SourceProviderFreshnessProbe = {
+    provider,
+    sessionsRoot: provider,
+    fileCount: 0,
+  };
+
+  const paths = new Set(
+    sources
+      .filter((source) => source.provider === provider)
+      .flatMap((source) => source.filePaths || [])
+      .filter(
+        (filePath): filePath is string => typeof filePath === "string" && filePath.length > 0,
+      ),
+  );
+
+  for (const filePath of paths) {
+    const fileStat = await stat(filePath).catch(() => null);
+    if (!fileStat) continue;
+    probe.fileCount += 1;
+    if (probe.newestSourceMtimeMs == null || fileStat.mtimeMs > probe.newestSourceMtimeMs) {
+      probe.newestSourceMtimeMs = fileStat.mtimeMs;
+      probe.newestSourcePath = filePath;
+    }
+  }
+
+  return probe;
+}
+
+function mergeSourceCatalogSessionUpdates(
+  current: CachedSourceRecord[],
+  updates: CachedSourceRecord[],
+): CachedSourceRecord[] {
+  if (current.length === 0) return updates;
+
+  const bySessionId = new Map<string, CachedSourceRecord>();
+  const byKey = new Map<string, CachedSourceRecord>();
+  for (const update of updates) {
+    byKey.set(sourceSessionKey(update.provider, update.project, update.slug), update);
+    if (typeof update.sessionId === "string" && update.sessionId) {
+      bySessionId.set(update.sessionId, update);
+    }
+  }
+
+  return current.map((session) => {
+    const byId = session.sessionId ? bySessionId.get(session.sessionId) : undefined;
+    const update =
+      (byId?.provider === session.provider ? byId : undefined) ??
+      byKey.get(sourceSessionKey(session.provider, session.project, session.slug));
+    return update ? { ...session, ...update } : session;
+  });
+}
+
 function updateSourceSessionCatalogSessions(
   catalog: NormalizedSourceSessionCatalogCache,
   sessions: CachedSourceRecord[],
@@ -518,9 +574,20 @@ async function getStaleSourceProviders(
   const piProbe = await probePiSourceFreshness();
   const piFingerprint = sourceProviderFingerprint(piProbe);
   const previousPiFingerprint = catalog.providerStates?.pi?.fingerprint;
+  const previousPiSessionCount = catalog.providerStates?.pi?.sessionCount;
+  const cachedPiSessionCount = catalog.sessions.filter(
+    (session) => session.provider === "pi",
+  ).length;
+  if (
+    cachedPiSessionCount > 0 &&
+    typeof previousPiSessionCount === "number" &&
+    previousPiSessionCount !== cachedPiSessionCount
+  ) {
+    staleProviders.push("pi");
+  }
   if (previousPiFingerprint) {
     if (piFingerprint !== previousPiFingerprint) staleProviders.push("pi");
-    return staleProviders;
+    return [...new Set(staleProviders)];
   }
 
   const piDiscoveredAt =
@@ -535,7 +602,7 @@ async function getStaleSourceProviders(
   ) {
     staleProviders.push("pi");
   }
-  return staleProviders;
+  return [...new Set(staleProviders)];
 }
 
 function sourceSessionKey(provider: string, project: string, slug: string): string {
@@ -1045,15 +1112,18 @@ export async function startServer(
     const discoveredAt = new Date().toISOString();
     const catalog = buildSourceSessionCatalogCache(sessions, discoveredAt, previous);
     try {
-      const piProbe = await probePiSourceFreshness();
+      const piProbe = await probeSourceRecordsFreshness(sessions, "pi");
+      const piSessionCount = sessions.filter((session) => session.provider === "pi").length;
       catalog.providerStates = {
         ...catalog.providerStates,
         pi: {
           ...(catalog.providerStates?.pi || {
             provider: "pi",
             discoveredAt,
-            sessionCount: 0,
           }),
+          provider: "pi",
+          discoveredAt,
+          sessionCount: piSessionCount,
           newestSourceMtimeMs: piProbe.newestSourceMtimeMs,
           newestSourcePath: piProbe.newestSourcePath,
           fingerprint: sourceProviderFingerprint(piProbe),
@@ -1069,7 +1139,13 @@ export async function startServer(
     previous: NormalizedSourceSessionCatalogCache,
     sessions: CachedSourceRecord[],
   ): Promise<void> => {
-    await writeFileCache(sourcesCacheKey, updateSourceSessionCatalogSessions(previous, sessions));
+    await writeFileCache(
+      sourcesCacheKey,
+      updateSourceSessionCatalogSessions(
+        previous,
+        mergeSourceCatalogSessionUpdates(previous.sessions, sessions),
+      ),
+    );
   };
   const refreshReplaysCache = async (): Promise<any[] | null> => {
     try {
@@ -3619,9 +3695,11 @@ export const __testables = {
   buildInsightsSyncBatches,
   countSessionStats,
   getStaleSourceProviders,
+  mergeSourceCatalogSessionUpdates,
   normalizeSourceSessionCatalogCache,
   pickSourceRecordForSession,
   probePiSourceFreshness,
+  probeSourceRecordsFreshness,
   prioritizeScanInputs,
   selectCursorEnrichmentCandidates,
   sourceSessionKey,
