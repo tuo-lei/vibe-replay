@@ -301,6 +301,8 @@ export interface ReplaySession {
     }>;
     /** Git branch (last seen — usually the feature branch) */
     gitBranch?: string;
+    /** Normalized git remote origin (for example, "owner/repo") */
+    gitRepo?: string;
     /** All branches seen during session, in order of appearance (if switched) */
     gitBranches?: string[];
     /** How the session was started: "cli" | "sdk-ts" */

@@ -19,6 +19,7 @@ import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import open from "open";
+import { readGitRepo } from "@vibe-replay/provider-core/utils";
 import { readFileCache, writeFileCache, type FileCacheEntry } from "./cache.js";
 import { cleanPromptText, previewPrompt } from "./clean-prompt.js";
 import { computeDaysUntilCleanup, getClaudeCodeCleanupPeriod } from "./cleanup-warning.js";
@@ -118,6 +119,7 @@ async function unarchiveSlug(baseDir: string, slug: string): Promise<void> {
 /** Scan replay.json files from a single directory */
 async function scanSessionsFromDir(baseDir: string): Promise<ReplaySummary[]> {
   const results: ReplaySummary[] = [];
+  const projectGitRepoCache = new Map<string, string | undefined>();
   let entries: string[];
   try {
     entries = await readdir(baseDir);
@@ -150,6 +152,13 @@ async function scanSessionsFromDir(baseDir: string): Promise<ReplaySummary[]> {
 
       const generatorVersion = session.meta.generator?.version;
       const replayOutdated = generatorVersion ? generatorVersion !== CLI_VERSION : false;
+      let gitRepo = session.meta.gitRepo;
+      if (!gitRepo && session.meta.project) {
+        if (!projectGitRepoCache.has(session.meta.project)) {
+          projectGitRepoCache.set(session.meta.project, await readGitRepo(session.meta.project));
+        }
+        gitRepo = projectGitRepoCache.get(session.meta.project);
+      }
 
       results.push({
         slug: entry,
@@ -158,6 +167,7 @@ async function scanSessionsFromDir(baseDir: string): Promise<ReplaySummary[]> {
         title: session.meta.title,
         provider: session.meta.provider,
         model: session.meta.model,
+        gitRepo,
         project: session.meta.project,
         startTime: session.meta.startTime,
         endTime: session.meta.endTime,
@@ -283,6 +293,7 @@ interface ReplaySummary {
   title?: string;
   provider: string;
   model?: string;
+  gitRepo?: string;
   project: string;
   startTime: string;
   endTime?: string;
@@ -939,6 +950,7 @@ async function buildSourcesResult(
             title: replay.title,
             provider: replay.provider,
             model: replay.model,
+            gitRepo: replay.gitRepo,
             project: replay.project,
             startTime: replay.startTime,
             endTime: replay.endTime,
@@ -1974,6 +1986,7 @@ export async function startServer(
               version: CLI_VERSION,
               generatedAt: new Date().toISOString(),
             },
+            gitRepo: info.gitRepo,
           });
           // Dedup on the serialized scene array. Hashing only coarse counters
           // (scene count, prompt count, last timestamp) misses content-only
@@ -2418,6 +2431,7 @@ export async function startServer(
       const project = rawProject.startsWith(home)
         ? `~${rawProject.slice(home.length)}`
         : rawProject;
+      const gitRepo = resolved.value.sessionInfo?.gitRepo || (await readGitRepo(rawProject));
 
       const replay = transformToReplay(parsed, body.provider, project, {
         generator: {
@@ -2425,6 +2439,7 @@ export async function startServer(
           version: CLI_VERSION,
           generatedAt: new Date().toISOString(),
         },
+        gitRepo,
       });
 
       if (typeof body.title === "string") {
@@ -2527,6 +2542,7 @@ export async function startServer(
             version: CLI_VERSION,
             generatedAt: new Date().toISOString(),
           },
+          gitRepo: sessionInfo.gitRepo,
         });
 
         // Preserve custom title from old replay

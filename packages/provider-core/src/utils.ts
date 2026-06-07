@@ -1,6 +1,6 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 /** Replace $HOME prefix with `~` for display. */
 export function shortenPath(path: string): string {
@@ -74,7 +74,25 @@ export async function readGitRepo(projectDir: string): Promise<string | undefine
   if (!projectDir.trim()) return undefined;
   try {
     const resolved = projectDir.startsWith("~") ? join(homedir(), projectDir.slice(1)) : projectDir;
-    const config = await readFile(join(resolved, ".git", "config"), "utf-8");
+    const gitPath = join(resolved, ".git");
+    let configPath = join(gitPath, "config");
+
+    // In git worktrees, `.git` is a file containing `gitdir: <path>` instead
+    // of a directory. The remote config lives in the common git dir.
+    const gitStat = await stat(gitPath).catch(() => null);
+    if (gitStat?.isFile()) {
+      const gitFile = await readFile(gitPath, "utf-8");
+      const gitdirMatch = gitFile.match(/^gitdir:\s*(.+)$/m);
+      if (!gitdirMatch) return undefined;
+      const gitdir = gitdirMatch[1].trim();
+      const absoluteGitdir = isAbsolute(gitdir) ? gitdir : resolve(resolved, gitdir);
+      const commonDir = await readFile(join(absoluteGitdir, "commondir"), "utf-8").catch(
+        () => "../..",
+      );
+      configPath = join(resolve(absoluteGitdir, commonDir.trim()), "config");
+    }
+
+    const config = await readFile(configPath, "utf-8");
     const match = config.match(/\[remote "origin"\][^[]*?url\s*=\s*(.+)/);
     if (!match) return undefined;
     return normalizeGitUrl(match[1].trim());
@@ -85,16 +103,17 @@ export async function readGitRepo(projectDir: string): Promise<string | undefine
 
 /** Normalize a git remote URL to "owner/repo" format. */
 export function normalizeGitUrl(url: string): string | undefined {
+  const trimmed = url.trim();
   // SCP-style ssh: git@github.com:org/repo.git
-  const scpMatch = url.match(/:([^/][^:]+?)(?:\.git)?\s*$/);
-  if (!url.startsWith("http") && !url.startsWith("ssh://") && scpMatch) {
+  const scpMatch = trimmed.match(/:([^/][^:]+?)(?:\.git)?\s*$/);
+  if (!trimmed.startsWith("http") && !trimmed.startsWith("ssh://") && scpMatch) {
     const path = scpMatch[1];
     const parts = path.split("/");
     if (parts.length >= 2) return `${parts[0]}/${parts[1]}`;
   }
   // https/ssh-protocol: https://github.com/org/repo.git or ssh://git@github.com/org/repo
   try {
-    const parsed = new URL(url);
+    const parsed = new URL(trimmed);
     const parts = parsed.pathname
       .replace(/^\//, "")
       .replace(/\.git$/, "")

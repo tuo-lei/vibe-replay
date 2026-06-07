@@ -653,6 +653,23 @@ describe("transform — metadata", () => {
     expect(replay.meta.generator).toEqual(gen);
   });
 
+  it("includes git repo metadata when provided by the caller", () => {
+    const replay = transformToReplay(buildParsed({}), "claude-code", "~/test", {
+      gitRepo: "tuo-lei/vibe-replay",
+    });
+    expect(replay.meta.gitRepo).toBe("tuo-lei/vibe-replay");
+  });
+
+  it("prefers provider git repo metadata over caller fallback", () => {
+    const replay = transformToReplay(
+      buildParsed({ gitRepo: "provider/repo" }),
+      "claude-code",
+      "~/test",
+      { gitRepo: "fallback/repo" },
+    );
+    expect(replay.meta.gitRepo).toBe("provider/repo");
+  });
+
   it("returns undefined duration when provider duration is missing (no wall-clock fallback)", () => {
     const replay = transformToReplay(
       buildParsed({

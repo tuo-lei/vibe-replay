@@ -4,6 +4,7 @@ import chalk from "chalk";
 import { Command, program } from "commander";
 import ora from "ora";
 import { setFileCacheAppVersion } from "@vibe-replay/provider-core/cache";
+import { readGitRepo } from "@vibe-replay/provider-core/utils";
 import { readFileCache, writeFileCache } from "./cache.js";
 import { cleanPromptText } from "./clean-prompt.js";
 import {
@@ -505,12 +506,14 @@ program
       const project = rawProject.startsWith(home)
         ? `~${rawProject.slice(home.length)}`
         : rawProject;
+      const gitRepo = sessionInfo?.gitRepo || (await readGitRepo(rawProject));
       replay = transformToReplay(parsed, providerName, project, {
         generator: {
           name: "vibe-replay",
           version: CLI_VERSION,
           generatedAt: new Date().toISOString(),
         },
+        gitRepo,
       });
 
       const thinkingStr = replay.meta.stats.thinkingBlocks
