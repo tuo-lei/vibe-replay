@@ -17,9 +17,18 @@ function makeLine(obj: Record<string, any>): string {
 
 let tmpDir: string;
 let fixturePath: string;
-const CURSOR_FIXTURE = join(import.meta.dirname, "fixtures/cursor-session.jsonl");
-const CURSOR_TOOL_FIXTURE_1 = join(import.meta.dirname, "fixtures/cursor-tool-1.txt");
-const CURSOR_TOOL_FIXTURE_2 = join(import.meta.dirname, "fixtures/cursor-tool-2.txt");
+const CURSOR_FIXTURE = join(
+  import.meta.dirname,
+  "../../provider-cursor/test/fixtures/cursor-session.jsonl",
+);
+const CURSOR_TOOL_FIXTURE_1 = join(
+  import.meta.dirname,
+  "../../provider-cursor/test/fixtures/cursor-tool-1.txt",
+);
+const CURSOR_TOOL_FIXTURE_2 = join(
+  import.meta.dirname,
+  "../../provider-cursor/test/fixtures/cursor-tool-2.txt",
+);
 
 beforeAll(async () => {
   tmpDir = join(tmpdir(), `scanner-test-${Date.now()}`);
