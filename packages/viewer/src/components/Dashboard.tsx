@@ -198,31 +198,67 @@ function RawJsonModal({
   const [remoteErrors, setRemoteErrors] = useState<Record<string, string>>({});
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const [retryNonce, setRetryNonce] = useState(0);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
 
   const activeItem = items.find((item) => item.id === activeId) || items[0];
   const activeData = activeItem?.fetchReplaySlug ? remoteData[activeItem.id] : activeItem?.data;
+  const activeItemDataLoaded = activeItem ? remoteData[activeItem.id] !== undefined : true;
   const jsonText = useMemo(
     () => (activeData === undefined ? "" : formatRawJson(activeData)),
     [activeData],
   );
 
   useEffect(() => {
+    previouslyFocusedRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeButtonRef.current?.focus();
+    return () => {
+      previouslyFocusedRef.current?.focus();
+    };
+  }, []);
+
+  useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      onClose();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        onClose();
+        return;
+      }
+
+      if (e.key !== "Tab") return;
+      const focusable = Array.from(
+        modalRef.current?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) || [],
+      ).filter((el) => !el.hasAttribute("disabled") && el.getAttribute("aria-hidden") !== "true");
+      if (focusable.length === 0) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     document.addEventListener("keydown", handler, true);
     return () => document.removeEventListener("keydown", handler, true);
   }, [onClose]);
 
   useEffect(() => {
-    if (!activeItem?.fetchReplaySlug || remoteData[activeItem.id] !== undefined) return;
+    const itemId = activeItem?.id;
+    const fetchReplaySlug = activeItem?.fetchReplaySlug;
+    if (!itemId || !fetchReplaySlug || activeItemDataLoaded) return;
     let cancelled = false;
-    setLoadingId(activeItem.id);
-    setRemoteErrors((prev) => ({ ...prev, [activeItem.id]: "" }));
-    fetch(`/api/session?slug=${encodeURIComponent(activeItem.fetchReplaySlug)}`)
+    setLoadingId(itemId);
+    setRemoteErrors((prev) => ({ ...prev, [itemId]: "" }));
+    fetch(`/api/session?slug=${encodeURIComponent(fetchReplaySlug)}`)
       .then(async (resp) => {
         const data = await resp.json().catch(() => null);
         if (!resp.ok) throw new Error(data?.error || "Failed to load replay JSON");
@@ -230,11 +266,11 @@ function RawJsonModal({
       })
       .then((data) => {
         if (cancelled) return;
-        setRemoteData((prev) => ({ ...prev, [activeItem.id]: data }));
+        setRemoteData((prev) => ({ ...prev, [itemId]: data }));
       })
       .catch((err) => {
         if (cancelled) return;
-        setRemoteErrors((prev) => ({ ...prev, [activeItem.id]: getFriendlyErrorMessage(err) }));
+        setRemoteErrors((prev) => ({ ...prev, [itemId]: getFriendlyErrorMessage(err) }));
       })
       .finally(() => {
         if (!cancelled) setLoadingId(null);
@@ -242,7 +278,7 @@ function RawJsonModal({
     return () => {
       cancelled = true;
     };
-  }, [activeItem, remoteData]);
+  }, [activeItem?.id, activeItem?.fetchReplaySlug, activeItemDataLoaded, retryNonce]);
 
   const copyJson = async () => {
     if (!jsonText) return;
@@ -252,7 +288,7 @@ function RawJsonModal({
     } catch {
       setCopyState("failed");
     }
-    window.setTimeout(() => setCopyState("idle"), 1500);
+    setTimeout(() => setCopyState("idle"), 1500);
   };
 
   return (
@@ -260,12 +296,14 @@ function RawJsonModal({
       className="fixed inset-0 z-[60] flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
+      aria-labelledby="raw-json-modal-title"
     >
       <div
         className="absolute inset-0 bg-black/70 backdrop-blur-md animate-in fade-in duration-200"
         onClick={onClose}
       />
       <div
+        ref={modalRef}
         className="relative w-full max-w-6xl max-h-[88vh] bg-terminal-bg border border-terminal-border-subtle rounded-2xl shadow-layer-xl animate-in zoom-in-95 fade-in duration-200 flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
@@ -274,7 +312,12 @@ function RawJsonModal({
             <div className="text-[10px] font-sans uppercase tracking-widest text-terminal-dimmer mb-1">
               Raw JSON
             </div>
-            <h2 className="text-lg font-sans font-semibold text-terminal-text truncate">{title}</h2>
+            <h2
+              id="raw-json-modal-title"
+              className="text-lg font-sans font-semibold text-terminal-text truncate"
+            >
+              {title}
+            </h2>
             {subtitle && (
               <p className="mt-1 text-xs font-mono text-terminal-dimmer truncate">{subtitle}</p>
             )}
@@ -288,6 +331,7 @@ function RawJsonModal({
               {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : "Copy"}
             </button>
             <button
+              ref={closeButtonRef}
               onClick={onClose}
               className="h-8 w-8 flex items-center justify-center rounded-lg text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors"
               aria-label="Close raw JSON modal"
@@ -339,8 +383,18 @@ function RawJsonModal({
               Loading JSON...
             </div>
           ) : activeItem && remoteErrors[activeItem.id] ? (
-            <div className="p-6 text-sm font-mono text-terminal-red">
-              {remoteErrors[activeItem.id]}
+            <div className="p-6 flex items-center gap-3">
+              <span className="text-sm font-mono text-terminal-red">
+                {remoteErrors[activeItem.id]}
+              </span>
+              {activeItem.fetchReplaySlug && (
+                <button
+                  onClick={() => setRetryNonce((value) => value + 1)}
+                  className="h-8 px-3 text-xs font-sans font-semibold rounded-lg bg-terminal-red-subtle text-terminal-red hover:bg-terminal-red-emphasis transition-colors"
+                >
+                  Retry
+                </button>
+              )}
             </div>
           ) : jsonText ? (
             <pre className="p-6 text-xs leading-relaxed font-mono text-terminal-dim whitespace-pre-wrap break-words">
