@@ -116,10 +116,18 @@ async function unarchiveSlug(baseDir: string, slug: string): Promise<void> {
   }
 }
 
+const replayGitRepoByProjectCache = new Map<string, string | undefined>();
+
+async function readReplayGitRepo(project: string): Promise<string | undefined> {
+  if (!replayGitRepoByProjectCache.has(project)) {
+    replayGitRepoByProjectCache.set(project, await readGitRepo(project));
+  }
+  return replayGitRepoByProjectCache.get(project);
+}
+
 /** Scan replay.json files from a single directory */
 async function scanSessionsFromDir(baseDir: string): Promise<ReplaySummary[]> {
   const results: ReplaySummary[] = [];
-  const projectGitRepoCache = new Map<string, string | undefined>();
   let entries: string[];
   try {
     entries = await readdir(baseDir);
@@ -154,10 +162,7 @@ async function scanSessionsFromDir(baseDir: string): Promise<ReplaySummary[]> {
       const replayOutdated = generatorVersion ? generatorVersion !== CLI_VERSION : false;
       let gitRepo = session.meta.gitRepo;
       if (!gitRepo && session.meta.project) {
-        if (!projectGitRepoCache.has(session.meta.project)) {
-          projectGitRepoCache.set(session.meta.project, await readGitRepo(session.meta.project));
-        }
-        gitRepo = projectGitRepoCache.get(session.meta.project);
+        gitRepo = await readReplayGitRepo(session.meta.project);
       }
 
       results.push({

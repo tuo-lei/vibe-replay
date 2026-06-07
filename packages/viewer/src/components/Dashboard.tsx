@@ -1039,6 +1039,7 @@ function ReplayCard({
       {/* Row 4: identity */}
       <div className="flex items-center gap-2 text-xs font-mono text-terminal-dimmer flex-wrap">
         <ProviderBadge provider={s.provider} />
+        {/* Replays display repo when available; keep the underlying project path discoverable. */}
         <span title={s.gitRepo ? s.project : isWorktreeReplay ? s.project : undefined}>
           {s.gitRepo || displayProject}
         </span>
@@ -1079,7 +1080,7 @@ function projectFilterLabel(project: string, labels: Map<string, string>): strin
 }
 
 function facetSortLabel(value: string): string {
-  return value === NO_REPO_FILTER ? "zzz-no-repo" : value.toLowerCase();
+  return value.toLowerCase();
 }
 
 function facetCountMap<T>(items: T[], keyFor: (session: T) => string): Map<string, number> {
@@ -1093,6 +1094,8 @@ function facetCountMap<T>(items: T[], keyFor: (session: T) => string): Map<strin
 
 function sortedFacetEntries(counts: Map<string, number>) {
   return [...counts.entries()].sort((a, b) => {
+    if (a[0] === NO_REPO_FILTER && b[0] !== NO_REPO_FILTER) return 1;
+    if (b[0] === NO_REPO_FILTER && a[0] !== NO_REPO_FILTER) return -1;
     if (b[1] !== a[1]) return b[1] - a[1];
     return facetSortLabel(a[0]).localeCompare(facetSortLabel(b[0]));
   });
