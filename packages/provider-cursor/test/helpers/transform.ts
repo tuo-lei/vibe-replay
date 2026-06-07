@@ -1,1 +1,1 @@
-export { transformToReplay } from "../../../cli/src/transform.js";
+export { transformToReplay } from "../../../replay-core/src/transform.js";

@@ -115,6 +115,30 @@ importers:
       '@types/node':
         specifier: ^22.10.0
         version: 22.19.13
+      '@vibe-replay/provider-claude-code':
+        specifier: workspace:*
+        version: link:../provider-claude-code
+      '@vibe-replay/provider-codex':
+        specifier: workspace:*
+        version: link:../provider-codex
+      '@vibe-replay/provider-contract':
+        specifier: workspace:*
+        version: link:../provider-contract
+      '@vibe-replay/provider-core':
+        specifier: workspace:*
+        version: link:../provider-core
+      '@vibe-replay/provider-cursor':
+        specifier: workspace:*
+        version: link:../provider-cursor
+      '@vibe-replay/provider-pi':
+        specifier: workspace:*
+        version: link:../provider-pi
+      '@vibe-replay/providers-default':
+        specifier: workspace:*
+        version: link:../providers-default
+      '@vibe-replay/replay-core':
+        specifier: workspace:*
+        version: link:../replay-core
       '@vibe-replay/types':
         specifier: workspace:*
         version: link:../types
