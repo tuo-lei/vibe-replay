@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import type { ReplaySession, Scene } from "@vibe-replay/types";
 import { parseClaudeCodeSession } from "../src/claude-code/parser.js";
 import { transformToReplay } from "./helpers/transform.js";
 
@@ -107,7 +108,7 @@ describe("New features: subagent, duration, metadata, api errors", () => {
   // --- Backward compatibility: old replay without new fields still works ---
   it("old replay JSON without new fields deserializes correctly", () => {
     // Simulate an old replay.json with no new fields
-    const oldReplay = {
+    const oldReplay: ReplaySession = {
       meta: {
         sessionId: "old-session",
         slug: "old-slug",
@@ -132,12 +133,12 @@ describe("New features: subagent, duration, metadata, api errors", () => {
     expect(oldReplay.scenes[1]).not.toHaveProperty("durationMs");
 
     // Access with optional chaining (how viewer does it) should return undefined, not throw
-    const meta = oldReplay.meta as any;
+    const meta = oldReplay.meta;
     expect(meta.gitBranch ?? "none").toBe("none");
     expect(meta.apiErrors?.length ?? 0).toBe(0);
     expect(meta.subAgentSummary?.length ?? 0).toBe(0);
 
-    const scene = oldReplay.scenes[1] as any;
+    const scene = oldReplay.scenes[1] as Extract<Scene, { type: "tool-call" }>;
     expect(scene.subAgent?.agentType ?? "none").toBe("none");
     expect(scene.durationMs ?? 0).toBe(0);
   });
