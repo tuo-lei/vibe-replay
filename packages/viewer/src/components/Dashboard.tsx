@@ -1070,150 +1070,59 @@ function ReplayCard({
   const displayProject = rollupProject(s.project);
   const isWorktreeReplay = displayProject !== s.project;
 
+  // New-design derived values, mirroring the Sessions-tab source card.
+  const titleText = normalizeTitleText(s.title || "") || replaySuggestedTitle(s);
+  const messages = (s.messages || (s.firstMessage ? [s.firstMessage] : []))
+    .map((msg) => cleanPrompt(msg || ""))
+    .filter((msg) => msg.length > 0 && normalizeTitleText(msg) !== titleText);
+  const repoUrl = s.gitRepo ? `https://github.com/${s.gitRepo}` : undefined;
+  const providerTooltip = [
+    providerDisplayName(s.provider),
+    s.model ? shortModelName(s.model) : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const shared = !!(s.cloud || s.gist);
+  const tooBig = s.replaySize != null && s.replaySize > 10 * 1024 * 1024;
+  const costTitle = s.stats.tokenUsage
+    ? `${formatTokens(s.stats.tokenUsage.cacheReadTokens)} cache read · ${formatTokens(
+        s.stats.tokenUsage.cacheCreationTokens,
+      )} cache write · ${formatTokens(s.stats.tokenUsage.inputTokens)} in · ${formatTokens(
+        s.stats.tokenUsage.outputTokens,
+      )} out`
+    : "Estimated cost";
+
   return (
     <div
       onClick={onOpen}
-      className={`bg-terminal-surface rounded-xl px-5 py-5 hover:bg-terminal-surface-hover transition-all duration-300 ease-material space-y-3.5 shadow-layer-sm cursor-pointer hover-lift ${isArchived ? "opacity-50" : ""}`}
+      className={`bg-terminal-surface rounded-xl px-5 py-5 hover:bg-terminal-surface-hover transition-all duration-300 ease-material space-y-3 shadow-layer-sm cursor-pointer hover-lift ${isArchived ? "opacity-50" : ""}`}
     >
-      {/* Row 1: title + badges + actions */}
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex-1 flex items-center gap-2 min-w-0">
+      {/* Row 1: provider icon + title | slug·time + menu */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-2.5 min-w-0 flex-1">
+          <span className="mt-0.5">
+            <ProviderBadge provider={s.provider} title={providerTooltip} />
+          </span>
           {onTitleSave ? (
-            <div className="flex-1 min-w-0" onClick={(e) => e.stopPropagation()}>
+            <div className="min-w-0 flex-1" onClick={(e) => e.stopPropagation()}>
               <EditableTitle
                 slug={s.slug}
                 title={s.title}
                 fallbackTitle={replaySuggestedTitle(s)}
                 onSave={onTitleSave}
+                hideSlug
               />
             </div>
           ) : (
-            <div className="flex-1 min-w-0">
-              <span className="text-sm font-sans font-medium text-terminal-text truncate block">
-                {replaySuggestedTitle(s)}
-              </span>
-              <div className="text-[11px] font-mono text-terminal-dimmer truncate mt-0.5">
-                slug: <span className="text-terminal-dim">{s.slug}</span>
-              </div>
-            </div>
-          )}
-        </div>
-        <div className="flex items-center gap-1.5 shrink-0">
-          {s.replayOutdated && (
-            <span
-              className="h-6 px-2 text-[10px] font-mono rounded-md bg-terminal-orange-subtle text-terminal-orange flex items-center gap-1"
-              title={`Generated with v${s.generatorVersion || "?"} — regenerate to update`}
-            >
-              <svg
-                width="10"
-                height="10"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              >
-                <path d="M2.5 8a5.5 5.5 0 019.3-4M13.5 8a5.5 5.5 0 01-9.3 4" />
-                <path d="M12.5 1v3h-3M3.5 15v-3h3" />
-              </svg>
-              outdated
+            <span className="text-sm font-sans font-medium text-terminal-text leading-snug line-clamp-2">
+              {replaySuggestedTitle(s)}
             </span>
           )}
-          {s.gist?.outdated && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onShare?.();
-              }}
-              className="h-7 w-7 flex items-center justify-center rounded-md bg-terminal-orange-subtle text-terminal-orange hover:bg-terminal-orange-emphasis transition-all duration-200 ease-material shrink-0"
-              title="Gist out of sync — click to update"
-            >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M8 1a1 1 0 0 1 1 1v5.5a1 1 0 0 1-2 0V2a1 1 0 0 1 1-1zM8 11a1.25 1.25 0 1 1 0 2.5A1.25 1.25 0 0 1 8 11z" />
-              </svg>
-            </button>
-          )}
-          {onShare && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onShare();
-              }}
-              className={`h-7 px-2.5 text-xs font-sans font-semibold rounded-md transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0 ${
-                s.cloud || s.gist
-                  ? "bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis"
-                  : "bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis"
-              }`}
-              title={s.cloud || s.gist ? "Already shared — view or update" : "Share & Export"}
-            >
-              {s.cloud || s.gist ? (
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
-                </svg>
-              ) : (
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                >
-                  <path d="M8 2v8M5 5l3-3 3 3M3 11v2h10v-2" />
-                </svg>
-              )}
-              {s.cloud || s.gist ? "Shared" : "Share"}
-            </button>
-          )}
-          {onRegenerate && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onRegenerate();
-              }}
-              disabled={isRegenerating}
-              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50"
-              title="Redo"
-            >
-              {isRegenerating ? (
-                <span className="animate-pulse">...</span>
-              ) : (
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
-                  <path d="M21 3v5h-5" />
-                  <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
-                  <path d="M8 16H3v5" />
-                </svg>
-              )}
-              Redo
-            </button>
-          )}
-          <button
-            onClick={onOpen}
-            className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1 shrink-0"
-          >
-            <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-              <polygon points="4 2 14 8 4 14" />
-            </svg>
-            View
-          </button>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-[11px] font-mono text-terminal-dimmer whitespace-nowrap hidden sm:inline">
+            {s.slug} · {formatDate(s.startTime)}
+          </span>
           {(onDelete || onArchive || onRawData) && (
             <div className="relative" ref={menuRef}>
               <button
@@ -1326,75 +1235,220 @@ function ReplayCard({
           )}
         </div>
       </div>
-      {/* Row 2: user messages */}
-      {(s.messages || (s.firstMessage ? [s.firstMessage] : []))
-        .map((msg) => cleanPrompt(msg || ""))
-        .filter((msg) => msg.length > 0)
-        .map((msg, i) => (
-          <div key={i} className="flex gap-2 items-start">
-            <span className="text-xs text-terminal-green shrink-0 mt-px select-none">&gt;</span>
-            <p className="text-sm text-terminal-dim line-clamp-1 leading-relaxed">{msg}</p>
-          </div>
-        ))}
-      {/* Row 3: stats bar */}
-      <div className="flex items-center gap-1.5 flex-wrap">
-        <span className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim">
-          {s.stats.userPrompts} prompts
-        </span>
-        <span className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-orange-subtle text-terminal-orange">
-          {s.stats.toolCalls} tools
-        </span>
-        {s.stats.durationMs && (
-          <span className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim">
-            {formatDuration(s.stats.durationMs)}
-          </span>
-        )}
-        {s.stats.costEstimate && (
-          <span className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-green-subtle text-terminal-green">
-            {formatCost(s.stats.costEstimate)}
-          </span>
-        )}
-        {s.hasAnnotations && (
-          <span className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-blue-subtle text-terminal-blue">
-            {s.annotationCount} annotation{s.annotationCount !== 1 ? "s" : ""}
-          </span>
-        )}
-        {s.replaySize != null && s.replaySize > 0 && (
-          <span
-            className={`inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md ${
-              s.replaySize > 10 * 1024 * 1024
-                ? "bg-terminal-red-subtle text-terminal-red"
-                : "bg-terminal-surface-2 text-terminal-dimmer"
-            }`}
-            title={s.replaySize > 10 * 1024 * 1024 ? "Exceeds share limit (10MB)" : undefined}
+
+      {/* Row 2: user messages (deduped against the title) */}
+      {messages.map((msg, i) => (
+        <div key={i} className="flex gap-2 items-start">
+          <span className="text-xs text-terminal-green shrink-0 mt-px select-none">&gt;</span>
+          <p className="text-sm text-terminal-dim line-clamp-1 leading-relaxed">{msg}</p>
+        </div>
+      ))}
+
+      {/* Row 3: place — project · repo (clickable) */}
+      <div className="flex items-center gap-x-2.5 gap-y-1 flex-wrap text-xs font-mono text-terminal-dim">
+        <span className="inline-flex items-center gap-1 max-w-[240px] truncate" title={s.project}>
+          <svg
+            width="11"
+            height="11"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.3"
+            className="text-terminal-dimmer shrink-0"
           >
-            {formatSize(s.replaySize)}
-          </span>
-        )}
-      </div>
-      {/* Row 4: identity */}
-      <div className="flex items-center gap-2 text-xs font-mono text-terminal-dimmer flex-wrap">
-        <ProviderBadge provider={s.provider} />
-        {/* Replays display repo when available; keep the underlying project path discoverable. */}
-        <span title={s.gitRepo ? s.project : isWorktreeReplay ? s.project : undefined}>
-          {s.gitRepo || displayProject}
+            <path d="M1.5 4.5a1 1 0 0 1 1-1h3l1.5 1.5h5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-10a1 1 0 0 1-1-1z" />
+          </svg>
+          {displayProject}
         </span>
+        {s.gitRepo && repoUrl && (
+          <a
+            href={repoUrl}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center gap-1 hover:text-terminal-blue hover:underline shrink-0"
+            title="Open repo on GitHub"
+          >
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 16 16"
+              fill="currentColor"
+              className="text-terminal-dimmer"
+            >
+              <path d="M8 1a7 7 0 0 0-2.2 13.6c.35.06.48-.15.48-.34v-1.2c-1.95.42-2.36-.94-2.36-.94-.32-.8-.78-1.02-.78-1.02-.64-.44.05-.43.05-.43.7.05 1.07.72 1.07.72.63 1.08 1.65.77 2.05.59.06-.46.25-.77.45-.95-1.56-.18-3.2-.78-3.2-3.47 0-.77.27-1.4.72-1.89-.07-.18-.31-.9.07-1.87 0 0 .59-.19 1.93.72a6.7 6.7 0 0 1 3.5 0c1.34-.91 1.93-.72 1.93-.72.38.97.14 1.69.07 1.87.45.49.72 1.12.72 1.89 0 2.7-1.64 3.29-3.2 3.46.25.22.48.65.48 1.31v1.95c0 .19.13.4.49.33A7 7 0 0 0 8 1z" />
+            </svg>
+            {s.gitRepo}
+          </a>
+        )}
         {isWorktreeReplay && (
           <span
-            className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple uppercase tracking-wider"
+            className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple uppercase tracking-wider shrink-0"
             title={`Agent worktree: ${s.project}`}
           >
             worktree
           </span>
         )}
-        <span className="text-terminal-border">&middot;</span>
-        <span>{formatDate(s.startTime)}</span>
-        {s.model && (
-          <>
-            <span className="text-terminal-border">&middot;</span>
-            <span>{s.model}</span>
-          </>
+      </div>
+
+      {/* Row 4: activity — hairline-framed */}
+      <div className="flex items-center gap-x-3.5 gap-y-1 flex-wrap text-xs font-mono tabular-nums py-2 border-y border-terminal-border-subtle">
+        {!!s.stats.durationMs && (
+          <span className="text-terminal-text">{formatDuration(s.stats.durationMs)}</span>
         )}
+        <span className="text-terminal-text">
+          {s.stats.userPrompts} <span className="text-terminal-dimmer">prompts</span>
+        </span>
+        <span className="text-terminal-text">
+          {s.stats.toolCalls} <span className="text-terminal-dimmer">tools</span>
+        </span>
+        {!!s.stats.costEstimate && (
+          <span className="text-terminal-green" title={costTitle}>
+            {formatCost(s.stats.costEstimate)}
+          </span>
+        )}
+        {s.hasAnnotations && (
+          <span className="text-terminal-blue">
+            {s.annotationCount} annotation{s.annotationCount !== 1 ? "s" : ""}
+          </span>
+        )}
+      </div>
+
+      {/* Row 5: facts (left) | state + actions (right) */}
+      <div className="flex items-end justify-between gap-3">
+        <div className="flex items-center gap-x-2 gap-y-1 flex-wrap text-xs font-mono min-w-0">
+          {s.replaySize != null && s.replaySize > 0 && (
+            <span
+              className={`tabular-nums ${tooBig ? "px-1.5 py-0.5 rounded-md bg-terminal-red-subtle text-terminal-red" : "text-terminal-dimmer"}`}
+              title={tooBig ? "Exceeds share limit (10MB)" : "Replay size"}
+            >
+              {formatSize(s.replaySize)}
+            </span>
+          )}
+          {s.replayOutdated && (
+            <span
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-terminal-orange-subtle text-terminal-orange"
+              title={`Generated with v${s.generatorVersion || "?"} — regenerate to update`}
+            >
+              <svg
+                width="10"
+                height="10"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              >
+                <path d="M2.5 8a5.5 5.5 0 019.3-4M13.5 8a5.5 5.5 0 01-9.3 4" />
+                <path d="M12.5 1v3h-3M3.5 15v-3h3" />
+              </svg>
+              outdated
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span
+            className={`text-[11px] font-mono px-1.5 py-0.5 rounded-md ${shared ? "bg-terminal-green-subtle text-terminal-green" : "bg-terminal-blue-subtle text-terminal-blue"}`}
+            title={shared ? "Replay is shared (cloud/gist)" : "Local replay ready to view"}
+          >
+            {shared ? "Shared" : "Replay"}
+          </span>
+          {s.gist?.outdated && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onShare?.();
+              }}
+              className="h-7 w-7 flex items-center justify-center rounded-md bg-terminal-orange-subtle text-terminal-orange hover:bg-terminal-orange-emphasis transition-all duration-200 ease-material shrink-0"
+              title="Gist out of sync — click to update"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M8 1a1 1 0 0 1 1 1v5.5a1 1 0 0 1-2 0V2a1 1 0 0 1 1-1zM8 11a1.25 1.25 0 1 1 0 2.5A1.25 1.25 0 0 1 8 11z" />
+              </svg>
+            </button>
+          )}
+          {onShare && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onShare();
+              }}
+              className={`h-7 px-2.5 text-xs font-sans font-semibold rounded-md transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0 ${
+                shared
+                  ? "bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis"
+                  : "bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis"
+              }`}
+              title={shared ? "Already shared — view or update" : "Share & Export"}
+            >
+              {shared ? (
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
+                </svg>
+              ) : (
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                >
+                  <path d="M8 2v8M5 5l3-3 3 3M3 11v2h10v-2" />
+                </svg>
+              )}
+              {shared ? "Shared" : "Share"}
+            </button>
+          )}
+          {onRegenerate && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onRegenerate();
+              }}
+              disabled={isRegenerating}
+              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50"
+              title="Redo"
+            >
+              {isRegenerating ? (
+                <span className="animate-pulse">...</span>
+              ) : (
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+                  <path d="M21 3v5h-5" />
+                  <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+                  <path d="M8 16H3v5" />
+                </svg>
+              )}
+              Redo
+            </button>
+          )}
+          <button
+            onClick={onOpen}
+            className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1 shrink-0"
+          >
+            <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+              <polygon points="4 2 14 8 4 14" />
+            </svg>
+            View
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -91,11 +91,14 @@ export function EditableTitle({
   title,
   fallbackTitle,
   onSave,
+  hideSlug = false,
 }: {
   slug: string;
   title?: string;
   fallbackTitle?: string;
   onSave: (slug: string, title: string) => Promise<void>;
+  /** Hide the slug line (the card shows slug elsewhere, e.g. top-right). */
+  hideSlug?: boolean;
 }) {
   const suggestedTitle = normalizeTitleText(title || fallbackTitle || slug);
   const [editing, setEditing] = useState(false);
@@ -155,9 +158,11 @@ export function EditableTitle({
             disabled={saving}
           />
         </form>
-        <div className="text-[11px] font-mono text-terminal-dimmer truncate mt-0.5">
-          slug: <span className="text-terminal-dim">{slug}</span>
-        </div>
+        {!hideSlug && (
+          <div className="text-[11px] font-mono text-terminal-dimmer truncate mt-0.5">
+            slug: <span className="text-terminal-dim">{slug}</span>
+          </div>
+        )}
       </div>
     );
   }
@@ -187,9 +192,11 @@ export function EditableTitle({
           <path d="M11.5 1.5l3 3-9 9H2.5v-3l9-9z" />
         </svg>
       </button>
-      <div className="text-[11px] font-mono text-terminal-dimmer truncate mt-0.5">
-        slug: <span className="text-terminal-dim">{slug}</span>
-      </div>
+      {!hideSlug && (
+        <div className="text-[11px] font-mono text-terminal-dimmer truncate mt-0.5">
+          slug: <span className="text-terminal-dim">{slug}</span>
+        </div>
+      )}
     </div>
   );
 }
