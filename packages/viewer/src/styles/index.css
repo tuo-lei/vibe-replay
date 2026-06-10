@@ -191,11 +191,7 @@ html.theme-transition *::after {
     @apply font-sans text-xs leading-relaxed text-terminal-dimmer;
   }
 
-  .ui-meta {
-    @apply font-sans text-xs leading-relaxed text-terminal-dim;
-  }
-
-  .ui-meta-strong {
+  .ui-caption-strong {
     @apply font-sans text-xs font-medium leading-relaxed text-terminal-text;
   }
 
@@ -205,10 +201,6 @@ html.theme-transition *::after {
 
   .ui-pill-compact {
     @apply inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-sans leading-4;
-  }
-
-  .ui-code-meta {
-    @apply font-mono text-xs tabular-nums text-terminal-dim;
   }
 }
 

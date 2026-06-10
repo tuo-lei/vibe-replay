@@ -325,7 +325,9 @@ export default function ConversationView({
                   <div className="animate-ping absolute inline-flex h-full w-full rounded-full bg-terminal-orange opacity-40"></div>
                   <div className="relative inline-flex rounded-full h-2 w-2 bg-terminal-orange/80 shadow-[0_0_8px_rgba(251,146,60,0.5)]"></div>
                 </div>
-                <span className="ui-section-title text-terminal-orange drop-shadow-sm">Paused</span>
+                <span className="text-[10px] font-sans font-black text-terminal-orange uppercase tracking-[.25em] drop-shadow-sm">
+                  Paused
+                </span>
               </div>
 
               {/* Right: Interaction Hints */}
