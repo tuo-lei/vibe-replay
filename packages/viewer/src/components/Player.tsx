@@ -100,7 +100,7 @@ function findSourceTextRange(
   selectedText: string,
   approximateStart: number,
 ): { start: number; end: number } | null {
-  if (!content) return null;
+  if (!content || !selectedText) return null;
 
   let bestStart = -1;
   let bestDistance = Number.POSITIVE_INFINITY;
@@ -395,11 +395,14 @@ export default function Player({
     (annotationId: string) => {
       const annotation = annotationActions.annotations.find((item) => item.id === annotationId);
       if (!annotation) return;
+      let highlightFound = false;
       const scrollToHighlight = () => {
+        if (highlightFound) return;
         const highlight = scrollRef.current?.querySelector(
           `[data-vibe-annotation-id="${CSS.escape(annotationId)}"]`,
         );
         if (highlight instanceof HTMLElement) {
+          highlightFound = true;
           highlight.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
           flashJumpTarget(highlight);
         }
@@ -411,7 +414,9 @@ export default function Player({
       setActiveView("replay");
       seekFromNavigation(annotation.sceneIndex);
       requestAnimationFrame(() => requestAnimationFrame(scrollToHighlight));
-      window.setTimeout(scrollToHighlight, 250);
+      window.setTimeout(() => {
+        if (!highlightFound) scrollToHighlight();
+      }, 250);
     },
     [annotationActions.annotations, seekFromNavigation, setActiveView],
   );

@@ -64,4 +64,31 @@ describe("exportExecutableFeedback", () => {
 
     expect(output).toContain("No feedback annotations were added");
   });
+
+  it("uses a fence longer than the longest backtick run in content", () => {
+    const output = exportExecutableFeedback(makeSession(), [
+      makeAnnotation({
+        selectedText: "contains ``` and ```` fences",
+      }),
+    ]);
+
+    expect(output).toContain("`````markdown\ncontains ``` and ```` fences\n`````");
+  });
+
+  it("sorts annotations within a scene by timestamp", () => {
+    const output = exportExecutableFeedback(makeSession(), [
+      makeAnnotation({
+        id: "late",
+        body: "Second comment.",
+        createdAt: "2026-06-10T12:05:00.000Z",
+      }),
+      makeAnnotation({
+        id: "early",
+        body: "First comment.",
+        createdAt: "2026-06-10T12:01:00.000Z",
+      }),
+    ]);
+
+    expect(output.indexOf("First comment.")).toBeLessThan(output.indexOf("Second comment."));
+  });
 });

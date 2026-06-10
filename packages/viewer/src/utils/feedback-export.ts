@@ -10,7 +10,8 @@ function truncate(text: string, max = MAX_CONTEXT_CHARS): string {
 }
 
 function fence(text: string, language = "markdown"): string {
-  const ticks = text.includes("```") ? "````" : "```";
+  const maxBacktickRun = Math.max(0, ...[...text.matchAll(/`+/g)].map((match) => match[0].length));
+  const ticks = "`".repeat(Math.max(3, maxBacktickRun + 1));
   return `${ticks}${language}\n${text}\n${ticks}`;
 }
 
@@ -60,7 +61,7 @@ export function exportExecutableFeedback(
 ): string {
   const sorted = [...annotations].sort((a, b) => {
     if (a.sceneIndex !== b.sceneIndex) return a.sceneIndex - b.sceneIndex;
-    return a.createdAt.localeCompare(b.createdAt);
+    return Date.parse(a.createdAt) - Date.parse(b.createdAt);
   });
 
   const title = session.meta.title || session.meta.slug || "Untitled replay";

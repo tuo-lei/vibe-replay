@@ -10,7 +10,7 @@ import {
   matchesRepoFacet,
   NO_REPO_FILTER,
   repoFilterValue,
-} from "./dashboard-filtering";
+} from "../engine/dashboard-filtering";
 import {
   cleanPrompt,
   computeProjectLabels,

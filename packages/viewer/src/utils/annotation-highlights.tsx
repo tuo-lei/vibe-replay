@@ -41,6 +41,7 @@ function findHighlightRanges(
   const ranges: HighlightRange[] = [];
 
   for (const highlight of highlights) {
+    if (!highlight.text) continue;
     const start =
       useStoredRanges &&
       Number.isInteger(highlight.start) &&
@@ -108,6 +109,8 @@ export function renderHighlightedPlainText(
 }
 
 function markMarkdownHighlight(text: string, highlight: TextHighlight): string {
+  // This HTML is rendered by marked and then sanitized; attributes are escaped
+  // here so annotation body text cannot break out before the sanitizer runs.
   return `<mark data-vibe-annotation-id="${highlight.id}" title="${escapeHtmlAttribute(
     highlight.title,
   )}" class="${HIGHLIGHT_CLASS}">${text}</mark>`;
@@ -131,20 +134,26 @@ function createHighlightMark(doc: Document, highlight: TextHighlight, text: stri
 }
 
 export function injectHtmlTextHighlights(html: string, highlights: TextHighlight[]): string {
-  if (typeof DOMParser === "undefined" || typeof NodeFilter === "undefined") return html;
+  if (typeof DOMParser === "undefined") return html;
 
   const doc = new DOMParser().parseFromString(html, "text/html");
   const textNodes: { node: Text; start: number; end: number }[] = [];
   let text = "";
-  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
 
-  while (walker.nextNode()) {
-    const node = walker.currentNode as Text;
-    const value = node.nodeValue ?? "";
-    const start = text.length;
-    text += value;
-    textNodes.push({ node, start, end: text.length });
-  }
+  const visit = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const textNode = node as Text;
+      const value = textNode.nodeValue ?? "";
+      const start = text.length;
+      text += value;
+      textNodes.push({ node: textNode, start, end: text.length });
+      return;
+    }
+
+    node.childNodes.forEach(visit);
+  };
+
+  visit(doc.body);
 
   const ranges = findHighlightRanges(text, highlights, false);
   if (ranges.length === 0) return html;
@@ -165,10 +174,8 @@ export function injectHtmlTextHighlights(html: string, highlights: TextHighlight
     const fragment = doc.createDocumentFragment();
     let cursor = 0;
     nodeRanges.forEach((range) => {
-      const start = Math.max(range.start, entry.start);
-      const end = Math.min(range.end, entry.end);
-      const localStart = start - entry.start;
-      const localEnd = end - entry.start;
+      const localStart = range.start - entry.start;
+      const localEnd = range.end - entry.start;
 
       if (localStart > cursor)
         fragment.appendChild(doc.createTextNode(nodeText.slice(cursor, localStart)));
