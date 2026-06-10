@@ -3,7 +3,7 @@ import type { OverlayActions } from "../hooks/useOverlays";
 import type { LiveCursorDiagnostics } from "../hooks/useSessionLoader";
 import type { EffectivePrefs } from "../hooks/useViewPrefs";
 import type { Annotation, Scene, TurnStat } from "../types";
-import { textHighlightsForScene, type TextHighlight } from "../utils/annotation-highlights";
+import { textHighlightsByScene, type TextHighlight } from "../utils/annotation-highlights";
 import { displayToolName } from "../utils/toolName";
 import CompactionSummaryBlock from "./CompactionSummaryBlock";
 import { fmtNum, formatDuration, formatTokens, formatToolDuration } from "./StatsPanel";
@@ -92,6 +92,7 @@ export default function ConversationView({
 }: Props & { onSeek?: (index: number) => void }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [activeStickyPrompt, setActiveStickyPrompt] = useState<StickyPromptSummary | null>(null);
+  const highlightsByScene = useMemo(() => textHighlightsByScene(annotations ?? []), [annotations]);
 
   // Pre-compute ALL groups once — stable across playback ticks
   const allGroups = useMemo(() => {
@@ -299,7 +300,7 @@ export default function ConversationView({
                     focusIndex={focusIndex}
                     annotatedScenes={annotatedScenes}
                     annotationCounts={annotationCounts}
-                    annotations={annotations}
+                    highlightsByScene={highlightsByScene}
                     onComment={onComment}
                     onAnnotationClick={onAnnotationClick}
                     overlayActions={overlayActions}
@@ -647,7 +648,7 @@ const GroupCard = memo(function GroupCard({
   focusIndex,
   annotatedScenes: _annotatedScenes,
   annotationCounts,
-  annotations,
+  highlightsByScene,
   onComment,
   onAnnotationClick,
   overlayActions,
@@ -659,7 +660,7 @@ const GroupCard = memo(function GroupCard({
   focusIndex?: number;
   annotatedScenes?: Set<number>;
   annotationCounts?: Map<number, number>;
-  annotations?: Annotation[];
+  highlightsByScene?: Map<number, TextHighlight[]>;
   onComment?: (sceneIndex: number) => void;
   onAnnotationClick?: (annotationId: string) => void;
   overlayActions?: OverlayActions;
@@ -815,7 +816,7 @@ const GroupCard = memo(function GroupCard({
                   isActive={index === currentIndex}
                   collapseTools={effectivePrefs.collapseAllTools}
                   effectiveContent={effectiveContent ?? undefined}
-                  highlights={textHighlightsForScene(annotations ?? [], index)}
+                  highlights={highlightsByScene?.get(index) ?? []}
                   onHighlightClick={onAnnotationClick}
                 />
                 {sceneOverlays.length > 0 && (
@@ -905,7 +906,7 @@ const GroupCard = memo(function GroupCard({
         <CompactionSummaryBlock
           content={scene.content}
           isActive={firstIndex === currentIndex}
-          highlights={textHighlightsForScene(annotations ?? [], firstIndex)}
+          highlights={highlightsByScene?.get(firstIndex) ?? []}
           onHighlightClick={onAnnotationClick}
         />
       </div>
@@ -948,7 +949,7 @@ const GroupCard = memo(function GroupCard({
         <CompactionSummaryBlock
           content={scene.content}
           isActive={firstIndex === currentIndex}
-          highlights={textHighlightsForScene(annotations ?? [], firstIndex)}
+          highlights={highlightsByScene?.get(firstIndex) ?? []}
           onHighlightClick={onAnnotationClick}
         />
       </div>
@@ -979,7 +980,7 @@ const GroupCard = memo(function GroupCard({
         groupHasFocusedTarget={groupHasFocusedTarget}
         timestamp={group.timestamp}
         annotationCounts={annotationCounts}
-        annotations={annotations}
+        highlightsByScene={highlightsByScene}
         onComment={onComment}
         onAnnotationClick={onAnnotationClick}
         overlayActions={overlayActions}
@@ -1034,7 +1035,7 @@ const GroupCard = memo(function GroupCard({
           collapseTools={effectivePrefs.collapseAllTools}
           annotationCounts={annotationCounts}
           onComment={onComment}
-          annotations={annotations}
+          highlightsByScene={highlightsByScene}
           onAnnotationClick={onAnnotationClick}
           overlayActions={overlayActions}
         />
@@ -1058,7 +1059,7 @@ function CompactAssistantGroup({
   groupHasFocusedTarget,
   timestamp,
   annotationCounts,
-  annotations,
+  highlightsByScene,
   onComment,
   onAnnotationClick,
   overlayActions,
@@ -1074,7 +1075,7 @@ function CompactAssistantGroup({
   groupHasFocusedTarget: boolean;
   timestamp?: string;
   annotationCounts?: Map<number, number>;
-  annotations?: Annotation[];
+  highlightsByScene?: Map<number, TextHighlight[]>;
   onComment?: (sceneIndex: number) => void;
   onAnnotationClick?: (annotationId: string) => void;
   overlayActions?: OverlayActions;
@@ -1334,7 +1335,7 @@ function CompactAssistantGroup({
                   isActive={index === currentIndex}
                   collapseTools={false}
                   effectiveContent={ec}
-                  highlights={textHighlightsForScene(annotations ?? [], index)}
+                  highlights={highlightsByScene?.get(index) ?? []}
                   onHighlightClick={onAnnotationClick}
                 />
                 {onComment && (
@@ -1386,7 +1387,7 @@ function BatchedScenes({
   collapseTools,
   annotationCounts,
   onComment,
-  annotations,
+  highlightsByScene,
   onAnnotationClick,
   overlayActions,
 }: {
@@ -1395,7 +1396,7 @@ function BatchedScenes({
   collapseTools: boolean;
   annotationCounts?: Map<number, number>;
   onComment?: (sceneIndex: number) => void;
-  annotations?: Annotation[];
+  highlightsByScene?: Map<number, TextHighlight[]>;
   onAnnotationClick?: (annotationId: string) => void;
   overlayActions?: OverlayActions;
 }) {
@@ -1445,7 +1446,7 @@ function BatchedScenes({
                 isActive={index === currentIndex}
                 collapseTools={collapseTools}
                 effectiveContent={effectiveContent ?? undefined}
-                highlights={textHighlightsForScene(annotations ?? [], index)}
+                highlights={highlightsByScene?.get(index) ?? []}
                 onHighlightClick={onAnnotationClick}
               />
               {sceneOverlays.length > 0 && (

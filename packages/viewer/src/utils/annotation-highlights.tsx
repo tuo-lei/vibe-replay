@@ -18,19 +18,29 @@ interface HighlightRange {
 const HIGHLIGHT_CLASS =
   "rounded bg-terminal-blue/20 text-terminal-text ring-1 ring-terminal-blue/40 cursor-pointer hover:bg-terminal-blue/30 transition-colors";
 
+export function textHighlightsByScene(annotations: Annotation[]): Map<number, TextHighlight[]> {
+  const byScene = new Map<number, TextHighlight[]>();
+  annotations
+    .filter((annotation) => annotation.selectedText?.trim())
+    .forEach((annotation) => {
+      const highlights = byScene.get(annotation.sceneIndex) ?? [];
+      highlights.push({
+        id: annotation.id,
+        text: annotation.selectedText!.trim(),
+        title: annotation.body,
+        start: annotation.selectedTextStart,
+        end: annotation.selectedTextEnd,
+      });
+      byScene.set(annotation.sceneIndex, highlights);
+    });
+  return byScene;
+}
+
 export function textHighlightsForScene(
   annotations: Annotation[],
   sceneIndex: number,
 ): TextHighlight[] {
-  return annotations
-    .filter((annotation) => annotation.sceneIndex === sceneIndex && annotation.selectedText?.trim())
-    .map((annotation) => ({
-      id: annotation.id,
-      text: annotation.selectedText!.trim(),
-      title: annotation.body,
-      start: annotation.selectedTextStart,
-      end: annotation.selectedTextEnd,
-    }));
+  return textHighlightsByScene(annotations).get(sceneIndex) ?? [];
 }
 
 function findHighlightRanges(
@@ -111,9 +121,9 @@ export function renderHighlightedPlainText(
 function markMarkdownHighlight(text: string, highlight: TextHighlight): string {
   // This HTML is rendered by marked and then sanitized; attributes are escaped
   // here so annotation body text cannot break out before the sanitizer runs.
-  return `<mark data-vibe-annotation-id="${highlight.id}" title="${escapeHtmlAttribute(
-    highlight.title,
-  )}" class="${HIGHLIGHT_CLASS}">${text}</mark>`;
+  return `<mark data-vibe-annotation-id="${escapeHtmlAttribute(
+    highlight.id,
+  )}" title="${escapeHtmlAttribute(highlight.title)}" class="${HIGHLIGHT_CLASS}">${text}</mark>`;
 }
 
 function escapeHtmlAttribute(value: string): string {

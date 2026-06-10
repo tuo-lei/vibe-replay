@@ -46,6 +46,18 @@ describe("annotation highlights", () => {
     expect(output).toContain('hello <mark data-vibe-annotation-id="annotation-1"');
   });
 
+  it("escapes annotation ids in markdown highlight attributes", () => {
+    const output = injectMarkdownHighlights("hello annotated world", [
+      {
+        id: 'annotation-" onclick="bad',
+        text: "annotated",
+        title: "comment",
+      },
+    ]);
+
+    expect(output).toContain('data-vibe-annotation-id="annotation-&quot; onclick=&quot;bad"');
+  });
+
   it("highlights rendered HTML text across multiple text nodes", () => {
     const output = injectHtmlTextHighlights("<p>Hello <strong>annotated</strong> world</p>", [
       {
