@@ -31,7 +31,7 @@ npx vibe-replay
 
 ### All your sessions, one place
 
-Launch with `npx vibe-replay -d` and see every Claude Code, Cursor, and Codex session across all projects — with activity heatmaps, cost totals, and project analytics.
+Launch with `npx vibe-replay -d` and see every Claude Code, Cursor, Codex, and Pi session across all projects — with activity heatmaps, cost totals, and project analytics.
 
 <p align="center">
   <img src="docs/screenshots/dashboard.png" alt="Local dashboard — browse sessions, activity heatmap, project analytics" width="800" />
@@ -70,7 +70,7 @@ vibe-replay is also available as a [Claude Code plugin](https://code.claude.com/
 ### What the plugin gives your agent
 
 - **Auto-discover sessions** — finds the current session's JSONL file via `$CLAUDE_SESSION_ID`
-- **Search past sessions** — uses `vibe-replay sessions` to find Claude Code, Cursor, and Codex sessions by project, provider, or fuzzy query
+- **Search past sessions** — uses `vibe-replay sessions` to find Claude Code, Cursor, Codex, and Pi sessions by project, provider, or fuzzy query
 - **Generate PR artifacts** — markdown summary + animated GIF + SVG, ready for PR descriptions
 - **Generate HTML replays** — self-contained interactive replay files
 - **PR workflow integration** — agent automatically embeds replay context when you create PRs
