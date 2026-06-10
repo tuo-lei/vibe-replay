@@ -728,7 +728,7 @@ export default function Player({
                 {overlayActions.overlayCount > 0 && (
                   <button
                     onClick={() => overlayActions.toggleAllOriginals()}
-                    className="ui-meta hidden md:flex items-center gap-2"
+                    className="ui-caption hidden md:flex items-center gap-2"
                     title={
                       overlayActions.showAllOriginals
                         ? "Showing originals — click to show modified"
@@ -760,7 +760,7 @@ export default function Player({
                     setFocusedAnnotationId(null);
                     setCommentDrawerOpen(true);
                   }}
-                  className="ui-meta-strong hidden md:flex items-center gap-1.5 hover:text-terminal-green transition-colors"
+                  className="ui-caption-strong hidden md:flex items-center gap-1.5 hover:text-terminal-green transition-colors"
                   title="Open comments"
                 >
                   <svg
