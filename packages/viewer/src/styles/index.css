@@ -43,10 +43,10 @@ body {
   --orange-emphasis: rgba(210, 153, 34, 0.25);
 
   /* Warm siblings of orange — used to tell the Claude family apart
-     (Code = orange, Cowork = amber, Desktop = yellow). */
-  --amber: #e07a3e;
-  --amber-subtle: rgba(224, 122, 62, 0.15);
-  --amber-emphasis: rgba(224, 122, 62, 0.25);
+     (Code = orange, Cowork = sienna, Desktop = yellow). */
+  --sienna: #e07a3e;
+  --sienna-subtle: rgba(224, 122, 62, 0.15);
+  --sienna-emphasis: rgba(224, 122, 62, 0.25);
 
   --yellow: #f0cb35;
   --yellow-subtle: rgba(240, 203, 53, 0.15);
@@ -102,9 +102,9 @@ body {
   --orange-emphasis: rgba(154, 103, 0, 0.2);
 
   /* Warm siblings of orange — Claude family differentiation (see dark block). */
-  --amber: #b8501f;
-  --amber-subtle: rgba(184, 80, 31, 0.1);
-  --amber-emphasis: rgba(184, 80, 31, 0.2);
+  --sienna: #b8501f;
+  --sienna-subtle: rgba(184, 80, 31, 0.1);
+  --sienna-emphasis: rgba(184, 80, 31, 0.2);
 
   --yellow: #9e7700;
   --yellow-subtle: rgba(158, 119, 0, 0.1);

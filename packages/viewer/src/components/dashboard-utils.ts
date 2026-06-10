@@ -459,11 +459,11 @@ export function navigateToLive(provider: string, sessionId: string) {
 
 // The three Claude sources stay in the same warm color family but each gets a
 // distinct hue so they're tellable apart at icon size: Code = orange (the
-// signature tint), Cowork = amber (redder), Desktop = yellow (brighter).
+// signature tint), Cowork = sienna (redder), Desktop = yellow (brighter).
 export const PROVIDER_BADGE_COLORS: Record<string, string> = {
   "claude-code": "bg-terminal-orange-subtle text-terminal-orange",
   "claude-desktop": "bg-terminal-yellow-subtle text-terminal-yellow",
-  "claude-cowork": "bg-terminal-amber-subtle text-terminal-amber",
+  "claude-cowork": "bg-terminal-sienna-subtle text-terminal-sienna",
   codex: "bg-terminal-purple-subtle text-terminal-purple",
   cursor: "bg-terminal-blue-subtle text-terminal-blue",
   pi: "bg-terminal-cyan-subtle text-terminal-cyan",
@@ -494,7 +494,7 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
 const PROVIDER_BAR_COLORS: Record<string, string> = {
   "claude-code": "bg-terminal-orange",
   "claude-desktop": "bg-terminal-yellow",
-  "claude-cowork": "bg-terminal-amber",
+  "claude-cowork": "bg-terminal-sienna",
   codex: "bg-terminal-purple",
   cursor: "bg-terminal-blue",
   pi: "bg-terminal-cyan",
@@ -505,11 +505,11 @@ const PROVIDER_BAR_COLORS: Record<string, string> = {
 // Tailwind's static-class extraction happy and avoids template-string bugs.
 const PROVIDER_FAMILY: Record<
   string,
-  "orange" | "amber" | "yellow" | "blue" | "purple" | "cyan" | "dim"
+  "orange" | "sienna" | "yellow" | "blue" | "purple" | "cyan" | "dim"
 > = {
   "claude-code": "orange",
   "claude-desktop": "yellow",
-  "claude-cowork": "amber",
+  "claude-cowork": "sienna",
   codex: "purple",
   cursor: "blue",
   pi: "cyan",
@@ -517,7 +517,7 @@ const PROVIDER_FAMILY: Record<
 
 export function providerFamily(
   provider: string,
-): "orange" | "amber" | "yellow" | "blue" | "purple" | "cyan" | "dim" {
+): "orange" | "sienna" | "yellow" | "blue" | "purple" | "cyan" | "dim" {
   return PROVIDER_FAMILY[provider] || "dim";
 }
 
