@@ -65,9 +65,12 @@ function ProviderIcon({ provider }: { provider: string }) {
 export function ProviderBadge({
   provider,
   compact = false,
+  title,
 }: {
   provider: string;
   compact?: boolean;
+  /** Override the tooltip (defaults to the provider display name). */
+  title?: string;
 }) {
   const label = providerDisplayName(provider);
   return (
@@ -75,7 +78,7 @@ export function ProviderBadge({
       className={`inline-flex shrink-0 items-center justify-center ring-1 ring-current/15 ${
         compact ? "h-5 w-5 rounded-md" : "h-6 w-6 rounded-lg"
       } ${providerBadgeClass(provider)}`}
-      title={label}
+      title={title || label}
       aria-label={label}
     >
       <ProviderIcon provider={provider} />

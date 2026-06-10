@@ -146,6 +146,14 @@ export function formatSize(bytes: number): string {
   return kb >= 1024 ? `${(kb / 1024).toFixed(1)}MB` : `${kb}KB`;
 }
 
+/** Compact token count, e.g. 999251 → "999K", 1_200_000 → "1.2M". */
+export function formatTokens(n?: number): string {
+  if (!n) return "0";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
+  return String(n);
+}
+
 export function timeAgo(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(ms / 60000);
