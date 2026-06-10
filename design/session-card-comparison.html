@@ -323,6 +323,18 @@
         color: var(--dimmer);
         font-size: 11px;
       }
+      .place a.item {
+        text-decoration: none;
+        cursor: pointer;
+        border-bottom: 1px solid transparent;
+      }
+      .place a.item:hover {
+        color: var(--blue);
+        border-bottom-color: currentColor;
+      }
+      .place a.item:hover .ico {
+        color: var(--blue);
+      }
       .activity {
         display: flex;
         align-items: center;
@@ -746,7 +758,7 @@
               <span class="item" title="auto-quality/drop-dead-cursor-sdk-reader-stub (+ ui/relax-viewer-typography)">
                 <span class="ico">⎇</span> auto-quality/…stub <span class="more">+2</span>
               </span>
-              <span class="item"><span class="ico">⧉</span> tuo-lei/vibe-replay</span>
+              <a class="item" href="https://github.com/tuo-lei/vibe-replay" target="_blank" title="Open repo on GitHub"><span class="ico">⧉</span> tuo-lei/vibe-replay</a>
             </div>
             <!-- Activity line: exact values, hairline framed -->
             <div class="activity">
@@ -820,7 +832,7 @@
             <div class="place">
               <span class="item"><span class="ico">📁</span> vibe-replay2</span>
               <span class="item"><span class="ico">⎇</span> auto-quality/…stub <span class="more">+2</span></span>
-              <span class="item"><span class="ico">⧉</span> tuo-lei/vibe-replay</span>
+              <a class="item" href="https://github.com/tuo-lei/vibe-replay" target="_blank" title="Open repo on GitHub"><span class="ico">⧉</span> tuo-lei/vibe-replay</a>
             </div>
             <div class="activity">
               <span class="stat"><span class="ico">⏱</span> 4m15s</span>
@@ -871,7 +883,7 @@
             <div class="place">
               <span class="item"><span class="ico">📁</span> vibe-replay2</span>
               <span class="item"><span class="ico">⎇</span> auto-quality/…stub <span class="more">+2</span></span>
-              <span class="item"><span class="ico">⧉</span> tuo-lei/vibe-replay</span>
+              <a class="item" href="https://github.com/tuo-lei/vibe-replay" target="_blank" title="Open repo on GitHub"><span class="ico">⧉</span> tuo-lei/vibe-replay</a>
             </div>
             <div class="activity">
               <span class="stat"><span class="ico">⏱</span> 4m15s</span>
@@ -1024,6 +1036,7 @@
         compactionCount: { cat: "new", note: "✓ clean 的一部分" },
         existingReplay: { cat: "new", note: "驱动 state chip + CTA（Scanned/Shared）" },
         // --- place ---
+        gitRepo: { cat: "new", note: "可点 → github.com/<repo>（旧卡只是灰字）" },
         gitBranches: { cat: "new", note: "分支 +N 折叠（不再只显一条长名）" },
         // --- still-untapped opportunities ---
         lineCount: { cat: "todo", note: "可显示原始行数" },
