@@ -137,6 +137,51 @@ export function DataLevelBadge({
   );
 }
 
+/**
+ * Icon-only data-level indicator with a tooltip — used on session cards so the
+ * data-quality state reads as metadata next to the metrics it qualifies, rather
+ * than as a chip competing with the action buttons.
+ */
+export function DataLevelIcon({
+  state,
+  active = false,
+  scannedAtLabel,
+}: {
+  state: SessionDataState;
+  active?: boolean;
+  /** e.g. "3m" — appended to the tooltip when the scan time is known. */
+  scannedAtLabel?: string | null;
+}) {
+  const color =
+    state.level === "details"
+      ? "text-terminal-purple"
+      : state.level === "basic"
+        ? "text-terminal-dimmer"
+        : "text-terminal-green";
+  const title = `${state.label}${scannedAtLabel ? ` · scanned ${scannedAtLabel} ago` : ""}\n${state.description}${active ? "\nEnriching…" : ""}`;
+  return (
+    <span
+      title={title}
+      aria-label={`Data level: ${state.label}`}
+      className={`inline-flex items-center ${color} ${active ? "animate-pulse" : ""}`}
+    >
+      {/* stacked-layers glyph = data tiers */}
+      <svg
+        width="13"
+        height="13"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.3"
+      >
+        <path d="M8 1.5 1.5 5 8 8.5 14.5 5 8 1.5Z" />
+        <path d="M1.5 8 8 11.5 14.5 8" />
+        <path d="M1.5 11 8 14.5 14.5 11" />
+      </svg>
+    </span>
+  );
+}
+
 export function ReadinessRow({
   ready,
   label,

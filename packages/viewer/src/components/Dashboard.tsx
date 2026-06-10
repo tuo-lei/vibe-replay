@@ -50,6 +50,7 @@ import { ScanInsightsProvider, useScanInsightsContext } from "./InsightsPanel";
 import ProjectsPanel from "./ProjectsPanel";
 import {
   DataLevelBadge,
+  DataLevelIcon,
   hasEnrichedSourceDetails,
   hasPromptOrToolCounts,
   hasRichScanMetrics,
@@ -63,23 +64,31 @@ import { formatDuration } from "./StatsPanel";
 export type Tab = "home" | "sessions" | "replays" | "projects" | "insights";
 
 // Module-level cache for scan results (avoids re-fetching on every popup open)
-let scanResultsCache: SessionScanData[] | null = null;
-let scanResultsFetchPromise: Promise<SessionScanData[] | null> | null = null;
+interface ScanResultsPayload {
+  results: SessionScanData[] | null;
+  /** When the last full background scan finished (global, not per-session). */
+  finishedAt?: string;
+}
+let scanResultsCache: ScanResultsPayload | null = null;
+let scanResultsFetchPromise: Promise<ScanResultsPayload | null> | null = null;
 
-function fetchScanResults(): Promise<SessionScanData[] | null> {
+function fetchScanResults(): Promise<ScanResultsPayload | null> {
   if (scanResultsCache) return Promise.resolve(scanResultsCache);
   if (scanResultsFetchPromise) return scanResultsFetchPromise;
   scanResultsFetchPromise = fetch("/api/scan/results")
     .then((r) => (r.ok ? r.json() : null))
     .then((data) => {
-      const results = data?.results ?? null;
-      scanResultsCache = results;
+      const payload: ScanResultsPayload = {
+        results: data?.results ?? null,
+        finishedAt: data?.finishedAt,
+      };
+      scanResultsCache = payload;
       // Invalidate after 30s so fresh data can come in
       setTimeout(() => {
         scanResultsCache = null;
         scanResultsFetchPromise = null;
       }, 30_000);
-      return results;
+      return payload;
     })
     .catch(() => null);
   return scanResultsFetchPromise;
@@ -474,9 +483,9 @@ export function SessionDetailPopup({
     }
     let cancelled = false;
     setScanLoading(true);
-    fetchScanResults().then((results) => {
+    fetchScanResults().then((payload) => {
       if (cancelled) return;
-      const match = results?.find((r) => r.slug === s.slug);
+      const match = payload?.results?.find((r) => r.slug === s.slug);
       if (match) setScanData(match);
       setScanLoading(false);
     });
@@ -1612,6 +1621,7 @@ function FacetSection({
 function SessionsPanel() {
   const [sources, setSources] = useState<SourceSession[]>([]);
   const [scanResultsBySlug, setScanResultsBySlug] = useState<Record<string, SessionScanData>>({});
+  const [scanFinishedAt, setScanFinishedAt] = useState<string | null>(null);
   const [cleanupPeriodDays, setCleanupPeriodDays] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1762,11 +1772,12 @@ function SessionsPanel() {
     if (sources.length === 0) return;
     let cancelled = false;
     const loadScanResults = async () => {
-      const results = await fetchScanResults();
-      if (cancelled || !results) return;
+      const payload = await fetchScanResults();
+      if (cancelled || !payload?.results) return;
+      setScanFinishedAt(payload.finishedAt ?? null);
       setScanResultsBySlug(
         Object.fromEntries(
-          results.filter((result) => result.slug).map((result) => [result.slug!, result]),
+          payload.results.filter((result) => result.slug).map((result) => [result.slug!, result]),
         ),
       );
     };
@@ -2540,6 +2551,8 @@ function SessionsPanel() {
                   priorityEnrichmentSlugs.has(s.slug) &&
                   !hasRichScanMetrics(scanData);
                 const dataState = sessionDataState(s, scanData);
+                const scannedAtLabel =
+                  scanData && scanFinishedAt ? formatCompactAge(scanFinishedAt) : null;
                 const isArchived = archivedSlugs.has(s.slug);
                 const replaySlug = s.existingReplay || s.replay?.slug;
                 const projectLabel =
@@ -2740,63 +2753,62 @@ function SessionsPanel() {
                       )}
                     </div>
 
-                    {/* Row 4: activity — exact values, hairline-framed */}
-                    {(!!displayPromptCount ||
-                      !!displayToolCount ||
-                      !!displayDurationMs ||
-                      !!displayEditCount ||
-                      !!displayCost ||
-                      cleanRun) && (
-                      <div className="flex items-center gap-x-3.5 gap-y-1 flex-wrap text-xs font-mono tabular-nums py-2 border-y border-terminal-border-subtle">
-                        {!!displayDurationMs && (
-                          <span className="text-terminal-text" title="Active duration">
-                            {scanData?.durationMs == null ? "~" : ""}
-                            {formatDuration(displayDurationMs)}
+                    {/* Row 4: activity — exact values, hairline-framed. Leads with the
+                        data-level icon (replaces the old "Scanned" chip next to the CTAs). */}
+                    <div className="flex items-center gap-x-3.5 gap-y-1 flex-wrap text-xs font-mono tabular-nums py-2 border-y border-terminal-border-subtle">
+                      <DataLevelIcon
+                        state={dataState}
+                        active={isPriorityEnriching}
+                        scannedAtLabel={scannedAtLabel}
+                      />
+                      {!!displayDurationMs && (
+                        <span className="text-terminal-text" title="Active duration">
+                          {scanData?.durationMs == null ? "~" : ""}
+                          {formatDuration(displayDurationMs)}
+                        </span>
+                      )}
+                      {!!displayPromptCount && (
+                        <span className="text-terminal-text">
+                          {displayPromptCount}{" "}
+                          <span className="text-terminal-dimmer">
+                            prompt{displayPromptCount !== 1 ? "s" : ""}
                           </span>
-                        )}
-                        {!!displayPromptCount && (
-                          <span className="text-terminal-text">
-                            {displayPromptCount}{" "}
-                            <span className="text-terminal-dimmer">
-                              prompt{displayPromptCount !== 1 ? "s" : ""}
-                            </span>
-                          </span>
-                        )}
-                        {!!displayToolCount && (
-                          <span className="text-terminal-text">
-                            {displayToolCount} <span className="text-terminal-dimmer">tools</span>
-                          </span>
-                        )}
-                        {!!displayEditCount && (
-                          <span className="text-terminal-text" title="File edits">
-                            {scanData?.editCount == null ? "~" : ""}
-                            {displayEditCount} <span className="text-terminal-dimmer">edits</span>
-                          </span>
-                        )}
-                        {!!displayCost && (
-                          <span className="text-terminal-green" title={costTitle}>
-                            {formatCost(displayCost)}
-                          </span>
-                        )}
-                        {cleanRun ? (
+                        </span>
+                      )}
+                      {!!displayToolCount && (
+                        <span className="text-terminal-text">
+                          {displayToolCount} <span className="text-terminal-dimmer">tools</span>
+                        </span>
+                      )}
+                      {!!displayEditCount && (
+                        <span className="text-terminal-text" title="File edits">
+                          {scanData?.editCount == null ? "~" : ""}
+                          {displayEditCount} <span className="text-terminal-dimmer">edits</span>
+                        </span>
+                      )}
+                      {!!displayCost && (
+                        <span className="text-terminal-green" title={costTitle}>
+                          {formatCost(displayCost)}
+                        </span>
+                      )}
+                      {cleanRun ? (
+                        <span
+                          className="text-terminal-green"
+                          title={`No API errors${compactionCount === 0 ? " · no compactions" : ` · ${compactionCount} compaction(s)`}`}
+                        >
+                          ✓ clean
+                        </span>
+                      ) : (
+                        errorCount > 0 && (
                           <span
-                            className="text-terminal-green"
-                            title={`No API errors${compactionCount === 0 ? " · no compactions" : ` · ${compactionCount} compaction(s)`}`}
+                            className="text-terminal-red"
+                            title={`${errorCount} API error(s) during this session`}
                           >
-                            ✓ clean
+                            {errorCount} error{errorCount !== 1 ? "s" : ""}
                           </span>
-                        ) : (
-                          errorCount > 0 && (
-                            <span
-                              className="text-terminal-red"
-                              title={`${errorCount} API error(s) during this session`}
-                            >
-                              {errorCount} error{errorCount !== 1 ? "s" : ""}
-                            </span>
-                          )
-                        )}
-                      </div>
-                    )}
+                        )
+                      )}
+                    </div>
 
                     {/* Row 5: outcome facts (left) | state + CTAs (right) */}
                     <div className="flex items-end justify-between gap-3">
@@ -2880,7 +2892,6 @@ function SessionsPanel() {
                         )}
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
-                        <DataLevelBadge state={dataState} compact active={isPriorityEnriching} />
                         {s.sessionId && (
                           <button
                             onClick={(e) => {
