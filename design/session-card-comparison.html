@@ -52,7 +52,7 @@
         padding: 40px 24px 80px;
       }
       .page {
-        max-width: 1240px;
+        max-width: 880px;
         margin: 0 auto;
       }
       h1 {
@@ -66,15 +66,12 @@
         margin: 0 0 32px;
       }
       .cols {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 28px;
-        align-items: start;
+        display: flex;
+        flex-direction: column;
+        gap: 36px;
       }
-      @media (max-width: 900px) {
-        .cols {
-          grid-template-columns: 1fr;
-        }
+      .cols > div {
+        min-width: 0;
       }
       .col-head {
         display: flex;
@@ -265,6 +262,30 @@
         color: var(--sienna);
         font-weight: 600;
       }
+      /* leading provider icon, consistent with the filter's provider chips */
+      .prov-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        border-radius: 8px;
+        flex-shrink: 0;
+        margin-top: 1px;
+        background: var(--sienna-subtle);
+        color: var(--sienna);
+        box-shadow: inset 0 0 0 1px rgba(224, 122, 62, 0.2);
+      }
+      .prov-badge svg {
+        width: 15px;
+        height: 15px;
+      }
+      .title-lead {
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+        min-width: 0;
+      }
       .ctx .auto {
         color: var(--yellow);
         display: inline-flex;
@@ -274,6 +295,12 @@
       .ctx .when {
         margin-left: auto;
         color: var(--dimmer);
+      }
+      .when {
+        font-size: 11px;
+        font-family: var(--font-mono);
+        color: var(--dimmer);
+        white-space: nowrap;
       }
       .place {
         display: flex;
@@ -391,6 +418,62 @@
         font-size: 11px;
         font-family: var(--font-mono);
         color: var(--dim);
+      }
+      /* single stage chip replaces the 3-dot progress bar (word > abstract dots) */
+      .state-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 11px;
+        font-family: var(--font-mono);
+        padding: 3px 8px;
+        border-radius: 6px;
+        white-space: nowrap;
+      }
+      .state-chip::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+        opacity: 0.9;
+      }
+      .state-chip.scanned {
+        background: var(--surface-2);
+        color: var(--dimmer);
+      }
+      .state-chip.ready {
+        background: var(--green-subtle);
+        color: var(--green);
+      }
+      .state-chip.shared {
+        background: var(--purple-subtle);
+        color: var(--purple);
+      }
+      .btn-cta {
+        height: 30px;
+        padding: 0 12px;
+        font-size: 12.5px;
+        font-weight: 600;
+        border-radius: 7px;
+        border: none;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        font-family: var(--font-sans);
+      }
+      .btn-view {
+        background: var(--green-subtle);
+        color: var(--green);
+      }
+      .btn-share {
+        background: var(--purple-subtle);
+        color: var(--purple);
+      }
+      .btn-redo {
+        background: var(--blue-subtle);
+        color: var(--blue);
       }
       .btn-gen-new {
         height: 30px;
@@ -552,22 +635,23 @@
             <h2>重构提议</h2>
           </div>
           <div class="card new-stack">
-            <!-- Title + actions -->
+            <!-- Title + actions: provider icon leads the title (matches filter chips) -->
             <div style="display: flex; justify-content: space-between; gap: 12px; align-items: flex-start">
-              <p class="new-title">你babysit一下 PR #345，address comment，更新后自己 review 没问题就 merge</p>
-              <div style="display: flex; gap: 6px; flex-shrink: 0">
+              <div class="title-lead">
+                <span class="prov-badge" title="Claude Code · Opus 4.8 · ⚡ auto (auto-approve)" aria-label="Claude Code">
+                  <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z" />
+                  </svg>
+                </span>
+                <p class="new-title">你babysit一下 PR #345，address comment，更新后自己 review 没问题就 merge</p>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0">
+                <span class="when">aacad1c4 · 1m ago</span>
                 <button class="btn btn-more">⋯</button>
               </div>
             </div>
-            <!-- Context line: provider · model · mode · time -->
-            <div class="ctx">
-              <span class="prov">✳ Claude Code</span>
-              <span class="dot">·</span>
-              <span>Opus 4.8</span>
-              <span class="dot">·</span>
-              <span class="auto" title="auto-approve / autonomous run">⚡ auto</span>
-              <span class="when">aacad1c4 · 1m ago</span>
-            </div>
+            <!-- Prompt row(s): rendered here, deduped vs title. This session is
+                 fallback+single-prompt, so the only prompt == title → suppressed. -->
             <!-- Place line: project · branch(+more) · repo -->
             <div class="place">
               <span class="item"><span class="ico">📁</span> vibe-replay2</span>
@@ -598,22 +682,130 @@
                 🔗 PR #345 <span style="opacity: 0.7">↗</span>
               </a>
               <div class="lifecycle">
-                <div class="steps" title="Discovered → Scanned → Replay → Shared">
-                  <div class="step done"><span class="ball"></span><span class="bar"></span></div>
-                  <div class="step done"><span class="ball"></span><span class="bar"></span></div>
-                  <div class="step next"><span class="ball"></span></div>
-                </div>
+                <span class="state-chip scanned" title="Stats are scanned (exact, not estimated). No replay generated yet.">Scanned</span>
                 <button class="btn-gen-new">+ Generate</button>
               </div>
             </div>
           </div>
           <p class="note">
-            <span class="good">●</span> 标题<b>只出现一次</b>，prompt 去重，省一整行。<br />
+            <span class="good">●</span> 规则：<b>title 永远独立</b>（重命名的名字 / fallback 到首条 prompt），<b>仅当某条 prompt 与 title 逐字相同时才跳过那一条</b>。本例是 fallback+单 prompt → 恰好省一行；重命名或多 prompt 时 prompt 行照常显示（见下方第二个场景）。<br />
             <span class="good">●</span> 四个语义区：<b>识别 / 上下文(provider·model·mode) / 地点(项目·分支·repo) / 活动</b>。<br />
             <span class="good">●</span> Scanned 后用<b>精确值</b>，去掉假波浪号；活动行用细线框出，数字对齐。<br />
             <span class="good">●</span> <b>PR #345 可点跳转</b>；<code>⚡auto</code> 暖色提示自主运行；<code>✓ clean</code> = 0 报错。<br />
             <span class="good">●</span> 右下<b>三段进度条</b>取代 [Scanned][No replay]，亮蓝点 = 下一步动作。<br />
+            <span class="good">●</span> <b>model + mode 收进 provider 图标 tooltip</b>（hover 左上角图标可见），卡面只留判断"值不值得生成"的关键信号。<br />
             <span class="good">●</span> cost hover 展开 <code>999K cache read</code> 成本构成。
+          </p>
+
+          <!-- ============ NEW · scenario 2: renamed + multi-prompt ============ -->
+          <div class="col-head" style="margin-top: 28px">
+            <span class="tag new">PROPOSED</span>
+            <h2>场景二 · 重命名 + 多 prompt（证明布局不塌）</h2>
+          </div>
+          <div class="card new-stack">
+            <div style="display: flex; justify-content: space-between; gap: 12px; align-items: flex-start">
+              <div class="title-lead">
+                <span class="prov-badge" title="Claude Code · Opus 4.8 · ⚡ auto (auto-approve)" aria-label="Claude Code">
+                  <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z" />
+                  </svg>
+                </span>
+                <p class="new-title">Redesign session card 🎨</p>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0">
+                <span class="when">aacad1c4 · 1m ago</span>
+                <button class="btn btn-more">⋯</button>
+              </div>
+            </div>
+            <!-- title was renamed → distinct from prompts, so prompts render below -->
+            <div class="prompt">
+              <span class="gt">&gt;</span>
+              <p style="color: var(--dim)">你babysit一下 PR #345，address comment，更新后自己 review 没问题就 merge</p>
+            </div>
+            <div class="prompt">
+              <span class="gt">&gt;</span>
+              <p style="color: var(--dim)">顺便把活动行的图标换成更细的 lucide 风格</p>
+            </div>
+            <div class="place">
+              <span class="item"><span class="ico">📁</span> vibe-replay2</span>
+              <span class="item"><span class="ico">⎇</span> auto-quality/…stub <span class="more">+2</span></span>
+              <span class="item"><span class="ico">⧉</span> tuo-lei/vibe-replay</span>
+            </div>
+            <div class="activity">
+              <span class="stat"><span class="ico">⏱</span> 4m15s</span>
+              <span class="stat">💬 2 <span class="lbl">prompts</span></span>
+              <span class="stat">🔧 29 <span class="lbl">tools</span></span>
+              <span class="stat">✎ 5 <span class="lbl">files</span></span>
+              <span class="stat cost"><span class="cost-wrap">$2.86<span class="tip"><b>999K</b> cache read · <b>32K</b> cache write<br />7.7K in · 8.7K out</span></span></span>
+              <span class="stat ok" title="0 API errors · 0 compactions">✓ clean</span>
+            </div>
+            <div class="footer">
+              <a class="pr-link" href="https://github.com/tuo-lei/vibe-replay/pull/345" target="_blank">
+                🔗 PR #345 <span style="opacity: 0.7">↗</span>
+              </a>
+              <div class="lifecycle">
+                <span class="state-chip scanned" title="Stats are scanned (exact). No replay generated yet.">Scanned</span>
+                <button class="btn-gen-new">+ Generate</button>
+              </div>
+            </div>
+          </div>
+          <p class="note">
+            <span class="good">●</span> title 是用户<b>重命名</b>的名字（"Redesign session card 🎨"），和 prompt 不同 → 两条 prompt <b>照常显示</b>，布局稳。<br />
+            <span class="good">●</span> 同样的 provider 图标 + tooltip + 活动行 + footer，结构在两种场景下完全一致。
+          </p>
+
+          <!-- ============ NEW · scenario 3: REPLAY state (different CTA) ============ -->
+          <div class="col-head" style="margin-top: 28px">
+            <span class="tag new">PROPOSED</span>
+            <h2>场景三 · 已生成 replay（CTA 变 View/Share/Redo，同一套布局）</h2>
+          </div>
+          <div class="card new-stack">
+            <div style="display: flex; justify-content: space-between; gap: 12px; align-items: flex-start">
+              <div class="title-lead">
+                <span class="prov-badge" title="Claude Code · Opus 4.8 · ⚡ auto (auto-approve)" aria-label="Claude Code">
+                  <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z" />
+                  </svg>
+                </span>
+                <p class="new-title">你babysit一下 PR #345，address comment，更新后自己 review 没问题就 merge</p>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0">
+                <span class="when">aacad1c4 · 1m ago</span>
+                <button class="btn btn-more">⋯</button>
+              </div>
+            </div>
+            <div class="place">
+              <span class="item"><span class="ico">📁</span> vibe-replay2</span>
+              <span class="item"><span class="ico">⎇</span> auto-quality/…stub <span class="more">+2</span></span>
+              <span class="item"><span class="ico">⧉</span> tuo-lei/vibe-replay</span>
+            </div>
+            <div class="activity">
+              <span class="stat"><span class="ico">⏱</span> 4m15s</span>
+              <span class="stat">💬 1 <span class="lbl">prompt</span></span>
+              <span class="stat">🔧 29 <span class="lbl">tools</span></span>
+              <span class="stat">✎ 5 <span class="lbl">files</span></span>
+              <span class="stat cost"><span class="cost-wrap">$2.86<span class="tip"><b>999K</b> cache read · <b>32K</b> cache write<br />7.7K in · 8.7K out</span></span></span>
+              <span class="stat ok" title="0 API errors · 0 compactions">✓ clean</span>
+            </div>
+            <div class="footer">
+              <a class="pr-link" href="https://github.com/tuo-lei/vibe-replay/pull/345" target="_blank">
+                🔗 PR #345 <span style="opacity: 0.7">↗</span>
+              </a>
+              <div class="lifecycle">
+                <span class="state-chip shared" title="Replay generated and shared (gist/cloud live)">Live</span>
+                <button class="btn-cta btn-view">
+                  <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><polygon points="4 2 14 8 4 14" /></svg>
+                  View
+                </button>
+                <button class="btn-cta btn-share">Share</button>
+                <button class="btn-cta btn-redo">Redo</button>
+              </div>
+            </div>
+          </div>
+          <p class="note">
+            <span class="good">●</span> 完全相同的卡片骨架——只有右下角 <b>state chip + CTA 集群</b>随状态切换：<br />
+            &nbsp;&nbsp;&nbsp;<code>Scanned</code> + <code>Generate</code> → <code>Live</code> + <code>View / Share / Redo</code>。<br />
+            <span class="good">●</span> <b>去掉了进度条</b>：CTA 已经表达了"下一步"，进度条会和它抢语义、反而 confuse。状态用<b>一个带颜色的词</b>（灰 Scanned / 绿 Replay / 紫 Live）就够，比抽象圆点直观。
           </p>
         </div>
       </div>
