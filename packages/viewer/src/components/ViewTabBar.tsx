@@ -65,7 +65,7 @@ export default function ViewTabBar({
           <button
             key={key}
             onClick={() => handleChange(key)}
-            className={`relative px-4 py-2 text-[11px] font-sans font-semibold uppercase tracking-widest transition-colors ${
+            className={`ui-section-title relative px-4 py-2 transition-colors ${
               activeView === key
                 ? "text-terminal-green border-b-2 border-terminal-green bg-terminal-surface/50"
                 : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"

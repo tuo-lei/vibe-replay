@@ -1477,7 +1477,7 @@ function ActiveFilterChip({
   return (
     <button
       onClick={onRemove}
-      className="inline-flex items-center gap-1.5 rounded-full bg-terminal-surface text-xs font-mono text-terminal-dim ring-1 ring-terminal-border-subtle pl-2.5 pr-2 py-1 hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors"
+      className="ui-pill rounded-full bg-terminal-surface text-terminal-dim ring-1 ring-terminal-border-subtle pl-2.5 pr-2 py-1 hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors"
       title={`Remove ${label}: ${value}`}
     >
       <span className="text-terminal-dimmer">{label}</span>
@@ -1491,9 +1491,7 @@ function FacetHeader({ title, count }: { title: string; count?: number }) {
   return (
     <div className="mb-2 px-3 pt-0.5">
       <div className="flex items-baseline gap-2 min-w-0">
-        <span className="text-xs font-sans font-bold uppercase tracking-wider text-terminal-text truncate">
-          {title}
-        </span>
+        <span className="ui-section-title-strong truncate">{title}</span>
         {count != null && (
           <span className="text-[10px] font-mono tabular-nums text-terminal-dimmer shrink-0">
             {count}
@@ -1564,7 +1562,7 @@ function FacetSection({
       {entries.length > max && !expanded && (
         <button
           onClick={() => setExpanded(true)}
-          className="w-full rounded-md px-3 py-1.5 text-left text-[10px] font-mono text-terminal-dimmer hover:text-terminal-text hover:bg-terminal-surface transition-colors"
+          className="w-full rounded-md px-3 py-1.5 text-left ui-caption-muted hover:text-terminal-text hover:bg-terminal-surface transition-colors"
         >
           Show {entries.length - max} more
         </button>
@@ -1572,7 +1570,7 @@ function FacetSection({
       {entries.length > max && expanded && (
         <button
           onClick={() => setExpanded(false)}
-          className="w-full rounded-md px-3 py-1.5 text-left text-[10px] font-mono text-terminal-dimmer hover:text-terminal-text hover:bg-terminal-surface transition-colors"
+          className="w-full rounded-md px-3 py-1.5 text-left ui-caption-muted hover:text-terminal-text hover:bg-terminal-surface transition-colors"
         >
           Show fewer
         </button>
@@ -2637,11 +2635,11 @@ function SessionsPanel() {
                     {/* Row 3: identity */}
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <ProviderBadge provider={s.provider} />
-                      <span className="text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim">
+                      <span className="ui-pill bg-terminal-surface-2 text-terminal-dim">
                         {providerDisplayName(s.provider)}
                       </span>
                       <span
-                        className={`text-xs font-mono px-1.5 py-0.5 rounded-md ${
+                        className={`ui-pill font-mono ${
                           s.gitRepo
                             ? "bg-terminal-surface-2 text-terminal-dim"
                             : "bg-terminal-surface-2 text-terminal-dimmer"
@@ -2651,13 +2649,13 @@ function SessionsPanel() {
                         {repoFilterLabel(repoFilterValue(s))}
                       </span>
                       <span
-                        className="text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim max-w-[260px] truncate"
+                        className="ui-pill font-mono bg-terminal-surface-2 text-terminal-dim max-w-[260px] truncate"
                         title={s.project}
                       >
                         {projectLabel}
                       </span>
                       {branch && (
-                        <span className="text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim shrink-0 inline-flex items-center gap-0.5">
+                        <span className="ui-pill font-mono bg-terminal-surface-2 text-terminal-dim shrink-0 gap-0.5">
                           <svg
                             width="10"
                             height="10"
@@ -2674,13 +2672,13 @@ function SessionsPanel() {
                         </span>
                       )}
                       {displayModel && (
-                        <span className="text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dimmer">
+                        <span className="ui-pill font-mono bg-terminal-surface-2 text-terminal-dimmer">
                           {shortModelName(displayModel)}
                         </span>
                       )}
                       {isWorktree && (
                         <span
-                          className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple shrink-0 uppercase tracking-wider"
+                          className="ui-pill-compact bg-terminal-purple-subtle text-terminal-purple shrink-0"
                           title={`Agent worktree: ${s.project}`}
                         >
                           worktree
@@ -2691,15 +2689,12 @@ function SessionsPanel() {
                     {/* Row 4: data/replay state */}
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <DataLevelBadge state={dataState} compact active={isPriorityEnriching} />
-                      <span
-                        className={`text-xs font-mono px-1.5 py-0.5 rounded-md ${replay.className}`}
-                        title={replay.title}
-                      >
+                      <span className={`ui-pill ${replay.className}`} title={replay.title}>
                         {replay.label}
                       </span>
                       {(s.hasSqlite || s.hasSdk || scanData?.dataSource) && (
                         <span
-                          className={`text-xs font-mono px-1.5 py-0.5 rounded-md ${dataSourceBadgeClass(scanData?.dataSource, s.hasSqlite, s.hasSdk)}`}
+                          className={`ui-pill ${dataSourceBadgeClass(scanData?.dataSource, s.hasSqlite, s.hasSdk)}`}
                           title={dataSourceLabel}
                         >
                           {dataSourceLabel}
@@ -2707,7 +2702,7 @@ function SessionsPanel() {
                       )}
                       {s.spaceId && (
                         <span
-                          className="text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dimmer"
+                          className="ui-pill font-mono bg-terminal-surface-2 text-terminal-dimmer"
                           title={
                             s.spaceIdSetBy
                               ? `Cowork space ${s.spaceId} (${s.spaceIdSetBy})`
@@ -2719,7 +2714,7 @@ function SessionsPanel() {
                       )}
                       {s.pluginsEnabled && (
                         <span
-                          className="text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dimmer"
+                          className="ui-pill bg-terminal-surface-2 text-terminal-dimmer"
                           title="Claude Cowork plugins enabled"
                         >
                           plugins
@@ -2727,7 +2722,7 @@ function SessionsPanel() {
                       )}
                       {s.skillsEnabled && (
                         <span
-                          className="text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dimmer"
+                          className="ui-pill bg-terminal-surface-2 text-terminal-dimmer"
                           title="Claude Cowork skills enabled"
                         >
                           skills
@@ -2747,18 +2742,18 @@ function SessionsPanel() {
                       (s.expiresInDays != null && s.expiresInDays <= EXPIRY_WARN_DAYS)) && (
                       <div className="flex items-center gap-1.5 flex-wrap">
                         {!!displayPromptCount && (
-                          <span className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim">
+                          <span className="ui-pill font-mono tabular-nums bg-terminal-surface-2 text-terminal-dim">
                             {displayPromptCount} prompts
                           </span>
                         )}
                         {!!displayToolCount && (
-                          <span className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-orange-subtle text-terminal-orange">
+                          <span className="ui-pill font-mono tabular-nums bg-terminal-orange-subtle text-terminal-orange">
                             {displayToolCount} tools
                           </span>
                         )}
                         {!!displayDurationMs && (
                           <span
-                            className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim"
+                            className="ui-pill font-mono tabular-nums bg-terminal-surface-2 text-terminal-dim"
                             title="Estimated active duration"
                           >
                             ~{formatDuration(displayDurationMs)}
@@ -2766,20 +2761,20 @@ function SessionsPanel() {
                         )}
                         {!!displayEditCount && (
                           <span
-                            className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim"
+                            className="ui-pill font-mono tabular-nums bg-terminal-surface-2 text-terminal-dim"
                             title="Estimated file edits"
                           >
                             ~{displayEditCount} edits
                           </span>
                         )}
                         {!!displayCost && (
-                          <span className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-green-subtle text-terminal-green">
+                          <span className="ui-pill font-mono tabular-nums bg-terminal-green-subtle text-terminal-green">
                             {formatCost(displayCost)}
                           </span>
                         )}
                         {s.hasPR && (
                           <span
-                            className="inline-flex items-center gap-1 text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-purple-subtle text-terminal-purple"
+                            className="ui-pill bg-terminal-purple-subtle text-terminal-purple"
                             title="Session produced a PR"
                           >
                             PR
@@ -2787,7 +2782,7 @@ function SessionsPanel() {
                         )}
                         {s.isStarred && (
                           <span
-                            className="inline-flex items-center gap-1 text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-orange-subtle text-terminal-orange"
+                            className="ui-pill bg-terminal-orange-subtle text-terminal-orange"
                             title="Starred in Claude Cowork"
                           >
                             starred
@@ -2795,7 +2790,7 @@ function SessionsPanel() {
                         )}
                         {s.fsDetectedFiles && s.fsDetectedFiles.length > 0 && (
                           <span
-                            className="inline-flex items-center gap-1 text-xs font-mono px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim"
+                            className="ui-pill font-mono tabular-nums bg-terminal-surface-2 text-terminal-dim"
                             title={s.fsDetectedFiles.join("\n")}
                           >
                             {s.fsDetectedFiles.length} files
@@ -2803,7 +2798,7 @@ function SessionsPanel() {
                         )}
                         {s.expiresInDays != null && s.expiresInDays <= EXPIRY_WARN_DAYS && (
                           <span
-                            className={`inline-flex items-center gap-1 text-xs font-mono px-1.5 py-0.5 rounded-md ${
+                            className={`ui-pill ${
                               s.expiresInDays <= 2
                                 ? "bg-terminal-red-subtle text-terminal-red"
                                 : "bg-terminal-orange-subtle text-terminal-orange"
@@ -2818,11 +2813,11 @@ function SessionsPanel() {
                       </div>
                     )}
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dimmer">
+                      <span className="ui-pill font-mono tabular-nums bg-terminal-surface-2 text-terminal-dimmer">
                         {formatSize(s.fileSize)}
                       </span>
                       {s.filePaths.length > 1 && (
-                        <span className="text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dimmer">
+                        <span className="ui-pill font-mono tabular-nums bg-terminal-surface-2 text-terminal-dimmer">
                           {s.filePaths.length} parts
                         </span>
                       )}

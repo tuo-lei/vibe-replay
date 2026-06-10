@@ -536,7 +536,7 @@ export default function Player({
                 {overlayActions.overlayCount > 0 && (
                   <button
                     onClick={() => overlayActions.toggleAllOriginals()}
-                    className="hidden md:flex items-center gap-2 text-xs font-mono text-terminal-dim"
+                    className="ui-meta hidden md:flex items-center gap-2"
                     title={
                       overlayActions.showAllOriginals
                         ? "Showing originals — click to show modified"
@@ -565,7 +565,7 @@ export default function Player({
                 {/* Comments — desktop: full button, mobile: icon only */}
                 <button
                   onClick={() => setCommentDrawerOpen(true)}
-                  className="hidden md:flex items-center gap-1.5 text-xs font-mono font-semibold text-terminal-text hover:text-terminal-green transition-colors"
+                  className="ui-meta-strong hidden md:flex items-center gap-1.5 hover:text-terminal-green transition-colors"
                   title="Open comments"
                 >
                   <svg
@@ -618,7 +618,7 @@ export default function Player({
                 {hasAiStudio && (
                   <button
                     onClick={() => setStudioDrawerOpen(true)}
-                    className="hidden md:flex pl-2 pr-3 py-1 text-[11px] font-mono rounded bg-[rgba(168,85,247,0.1)] hover:bg-[rgba(168,85,247,0.2)] border border-[rgba(168,85,247,0.3)] hover:border-[rgba(168,85,247,0.5)] text-terminal-purple transition-all items-center gap-1.5 relative overflow-hidden group shadow-sm"
+                    className="ui-pill-compact hidden md:flex pl-2 pr-3 rounded bg-[rgba(168,85,247,0.1)] hover:bg-[rgba(168,85,247,0.2)] border border-[rgba(168,85,247,0.3)] hover:border-[rgba(168,85,247,0.5)] text-terminal-purple transition-all relative overflow-hidden group shadow-sm"
                   >
                     <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
                     <svg
@@ -635,7 +635,7 @@ export default function Player({
                     >
                       <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
                     </svg>
-                    <span className="font-semibold tracking-wide">AI Studio</span>
+                    <span className="font-semibold">AI Studio</span>
                     {(hasAiFeedback || overlayActions.overlayCount > 0) && (
                       <span className="relative flex h-1.5 w-1.5">
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-terminal-purple opacity-75" />
@@ -660,9 +660,7 @@ export default function Player({
                   <div className="flex-1 overflow-y-auto min-h-0">
                     {/* Sidebar Header */}
                     <div className="px-3 py-2 border-b border-terminal-border-subtle flex items-center justify-between group/side">
-                      <span className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest">
-                        Outline
-                      </span>
+                      <span className="ui-section-title">Outline</span>
                       <button
                         onClick={() => setIsOutlineOpen(false)}
                         className="p-1 rounded hover:bg-terminal-surface text-terminal-dimmer hover:text-terminal-text transition-colors"
@@ -697,7 +695,7 @@ export default function Player({
                     <div className="px-3 py-2 border-b border-terminal-border-subtle">
                       <button
                         onClick={() => setActiveView("summary")}
-                        className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest hover:text-terminal-green transition-colors"
+                        className="ui-section-title hover:text-terminal-green transition-colors"
                         title="Open Insights view"
                       >
                         Stats
@@ -915,7 +913,7 @@ export default function Player({
           <div className="flex border-b border-terminal-border-subtle shrink-0">
             <button
               onClick={() => setMobileDrawerTab("outline")}
-              className={`flex-1 px-3 py-2.5 text-[10px] font-sans font-semibold uppercase tracking-widest transition-colors ${
+              className={`ui-section-title flex-1 px-3 py-2.5 transition-colors ${
                 mobileDrawerTab === "outline"
                   ? "text-terminal-green border-b-2 border-terminal-green"
                   : "text-terminal-dim hover:text-terminal-text"
@@ -925,7 +923,7 @@ export default function Player({
             </button>
             <button
               onClick={() => setMobileDrawerTab("comments")}
-              className={`flex-1 px-3 py-2.5 text-[10px] font-sans font-semibold uppercase tracking-widest transition-colors ${
+              className={`ui-section-title flex-1 px-3 py-2.5 transition-colors ${
                 mobileDrawerTab === "comments"
                   ? "text-terminal-green border-b-2 border-terminal-green"
                   : "text-terminal-dim hover:text-terminal-text"

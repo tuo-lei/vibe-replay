@@ -42,9 +42,7 @@ type Status = { type: "success" | "error"; text: string } | null;
 function SectionHeader({ title, color }: { title: string; color: string }) {
   return (
     <div className="flex items-center gap-3 mb-4">
-      <span className={`text-[10px] font-sans font-semibold uppercase tracking-widest ${color}`}>
-        {title}
-      </span>
+      <span className={`ui-section-title ${color}`}>{title}</span>
       <div className="flex-1 h-px bg-terminal-border-subtle" />
     </div>
   );
@@ -59,7 +57,7 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
       }}
-      className="text-[10px] font-mono text-terminal-dim hover:text-terminal-text transition-colors px-1.5 py-0.5 rounded bg-terminal-surface hover:bg-terminal-surface-hover border border-terminal-border-subtle"
+      className="ui-pill-compact text-terminal-dim hover:text-terminal-text transition-colors rounded bg-terminal-surface hover:bg-terminal-surface-hover border border-terminal-border-subtle"
       title="Copy to clipboard"
     >
       {copied ? "Copied!" : label || "Copy"}
@@ -575,14 +573,12 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
 
   if (readOnly) {
     return (
-      <div className="p-6 text-center text-xs font-mono text-terminal-dim">
-        Export is not available in read-only mode
-      </div>
+      <div className="p-6 text-center ui-caption">Export is not available in read-only mode</div>
     );
   }
 
   const btnBase =
-    "px-4 py-2 text-xs font-mono rounded-lg transition-colors text-center disabled:opacity-50 shrink-0";
+    "px-4 py-2 text-xs font-sans font-semibold rounded-lg transition-colors text-center disabled:opacity-50 shrink-0";
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -595,14 +591,14 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                 {session.meta.title || session.meta.slug}
               </h2>
               {session.meta.provider && (
-                <span className="shrink-0 text-[10px] font-mono text-terminal-dimmer px-1.5 py-0.5 rounded bg-terminal-surface border border-terminal-border-subtle">
+                <span className="ui-pill-compact shrink-0 text-terminal-dimmer bg-terminal-surface border border-terminal-border-subtle">
                   {session.meta.provider}
                 </span>
               )}
             </div>
           )}
           {hasUnsaved && (
-            <div className="text-xs font-mono text-terminal-orange text-center mb-5 px-3 py-2 rounded-lg bg-terminal-orange-subtle border border-terminal-orange/20">
+            <div className="ui-caption text-terminal-orange text-center mb-5 px-3 py-2 rounded-lg bg-terminal-orange-subtle border border-terminal-orange/20">
               You have unsaved annotation changes
             </div>
           )}
@@ -639,7 +635,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                           <span className="text-xs font-sans font-bold text-terminal-purple">
                             Cloud Share
                           </span>
-                          <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md bg-terminal-purple-subtle text-terminal-purple">
+                          <span className="ui-pill-compact font-semibold px-2 bg-terminal-purple-subtle text-terminal-purple">
                             Private
                           </span>
                         </div>
@@ -659,7 +655,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                           <span className="text-xs font-sans font-bold text-terminal-dim">
                             GitHub Gist
                           </span>
-                          <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dimmer">
+                          <span className="ui-pill-compact font-semibold px-2 bg-terminal-surface-2 text-terminal-dimmer">
                             Public
                           </span>
                         </div>
@@ -1021,7 +1017,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
                         <span className="text-sm font-mono font-semibold text-terminal-dim">
                           GitHub Gist
                         </span>
-                        <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dimmer">
+                        <span className="ui-pill-compact font-semibold px-2 bg-terminal-surface-2 text-terminal-dimmer">
                           Public
                         </span>
                       </div>
