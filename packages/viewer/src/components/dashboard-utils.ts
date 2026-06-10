@@ -457,12 +457,13 @@ export function navigateToLive(provider: string, sessionId: string) {
 
 // ─── Shared UI helpers ────────────────────────────────────────────────
 
-// All Claude sources (CLI, Desktop Code tab, Desktop Cowork) share the same
-// orange tint so they read as one family. Labels differentiate the sub-kind.
+// The three Claude sources stay in the same warm color family but each gets a
+// distinct hue so they're tellable apart at icon size: Code = orange (the
+// signature tint), Cowork = amber (redder), Desktop = yellow (brighter).
 export const PROVIDER_BADGE_COLORS: Record<string, string> = {
   "claude-code": "bg-terminal-orange-subtle text-terminal-orange",
-  "claude-desktop": "bg-terminal-orange-subtle text-terminal-orange",
-  "claude-cowork": "bg-terminal-orange-subtle text-terminal-orange",
+  "claude-desktop": "bg-terminal-yellow-subtle text-terminal-yellow",
+  "claude-cowork": "bg-terminal-amber-subtle text-terminal-amber",
   codex: "bg-terminal-purple-subtle text-terminal-purple",
   cursor: "bg-terminal-blue-subtle text-terminal-blue",
   pi: "bg-terminal-cyan-subtle text-terminal-cyan",
@@ -489,11 +490,11 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
 };
 
 // Solid (non-subtle) bar colors used by the provider breakdown bar chart.
-// Keep the Claude family on the orange family so it reads as one group.
+// Mirror the badge hues so the Claude sub-kinds stay distinguishable here too.
 const PROVIDER_BAR_COLORS: Record<string, string> = {
   "claude-code": "bg-terminal-orange",
-  "claude-desktop": "bg-terminal-orange",
-  "claude-cowork": "bg-terminal-orange",
+  "claude-desktop": "bg-terminal-yellow",
+  "claude-cowork": "bg-terminal-amber",
   codex: "bg-terminal-purple",
   cursor: "bg-terminal-blue",
   pi: "bg-terminal-cyan",
@@ -502,16 +503,21 @@ const PROVIDER_BAR_COLORS: Record<string, string> = {
 // Provider "color family" for home-page chip UI that composes several tint
 // variants together (bg/8, text/80, text, dot). Returning the token name keeps
 // Tailwind's static-class extraction happy and avoids template-string bugs.
-const PROVIDER_FAMILY: Record<string, "orange" | "blue" | "purple" | "cyan" | "dim"> = {
+const PROVIDER_FAMILY: Record<
+  string,
+  "orange" | "amber" | "yellow" | "blue" | "purple" | "cyan" | "dim"
+> = {
   "claude-code": "orange",
-  "claude-desktop": "orange",
-  "claude-cowork": "orange",
+  "claude-desktop": "yellow",
+  "claude-cowork": "amber",
   codex: "purple",
   cursor: "blue",
   pi: "cyan",
 };
 
-export function providerFamily(provider: string): "orange" | "blue" | "purple" | "cyan" | "dim" {
+export function providerFamily(
+  provider: string,
+): "orange" | "amber" | "yellow" | "blue" | "purple" | "cyan" | "dim" {
   return PROVIDER_FAMILY[provider] || "dim";
 }
 
