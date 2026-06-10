@@ -15,7 +15,13 @@ export interface AnnotationActions {
   annotations: Annotation[];
   annotatedScenes: Set<number>;
   annotationCounts: Map<number, number>;
-  add: (sceneIndex: number, body: string) => void;
+  add: (
+    sceneIndex: number,
+    body: string,
+    selectedText?: string,
+    selectedTextStart?: number,
+    selectedTextEnd?: number,
+  ) => void;
   update: (id: string, body: string) => void;
   remove: (id: string) => void;
   hasUnsaved: boolean;
@@ -137,9 +143,28 @@ export function useAnnotations(
 
   const annotationCounts = useMemo(() => computeAnnotationCounts(annotations), [annotations]);
 
-  const add = useCallback((sceneIndex: number, body: string) => {
-    setAnnotations((prev) => addAnnotation(prev, sceneIndex, body));
-  }, []);
+  const add = useCallback(
+    (
+      sceneIndex: number,
+      body: string,
+      selectedText?: string,
+      selectedTextStart?: number,
+      selectedTextEnd?: number,
+    ) => {
+      setAnnotations((prev) =>
+        addAnnotation(
+          prev,
+          sceneIndex,
+          body,
+          undefined,
+          selectedText,
+          selectedTextStart,
+          selectedTextEnd,
+        ),
+      );
+    },
+    [],
+  );
 
   const update = useCallback((id: string, body: string) => {
     setAnnotations((prev) => updateAnnotation(prev, id, body));

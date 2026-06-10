@@ -4,7 +4,7 @@ import { useOverlays } from "../hooks/useOverlays";
 import { usePlayback } from "../hooks/usePlayback";
 import type { LiveStatus, ViewerMode } from "../hooks/useSessionLoader";
 import { getEffectivePrefs, type ViewPrefs } from "../hooks/useViewPrefs";
-import type { ReplaySession } from "../types";
+import type { ReplaySession, Scene } from "../types";
 import AiStudioDrawer from "./AiStudioDrawer";
 import AnnotationPanel from "./AnnotationPanel";
 import CommentDrawer from "./CommentDrawer";
@@ -40,6 +40,84 @@ function flashJumpTarget(el: HTMLElement) {
   window.setTimeout(() => {
     el.classList.remove("jump-target-flash");
   }, 900);
+}
+
+interface CommentTarget {
+  sceneIndex: number;
+  selectedText?: string;
+  selectedTextStart?: number;
+  selectedTextEnd?: number;
+}
+
+interface SelectionAnnotatePrompt extends CommentTarget {
+  top: number;
+  left: number;
+}
+
+function getElementFromSelectionNode(node: Node): HTMLElement | null {
+  return node instanceof HTMLElement ? node : node.parentElement;
+}
+
+function getSceneElementForNode(node: Node): HTMLElement | null {
+  return getElementFromSelectionNode(node)?.closest("[data-scene-index]") ?? null;
+}
+
+function getRangeRect(range: Range): DOMRect | null {
+  const direct = range.getBoundingClientRect();
+  if (direct.width > 0 || direct.height > 0) return direct;
+  return range.getClientRects()[0] ?? null;
+}
+
+function normalizeSelectedText(text: string): string {
+  return text
+    .replace(/\s+\n/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .trim();
+}
+
+function getAnnotatableSceneContent(scene: Scene): string | null {
+  switch (scene.type) {
+    case "user-prompt":
+    case "compaction-summary":
+    case "context-injection":
+    case "thinking":
+    case "text-response":
+      return scene.content;
+    case "tool-call":
+      return null;
+  }
+}
+
+function getDomSelectionStartOffset(sceneElement: HTMLElement, range: Range): number {
+  const preRange = document.createRange();
+  preRange.selectNodeContents(sceneElement);
+  preRange.setEnd(range.startContainer, range.startOffset);
+  return normalizeSelectedText(preRange.toString()).length;
+}
+
+function findSourceTextRange(
+  content: string | null,
+  selectedText: string,
+  approximateStart: number,
+): { start: number; end: number } | null {
+  if (!content) return null;
+
+  let bestStart = -1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  let searchFrom = 0;
+  while (searchFrom <= content.length) {
+    const candidate = content.indexOf(selectedText, searchFrom);
+    if (candidate < 0) break;
+    const distance = Math.abs(candidate - approximateStart);
+    if (distance < bestDistance) {
+      bestStart = candidate;
+      bestDistance = distance;
+    }
+    searchFrom = candidate + selectedText.length;
+  }
+
+  if (bestStart < 0) return null;
+  return { start: bestStart, end: bestStart + selectedText.length };
 }
 
 export default function Player({
@@ -78,7 +156,10 @@ export default function Player({
   const [navFocusIndex, setNavFocusIndex] = useState<number | undefined>(undefined);
   const [commentDrawerOpen, setCommentDrawerOpen] = useState(false);
   const [studioDrawerOpen, setStudioDrawerOpen] = useState(false);
-  const [commentTargetScene, setCommentTargetScene] = useState<number | null>(null);
+  const [commentTarget, setCommentTarget] = useState<CommentTarget | null>(null);
+  const [focusedAnnotationId, setFocusedAnnotationId] = useState<string | null>(null);
+  const [selectionAnnotatePrompt, setSelectionAnnotatePrompt] =
+    useState<SelectionAnnotatePrompt | null>(null);
   const [isOutlineOpen, setIsOutlineOpen] = useState(true);
   const annotationActions = useAnnotations(session, viewerMode);
   const overlayActions = useOverlays(session, viewerMode);
@@ -117,6 +198,92 @@ export default function Player({
   // Flag to suppress auto-scroll when scene advance comes from scroll-to-reveal
   const scrollRevealRef = useRef(false);
   const [showHelp, setShowHelp] = useState(false);
+
+  const updateSelectionAnnotatePrompt = useCallback(() => {
+    if (isReadOnly || activeView !== "replay") {
+      setSelectionAnnotatePrompt(null);
+      return;
+    }
+
+    const selection = window.getSelection();
+    const container = scrollRef.current;
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed || !container) {
+      setSelectionAnnotatePrompt(null);
+      return;
+    }
+
+    const range = selection.getRangeAt(0);
+    const startScene = getSceneElementForNode(range.startContainer);
+    const endScene = getSceneElementForNode(range.endContainer);
+    if (!startScene || !endScene || startScene !== endScene || !container.contains(startScene)) {
+      setSelectionAnnotatePrompt(null);
+      return;
+    }
+
+    const rawText = normalizeSelectedText(selection.toString());
+    if (!rawText) {
+      setSelectionAnnotatePrompt(null);
+      return;
+    }
+
+    const sceneIndex = Number(startScene.dataset.sceneIndex);
+    const rect = getRangeRect(range);
+    if (!Number.isFinite(sceneIndex) || !rect) {
+      setSelectionAnnotatePrompt(null);
+      return;
+    }
+
+    const selectedText =
+      rawText.length > 4_000 ? `${rawText.slice(0, 4_000).trimEnd()}...` : rawText;
+    const sceneContent = getAnnotatableSceneContent(session.scenes[sceneIndex]);
+    const sourceRange =
+      selectedText === rawText
+        ? findSourceTextRange(
+            sceneContent,
+            selectedText,
+            getDomSelectionStartOffset(startScene, range),
+          )
+        : null;
+    setSelectionAnnotatePrompt({
+      sceneIndex,
+      selectedText,
+      selectedTextStart: sourceRange?.start,
+      selectedTextEnd: sourceRange?.end,
+      top: Math.max(8, rect.top - 42),
+      left: Math.min(window.innerWidth - 112, Math.max(112, rect.left + rect.width / 2)),
+    });
+  }, [activeView, isReadOnly, session.scenes]);
+
+  useEffect(() => {
+    if (isReadOnly || activeView !== "replay") {
+      setSelectionAnnotatePrompt(null);
+      return;
+    }
+
+    let frame = 0;
+    const schedule = () => {
+      if (frame) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        updateSelectionAnnotatePrompt();
+      });
+    };
+    const clearOnScroll = () => setSelectionAnnotatePrompt(null);
+    const scrollContainer = scrollRef.current;
+
+    document.addEventListener("selectionchange", schedule);
+    document.addEventListener("mouseup", schedule);
+    document.addEventListener("keyup", schedule);
+    scrollContainer?.addEventListener("scroll", clearOnScroll, { passive: true });
+
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      document.removeEventListener("selectionchange", schedule);
+      document.removeEventListener("mouseup", schedule);
+      document.removeEventListener("keyup", schedule);
+      scrollContainer?.removeEventListener("scroll", clearOnScroll);
+    };
+  }, [activeView, isReadOnly, updateSelectionAnnotatePrompt]);
 
   // Cmd+K / Ctrl+K to open search
   useEffect(() => {
@@ -222,6 +389,31 @@ export default function Player({
       // Scroll + flash is handled by the manual-nav useEffect below (depends on [currentIndex]).
     },
     [pause, seekTo, session.scenes.length],
+  );
+
+  const openAnnotation = useCallback(
+    (annotationId: string) => {
+      const annotation = annotationActions.annotations.find((item) => item.id === annotationId);
+      if (!annotation) return;
+      const scrollToHighlight = () => {
+        const highlight = scrollRef.current?.querySelector(
+          `[data-vibe-annotation-id="${CSS.escape(annotationId)}"]`,
+        );
+        if (highlight instanceof HTMLElement) {
+          highlight.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+          flashJumpTarget(highlight);
+        }
+      };
+      setCommentDrawerOpen(true);
+      setFocusedAnnotationId(annotationId);
+      setCommentTarget(null);
+      setSelectionAnnotatePrompt(null);
+      setActiveView("replay");
+      seekFromNavigation(annotation.sceneIndex);
+      requestAnimationFrame(() => requestAnimationFrame(scrollToHighlight));
+      window.setTimeout(scrollToHighlight, 250);
+    },
+    [annotationActions.annotations, seekFromNavigation, setActiveView],
   );
 
   // Auto-land if URL has ?s= deep-link (skip landing hero, seek + scroll directly)
@@ -564,7 +756,10 @@ export default function Player({
 
                 {/* Comments — desktop: full button, mobile: icon only */}
                 <button
-                  onClick={() => setCommentDrawerOpen(true)}
+                  onClick={() => {
+                    setFocusedAnnotationId(null);
+                    setCommentDrawerOpen(true);
+                  }}
                   className="ui-meta-strong hidden md:flex items-center gap-1.5 hover:text-terminal-green transition-colors"
                   title="Open comments"
                 >
@@ -590,7 +785,10 @@ export default function Player({
                   )}
                 </button>
                 <button
-                  onClick={() => setCommentDrawerOpen(true)}
+                  onClick={() => {
+                    setFocusedAnnotationId(null);
+                    setCommentDrawerOpen(true);
+                  }}
                   className="md:hidden flex items-center gap-1 text-terminal-dim hover:text-terminal-text transition-colors"
                   title="Comments"
                 >
@@ -797,6 +995,8 @@ export default function Player({
                     focusIndex={navFocusIndex}
                     annotatedScenes={annotationActions.annotatedScenes}
                     annotationCounts={annotationActions.annotationCounts}
+                    annotations={annotationActions.annotations}
+                    onAnnotationClick={openAnnotation}
                     onSeek={seekFromNavigation}
                     state={state}
                     overlayActions={overlayActions}
@@ -811,11 +1011,39 @@ export default function Player({
                         ? undefined
                         : (sceneIndex) => {
                             setCommentDrawerOpen(true);
-                            setCommentTargetScene(sceneIndex);
+                            setCommentTarget({ sceneIndex });
+                            setFocusedAnnotationId(null);
+                            setSelectionAnnotatePrompt(null);
                           }
                     }
                   />
                 </div>
+
+                {selectionAnnotatePrompt && (
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      setCommentTarget({
+                        sceneIndex: selectionAnnotatePrompt.sceneIndex,
+                        selectedText: selectionAnnotatePrompt.selectedText,
+                        selectedTextStart: selectionAnnotatePrompt.selectedTextStart,
+                        selectedTextEnd: selectionAnnotatePrompt.selectedTextEnd,
+                      });
+                      setCommentDrawerOpen(true);
+                      setFocusedAnnotationId(null);
+                      setSelectionAnnotatePrompt(null);
+                      window.getSelection()?.removeAllRanges();
+                    }}
+                    className="fixed z-50 -translate-x-1/2 rounded-full border border-terminal-blue/40 bg-terminal-bg px-3 py-1.5 text-xs font-mono font-semibold text-terminal-blue shadow-layer-lg backdrop-blur-md transition-colors hover:bg-terminal-blue-subtle hover:text-terminal-text"
+                    style={{
+                      top: selectionAnnotatePrompt.top,
+                      left: selectionAnnotatePrompt.left,
+                    }}
+                  >
+                    Annotate selection
+                  </button>
+                )}
 
                 {/* Search overlay */}
                 <SearchOverlay
@@ -878,8 +1106,13 @@ export default function Player({
         scenes={effectiveSession.scenes}
         currentIndex={currentIndex}
         onSeek={seekFromNavigation}
-        addingForScene={commentTargetScene}
-        onClearAddingTarget={() => setCommentTargetScene(null)}
+        onSelectAnnotation={openAnnotation}
+        addingForScene={commentTarget?.sceneIndex ?? null}
+        addingSelectedText={commentTarget?.selectedText ?? null}
+        addingSelectedTextStart={commentTarget?.selectedTextStart ?? null}
+        addingSelectedTextEnd={commentTarget?.selectedTextEnd ?? null}
+        focusedAnnotationId={focusedAnnotationId}
+        onClearAddingTarget={() => setCommentTarget(null)}
         readOnly={isReadOnly}
       />
 
@@ -958,8 +1191,16 @@ export default function Player({
                 onSeek={(i) => {
                   seekFromNavigation(i);
                 }}
-                addingForScene={commentTargetScene}
-                onClearAddingTarget={() => setCommentTargetScene(null)}
+                onSelectAnnotation={(annotationId) => {
+                  openAnnotation(annotationId);
+                  setMobileDrawerOpen(false);
+                }}
+                addingForScene={commentTarget?.sceneIndex ?? null}
+                addingSelectedText={commentTarget?.selectedText ?? null}
+                addingSelectedTextStart={commentTarget?.selectedTextStart ?? null}
+                addingSelectedTextEnd={commentTarget?.selectedTextEnd ?? null}
+                focusedAnnotationId={focusedAnnotationId}
+                onClearAddingTarget={() => setCommentTarget(null)}
                 readOnly={isReadOnly}
               />
             )}

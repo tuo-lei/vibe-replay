@@ -1,9 +1,16 @@
 import { memo, useEffect, useMemo, useState } from "react";
+import {
+  hasVisibleTextHighlights,
+  renderHighlightedPlainText,
+  type TextHighlight,
+} from "../utils/annotation-highlights";
 
 interface Props {
   content: string;
   images?: string[];
   isActive: boolean;
+  highlights?: TextHighlight[];
+  onHighlightClick?: (annotationId: string) => void;
 }
 
 const COLLAPSE_DESKTOP = { lines: 8, chars: 900 };
@@ -14,7 +21,13 @@ function getCollapseConfig() {
   return COLLAPSE_DESKTOP;
 }
 
-export default memo(function UserPromptBlock({ content, images, isActive }: Props) {
+export default memo(function UserPromptBlock({
+  content,
+  images,
+  isActive,
+  highlights = [],
+  onHighlightClick,
+}: Props) {
   const [expanded, setExpanded] = useState(false);
   const [collapse] = useState(getCollapseConfig);
 
@@ -39,6 +52,17 @@ export default memo(function UserPromptBlock({ content, images, isActive }: Prop
     return byLines;
   }, [content, expanded, isLong, lines, collapse]);
 
+  useEffect(() => {
+    if (
+      isLong &&
+      !expanded &&
+      hasVisibleTextHighlights(content, highlights) &&
+      !hasVisibleTextHighlights(preview, highlights)
+    ) {
+      setExpanded(true);
+    }
+  }, [content, expanded, highlights, isLong, preview]);
+
   return (
     <div>
       <div
@@ -46,7 +70,7 @@ export default memo(function UserPromptBlock({ content, images, isActive }: Prop
           isActive ? "typing-cursor" : ""
         }`}
       >
-        {preview}
+        {renderHighlightedPlainText(preview, highlights, onHighlightClick)}
         {isLong && !expanded && <span className="text-terminal-dim">{`\n...`}</span>}
       </div>
       {isLong && (

@@ -108,6 +108,8 @@ export interface Annotation {
   id: string;
   sceneIndex: number;
   selectedText?: string;
+  selectedTextStart?: number;
+  selectedTextEnd?: number;
   body: string;
   author: string;
   createdAt: string;

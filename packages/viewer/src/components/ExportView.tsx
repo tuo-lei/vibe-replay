@@ -4,6 +4,7 @@ import type { AnnotationActions } from "../hooks/useAnnotations";
 import type { ViewerMode } from "../hooks/useSessionLoader";
 import type { ReplaySession } from "../types";
 import { apiUrl } from "../utils/api";
+import { exportExecutableFeedback } from "../utils/feedback-export";
 import { sanitizeHtml, sanitizeSvg } from "../utils/sanitize";
 
 // Sync with MAX_EXPORT_TURNS in packages/cli/src/formatters/github.ts
@@ -107,6 +108,7 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
     exportGithub,
     htmlExporting,
     githubExporting,
+    annotations,
   } = actions;
 
   const isEditor = viewerMode === "editor";
@@ -194,6 +196,10 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
   const GIST_MAX = 10 * 1024 * 1024;
   const cloudTooBig = replaySize > CLOUD_MAX;
   const gistTooBig = replaySize > GIST_MAX;
+  const executableFeedback = useMemo(
+    () => (session ? exportExecutableFeedback(session, annotations) : ""),
+    [annotations, session],
+  );
 
   // Auth + cloud data check — extracted so it can re-run on login events.
   // `session` is intentionally omitted from deps: it's stable after initial load,
@@ -600,6 +606,42 @@ export default function ExportView({ actions, viewerMode, readOnly, session }: P
           {hasUnsaved && (
             <div className="ui-caption text-terminal-orange text-center mb-5 px-3 py-2 rounded-lg bg-terminal-orange-subtle border border-terminal-orange/20">
               You have unsaved annotation changes
+            </div>
+          )}
+
+          {session && (
+            <div id="feedback" className="mb-12">
+              <SectionHeader title="Agent Feedback" color="text-terminal-blue" />
+              <div className="bg-terminal-surface rounded-xl border border-terminal-border shadow-layer-sm overflow-hidden">
+                <div className="px-5 py-4 flex items-start justify-between gap-4 border-b border-terminal-border-subtle">
+                  <div>
+                    <h3 className="text-sm font-mono font-semibold text-terminal-text">
+                      Executable feedback
+                    </h3>
+                    <p className="text-xs font-sans text-terminal-dim mt-1 leading-relaxed">
+                      Copy comments and selected text as structured markdown for an agent or PR
+                      reviewer.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="ui-pill-compact bg-terminal-blue-subtle text-terminal-blue">
+                      {annotations.length} {annotations.length === 1 ? "item" : "items"}
+                    </span>
+                    <CopyButton text={executableFeedback} label="Copy feedback" />
+                  </div>
+                </div>
+                <div className="p-5">
+                  {annotations.length === 0 ? (
+                    <div className="text-xs font-mono text-terminal-dim rounded-lg border border-dashed border-terminal-border-subtle bg-terminal-bg px-4 py-5 text-center">
+                      Add comments in the replay view, or select text in a scene and annotate it.
+                    </div>
+                  ) : (
+                    <pre className="max-h-80 overflow-auto rounded-lg bg-terminal-bg border border-terminal-border-subtle p-4 text-xs font-mono text-terminal-text whitespace-pre-wrap break-words">
+                      {executableFeedback}
+                    </pre>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
