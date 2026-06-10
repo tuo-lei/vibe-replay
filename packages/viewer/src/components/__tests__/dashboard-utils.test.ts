@@ -424,6 +424,20 @@ describe("provider display helpers", () => {
     expect(providerBarClass("pi")).toBe("bg-terminal-cyan");
     expect(providerFamily("pi")).toBe("cyan");
   });
+
+  it("gives each Claude sub-kind a distinct warm hue", () => {
+    expect(providerFamily("claude-code")).toBe("orange");
+    expect(providerFamily("claude-cowork")).toBe("sienna");
+    expect(providerFamily("claude-desktop")).toBe("yellow");
+
+    expect(providerBadgeClass("claude-code")).toContain("terminal-orange");
+    expect(providerBadgeClass("claude-cowork")).toContain("terminal-sienna");
+    expect(providerBadgeClass("claude-desktop")).toContain("terminal-yellow");
+
+    expect(providerBarClass("claude-code")).toBe("bg-terminal-orange");
+    expect(providerBarClass("claude-cowork")).toBe("bg-terminal-sienna");
+    expect(providerBarClass("claude-desktop")).toBe("bg-terminal-yellow");
+  });
 });
 
 describe("isNetworkError", () => {
