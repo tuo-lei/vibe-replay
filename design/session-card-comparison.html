@@ -475,6 +475,36 @@
         background: var(--blue-subtle);
         color: var(--blue);
       }
+      /* Watch-live CTA — red with a pulsing dot, matches the dashboard's existing button */
+      .btn-live {
+        background: var(--red-subtle);
+        color: var(--red);
+      }
+      .live-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: currentColor;
+        animation: pulse-dot 1.4s ease-in-out infinite;
+      }
+      @keyframes pulse-dot {
+        0%,
+        100% {
+          opacity: 1;
+          transform: scale(1);
+        }
+        50% {
+          opacity: 0.35;
+          transform: scale(0.7);
+        }
+      }
+      .state-chip.busy {
+        background: var(--red-subtle);
+        color: var(--red);
+      }
+      .state-chip.busy::before {
+        animation: pulse-dot 1.4s ease-in-out infinite;
+      }
       .btn-gen-new {
         height: 30px;
         padding: 0 14px;
@@ -556,6 +586,64 @@
         background: rgba(210, 153, 34, 0.13);
         border-radius: 3px;
         padding: 0 2px;
+      }
+      /* JSON field-destination annotation */
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 18px;
+        margin: 0 2px 12px;
+        font-size: 12px;
+        color: var(--dim);
+      }
+      .legend-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .legend b {
+        color: var(--text);
+        font-weight: 600;
+      }
+      .sw {
+        width: 12px;
+        height: 12px;
+        border-radius: 3px;
+        flex-shrink: 0;
+      }
+      .sw-new {
+        background: rgba(63, 185, 80, 0.3);
+        box-shadow: inset 0 0 0 1px var(--green);
+      }
+      .sw-todo {
+        background: rgba(210, 153, 34, 0.22);
+        box-shadow: inset 0 0 0 1px var(--orange);
+      }
+      .sw-plain {
+        background: var(--surface-2);
+        box-shadow: inset 0 0 0 1px var(--border);
+      }
+      .k-new {
+        background: rgba(63, 185, 80, 0.16);
+        border-radius: 3px;
+        padding: 0 2px;
+        box-shadow: inset 0 0 0 1px rgba(63, 185, 80, 0.4);
+      }
+      .k-todo {
+        background: rgba(210, 153, 34, 0.14);
+        border-radius: 3px;
+        padding: 0 2px;
+        box-shadow: inset 0 0 0 1px rgba(210, 153, 34, 0.4);
+      }
+      .cmt {
+        font-style: normal;
+        opacity: 0.95;
+      }
+      .cmt-new {
+        color: var(--green);
+      }
+      .cmt-todo {
+        color: var(--orange);
       }
     </style>
   </head>
@@ -683,6 +771,9 @@
               </a>
               <div class="lifecycle">
                 <span class="state-chip scanned" title="Stats are scanned (exact, not estimated). No replay generated yet.">Scanned</span>
+                <button class="btn-cta btn-live" title="Stream this session live as it's written to disk">
+                  <span class="live-dot"></span> Watch live
+                </button>
                 <button class="btn-gen-new">+ Generate</button>
               </div>
             </div>
@@ -745,6 +836,9 @@
               </a>
               <div class="lifecycle">
                 <span class="state-chip scanned" title="Stats are scanned (exact). No replay generated yet.">Scanned</span>
+                <button class="btn-cta btn-live" title="Stream this session live as it's written to disk">
+                  <span class="live-dot"></span> Watch live
+                </button>
                 <button class="btn-gen-new">+ Generate</button>
               </div>
             </div>
@@ -792,7 +886,7 @@
                 🔗 PR #345 <span style="opacity: 0.7">↗</span>
               </a>
               <div class="lifecycle">
-                <span class="state-chip shared" title="Replay generated and shared (gist/cloud live)">Live</span>
+                <span class="state-chip shared" title="Replay generated and shared (gist/cloud)">Shared</span>
                 <button class="btn-cta btn-view">
                   <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><polygon points="4 2 14 8 4 14" /></svg>
                   View
@@ -804,15 +898,21 @@
           </div>
           <p class="note">
             <span class="good">●</span> 完全相同的卡片骨架——只有右下角 <b>state chip + CTA 集群</b>随状态切换：<br />
-            &nbsp;&nbsp;&nbsp;<code>Scanned</code> + <code>Generate</code> → <code>Live</code> + <code>View / Share / Redo</code>。<br />
-            <span class="good">●</span> <b>去掉了进度条</b>：CTA 已经表达了"下一步"，进度条会和它抢语义、反而 confuse。状态用<b>一个带颜色的词</b>（灰 Scanned / 绿 Replay / 紫 Live）就够，比抽象圆点直观。
+            &nbsp;&nbsp;&nbsp;<code>Scanned</code> + <code>● Watch live</code> / <code>Generate</code> → <code>Shared</code> + <code>View / Share / Redo</code>。<br />
+            <span class="good">●</span> <b>去掉了进度条</b>：CTA 已经表达了"下一步"，进度条会和它抢语义、反而 confuse。状态用<b>一个带颜色的词</b>（灰 Scanned / 紫 Shared）就够，比抽象圆点直观。<br />
+            <span class="good">●</span> <b><code>● Watch live</code> 作为 session 卡的 CTA</b>（红色脉冲，复用现有 <code>/api/live</code> SSE 流）——最近/进行中的 session 可以直接边写边看，不必先 Generate。<code>Live</code> 一词保留给实时流，已分享 replay 的状态改叫 <code>Shared</code> 避免撞名。
           </p>
         </div>
       </div>
 
       <!-- ============ RAW JSON ============ -->
       <div class="json-wrap">
-        <h2>Raw JSON <span style="font-weight: 400; color: var(--dim); font-size: 12px">（<span class="hl">黄色高亮</span> = 数据里有、旧卡片没用上的字段）</span></h2>
+        <h2>Raw JSON — 字段去向</h2>
+        <div class="legend">
+          <span class="legend-item"><span class="sw sw-new"></span> 新卡片<b>新surface</b>的（旧卡片没有 / 改了用法）</span>
+          <span class="legend-item"><span class="sw sw-todo"></span> 数据可拿、<b>暂未用</b>的机会（含交互点子）</span>
+          <span class="legend-item"><span class="sw sw-plain"></span> 旧卡片已有、沿用</span>
+        </div>
         <pre id="json"></pre>
       </div>
     </div>
@@ -894,27 +994,56 @@
         replaySummary: null,
       };
 
-      // fields the OLD card does NOT surface -> highlight
-      const HIDDEN = new Set([
-        "lineCount",
-        "gitBranches",
-        "prLinks",
-        "prNumber",
-        "prUrl",
-        "prRepository",
-        "filesModified",
-        "tokenUsage",
-        "inputTokens",
-        "outputTokens",
-        "cacheCreationTokens",
-        "cacheReadTokens",
-        "subAgentCount",
-        "apiErrorCount",
-        "compactionCount",
-        "entrypoint",
-        "permissionMode",
-        "turnDurations",
-      ]);
+      // Per-field destination map. cat: "new" = surfaced/changed by new card,
+      // "todo" = data is accessible but still unused (+ an idea for what to do).
+      // Anything not listed = already shown on the old card, carried over as-is.
+      const ANNOT = {
+        // --- identity / how it's shown changed ---
+        provider: { cat: "new", note: "标题左侧 provider 图标" },
+        sessionId: { cat: "todo", note: "点击复制 session id（hover ⧉ 图标）" },
+        model: { cat: "new", note: "移入 provider 图标 tooltip" },
+        permissionMode: { cat: "new", note: "⚡auto → provider tooltip" },
+        entrypoint: { cat: "new", note: "provider tooltip（cli）" },
+        // --- activity: exact values replace estimates ---
+        promptCount: { cat: "new", note: "活动行 💬" },
+        toolCallCount: { cat: "new", note: "活动行 🔧" },
+        durationMs: { cat: "new", note: "活动行 ⏱ 精确时长（替掉 ~估算）" },
+        editCount: { cat: "new", note: "活动行 ✎（精确）" },
+        durationMsEst: { cat: "todo", note: "estimate — 已被 scanData.durationMs 取代" },
+        editCountEst: { cat: "todo", note: "estimate — 已被 scanData.editCount 取代" },
+        filesModified: { cat: "new", note: "✎N files，hover 展开文件列表" },
+        // --- cost breakdown ---
+        tokenUsage: { cat: "new", note: "$ 的 hover tooltip（cache 占比）" },
+        cacheReadTokens: { cat: "new", note: "999K → cost tooltip 主因" },
+        // --- outcome ---
+        prLinks: { cat: "new", note: "🔗 PR #345 可点跳转（升级自死 badge）" },
+        prNumber: { cat: "new", note: "PR 号 → 链接文案" },
+        prUrl: { cat: "new", note: "PR 链接目标" },
+        hasPR: { cat: "new", note: "由 prLinks 升级为可点链接" },
+        apiErrorCount: { cat: "new", note: "✓ clean" },
+        compactionCount: { cat: "new", note: "✓ clean 的一部分" },
+        existingReplay: { cat: "new", note: "驱动 state chip + CTA（Scanned/Shared）" },
+        // --- place ---
+        gitBranches: { cat: "new", note: "分支 +N 折叠（不再只显一条长名）" },
+        // --- still-untapped opportunities ---
+        lineCount: { cat: "todo", note: "可显示原始行数" },
+        subAgentCount: { cat: "todo", note: ">0 时显示「N subagents」" },
+        turnDurations: { cat: "todo", note: "可算 time-to-intervention 洞察" },
+        fileSize: { cat: "todo", note: "新卡暂移除；可进 ⋯ 菜单" },
+      };
+
+      function annotate(k) {
+        const a = ANNOT[k];
+        const key = '<span class="k">"' + k + '"</span>';
+        if (!a) return { keyHtml: key, cmt: "" };
+        const cls = a.cat === "new" ? "k-new" : "k-todo";
+        const ccls = a.cat === "new" ? "cmt-new" : "cmt-todo";
+        const arrow = a.cat === "new" ? "←" : "○";
+        return {
+          keyHtml: '<span class="' + cls + '">' + key + "</span>",
+          cmt: '<span class="cmt ' + ccls + '">  ' + arrow + " " + a.note + "</span>",
+        };
+      }
 
       function render(obj, indent) {
         const pad = "  ".repeat(indent);
@@ -928,16 +1057,21 @@
         }
         if (typeof obj === "object") {
           const keys = Object.keys(obj);
-          const items = keys
-            .map((k) => {
-              const hidden = HIDDEN.has(k);
-              const keyHtml = hidden
-                ? '<span class="hl"><span class="k">"' + k + '"</span></span>'
-                : '<span class="k">"' + k + '"</span>';
-              return pad + "  " + keyHtml + ": " + render(obj[k], indent + 1);
-            })
-            .join(",\n");
-          return "{\n" + items + "\n" + pad + "}";
+          const items = keys.map((k, i) => {
+            const { keyHtml, cmt } = annotate(k);
+            const comma = i === keys.length - 1 ? "" : ",";
+            let v = render(obj[k], indent + 1);
+            if (v.includes("\n")) {
+              v = v + comma;
+              if (cmt) {
+                const nl = v.indexOf("\n");
+                v = v.slice(0, nl) + cmt + v.slice(nl);
+              }
+              return pad + "  " + keyHtml + ": " + v;
+            }
+            return pad + "  " + keyHtml + ": " + v + comma + cmt;
+          });
+          return "{\n" + items.join("\n") + "\n" + pad + "}";
         }
         if (typeof obj === "string")
           return '<span class="s">"' + obj.replace(/</g, "&lt;") + '"</span>';
