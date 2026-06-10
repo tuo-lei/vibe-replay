@@ -340,12 +340,10 @@ export default function SummaryView({ session }: Props) {
 
         {dataQualityNotes.length > 0 && (
           <div className="rounded border border-terminal-orange/40 bg-terminal-orange/10 px-3 py-2">
-            <div className="text-[10px] font-sans font-semibold text-terminal-orange uppercase tracking-widest mb-1">
-              Data Quality
-            </div>
+            <div className="ui-section-title text-terminal-orange mb-1">Data Quality</div>
             <div className="space-y-0.5">
               {dataQualityNotes.slice(0, 4).map((note) => (
-                <div key={note} className="text-xs font-mono text-terminal-dim">
+                <div key={note} className="ui-caption">
                   {note}
                 </div>
               ))}
@@ -355,9 +353,7 @@ export default function SummaryView({ session }: Props) {
 
         {(meta.dataSource || meta.dataSourceInfo) && (
           <div className="rounded border border-terminal-border-subtle bg-terminal-surface/40 px-3 py-2">
-            <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-1">
-              Data Source
-            </div>
+            <div className="ui-section-title mb-1">Data Source</div>
             <div className="text-xs font-mono text-terminal-text">
               {formatReplaySourceLabel(meta.dataSourceInfo?.primary || meta.dataSource)}
             </div>
@@ -399,9 +395,7 @@ export default function SummaryView({ session }: Props) {
             meta.cursorSidecars.restrictAgentModeSwitching !== undefined ||
             meta.cursorSidecars.glassMetaParentAgent) && (
             <div className="rounded border border-terminal-border-subtle bg-terminal-surface/40 px-3 py-2">
-              <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-1">
-                Cursor Sidecars
-              </div>
+              <div className="ui-section-title mb-1">Cursor Sidecars</div>
               <div className="space-y-0.5 text-xs font-mono text-terminal-dim">
                 {meta.cursorSidecars.requestContextCount ? (
                   <div>
@@ -448,9 +442,7 @@ export default function SummaryView({ session }: Props) {
 
         {/* Overview: Key Metrics + Duration/Cost + Tokens */}
         <div>
-          <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-3">
-            Overview
-          </div>
+          <div className="ui-section-title mb-3">Overview</div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <StatCard label="Turns" value={stats.userPrompts} color="text-terminal-green" />
             <StatCard label="Tool Calls" value={stats.toolCalls} color="text-terminal-orange" />
@@ -554,9 +546,7 @@ export default function SummaryView({ session }: Props) {
         {/* === Time Series Charts (grouped) === */}
         {hasTurnStats && (
           <div className="space-y-5">
-            <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest">
-              Per-Turn Metrics
-            </div>
+            <div className="ui-section-title">Per-Turn Metrics</div>
             <TokenBurnCurve
               turnStats={meta.stats.turnStats!}
               costEstimate={meta.stats.costEstimate}
@@ -580,9 +570,7 @@ export default function SummaryView({ session }: Props) {
         {/* API Errors */}
         {meta.apiErrors && meta.apiErrors.length > 0 && (
           <div>
-            <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
-              API Issues
-            </div>
+            <div className="ui-section-title mb-2">API Issues</div>
             <div className="text-xs font-mono text-terminal-dim space-y-1">
               {(() => {
                 const errs = meta.apiErrors;
@@ -630,9 +618,7 @@ export default function SummaryView({ session }: Props) {
         {/* Tracked Files */}
         {meta.trackedFiles && meta.trackedFiles.length > 0 && (
           <div>
-            <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
-              Files Tracked ({meta.trackedFiles.length})
-            </div>
+            <div className="ui-section-title mb-2">Files Tracked ({meta.trackedFiles.length})</div>
             <div className="space-y-0.5 max-h-[200px] overflow-y-auto">
               {meta.trackedFiles.map((f) => (
                 <div
@@ -649,7 +635,7 @@ export default function SummaryView({ session }: Props) {
 
         {meta.contextFiles && meta.contextFiles.length > 0 && (
           <div>
-            <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
+            <div className="ui-section-title mb-2">
               Context Files (inferred, {meta.contextFiles.length})
             </div>
             <div className="space-y-0.5 max-h-[200px] overflow-y-auto">
@@ -669,9 +655,7 @@ export default function SummaryView({ session }: Props) {
         {/* PR Links */}
         {meta.prLinks && meta.prLinks.length > 0 && (
           <div>
-            <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
-              Pull Requests
-            </div>
+            <div className="ui-section-title mb-2">Pull Requests</div>
             <div className="space-y-1">
               {meta.prLinks.map((pr) => (
                 <a
@@ -707,7 +691,7 @@ export default function SummaryView({ session }: Props) {
         {/* Bash Breakdown */}
         {stats.bashCats.length > 1 && (
           <div>
-            <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
+            <div className="ui-section-title mb-2">
               Bash Commands
               {stats.totalBashErrors > 0 && (
                 <span className="text-terminal-red ml-2 normal-case tracking-normal">
@@ -731,7 +715,7 @@ export default function SummaryView({ session }: Props) {
         {/* Top Tools */}
         {stats.topTools.length > 0 && (
           <div>
-            <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
+            <div className="ui-section-title mb-2">
               Top Tools
               <span className="text-terminal-dimmer ml-2 normal-case tracking-normal font-mono">
                 {stats.totalTools} total
@@ -770,9 +754,7 @@ export default function SummaryView({ session }: Props) {
         {/* Activity Distribution (heuristic — placed low as reference) */}
         {stats.totalTools > 0 && (
           <div>
-            <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
-              Activity Distribution
-            </div>
+            <div className="ui-section-title mb-2">Activity Distribution</div>
             <div className="space-y-1.5">
               {(
                 [
@@ -849,9 +831,7 @@ function SubAgentSummary({
 
   return (
     <div>
-      <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
-        Sub-Agents ({subAgents.length})
-      </div>
+      <div className="ui-section-title mb-2">Sub-Agents ({subAgents.length})</div>
       {/* Type breakdown */}
       <div className="flex flex-wrap gap-2 mb-3">
         {types.map(([type, data]) => {
@@ -987,9 +967,7 @@ function TokenBurnCurve({
 
   return (
     <div>
-      <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-1">
-        Token Burn{costEstimate ? " & Cost" : ""}
-      </div>
+      <div className="ui-section-title mb-1">Token Burn{costEstimate ? " & Cost" : ""}</div>
       <div className="relative">
         <svg
           ref={ref}
@@ -1085,9 +1063,7 @@ function CacheEfficiencyLine({ turnStats }: { turnStats: TurnStat[] }) {
   return (
     <div className="mt-1">
       <div className="flex items-center gap-2">
-        <span className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest">
-          Cache Hit Rate
-        </span>
+        <span className="ui-section-title">Cache Hit Rate</span>
         <span className="text-[10px] font-mono text-terminal-purple">
           avg {Math.round(avgRatio * 100)}%
         </span>
@@ -1213,7 +1189,7 @@ function ContextWindowChart({
 
   return (
     <div>
-      <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-1 flex items-center gap-2">
+      <div className="ui-section-title mb-1 flex items-center gap-2">
         <span>Context Window Usage</span>
         <span className="font-mono text-terminal-cyan">peak {fmtNum(peak)}</span>
       </div>
@@ -1431,9 +1407,7 @@ function TurnDurationChart({
 
   return (
     <div>
-      <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-1">
-        Turn Duration
-      </div>
+      <div className="ui-section-title mb-1">Turn Duration</div>
       <div className="relative">
         <div className="flex items-end gap-px h-16" onMouseLeave={() => setHovered(null)}>
           {durations.map((d, i) => {
@@ -1495,9 +1469,7 @@ function ModelBreakdown({
 
   return (
     <div>
-      <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
-        Model Breakdown
-      </div>
+      <div className="ui-section-title mb-2">Model Breakdown</div>
       {/* Stacked bar */}
       <div className="flex h-3 rounded-full overflow-hidden gap-px">
         {entries.map(([model, usage], i) => {
@@ -1547,9 +1519,7 @@ function ToolActivityChart({ turns, turnLabels }: { turns: TurnInfo[]; turnLabel
 
   return (
     <div>
-      <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-1">
-        Tool Calls per Turn
-      </div>
+      <div className="ui-section-title mb-1">Tool Calls per Turn</div>
       <div className="relative">
         <div className="flex items-end gap-px h-16" onMouseLeave={() => setHovered(null)}>
           {counts.map((c, i) => {
@@ -1622,7 +1592,7 @@ function FileActivityHeatmap({
 
   return (
     <div>
-      <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
+      <div className="ui-section-title mb-2">
         File Activity Heatmap
         {capped && (
           <span className="normal-case tracking-normal font-normal ml-2">
@@ -1743,9 +1713,7 @@ function TurnTable({ turns, turnStats }: { turns: TurnInfo[]; turnStats?: TurnSt
 
   return (
     <div>
-      <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
-        Per-Turn Breakdown
-      </div>
+      <div className="ui-section-title mb-2">Per-Turn Breakdown</div>
       <div className="overflow-x-auto rounded border border-terminal-border-subtle">
         <table className="w-full text-[11px] font-mono border-collapse">
           <thead>
@@ -1941,7 +1909,7 @@ function FileTable({
 
   return (
     <div>
-      <div className="text-[10px] font-sans font-semibold text-terminal-dimmer uppercase tracking-widest mb-2">
+      <div className="ui-section-title mb-2">
         File Impact
         <span className="normal-case tracking-normal ml-1.5">
           ({editedFiles.length} modified

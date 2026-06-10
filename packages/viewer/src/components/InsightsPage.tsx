@@ -528,9 +528,7 @@ function ShareCard({
 
   const MetricLabel = ({ label, title }: { label: string; title?: string }) => (
     <div className="mt-0.5 flex items-center gap-1">
-      <div className="text-[10px] font-sans font-medium text-terminal-dim uppercase tracking-wider">
-        {label}
-      </div>
+      <div className="ui-section-title">{label}</div>
       {title ? <DataQualityIndicator title={title} className="shrink-0" /> : null}
     </div>
   );
@@ -551,7 +549,7 @@ function ShareCard({
             <span className="text-sm font-sans font-bold bg-gradient-to-r from-terminal-green to-terminal-blue bg-clip-text text-transparent">
               vibe-replay
             </span>
-            <span className="text-[10px] font-mono text-terminal-dimmer px-2 py-0.5 rounded-full bg-terminal-surface-2">
+            <span className="ui-pill-compact bg-terminal-surface-2 text-terminal-dimmer">
               {rangeLabel(range)}
             </span>
             {metricQuality.overall ? (
@@ -635,15 +633,9 @@ function ShareCard({
         {/* Footer highlights */}
         <div className="flex items-center justify-between pt-4 border-t border-terminal-border/30">
           <div className="flex items-center gap-4">
-            {streak.current > 0 && (
-              <span className="text-xs font-mono text-terminal-dim">
-                {streak.current} day streak
-              </span>
-            )}
+            {streak.current > 0 && <span className="ui-caption">{streak.current} day streak</span>}
             {bestDay && bestDay.count > 0 && (
-              <span className="text-xs font-mono text-terminal-dim">
-                Most active: {bestDay.day}
-              </span>
+              <span className="ui-caption">Most active: {bestDay.day}</span>
             )}
           </div>
           <span className="text-[10px] font-mono text-terminal-dimmer">vibe-replay.com</span>
@@ -671,9 +663,7 @@ function HighlightCard({
       <div className="flex items-start gap-3">
         <span className="text-lg leading-none mt-0.5">{icon}</span>
         <div className="min-w-0">
-          <div className="text-[10px] font-sans font-bold text-terminal-dim uppercase tracking-widest">
-            {label}
-          </div>
+          <div className="ui-section-title">{label}</div>
           <div className="text-lg font-mono font-bold text-terminal-text mt-0.5">{value}</div>
           {sub && <div className="text-[10px] font-mono text-terminal-dimmer mt-0.5">{sub}</div>}
         </div>
@@ -1239,7 +1229,7 @@ function InsightsLoadingState({
               {hasCachedInsights ? "Refreshing cached insights" : "Loading your insights"}
             </span>
           </div>
-          <p className="mt-1 text-xs font-mono text-terminal-dim">{detail}</p>
+          <p className="mt-1 ui-caption">{detail}</p>
         </div>
         <InsightsPageSkeleton />
       </div>
@@ -1420,7 +1410,7 @@ export default function InsightsPage() {
               <button
                 key={r}
                 onClick={() => setRange(r)}
-                className={`px-3 py-1.5 text-[11px] font-mono rounded-md transition-all ${
+                className={`px-3 py-1.5 text-xs font-sans rounded-md transition-all ${
                   range === r
                     ? "bg-terminal-green-subtle text-terminal-green font-bold"
                     : "text-terminal-dim hover:text-terminal-text"
@@ -1474,9 +1464,7 @@ export default function InsightsPage() {
         {/* Activity Heatmap — always shows full history regardless of range filter */}
         <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
-              Activity
-            </h3>
+            <h3 className="ui-section-title-strong">Activity</h3>
             {range !== "all" && (
               <span className="text-[9px] font-mono text-terminal-dimmer">Last 52 weeks</span>
             )}
@@ -1548,17 +1536,13 @@ export default function InsightsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {userInsights.turnDurationHistogram && (
               <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm">
-                <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider mb-4">
-                  Turn Duration Distribution
-                </h3>
+                <h3 className="ui-section-title-strong mb-4">Turn Duration Distribution</h3>
                 <TurnDurationChart histogram={userInsights.turnDurationHistogram} />
               </div>
             )}
             {userInsights.tokenBreakdown && (
               <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm">
-                <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider mb-4">
-                  Token Usage
-                </h3>
+                <h3 className="ui-section-title-strong mb-4">Token Usage</h3>
                 <TokenBreakdownChart breakdown={userInsights.tokenBreakdown} />
               </div>
             )}
@@ -1568,15 +1552,11 @@ export default function InsightsPage() {
         {/* Two-column: Weekly Trend + Day of Week */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm">
-            <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider mb-4">
-              Weekly Trend
-            </h3>
+            <h3 className="ui-section-title-strong mb-4">Weekly Trend</h3>
             <WeeklyTrendChart data={weeklyTrend} />
           </div>
           <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm">
-            <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider mb-4">
-              Day of Week
-            </h3>
+            <h3 className="ui-section-title-strong mb-4">Day of Week</h3>
             <DayOfWeekChart data={dayOfWeek} />
           </div>
         </div>
@@ -1584,9 +1564,7 @@ export default function InsightsPage() {
         {/* Two-column: Top Projects + Models & Providers */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm">
-            <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider mb-4">
-              Top Projects
-            </h3>
+            <h3 className="ui-section-title-strong mb-4">Top Projects</h3>
             <TopProjectsList
               projects={rolledTopProjects.map((p) => ({
                 project: p.project,
@@ -1600,16 +1578,12 @@ export default function InsightsPage() {
           </div>
           <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm space-y-5">
             <div>
-              <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider mb-4">
-                Models
-              </h3>
+              <h3 className="ui-section-title-strong mb-4">Models</h3>
               <ModelBreakdown models={userInsights.models || {}} />
             </div>
             {Object.keys(userInsights.providers || {}).length > 1 && (
               <div>
-                <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider mb-4">
-                  Providers
-                </h3>
+                <h3 className="ui-section-title-strong mb-4">Providers</h3>
                 <ProviderBreakdown providers={userInsights.providers || {}} />
               </div>
             )}

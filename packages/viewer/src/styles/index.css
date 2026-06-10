@@ -167,6 +167,43 @@ html.theme-transition *::after {
   }
 }
 
+@layer components {
+  /*
+   * Shared UI typography primitives.
+   *
+   * Keep monospace for code, commands, slugs, paths, models, and numbers.
+   * Use these sans-serif classes for chrome, status labels, section titles,
+   * and explanatory copy so dense screens keep a clearer reading hierarchy.
+   */
+  .ui-section-title {
+    @apply font-sans text-xs font-semibold tracking-wide text-terminal-dim;
+  }
+
+  .ui-section-title-strong {
+    @apply font-sans text-xs font-semibold tracking-wide text-terminal-text;
+  }
+
+  .ui-caption {
+    @apply font-sans text-xs leading-relaxed text-terminal-dim;
+  }
+
+  .ui-caption-muted {
+    @apply font-sans text-xs leading-relaxed text-terminal-dimmer;
+  }
+
+  .ui-caption-strong {
+    @apply font-sans text-xs font-medium leading-relaxed text-terminal-text;
+  }
+
+  .ui-pill {
+    @apply inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-sans leading-5;
+  }
+
+  .ui-pill-compact {
+    @apply inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-sans leading-4;
+  }
+}
+
 /* Respect reduced-motion preference */
 @media (prefers-reduced-motion: reduce) {
   *,

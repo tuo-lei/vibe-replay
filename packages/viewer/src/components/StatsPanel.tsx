@@ -100,12 +100,10 @@ export default function StatsPanel({ session }: Props) {
   const metricQuality = useMemo(() => getSessionMetricQuality(meta), [meta]);
 
   return (
-    <div className="p-4 space-y-6 text-xs font-mono">
+    <div className="p-4 space-y-6 ui-caption">
       {/* Session info */}
       <div>
-        <div className="text-terminal-dimmer uppercase tracking-widest text-[10px] font-sans font-semibold mb-2">
-          Session
-        </div>
+        <div className="ui-section-title mb-2">Session</div>
         {meta.title && (
           <div className="text-terminal-text text-xs mb-0.5 truncate" title={meta.title}>
             {meta.title}
@@ -119,7 +117,7 @@ export default function StatsPanel({ session }: Props) {
           {meta.provider && <span>{meta.provider}</span>}
           {isWorktree && (
             <span
-              className="px-1 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple uppercase tracking-wider text-[10px]"
+              className="ui-pill-compact bg-terminal-purple-subtle text-terminal-purple"
               title={`Agent worktree: ${meta.project}`}
             >
               worktree
@@ -142,7 +140,7 @@ export default function StatsPanel({ session }: Props) {
           </div>
         )}
         {(meta.entrypoint || meta.permissionMode || meta.memoryMode) && (
-          <div className="text-terminal-dim mt-0.5 flex items-center gap-1.5 flex-wrap text-[10px]">
+          <div className="text-terminal-dim mt-0.5 flex items-center gap-1.5 flex-wrap text-xs">
             {meta.entrypoint && (
               <span className="px-1 py-0.5 rounded bg-terminal-surface text-terminal-dim">
                 {meta.entrypoint}
@@ -234,7 +232,7 @@ export default function StatsPanel({ session }: Props) {
 
       {stats.tokenUsage && (
         <div>
-          <div className="text-terminal-dimmer mb-2 text-[10px] font-sans font-semibold uppercase tracking-widest flex items-center gap-1.5">
+          <div className="ui-section-title mb-2 flex items-center gap-1.5">
             Tokens
             {metricQuality.tokens && <DataQualityIndicator title={metricQuality.tokens} />}
           </div>
@@ -329,9 +327,7 @@ export default function StatsPanel({ session }: Props) {
       {/* PR Links */}
       {meta.prLinks && meta.prLinks.length > 0 && (
         <div>
-          <div className="text-terminal-dimmer mb-1 text-[10px] font-sans font-semibold uppercase tracking-widest">
-            Pull Requests
-          </div>
+          <div className="ui-section-title mb-1">Pull Requests</div>
           <div className="space-y-0.5">
             {meta.prLinks.map((pr) => (
               <a
@@ -360,7 +356,7 @@ export default function StatsPanel({ session }: Props) {
 
       {stats.compactions && stats.compactions.length > 0 && (
         <div>
-          <div className="text-terminal-dimmer mb-2 text-[10px] font-sans font-semibold uppercase tracking-widest">
+          <div className="ui-section-title mb-2">
             Context Compactions ({stats.compactions.length})
           </div>
           <div className="space-y-1">
@@ -382,9 +378,7 @@ export default function StatsPanel({ session }: Props) {
 
       {stats.topTools.length > 0 && (
         <div>
-          <div className="text-terminal-dimmer mb-2 text-[10px] font-sans font-semibold uppercase tracking-widest">
-            Top Tools
-          </div>
+          <div className="ui-section-title mb-2">Top Tools</div>
           <div className="space-y-1.5">
             {stats.topTools.map(([name, count]) => (
               <div key={name} className="flex items-center gap-2">
@@ -406,9 +400,7 @@ export default function StatsPanel({ session }: Props) {
 
       {(meta.dataSource || meta.dataSourceInfo) && (
         <div>
-          <div className="text-terminal-dimmer mb-2 text-[10px] font-sans font-semibold uppercase tracking-widest">
-            Data Source
-          </div>
+          <div className="ui-section-title mb-2">Data Source</div>
           <div className="text-terminal-dim">
             <span className="text-terminal-blue">
               {formatReplaySourceLabel(meta.dataSourceInfo?.primary || meta.dataSource)}
@@ -465,9 +457,7 @@ export function StatCard({
       >
         {value}
       </div>
-      <div className="text-terminal-dimmer text-[10px] font-sans font-medium uppercase tracking-widest mt-0.5">
-        {label}
-      </div>
+      <div className="ui-section-title mt-0.5">{label}</div>
     </div>
   );
 }

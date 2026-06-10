@@ -466,7 +466,7 @@ function RecentSessionsList({
 }) {
   if (sessions.length === 0) {
     return (
-      <div className="text-center py-6 text-terminal-dimmer text-xs font-mono">
+      <div className="text-center py-6 ui-caption-muted">
         {isLoading
           ? "Loading recent sessions..."
           : "No sessions found. Start Claude, Cursor, or Codex."}
@@ -561,7 +561,7 @@ function RecentSessionsList({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <span
-                className={`rounded-full px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider ${
+                className={`ui-pill-compact ${
                   primaryHasReplay
                     ? "bg-terminal-green-subtle text-terminal-green"
                     : "bg-terminal-blue-subtle text-terminal-blue"
@@ -641,7 +641,7 @@ function RecentReplaysList({
 }) {
   if (replays.length === 0) {
     return (
-      <div className="text-center py-6 text-terminal-dimmer text-xs font-mono">
+      <div className="text-center py-6 ui-caption-muted">
         {isLoading ? "Loading replays..." : "No replays yet. Generate one from the Sessions tab."}
       </div>
     );
@@ -680,7 +680,7 @@ function RecentReplaysList({
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {r.gist?.gistId && (
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple">
+              <span className="ui-pill-compact bg-terminal-purple-subtle text-terminal-purple">
                 published
               </span>
             )}
@@ -777,7 +777,7 @@ function SystemChecksSection() {
   if (loadingChecks) {
     return (
       <div className="bg-terminal-surface rounded-xl px-4 py-3 shadow-layer-sm">
-        <div className="flex items-center gap-2 text-xs font-mono text-terminal-dim">
+        <div className="flex items-center gap-2 ui-caption">
           <span className="w-1.5 h-1.5 rounded-full bg-terminal-blue animate-pulse" />
           Checking local replay tools...
         </div>
@@ -790,14 +790,12 @@ function SystemChecksSection() {
       <div className="bg-terminal-surface rounded-xl px-4 py-3 shadow-layer-sm">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
-              System Ready
-            </h3>
-            <p className="mt-0.5 text-[10px] font-mono text-terminal-dimmer">
-              Local replay tooling is available.
-            </p>
+            <h3 className="ui-section-title-strong">System Ready</h3>
+            <p className="mt-0.5 ui-caption-muted">Local replay tooling is available.</p>
           </div>
-          <span className="text-[10px] font-mono text-terminal-green">all checks passed</span>
+          <span className="ui-pill-compact bg-terminal-green-subtle text-terminal-green">
+            all checks passed
+          </span>
         </div>
       </div>
     );
@@ -805,9 +803,7 @@ function SystemChecksSection() {
 
   return (
     <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm">
-      <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider mb-3">
-        System Attention Needed
-      </h3>
+      <h3 className="ui-section-title-strong mb-3">System Attention Needed</h3>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
         {missingChecks.map((t) => (
           <div
@@ -1233,9 +1229,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm flex flex-col">
             <div className="mb-3 flex min-h-7 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-w-0 items-center gap-2">
-                <h2 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
-                  {activityWindowLabel}
-                </h2>
+                <h2 className="ui-section-title-strong">{activityWindowLabel}</h2>
                 <span className="text-[10px] font-mono text-terminal-dimmer">
                   {activityDateLabel}
                 </span>
@@ -1266,33 +1260,25 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
                 <div className="text-xl font-mono font-bold text-terminal-green tabular-nums">
                   <AnimatedValue value={activeSessions} />
                 </div>
-                <div className="text-[10px] font-sans font-bold uppercase tracking-widest text-terminal-dimmer">
-                  sessions
-                </div>
+                <div className="ui-section-title">sessions</div>
               </div>
               <div className="rounded-lg bg-terminal-bg px-3 py-2">
                 <div className="text-xl font-mono font-bold text-terminal-blue tabular-nums">
                   <AnimatedValue value={activeProjectCount} />
                 </div>
-                <div className="text-[10px] font-sans font-bold uppercase tracking-widest text-terminal-dimmer">
-                  projects
-                </div>
+                <div className="ui-section-title">projects</div>
               </div>
               <div className="rounded-lg bg-terminal-bg px-3 py-2">
                 <div className="text-xl font-mono font-bold text-terminal-green tabular-nums">
                   <AnimatedValue value={activePrompts} />
                 </div>
-                <div className="text-[10px] font-sans font-bold uppercase tracking-widest text-terminal-dimmer">
-                  turns
-                </div>
+                <div className="ui-section-title">turns</div>
               </div>
               <div className="rounded-lg bg-terminal-bg px-3 py-2">
                 <div className="text-xl font-mono font-bold text-terminal-orange tabular-nums">
                   <AnimatedValue value={activeToolCalls} />
                 </div>
-                <div className="text-[10px] font-sans font-bold uppercase tracking-widest text-terminal-dimmer">
-                  tools
-                </div>
+                <div className="ui-section-title">tools</div>
               </div>
             </div>
           </div>
@@ -1300,9 +1286,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm flex flex-col">
             <div className="mb-3 flex min-h-7 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-w-0 items-center gap-2">
-                <h2 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
-                  Activity Insights
-                </h2>
+                <h2 className="ui-section-title-strong">Activity Insights</h2>
                 <InfoTooltip>
                   Long-term local AI coding totals and contribution-style activity across this
                   machine. Cached data appears first, then provider scans enrich details in place.
@@ -1345,33 +1329,25 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
                 <div className="text-xl font-mono font-bold text-terminal-green tabular-nums">
                   <AnimatedValue value={insights.totalSessions} />
                 </div>
-                <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest">
-                  sessions
-                </div>
+                <div className="ui-section-title">sessions</div>
               </div>
               <div className="rounded-lg bg-terminal-bg px-3 py-2">
                 <div className="text-xl font-mono font-bold text-terminal-blue tabular-nums">
                   <AnimatedValue value={displayProjectCount} />
                 </div>
-                <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest">
-                  projects
-                </div>
+                <div className="ui-section-title">projects</div>
               </div>
               <div className="rounded-lg bg-terminal-bg px-3 py-2">
                 <div className="text-xl font-mono font-bold text-terminal-green tabular-nums">
                   <AnimatedValue value={displayTotalPrompts} />
                 </div>
-                <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest">
-                  turns
-                </div>
+                <div className="ui-section-title">turns</div>
               </div>
               <div className="rounded-lg bg-terminal-bg px-3 py-2">
                 <div className="text-xl font-mono font-bold text-terminal-orange tabular-nums">
                   <AnimatedValue value={displayTotalToolCalls} />
                 </div>
-                <div className="text-[10px] font-sans font-bold text-terminal-dimmer uppercase tracking-widest">
-                  tool calls
-                </div>
+                <div className="ui-section-title">tool calls</div>
               </div>
             </div>
 
@@ -1405,9 +1381,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm flex flex-col">
             <div className="flex items-center justify-between mb-3">
               <div className="flex min-w-0 items-center gap-2">
-                <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
-                  Recent Sessions
-                </h3>
+                <h3 className="ui-section-title-strong">Recent Sessions</h3>
                 <InfoTooltip>
                   Pick up the sessions most likely to need your next action.
                 </InfoTooltip>
@@ -1439,9 +1413,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm flex flex-col">
             <div className="flex items-center justify-between mb-3">
               <div className="flex min-w-0 items-center gap-2">
-                <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
-                  Recent Replays
-                </h3>
+                <h3 className="ui-section-title-strong">Recent Replays</h3>
                 <InfoTooltip>Open something already generated.</InfoTooltip>
               </div>
               <span className="text-[10px] font-mono text-terminal-dimmer tabular-nums">
@@ -1471,9 +1443,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm">
             <div className="flex items-center justify-between mb-3">
               <div className="flex min-w-0 items-center gap-2">
-                <h3 className="text-xs font-sans font-semibold text-terminal-text uppercase tracking-wider">
-                  Project Shortcuts
-                </h3>
+                <h3 className="ui-section-title-strong">Project Shortcuts</h3>
                 <InfoTooltip>Jump back into the projects with recent AI work.</InfoTooltip>
               </div>
               <span className="text-[10px] font-mono text-terminal-dimmer tabular-nums">
