@@ -11,14 +11,13 @@
   },
   "dependencies": {
     "@vibe-replay/types": "workspace:*",
-    "diff": "^7.0.0",
+    "diff": "^9.0.0",
     "marked": "^17.0.4",
     "prism-react-renderer": "^2.4.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
-    "@types/diff": "^6.0.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.0.2",

@@ -40,14 +40,14 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.19.11",
-    "@inquirer/prompts": "^7.2.0",
+    "@inquirer/prompts": "^8.5.2",
     "@resvg/resvg-js": "^2.6.2",
     "chalk": "^5.3.0",
-    "commander": "^12.1.0",
+    "commander": "^15.0.0",
     "gifenc": "^1.0.3",
     "hono": "^4.12.23",
-    "open": "^10.2.0",
-    "ora": "^8.1.0",
+    "open": "^11.0.0",
+    "ora": "^9.4.0",
     "sql.js": "^1.14.1"
   },
   "devDependencies": {
