@@ -149,7 +149,8 @@ export function formatSize(bytes: number): string {
 /** Compact token count, e.g. 999251 → "999K", 1_200_000 → "1.2M". */
 export function formatTokens(n?: number): string {
   if (!n) return "0";
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  // Round-trip guard: 999_500..999_999 would render as "1000K" via Math.round.
+  if (n >= 999_500) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
   return String(n);
 }

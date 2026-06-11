@@ -1088,10 +1088,12 @@ function ReplayCard({
   const isWorktreeReplay = displayProject !== s.project;
 
   // New-design derived values, mirroring the Sessions-tab source card.
-  const titleText = normalizeTitleText(s.title || "") || replaySuggestedTitle(s);
+  // replaySuggestedTitle already resolves the explicit title first, so it is the
+  // single source of truth for the displayed title and the message dedup key.
+  const displayTitle = replaySuggestedTitle(s);
   const messages = (s.messages || (s.firstMessage ? [s.firstMessage] : []))
     .map((msg) => cleanPrompt(msg || ""))
-    .filter((msg) => msg.length > 0 && normalizeTitleText(msg) !== titleText);
+    .filter((msg) => msg.length > 0 && normalizeTitleText(msg) !== displayTitle);
   const repoUrl = s.gitRepo ? `https://github.com/${s.gitRepo}` : undefined;
   const providerTooltip = [
     providerDisplayName(s.provider),
@@ -1125,14 +1127,14 @@ function ReplayCard({
               <EditableTitle
                 slug={s.slug}
                 title={s.title}
-                fallbackTitle={replaySuggestedTitle(s)}
+                fallbackTitle={displayTitle}
                 onSave={onTitleSave}
                 hideSlug
               />
             </div>
           ) : (
             <span className="text-sm font-sans font-medium text-terminal-text leading-snug line-clamp-2">
-              {replaySuggestedTitle(s)}
+              {displayTitle}
             </span>
           )}
         </div>
@@ -1472,6 +1474,9 @@ function ReplayCard({
 }
 
 const SESSION_RENDER_BATCH_SIZE = 100;
+
+/** Only surface the "Watch live" CTA for sessions newer than this (24h). */
+const LIVE_RECENT_MS = 24 * 60 * 60 * 1000;
 
 function repoFilterLabel(repo: string): string {
   return repo === NO_REPO_FILTER ? "No repo" : repo;
@@ -2574,10 +2579,19 @@ function SessionsPanel() {
                 // New-design derived values (see design/session-card-comparison.html)
                 const prLink = scanData?.prLinks?.[0];
                 const repoUrl = s.gitRepo ? `https://github.com/${s.gitRepo}` : undefined;
+                // Encode each path segment so branch names with "/" (e.g.
+                // "feature/foo") don't 404 — GitHub /tree/ uses literal slashes.
                 const branchUrl =
                   s.gitRepo && branch
-                    ? `https://github.com/${s.gitRepo}/tree/${encodeURIComponent(branch)}`
+                    ? `https://github.com/${s.gitRepo}/tree/${branch
+                        .split("/")
+                        .map(encodeURIComponent)
+                        .join("/")}`
                     : undefined;
+                // Live stream is only meaningful for recent sessions (the provider
+                // may still be writing); older sessions just render and end.
+                const isRecentSession =
+                  Date.now() - new Date(s.timestamp).getTime() < LIVE_RECENT_MS;
                 const errorCount = scanData?.apiErrorCount ?? 0;
                 const compactionCount = scanData?.compactionCount ?? 0;
                 // "clean" is only meaningful once scanned (scanData present).
@@ -2808,7 +2822,7 @@ function SessionsPanel() {
                           className="text-terminal-green"
                           title={`No API errors${compactionCount === 0 ? " · no compactions" : ` · ${compactionCount} compaction(s)`}`}
                         >
-                          ✓ clean
+                          ✓ no errors
                         </span>
                       ) : (
                         errorCount > 0 && (
@@ -2904,7 +2918,7 @@ function SessionsPanel() {
                         )}
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
-                        {s.sessionId && (
+                        {s.sessionId && isRecentSession && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
