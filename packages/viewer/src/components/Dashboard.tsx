@@ -1512,7 +1512,7 @@ function ActiveFilterChip({
   return (
     <button
       onClick={onRemove}
-      className="inline-flex items-center gap-1.5 rounded-full bg-terminal-surface text-xs font-mono text-terminal-dim ring-1 ring-terminal-border-subtle pl-2.5 pr-2 py-1 hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors"
+      className="ui-pill rounded-full bg-terminal-surface text-terminal-dim ring-1 ring-terminal-border-subtle pl-2.5 pr-2 py-1 hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors"
       title={`Remove ${label}: ${value}`}
     >
       <span className="text-terminal-dimmer">{label}</span>
@@ -1526,9 +1526,7 @@ function FacetHeader({ title, count }: { title: string; count?: number }) {
   return (
     <div className="mb-2 px-3 pt-0.5">
       <div className="flex items-baseline gap-2 min-w-0">
-        <span className="text-xs font-sans font-bold uppercase tracking-wider text-terminal-text truncate">
-          {title}
-        </span>
+        <span className="ui-section-title-strong truncate">{title}</span>
         {count != null && (
           <span className="text-[10px] font-mono tabular-nums text-terminal-dimmer shrink-0">
             {count}
@@ -1599,7 +1597,7 @@ function FacetSection({
       {entries.length > max && !expanded && (
         <button
           onClick={() => setExpanded(true)}
-          className="w-full rounded-md px-3 py-1.5 text-left text-[10px] font-mono text-terminal-dimmer hover:text-terminal-text hover:bg-terminal-surface transition-colors"
+          className="w-full rounded-md px-3 py-1.5 text-left ui-caption-muted hover:text-terminal-text hover:bg-terminal-surface transition-colors"
         >
           Show {entries.length - max} more
         </button>
@@ -1607,7 +1605,7 @@ function FacetSection({
       {entries.length > max && expanded && (
         <button
           onClick={() => setExpanded(false)}
-          className="w-full rounded-md px-3 py-1.5 text-left text-[10px] font-mono text-terminal-dimmer hover:text-terminal-text hover:bg-terminal-surface transition-colors"
+          className="w-full rounded-md px-3 py-1.5 text-left ui-caption-muted hover:text-terminal-text hover:bg-terminal-surface transition-colors"
         >
           Show fewer
         </button>

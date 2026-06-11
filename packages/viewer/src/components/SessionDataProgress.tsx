@@ -121,11 +121,9 @@ export function DataLevelBadge({
 }) {
   return (
     <span
-      className={`relative inline-flex items-center gap-1 overflow-hidden font-mono rounded-md ${
+      className={`relative ui-pill overflow-hidden ${
         state.className
-      } ${active ? "ring-1 ring-terminal-blue/25" : ""} ${
-        compact ? "text-[10px] px-1.5 py-0.5" : "text-xs px-1.5 py-0.5"
-      }`}
+      } ${active ? "ring-1 ring-terminal-blue/25" : ""} ${compact ? "text-[11px] leading-4" : ""}`}
       title={state.description}
     >
       {active && (

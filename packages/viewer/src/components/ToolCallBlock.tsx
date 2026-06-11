@@ -116,29 +116,16 @@ const THEME_CLASSES: Record<
   },
 };
 
-/** Agent-type pill — matches the design language of the Assistant group's
- * "Jump Target" / "Focused" pills (rounded-full, sans-serif uppercase). */
+/** Agent-type pill — matches the shared replay status treatment. */
 function AgentTypeBadge({ type }: { type: string }) {
   const c = THEME_CLASSES[agentTheme(type)];
-  return (
-    <span
-      className={`text-[10px] font-sans font-medium uppercase tracking-widest px-2 py-0.5 rounded-full ${c.pill}`}
-    >
-      {type}
-    </span>
-  );
+  return <span className={`ui-pill-compact px-2 ${c.pill}`}>{type}</span>;
 }
 
 /** Section label — matches the "Assistant" header treatment so a subagent
  * card reads as a sibling section, not a tool row. */
 function SubagentLabel({ theme }: { theme: AgentTheme }) {
-  return (
-    <span
-      className={`text-[10px] font-sans font-semibold uppercase tracking-widest ${THEME_CLASSES[theme].text}`}
-    >
-      Subagent
-    </span>
-  );
+  return <span className={`ui-section-title ${THEME_CLASSES[theme].text}`}>Subagent</span>;
 }
 
 function SubAgentBody({ subAgent }: { subAgent: SubAgent }) {
@@ -146,9 +133,7 @@ function SubAgentBody({ subAgent }: { subAgent: SubAgent }) {
     <div className="mt-3 space-y-3">
       {subAgent.prompt && (
         <div>
-          <div className="text-[10px] font-sans font-semibold uppercase tracking-widest text-terminal-dim mb-1.5">
-            Prompt
-          </div>
+          <div className="ui-section-title mb-1.5">Prompt</div>
           <div className="text-[11px] text-terminal-text/85 font-mono whitespace-pre-wrap break-words max-h-[120px] overflow-y-auto rounded-md bg-terminal-surface-inset px-3 py-2">
             {subAgent.prompt}
           </div>
@@ -174,7 +159,7 @@ function SubAgentTrace({ scenes }: { scenes: Scene[] }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-1.5">
-        <span className="text-[10px] font-sans font-semibold uppercase tracking-widest text-terminal-dim">
+        <span className="ui-section-title">
           Trace · {scenes.length} {scenes.length === 1 ? "scene" : "scenes"}
         </span>
         {isLong && (

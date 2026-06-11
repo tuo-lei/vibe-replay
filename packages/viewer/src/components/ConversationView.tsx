@@ -336,18 +336,14 @@ export default function ConversationView({
                   <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-terminal-surface-hover/80 border border-terminal-border-subtle/50 text-terminal-text shadow-sm">
                     <span className="text-[11px] font-mono font-bold">&darr;</span>
                   </div>
-                  <span className="text-[10px] font-sans font-bold text-terminal-dim uppercase tracking-widest opacity-80">
-                    Explore
-                  </span>
+                  <span className="ui-caption text-terminal-dim opacity-80">Explore</span>
                 </div>
 
                 <div className="flex items-center gap-3">
                   <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-terminal-surface-hover/80 border border-terminal-border-subtle/50 text-terminal-text shadow-sm">
                     <span className="text-[9px] font-mono font-black tracking-tight">SPACE</span>
                   </div>
-                  <span className="text-[10px] font-sans font-bold text-terminal-dim uppercase tracking-widest opacity-80">
-                    Resume
-                  </span>
+                  <span className="ui-caption text-terminal-dim opacity-80">Resume</span>
                 </div>
               </div>
             </div>
@@ -739,9 +735,7 @@ const GroupCard = memo(function GroupCard({
       >
         {userCommentButton}
         <div className="flex items-center gap-2 mb-2.5">
-          <span className="text-[10px] font-sans font-semibold text-terminal-green uppercase tracking-widest">
-            You
-          </span>
+          <span className="ui-section-title text-terminal-green">You</span>
           {group.timestamp && (
             <span className="text-[10px] font-mono text-terminal-dimmer">
               {formatTime(group.timestamp)}
@@ -749,12 +743,10 @@ const GroupCard = memo(function GroupCard({
           )}
           <div className="flex-1" />
           {groupHasFocusedTarget ? (
-            <span className="text-[10px] font-sans font-medium uppercase tracking-widest px-2 py-0.5 rounded-full bg-terminal-green text-terminal-bg">
-              Jump Target
-            </span>
+            <span className="ui-pill-compact bg-terminal-green text-terminal-bg">Jump Target</span>
           ) : (
             groupHasCurrent && (
-              <span className="text-[10px] font-sans font-medium uppercase tracking-widest px-2 py-0.5 rounded-full bg-terminal-green-subtle text-terminal-green border border-terminal-green/20">
+              <span className="ui-pill-compact bg-terminal-green-subtle text-terminal-green border border-terminal-green/20">
                 Focused
               </span>
             )
@@ -884,9 +876,7 @@ const GroupCard = memo(function GroupCard({
         }`}
       >
         <div className="flex items-center gap-2 mb-2">
-          <span className="text-[10px] font-sans font-semibold text-terminal-dim uppercase tracking-widest">
-            Context Compaction
-          </span>
+          <span className="ui-section-title">Context Compaction</span>
           {group.timestamp && (
             <span className="text-xs font-mono text-terminal-dimmer">
               {formatTime(group.timestamp)}
@@ -932,9 +922,7 @@ const GroupCard = memo(function GroupCard({
         }`}
       >
         <div className="flex items-center gap-2 mb-2">
-          <span className="text-[10px] font-sans font-semibold text-blue-400/80 uppercase tracking-widest">
-            {label}
-          </span>
+          <span className="ui-section-title text-blue-400/80">{label}</span>
           {group.timestamp && (
             <span className="text-xs font-mono text-terminal-dimmer">
               {formatTime(group.timestamp)}
@@ -992,9 +980,7 @@ const GroupCard = memo(function GroupCard({
       }`}
     >
       <div className="flex items-center gap-2 mb-2">
-        <span className="text-[10px] font-sans font-semibold text-terminal-blue uppercase tracking-widest">
-          Assistant
-        </span>
+        <span className="ui-section-title text-terminal-blue">Assistant</span>
         {group.timestamp && (
           <span className="text-[10px] font-mono text-terminal-dimmer">
             {formatTime(group.timestamp)}
@@ -1002,12 +988,12 @@ const GroupCard = memo(function GroupCard({
         )}
         <div className="flex-1" />
         {groupHasFocusedTarget ? (
-          <span className="text-[10px] font-sans font-medium uppercase tracking-widest px-2 py-0.5 rounded-full bg-terminal-blue-emphasis text-terminal-blue">
+          <span className="ui-pill-compact bg-terminal-blue-emphasis text-terminal-blue">
             Jump Target
           </span>
         ) : (
           groupHasCurrent && (
-            <span className="text-[10px] font-sans font-medium uppercase tracking-widest px-2 py-0.5 rounded-full bg-terminal-blue-subtle text-terminal-blue">
+            <span className="ui-pill-compact bg-terminal-blue-subtle text-terminal-blue">
               Focused
             </span>
           )
@@ -1214,9 +1200,7 @@ function CompactAssistantGroup({
       )}
 
       <div className="flex items-center gap-2 mb-2">
-        <span className="text-[10px] font-sans font-semibold text-terminal-blue uppercase tracking-widest">
-          Assistant
-        </span>
+        <span className="ui-section-title text-terminal-blue">Assistant</span>
         {timestamp && (
           <span className="text-[10px] font-mono text-terminal-dimmer">
             {formatTime(timestamp)}
@@ -1229,12 +1213,12 @@ function CompactAssistantGroup({
         )}
         <div className="flex-1" />
         {groupHasFocusedTarget ? (
-          <span className="text-[10px] font-sans font-medium uppercase tracking-widest px-2 py-0.5 rounded-full bg-terminal-blue-emphasis text-terminal-blue">
+          <span className="ui-pill-compact bg-terminal-blue-emphasis text-terminal-blue">
             Jump Target
           </span>
         ) : (
           groupHasCurrent && (
-            <span className="text-[10px] font-sans font-medium uppercase tracking-widest px-2 py-0.5 rounded-full bg-terminal-blue-subtle text-terminal-blue">
+            <span className="ui-pill-compact bg-terminal-blue-subtle text-terminal-blue">
               Focused
             </span>
           )
