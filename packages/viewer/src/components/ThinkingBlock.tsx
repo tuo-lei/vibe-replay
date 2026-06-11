@@ -1,15 +1,34 @@
-import { memo, useState } from "react";
+import { memo, useEffect, useState } from "react";
+import {
+  hasVisibleTextHighlights,
+  renderHighlightedPlainText,
+  type TextHighlight,
+} from "../utils/annotation-highlights";
 import { formatTokens } from "./StatsPanel";
 
 interface Props {
   content: string;
   isActive: boolean;
   tokens?: number;
+  highlights?: TextHighlight[];
+  onHighlightClick?: (annotationId: string) => void;
 }
 
-export default memo(function ThinkingBlock({ content, isActive, tokens }: Props) {
+export default memo(function ThinkingBlock({
+  content,
+  isActive,
+  tokens,
+  highlights = [],
+  onHighlightClick,
+}: Props) {
   const [expanded, setExpanded] = useState(false);
   const tokenLabel = formatTokens(tokens);
+
+  useEffect(() => {
+    if (!expanded && hasVisibleTextHighlights(content, highlights)) {
+      setExpanded(true);
+    }
+  }, [content, expanded, highlights]);
 
   return (
     <div className="ml-6">
@@ -32,7 +51,7 @@ export default memo(function ThinkingBlock({ content, isActive, tokens }: Props)
       </button>
       {expanded && (
         <div className="mt-2 pl-5 text-xs text-terminal-dim font-mono whitespace-pre-wrap break-words border-l-2 border-terminal-purple/30 max-h-[300px] overflow-y-auto">
-          {content}
+          {renderHighlightedPlainText(content, highlights, onHighlightClick)}
         </div>
       )}
     </div>

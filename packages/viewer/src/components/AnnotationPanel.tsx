@@ -13,7 +13,12 @@ interface Props {
   scenes: Scene[];
   currentIndex: number;
   onSeek: (index: number) => void;
+  onSelectAnnotation?: (annotationId: string) => void;
   addingForScene: number | null;
+  addingSelectedText?: string | null;
+  addingSelectedTextStart?: number | null;
+  addingSelectedTextEnd?: number | null;
+  focusedAnnotationId?: string | null;
   onClearAddingTarget: () => void;
   readOnly?: boolean;
 }
@@ -72,7 +77,12 @@ export default function AnnotationPanel({
   scenes,
   currentIndex,
   onSeek,
+  onSelectAnnotation,
   addingForScene,
+  addingSelectedText = null,
+  addingSelectedTextStart = null,
+  addingSelectedTextEnd = null,
+  focusedAnnotationId = null,
   onClearAddingTarget,
   readOnly = false,
 }: Props) {
@@ -88,6 +98,9 @@ export default function AnnotationPanel({
 
   // External target from clicking a card's comment icon
   const activeAdding = addingForScene ?? internalAdding;
+  const activeSelectedText = addingForScene !== null ? addingSelectedText : null;
+  const activeSelectedTextStart = addingForScene !== null ? addingSelectedTextStart : null;
+  const activeSelectedTextEnd = addingForScene !== null ? addingSelectedTextEnd : null;
 
   // When an external target arrives, scroll the form into view
   useEffect(() => {
@@ -125,6 +138,15 @@ export default function AnnotationPanel({
   // Auto-scroll to annotations near currentIndex
   useEffect(() => {
     if (!panelRef.current || activeAdding !== null) return;
+    if (focusedAnnotationId) {
+      const focused = panelRef.current.querySelector(
+        `[data-annotation-id="${CSS.escape(focusedAnnotationId)}"]`,
+      );
+      if (focused instanceof HTMLElement) {
+        focused.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+    }
     const cards = panelRef.current.querySelectorAll("[data-annotation-scene]");
     let closest: Element | null = null;
     let closestDist = Infinity;
@@ -139,7 +161,7 @@ export default function AnnotationPanel({
     if (closest && closestDist <= 3) {
       (closest as HTMLElement).scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
-  }, [currentIndex, activeAdding]);
+  }, [currentIndex, activeAdding, focusedAnnotationId]);
 
   const cancelAdding = useCallback(() => {
     setInternalAdding(null);
@@ -149,11 +171,25 @@ export default function AnnotationPanel({
 
   const handleAdd = useCallback(() => {
     if (!newBody.trim() || activeAdding === null) return;
-    add(activeAdding, newBody.trim());
+    add(
+      activeAdding,
+      newBody.trim(),
+      activeSelectedText ?? undefined,
+      activeSelectedTextStart ?? undefined,
+      activeSelectedTextEnd ?? undefined,
+    );
     setNewBody("");
     setInternalAdding(null);
     onClearAddingTarget();
-  }, [add, activeAdding, newBody, onClearAddingTarget]);
+  }, [
+    add,
+    activeAdding,
+    activeSelectedText,
+    activeSelectedTextEnd,
+    activeSelectedTextStart,
+    newBody,
+    onClearAddingTarget,
+  ]);
 
   const handleUpdate = useCallback(() => {
     if (!editingId || !editBody.trim()) return;
@@ -205,9 +241,10 @@ export default function AnnotationPanel({
             scene={scenes[annotation.sceneIndex]}
             isCurrent={annotation.sceneIndex === currentIndex}
             isEditing={!readOnly && editingId === annotation.id}
+            isFocused={annotation.id === focusedAnnotationId}
             editBody={editingId === annotation.id ? editBody : ""}
             editTextareaRef={editingId === annotation.id ? editTextareaRef : undefined}
-            onSeek={() => onSeek(annotation.sceneIndex)}
+            onSelect={() => onSelectAnnotation?.(annotation.id) ?? onSeek(annotation.sceneIndex)}
             onStartEdit={() => {
               setEditingId(annotation.id);
               setEditBody(annotation.body);
@@ -238,6 +275,16 @@ export default function AnnotationPanel({
                 <span className="text-xs font-mono text-terminal-dim truncate">
                   {addingPreview.text}
                 </span>
+              </div>
+            )}
+            {activeSelectedText && (
+              <div className="mb-2 rounded-md border border-terminal-blue/20 bg-terminal-blue-subtle/40 px-2 py-1.5">
+                <div className="text-[10px] font-mono font-semibold uppercase tracking-wider text-terminal-blue mb-1">
+                  Selected text
+                </div>
+                <div className="text-xs font-mono text-terminal-text/85 max-h-20 overflow-hidden whitespace-pre-wrap break-words">
+                  {activeSelectedText}
+                </div>
               </div>
             )}
             <textarea
@@ -286,10 +333,11 @@ const AnnotationCard = memo(function AnnotationCard({
   annotation,
   scene,
   isCurrent,
+  isFocused,
   isEditing,
   editBody,
   editTextareaRef,
-  onSeek,
+  onSelect,
   onStartEdit,
   onCancelEdit,
   onSaveEdit,
@@ -300,10 +348,11 @@ const AnnotationCard = memo(function AnnotationCard({
   annotation: Annotation;
   scene?: Scene;
   isCurrent: boolean;
+  isFocused: boolean;
   isEditing: boolean;
   editBody: string;
   editTextareaRef?: React.RefObject<HTMLTextAreaElement | null>;
-  onSeek: () => void;
+  onSelect: () => void;
   onStartEdit: () => void;
   onCancelEdit: () => void;
   onSaveEdit: () => void;
@@ -334,15 +383,21 @@ const AnnotationCard = memo(function AnnotationCard({
   return (
     <div
       data-annotation-scene={annotation.sceneIndex}
-      className={`px-3 py-2 border-b border-terminal-border-subtle transition-colors ${
+      data-annotation-id={annotation.id}
+      className={`cursor-pointer px-3 py-2 border-b border-terminal-border-subtle transition-colors ${
         isAiFeedback
           ? isCurrent
             ? "bg-terminal-purple/10 border-l-2 border-l-terminal-purple"
             : "bg-terminal-purple/[0.03] hover:bg-terminal-purple/[0.06]"
-          : isCurrent
-            ? "bg-terminal-blue/10 border-l-2 border-l-terminal-blue"
-            : "hover:bg-terminal-surface/50"
+          : isFocused
+            ? "bg-terminal-blue/15 border-l-2 border-l-terminal-blue shadow-[inset_0_0_0_1px_rgba(96,165,250,0.16)]"
+            : isCurrent
+              ? "bg-terminal-blue/10 border-l-2 border-l-terminal-blue"
+              : "hover:bg-terminal-surface/50"
       }`}
+      onClick={() => {
+        if (!isEditing) onSelect();
+      }}
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
     >
@@ -357,7 +412,10 @@ const AnnotationCard = memo(function AnnotationCard({
 
       {/* Scene reference — click to navigate */}
       <button
-        onClick={onSeek}
+        onClick={(event) => {
+          event.stopPropagation();
+          onSelect();
+        }}
         className="flex items-center gap-1.5 mb-1 w-full text-left group/ref"
       >
         {preview && (
@@ -378,8 +436,16 @@ const AnnotationCard = memo(function AnnotationCard({
       </button>
 
       {/* Comment body + actions */}
-      <div className="flex items-start gap-1">
+      <div className="flex items-start gap-2">
         <div className="flex-1 min-w-0">
+          {annotation.selectedText && (
+            <blockquote
+              title={annotation.selectedText}
+              className="mb-2 max-h-11 overflow-hidden rounded-md border-l-2 border-terminal-blue/60 bg-terminal-blue-subtle/30 px-2 py-1.5 text-xs font-mono text-terminal-text/80 whitespace-pre-wrap break-words"
+            >
+              {annotation.selectedText}
+            </blockquote>
+          )}
           {isEditing ? (
             <div>
               <textarea
@@ -398,13 +464,19 @@ const AnnotationCard = memo(function AnnotationCard({
               />
               <div className="flex justify-end gap-1.5 mt-1">
                 <button
-                  onClick={onCancelEdit}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onCancelEdit();
+                  }}
                   className="px-2 py-0.5 text-xs font-mono text-terminal-dim hover:text-terminal-text transition-colors"
                 >
                   Cancel
                 </button>
                 <button
-                  onClick={onSaveEdit}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onSaveEdit();
+                  }}
                   className="px-2 py-0.5 text-xs font-mono bg-terminal-blue-subtle text-terminal-blue rounded hover:bg-terminal-blue-emphasis transition-colors"
                 >
                   Save
@@ -422,17 +494,27 @@ const AnnotationCard = memo(function AnnotationCard({
         </div>
 
         {/* Action buttons */}
-        {!readOnly && showActions && !isEditing && (
-          <div className="flex gap-0.5 shrink-0 pt-0.5">
+        {!readOnly && !isEditing && (
+          <div
+            className={`flex w-10 shrink-0 justify-end gap-0.5 pt-0.5 transition-opacity ${
+              showActions ? "opacity-100" : "pointer-events-none opacity-0"
+            }`}
+          >
             <button
-              onClick={onStartEdit}
+              onClick={(event) => {
+                event.stopPropagation();
+                onStartEdit();
+              }}
               className="p-0.5 text-xs text-terminal-dim hover:text-terminal-blue transition-colors"
               title="Edit"
             >
               {"\u270E"}
             </button>
             <button
-              onClick={onDelete}
+              onClick={(event) => {
+                event.stopPropagation();
+                onDelete();
+              }}
               className="p-0.5 text-xs text-terminal-dim hover:text-terminal-red transition-colors"
               title="Delete"
             >

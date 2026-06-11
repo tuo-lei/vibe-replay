@@ -10,7 +10,12 @@ interface Props {
   scenes: Scene[];
   currentIndex: number;
   onSeek: (index: number) => void;
+  onSelectAnnotation?: (annotationId: string) => void;
   addingForScene: number | null;
+  addingSelectedText?: string | null;
+  addingSelectedTextStart?: number | null;
+  addingSelectedTextEnd?: number | null;
+  focusedAnnotationId?: string | null;
   onClearAddingTarget: () => void;
   readOnly?: boolean;
 }
@@ -22,7 +27,12 @@ export default function CommentDrawer({
   scenes,
   currentIndex,
   onSeek,
+  onSelectAnnotation,
   addingForScene,
+  addingSelectedText,
+  addingSelectedTextStart,
+  addingSelectedTextEnd,
+  focusedAnnotationId,
   onClearAddingTarget,
   readOnly,
 }: Props) {
@@ -69,7 +79,12 @@ export default function CommentDrawer({
           scenes={scenes}
           currentIndex={currentIndex}
           onSeek={onSeek}
+          onSelectAnnotation={onSelectAnnotation}
           addingForScene={addingForScene}
+          addingSelectedText={addingSelectedText}
+          addingSelectedTextStart={addingSelectedTextStart}
+          addingSelectedTextEnd={addingSelectedTextEnd}
+          focusedAnnotationId={focusedAnnotationId}
           onClearAddingTarget={onClearAddingTarget}
           readOnly={readOnly}
         />

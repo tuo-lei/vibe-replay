@@ -6,11 +6,21 @@ export function addAnnotation(
   sceneIndex: number,
   body: string,
   id?: string,
+  selectedText?: string,
+  selectedTextStart?: number,
+  selectedTextEnd?: number,
 ): Annotation[] {
   const now = new Date().toISOString();
+  const hasSelectedTextRange =
+    Number.isInteger(selectedTextStart) &&
+    Number.isInteger(selectedTextEnd) &&
+    selectedTextStart! >= 0 &&
+    selectedTextEnd! > selectedTextStart!;
   const annotation: Annotation = {
     id: id ?? crypto.randomUUID(),
     sceneIndex,
+    ...(selectedText?.trim() ? { selectedText: selectedText.trim() } : {}),
+    ...(hasSelectedTextRange ? { selectedTextStart, selectedTextEnd } : {}),
     body,
     author: "anonymous",
     createdAt: now,

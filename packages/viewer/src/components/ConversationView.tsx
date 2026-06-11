@@ -2,7 +2,8 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { OverlayActions } from "../hooks/useOverlays";
 import type { LiveCursorDiagnostics } from "../hooks/useSessionLoader";
 import type { EffectivePrefs } from "../hooks/useViewPrefs";
-import type { Scene, TurnStat } from "../types";
+import type { Annotation, Scene, TurnStat } from "../types";
+import { textHighlightsByScene, type TextHighlight } from "../utils/annotation-highlights";
 import { displayToolName } from "../utils/toolName";
 import CompactionSummaryBlock from "./CompactionSummaryBlock";
 import { fmtNum, formatDuration, formatTokens, formatToolDuration } from "./StatsPanel";
@@ -19,7 +20,9 @@ interface Props {
   focusIndex?: number;
   annotatedScenes?: Set<number>;
   annotationCounts?: Map<number, number>;
+  annotations?: Annotation[];
   onComment?: (sceneIndex: number) => void;
+  onAnnotationClick?: (annotationId: string) => void;
   state?: string;
   overlayActions?: OverlayActions;
   turnStats?: TurnStat[];
@@ -74,7 +77,9 @@ export default function ConversationView({
   focusIndex,
   annotatedScenes,
   annotationCounts,
+  annotations,
   onComment,
+  onAnnotationClick,
   onSeek,
   state,
   overlayActions,
@@ -87,6 +92,7 @@ export default function ConversationView({
 }: Props & { onSeek?: (index: number) => void }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [activeStickyPrompt, setActiveStickyPrompt] = useState<StickyPromptSummary | null>(null);
+  const highlightsByScene = useMemo(() => textHighlightsByScene(annotations ?? []), [annotations]);
 
   // Pre-compute ALL groups once — stable across playback ticks
   const allGroups = useMemo(() => {
@@ -294,7 +300,9 @@ export default function ConversationView({
                     focusIndex={focusIndex}
                     annotatedScenes={annotatedScenes}
                     annotationCounts={annotationCounts}
+                    highlightsByScene={highlightsByScene}
                     onComment={onComment}
+                    onAnnotationClick={onAnnotationClick}
                     overlayActions={overlayActions}
                     turnStats={turnStats}
                   />
@@ -325,9 +333,7 @@ export default function ConversationView({
                   <div className="animate-ping absolute inline-flex h-full w-full rounded-full bg-terminal-orange opacity-40"></div>
                   <div className="relative inline-flex rounded-full h-2 w-2 bg-terminal-orange/80 shadow-[0_0_8px_rgba(251,146,60,0.5)]"></div>
                 </div>
-                <span className="text-[10px] font-sans font-black text-terminal-orange uppercase tracking-[.25em] drop-shadow-sm">
-                  Paused
-                </span>
+                <span className="ui-section-title text-terminal-orange drop-shadow-sm">Paused</span>
               </div>
 
               {/* Right: Interaction Hints */}
@@ -642,7 +648,9 @@ const GroupCard = memo(function GroupCard({
   focusIndex,
   annotatedScenes: _annotatedScenes,
   annotationCounts,
+  highlightsByScene,
   onComment,
+  onAnnotationClick,
   overlayActions,
   turnStats,
 }: {
@@ -652,7 +660,9 @@ const GroupCard = memo(function GroupCard({
   focusIndex?: number;
   annotatedScenes?: Set<number>;
   annotationCounts?: Map<number, number>;
+  highlightsByScene?: Map<number, TextHighlight[]>;
   onComment?: (sceneIndex: number) => void;
+  onAnnotationClick?: (annotationId: string) => void;
   overlayActions?: OverlayActions;
   turnStats?: TurnStat[];
 }) {
@@ -806,6 +816,8 @@ const GroupCard = memo(function GroupCard({
                   isActive={index === currentIndex}
                   collapseTools={effectivePrefs.collapseAllTools}
                   effectiveContent={effectiveContent ?? undefined}
+                  highlights={highlightsByScene?.get(index) ?? []}
+                  onHighlightClick={onAnnotationClick}
                 />
                 {sceneOverlays.length > 0 && (
                   <div className="flex items-center gap-2 mt-1.5">
@@ -891,7 +903,12 @@ const GroupCard = memo(function GroupCard({
             </span>
           )}
         </div>
-        <CompactionSummaryBlock content={scene.content} isActive={firstIndex === currentIndex} />
+        <CompactionSummaryBlock
+          content={scene.content}
+          isActive={firstIndex === currentIndex}
+          highlights={highlightsByScene?.get(firstIndex) ?? []}
+          onHighlightClick={onAnnotationClick}
+        />
       </div>
     );
   }
@@ -929,7 +946,12 @@ const GroupCard = memo(function GroupCard({
             </span>
           )}
         </div>
-        <CompactionSummaryBlock content={scene.content} isActive={firstIndex === currentIndex} />
+        <CompactionSummaryBlock
+          content={scene.content}
+          isActive={firstIndex === currentIndex}
+          highlights={highlightsByScene?.get(firstIndex) ?? []}
+          onHighlightClick={onAnnotationClick}
+        />
       </div>
     );
   }
@@ -958,7 +980,9 @@ const GroupCard = memo(function GroupCard({
         groupHasFocusedTarget={groupHasFocusedTarget}
         timestamp={group.timestamp}
         annotationCounts={annotationCounts}
+        highlightsByScene={highlightsByScene}
         onComment={onComment}
+        onAnnotationClick={onAnnotationClick}
         overlayActions={overlayActions}
         turnDurationMs={
           group.turnNumber ? turnStats?.[group.turnNumber - 1]?.durationMs : undefined
@@ -1011,6 +1035,8 @@ const GroupCard = memo(function GroupCard({
           collapseTools={effectivePrefs.collapseAllTools}
           annotationCounts={annotationCounts}
           onComment={onComment}
+          highlightsByScene={highlightsByScene}
+          onAnnotationClick={onAnnotationClick}
           overlayActions={overlayActions}
         />
       </div>
@@ -1033,7 +1059,9 @@ function CompactAssistantGroup({
   groupHasFocusedTarget,
   timestamp,
   annotationCounts,
+  highlightsByScene,
   onComment,
+  onAnnotationClick,
   overlayActions,
   turnDurationMs,
 }: {
@@ -1047,7 +1075,9 @@ function CompactAssistantGroup({
   groupHasFocusedTarget: boolean;
   timestamp?: string;
   annotationCounts?: Map<number, number>;
+  highlightsByScene?: Map<number, TextHighlight[]>;
   onComment?: (sceneIndex: number) => void;
+  onAnnotationClick?: (annotationId: string) => void;
   overlayActions?: OverlayActions;
   turnDurationMs?: number;
 }) {
@@ -1305,6 +1335,8 @@ function CompactAssistantGroup({
                   isActive={index === currentIndex}
                   collapseTools={false}
                   effectiveContent={ec}
+                  highlights={highlightsByScene?.get(index) ?? []}
+                  onHighlightClick={onAnnotationClick}
                 />
                 {onComment && (
                   <button
@@ -1355,6 +1387,8 @@ function BatchedScenes({
   collapseTools,
   annotationCounts,
   onComment,
+  highlightsByScene,
+  onAnnotationClick,
   overlayActions,
 }: {
   scenes: { scene: Scene; index: number }[];
@@ -1362,6 +1396,8 @@ function BatchedScenes({
   collapseTools: boolean;
   annotationCounts?: Map<number, number>;
   onComment?: (sceneIndex: number) => void;
+  highlightsByScene?: Map<number, TextHighlight[]>;
+  onAnnotationClick?: (annotationId: string) => void;
   overlayActions?: OverlayActions;
 }) {
   // Group consecutive tool calls with the same toolName (only batchable ones)
@@ -1410,6 +1446,8 @@ function BatchedScenes({
                 isActive={index === currentIndex}
                 collapseTools={collapseTools}
                 effectiveContent={effectiveContent ?? undefined}
+                highlights={highlightsByScene?.get(index) ?? []}
+                onHighlightClick={onAnnotationClick}
               />
               {sceneOverlays.length > 0 && (
                 <div className="flex items-center gap-2 mt-1">
@@ -1647,11 +1685,15 @@ const SceneBlock = memo(function SceneBlock({
   isActive,
   collapseTools,
   effectiveContent,
+  highlights = [],
+  onHighlightClick,
 }: {
   scene: Scene;
   isActive: boolean;
   collapseTools: boolean;
   effectiveContent?: string;
+  highlights?: TextHighlight[];
+  onHighlightClick?: (annotationId: string) => void;
 }) {
   switch (scene.type) {
     case "user-prompt":
@@ -1660,18 +1702,47 @@ const SceneBlock = memo(function SceneBlock({
           content={effectiveContent ?? scene.content}
           images={scene.images}
           isActive={isActive}
+          highlights={highlights}
+          onHighlightClick={onHighlightClick}
         />
       );
     case "compaction-summary":
-      return <CompactionSummaryBlock content={scene.content} isActive={isActive} />;
+      return (
+        <CompactionSummaryBlock
+          content={scene.content}
+          isActive={isActive}
+          highlights={highlights}
+          onHighlightClick={onHighlightClick}
+        />
+      );
     case "context-injection":
-      return <CompactionSummaryBlock content={scene.content} isActive={isActive} />;
+      return (
+        <CompactionSummaryBlock
+          content={scene.content}
+          isActive={isActive}
+          highlights={highlights}
+          onHighlightClick={onHighlightClick}
+        />
+      );
     case "thinking":
-      return <ThinkingBlock content={scene.content} isActive={isActive} tokens={scene.tokens} />;
+      return (
+        <ThinkingBlock
+          content={scene.content}
+          isActive={isActive}
+          tokens={scene.tokens}
+          highlights={highlights}
+          onHighlightClick={onHighlightClick}
+        />
+      );
     case "text-response":
       return (
         <>
-          <TextResponseBlock content={effectiveContent ?? scene.content} isActive={isActive} />
+          <TextResponseBlock
+            content={effectiveContent ?? scene.content}
+            isActive={isActive}
+            highlights={highlights}
+            onHighlightClick={onHighlightClick}
+          />
           {scene.isTruncated && (
             <div className="mt-1 text-[10px] font-mono text-terminal-orange/70 italic">
               Response truncated (max_tokens reached)

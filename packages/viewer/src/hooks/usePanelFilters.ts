@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { navigateTo } from "../components/dashboard-utils";
 
 export const ALL_PROJECTS = "__all__";
@@ -47,14 +47,28 @@ export function usePanelFilters() {
   const [showArchived, setShowArchived] = useState(getShowArchivedFromUrl);
   const [selectedProviders, setSelectedProviders] = useState(getProvidersFromUrl);
   const [selectedRepos, setSelectedRepos] = useState(getReposFromUrl);
+  const selectedProvidersRef = useRef(selectedProviders);
+  const selectedReposRef = useRef(selectedRepos);
+
+  useEffect(() => {
+    selectedProvidersRef.current = selectedProviders;
+  }, [selectedProviders]);
+
+  useEffect(() => {
+    selectedReposRef.current = selectedRepos;
+  }, [selectedRepos]);
 
   useEffect(() => {
     const handler = () => {
       setSelectedProject(getProjectFromUrl());
       setFilter(getFilterFromUrl());
       setShowArchived(getShowArchivedFromUrl());
-      setSelectedProviders(getProvidersFromUrl());
-      setSelectedRepos(getReposFromUrl());
+      const providers = getProvidersFromUrl();
+      const repos = getReposFromUrl();
+      selectedProvidersRef.current = providers;
+      selectedReposRef.current = repos;
+      setSelectedProviders(providers);
+      setSelectedRepos(repos);
     };
     window.addEventListener("popstate", handler);
     return () => window.removeEventListener("popstate", handler);
@@ -71,26 +85,26 @@ export function usePanelFilters() {
   };
 
   const handleProviderSet = (providers: string[]) => {
+    selectedProvidersRef.current = providers;
     setSelectedProviders(providers);
     navigateTo({ provider: multiParam(providers) }, { notify: false });
   };
 
   const handleProviderToggle = (provider: string) => {
-    const next = selectedProviders.includes(provider)
-      ? selectedProviders.filter((p) => p !== provider)
-      : [...selectedProviders, provider];
+    const prev = selectedProvidersRef.current;
+    const next = prev.includes(provider) ? prev.filter((p) => p !== provider) : [...prev, provider];
     handleProviderSet(next);
   };
 
   const handleRepoSet = (repos: string[]) => {
+    selectedReposRef.current = repos;
     setSelectedRepos(repos);
     navigateTo({ repo: multiParam(repos) }, { notify: false });
   };
 
   const handleRepoToggle = (repo: string) => {
-    const next = selectedRepos.includes(repo)
-      ? selectedRepos.filter((r) => r !== repo)
-      : [...selectedRepos, repo];
+    const prev = selectedReposRef.current;
+    const next = prev.includes(repo) ? prev.filter((r) => r !== repo) : [...prev, repo];
     handleRepoSet(next);
   };
 
@@ -105,6 +119,8 @@ export function usePanelFilters() {
     // Clear all only resets the explorer dimensions shown as active chips.
     setSelectedProject(ALL_PROJECTS);
     setFilter("");
+    selectedProvidersRef.current = [];
+    selectedReposRef.current = [];
     setSelectedProviders([]);
     setSelectedRepos([]);
     navigateTo(
