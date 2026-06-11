@@ -88,6 +88,13 @@ export interface RawMessage {
   sourceToolUseID?: string;
   /** Source classification for user messages (for example, tool-originated messages). */
   origin?: string;
+  /**
+   * Origin of a user prompt. `"sdk"` marks prompts driven by the Claude Agent
+   * SDK (programmatic / routine-driven runs) rather than direct keyboard input.
+   * Absent on normal interactive sessions. These are still genuine prompts that
+   * drove the turn, so they render as ordinary user turns.
+   */
+  promptSource?: string;
   type:
     | "user"
     | "assistant"
