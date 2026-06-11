@@ -21,6 +21,7 @@ import {
   formatDataSourceLabel,
   formatDate,
   formatSize,
+  formatTokens,
   fetchWithRetry,
   getErrorMessage,
   getFriendlyErrorMessage,
@@ -57,6 +58,7 @@ import { ScanInsightsProvider, useScanInsightsContext } from "./InsightsPanel";
 import ProjectsPanel from "./ProjectsPanel";
 import {
   DataLevelBadge,
+  DataLevelIcon,
   hasEnrichedSourceDetails,
   hasPromptOrToolCounts,
   hasRichScanMetrics,
@@ -70,23 +72,31 @@ import { formatDuration } from "./StatsPanel";
 export type Tab = "home" | "sessions" | "replays" | "projects" | "insights";
 
 // Module-level cache for scan results (avoids re-fetching on every popup open)
-let scanResultsCache: SessionScanData[] | null = null;
-let scanResultsFetchPromise: Promise<SessionScanData[] | null> | null = null;
+interface ScanResultsPayload {
+  results: SessionScanData[] | null;
+  /** When the last full background scan finished (global, not per-session). */
+  finishedAt?: string;
+}
+let scanResultsCache: ScanResultsPayload | null = null;
+let scanResultsFetchPromise: Promise<ScanResultsPayload | null> | null = null;
 
-function fetchScanResults(): Promise<SessionScanData[] | null> {
+function fetchScanResults(): Promise<ScanResultsPayload | null> {
   if (scanResultsCache) return Promise.resolve(scanResultsCache);
   if (scanResultsFetchPromise) return scanResultsFetchPromise;
   scanResultsFetchPromise = fetch("/api/scan/results")
     .then((r) => (r.ok ? r.json() : null))
     .then((data) => {
-      const results = data?.results ?? null;
-      scanResultsCache = results;
+      const payload: ScanResultsPayload = {
+        results: data?.results ?? null,
+        finishedAt: data?.finishedAt,
+      };
+      scanResultsCache = payload;
       // Invalidate after 30s so fresh data can come in
       setTimeout(() => {
         scanResultsCache = null;
         scanResultsFetchPromise = null;
       }, 30_000);
-      return results;
+      return payload;
     })
     .catch(() => null);
   return scanResultsFetchPromise;
@@ -481,9 +491,9 @@ export function SessionDetailPopup({
     }
     let cancelled = false;
     setScanLoading(true);
-    fetchScanResults().then((results) => {
+    fetchScanResults().then((payload) => {
       if (cancelled) return;
-      const match = results?.find((r) => r.slug === s.slug);
+      const match = payload?.results?.find((r) => r.slug === s.slug);
       if (match) setScanData(match);
       setScanLoading(false);
     });
@@ -1077,150 +1087,61 @@ function ReplayCard({
   const displayProject = rollupProject(s.project);
   const isWorktreeReplay = displayProject !== s.project;
 
+  // New-design derived values, mirroring the Sessions-tab source card.
+  // replaySuggestedTitle already resolves the explicit title first, so it is the
+  // single source of truth for the displayed title and the message dedup key.
+  const displayTitle = replaySuggestedTitle(s);
+  const messages = (s.messages || (s.firstMessage ? [s.firstMessage] : []))
+    .map((msg) => cleanPrompt(msg || ""))
+    .filter((msg) => msg.length > 0 && normalizeTitleText(msg) !== displayTitle);
+  const repoUrl = s.gitRepo ? `https://github.com/${s.gitRepo}` : undefined;
+  const providerTooltip = [
+    providerDisplayName(s.provider),
+    s.model ? shortModelName(s.model) : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const shared = !!(s.cloud || s.gist);
+  const tooBig = s.replaySize != null && s.replaySize > 10 * 1024 * 1024;
+  const costTitle = s.stats.tokenUsage
+    ? `${formatTokens(s.stats.tokenUsage.cacheReadTokens)} cache read · ${formatTokens(
+        s.stats.tokenUsage.cacheCreationTokens,
+      )} cache write · ${formatTokens(s.stats.tokenUsage.inputTokens)} in · ${formatTokens(
+        s.stats.tokenUsage.outputTokens,
+      )} out`
+    : "Estimated cost";
+
   return (
     <div
       onClick={onOpen}
-      className={`bg-terminal-surface rounded-xl px-5 py-5 hover:bg-terminal-surface-hover transition-all duration-300 ease-material space-y-3.5 shadow-layer-sm cursor-pointer hover-lift ${isArchived ? "opacity-50" : ""}`}
+      className={`bg-terminal-surface rounded-xl px-5 py-5 hover:bg-terminal-surface-hover transition-all duration-300 ease-material space-y-3 shadow-layer-sm cursor-pointer hover-lift ${isArchived ? "opacity-50" : ""}`}
     >
-      {/* Row 1: title + badges + actions */}
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex-1 flex items-center gap-2 min-w-0">
+      {/* Row 1: provider icon + title | slug·time + menu */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-2.5 min-w-0 flex-1">
+          <span className="mt-0.5">
+            <ProviderBadge provider={s.provider} title={providerTooltip} />
+          </span>
           {onTitleSave ? (
-            <div className="flex-1 min-w-0" onClick={(e) => e.stopPropagation()}>
+            <div className="min-w-0 flex-1" onClick={(e) => e.stopPropagation()}>
               <EditableTitle
                 slug={s.slug}
                 title={s.title}
-                fallbackTitle={replaySuggestedTitle(s)}
+                fallbackTitle={displayTitle}
                 onSave={onTitleSave}
+                hideSlug
               />
             </div>
           ) : (
-            <div className="flex-1 min-w-0">
-              <span className="text-sm font-sans font-medium text-terminal-text truncate block">
-                {replaySuggestedTitle(s)}
-              </span>
-              <div className="text-[11px] font-mono text-terminal-dimmer truncate mt-0.5">
-                slug: <span className="text-terminal-dim">{s.slug}</span>
-              </div>
-            </div>
-          )}
-        </div>
-        <div className="flex items-center gap-1.5 shrink-0">
-          {s.replayOutdated && (
-            <span
-              className="h-6 px-2 text-[10px] font-mono rounded-md bg-terminal-orange-subtle text-terminal-orange flex items-center gap-1"
-              title={`Generated with v${s.generatorVersion || "?"} — regenerate to update`}
-            >
-              <svg
-                width="10"
-                height="10"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              >
-                <path d="M2.5 8a5.5 5.5 0 019.3-4M13.5 8a5.5 5.5 0 01-9.3 4" />
-                <path d="M12.5 1v3h-3M3.5 15v-3h3" />
-              </svg>
-              outdated
+            <span className="text-sm font-sans font-medium text-terminal-text leading-snug line-clamp-2">
+              {displayTitle}
             </span>
           )}
-          {s.gist?.outdated && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onShare?.();
-              }}
-              className="h-7 w-7 flex items-center justify-center rounded-md bg-terminal-orange-subtle text-terminal-orange hover:bg-terminal-orange-emphasis transition-all duration-200 ease-material shrink-0"
-              title="Gist out of sync — click to update"
-            >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M8 1a1 1 0 0 1 1 1v5.5a1 1 0 0 1-2 0V2a1 1 0 0 1 1-1zM8 11a1.25 1.25 0 1 1 0 2.5A1.25 1.25 0 0 1 8 11z" />
-              </svg>
-            </button>
-          )}
-          {onShare && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onShare();
-              }}
-              className={`h-7 px-2.5 text-xs font-sans font-semibold rounded-md transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0 ${
-                s.cloud || s.gist
-                  ? "bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis"
-                  : "bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis"
-              }`}
-              title={s.cloud || s.gist ? "Already shared — view or update" : "Share & Export"}
-            >
-              {s.cloud || s.gist ? (
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
-                </svg>
-              ) : (
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                >
-                  <path d="M8 2v8M5 5l3-3 3 3M3 11v2h10v-2" />
-                </svg>
-              )}
-              {s.cloud || s.gist ? "Shared" : "Share"}
-            </button>
-          )}
-          {onRegenerate && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onRegenerate();
-              }}
-              disabled={isRegenerating}
-              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50"
-              title="Redo"
-            >
-              {isRegenerating ? (
-                <span className="animate-pulse">...</span>
-              ) : (
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
-                  <path d="M21 3v5h-5" />
-                  <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
-                  <path d="M8 16H3v5" />
-                </svg>
-              )}
-              Redo
-            </button>
-          )}
-          <button
-            onClick={onOpen}
-            className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1 shrink-0"
-          >
-            <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-              <polygon points="4 2 14 8 4 14" />
-            </svg>
-            View
-          </button>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-[11px] font-mono text-terminal-dimmer whitespace-nowrap hidden sm:inline">
+            {s.slug} · {formatDate(s.startTime)}
+          </span>
           {(onDelete || onArchive || onRawData) && (
             <div className="relative" ref={menuRef}>
               <button
@@ -1333,81 +1254,229 @@ function ReplayCard({
           )}
         </div>
       </div>
-      {/* Row 2: user messages */}
-      {(s.messages || (s.firstMessage ? [s.firstMessage] : []))
-        .map((msg) => cleanPrompt(msg || ""))
-        .filter((msg) => msg.length > 0)
-        .map((msg, i) => (
-          <div key={i} className="flex gap-2 items-start">
-            <span className="text-xs text-terminal-green shrink-0 mt-px select-none">&gt;</span>
-            <p className="text-sm text-terminal-dim line-clamp-1 leading-relaxed">{msg}</p>
-          </div>
-        ))}
-      {/* Row 3: stats bar */}
-      <div className="flex items-center gap-1.5 flex-wrap">
-        <span className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim">
-          {s.stats.userPrompts} prompts
-        </span>
-        <span className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-orange-subtle text-terminal-orange">
-          {s.stats.toolCalls} tools
-        </span>
-        {s.stats.durationMs && (
-          <span className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-surface-2 text-terminal-dim">
-            {formatDuration(s.stats.durationMs)}
-          </span>
-        )}
-        {s.stats.costEstimate && (
-          <span className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-green-subtle text-terminal-green">
-            {formatCost(s.stats.costEstimate)}
-          </span>
-        )}
-        {s.hasAnnotations && (
-          <span className="inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-terminal-blue-subtle text-terminal-blue">
-            {s.annotationCount} annotation{s.annotationCount !== 1 ? "s" : ""}
-          </span>
-        )}
-        {s.replaySize != null && s.replaySize > 0 && (
-          <span
-            className={`inline-flex items-center gap-1 text-xs font-mono tabular-nums px-1.5 py-0.5 rounded-md ${
-              s.replaySize > 10 * 1024 * 1024
-                ? "bg-terminal-red-subtle text-terminal-red"
-                : "bg-terminal-surface-2 text-terminal-dimmer"
-            }`}
-            title={s.replaySize > 10 * 1024 * 1024 ? "Exceeds share limit (10MB)" : undefined}
+
+      {/* Row 2: user messages (deduped against the title) */}
+      {messages.map((msg, i) => (
+        <div key={i} className="flex gap-2 items-start">
+          <span className="text-xs text-terminal-green shrink-0 mt-px select-none">&gt;</span>
+          <p className="text-sm text-terminal-dim line-clamp-1 leading-relaxed">{msg}</p>
+        </div>
+      ))}
+
+      {/* Row 3: place — project · repo (clickable) */}
+      <div className="flex items-center gap-x-2.5 gap-y-1 flex-wrap text-xs font-mono text-terminal-dim">
+        <span className="inline-flex items-center gap-1 max-w-[240px] truncate" title={s.project}>
+          <svg
+            width="11"
+            height="11"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.3"
+            className="text-terminal-dimmer shrink-0"
           >
-            {formatSize(s.replaySize)}
-          </span>
-        )}
-      </div>
-      {/* Row 4: identity */}
-      <div className="flex items-center gap-2 text-xs font-mono text-terminal-dimmer flex-wrap">
-        <ProviderBadge provider={s.provider} />
-        {/* Replays display repo when available; keep the underlying project path discoverable. */}
-        <span title={s.gitRepo ? s.project : isWorktreeReplay ? s.project : undefined}>
-          {s.gitRepo || displayProject}
+            <path d="M1.5 4.5a1 1 0 0 1 1-1h3l1.5 1.5h5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-10a1 1 0 0 1-1-1z" />
+          </svg>
+          {displayProject}
         </span>
+        {s.gitRepo && repoUrl && (
+          <a
+            href={repoUrl}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center gap-1 hover:text-terminal-blue hover:underline shrink-0"
+            title="Open repo on GitHub"
+          >
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 16 16"
+              fill="currentColor"
+              className="text-terminal-dimmer"
+            >
+              <path d="M8 1a7 7 0 0 0-2.2 13.6c.35.06.48-.15.48-.34v-1.2c-1.95.42-2.36-.94-2.36-.94-.32-.8-.78-1.02-.78-1.02-.64-.44.05-.43.05-.43.7.05 1.07.72 1.07.72.63 1.08 1.65.77 2.05.59.06-.46.25-.77.45-.95-1.56-.18-3.2-.78-3.2-3.47 0-.77.27-1.4.72-1.89-.07-.18-.31-.9.07-1.87 0 0 .59-.19 1.93.72a6.7 6.7 0 0 1 3.5 0c1.34-.91 1.93-.72 1.93-.72.38.97.14 1.69.07 1.87.45.49.72 1.12.72 1.89 0 2.7-1.64 3.29-3.2 3.46.25.22.48.65.48 1.31v1.95c0 .19.13.4.49.33A7 7 0 0 0 8 1z" />
+            </svg>
+            {s.gitRepo}
+          </a>
+        )}
         {isWorktreeReplay && (
           <span
-            className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple uppercase tracking-wider"
+            className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple uppercase tracking-wider shrink-0"
             title={`Agent worktree: ${s.project}`}
           >
             worktree
           </span>
         )}
-        <span className="text-terminal-border">&middot;</span>
-        <span>{formatDate(s.startTime)}</span>
-        {s.model && (
-          <>
-            <span className="text-terminal-border">&middot;</span>
-            <span>{s.model}</span>
-          </>
+      </div>
+
+      {/* Row 4: activity — hairline-framed */}
+      <div className="flex items-center gap-x-3.5 gap-y-1 flex-wrap text-xs font-mono tabular-nums py-2 border-y border-terminal-border-subtle">
+        {!!s.stats.durationMs && (
+          <span className="text-terminal-text">{formatDuration(s.stats.durationMs)}</span>
         )}
+        <span className="text-terminal-text">
+          {s.stats.userPrompts} <span className="text-terminal-dimmer">prompts</span>
+        </span>
+        <span className="text-terminal-text">
+          {s.stats.toolCalls} <span className="text-terminal-dimmer">tools</span>
+        </span>
+        {!!s.stats.costEstimate && (
+          <span className="text-terminal-green" title={costTitle}>
+            {formatCost(s.stats.costEstimate)}
+          </span>
+        )}
+        {s.hasAnnotations && (
+          <span className="text-terminal-blue">
+            {s.annotationCount} annotation{s.annotationCount !== 1 ? "s" : ""}
+          </span>
+        )}
+      </div>
+
+      {/* Row 5: facts (left) | state + actions (right) */}
+      <div className="flex items-end justify-between gap-3">
+        <div className="flex items-center gap-x-2 gap-y-1 flex-wrap text-xs font-mono min-w-0">
+          {s.replaySize != null && s.replaySize > 0 && (
+            <span
+              className={`tabular-nums ${tooBig ? "px-1.5 py-0.5 rounded-md bg-terminal-red-subtle text-terminal-red" : "text-terminal-dimmer"}`}
+              title={tooBig ? "Exceeds share limit (10MB)" : "Replay size"}
+            >
+              {formatSize(s.replaySize)}
+            </span>
+          )}
+          {s.replayOutdated && (
+            <span
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-terminal-orange-subtle text-terminal-orange"
+              title={`Generated with v${s.generatorVersion || "?"} — regenerate to update`}
+            >
+              <svg
+                width="10"
+                height="10"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              >
+                <path d="M2.5 8a5.5 5.5 0 019.3-4M13.5 8a5.5 5.5 0 01-9.3 4" />
+                <path d="M12.5 1v3h-3M3.5 15v-3h3" />
+              </svg>
+              outdated
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span
+            className={`text-[11px] font-mono px-1.5 py-0.5 rounded-md ${shared ? "bg-terminal-green-subtle text-terminal-green" : "bg-terminal-blue-subtle text-terminal-blue"}`}
+            title={shared ? "Replay is shared (cloud/gist)" : "Local replay ready to view"}
+          >
+            {shared ? "Shared" : "Replay"}
+          </span>
+          {s.gist?.outdated && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onShare?.();
+              }}
+              className="h-7 w-7 flex items-center justify-center rounded-md bg-terminal-orange-subtle text-terminal-orange hover:bg-terminal-orange-emphasis transition-all duration-200 ease-material shrink-0"
+              title="Gist out of sync — click to update"
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M8 1a1 1 0 0 1 1 1v5.5a1 1 0 0 1-2 0V2a1 1 0 0 1 1-1zM8 11a1.25 1.25 0 1 1 0 2.5A1.25 1.25 0 0 1 8 11z" />
+              </svg>
+            </button>
+          )}
+          {onShare && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onShare();
+              }}
+              className={`h-7 px-2.5 text-xs font-sans font-semibold rounded-md transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0 ${
+                shared
+                  ? "bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis"
+                  : "bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis"
+              }`}
+              title={shared ? "Already shared — view or update" : "Share & Export"}
+            >
+              {shared ? (
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
+                </svg>
+              ) : (
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                >
+                  <path d="M8 2v8M5 5l3-3 3 3M3 11v2h10v-2" />
+                </svg>
+              )}
+              {shared ? "Shared" : "Share"}
+            </button>
+          )}
+          {onRegenerate && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onRegenerate();
+              }}
+              disabled={isRegenerating}
+              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50"
+              title="Redo"
+            >
+              {isRegenerating ? (
+                <span className="animate-pulse">...</span>
+              ) : (
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+                  <path d="M21 3v5h-5" />
+                  <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+                  <path d="M8 16H3v5" />
+                </svg>
+              )}
+              Redo
+            </button>
+          )}
+          <button
+            onClick={onOpen}
+            className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1 shrink-0"
+          >
+            <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+              <polygon points="4 2 14 8 4 14" />
+            </svg>
+            View
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
 const SESSION_RENDER_BATCH_SIZE = 100;
+
+/** Only surface the "Watch live" CTA for sessions newer than this (24h). */
+const LIVE_RECENT_MS = 24 * 60 * 60 * 1000;
 
 function repoFilterLabel(repo: string): string {
   return repo === NO_REPO_FILTER ? "No repo" : repo;
@@ -1437,35 +1506,6 @@ function sortedFacetEntries(counts: Map<string, number>) {
     if (b[1] !== a[1]) return b[1] - a[1];
     return facetSortLabel(a[0]).localeCompare(facetSortLabel(b[0]));
   });
-}
-
-function replayStatus(s: SourceSession): { label: string; className: string; title: string } {
-  if (!s.replay) {
-    return {
-      label: "No replay",
-      className: "bg-terminal-surface-2 text-terminal-dimmer",
-      title: "No self-contained replay has been generated yet.",
-    };
-  }
-  if (s.replay.replayOutdated) {
-    return {
-      label: "Replay outdated",
-      className: "bg-terminal-orange-subtle text-terminal-orange",
-      title: "A replay exists, but it was generated by an older version.",
-    };
-  }
-  if (s.replay.cloud || s.replay.gist) {
-    return {
-      label: "Shared",
-      className: "bg-terminal-green-subtle text-terminal-green",
-      title: s.replay.cloud ? "Replay is shared to cloud." : "Replay is shared as a gist.",
-    };
-  }
-  return {
-    label: "Replay ready",
-    className: "bg-terminal-blue-subtle text-terminal-blue",
-    title: "A local replay is ready to view.",
-  };
 }
 
 function ActiveFilterChip({
@@ -1587,6 +1627,7 @@ function FacetSection({
 function SessionsPanel() {
   const [sources, setSources] = useState<SourceSession[]>([]);
   const [scanResultsBySlug, setScanResultsBySlug] = useState<Record<string, SessionScanData>>({});
+  const [scanFinishedAt, setScanFinishedAt] = useState<string | null>(null);
   const [cleanupPeriodDays, setCleanupPeriodDays] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1737,11 +1778,12 @@ function SessionsPanel() {
     if (sources.length === 0) return;
     let cancelled = false;
     const loadScanResults = async () => {
-      const results = await fetchScanResults();
-      if (cancelled || !results) return;
+      const payload = await fetchScanResults();
+      if (cancelled || !payload?.results) return;
+      setScanFinishedAt(payload.finishedAt ?? null);
       setScanResultsBySlug(
         Object.fromEntries(
-          results.filter((result) => result.slug).map((result) => [result.slug!, result]),
+          payload.results.filter((result) => result.slug).map((result) => [result.slug!, result]),
         ),
       );
     };
@@ -2526,13 +2568,49 @@ function SessionsPanel() {
                   priorityEnrichmentSlugs.has(s.slug) &&
                   !hasRichScanMetrics(scanData);
                 const dataState = sessionDataState(s, scanData);
-                const replay = replayStatus(s);
+                const scannedAtLabel =
+                  scanData && scanFinishedAt ? formatCompactAge(scanFinishedAt) : null;
                 const isArchived = archivedSlugs.has(s.slug);
                 const replaySlug = s.existingReplay || s.replay?.slug;
                 const projectLabel =
                   projectLabels.get(rolledProject) ||
                   projectLabels.get(s.project) ||
                   projectName(rolledProject);
+                // New-design derived values (see design/session-card-comparison.html)
+                const prLink = scanData?.prLinks?.[0];
+                const repoUrl = s.gitRepo ? `https://github.com/${s.gitRepo}` : undefined;
+                // Encode each path segment so branch names with "/" (e.g.
+                // "feature/foo") don't 404 — GitHub /tree/ uses literal slashes.
+                const branchUrl =
+                  s.gitRepo && branch
+                    ? `https://github.com/${s.gitRepo}/tree/${branch
+                        .split("/")
+                        .map(encodeURIComponent)
+                        .join("/")}`
+                    : undefined;
+                // Live stream is only meaningful for recent sessions (the provider
+                // may still be writing); older sessions just render and end.
+                const isRecentSession =
+                  Date.now() - new Date(s.timestamp).getTime() < LIVE_RECENT_MS;
+                const errorCount = scanData?.apiErrorCount ?? 0;
+                const compactionCount = scanData?.compactionCount ?? 0;
+                // "clean" is only meaningful once scanned (scanData present).
+                const cleanRun = !!scanData && errorCount === 0;
+                const providerTooltip = [
+                  providerDisplayName(s.provider),
+                  displayModel ? shortModelName(displayModel) : null,
+                  scanData?.permissionMode ? `${scanData.permissionMode} mode` : null,
+                  scanData?.entrypoint ? `via ${scanData.entrypoint}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ");
+                const costTitle = scanData?.tokenUsage
+                  ? `${formatTokens(scanData.tokenUsage.cacheReadTokens)} cache read · ${formatTokens(
+                      scanData.tokenUsage.cacheCreationTokens,
+                    )} cache write · ${formatTokens(scanData.tokenUsage.inputTokens)} in · ${formatTokens(
+                      scanData.tokenUsage.outputTokens,
+                    )} out`
+                  : "Estimated cost";
                 return (
                   <div
                     key={`${s.provider}-${s.slug}`}
@@ -2544,179 +2622,136 @@ function SessionsPanel() {
                       isPriorityEnriching ? "ring-1 ring-terminal-blue/20" : ""
                     } ${isArchived ? "opacity-50" : ""}`}
                   >
-                    {/* Row 1: title / time + primary actions */}
+                    {/* Row 1: provider icon + title | slug·time + menu */}
                     <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 space-y-1">
-                        <span className="text-sm font-sans font-semibold text-terminal-text truncate block leading-relaxed">
+                      <div className="flex items-start gap-2.5 min-w-0">
+                        <span className="mt-0.5">
+                          <ProviderBadge provider={s.provider} title={providerTooltip} />
+                        </span>
+                        <span className="text-sm font-sans font-semibold text-terminal-text leading-snug line-clamp-2">
                           {sessionTitle}
                         </span>
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <div className="text-[11px] font-mono text-terminal-dimmer truncate">
-                            slug: <span className="text-terminal-dim">{s.slug}</span>
-                          </div>
-                          <span className="text-terminal-border">·</span>
-                          <span className="text-[11px] font-mono text-terminal-dimmer">
-                            {timeAgo(s.timestamp)}
-                          </span>
-                        </div>
                       </div>
-                      <div className="flex flex-col items-end gap-1 shrink-0">
-                        <div className="flex items-center gap-1.5">
-                          {replaySlug && (
-                            <>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  navigateTo({ view: null, session: replaySlug, v: "export" });
-                                }}
-                                className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis transition-all duration-200 ease-material"
-                              >
-                                Share
-                              </button>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedSlug(s.slug);
-                                }}
-                                disabled={generatingSlug === s.slug}
-                                className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200 ease-material disabled:opacity-50"
-                              >
-                                {generatingSlug === s.slug ? "..." : "Redo"}
-                              </button>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  navigateTo({ view: null, session: replaySlug });
-                                }}
-                                className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1"
-                              >
-                                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-                                  <polygon points="4 2 14 8 4 14" />
-                                </svg>
-                                View
-                              </button>
-                            </>
-                          )}
-                          {!replaySlug && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedSlug(s.slug);
-                              }}
-                              disabled={generatingSlug === s.slug}
-                              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1 disabled:opacity-50"
-                            >
-                              {generatingSlug === s.slug ? (
-                                <span className="animate-pulse">Generating...</span>
-                              ) : (
-                                <>
-                                  <svg
-                                    width="10"
-                                    height="10"
-                                    viewBox="0 0 16 16"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                  >
-                                    <path d="M8 2v12M2 8h12" />
-                                  </svg>
-                                  Generate
-                                </>
-                              )}
-                            </button>
-                          )}
-                          <SessionMoreMenu
-                            onArchive={() => toggleArchive(s.slug)}
-                            onDelete={replaySlug ? () => handleDeleteReplay(s.slug) : undefined}
-                            onRawData={() => openRawSourceJson(s, scanData || null)}
-                            isArchived={isArchived}
-                          />
-                        </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-[11px] font-mono text-terminal-dimmer whitespace-nowrap hidden sm:inline">
+                          {s.slug} · {timeAgo(s.timestamp)}
+                        </span>
+                        <SessionMoreMenu
+                          onArchive={() => toggleArchive(s.slug)}
+                          onDelete={replaySlug ? () => handleDeleteReplay(s.slug) : undefined}
+                          onRawData={() => openRawSourceJson(s, scanData || null)}
+                          isArchived={isArchived}
+                        />
                       </div>
                     </div>
-                    {/* Row 2: user prompts */}
-                    {prompts.map((p, i) => (
-                      <div key={i} className="flex gap-2 items-start">
-                        <span className="text-xs text-terminal-green shrink-0 mt-px select-none">
-                          &gt;
-                        </span>
-                        <p className="text-sm text-terminal-dim line-clamp-2 leading-relaxed">
-                          {p}
-                        </p>
-                      </div>
-                    ))}
 
-                    {/* Row 3: identity */}
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <ProviderBadge provider={s.provider} />
-                      <span className="ui-pill bg-terminal-surface-2 text-terminal-dim">
-                        {providerDisplayName(s.provider)}
-                      </span>
+                    {/* Row 2: user prompts (deduped against the title, which may be a
+                        normalized/truncated form of the first prompt) */}
+                    {prompts
+                      .filter((p) => normalizeTitleText(p) !== sessionTitle)
+                      .map((p, i) => (
+                        <div key={i} className="flex gap-2 items-start">
+                          <span className="text-xs text-terminal-green shrink-0 mt-px select-none">
+                            &gt;
+                          </span>
+                          <p className="text-sm text-terminal-dim line-clamp-2 leading-relaxed">
+                            {p}
+                          </p>
+                        </div>
+                      ))}
+
+                    {/* Row 3: place — project · branch · repo (clickable) */}
+                    <div className="flex items-center gap-x-2.5 gap-y-1 flex-wrap text-xs font-mono text-terminal-dim">
                       <span
-                        className={`ui-pill font-mono ${
-                          s.gitRepo
-                            ? "bg-terminal-surface-2 text-terminal-dim"
-                            : "bg-terminal-surface-2 text-terminal-dimmer"
-                        }`}
-                        title={s.gitRepo || "No git repository detected for this session"}
-                      >
-                        {repoFilterLabel(repoFilterValue(s))}
-                      </span>
-                      <span
-                        className="ui-pill font-mono bg-terminal-surface-2 text-terminal-dim max-w-[260px] truncate"
+                        className="inline-flex items-center gap-1 max-w-[240px] truncate"
                         title={s.project}
                       >
+                        <svg
+                          width="11"
+                          height="11"
+                          viewBox="0 0 16 16"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.3"
+                          className="text-terminal-dimmer shrink-0"
+                        >
+                          <path d="M1.5 4.5a1 1 0 0 1 1-1h3l1.5 1.5h5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-10a1 1 0 0 1-1-1z" />
+                        </svg>
                         {projectLabel}
                       </span>
-                      {branch && (
-                        <span className="ui-pill font-mono bg-terminal-surface-2 text-terminal-dim shrink-0 gap-0.5">
+                      {branch &&
+                        (branchUrl ? (
+                          <a
+                            href={branchUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center gap-1 hover:text-terminal-blue hover:underline shrink-0"
+                            title={`Open branch ${branch} on GitHub`}
+                          >
+                            <svg
+                              width="10"
+                              height="10"
+                              viewBox="0 0 16 16"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                            >
+                              <circle cx="5" cy="4" r="2" />
+                              <circle cx="11" cy="12" r="2" />
+                              <path d="M5 6v4c0 1.1.9 2 2 2h2" />
+                            </svg>
+                            {branch}
+                          </a>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 shrink-0">
+                            <svg
+                              width="10"
+                              height="10"
+                              viewBox="0 0 16 16"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                            >
+                              <circle cx="5" cy="4" r="2" />
+                              <circle cx="11" cy="12" r="2" />
+                              <path d="M5 6v4c0 1.1.9 2 2 2h2" />
+                            </svg>
+                            {branch}
+                          </span>
+                        ))}
+                      {s.gitRepo && repoUrl && (
+                        <a
+                          href={repoUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="inline-flex items-center gap-1 hover:text-terminal-blue hover:underline shrink-0"
+                          title="Open repo on GitHub"
+                        >
                           <svg
                             width="10"
                             height="10"
                             viewBox="0 0 16 16"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="1.5"
+                            fill="currentColor"
+                            className="text-terminal-dimmer"
                           >
-                            <circle cx="5" cy="4" r="2" />
-                            <circle cx="11" cy="12" r="2" />
-                            <path d="M5 6v4c0 1.1.9 2 2 2h2" />
+                            <path d="M8 1a7 7 0 0 0-2.2 13.6c.35.06.48-.15.48-.34v-1.2c-1.95.42-2.36-.94-2.36-.94-.32-.8-.78-1.02-.78-1.02-.64-.44.05-.43.05-.43.7.05 1.07.72 1.07.72.63 1.08 1.65.77 2.05.59.06-.46.25-.77.45-.95-1.56-.18-3.2-.78-3.2-3.47 0-.77.27-1.4.72-1.89-.07-.18-.31-.9.07-1.87 0 0 .59-.19 1.93.72a6.7 6.7 0 0 1 3.5 0c1.34-.91 1.93-.72 1.93-.72.38.97.14 1.69.07 1.87.45.49.72 1.12.72 1.89 0 2.7-1.64 3.29-3.2 3.46.25.22.48.65.48 1.31v1.95c0 .19.13.4.49.33A7 7 0 0 0 8 1z" />
                           </svg>
-                          {branch}
-                        </span>
-                      )}
-                      {displayModel && (
-                        <span className="ui-pill font-mono bg-terminal-surface-2 text-terminal-dimmer">
-                          {shortModelName(displayModel)}
-                        </span>
+                          {s.gitRepo}
+                        </a>
                       )}
                       {isWorktree && (
                         <span
-                          className="ui-pill-compact bg-terminal-purple-subtle text-terminal-purple shrink-0"
+                          className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple shrink-0 uppercase tracking-wider"
                           title={`Agent worktree: ${s.project}`}
                         >
                           worktree
                         </span>
                       )}
-                    </div>
-
-                    {/* Row 4: data/replay state */}
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <DataLevelBadge state={dataState} compact active={isPriorityEnriching} />
-                      <span className={`ui-pill ${replay.className}`} title={replay.title}>
-                        {replay.label}
-                      </span>
-                      {(s.hasSqlite || s.hasSdk || scanData?.dataSource) && (
-                        <span
-                          className={`ui-pill ${dataSourceBadgeClass(scanData?.dataSource, s.hasSqlite, s.hasSdk)}`}
-                          title={dataSourceLabel}
-                        >
-                          {dataSourceLabel}
-                        </span>
-                      )}
                       {s.spaceId && (
                         <span
-                          className="ui-pill font-mono bg-terminal-surface-2 text-terminal-dimmer"
+                          className="text-terminal-dimmer shrink-0"
                           title={
                             s.spaceIdSetBy
                               ? `Cowork space ${s.spaceId} (${s.spaceIdSetBy})`
@@ -2728,7 +2763,7 @@ function SessionsPanel() {
                       )}
                       {s.pluginsEnabled && (
                         <span
-                          className="ui-pill bg-terminal-surface-2 text-terminal-dimmer"
+                          className="text-terminal-dimmer shrink-0"
                           title="Claude Cowork plugins enabled"
                         >
                           plugins
@@ -2736,7 +2771,7 @@ function SessionsPanel() {
                       )}
                       {s.skillsEnabled && (
                         <span
-                          className="ui-pill bg-terminal-surface-2 text-terminal-dimmer"
+                          className="text-terminal-dimmer shrink-0"
                           title="Claude Cowork skills enabled"
                         >
                           skills
@@ -2744,67 +2779,124 @@ function SessionsPanel() {
                       )}
                     </div>
 
-                    {/* Row 5: stats */}
-                    {(displayPromptCount ||
-                      displayToolCount ||
-                      displayDurationMs ||
-                      displayEditCount ||
-                      displayCost ||
-                      s.hasPR ||
-                      s.isStarred ||
-                      (s.fsDetectedFiles && s.fsDetectedFiles.length > 0) ||
-                      (s.expiresInDays != null && s.expiresInDays <= EXPIRY_WARN_DAYS)) && (
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        {!!displayPromptCount && (
-                          <span className="ui-pill font-mono tabular-nums bg-terminal-surface-2 text-terminal-dim">
-                            {displayPromptCount} prompts
+                    {/* Row 4: activity — exact values, hairline-framed. Leads with the
+                        data-level icon (replaces the old "Scanned" chip next to the CTAs). */}
+                    <div className="flex items-center gap-x-3.5 gap-y-1 flex-wrap text-xs font-mono tabular-nums py-2 border-y border-terminal-border-subtle">
+                      <DataLevelIcon
+                        state={dataState}
+                        active={isPriorityEnriching}
+                        scannedAtLabel={scannedAtLabel}
+                      />
+                      {!!displayDurationMs && (
+                        <span className="text-terminal-text" title="Active duration">
+                          {scanData?.durationMs == null ? "~" : ""}
+                          {formatDuration(displayDurationMs)}
+                        </span>
+                      )}
+                      {!!displayPromptCount && (
+                        <span className="text-terminal-text">
+                          {displayPromptCount}{" "}
+                          <span className="text-terminal-dimmer">
+                            prompt{displayPromptCount !== 1 ? "s" : ""}
                           </span>
-                        )}
-                        {!!displayToolCount && (
-                          <span className="ui-pill font-mono tabular-nums bg-terminal-orange-subtle text-terminal-orange">
-                            {displayToolCount} tools
-                          </span>
-                        )}
-                        {!!displayDurationMs && (
+                        </span>
+                      )}
+                      {!!displayToolCount && (
+                        <span className="text-terminal-text">
+                          {displayToolCount} <span className="text-terminal-dimmer">tools</span>
+                        </span>
+                      )}
+                      {!!displayEditCount && (
+                        <span className="text-terminal-text" title="File edits">
+                          {scanData?.editCount == null ? "~" : ""}
+                          {displayEditCount} <span className="text-terminal-dimmer">edits</span>
+                        </span>
+                      )}
+                      {!!displayCost && (
+                        <span className="text-terminal-green" title={costTitle}>
+                          {formatCost(displayCost)}
+                        </span>
+                      )}
+                      {cleanRun ? (
+                        <span
+                          className="text-terminal-green"
+                          title={`No API errors${compactionCount === 0 ? " · no compactions" : ` · ${compactionCount} compaction(s)`}`}
+                        >
+                          ✓ no errors
+                        </span>
+                      ) : (
+                        errorCount > 0 && (
                           <span
-                            className="ui-pill font-mono tabular-nums bg-terminal-surface-2 text-terminal-dim"
-                            title="Estimated active duration"
+                            className="text-terminal-red"
+                            title={`${errorCount} API error(s) during this session`}
                           >
-                            ~{formatDuration(displayDurationMs)}
+                            {errorCount} error{errorCount !== 1 ? "s" : ""}
+                          </span>
+                        )
+                      )}
+                    </div>
+
+                    {/* Row 5: outcome facts (left) | state + CTAs (right) */}
+                    <div className="flex items-end justify-between gap-3">
+                      <div className="flex items-center gap-x-2 gap-y-1 flex-wrap text-xs font-mono min-w-0">
+                        {prLink ? (
+                          <a
+                            href={prLink.prUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis transition-colors"
+                            title={`Open PR #${prLink.prNumber} on GitHub`}
+                          >
+                            <svg
+                              width="10"
+                              height="10"
+                              viewBox="0 0 16 16"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                            >
+                              <circle cx="4" cy="4" r="1.5" />
+                              <circle cx="4" cy="12" r="1.5" />
+                              <circle cx="12" cy="12" r="1.5" />
+                              <path d="M4 5.5v5M12 5.5v5M12 5.5a3 3 0 0 0-3-3H7" />
+                            </svg>
+                            PR #{prLink.prNumber}
+                          </a>
+                        ) : (
+                          s.hasPR && (
+                            <span
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-terminal-purple-subtle text-terminal-purple"
+                              title="Session produced a PR"
+                            >
+                              PR
+                            </span>
+                          )
+                        )}
+                        <span className="text-terminal-dimmer tabular-nums" title="Transcript size">
+                          {formatSize(s.fileSize)}
+                        </span>
+                        {s.filePaths.length > 1 && (
+                          <span className="text-terminal-dimmer tabular-nums">
+                            {s.filePaths.length} parts
                           </span>
                         )}
-                        {!!displayEditCount && (
+                        {(s.hasSqlite || s.hasSdk || scanData?.dataSource) && (
                           <span
-                            className="ui-pill font-mono tabular-nums bg-terminal-surface-2 text-terminal-dim"
-                            title="Estimated file edits"
+                            className={`px-1.5 py-0.5 rounded-md ${dataSourceBadgeClass(scanData?.dataSource, s.hasSqlite, s.hasSdk)}`}
+                            title={dataSourceLabel}
                           >
-                            ~{displayEditCount} edits
-                          </span>
-                        )}
-                        {!!displayCost && (
-                          <span className="ui-pill font-mono tabular-nums bg-terminal-green-subtle text-terminal-green">
-                            {formatCost(displayCost)}
-                          </span>
-                        )}
-                        {s.hasPR && (
-                          <span
-                            className="ui-pill bg-terminal-purple-subtle text-terminal-purple"
-                            title="Session produced a PR"
-                          >
-                            PR
+                            {dataSourceLabel}
                           </span>
                         )}
                         {s.isStarred && (
-                          <span
-                            className="ui-pill bg-terminal-orange-subtle text-terminal-orange"
-                            title="Starred in Claude Cowork"
-                          >
-                            starred
+                          <span className="text-terminal-orange" title="Starred in Claude Cowork">
+                            ★
                           </span>
                         )}
                         {s.fsDetectedFiles && s.fsDetectedFiles.length > 0 && (
                           <span
-                            className="ui-pill font-mono tabular-nums bg-terminal-surface-2 text-terminal-dim"
+                            className="text-terminal-dimmer tabular-nums"
                             title={s.fsDetectedFiles.join("\n")}
                           >
                             {s.fsDetectedFiles.length} files
@@ -2812,7 +2904,7 @@ function SessionsPanel() {
                         )}
                         {s.expiresInDays != null && s.expiresInDays <= EXPIRY_WARN_DAYS && (
                           <span
-                            className={`ui-pill ${
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md ${
                               s.expiresInDays <= 2
                                 ? "bg-terminal-red-subtle text-terminal-red"
                                 : "bg-terminal-orange-subtle text-terminal-orange"
@@ -2825,16 +2917,86 @@ function SessionsPanel() {
                           </span>
                         )}
                       </div>
-                    )}
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="ui-pill font-mono tabular-nums bg-terminal-surface-2 text-terminal-dimmer">
-                        {formatSize(s.fileSize)}
-                      </span>
-                      {s.filePaths.length > 1 && (
-                        <span className="ui-pill font-mono tabular-nums bg-terminal-surface-2 text-terminal-dimmer">
-                          {s.filePaths.length} parts
-                        </span>
-                      )}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {s.sessionId && isRecentSession && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigateToLive(s.provider, s.sessionId!);
+                            }}
+                            title="Stream this session live as the provider writes new turns"
+                            className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-red-subtle text-terminal-red hover:bg-terminal-red-emphasis transition-all duration-200 ease-material flex items-center gap-1.5"
+                          >
+                            <span className="relative flex w-1.5 h-1.5">
+                              <span className="absolute inline-flex h-full w-full rounded-full bg-terminal-red opacity-75 animate-ping" />
+                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-terminal-red" />
+                            </span>
+                            Live
+                          </button>
+                        )}
+                        {replaySlug ? (
+                          <>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigateTo({ view: null, session: replaySlug, v: "export" });
+                              }}
+                              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis transition-all duration-200 ease-material"
+                            >
+                              Share
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedSlug(s.slug);
+                              }}
+                              disabled={generatingSlug === s.slug}
+                              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200 ease-material disabled:opacity-50"
+                            >
+                              {generatingSlug === s.slug ? "..." : "Redo"}
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigateTo({ view: null, session: replaySlug });
+                              }}
+                              className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1"
+                            >
+                              <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                                <polygon points="4 2 14 8 4 14" />
+                              </svg>
+                              View
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedSlug(s.slug);
+                            }}
+                            disabled={generatingSlug === s.slug}
+                            className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1 disabled:opacity-50"
+                          >
+                            {generatingSlug === s.slug ? (
+                              <span className="animate-pulse">Generating...</span>
+                            ) : (
+                              <>
+                                <svg
+                                  width="10"
+                                  height="10"
+                                  viewBox="0 0 16 16"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                >
+                                  <path d="M8 2v12M2 8h12" />
+                                </svg>
+                                Generate
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );

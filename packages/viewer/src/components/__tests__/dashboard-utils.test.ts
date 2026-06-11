@@ -5,6 +5,7 @@ import {
   dataSourceBadgeClass,
   fetchWithRetry,
   formatDataSourceLabel,
+  formatTokens,
   getFriendlyErrorMessage,
   isCacheFresh,
   isNetworkError,
@@ -384,6 +385,23 @@ describe("formatDataSourceLabel", () => {
     expect(formatDataSourceLabel(false, "global-state")).toBe("Cursor global state");
     expect(formatDataSourceLabel(true)).toBe("SQLite + JSONL");
     expect(formatDataSourceLabel()).toBe("JSONL");
+  });
+});
+
+describe("formatTokens", () => {
+  it("formats magnitudes with K/M suffixes", () => {
+    expect(formatTokens(0)).toBe("0");
+    expect(formatTokens(undefined)).toBe("0");
+    expect(formatTokens(742)).toBe("742");
+    expect(formatTokens(8_655)).toBe("9K");
+    expect(formatTokens(999_251)).toBe("999K");
+    expect(formatTokens(2_400_000)).toBe("2.4M");
+  });
+
+  it("does not emit '1000K' near the 1M boundary", () => {
+    expect(formatTokens(999_500)).toBe("1.0M");
+    expect(formatTokens(999_999)).toBe("1.0M");
+    expect(formatTokens(1_000_000)).toBe("1.0M");
   });
 });
 

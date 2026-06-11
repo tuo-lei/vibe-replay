@@ -2601,6 +2601,7 @@ export async function startServer(
       running: scanState.running,
       scanned: scanState.scanned,
       total: scanState.total,
+      finishedAt: scanState.finishedAt,
     });
   });
 
