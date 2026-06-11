@@ -31,7 +31,7 @@ npx vibe-replay
 
 ### All your sessions, one place
 
-Launch with `npx vibe-replay -d` and see every Claude Code, Cursor, Codex, and Pi session across all projects — with activity heatmaps, cost totals, and project analytics.
+Launch with `npx vibe-replay -d` and see every Claude Code, Cursor, Codex, and Pi session across all projects — with a daily activity snapshot, activity heatmaps, cost totals, and project analytics. Search sessions, filter by git repo, and generate any replay in one click.
 
 <p align="center">
   <img src="docs/screenshots/dashboard.png" alt="Local dashboard — browse sessions, activity heatmap, project analytics" width="800" />
@@ -126,6 +126,7 @@ curl -o ~/.claude/skills/replay/SKILL.md \
 - **Cross-platform** — runs on macOS, Linux, and Windows
 - **Single HTML file** — self-contained, works offline, zero external requests. Drop it in Slack, email it, open it anywhere
 - **Claude Code, Cursor, Codex, and Pi** — all providers auto-discovered, including multi-file and resumed sessions
+- **Local dashboard** — browse and search every session, filter by git repo, with activity heatmaps, per-project analytics, and a personal-insights view across all your coding
 - **Share & export** — GitHub Gist, animated SVG, GIF, markdown summary, or cloud upload. Secret redaction built in
 - **Sub-agent visualization** — see delegated tool calls and sub-agent trees rendered inline
 - **Comments** — leave notes on any scene. Comments persist in the HTML and travel with the replay

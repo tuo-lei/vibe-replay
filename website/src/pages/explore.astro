@@ -13,8 +13,8 @@ const exploreFaq = [
     a: "Run `npx vibe-replay --gist` (publishes to GitHub Gist) or `npx vibe-replay --cloud` (publishes to vibe-replay cloud). Both produce a public URL you can share. Replays show up here automatically.",
   },
   {
-    q: "Can I replay Claude Code and Cursor sessions?",
-    a: "Yes. vibe-replay reads JSONL files for Claude Code and SQLite/JSONL for Cursor — no extra instrumentation. Both providers render with full prompt history, tool calls, diffs, and thinking blocks.",
+    q: "Which agents can I replay?",
+    a: "Claude Code, Claude Desktop, Cursor, Codex, and Pi — all auto-discovered from local files, no extra instrumentation. vibe-replay reads JSONL for Claude Code and SQLite/JSONL for Cursor, and every provider renders with full prompt history, tool calls, diffs, and thinking blocks.",
   },
   {
     q: "Are replays self-contained?",
@@ -29,7 +29,7 @@ const exploreJsonLd = [
     "@type": "CollectionPage",
     "name": "Public AI coding session replays",
     "description":
-      "Browse public AI coding session replays shared by the community. Watch Claude Code and Cursor sessions as interactive web replays.",
+      "Browse public AI coding session replays shared by the community. Watch Claude Code, Cursor, Codex, and Pi sessions as interactive web replays.",
     "url": new URL("/explore/", siteBase).href,
     "isPartOf": {
       "@type": "WebSite",
@@ -50,8 +50,8 @@ const exploreJsonLd = [
 ---
 
 <Layout
-  title="Explore Public AI Coding Replays — Claude Code & Cursor | vibe-replay"
-  description="Browse public AI coding session replays shared by the community. Watch real Claude Code and Cursor sessions as interactive, scrubbable web replays."
+  title="Explore Public AI Coding Replays — Claude Code, Cursor, Codex & Pi | vibe-replay"
+  description="Browse public AI coding session replays shared by the community. Watch real Claude Code, Cursor, Codex, and Pi sessions as interactive, scrubbable web replays."
   jsonLd={exploreJsonLd}
 >
   <div class="min-h-screen flex flex-col">
@@ -63,7 +63,7 @@ const exploreJsonLd = [
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
         <div>
           <h1 class="text-2xl font-bold text-text-primary mb-1">Public AI coding replays</h1>
-          <p class="text-text-muted text-sm font-mono">Claude Code &amp; Cursor sessions shared by the community</p>
+          <p class="text-text-muted text-sm font-mono">Claude Code, Cursor, Codex &amp; Pi sessions shared by the community</p>
         </div>
         <div class="flex items-center gap-1 rounded-lg border border-border overflow-hidden w-fit shrink-0">
           <button
@@ -87,7 +87,7 @@ const exploreJsonLd = [
       <section class="mb-8 text-text-secondary text-sm leading-relaxed max-w-3xl">
         <p>
           Watch real <a href="/blog/" class="text-accent hover:underline">AI coding sessions</a> from
-          Claude Code and Cursor &mdash; full prompts, tool calls, file diffs, and thinking blocks
+          Claude Code, Cursor, Codex, and Pi &mdash; full prompts, tool calls, file diffs, and thinking blocks
           rendered as an interactive timeline. Each replay is a self-contained HTML file you can open
           offline, embed in a PR, or share as a link.
         </p>
