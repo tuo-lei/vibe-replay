@@ -453,7 +453,7 @@ describe("sources enrichment helpers", () => {
 
     const ordered = __testables.prioritizeScanInputs(
       inputs,
-      [{ sessionId: "already-new" }, { sessionId: "hinted-mid" }] as any[],
+      [{ sessionId: "already-new" }, { sessionId: "hinted-mid" }],
       { slugs: ["mid"] },
     );
 
@@ -515,9 +515,12 @@ describe("sources enrichment helpers", () => {
       },
       {
         role: "assistant",
-        blocks: [{ type: "tool_use" }, { type: "tool_use" }],
+        blocks: [
+          { type: "tool_use" as const, id: "t1", name: "bash", input: {} },
+          { type: "tool_use" as const, id: "t2", name: "bash", input: {} },
+        ],
       },
-    ] as any);
+    ]);
 
     expect(counts).toEqual({ promptCount: 1, toolCallCount: 2 });
   });

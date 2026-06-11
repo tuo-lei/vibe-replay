@@ -702,7 +702,7 @@ function enrichmentPriorityScore(
 
 function prioritizeScanInputs(
   inputs: ScanInput[],
-  previousResults: SessionScanResult[],
+  previousResults: Array<Pick<SessionScanResult, "sessionId">>,
   hints: EnrichmentHints = {},
 ): ScanInput[] {
   const previousSessionIds = new Set(previousResults.map((result) => result.sessionId));
