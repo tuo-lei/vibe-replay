@@ -47,6 +47,17 @@ describe("addAnnotation", () => {
     expect(result[0].id).toBeTruthy();
     expect(result[0].id).not.toBe("test-id");
   });
+
+  it("stores selected text when provided", () => {
+    const result = addAnnotation([], 2, "tighten this", "fixed-id", "selected phrase");
+    expect(result[0].selectedText).toBe("selected phrase");
+  });
+
+  it("stores selected text range when provided", () => {
+    const result = addAnnotation([], 2, "tighten this", "fixed-id", "selected phrase", 10, 25);
+    expect(result[0].selectedTextStart).toBe(10);
+    expect(result[0].selectedTextEnd).toBe(25);
+  });
 });
 
 // -- updateAnnotation --

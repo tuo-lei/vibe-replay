@@ -4,6 +4,14 @@ import { ALL_PROJECTS, usePanelFilters } from "../hooks/usePanelFilters";
 import type { SessionSummary, SourceSession } from "../types";
 import DashboardHome from "./DashboardHome";
 import {
+  applyDashboardFacetFilters,
+  matchesProjectFacet,
+  matchesProviderFacet,
+  matchesRepoFacet,
+  NO_REPO_FILTER,
+  repoFilterValue,
+} from "../engine/dashboard-filtering";
+import {
   cleanPrompt,
   computeProjectLabels,
   dataSourceBadgeClass,
@@ -1463,12 +1471,7 @@ function ReplayCard({
   );
 }
 
-const NO_REPO_FILTER = "__no_repo__";
 const SESSION_RENDER_BATCH_SIZE = 100;
-
-function repoFilterValue(s: Pick<SourceSession, "gitRepo">): string {
-  return s.gitRepo || NO_REPO_FILTER;
-}
 
 function repoFilterLabel(repo: string): string {
   return repo === NO_REPO_FILTER ? "No repo" : repo;
@@ -1910,12 +1913,10 @@ function SessionsPanel() {
   const selectedRepoSet = new Set(selectedRepos);
   const query = filter.trim().toLowerCase();
 
-  const matchesProviderFilter = (s: SourceSession) =>
-    selectedProviderSet.size === 0 || selectedProviderSet.has(s.provider);
-  const matchesRepoFilter = (s: SourceSession) =>
-    selectedRepoSet.size === 0 || selectedRepoSet.has(repoFilterValue(s));
+  const matchesProviderFilter = (s: SourceSession) => matchesProviderFacet(s, selectedProviderSet);
+  const matchesRepoFilter = (s: SourceSession) => matchesRepoFacet(s, selectedRepoSet);
   const matchesProjectFilter = (s: SourceSession) =>
-    selectedProjectKey === ALL_PROJECTS || rollupProject(s.project) === selectedProjectKey;
+    matchesProjectFacet(s, selectedProjectKey, ALL_PROJECTS, rollupProject);
   const matchesSearchFilter = (s: SourceSession) => {
     if (!query) return true;
     const scanData = scanResultsBySlug[s.slug];
@@ -1975,9 +1976,15 @@ function SessionsPanel() {
   // Compute disambiguated labels for projects
   const projectLabels = computeProjectLabels(projectEntries.map(([p]) => p));
 
-  // Filter sessions within selected facets. Tolerate URLs pointing at a
-  // worktree path — `selectedProjectKey` is already rolled up above.
-  const filtered = projectFacetSources.filter(matchesProjectFilter);
+  // Final list applies every selected facet directly. The facet-specific
+  // intermediate arrays above are only for sidebar counts.
+  const filtered = applyDashboardFacetFilters(searchMatchedSources, {
+    selectedProviders,
+    selectedRepos,
+    selectedProjectKey,
+    allProjectsKey: ALL_PROJECTS,
+    rollupProject,
+  });
   const refreshAge = lastRefreshedAt ? formatCompactAge(lastRefreshedAt, refreshClockMs) : null;
   const priorityEnrichmentSlugs = new Set(filtered.slice(0, 25).map((session) => session.slug));
   const hasActiveFilters =
@@ -1988,6 +1995,13 @@ function SessionsPanel() {
   const [renderLimit, setRenderLimit] = useState(SESSION_RENDER_BATCH_SIZE);
   const providerFilterKey = selectedProviders.join("\0");
   const repoFilterKey = selectedRepos.join("\0");
+  const listFilterKey = [
+    filter,
+    providerFilterKey,
+    repoFilterKey,
+    selectedProjectKey,
+    showArchived ? "archived" : "active",
+  ].join("\0");
   useEffect(() => {
     setRenderLimit(SESSION_RENDER_BATCH_SIZE);
   }, [filter, providerFilterKey, repoFilterKey, selectedProjectKey, showArchived]);
@@ -2521,7 +2535,7 @@ function SessionsPanel() {
                 : "No local sessions found"}
             </div>
           ) : (
-            <div className="space-y-2.5 px-4 py-3">
+            <div key={listFilterKey} className="space-y-2.5 px-4 py-3">
               {renderedSessions.map((s) => {
                 const scanData = scanResultsBySlug[s.slug];
                 const sessionTitle = sourceDisplayTitle(s, scanData);
@@ -3197,12 +3211,10 @@ function ReplaysPanel() {
   const selectedRepoSet = new Set(selectedRepos);
   const query = filter.trim().toLowerCase();
 
-  const matchesProviderFilter = (s: SessionSummary) =>
-    selectedProviderSet.size === 0 || selectedProviderSet.has(s.provider);
-  const matchesRepoFilter = (s: SessionSummary) =>
-    selectedRepoSet.size === 0 || selectedRepoSet.has(repoFilterValue(s));
+  const matchesProviderFilter = (s: SessionSummary) => matchesProviderFacet(s, selectedProviderSet);
+  const matchesRepoFilter = (s: SessionSummary) => matchesRepoFacet(s, selectedRepoSet);
   const matchesProjectFilter = (s: SessionSummary) =>
-    selectedProjectKey === ALL_PROJECTS || rollupProject(s.project) === selectedProjectKey;
+    matchesProjectFacet(s, selectedProjectKey, ALL_PROJECTS, rollupProject);
   const matchesSearchFilter = (s: SessionSummary) => {
     if (!query) return true;
     return [
@@ -3252,8 +3264,15 @@ function ReplaysPanel() {
 
   const projectLabels = computeProjectLabels(projectEntries.map(([p]) => p));
 
-  // Filter within selected facets — `selectedProjectKey` is already rolled up.
-  const filtered = projectFacetSessions.filter(matchesProjectFilter);
+  // Final list applies every selected facet directly. The facet-specific
+  // intermediate arrays above are only for sidebar counts.
+  const filtered = applyDashboardFacetFilters(searchMatchedSessions, {
+    selectedProviders,
+    selectedRepos,
+    selectedProjectKey,
+    allProjectsKey: ALL_PROJECTS,
+    rollupProject,
+  });
   const refreshAge = lastRefreshedAt ? formatCompactAge(lastRefreshedAt, refreshClockMs) : null;
   const hasActiveFilters =
     Boolean(filter) ||
@@ -3263,6 +3282,13 @@ function ReplaysPanel() {
   const [renderLimit, setRenderLimit] = useState(SESSION_RENDER_BATCH_SIZE);
   const providerFilterKey = selectedProviders.join("\0");
   const repoFilterKey = selectedRepos.join("\0");
+  const listFilterKey = [
+    filter,
+    providerFilterKey,
+    repoFilterKey,
+    selectedProjectKey,
+    showArchived ? "archived" : "active",
+  ].join("\0");
   useEffect(() => {
     setRenderLimit(SESSION_RENDER_BATCH_SIZE);
   }, [filter, providerFilterKey, repoFilterKey, selectedProjectKey, showArchived]);
@@ -3715,7 +3741,7 @@ function ReplaysPanel() {
               {hasActiveFilters ? "No replays match the current filters" : "No local replays found"}
             </div>
           ) : (
-            <div className="space-y-2.5 px-4 py-3">
+            <div key={listFilterKey} className="space-y-2.5 px-4 py-3">
               {renderedReplays.map((s) => {
                 const isArchived = archivedSlugs.has(s.slug);
                 return (
