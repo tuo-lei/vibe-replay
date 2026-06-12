@@ -14,7 +14,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { readFileCache, writeFileCache } from "./cache.js";
-import { estimateActiveDuration } from "./duration.js";
+import { estimateActiveDuration } from "@vibe-replay/provider-core/duration";
 import { estimateCost, estimateCostSimple } from "./pricing.js";
 import { parseCodexSession } from "./providers/codex/parser.js";
 import { parseCursorSession } from "./providers/cursor/parser.js";
