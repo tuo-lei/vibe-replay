@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { estimateActiveDuration } from "../src/duration.js";
+import { estimateActiveDuration } from "@vibe-replay/provider-core/duration";
 
 describe("estimateActiveDuration", () => {
   it("returns undefined for empty array", () => {
