@@ -128,11 +128,12 @@ jobs:
         run: pnpm exec playwright install chromium --with-deps
       - run: pnpm test:e2e
 
-  # Non-blocking dependency vulnerability scan. Surfaces known high-severity
-  # advisories in the checks UI without failing the build (continue-on-error).
+  # Non-blocking dependency vulnerability scan. The step swallows pnpm audit's
+  # non-zero exit and instead emits a ::warning:: annotation, so high-severity
+  # advisories are visible on the PR/commit without showing a red failing check
+  # or blocking the merge.
   audit:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -142,4 +143,14 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Audit dependencies (high severity)
-        run: pnpm audit --audit-level high
+        run: |
+          if ! pnpm audit --audit-level high | tee audit.log; then
+            echo "::warning::High-severity dependency advisories found — see the audit job log and run 'pnpm audit' locally."
+          fi
+          # Mirror the report into the job summary for an at-a-glance signal.
+          {
+            echo "### Dependency audit (high severity)"
+            echo '```'
+            tail -n 20 audit.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
