@@ -13,7 +13,6 @@ import {
   SCAN_INPUT_SCORE_WEIGHTS,
 } from "./constants.js";
 import type { ScanInput, SessionScanResult } from "./scanner.js";
-import type { SourceSummaryRecord } from "./server.js";
 import type { SessionInfo } from "./types.js";
 
 export interface EnrichmentHints {
@@ -23,15 +22,36 @@ export interface EnrichmentHints {
   limit?: number;
 }
 
+/**
+ * The subset of a source-summary record this module reads. Declared locally
+ * (rather than importing SourceSummaryRecord from server.ts) so this module has
+ * no dependency — even a type-only one — pointing back at server.ts. The full
+ * SourceSummaryRecord is structurally assignable to this, and the generic on
+ * pickSourceRecordForSession preserves the caller's concrete record type. The
+ * index signature mirrors SourceSummaryRecord's, so display-only fields like
+ * `title`/`model`/`firstPrompt` are still readable as `unknown`.
+ */
+export interface EnrichmentSourceRecord {
+  provider: string;
+  slug: string;
+  project: string;
+  sessionId?: string;
+  promptCount?: number;
+  toolCallCount?: number;
+  filePaths: string[];
+  hasSqlite?: boolean;
+  [key: string]: unknown;
+}
+
 export function sourceSessionKey(provider: string, project: string, slug: string): string {
   return `${provider}::${project}::${slug}`;
 }
 
-export function pickSourceRecordForSession(
+export function pickSourceRecordForSession<T extends EnrichmentSourceRecord>(
   session: Pick<SessionInfo, "provider" | "sessionId" | "project" | "slug">,
-  bySessionId: Map<string, SourceSummaryRecord>,
-  byKey: Map<string, SourceSummaryRecord>,
-): SourceSummaryRecord | undefined {
+  bySessionId: Map<string, T>,
+  byKey: Map<string, T>,
+): T | undefined {
   const byIdMatch = bySessionId.get(session.sessionId);
   return (
     (byIdMatch?.provider === session.provider ? byIdMatch : undefined) ??
@@ -41,7 +61,7 @@ export function pickSourceRecordForSession(
 
 export function selectCursorEnrichmentCandidates(
   merged: SessionInfo[],
-  baseSources: SourceSummaryRecord[],
+  baseSources: EnrichmentSourceRecord[],
   limitOrHints: number | EnrichmentHints = 30,
 ): SessionInfo[] {
   const hints = typeof limitOrHints === "number" ? { limit: limitOrHints } : limitOrHints;
@@ -58,6 +78,8 @@ export function selectCursorEnrichmentCandidates(
 
   return baseSources
     .filter(
+      // A Cursor source needs enrichment if it has a usable source (SQLite or
+      // files) AND *any* display field is missing or looks like raw noise.
       (s) =>
         s.provider === "cursor" &&
         (s.promptCount == null ||
@@ -189,6 +211,8 @@ export function mergeEnrichmentHints(
 }
 
 function uniqueStrings(values: string[]): string[] {
+  // Cap at 200 to bound hint accumulation: hints merge across repeated enrich
+  // requests, so without a limit the deduped lists could grow unbounded.
   return [...new Set(values.filter((value) => typeof value === "string" && value.trim()))].slice(
     0,
     200,
