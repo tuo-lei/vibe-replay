@@ -16,7 +16,7 @@
     "dev:menu": "node scripts/dev.mjs --menu",
     "dev:dashboard": "node scripts/dev.mjs -d",
     "dev:website": "node scripts/dev-website.mjs",
-    "test": "pnpm --filter @vibe-replay/provider-claude-code test && pnpm --filter @vibe-replay/provider-codex test && pnpm --filter @vibe-replay/provider-cursor test && pnpm --filter @vibe-replay/provider-pi test && pnpm --filter @vibe-replay/providers-default test && pnpm --filter @vibe-replay/replay-core test && pnpm --filter vibe-replay test && pnpm --filter @vibe-replay/viewer test",
+    "test": "pnpm --filter @vibe-replay/provider-contract test && pnpm --filter @vibe-replay/provider-core test && pnpm --filter @vibe-replay/provider-claude-code test && pnpm --filter @vibe-replay/provider-codex test && pnpm --filter @vibe-replay/provider-cursor test && pnpm --filter @vibe-replay/provider-pi test && pnpm --filter @vibe-replay/providers-default test && pnpm --filter @vibe-replay/replay-core test && pnpm --filter vibe-replay test && pnpm --filter @vibe-replay/viewer test",
     "test:cloudflare": "pnpm --filter @vibe-replay/cloudflare test",
     "test:e2e": "vitest run --config e2e/vitest.config.ts",
     "lint": "oxlint --fix packages/ website/src cloudflare/src && oxfmt packages/ website/src cloudflare/src",
