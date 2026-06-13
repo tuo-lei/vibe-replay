@@ -226,8 +226,9 @@ async function scanSessionsFromDir(baseDir: string): Promise<ReplaySummary[]> {
           : undefined,
       });
     } catch {
-      // Skip any replay dir whose replay.json is missing or unreadable rather
-      // than failing the whole scan.
+      // Skip any replay dir that fails to load — missing/unreadable/corrupt
+      // replay.json, annotations, gist or cloud info, or git-repo lookup —
+      // rather than failing the whole scan.
     }
   }
 
