@@ -56,6 +56,47 @@ describe("addParseWarning", () => {
     expect(warnings).toHaveLength(2);
   });
 
+  it("does not coalesce when message differs", () => {
+    const warnings: ParseWarning[] = [];
+    addParseWarning(warnings, { kind: "missing-image", message: "first", source: "a.jsonl" });
+    addParseWarning(warnings, { kind: "missing-image", message: "second", source: "a.jsonl" });
+
+    expect(warnings).toHaveLength(2);
+  });
+
+  it("coalesces warnings that share an undefined source", () => {
+    const warnings: ParseWarning[] = [];
+    addParseWarning(warnings, { kind: "missing-image", message: "m" });
+    addParseWarning(warnings, { kind: "missing-image", message: "m" });
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.count).toBe(2);
+  });
+
+  it("preserves the first entry's sample and firstLine when a duplicate coalesces", () => {
+    const warnings: ParseWarning[] = [];
+    addParseWarning(warnings, {
+      kind: "missing-image",
+      message: "m",
+      source: "a.jsonl",
+      sample: "first.png",
+      firstLine: 7,
+    });
+    // A later duplicate only bumps count; it must not overwrite sample/firstLine.
+    addParseWarning(warnings, {
+      kind: "missing-image",
+      message: "m",
+      source: "a.jsonl",
+      sample: "second.png",
+      firstLine: 99,
+    });
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.count).toBe(2);
+    expect(warnings[0]?.sample).toBe("first.png");
+    expect(warnings[0]?.firstLine).toBe(7);
+  });
+
   it("drops the sample for malformed-json warnings (avoids leaking raw source)", () => {
     const warnings: ParseWarning[] = [];
     addParseWarning(warnings, {
@@ -102,10 +143,11 @@ describe("compactWarningSample", () => {
   });
 
   it("truncates and appends an ellipsis when over the default limit", () => {
+    const defaultMax = 160;
     const long = "x".repeat(200);
     const result = compactWarningSample(long);
 
-    expect(result).toHaveLength(163); // 160 chars + "..."
+    expect(result).toHaveLength(defaultMax + "...".length);
     expect(result.endsWith("...")).toBe(true);
   });
 
