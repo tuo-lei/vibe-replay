@@ -108,6 +108,11 @@ jobs:
           npx vibe-replay --version
           echo "Publish simulation passed — package installs and runs correctly"
 
+  # e2e runs on Ubuntu only. Windows-specific concerns (path decoding, CRLF,
+  # PowerShell-safe build scripts) are covered by the windows-smoke job (unit
+  # tests + build). Browser e2e is intentionally NOT run on Windows: the
+  # GIF-export path is timing-sensitive and flakes on Windows runners, so adding
+  # it would make CI flaky without meaningful extra coverage.
   e2e:
     runs-on: ubuntu-latest
     steps:
@@ -122,3 +127,30 @@ jobs:
       - name: Install Playwright browsers
         run: pnpm exec playwright install chromium --with-deps
       - run: pnpm test:e2e
+
+  # Non-blocking dependency vulnerability scan. The step swallows pnpm audit's
+  # non-zero exit and instead emits a ::warning:: annotation, so high-severity
+  # advisories are visible on the PR/commit without showing a red failing check
+  # or blocking the merge.
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Audit dependencies (high severity)
+        run: |
+          if ! pnpm audit --audit-level high | tee audit.log; then
+            echo "::warning::High-severity dependency advisories found — see the audit job log and run 'pnpm audit' locally."
+          fi
+          # Mirror the report into the job summary for an at-a-glance signal.
+          {
+            echo "### Dependency audit (high severity)"
+            echo '```'
+            tail -n 20 audit.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

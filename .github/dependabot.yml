@@ -1,0 +1,16 @@
+version: 2
+updates:
+  # Keep GitHub Actions pinned to current, secure versions. npm dependency
+  # version-bumps are handled by the repo's existing auto-deps routine, so only
+  # the github-actions ecosystem is configured here to avoid duplicate PRs.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
+    groups:
+      github-actions:
+        patterns:
+          - "*"
