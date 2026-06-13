@@ -21,6 +21,11 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import open from "open";
 import { readGitRepo } from "@vibe-replay/provider-core/utils";
 import { readFileCache, writeFileCache, type FileCacheEntry } from "./cache.js";
+import {
+  ENRICHMENT_SCORE_WEIGHTS,
+  RECENT_SESSION_WINDOW_MS,
+  SCAN_INPUT_SCORE_WEIGHTS,
+} from "./constants.js";
 import { cleanPromptText, previewPrompt } from "./clean-prompt.js";
 import { computeDaysUntilCleanup, getClaudeCodeCleanupPeriod } from "./cleanup-warning.js";
 import {
@@ -682,21 +687,48 @@ function selectCursorEnrichmentCandidates(
     .slice(0, limit);
 }
 
+/** True when `timestamp` parses and is within RECENT_SESSION_WINDOW_MS of now. */
+function isRecentActivity(timestamp: string | undefined): boolean {
+  if (!timestamp) return false;
+  return Date.now() - Date.parse(timestamp) <= RECENT_SESSION_WINDOW_MS;
+}
+
+/**
+ * Score the preference/recency signals shared by both priority schemes.
+ * Scheme-specific signals (hasPR, not-previously-scanned, etc.) are added by
+ * the caller using its own weights.
+ */
+function preferenceScore(
+  entity: { sessionId: string; slug: string; project: string; timestamp?: string },
+  preferred: { sessionIds: Set<string>; slugs: Set<string>; projects: Set<string> },
+  weights: {
+    preferredSessionId: number;
+    preferredSlug: number;
+    preferredProject: number;
+    recent: number;
+  },
+): number {
+  let score = 0;
+  if (preferred.sessionIds.has(entity.sessionId)) score += weights.preferredSessionId;
+  if (preferred.slugs.has(entity.slug)) score += weights.preferredSlug;
+  if (preferred.projects.has(entity.project)) score += weights.preferredProject;
+  if (isRecentActivity(entity.timestamp)) score += weights.recent;
+  return score;
+}
+
 function enrichmentPriorityScore(
   session: SessionInfo,
   preferredSessionIds: Set<string>,
   preferredSlugs: Set<string>,
   preferredProjects: Set<string>,
 ): number {
-  let score = 0;
-  if (preferredSessionIds.has(session.sessionId)) score += 1000;
-  if (preferredSlugs.has(session.slug)) score += 800;
-  if (preferredProjects.has(session.project)) score += 400;
-  if (session.timestamp && Date.now() - Date.parse(session.timestamp) <= 24 * 60 * 60 * 1000) {
-    score += 100;
-  }
-  if (session.hasPR) score += 25;
-  if (session.hasSqlite) score += 10;
+  let score = preferenceScore(
+    session,
+    { sessionIds: preferredSessionIds, slugs: preferredSlugs, projects: preferredProjects },
+    ENRICHMENT_SCORE_WEIGHTS,
+  );
+  if (session.hasPR) score += ENRICHMENT_SCORE_WEIGHTS.hasPR;
+  if (session.hasSqlite) score += ENRICHMENT_SCORE_WEIGHTS.hasSqlite;
   return score;
 }
 
@@ -737,14 +769,13 @@ function scanInputPriorityScore(
   preferredSlugs: Set<string>,
   preferredProjects: Set<string>,
 ): number {
-  let score = 0;
-  if (!previousSessionIds.has(input.sessionId)) score += 1000;
-  if (preferredSessionIds.has(input.sessionId)) score += 2000;
-  if (preferredSlugs.has(input.slug)) score += 1600;
-  if (preferredProjects.has(input.project)) score += 400;
-  if (input.timestamp && Date.now() - Date.parse(input.timestamp) <= 24 * 60 * 60 * 1000) {
-    score += 100;
-  }
+  let score = preferenceScore(
+    input,
+    { sessionIds: preferredSessionIds, slugs: preferredSlugs, projects: preferredProjects },
+    SCAN_INPUT_SCORE_WEIGHTS,
+  );
+  if (!previousSessionIds.has(input.sessionId))
+    score += SCAN_INPUT_SCORE_WEIGHTS.notPreviouslyScanned;
   return score;
 }
 
