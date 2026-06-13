@@ -473,6 +473,39 @@ function runAgent(prompt: string, cmd: string): Promise<string> {
 // Parsing & validation
 // ---------------------------------------------------------------------------
 
+/** Parse JSON and return it only if it is a non-null, non-array object, else null. */
+function parseJsonObject(json: string): Record<string, unknown> | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  return asRecord(parsed);
+}
+
+/** Narrow an unknown value to a plain (non-array) object record, or null. */
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+/** Keep only the string members of an unknown value (non-arrays yield []). */
+function stringsOnly(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+}
+
+/**
+ * Return `value` typed as `T` when it is a string present in `allowed`, else
+ * undefined. The cast is justified by the runtime membership check.
+ */
+function asOneOf<T extends string>(value: unknown, allowed: ReadonlySet<T>): T | undefined {
+  return typeof value === "string" && (allowed as ReadonlySet<string>).has(value)
+    ? (value as T)
+    : undefined;
+}
+
 export function parseFeedbackResponse(
   output: string,
   session: ReplaySession,
@@ -480,27 +513,20 @@ export function parseFeedbackResponse(
   const json = extractJson(output);
   if (!json) return null;
 
-  let parsed: any;
-  try {
-    parsed = JSON.parse(json);
-  } catch {
-    return null;
-  }
+  const parsed = parseJsonObject(json);
+  if (!parsed) return null;
 
   // Validate top-level shape
-  if (!parsed || typeof parsed !== "object") return null;
   if (typeof parsed.summary !== "string" || !parsed.summary) return null;
   if (typeof parsed.score !== "number") return null;
-  parsed.score = Math.max(1, Math.min(10, Math.round(parsed.score)));
-  if (!Array.isArray(parsed.strengths)) parsed.strengths = [];
-  if (!Array.isArray(parsed.improvements)) parsed.improvements = [];
-  if (!Array.isArray(parsed.feedbackItems)) parsed.feedbackItems = [];
+  const summary = parsed.summary;
+  const score = Math.max(1, Math.min(10, Math.round(parsed.score)));
 
   // Valid user-prompt scene indices
   const validIndices = new Set(
     session.scenes.map((s, i) => (s.type === "user-prompt" ? i : -1)).filter((i) => i !== -1),
   );
-  const validCategories = new Set([
+  const validCategories = new Set<FeedbackItem["category"]>([
     "clarity",
     "specificity",
     "context",
@@ -509,9 +535,11 @@ export function parseFeedbackResponse(
     "tool-usage",
   ]);
 
+  const feedbackItemsRaw = Array.isArray(parsed.feedbackItems) ? parsed.feedbackItems : [];
   const items: FeedbackItem[] = [];
-  for (const raw of parsed.feedbackItems) {
-    if (!raw || typeof raw !== "object") continue;
+  for (const rawItem of feedbackItemsRaw) {
+    const raw = asRecord(rawItem);
+    if (!raw) continue;
     if (typeof raw.sceneIndex !== "number") continue;
     if (!validIndices.has(raw.sceneIndex)) continue;
     if (typeof raw.title !== "string" || !raw.title) continue;
@@ -521,7 +549,7 @@ export function parseFeedbackResponse(
       sceneIndex: raw.sceneIndex,
       title: raw.title,
       feedback: raw.feedback,
-      category: validCategories.has(raw.category) ? raw.category : "clarity",
+      category: asOneOf(raw.category, validCategories) ?? "clarity",
       improvedPrompt:
         typeof raw.improvedPrompt === "string" && raw.improvedPrompt
           ? raw.improvedPrompt
@@ -530,62 +558,63 @@ export function parseFeedbackResponse(
   }
 
   // Parse new session-level fields (optional — graceful degradation for weaker models)
-  const validOutcomes = new Set([
+  const validOutcomes = new Set<NonNullable<FeedbackResult["outcome"]>>([
     "fully_achieved",
     "mostly_achieved",
     "partially_achieved",
     "not_achieved",
     "unclear",
   ]);
-  const validFrictionTypes = new Set([
+  const validFrictionTypes = new Set<FrictionPoint["type"]>([
     "misunderstood",
     "wrong_approach",
     "buggy_code",
     "excessive_changes",
     "user_unclear",
   ]);
-  const validAiRatings = new Set(["poor", "below_average", "average", "good", "excellent"]);
+  const validAiRatings = new Set<NonNullable<FeedbackResult["aiPerformance"]>["rating"]>([
+    "poor",
+    "below_average",
+    "average",
+    "good",
+    "excellent",
+  ]);
 
-  const outcome = validOutcomes.has(parsed.outcome) ? parsed.outcome : undefined;
+  const outcome = asOneOf(parsed.outcome, validOutcomes);
   const sessionGoal =
     typeof parsed.sessionGoal === "string" && parsed.sessionGoal ? parsed.sessionGoal : undefined;
 
   let frictionPoints: FrictionPoint[] | undefined;
   if (Array.isArray(parsed.frictionPoints) && parsed.frictionPoints.length > 0) {
-    const filtered: FrictionPoint[] = parsed.frictionPoints
-      .filter(
-        (f: any) =>
-          f &&
-          typeof f === "object" &&
-          validFrictionTypes.has(f.type) &&
-          typeof f.description === "string" &&
-          typeof f.turn === "number",
-      )
-      .map((f: any) => ({ type: f.type, description: f.description, turn: f.turn }));
+    const filtered: FrictionPoint[] = [];
+    for (const rawPoint of parsed.frictionPoints) {
+      const f = asRecord(rawPoint);
+      if (!f) continue;
+      const type = asOneOf(f.type, validFrictionTypes);
+      if (!type || typeof f.description !== "string" || typeof f.turn !== "number") continue;
+      filtered.push({ type, description: f.description, turn: f.turn });
+    }
     frictionPoints = filtered.length > 0 ? filtered : undefined;
   }
 
   let aiPerformance: FeedbackResult["aiPerformance"];
-  if (parsed.aiPerformance && typeof parsed.aiPerformance === "object") {
-    const ap = parsed.aiPerformance;
-    if (validAiRatings.has(ap.rating)) {
+  const ap = asRecord(parsed.aiPerformance);
+  if (ap) {
+    const rating = asOneOf(ap.rating, validAiRatings);
+    if (rating) {
       aiPerformance = {
-        rating: ap.rating,
-        strengths: Array.isArray(ap.strengths)
-          ? ap.strengths.filter((s: any) => typeof s === "string")
-          : [],
-        weaknesses: Array.isArray(ap.weaknesses)
-          ? ap.weaknesses.filter((s: any) => typeof s === "string")
-          : [],
+        rating,
+        strengths: stringsOnly(ap.strengths),
+        weaknesses: stringsOnly(ap.weaknesses),
       };
     }
   }
 
   return {
-    summary: parsed.summary,
-    score: parsed.score,
-    strengths: parsed.strengths.filter((s: any) => typeof s === "string"),
-    improvements: parsed.improvements.filter((s: any) => typeof s === "string"),
+    summary,
+    score,
+    strengths: stringsOnly(parsed.strengths),
+    improvements: stringsOnly(parsed.improvements),
     feedbackItems: items,
     outcome,
     sessionGoal,
@@ -987,28 +1016,24 @@ function parseTranslationBatch(
   const json = extractJson(output);
   if (!json) return null;
 
-  let parsed: any;
-  try {
-    parsed = JSON.parse(json);
-  } catch {
-    return null;
-  }
-
+  const parsed = parseJsonObject(json);
   if (!parsed || !Array.isArray(parsed.translations)) return null;
 
   const validIndices = new Set(batchScenes.map((s) => s.index));
   const overlays: SceneOverlay[] = [];
   let skipped = 0;
 
-  for (const item of parsed.translations) {
+  for (const rawItem of parsed.translations) {
+    const item = asRecord(rawItem);
     if (!item || typeof item.sceneIndex !== "number") continue;
     if (!validIndices.has(item.sceneIndex)) continue;
     if (typeof item.translated !== "string") continue;
+    const translated = item.translated;
 
     const scene = batchScenes.find((s) => s.index === item.sceneIndex);
     if (!scene) continue;
 
-    if (item.unchanged || item.translated.trim() === scene.content.trim()) {
+    if (item.unchanged || translated.trim() === scene.content.trim()) {
       skipped++;
       continue;
     }
@@ -1023,7 +1048,7 @@ function parseTranslationBatch(
       sceneIndex: item.sceneIndex,
       field: "content",
       originalValue: scene.content,
-      modifiedValue: item.translated,
+      modifiedValue: translated,
       source,
       createdAt: now,
       updatedAt: now,
@@ -1180,28 +1205,24 @@ function parseToneBatch(
   const json = extractJson(output);
   if (!json) return null;
 
-  let parsed: any;
-  try {
-    parsed = JSON.parse(json);
-  } catch {
-    return null;
-  }
-
+  const parsed = parseJsonObject(json);
   if (!parsed || !Array.isArray(parsed.adjustments)) return null;
 
   const validIndices = new Set(batchScenes.map((s) => s.index));
   const overlays: SceneOverlay[] = [];
   let skipped = 0;
 
-  for (const item of parsed.adjustments) {
+  for (const rawItem of parsed.adjustments) {
+    const item = asRecord(rawItem);
     if (!item || typeof item.sceneIndex !== "number") continue;
     if (!validIndices.has(item.sceneIndex)) continue;
     if (typeof item.adjusted !== "string") continue;
+    const adjusted = item.adjusted;
 
     const scene = batchScenes.find((s) => s.index === item.sceneIndex);
     if (!scene) continue;
 
-    if (item.unchanged || item.adjusted.trim() === scene.content.trim()) {
+    if (item.unchanged || adjusted.trim() === scene.content.trim()) {
       skipped++;
       continue;
     }
@@ -1216,7 +1237,7 @@ function parseToneBatch(
       sceneIndex: item.sceneIndex,
       field: "content",
       originalValue: scene.content,
-      modifiedValue: item.adjusted,
+      modifiedValue: adjusted,
       source,
       createdAt: now,
       updatedAt: now,
