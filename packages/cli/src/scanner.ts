@@ -462,9 +462,12 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
         } else if (Array.isArray(msgContent)) {
           // Check if it has text (not just tool_result)
           const hasText = msgContent.some(
-            (b: any) => (b.type === "text" && b.text?.trim()) || b.type === "_user_images",
+            (b: { type?: string; text?: string }) =>
+              (b.type === "text" && b.text?.trim()) || b.type === "_user_images",
           );
-          const isOnlyToolResult = msgContent.every((b: any) => b.type === "tool_result");
+          const isOnlyToolResult = msgContent.every(
+            (b: { type?: string }) => b.type === "tool_result",
+          );
           if (hasText && !isOnlyToolResult) promptCount++;
         }
       }
@@ -1435,8 +1438,8 @@ function extractMetaText(content: unknown): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
     return content
-      .filter((b: any) => b.type === "text")
-      .map((b: any) => b.text || "")
+      .filter((b: { type?: string }) => b.type === "text")
+      .map((b: { text?: string }) => b.text || "")
       .join("\n");
   }
   return "";
