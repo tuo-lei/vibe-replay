@@ -108,6 +108,11 @@ jobs:
           npx vibe-replay --version
           echo "Publish simulation passed — package installs and runs correctly"
 
+  # e2e runs on Ubuntu only. Windows-specific concerns (path decoding, CRLF,
+  # PowerShell-safe build scripts) are covered by the windows-smoke job (unit
+  # tests + build). Browser e2e is intentionally NOT run on Windows: the
+  # GIF-export path is timing-sensitive and flakes on Windows runners, so adding
+  # it would make CI flaky without meaningful extra coverage.
   e2e:
     runs-on: ubuntu-latest
     steps:
@@ -122,3 +127,19 @@ jobs:
       - name: Install Playwright browsers
         run: pnpm exec playwright install chromium --with-deps
       - run: pnpm test:e2e
+
+  # Non-blocking dependency vulnerability scan. Surfaces known high-severity
+  # advisories in the checks UI without failing the build (continue-on-error).
+  audit:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Audit dependencies (high severity)
+        run: pnpm audit --audit-level high
