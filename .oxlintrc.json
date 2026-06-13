@@ -37,7 +37,8 @@
     "react/no-array-index-key": "off",
     "jsx-a11y/alt-text": "error",
     // Warn (not error): pre-existing clickable elements lack keyboard handlers / roles.
-    // Surfaced for incremental fixing without failing CI; promote to error once cleared.
+    // Surfaced for incremental fixing without failing CI.
+    // TODO: fix the ~44 interaction-a11y warnings in the viewer, then promote both to "error".
     "jsx-a11y/click-events-have-key-events": "warn",
     "jsx-a11y/no-static-element-interactions": "warn",
     // Off: this is a CLI tool — console output is part of the primary UX.
@@ -52,7 +53,7 @@
     "unicorn/consistent-function-scoping": "off",
     // Off: stylistic — on*-handler vs addEventListener not enforced.
     "unicorn/prefer-add-event-listener": "off",
-    // Off: stylistic — Array.prototype.sort usage is fine.
+    // Off: the rule flags in-place .sort() mutation; mutating local arrays is acceptable here.
     "unicorn/no-array-sort": "off"
   },
   "ignorePatterns": [
