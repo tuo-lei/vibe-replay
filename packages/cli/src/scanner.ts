@@ -276,6 +276,64 @@ interface ScanProgress {
   done: boolean;
 }
 
+/** Token-usage fields read from a JSONL message during scanning. */
+interface ScanLineUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+}
+
+/** The `message` envelope read from a JSONL scan line. */
+interface ScanLineMessage {
+  role?: string;
+  content?: unknown;
+  id?: string;
+  model?: string;
+  usage?: ScanLineUsage;
+}
+
+/** PR-link payload, present either at the top level of a line or under `data`. */
+interface ScanLinePrLink {
+  prNumber?: number;
+  prUrl?: string;
+  prRepository?: string;
+}
+
+/**
+ * The subset of a JSONL line read during lightweight scanning. Every field is
+ * optional — lines are heterogeneous across providers and validated field by
+ * field. Replaces an untyped `JSON.parse(...)` result.
+ */
+interface ScanLine extends ScanLinePrLink {
+  gitBranch?: string;
+  entrypoint?: string;
+  permissionMode?: string;
+  timestamp?: string;
+  type?: string;
+  subtype?: string;
+  durationMs?: number;
+  customTitle?: string;
+  title?: string;
+  isApiErrorMessage?: boolean;
+  isMeta?: boolean;
+  snapshot?: { timestamp?: string };
+  data?: ScanLinePrLink;
+  message?: ScanLineMessage;
+}
+
+/** A content block read from a sub-agent JSONL message. */
+interface SubAgentBlock {
+  type?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+}
+
+/** The subset of a sub-agent JSONL line read during scanning. */
+interface SubAgentLine {
+  message?: { role?: string; content?: unknown };
+}
+
 /**
  * Scan a single session's JSONL files and extract aggregate metadata.
  * This is much lighter than the full parser — no scene building, no
@@ -355,7 +413,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
     for (const line of content.split("\n")) {
       if (!line.trim()) continue;
 
-      let obj: any;
+      let obj: ScanLine;
       try {
         obj = JSON.parse(line);
       } catch {
@@ -364,7 +422,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
 
       // Extract metadata from top-level fields
       if (obj.gitBranch) {
-        const b = obj.gitBranch as string;
+        const b = obj.gitBranch;
         if (gitBranches.length === 0 || gitBranches[gitBranches.length - 1] !== b) {
           gitBranches.push(b);
         }
@@ -518,7 +576,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
         }
         for (const saLine of saContent.split("\n")) {
           if (!saLine.trim()) continue;
-          let saObj: any;
+          let saObj: SubAgentLine;
           try {
             saObj = JSON.parse(saLine);
           } catch {
@@ -526,9 +584,9 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
           }
           const saMsg = saObj?.message;
           if (saMsg?.role !== "assistant" || !Array.isArray(saMsg.content)) continue;
-          for (const block of saMsg.content) {
+          for (const block of saMsg.content as SubAgentBlock[]) {
             if (block.type !== "tool_use") continue;
-            if (FILE_EDIT_TOOLS.has(block.name)) {
+            if (block.name && FILE_EDIT_TOOLS.has(block.name)) {
               const fp = extractToolFilePath(block.input);
               if (fp) {
                 editCount++;
