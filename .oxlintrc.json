@@ -10,14 +10,20 @@
     "eqeqeq": ["error", "smart"],
     "no-debugger": "error",
     "no-var": "error",
-    "prefer-const": "off",
+    "prefer-const": "error",
     "prefer-template": "warn",
+    // Off: false-positives on async wait-loops whose condition is mutated via refs/timers.
     "no-unmodified-loop-condition": "off",
+    // Off: stylistic — mixed type/value import style is intentionally not enforced.
     "@typescript-eslint/consistent-type-imports": "off",
+    // Off: triple-slash references are used intentionally for ambient .d.ts shims.
     "@typescript-eslint/triple-slash-reference": "off",
     "unicorn/prefer-node-protocol": "warn",
+    // Off: stylistic — .find vs .filter()[0] not worth enforcing.
     "unicorn/prefer-array-find": "off",
+    // Off: the map-then-spread pattern is used deliberately in a few places.
     "oxc/no-map-spread": "off",
+    // Off: superseded by the @typescript-eslint/no-unused-vars entry below (handles _ prefixes).
     "no-unused-vars": "off",
     "@typescript-eslint/no-unused-vars": [
       "warn",
@@ -25,17 +31,29 @@
     ],
     "react-hooks/rules-of-hooks": "error",
     "react/jsx-key": "error",
+    // Off: React 17+ automatic JSX runtime — no in-scope React import required.
     "react/react-in-jsx-scope": "off",
+    // Off: array-index keys are acceptable for the static, non-reordered lists here.
     "react/no-array-index-key": "off",
-    "jsx-a11y/alt-text": "off",
-    "jsx-a11y/click-events-have-key-events": "off",
-    "jsx-a11y/no-static-element-interactions": "off",
+    "jsx-a11y/alt-text": "error",
+    // Warn (not error): pre-existing clickable elements lack keyboard handlers / roles.
+    // Surfaced for incremental fixing without failing CI.
+    // TODO: fix the ~44 interaction-a11y warnings in the viewer, then promote both to "error".
+    "jsx-a11y/click-events-have-key-events": "warn",
+    "jsx-a11y/no-static-element-interactions": "warn",
+    // Off: this is a CLI tool — console output is part of the primary UX.
     "no-console": "off",
+    // Off: pragmatic for the heavy JSON/JSONL data-transformation code paths.
     "no-explicit-any": "off",
+    // Off: sequential awaits in loops are intentional (ordered I/O).
     "no-await-in-loop": "off",
+    // Off: stylistic — small-scope shadowing is allowed.
     "no-shadow": "off",
+    // Off: stylistic — local nested helpers are kept where they're used.
     "unicorn/consistent-function-scoping": "off",
+    // Off: stylistic — on*-handler vs addEventListener not enforced.
     "unicorn/prefer-add-event-listener": "off",
+    // Off: the rule flags in-place .sort() mutation; mutating local arrays is acceptable here.
     "unicorn/no-array-sort": "off"
   },
   "ignorePatterns": [
