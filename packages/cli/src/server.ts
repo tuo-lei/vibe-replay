@@ -225,7 +225,10 @@ async function scanSessionsFromDir(baseDir: string): Promise<ReplaySummary[]> {
             }
           : undefined,
       });
-    } catch {}
+    } catch {
+      // Skip any replay dir whose replay.json is missing or unreadable rather
+      // than failing the whole scan.
+    }
   }
 
   return results;
@@ -2327,7 +2330,14 @@ export async function startServer(
       try {
         const sessions = mergeSameSessions(await provider.discover());
         allSessions.push(...sessions);
-      } catch {}
+      } catch (err) {
+        // One provider failing to discover must not abort discovery for the
+        // rest. Surfaced only under VIBE_REPLAY_DEBUG so the dashboard stays
+        // quiet by default but partial failures remain diagnosable.
+        if (process.env.VIBE_REPLAY_DEBUG) {
+          console.error(`[vibe-replay] ${provider.name} discovery failed:`, err);
+        }
+      }
     }
 
     let entries: string[];
