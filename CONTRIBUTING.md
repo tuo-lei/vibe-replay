@@ -167,6 +167,10 @@ The viewer is built once, then the CLI embeds it. The final HTML output is the v
 - **Shared types** live in `packages/types` (`@vibe-replay/types`) — CLI and viewer re-export from there
 - **Secret redaction**: `transform.ts` strips API keys, tokens, PEM keys, paths. `scan.ts` does a second pass on the final output.
 - **`</` escaping**: JSON in `<script>` tags must escape `</` as `<\/` (see `generator.ts`)
+- **Error handling** — pick one of three, deliberately:
+  - **Propagate** when the caller can't proceed without the result (let it throw).
+  - **Log** when a step can be skipped but the failure is diagnostically useful — e.g. one provider failing during discovery shouldn't abort the others, but should be visible under `VIBE_REPLAY_DEBUG` (the dashboard stays quiet by default).
+  - **Silently swallow** only for genuinely-expected, recoverable cases (an optional file that may be absent, a best-effort cache write). Every such empty `catch` **must carry a one-line comment** explaining why it's safe to ignore — a bare `catch {}` is not allowed.
 
 ## Submitting changes
 

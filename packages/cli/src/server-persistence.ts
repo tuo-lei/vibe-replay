@@ -10,7 +10,10 @@ export async function loadAnnotations(baseDir: string, slug: string): Promise<An
       const raw = await readFile(join(dir, "annotations.json"), "utf-8");
       const anns = JSON.parse(raw) as Annotation[];
       if (Array.isArray(anns)) return anns;
-    } catch {}
+    } catch {
+      // annotations.json is optional and may be absent or corrupt in this dir;
+      // fall through to the next candidate dir and default to [].
+    }
   }
   return [];
 }
