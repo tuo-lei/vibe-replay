@@ -24,6 +24,13 @@ pnpm test             # Run tests
 pnpm start            # Full build + run (simulates real user flow)
 ```
 
+**Testing viewer hooks/components**: most viewer tests run in the default node
+environment (pure engine/util logic). Tests that render React (hooks via
+`renderHook`, components via `render` from `@testing-library/react`) opt into a
+DOM by adding `// @vitest-environment jsdom` as the first line of the test file,
+and should `afterEach(cleanup)` so window listeners don't leak between tests.
+See `src/hooks/__tests__/usePlayback.test.tsx` for the pattern.
+
 **Daily workflow**: Run `pnpm dev`, open `http://localhost:5173`. Viewer changes hot-reload instantly via Vite HMR. CLI/API changes auto-restart via `tsx watch`. No manual rebuild or restart needed.
 
 ## Architecture
