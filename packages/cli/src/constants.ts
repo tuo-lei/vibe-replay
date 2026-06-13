@@ -37,8 +37,6 @@ export const ENRICHMENT_SCORE_WEIGHTS = {
  * a user-requested session is scanned ahead of generic recent ones.
  */
 export const SCAN_INPUT_SCORE_WEIGHTS = {
-  /** Input has not been scanned in a previous pass. */
-  notPreviouslyScanned: 1000,
   /** Input was explicitly requested by id. */
   preferredSessionId: 2000,
   /** Input matches a preferred slug. */
@@ -47,4 +45,7 @@ export const SCAN_INPUT_SCORE_WEIGHTS = {
   preferredProject: 400,
   /** Last activity within RECENT_SESSION_WINDOW_MS. */
   recent: 100,
+  /** Input has not been scanned in a previous pass. Applied directly by
+   * scanInputPriorityScore, not via the shared preferenceScore helper. */
+  notPreviouslyScanned: 1000,
 } as const;
