@@ -473,7 +473,7 @@ function runAgent(prompt: string, cmd: string): Promise<string> {
 // Parsing & validation
 // ---------------------------------------------------------------------------
 
-/** Parse JSON and return it only if it is a non-null object, else null. */
+/** Parse JSON and return it only if it is a non-null, non-array object, else null. */
 function parseJsonObject(json: string): Record<string, unknown> | null {
   let parsed: unknown;
   try {
@@ -481,12 +481,14 @@ function parseJsonObject(json: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
-  return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+  return asRecord(parsed);
 }
 
-/** Narrow an unknown value to a plain object record, or null. */
+/** Narrow an unknown value to a plain (non-array) object record, or null. */
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 /** Keep only the string members of an unknown value (non-arrays yield []). */
