@@ -21,11 +21,6 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import open from "open";
 import { readGitRepo } from "@vibe-replay/provider-core/utils";
 import { readFileCache, writeFileCache, type FileCacheEntry } from "./cache.js";
-import {
-  ENRICHMENT_SCORE_WEIGHTS,
-  RECENT_SESSION_WINDOW_MS,
-  SCAN_INPUT_SCORE_WEIGHTS,
-} from "./constants.js";
 import { cleanPromptText, previewPrompt } from "./clean-prompt.js";
 import { computeDaysUntilCleanup, getClaudeCodeCleanupPeriod } from "./cleanup-warning.js";
 import {
@@ -66,6 +61,15 @@ import {
   type SavedGistInfo,
 } from "./publishers/gist.js";
 import { scanForSecrets } from "./scan.js";
+import {
+  type EnrichmentHints,
+  enrichmentHintsFromBody,
+  mergeEnrichmentHints,
+  pickSourceRecordForSession,
+  prioritizeScanInputs,
+  selectCursorEnrichmentCandidates,
+  sourceSessionKey,
+} from "./server-enrichment.js";
 import { loadAnnotations, saveAnnotations, saveOverlays } from "./server-persistence.js";
 import { registerSessionAssetRoutes } from "./server-routes/session-assets.js";
 import {
@@ -385,13 +389,6 @@ interface PersistedInsightsCache {
   computedAt: string | null;
 }
 
-interface EnrichmentHints {
-  sessionIds?: string[];
-  slugs?: string[];
-  projects?: string[];
-  limit?: number;
-}
-
 function isSourceSessionCatalogCache(value: unknown): value is SourceSessionCatalogCache {
   return (
     !!value &&
@@ -626,197 +623,6 @@ async function getStaleSourceProviders(
   return [...new Set(staleProviders)];
 }
 
-function sourceSessionKey(provider: string, project: string, slug: string): string {
-  return `${provider}::${project}::${slug}`;
-}
-
-function pickSourceRecordForSession(
-  session: Pick<SessionInfo, "provider" | "sessionId" | "project" | "slug">,
-  bySessionId: Map<string, SourceSummaryRecord>,
-  byKey: Map<string, SourceSummaryRecord>,
-): SourceSummaryRecord | undefined {
-  const byIdMatch = bySessionId.get(session.sessionId);
-  return (
-    (byIdMatch?.provider === session.provider ? byIdMatch : undefined) ??
-    byKey.get(sourceSessionKey(session.provider, session.project, session.slug))
-  );
-}
-
-function selectCursorEnrichmentCandidates(
-  merged: SessionInfo[],
-  baseSources: SourceSummaryRecord[],
-  limitOrHints: number | EnrichmentHints = 30,
-): SessionInfo[] {
-  const hints = typeof limitOrHints === "number" ? { limit: limitOrHints } : limitOrHints;
-  const limit = Math.max(1, Math.min(hints.limit ?? 30, 100));
-  const preferredSessionIds = new Set(hints.sessionIds || []);
-  const preferredSlugs = new Set(hints.slugs || []);
-  const preferredProjects = new Set(hints.projects || []);
-  const mergedBySessionId = new Map<string, SessionInfo>();
-  const mergedByKey = new Map<string, SessionInfo>();
-  for (const session of merged) {
-    mergedBySessionId.set(session.sessionId, session);
-    mergedByKey.set(sourceSessionKey(session.provider, session.project, session.slug), session);
-  }
-
-  return baseSources
-    .filter(
-      (s) =>
-        s.provider === "cursor" &&
-        (s.promptCount == null ||
-          s.toolCallCount == null ||
-          typeof s.title !== "string" ||
-          !s.title.trim() ||
-          typeof s.model !== "string" ||
-          !s.model ||
-          looksLikeCursorDisplayNoise(s.title) ||
-          looksLikeCursorDisplayNoise(s.firstPrompt)) &&
-        (s.hasSqlite || s.filePaths.length > 0),
-    )
-    .map((s) => {
-      const byId = s.sessionId ? mergedBySessionId.get(s.sessionId) : undefined;
-      return byId || mergedByKey.get(sourceSessionKey(s.provider, s.project, s.slug));
-    })
-    .filter((s): s is SessionInfo => Boolean(s))
-    .sort((a, b) => {
-      const scoreDelta =
-        enrichmentPriorityScore(b, preferredSessionIds, preferredSlugs, preferredProjects) -
-        enrichmentPriorityScore(a, preferredSessionIds, preferredSlugs, preferredProjects);
-      return scoreDelta || b.timestamp.localeCompare(a.timestamp);
-    })
-    .slice(0, limit);
-}
-
-/** True when `timestamp` parses and is within RECENT_SESSION_WINDOW_MS of now. */
-function isRecentActivity(timestamp: string | undefined): boolean {
-  if (!timestamp) return false;
-  return Date.now() - Date.parse(timestamp) <= RECENT_SESSION_WINDOW_MS;
-}
-
-/**
- * Score the preference/recency signals shared by both priority schemes.
- * Scheme-specific signals (hasPR, not-previously-scanned, etc.) are added by
- * the caller using its own weights.
- */
-function preferenceScore(
-  entity: { sessionId: string; slug: string; project: string; timestamp?: string },
-  preferred: { sessionIds: Set<string>; slugs: Set<string>; projects: Set<string> },
-  weights: {
-    preferredSessionId: number;
-    preferredSlug: number;
-    preferredProject: number;
-    recent: number;
-  },
-): number {
-  let score = 0;
-  if (preferred.sessionIds.has(entity.sessionId)) score += weights.preferredSessionId;
-  if (preferred.slugs.has(entity.slug)) score += weights.preferredSlug;
-  if (preferred.projects.has(entity.project)) score += weights.preferredProject;
-  if (isRecentActivity(entity.timestamp)) score += weights.recent;
-  return score;
-}
-
-function enrichmentPriorityScore(
-  session: SessionInfo,
-  preferredSessionIds: Set<string>,
-  preferredSlugs: Set<string>,
-  preferredProjects: Set<string>,
-): number {
-  let score = preferenceScore(
-    session,
-    { sessionIds: preferredSessionIds, slugs: preferredSlugs, projects: preferredProjects },
-    ENRICHMENT_SCORE_WEIGHTS,
-  );
-  if (session.hasPR) score += ENRICHMENT_SCORE_WEIGHTS.hasPR;
-  if (session.hasSqlite) score += ENRICHMENT_SCORE_WEIGHTS.hasSqlite;
-  return score;
-}
-
-function prioritizeScanInputs(
-  inputs: ScanInput[],
-  previousResults: Array<Pick<SessionScanResult, "sessionId">>,
-  hints: EnrichmentHints = {},
-): ScanInput[] {
-  const previousSessionIds = new Set(previousResults.map((result) => result.sessionId));
-  const preferredSessionIds = new Set(hints.sessionIds || []);
-  const preferredSlugs = new Set(hints.slugs || []);
-  const preferredProjects = new Set(hints.projects || []);
-
-  return [...inputs].sort((a, b) => {
-    const scoreDelta =
-      scanInputPriorityScore(
-        b,
-        previousSessionIds,
-        preferredSessionIds,
-        preferredSlugs,
-        preferredProjects,
-      ) -
-      scanInputPriorityScore(
-        a,
-        previousSessionIds,
-        preferredSessionIds,
-        preferredSlugs,
-        preferredProjects,
-      );
-    return scoreDelta || (b.timestamp || "").localeCompare(a.timestamp || "");
-  });
-}
-
-function scanInputPriorityScore(
-  input: ScanInput,
-  previousSessionIds: Set<string>,
-  preferredSessionIds: Set<string>,
-  preferredSlugs: Set<string>,
-  preferredProjects: Set<string>,
-): number {
-  let score = preferenceScore(
-    input,
-    { sessionIds: preferredSessionIds, slugs: preferredSlugs, projects: preferredProjects },
-    SCAN_INPUT_SCORE_WEIGHTS,
-  );
-  if (!previousSessionIds.has(input.sessionId))
-    score += SCAN_INPUT_SCORE_WEIGHTS.notPreviouslyScanned;
-  return score;
-}
-
-function mergeEnrichmentHints(
-  existing: EnrichmentHints | undefined,
-  next: EnrichmentHints,
-): EnrichmentHints {
-  return {
-    sessionIds: uniqueStrings([...(existing?.sessionIds || []), ...(next.sessionIds || [])]),
-    slugs: uniqueStrings([...(existing?.slugs || []), ...(next.slugs || [])]),
-    projects: uniqueStrings([...(existing?.projects || []), ...(next.projects || [])]),
-    limit: Math.max(existing?.limit || 0, next.limit || 0) || undefined,
-  };
-}
-
-function uniqueStrings(values: string[]): string[] {
-  return [...new Set(values.filter((value) => typeof value === "string" && value.trim()))].slice(
-    0,
-    200,
-  );
-}
-
-function enrichmentHintsFromBody(value: unknown): EnrichmentHints {
-  if (!value || typeof value !== "object") return {};
-  const body = value as Record<string, unknown>;
-  return {
-    sessionIds: stringArrayFromUnknown(body.sessionIds),
-    slugs: stringArrayFromUnknown(body.slugs),
-    projects: stringArrayFromUnknown(body.projects),
-    limit: typeof body.limit === "number" ? body.limit : undefined,
-  };
-}
-
-function stringArrayFromUnknown(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const strings = value.filter(
-    (item): item is string => typeof item === "string" && item.trim().length > 0,
-  );
-  return strings.length > 0 ? [...new Set(strings)] : undefined;
-}
-
 function normalizeSessionProjectsForHome(sessions: SessionInfo[], home: string): SessionInfo[] {
   return sessions.map((session) =>
     session.project.startsWith(home)
@@ -864,11 +670,6 @@ function extractPromptPreviewsFromTurns(turns: ParsedTurn[], limit = 3): string[
     if (prompts.length >= limit) break;
   }
   return prompts;
-}
-
-function looksLikeCursorDisplayNoise(value: unknown): boolean {
-  if (typeof value !== "string" || !value.trim()) return false;
-  return !cleanPromptText(value);
 }
 
 /** Build dual lookup maps for replays — match by slug or sessionId */
