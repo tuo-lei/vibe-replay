@@ -86,8 +86,6 @@ import type {
   SourceSessionCatalogCache,
   SourceSummaryRecord,
 } from "./server-types.js";
-
-export type { SourceSummaryRecord } from "./server-types.js";
 import { loadAnnotations, saveAnnotations, saveOverlays } from "./server-persistence.js";
 import { registerSessionAssetRoutes } from "./server-routes/session-assets.js";
 import {
@@ -115,6 +113,9 @@ import { localDayKey, normalizeTitle } from "./utils.js";
 import { CLI_VERSION } from "./version.js";
 
 export { resolveGenerateInputs } from "./server-core.js";
+// Re-exported for tests that import it from "../src/server.js" (kept stable
+// after the type moved to server-types.ts).
+export type { SourceSummaryRecord } from "./server-types.js";
 
 // ─── Archive helpers (directory-based, one marker file per slug) ────
 

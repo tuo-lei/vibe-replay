@@ -100,6 +100,9 @@ export async function probeSourceRecordsFreshness(
 ): Promise<SourceProviderFreshnessProbe> {
   const probe: SourceProviderFreshnessProbe = {
     provider,
+    // This probe works from a flat list of source filePaths rather than a
+    // directory tree, so there is no real root to report — reuse the provider
+    // name as the label. (walkJsonlFreshness, by contrast, sets a real path.)
     sessionsRoot: provider,
     fileCount: 0,
   };
