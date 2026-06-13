@@ -5,6 +5,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { ScanInput } from "../src/scanner.js";
 import type { SourceSummaryRecord } from "../src/server.js";
 import { __testables } from "../src/server.js";
+import {
+  pickSourceRecordForSession,
+  prioritizeScanInputs,
+  selectCursorEnrichmentCandidates,
+  sourceSessionKey,
+} from "../src/server-enrichment.js";
 import type { SessionInfo } from "../src/types.js";
 
 const originalPiSessionDir = process.env.PI_CODING_AGENT_SESSION_DIR;
@@ -324,7 +330,7 @@ describe("sources enrichment helpers", () => {
       },
     ];
 
-    const candidates = __testables.selectCursorEnrichmentCandidates(merged, baseSources);
+    const candidates = selectCursorEnrichmentCandidates(merged, baseSources);
     expect(candidates).toHaveLength(0);
   });
 
@@ -382,7 +388,7 @@ describe("sources enrichment helpers", () => {
       },
     ];
 
-    const candidates = __testables.selectCursorEnrichmentCandidates(merged, baseSources, 2);
+    const candidates = selectCursorEnrichmentCandidates(merged, baseSources, 2);
     expect(candidates.map((s) => s.sessionId)).toEqual(["cursor-new", "cursor-old"]);
   });
 
@@ -416,7 +422,7 @@ describe("sources enrichment helpers", () => {
       toolCallCount: undefined,
     }));
 
-    const candidates = __testables.selectCursorEnrichmentCandidates(merged, baseSources, {
+    const candidates = selectCursorEnrichmentCandidates(merged, baseSources, {
       slugs: ["visible0"],
       limit: 2,
     });
@@ -451,7 +457,7 @@ describe("sources enrichment helpers", () => {
       },
     ];
 
-    const ordered = __testables.prioritizeScanInputs(
+    const ordered = prioritizeScanInputs(
       inputs,
       [{ sessionId: "already-new" }, { sessionId: "hinted-mid" }],
       { slugs: ["mid"] },
@@ -483,7 +489,7 @@ describe("sources enrichment helpers", () => {
     ]);
     const byKey = new Map<string, SourceSummaryRecord>([
       [
-        __testables.sourceSessionKey("cursor", "~/project-a", "aaaaaaaa"),
+        sourceSessionKey("cursor", "~/project-a", "aaaaaaaa"),
         {
           provider: "cursor",
           sessionId: "cursor-real",
@@ -497,7 +503,7 @@ describe("sources enrichment helpers", () => {
       ],
     ]);
 
-    const picked = __testables.pickSourceRecordForSession(current, bySessionId, byKey);
+    const picked = pickSourceRecordForSession(current, bySessionId, byKey);
     expect(picked?.provider).toBe("cursor");
     expect(picked?.promptCount).toBe(5);
   });
