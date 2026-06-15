@@ -20,7 +20,7 @@ import { streamSSE } from "hono/streaming";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import open from "open";
 import { readGitRepo } from "@vibe-replay/provider-core/utils";
-import { readFileCache, writeFileCache, type FileCacheEntry } from "./cache.js";
+import { readFileCache, writeFileCache } from "./cache.js";
 import { cleanPromptText, previewPrompt } from "./clean-prompt.js";
 import { computeDaysUntilCleanup, getClaudeCodeCleanupPeriod } from "./cleanup-warning.js";
 import {
@@ -36,7 +36,6 @@ import { mergeInsights, readInsightsStore, writeInsightsStore } from "./insights
 import { loadOverlays, sessionWithEffectiveContent } from "./overlays.js";
 import { parseClaudeCodeLines } from "./providers/claude-code/parser.js";
 import { parseCodexLines } from "./providers/codex/parser.js";
-import { getPiSessionsDir } from "./providers/pi/config.js";
 import { parsePiLines } from "./providers/pi/parser.js";
 import {
   readCursorLiveDiagnostics,
@@ -70,6 +69,23 @@ import {
   selectCursorEnrichmentCandidates,
   sourceSessionKey,
 } from "./server-enrichment.js";
+import {
+  buildSourceSessionCatalogCache,
+  getStaleSourceProviders,
+  mergeSourceCatalogSessionUpdates,
+  normalizeSourceSessionCatalogCache,
+  probePiSourceFreshness,
+  probeSourceRecordsFreshness,
+  sourceProviderFingerprint,
+  updateSourceSessionCatalogSessions,
+} from "./server-source-catalog.js";
+import type {
+  CachedSourceRecord,
+  NormalizedSourceSessionCatalogCache,
+  ReplaySummary,
+  SourceSessionCatalogCache,
+  SourceSummaryRecord,
+} from "./server-types.js";
 import { loadAnnotations, saveAnnotations, saveOverlays } from "./server-persistence.js";
 import { registerSessionAssetRoutes } from "./server-routes/session-assets.js";
 import {
@@ -97,6 +113,9 @@ import { localDayKey, normalizeTitle } from "./utils.js";
 import { CLI_VERSION } from "./version.js";
 
 export { resolveGenerateInputs } from "./server-core.js";
+// Re-exported for tests that import it from "../src/server.js" (kept stable
+// after the type moved to server-types.ts).
+export type { SourceSummaryRecord } from "./server-types.js";
 
 // ─── Archive helpers (directory-based, one marker file per slug) ────
 
@@ -282,101 +301,6 @@ async function loadSessionFromDisk(baseDir: string, slug: string): Promise<Repla
   return session;
 }
 
-export interface SourceSummaryRecord {
-  provider: string;
-  slug: string;
-  project: string;
-  sessionId?: string;
-  promptCount?: number;
-  toolCallCount?: number;
-  filePaths: string[];
-  toolPaths?: string[];
-  hasSqlite?: boolean;
-  hasSdk?: boolean;
-  isStarred?: boolean;
-  spaceId?: string;
-  spaceIdSetBy?: string;
-  pluginsEnabled?: boolean;
-  skillsEnabled?: boolean;
-  fsDetectedFiles?: string[];
-  timestamp: string;
-  [key: string]: unknown;
-}
-
-/** Summary of a generated replay, returned by scanSessionsFromDir / scanSessions */
-interface ReplaySummary {
-  slug: string;
-  baseDir: string;
-  sessionId: string;
-  title?: string;
-  provider: string;
-  model?: string;
-  gitRepo?: string;
-  project: string;
-  startTime: string;
-  endTime?: string;
-  stats: ReplaySession["meta"]["stats"];
-  replaySize: number;
-  generatorVersion?: string;
-  replayOutdated: boolean;
-  hasAnnotations: boolean;
-  annotationCount: number;
-  firstMessage?: string;
-  messages?: string[];
-  gist?: {
-    gistId?: string;
-    viewerUrl?: string;
-    updatedAt?: string;
-    outdated: boolean;
-  };
-  cloud?: {
-    id: string;
-    url: string;
-    expiresAt?: string;
-    updatedAt?: string;
-  };
-}
-
-/** SourceSummaryRecord enriched with replay info for the sources cache */
-interface CachedSourceRecord extends SourceSummaryRecord {
-  existingReplay?: string | null;
-  replay?: Omit<ReplaySummary, "baseDir" | "generatorVersion" | "replayOutdated">;
-}
-
-interface ProviderDiscoveryState {
-  provider: string;
-  discoveredAt: string;
-  sessionCount: number;
-  newestSourceMtimeMs?: number;
-  newestSourcePath?: string;
-  fingerprint?: string;
-}
-
-interface SourceSessionCatalogCache {
-  schemaVersion: 1;
-  discoveredAt: string;
-  updatedAt?: string;
-  providerStates?: Record<string, ProviderDiscoveryState>;
-  sessions: CachedSourceRecord[];
-}
-
-interface NormalizedSourceSessionCatalogCache {
-  sessions: CachedSourceRecord[];
-  cachedAt?: string;
-  discoveredAt?: string;
-  updatedAt?: string;
-  providerStates?: Record<string, ProviderDiscoveryState>;
-  legacy?: boolean;
-}
-
-interface SourceProviderFreshnessProbe {
-  provider: string;
-  sessionsRoot: string;
-  fileCount: number;
-  newestSourceMtimeMs?: number;
-  newestSourcePath?: string;
-}
-
 interface SourcesEnrichmentStatus {
   running: boolean;
   processed: number;
@@ -391,240 +315,6 @@ interface PersistedInsightsCache {
   userInsights: UserInsights | null;
   projectInsights: Array<[string, ProjectInsights]>;
   computedAt: string | null;
-}
-
-function isSourceSessionCatalogCache(value: unknown): value is SourceSessionCatalogCache {
-  return (
-    !!value &&
-    typeof value === "object" &&
-    (value as { schemaVersion?: unknown }).schemaVersion === 1 &&
-    typeof (value as { discoveredAt?: unknown }).discoveredAt === "string" &&
-    Array.isArray((value as { sessions?: unknown }).sessions)
-  );
-}
-
-function normalizeSourceSessionCatalogCache(
-  cached: FileCacheEntry<SourceSessionCatalogCache | CachedSourceRecord[]> | null,
-): NormalizedSourceSessionCatalogCache | null {
-  if (!cached) return null;
-  if (Array.isArray(cached.data)) {
-    return {
-      sessions: cached.data,
-      cachedAt: cached.updatedAt,
-      discoveredAt: cached.updatedAt,
-      updatedAt: cached.updatedAt,
-      legacy: true,
-    };
-  }
-  if (isSourceSessionCatalogCache(cached.data)) {
-    return {
-      sessions: cached.data.sessions,
-      cachedAt: cached.updatedAt,
-      discoveredAt: cached.data.discoveredAt || cached.updatedAt,
-      updatedAt: cached.data.updatedAt || cached.updatedAt,
-      providerStates: cached.data.providerStates,
-      legacy: false,
-    };
-  }
-  return null;
-}
-
-function buildProviderDiscoveryStates(
-  sources: SourceSummaryRecord[],
-  discoveredAt: string,
-): Record<string, ProviderDiscoveryState> {
-  const byProvider = new Map<string, SourceSummaryRecord[]>();
-  for (const source of sources) {
-    const bucket = byProvider.get(source.provider) || [];
-    bucket.push(source);
-    byProvider.set(source.provider, bucket);
-  }
-
-  const states: Record<string, ProviderDiscoveryState> = {};
-  for (const [provider, providerSources] of byProvider) {
-    states[provider] = {
-      provider,
-      discoveredAt,
-      sessionCount: providerSources.length,
-    };
-  }
-  return states;
-}
-
-function buildSourceSessionCatalogCache(
-  sessions: SourceSummaryRecord[],
-  discoveredAt: string,
-  previous?: NormalizedSourceSessionCatalogCache | null,
-): SourceSessionCatalogCache {
-  const providerStates = {
-    ...previous?.providerStates,
-    ...buildProviderDiscoveryStates(sessions, discoveredAt),
-  };
-  return {
-    schemaVersion: 1,
-    discoveredAt,
-    updatedAt: discoveredAt,
-    providerStates,
-    sessions: sessions as CachedSourceRecord[],
-  };
-}
-
-async function probeSourceRecordsFreshness(
-  sources: SourceSummaryRecord[],
-  provider: string,
-): Promise<SourceProviderFreshnessProbe> {
-  const probe: SourceProviderFreshnessProbe = {
-    provider,
-    sessionsRoot: provider,
-    fileCount: 0,
-  };
-
-  const paths = new Set(
-    sources
-      .filter((source) => source.provider === provider)
-      .flatMap((source) => source.filePaths || [])
-      .filter(
-        (filePath): filePath is string => typeof filePath === "string" && filePath.length > 0,
-      ),
-  );
-
-  for (const filePath of paths) {
-    const fileStat = await stat(filePath).catch(() => null);
-    if (!fileStat) continue;
-    probe.fileCount += 1;
-    if (probe.newestSourceMtimeMs == null || fileStat.mtimeMs > probe.newestSourceMtimeMs) {
-      probe.newestSourceMtimeMs = fileStat.mtimeMs;
-      probe.newestSourcePath = filePath;
-    }
-  }
-
-  return probe;
-}
-
-function mergeSourceCatalogSessionUpdates(
-  current: CachedSourceRecord[],
-  updates: CachedSourceRecord[],
-): CachedSourceRecord[] {
-  if (current.length === 0) return updates;
-
-  const bySessionId = new Map<string, CachedSourceRecord>();
-  const byKey = new Map<string, CachedSourceRecord>();
-  for (const update of updates) {
-    byKey.set(sourceSessionKey(update.provider, update.project, update.slug), update);
-    if (typeof update.sessionId === "string" && update.sessionId) {
-      bySessionId.set(update.sessionId, update);
-    }
-  }
-
-  return current.map((session) => {
-    const byId = session.sessionId ? bySessionId.get(session.sessionId) : undefined;
-    const update =
-      (byId?.provider === session.provider ? byId : undefined) ??
-      byKey.get(sourceSessionKey(session.provider, session.project, session.slug));
-    return update ? { ...session, ...update } : session;
-  });
-}
-
-function updateSourceSessionCatalogSessions(
-  catalog: NormalizedSourceSessionCatalogCache,
-  sessions: CachedSourceRecord[],
-  updatedAt = new Date().toISOString(),
-): SourceSessionCatalogCache {
-  return {
-    schemaVersion: 1,
-    discoveredAt: catalog.discoveredAt || catalog.cachedAt || updatedAt,
-    updatedAt,
-    providerStates: catalog.providerStates,
-    sessions,
-  };
-}
-
-async function walkJsonlFreshness(
-  root: string,
-  provider: string,
-): Promise<SourceProviderFreshnessProbe> {
-  const probe: SourceProviderFreshnessProbe = {
-    provider,
-    sessionsRoot: root,
-    fileCount: 0,
-  };
-
-  async function walk(dir: string): Promise<void> {
-    let entries: Array<{ name: string; isDirectory: () => boolean; isFile: () => boolean }>;
-    try {
-      entries = await readdir(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-
-    await Promise.all(
-      entries.map(async (entry) => {
-        const entryPath = join(dir, entry.name);
-        if (entry.isDirectory()) {
-          await walk(entryPath);
-          return;
-        }
-        if (!entry.isFile() || !entry.name.endsWith(".jsonl")) return;
-        const fileStat = await stat(entryPath).catch(() => null);
-        if (!fileStat) return;
-        probe.fileCount += 1;
-        if (probe.newestSourceMtimeMs == null || fileStat.mtimeMs > probe.newestSourceMtimeMs) {
-          probe.newestSourceMtimeMs = fileStat.mtimeMs;
-          probe.newestSourcePath = entryPath;
-        }
-      }),
-    );
-  }
-
-  await walk(root);
-  return probe;
-}
-
-async function probePiSourceFreshness(): Promise<SourceProviderFreshnessProbe> {
-  return walkJsonlFreshness(getPiSessionsDir(), "pi");
-}
-
-function sourceProviderFingerprint(probe: SourceProviderFreshnessProbe): string {
-  return `${probe.fileCount}:${probe.newestSourcePath || ""}`;
-}
-
-async function getStaleSourceProviders(
-  catalog: NormalizedSourceSessionCatalogCache | null,
-): Promise<string[]> {
-  if (!catalog) return [];
-  const staleProviders: string[] = [];
-  const piProbe = await probePiSourceFreshness();
-  const piFingerprint = sourceProviderFingerprint(piProbe);
-  const previousPiFingerprint = catalog.providerStates?.pi?.fingerprint;
-  const previousPiSessionCount = catalog.providerStates?.pi?.sessionCount;
-  const cachedPiSessionCount = catalog.sessions.filter(
-    (session) => session.provider === "pi",
-  ).length;
-  if (
-    cachedPiSessionCount > 0 &&
-    typeof previousPiSessionCount === "number" &&
-    previousPiSessionCount !== cachedPiSessionCount
-  ) {
-    staleProviders.push("pi");
-  }
-  if (previousPiFingerprint) {
-    if (piFingerprint !== previousPiFingerprint) staleProviders.push("pi");
-    return [...new Set(staleProviders)];
-  }
-
-  const piDiscoveredAt =
-    catalog.providerStates?.pi?.discoveredAt || catalog.discoveredAt || catalog.cachedAt;
-  const piDiscoveredMs = piDiscoveredAt ? Date.parse(piDiscoveredAt) : Number.NaN;
-  if (
-    piProbe.fileCount > 0 &&
-    piProbe.newestSourceMtimeMs != null &&
-    (catalog.legacy ||
-      !Number.isFinite(piDiscoveredMs) ||
-      piProbe.newestSourceMtimeMs > piDiscoveredMs)
-  ) {
-    staleProviders.push("pi");
-  }
-  return [...new Set(staleProviders)];
 }
 
 function normalizeSessionProjectsForHome(sessions: SessionInfo[], home: string): SessionInfo[] {
