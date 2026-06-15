@@ -21,7 +21,7 @@ jobs:
     steps:
       - name: Get PR number
         id: pr
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const run = context.payload.workflow_run;
@@ -43,7 +43,7 @@ jobs:
       - name: Identify failure type
         id: failure
         if: steps.pr.outputs.result != ''
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           RUN_ID: ${{ github.event.workflow_run.id }}
         with:
@@ -64,7 +64,7 @@ jobs:
 
       - name: Checkout repository
         if: steps.pr.outputs.result != '' && steps.failure.outputs.has_lint_or_build == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event.workflow_run.head_branch }}
           fetch-depth: 1
@@ -93,7 +93,7 @@ jobs:
       # Test failures get a comment only — human decides whether to fix test or code
       - name: Comment on test failures
         if: steps.pr.outputs.result != '' && steps.failure.outputs.has_test == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           RUN_ID: ${{ github.event.workflow_run.id }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
