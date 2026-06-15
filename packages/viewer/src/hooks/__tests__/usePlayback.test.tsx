@@ -98,9 +98,36 @@ describe("usePlayback", () => {
       expect(result.current.state).toBe("playing");
       expect(result.current.visibleCount).toBeGreaterThan(0);
     });
+
+    it("reaches the ended state after the last scene, and play() restarts from the top", () => {
+      const { result } = renderHook(() => usePlayback(scenes(), ALL_PREFS));
+      act(() => result.current.play());
+      act(() => vi.advanceTimersByTime(60)); // bootstrap
+
+      // Fire one advancement timer at a time so React re-renders (and the
+      // internal index ref updates) between steps.
+      let guard = 0;
+      while (result.current.state === "playing" && guard++ < 50) {
+        act(() => vi.advanceTimersToNextTimer());
+      }
+
+      expect(result.current.state).toBe("ended");
+      expect(result.current.currentIndex).toBe(4);
+      expect(result.current.visibleCount).toBe(5);
+
+      // play() from "ended" rewinds to the start before replaying.
+      act(() => result.current.play());
+      expect(result.current.state).toBe("playing");
+      expect(result.current.currentIndex).toBe(-1);
+    });
   });
 
   describe("keyboard shortcuts", () => {
+    // Use fake timers so play()'s 50ms bootstrap never fires on a real clock and
+    // leaks across tests.
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
     // Dispatch from a real element so the event bubbles to the window listener
     // with a DOM-element target (matching real keydown propagation).
     const press = (key: string) =>

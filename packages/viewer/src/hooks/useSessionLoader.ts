@@ -335,7 +335,7 @@ async function loadSession(): Promise<LoadResult | "dashboard"> {
     return { session: await fetchJson(url), mode: "readonly" };
   }
 
-  // 5. Local file parameter — for dev mode
+  // 6. Local file parameter — for dev mode
   const file = params.get("file");
   if (file) {
     const resp = await fetch(file);

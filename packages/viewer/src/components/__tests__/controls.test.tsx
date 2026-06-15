@@ -26,18 +26,22 @@ function renderControls(overrides: Partial<Parameters<typeof Controls>[0]> = {})
 describe("Controls", () => {
   it("renders a Play affordance when paused", () => {
     renderControls({ state: "paused" });
-    expect(screen.getAllByText("Play").length).toBeGreaterThan(0);
+    expect(screen.getByText("Play")).toBeTruthy();
   });
 
   it("renders a Pause affordance when playing", () => {
     renderControls({ state: "playing" });
-    expect(screen.getAllByText("Pause").length).toBeGreaterThan(0);
+    expect(screen.getByText("Pause")).toBeTruthy();
   });
 
-  it("calls onTogglePlayPause when the play/pause button is clicked", () => {
+  it("calls onTogglePlayPause from every play/pause button (both layouts)", () => {
     const { props } = renderControls();
-    fireEvent.click(screen.getByTitle("Play/Pause"));
-    expect(props.onTogglePlayPause).toHaveBeenCalledTimes(1);
+    // jsdom renders both the mobile and desktop layouts (CSS media queries
+    // don't apply), so there are two play/pause buttons; exercise both.
+    const buttons = screen.getAllByTitle(/^Play\/Pause/);
+    expect(buttons.length).toBeGreaterThan(1);
+    for (const btn of buttons) fireEvent.click(btn);
+    expect(props.onTogglePlayPause).toHaveBeenCalledTimes(buttons.length);
   });
 
   it("calls onNextPrompt / onPrevPrompt from the turn navigation buttons", () => {
@@ -46,6 +50,12 @@ describe("Controls", () => {
     fireEvent.click(screen.getByTitle("Previous turn"));
     expect(props.onNextPrompt).toHaveBeenCalledTimes(1);
     expect(props.onPrevPrompt).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls onChangeSpeed with the selected speed", () => {
+    const { props } = renderControls();
+    fireEvent.click(screen.getByText("5x"));
+    expect(props.onChangeSpeed).toHaveBeenCalledWith(5);
   });
 
   it("opens search when the search button is clicked", () => {
