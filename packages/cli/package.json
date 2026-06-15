@@ -61,11 +61,11 @@
     "@vibe-replay/providers-default": "workspace:*",
     "@vibe-replay/replay-core": "workspace:*",
     "@vibe-replay/types": "workspace:*",
-    "@vitest/coverage-v8": "4.1.8",
+    "@vitest/coverage-v8": "4.1.9",
     "tsup": "^8.3.0",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.9"
   },
   "engines": {
     "node": ">=20"
