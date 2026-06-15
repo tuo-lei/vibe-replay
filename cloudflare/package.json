@@ -21,7 +21,7 @@
     "@types/node": "^22.10.0",
     "drizzle-kit": "^0.31.0",
     "miniflare": "^4.20260603.0",
-    "vitest": "^4.1.8",
+    "vitest": "^4.1.9",
     "wrangler": "^4.98.0"
   }
 }
