@@ -17,7 +17,7 @@ import {
 } from "./sanitize.js";
 import { createRetryableInit, CURSOR_CHATS_DIR, workspaceHash } from "./sqlite-io.js";
 // Local use requires named imports in addition to the compatibility re-exports below.
-import { mapCursorToolName, mapToolArgs } from "./tool-mapping.js";
+import { mapCursorToolName, mapToolArgs, parseJson } from "./tool-mapping.js";
 
 export { storeDbPath, workspaceHash } from "./sqlite-io.js";
 export { mapCursorToolName, mapToolArgs } from "./tool-mapping.js";
@@ -693,15 +693,6 @@ function valueToString(value: unknown): string {
   if (value instanceof Uint8Array) return new TextDecoder().decode(value);
   if (value == null) return "";
   return String(value);
-}
-
-function parseJson<T = any>(raw: unknown): T | null {
-  if (typeof raw !== "string") return null;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return null;
-  }
 }
 
 function parseJsonColumn(value: unknown): unknown {
