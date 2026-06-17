@@ -1,4 +1,4 @@
-function parseJson<T = any>(raw: unknown): T | null {
+export function parseJson<T = any>(raw: unknown): T | null {
   if (typeof raw !== "string") return null;
   try {
     return JSON.parse(raw) as T;
