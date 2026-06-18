@@ -19,6 +19,7 @@ import {
   mapCursorToolName,
   mapToolArgs,
   parseCursorSqlite,
+  SESSION_ID_RE,
 } from "./sqlite-reader.js";
 import { addParseWarning } from "@vibe-replay/provider-contract/warnings";
 
@@ -44,8 +45,6 @@ export function createCursorParser(deps: Partial<CursorParserDependencies> = {})
   return (filePaths: string | string[], sessionInfo?: SessionInfo): Promise<ProviderParseResult> =>
     parseCursorSessionWithDependencies(filePaths, sessionInfo, resolved);
 }
-
-const CURSOR_UUID_SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function toErrorMessage(err: unknown): string {
   if (err instanceof Error && err.message) return err.message;
@@ -219,7 +218,7 @@ function sessionIdFromStoreDbPath(path: string): string | undefined {
   const parts = normalized.split("/");
   if (parts.at(-1) !== "store.db") return undefined;
   const rawSessionId = parts.at(-2)?.trim();
-  if (!rawSessionId || !CURSOR_UUID_SESSION_ID_RE.test(rawSessionId)) return undefined;
+  if (!rawSessionId || !SESSION_ID_RE.test(rawSessionId)) return undefined;
   return rawSessionId;
 }
 
