@@ -22,7 +22,7 @@ import { mapCursorToolName, mapToolArgs, parseJson } from "./tool-mapping.js";
 export { storeDbPath, workspaceHash } from "./sqlite-io.js";
 export { mapCursorToolName, mapToolArgs } from "./tool-mapping.js";
 
-const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const MIN_STORE_DB_SIZE = 8192;
 const MAX_CURSOR_REQUEST_CONTEXT_ROWS = 500;
