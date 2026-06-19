@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 import { viteSingleFile } from "vite-plugin-singlefile";
@@ -27,7 +28,7 @@ function editorFlagPlugin(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), viteSingleFile(), editorFlagPlugin()],
+  plugins: [tailwindcss(), react(), viteSingleFile(), editorFlagPlugin()],
   define: {
     // Bake cloud API URL at build time. Vite's import.meta.env.VITE_* replacement
     // runs before define, so we use a custom global instead.
