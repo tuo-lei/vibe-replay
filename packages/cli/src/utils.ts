@@ -17,34 +17,6 @@ export function normalizeTitle(value?: string): string | undefined {
   return cleaned || undefined;
 }
 
-/** Tool names that modify files on disk. Used to count edits and track modified files. */
-export const FILE_EDIT_TOOLS: ReadonlySet<string> = new Set([
-  "Edit",
-  "MultiEdit",
-  "Write",
-  "NotebookEdit",
-  "Delete",
-]);
-
-/** Extract file path from tool input, handling different provider field names. */
-export function extractToolFilePath(
-  input: Record<string, unknown> | undefined,
-): string | undefined {
-  return extractToolFilePaths(input)[0];
-}
-
-/** Extract one or more file paths from tool input, handling provider-specific field names. */
-export function extractToolFilePaths(input: Record<string, unknown> | undefined): string[] {
-  if (!input) return [];
-  const plural = input.file_paths ?? input.filePaths ?? input.paths;
-  const paths = Array.isArray(plural)
-    ? plural.filter((fp): fp is string => typeof fp === "string" && fp.trim().length > 0)
-    : [];
-  const singular = input.file_path ?? input.filePath ?? input.path ?? input.relativeWorkspacePath;
-  if (typeof singular === "string" && singular.trim()) paths.unshift(singular);
-  return [...new Set(paths)];
-}
-
 /**
  * Format a timestamp as YYYY-MM-DD in the local timezone.
  * Critical for day-bucketing: slicing an ISO string gives UTC, which shifts

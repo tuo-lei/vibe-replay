@@ -15,19 +15,18 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { readFileCache, writeFileCache } from "./cache.js";
 import { estimateActiveDuration } from "@vibe-replay/provider-core/duration";
+import {
+  FILE_EDIT_TOOLS,
+  extractToolFilePath,
+  extractToolFilePaths,
+} from "@vibe-replay/provider-core/utils";
 import { estimateCost, estimateCostSimple } from "./pricing.js";
 import { parseCodexSession } from "./providers/codex/parser.js";
 import { parseCursorSession } from "./providers/cursor/parser.js";
 import { parsePiSession } from "./providers/pi/parser.js";
 import type { ProviderParseResult } from "./providers/types.js";
 import type { DataSource, PrLink, SessionInfo, TokenUsage } from "./types.js";
-import {
-  FILE_EDIT_TOOLS,
-  extractToolFilePath,
-  extractToolFilePaths,
-  localDayKey,
-  shortenPath,
-} from "./utils.js";
+import { localDayKey, shortenPath } from "./utils.js";
 
 // Bump this when we extract new fields — forces re-scan of all sessions.
 const SCANNER_VERSION = 8;
