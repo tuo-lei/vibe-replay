@@ -1,6 +1,8 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/* Reuse the existing terminal theme + content globs (Tailwind v4 reads the
+   legacy JS config via @config). darkMode/class-based variables still apply. */
+@config "../../tailwind.config.js";
 
 /* Prevent horizontal scroll on mobile */
 html,
