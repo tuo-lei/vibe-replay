@@ -140,4 +140,7 @@ describe("generateGitHubGif", () => {
     expect(gif[0]).toBe(0x47); // G
     expect(gif.length).toBeGreaterThan(100);
   });
-}, 30_000);
+  // GIF generation rasterizes several SVG frames and is CPU-heavy; it can take
+  // ~35s on slower Windows CI runners. Keep the timeout generous so these tests
+  // don't flake there.
+}, 60_000);
