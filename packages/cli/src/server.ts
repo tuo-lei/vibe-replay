@@ -87,6 +87,7 @@ import type {
   SourceSummaryRecord,
 } from "./server-types.js";
 import { loadAnnotations, saveAnnotations, saveOverlays } from "./server-persistence.js";
+import { registerArchiveRoutes } from "./server-routes/archive.js";
 import { registerSessionAssetRoutes } from "./server-routes/session-assets.js";
 import {
   buildInsightsSyncBatches,
@@ -116,33 +117,6 @@ export { resolveGenerateInputs } from "./server-core.js";
 // Re-exported for tests that import it from "../src/server.js" (kept stable
 // after the type moved to server-types.ts).
 export type { SourceSummaryRecord } from "./server-types.js";
-
-// ─── Archive helpers (directory-based, one marker file per slug) ────
-
-const ARCHIVE_DIR = ".archive";
-
-async function getArchivedSlugs(baseDir: string): Promise<Set<string>> {
-  try {
-    const entries = await readdir(join(baseDir, ARCHIVE_DIR));
-    return new Set(entries);
-  } catch {
-    return new Set();
-  }
-}
-
-async function archiveSlug(baseDir: string, slug: string): Promise<void> {
-  const dir = join(baseDir, ARCHIVE_DIR);
-  await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, slug), "");
-}
-
-async function unarchiveSlug(baseDir: string, slug: string): Promise<void> {
-  try {
-    await unlink(join(baseDir, ARCHIVE_DIR, slug));
-  } catch {
-    /* already gone */
-  }
-}
 
 const replayGitRepoByProjectCache = new Map<string, string | undefined>();
 
@@ -1760,25 +1734,7 @@ export async function startServer(
   app.delete("/api/sessions/:slug", deleteReplay);
   app.delete("/api/replays/:slug", deleteReplay);
 
-  // --- Archive: directory-based, one marker file per slug ---
-  app.get("/api/archived", async (c) => {
-    const slugs = await getArchivedSlugs(baseDir);
-    return c.json({ slugs: [...slugs] });
-  });
-
-  app.post("/api/archive/:slug", async (c) => {
-    const slug = safeSlug(c.req.param("slug"));
-    if (!slug) return c.json({ error: "invalid slug" }, 400);
-    await archiveSlug(baseDir, slug);
-    return c.json({ ok: true });
-  });
-
-  app.delete("/api/archive/:slug", async (c) => {
-    const slug = safeSlug(c.req.param("slug"));
-    if (!slug) return c.json({ error: "invalid slug" }, 400);
-    await unarchiveSlug(baseDir, slug);
-    return c.json({ ok: true });
-  });
+  registerArchiveRoutes(app, { baseDir });
 
   // --- Source sessions: discover raw AI coding sessions from all providers ---
   const getCachedSourceSessions = async (c: Context) => {
