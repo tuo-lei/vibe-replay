@@ -1,4 +1,5 @@
 /// <reference path="../sql-js.d.ts" />
+import type { SqlJsStatic } from "sql.js";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
@@ -407,7 +408,7 @@ async function openGlobalStateDb(): Promise<CachedGlobalStateDb | null> {
     return cachedGlobalStateDb;
   }
 
-  let SQL: any;
+  let SQL: SqlJsStatic;
   try {
     SQL = await getSqlJs();
   } catch {
@@ -1138,7 +1139,7 @@ function buildHashToProjectMap(decodedWorkspacePaths: string[]): Map<string, str
  * Returns null if the DB is empty, corrupt, or has no meta table.
  */
 async function readStoreDbMeta(dbPath: string): Promise<StoreDbMetaPreview | null> {
-  let SQL: any;
+  let SQL: SqlJsStatic;
   try {
     SQL = await getSqlJs();
   } catch {
@@ -1632,7 +1633,7 @@ async function parseCursorStoreDb(
     }
   }
 
-  let SQL: any;
+  let SQL: SqlJsStatic;
   try {
     SQL = await getSqlJs();
   } catch {
