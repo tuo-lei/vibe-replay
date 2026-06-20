@@ -1,24 +1,11 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { stubBrowserAPIs } from "../../test-utils/jsdom-stubs";
 import Dashboard from "../Dashboard";
 
-beforeAll(() => {
-  Element.prototype.scrollIntoView = vi.fn();
-  Element.prototype.scrollTo = vi.fn();
-  class StubObserver {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-    takeRecords() {
-      return [];
-    }
-  }
-  vi.stubGlobal("IntersectionObserver", StubObserver);
-  vi.stubGlobal("ResizeObserver", StubObserver);
-});
-
 beforeEach(() => {
+  stubBrowserAPIs();
   // Dashboard fetches replay/source data on mount. Reject so it exercises its
   // error/empty handling instead of hitting the network — modelling each
   // endpoint's exact response shape is out of scope for a smoke test.
@@ -30,7 +17,10 @@ beforeEach(() => {
   );
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe("Dashboard (smoke)", () => {
   it("renders its chrome (search + facets) without crashing", () => {

@@ -1,28 +1,19 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReplaySession } from "../../types";
 import { textResponse, thinking, userPrompt } from "../../engine/__tests__/helpers";
 import type { ViewPrefs } from "../../hooks/useViewPrefs";
+import { stubBrowserAPIs } from "../../test-utils/jsdom-stubs";
 import Player from "../Player";
 
-// jsdom doesn't implement these browser APIs; Player uses them from effects.
-beforeAll(() => {
-  Element.prototype.scrollIntoView = vi.fn();
-  Element.prototype.scrollTo = vi.fn();
-  class StubObserver {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-    takeRecords() {
-      return [];
-    }
-  }
-  vi.stubGlobal("IntersectionObserver", StubObserver);
-  vi.stubGlobal("ResizeObserver", StubObserver);
-});
+// jsdom doesn't implement the scroll/observer APIs Player uses from effects.
+beforeEach(stubBrowserAPIs);
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 const VIEW_PREFS: ViewPrefs = {
   displayMode: "all",
