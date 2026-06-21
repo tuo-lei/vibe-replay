@@ -26,11 +26,11 @@
     "prepare": "lefthook install"
   },
   "devDependencies": {
-    "@hono/node-server": "^1.19.11",
+    "@hono/node-server": "^2.0.4",
     "hono": "^4.12.23",
     "lefthook": "^2.1.9",
-    "oxfmt": "^0.53.0",
-    "oxlint": "^1.61.0",
+    "oxfmt": "^0.54.0",
+    "oxlint": "^1.69.0",
     "playwright": "^1.58.2",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",

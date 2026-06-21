@@ -14,9 +14,9 @@
     "@astrojs/rss": "^4.0.18",
     "@astrojs/sitemap": "^3.7.3",
     "@tailwindcss/typography": "^0.5.19",
-    "@tailwindcss/vite": "^4.2.1",
+    "@tailwindcss/vite": "^4.3.1",
     "astro": "^6.0.3",
-    "tailwindcss": "^4.2.1",
+    "tailwindcss": "^4.3.1",
     "typescript": "^6.0.3"
   }
 }
