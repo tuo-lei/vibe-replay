@@ -44,13 +44,8 @@ import {
 import { getAllProviders, getProvider } from "./providers/index.js";
 import {
   getApiUrl,
-  getSessionCookieName,
-  loadAllAuthTokens,
-  loadAnyAuthToken,
-  loadAuthToken,
   loadSavedCloudInfo,
   publishCloudWithOverlays,
-  removeAuthToken,
   saveAuthToken,
 } from "./publishers/cloud.js";
 import {
@@ -87,6 +82,7 @@ import type {
   SourceSummaryRecord,
 } from "./server-types.js";
 import { loadAnnotations, saveAnnotations, saveOverlays } from "./server-persistence.js";
+import { createAuthSession } from "./server-auth.js";
 import { registerArchiveRoutes } from "./server-routes/archive.js";
 import { registerSessionAssetRoutes } from "./server-routes/session-assets.js";
 import {
@@ -2184,126 +2180,8 @@ export async function startServer(
   // proxies to that token's origin (e.g. production) instead.
   const cloudApiBaseUrl = getApiUrl();
 
-  function readLocalAuthSession(): {
-    token: string;
-    user: { id: string; name: string; email?: string; image?: string };
-    /** The actual API origin this token authenticates against */
-    targetApi: string;
-  } | null {
-    // 1. Try exact match for current environment
-    const exact = loadAuthToken(cloudApiBaseUrl);
-    if (exact) {
-      return {
-        token: exact.token,
-        user: exact.user as { id: string; name: string; email?: string; image?: string },
-        targetApi: cloudApiBaseUrl,
-      };
-    }
-    // 2. Fallback: use any available token and proxy to its origin
-    const fallback = loadAnyAuthToken();
-    if (fallback) {
-      return {
-        token: fallback.token,
-        user: fallback.user as { id: string; name: string; email?: string; image?: string },
-        targetApi: fallback.origin,
-      };
-    }
-    return null;
-  }
-
-  async function clearLocalAuthSession() {
-    // Remove ALL tokens — user expects a full logout, not per-env
-    for (const entry of loadAllAuthTokens()) {
-      await removeAuthToken(entry.origin);
-    }
-    invalidateAuthCache();
-  }
-
-  /** Build an ordered list of (token, apiUrl) pairs to try.
-   *  Exact match for current env first, then any other available token. */
-  function getAuthCandidates(): { token: string; apiUrl: string }[] {
-    const candidates: { token: string; apiUrl: string }[] = [];
-    const exact = loadAuthToken(cloudApiBaseUrl);
-    if (exact) candidates.push({ token: exact.token, apiUrl: cloudApiBaseUrl });
-    const fallback = loadAnyAuthToken();
-    if (fallback) {
-      const fallbackApi = fallback.origin;
-      if (fallbackApi !== cloudApiBaseUrl) {
-        candidates.push({ token: fallback.token, apiUrl: fallbackApi });
-      }
-    }
-    return candidates;
-  }
-
-  async function fetchCloudApiWithLocalAuth(path: string, init: RequestInit = {}) {
-    const candidates = getAuthCandidates();
-    if (candidates.length === 0) return { unauthorized: true as const };
-
-    // Try each candidate; on 401, cascade to the next one
-    for (const candidate of candidates) {
-      const headers = new Headers(init.headers);
-      const cookieName = getSessionCookieName(candidate.apiUrl);
-      headers.set("Cookie", `${cookieName}=${candidate.token}`);
-      const response = await fetch(`${candidate.apiUrl}${path}`, { ...init, headers });
-      if (response.status !== 401) return { unauthorized: false as const, response };
-    }
-    // All candidates returned 401 — token expired, clear it
-    await clearLocalAuthSession();
-    return { unauthorized: true as const };
-  }
-
-  // Track validated auth state so we don't hit the cloud on every request.
-  // Invalidated on 401 from any cloud call or on explicit logout.
-  let validatedAuth: { valid: boolean; checkedAt: number } | null = null;
-  const AUTH_CHECK_TTL = 5 * 60 * 1000; // Re-validate every 5 minutes
-
-  /** Validate the local token against the cloud. Caches result. */
-  async function isAuthValid(): Promise<boolean> {
-    const now = Date.now();
-    if (validatedAuth && now - validatedAuth.checkedAt < AUTH_CHECK_TTL) {
-      return validatedAuth.valid;
-    }
-    const auth = readLocalAuthSession();
-    if (!auth) {
-      validatedAuth = { valid: false, checkedAt: now };
-      return false;
-    }
-    try {
-      const cookieName = getSessionCookieName(auth.targetApi);
-      const resp = await fetch(`${auth.targetApi}/api/auth/get-session`, {
-        headers: { Cookie: `${cookieName}=${auth.token}` },
-        signal: AbortSignal.timeout(5_000),
-      });
-      if (!resp.ok) {
-        if (resp.status === 401 || resp.status === 403) {
-          // Auth rejected — clear session so UI shows logged out
-          await clearLocalAuthSession();
-          validatedAuth = { valid: false, checkedAt: now };
-          return false;
-        }
-        // 5xx / other non-2xx — treat like network error (offline-friendly)
-        validatedAuth = { valid: true, checkedAt: now };
-        return true;
-      }
-      const data = await resp.json();
-      const valid = !!(data?.session && data.user);
-      if (!valid) {
-        // Token expired — clear it so UI shows logged out
-        await clearLocalAuthSession();
-      }
-      validatedAuth = { valid, checkedAt: now };
-      return valid;
-    } catch {
-      // Network/timeout error — assume still valid (offline-friendly)
-      validatedAuth = { valid: true, checkedAt: now };
-      return true;
-    }
-  }
-
-  /** Invalidate cached auth state (call on 401 or logout). */
-  function invalidateAuthCache() {
-    validatedAuth = null;
-  }
+  const { readLocalAuthSession, isAuthValid, clearLocalAuthSession, fetchCloudApiWithLocalAuth } =
+    createAuthSession(cloudApiBaseUrl);
 
   /** Shared response handler for cloud API proxy routes (BFF mode). */
   async function proxyCloudResponse(
