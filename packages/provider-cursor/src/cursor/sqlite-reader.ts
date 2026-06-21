@@ -1152,7 +1152,7 @@ async function readStoreDbMeta(dbPath: string): Promise<StoreDbMetaPreview | nul
     const metaRows = db.exec("SELECT value FROM meta WHERE key = '0'");
     if (!metaRows.length || !metaRows[0].values.length) return null;
     const metaHex = metaRows[0].values[0][0] as string;
-    const meta = JSON.parse(Buffer.from(metaHex, "hex").toString("utf-8")) as ChatMeta;
+    const meta = parseChatMetaHex(metaHex);
     const rootId = meta.latestRootBlobId;
     if (!rootId) return { meta, hasReplayableRoot: false };
     const rootRows = db.exec("SELECT data FROM blobs WHERE id = ?", [rootId]);
@@ -1443,6 +1443,10 @@ interface StoreDbMetaPreview {
   hasReplayableRoot: boolean;
 }
 
+function parseChatMetaHex(hex: string): ChatMeta {
+  return JSON.parse(Buffer.from(hex, "hex").toString("utf-8")) as ChatMeta;
+}
+
 interface CursorBlock {
   type: string;
   text?: string;
@@ -1648,7 +1652,7 @@ async function parseCursorStoreDb(
     if (!metaRows.length || !metaRows[0].values.length) return null;
 
     const metaHex = metaRows[0].values[0][0] as string;
-    const metaJson: ChatMeta = JSON.parse(Buffer.from(metaHex, "hex").toString("utf-8"));
+    const metaJson = parseChatMetaHex(metaHex);
     const rootId = metaJson.latestRootBlobId;
     if (!rootId) return null;
 
@@ -1717,7 +1721,7 @@ async function parseCursorStoreDbWithSqliteCli(
 
   // If sqlite3 returns malformed data, let the caller fall back to the sql.js
   // path below; that path has historically handled store.db quirks well.
-  const metaJson: ChatMeta = JSON.parse(Buffer.from(metaHex, "hex").toString("utf-8"));
+  const metaJson = parseChatMetaHex(metaHex);
   const rootId = metaJson.latestRootBlobId;
   if (!rootId) return null;
 
