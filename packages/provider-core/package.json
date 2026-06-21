@@ -32,7 +32,7 @@
     "@vibe-replay/provider-contract": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
+    "@types/node": "^25.9.3",
     "vitest": "^4.1.9"
   }
 }

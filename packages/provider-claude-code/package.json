@@ -50,7 +50,7 @@
     "@vibe-replay/types": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
+    "@types/node": "^25.9.3",
     "@vibe-replay/replay-core": "workspace:*",
     "vitest": "^4.1.9"
   }

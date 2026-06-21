@@ -17,11 +17,11 @@
     "nanoid": "^5.1.11"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260605.1",
-    "@types/node": "^22.10.0",
+    "@cloudflare/workers-types": "^4.20260615.1",
+    "@types/node": "^25.9.3",
     "drizzle-kit": "^0.31.0",
-    "miniflare": "^4.20260603.0",
+    "miniflare": "^4.20260611.0",
     "vitest": "^4.1.9",
-    "wrangler": "^4.98.0"
+    "wrangler": "^4.100.0"
   }
 }
