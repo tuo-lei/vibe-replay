@@ -1,5 +1,5 @@
 /// <reference path="../sql-js.d.ts" />
-import type { SqlJsStatic } from "sql.js";
+import type { Database, SqlJsStatic } from "sql.js";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
@@ -42,7 +42,7 @@ const getSqlJs = createRetryableInit(async () => {
 interface CachedSqlJsDb {
   dbPath: string;
   backend: "sqljs";
-  db: any;
+  db: Database;
   size: number;
   mtimeMs: number;
   walSize: number;
@@ -314,7 +314,7 @@ async function querySqliteCliText(dbPath: string, sql: string): Promise<string> 
   return stdout.replace(/\r?\n$/, "");
 }
 
-function sqlJsRows(db: any, sql: string): Record<string, any>[] {
+function sqlJsRows(db: Database, sql: string): Record<string, any>[] {
   const result = db.exec(sql);
   if (!result.length) return [];
   const [{ columns, values }] = result;
