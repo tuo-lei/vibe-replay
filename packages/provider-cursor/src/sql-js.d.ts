@@ -1,7 +1,9 @@
 declare module "sql.js" {
+  type SqlValue = string | number | null | Uint8Array;
+
   interface QueryExecResult {
     columns: string[];
-    values: any[][];
+    values: SqlValue[][];
   }
 
   interface Statement {

@@ -1159,7 +1159,7 @@ async function readStoreDbMeta(dbPath: string): Promise<StoreDbMetaPreview | nul
     if (!rootRows.length || !rootRows[0].values.length) {
       return { meta, hasReplayableRoot: false };
     }
-    const rootData = rootRows[0].values[0][0] as unknown;
+    const rootData = rootRows[0].values[0][0];
     return { meta, hasReplayableRoot: hasReplayableRootBlob(rootData) };
   } catch {
     return null;
