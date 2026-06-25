@@ -237,7 +237,7 @@ async function readThreadRowsFromStateDb(): Promise<CodexThreadRow[]> {
       `);
       const table = result[0];
       if (!table) return [];
-      return table.values.map((values: any[]) => {
+      return table.values.map((values) => {
         const row: Record<string, any> = {};
         table.columns.forEach((col: string, i: number) => {
           row[col] = values[i];
