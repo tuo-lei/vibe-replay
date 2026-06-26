@@ -314,7 +314,7 @@ async function querySqliteCliText(dbPath: string, sql: string): Promise<string> 
   return stdout.replace(/\r?\n$/, "");
 }
 
-function sqlJsRows(db: Database, sql: string): Record<string, any>[] {
+export function sqlJsRows(db: Database, sql: string): Record<string, any>[] {
   const result = db.exec(sql);
   if (!result.length) return [];
   const [{ columns, values }] = result;
