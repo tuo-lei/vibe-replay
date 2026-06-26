@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { ParsedTurn } from "@vibe-replay/provider-contract";
-import { mapCursorToolName, mapToolArgs } from "./sqlite-reader.js";
+import { mapCursorToolName, mapToolArgs, sqlJsRows } from "./sqlite-reader.js";
 
 /**
  * Cursor SDK local agent state lives at:
@@ -524,16 +524,7 @@ async function queryIndexDb(handle: IndexDbHandle, sql: string): Promise<Record<
     const parsed = JSON.parse(trimmed);
     return Array.isArray(parsed) ? (parsed as Record<string, any>[]) : [];
   }
-  const result = handle.db.exec(sql);
-  if (!Array.isArray(result) || result.length === 0) return [];
-  const [{ columns, values }] = result;
-  return values.map((row: unknown[]) => {
-    const record: Record<string, any> = {};
-    columns.forEach((column: string, index: number) => {
-      record[column] = row[index];
-    });
-    return record;
-  });
+  return sqlJsRows(handle.db, sql);
 }
 
 const sqliteCliCheckCache = new Map<string, { canUse: boolean; checkedAt: number }>();
