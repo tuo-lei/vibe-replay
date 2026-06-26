@@ -96,6 +96,76 @@ describe("parseClaudeCoworkSession", () => {
     expect((toolUses[0] as { name: string }).name).toBe("mcp__workspace__bash");
   });
 
+  it("skips Cowork replay echo user messages when the original is present", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-cowork-replay-echo-"));
+    const auditPath = join(tempDir, "audit.jsonl");
+    const prompt = "Why does Cowork show duplicate user messages?";
+    const lines = [
+      {
+        type: "user",
+        uuid: "same-user-message",
+        session_id: "cowork-session",
+        message: { role: "user", content: prompt },
+        _audit_timestamp: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        type: "user",
+        uuid: "same-user-message",
+        session_id: "cli-session",
+        timestamp: "2026-01-01T00:00:01.000Z",
+        isReplay: true,
+        message: { role: "user", content: prompt },
+      },
+      {
+        type: "assistant",
+        session_id: "cli-session",
+        message: {
+          model: "claude-opus-4-6",
+          id: "msg_001",
+          role: "assistant",
+          content: [{ type: "text", text: "Only one user prompt should be rendered." }],
+        },
+        _audit_timestamp: "2026-01-01T00:00:02.000Z",
+      },
+    ];
+    await writeFile(auditPath, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+
+    try {
+      const result = await parseClaudeCoworkSession(auditPath);
+      const userTurns = result.turns.filter((turn) => turn.role === "user");
+      expect(userTurns).toHaveLength(1);
+      expect(userTurns[0].blocks).toEqual([{ type: "text", text: prompt }]);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps Cowork replay user messages when no original is present", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-cowork-replay-only-"));
+    const auditPath = join(tempDir, "audit.jsonl");
+    const prompt = "This older Cowork audit only has the replayed prompt.";
+    await writeFile(
+      auditPath,
+      `${JSON.stringify({
+        type: "user",
+        uuid: "replay-only-user-message",
+        session_id: "cli-session",
+        timestamp: "2026-01-01T00:00:01.000Z",
+        isReplay: true,
+        message: { role: "user", content: prompt },
+      })}\n`,
+    );
+
+    try {
+      const result = await parseClaudeCoworkSession(auditPath);
+      const userTurns = result.turns.filter((turn) => turn.role === "user");
+      expect(userTurns).toHaveLength(1);
+      expect(userTurns[0].blocks).toEqual([{ type: "text", text: prompt }]);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("overlays title, model, startTime from sessionInfo when missing in audit", async () => {
     const info: SessionInfo = {
       provider: "claude-cowork",
