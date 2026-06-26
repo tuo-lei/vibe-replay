@@ -166,6 +166,49 @@ describe("parseClaudeCoworkSession", () => {
     }
   });
 
+  it("skips Cowork replay echo user messages with array text content", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-cowork-replay-array-"));
+    const auditPath = join(tempDir, "audit.jsonl");
+    const prompt = "The user prompt is stored as a text block array.";
+    const content = [{ type: "text", text: prompt }];
+    const lines = [
+      {
+        type: "user",
+        session_id: "cowork-session",
+        message: { role: "user", content },
+        _audit_timestamp: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        type: "user",
+        session_id: "cli-session",
+        timestamp: "2026-01-01T00:00:01.000Z",
+        isReplay: true,
+        message: { role: "user", content },
+      },
+      {
+        type: "assistant",
+        session_id: "cli-session",
+        message: {
+          model: "claude-opus-4-6",
+          id: "msg_001",
+          role: "assistant",
+          content: [{ type: "text", text: "Array-format echo should be deduped too." }],
+        },
+        _audit_timestamp: "2026-01-01T00:00:02.000Z",
+      },
+    ];
+    await writeFile(auditPath, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+
+    try {
+      const result = await parseClaudeCoworkSession(auditPath);
+      const userTurns = result.turns.filter((turn) => turn.role === "user");
+      expect(userTurns).toHaveLength(1);
+      expect(userTurns[0].blocks).toEqual([{ type: "text", text: prompt }]);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("overlays title, model, startTime from sessionInfo when missing in audit", async () => {
     const info: SessionInfo = {
       provider: "claude-cowork",

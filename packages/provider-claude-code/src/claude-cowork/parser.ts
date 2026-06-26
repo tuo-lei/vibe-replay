@@ -66,6 +66,8 @@ function humanUserReplayKeys(obj: Record<string, unknown>): string[] {
   if (typeof content === "string") {
     keys.push(`content:${content}`);
   } else if (Array.isArray(content)) {
+    // Key text blocks only. Image-only prompts without UUID intentionally fall
+    // through as non-dedupable so we preserve rather than accidentally drop them.
     const text = content
       .filter(
         (block): block is { text?: unknown; type?: unknown } =>
