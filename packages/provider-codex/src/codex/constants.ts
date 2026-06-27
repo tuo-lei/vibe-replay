@@ -51,3 +51,18 @@ export function codexStripTwoPass(text: string): string {
   }
   return result;
 }
+
+export function contentText(content: any): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => {
+      if (typeof part === "string") return part;
+      if (part?.type === "output_text" || part?.type === "input_text" || part?.type === "text") {
+        return part.text || "";
+      }
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}

@@ -5,7 +5,7 @@ import { estimateActiveDuration } from "@vibe-replay/provider-core/duration";
 import type { ContentBlock, ParsedTurn, SessionInfo } from "@vibe-replay/provider-contract";
 import type { Compaction, ProviderParseResult, TokenUsage } from "@vibe-replay/provider-contract";
 import { addParseWarning } from "@vibe-replay/provider-contract/warnings";
-import { codexStripTwoPass, isCodexToolCallType } from "./constants.js";
+import { codexStripTwoPass, contentText, isCodexToolCallType } from "./constants.js";
 
 interface PendingTool {
   id: string;
@@ -507,21 +507,6 @@ function isCompactionSummaryText(text: string): boolean {
   // Codex-native compactions emit `response_item.compaction`; this keeps
   // compatibility with imported/bridged transcripts that use Claude's preamble.
   return text.startsWith("This session is being continued from a previous conversation");
-}
-
-function contentText(content: any): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((part) => {
-      if (typeof part === "string") return part;
-      if (part?.type === "output_text" || part?.type === "input_text" || part?.type === "text") {
-        return part.text || "";
-      }
-      return "";
-    })
-    .filter(Boolean)
-    .join("\n");
 }
 
 function contentImages(content: any): string[] {
