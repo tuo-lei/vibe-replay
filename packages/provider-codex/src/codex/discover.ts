@@ -7,7 +7,12 @@ import { createInterface } from "node:readline";
 import { cleanPromptText } from "@vibe-replay/provider-core/clean-prompt";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
 import { readGitRepo, shortenPath } from "@vibe-replay/provider-core/utils";
-import { CODEX_CONTEXT_TAGS, codexStripTwoPass, isCodexToolCallType } from "./constants.js";
+import {
+  CODEX_CONTEXT_TAGS,
+  codexStripTwoPass,
+  contentText,
+  isCodexToolCallType,
+} from "./constants.js";
 
 const STATE_DB_FILENAME = "state_5.sqlite";
 
@@ -321,21 +326,6 @@ function recordDiscoveredPrompt(
   promptSeen.set(key, [...previous, Number.isNaN(time) ? Number.NEGATIVE_INFINITY : time]);
   if (prompts.length < 2) prompts.push((text || "[Image]").slice(0, 200));
   return true;
-}
-
-function contentText(content: any): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((part) => {
-      if (typeof part === "string") return part;
-      if (part?.type === "output_text" || part?.type === "input_text" || part?.type === "text") {
-        return part.text || "";
-      }
-      return "";
-    })
-    .filter(Boolean)
-    .join("\n");
 }
 
 function isCodexContextMessage(text: string): boolean {
