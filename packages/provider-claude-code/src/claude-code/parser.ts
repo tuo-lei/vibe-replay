@@ -954,9 +954,9 @@ async function readSubagents(
     for (const line of content.split("\n")) {
       lineNumber++;
       if (!line.trim()) continue;
-      let obj: any;
+      let obj: RawMessage;
       try {
-        obj = JSON.parse(line);
+        obj = JSON.parse(line) as RawMessage;
       } catch {
         addParseWarning(parseWarnings, {
           kind: "malformed-json",
