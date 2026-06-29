@@ -29,6 +29,10 @@
       "warn",
       { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }
     ],
+    // Off: _result, _images, _isError, _durationMs, _isPendingMarker, _subAgent are typed
+    // properties on ContentBlock (provider-contract) used as intermediate parsing-stage fields;
+    // __testables is an intentional test-hook export. All are false positives for this rule.
+    "no-underscore-dangle": "off",
     "react-hooks/rules-of-hooks": "error",
     "react/jsx-key": "error",
     // Off: React 17+ automatic JSX runtime — no in-scope React import required.
