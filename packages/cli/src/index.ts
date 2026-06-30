@@ -184,6 +184,22 @@ function formatParseWarningSummary(warnings?: ParseWarning[]): string[] {
   });
 }
 
+function formatProviderBadge(provider: string): string {
+  return provider === "claude-code"
+    ? chalk.hex("#D97706")("claude")
+    : provider === "claude-desktop"
+      ? chalk.hex("#C084FC")("desktop")
+      : provider === "claude-cowork"
+        ? chalk.hex("#F472B6")("cowork")
+        : provider === "cursor"
+          ? chalk.hex("#0096FF")("cursor")
+          : provider === "codex"
+            ? chalk.hex("#B392F0")("codex")
+            : provider === "pi"
+              ? chalk.hex("#14B8A6")("pi")
+              : chalk.yellow(provider);
+}
+
 function printParseWarnings(warnings?: ParseWarning[]): void {
   const lines = formatParseWarningSummary(warnings);
   if (lines.length === 0) return;
@@ -312,20 +328,7 @@ program
                     hour12: false,
                   })
                 : "";
-              const providerBadge =
-                provider === "claude-code"
-                  ? chalk.hex("#D97706")("claude")
-                  : provider === "claude-desktop"
-                    ? chalk.hex("#C084FC")("desktop")
-                    : provider === "claude-cowork"
-                      ? chalk.hex("#F472B6")("cowork")
-                      : provider === "cursor"
-                        ? chalk.hex("#0096FF")("cursor")
-                        : provider === "codex"
-                          ? chalk.hex("#B392F0")("codex")
-                          : provider === "pi"
-                            ? chalk.hex("#14B8A6")("pi")
-                            : chalk.yellow(provider);
+              const providerBadge = formatProviderBadge(provider);
               replayEntries.push({
                 name: `${providerBadge} ${chalk.dim(`[${time}]`)} ${chalk.white(title)} ${chalk.dim(`(${scenes} scenes)`)}`,
                 value: slug,
@@ -1287,22 +1290,7 @@ function formatSessionChoices(sessions: SessionInfo[], cleanupPeriodDays?: numbe
       const sizeKB = Math.round(s.fileSize / 1024);
       const prompt = s.firstPrompt.replace(/\n/g, " ").slice(0, 50);
 
-      // Claude: orange-brown (#D97706), Desktop: purple (#C084FC),
-      // Cowork: pink (#F472B6), Cursor: blue (#0096FF), Codex: purple (#B392F0), Pi: teal (#14B8A6)
-      const providerBadge =
-        s.provider === "claude-code"
-          ? chalk.hex("#D97706")("claude")
-          : s.provider === "claude-desktop"
-            ? chalk.hex("#C084FC")("desktop")
-            : s.provider === "claude-cowork"
-              ? chalk.hex("#F472B6")("cowork")
-              : s.provider === "cursor"
-                ? chalk.hex("#0096FF")("cursor")
-                : s.provider === "codex"
-                  ? chalk.hex("#B392F0")("codex")
-                  : s.provider === "pi"
-                    ? chalk.hex("#14B8A6")("pi")
-                    : chalk.yellow(s.provider);
+      const providerBadge = formatProviderBadge(s.provider);
 
       const titleStr = s.title ? chalk.white(` "${s.title}"`) : "";
 
