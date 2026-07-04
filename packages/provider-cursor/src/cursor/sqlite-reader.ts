@@ -164,7 +164,7 @@ async function globalStateWalFingerprint(dbPath: string): Promise<{
   };
 }
 
-function sqlString(value: string): string {
+export function sqlString(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
 

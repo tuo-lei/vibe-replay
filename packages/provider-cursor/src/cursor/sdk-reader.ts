@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { ParsedTurn } from "@vibe-replay/provider-contract";
-import { mapCursorToolName, mapToolArgs, sqlJsRows } from "./sqlite-reader.js";
+import { mapCursorToolName, mapToolArgs, sqlJsRows, sqlString } from "./sqlite-reader.js";
 
 /**
  * Cursor SDK local agent state lives at:
@@ -569,10 +569,6 @@ async function listSdkIndexDbPaths(projectsRoot: string): Promise<string[]> {
     }),
   );
   return perProjectPaths.flat();
-}
-
-function sqlString(value: string): string {
-  return `'${value.replaceAll("'", "''")}'`;
 }
 
 function stringOrEmpty(value: unknown): string {
