@@ -20,7 +20,7 @@ import {
   extractToolFilePath,
   extractToolFilePaths,
 } from "@vibe-replay/provider-core/utils";
-import { estimateCost, estimateCostSimple } from "./pricing.js";
+import { estimateCost, estimateCostSimple } from "@vibe-replay/replay-core/pricing";
 import { parseCodexSession } from "./providers/codex/parser.js";
 import { parseCursorSession } from "./providers/cursor/parser.js";
 import { parsePiSession } from "./providers/pi/parser.js";
