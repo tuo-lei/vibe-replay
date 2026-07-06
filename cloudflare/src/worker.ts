@@ -41,6 +41,10 @@ function isDev(env: { BETTER_AUTH_URL?: string }): boolean {
   return !!env.BETTER_AUTH_URL?.startsWith("http://localhost");
 }
 
+function isUniqueConstraintError(e: unknown): boolean {
+  return Boolean((e as { message?: string } | undefined)?.message?.includes("UNIQUE"));
+}
+
 function isSafeCallbackPath(value: string): boolean {
   return value.startsWith("/") && !value.startsWith("//") && !value.startsWith("/\\");
 }
@@ -1527,8 +1531,8 @@ app.post("/api/insights/profile", async (c) => {
 
     try {
       await db.update(insightProfiles).set(updates).where(eq(insightProfiles.id, existing.id));
-    } catch (e: any) {
-      if (e?.message?.includes("UNIQUE")) {
+    } catch (e) {
+      if (isUniqueConstraintError(e)) {
         return c.json({ error: "Slug already taken" }, 409);
       }
       throw e;
@@ -1573,8 +1577,8 @@ app.post("/api/insights/profile", async (c) => {
       enabled: body.enabled !== false,
       config: JSON.stringify(config),
     });
-  } catch (e: any) {
-    if (e?.message?.includes("UNIQUE")) {
+  } catch (e) {
+    if (isUniqueConstraintError(e)) {
       return c.json({ error: "Profile already exists" }, 409);
     }
     throw e;
