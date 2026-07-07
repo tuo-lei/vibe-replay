@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { cleanPromptText, isSystemGeneratedMessage } from "@vibe-replay/provider-core/clean-prompt";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
-import { readGitRepo, shortenPath } from "@vibe-replay/provider-core/utils";
+import { readGitRepo, shortenPath, TOOL_USE_RE } from "@vibe-replay/provider-core/utils";
 
 const CLAUDE_DIR = join(homedir(), ".claude", "projects");
 
@@ -118,7 +118,6 @@ export async function extractSessionInfo(
   // fields (e.g. inside user-pasted JSON content).
   const tail: string[] = [];
 
-  const toolUseRe = /"type"\s*:\s*"tool_use"/g;
   const modelRe = /"model"\s*:\s*"(claude-[^"]+)"/;
   const durationRe = /"durationMs"\s*:\s*(\d+)/;
   const editToolRe = /"name"\s*:\s*"(Edit|Write|MultiEdit|NotebookEdit)"/;
@@ -142,7 +141,7 @@ export async function extractSessionInfo(
         // Extremely rare in practice; the fast string check avoids JSON-parsing every line.
         promptCount++;
       }
-      const toolMatches = line.match(toolUseRe);
+      const toolMatches = line.match(TOOL_USE_RE);
       if (toolMatches) {
         toolCallCount += toolMatches.length;
         if (editToolRe.test(line)) editCountEst++;

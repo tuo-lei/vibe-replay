@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { isSystemGeneratedMessage, previewPrompt } from "@vibe-replay/provider-core/clean-prompt";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
-import { readGitRepo } from "@vibe-replay/provider-core/utils";
+import { readGitRepo, TOOL_USE_RE } from "@vibe-replay/provider-core/utils";
 
 /**
  * Claude Desktop stores Cowork (autonomous agent mode) sessions separately from
@@ -137,7 +137,6 @@ export async function extractCoworkSessionInfo(jsonPath: string): Promise<Sessio
   // so using it here would permanently break replay linking for Cowork.
   const sessionId = meta.sessionId.replace(/^local_/, "");
 
-  const toolUseRe = /"type"\s*:\s*"tool_use"/g;
   const PROMPT_SCAN_LINES = 200;
   let lineCount = 0;
   let toolCallCount = 0;
@@ -153,7 +152,7 @@ export async function extractCoworkSessionInfo(jsonPath: string): Promise<Sessio
       if (!line) continue;
       lineCount++;
       if (earlyLines.length < PROMPT_SCAN_LINES) earlyLines.push(line);
-      const m = line.match(toolUseRe);
+      const m = line.match(TOOL_USE_RE);
       if (m) toolCallCount += m.length;
       if (
         (line.includes('"type":"user"') || line.includes('"type": "user"')) &&
