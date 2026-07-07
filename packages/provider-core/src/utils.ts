@@ -26,6 +26,9 @@ export const FILE_EDIT_TOOLS: ReadonlySet<string> = new Set([
   "Delete",
 ]);
 
+/** Matches a JSONL record's `"type": "tool_use"` field for cheap regex-based counting. */
+export const TOOL_USE_RE = /"type"\s*:\s*"tool_use"/g;
+
 /** Extract file path from tool input, handling different provider field names. */
 export function extractToolFilePath(
   input: Record<string, unknown> | undefined,
