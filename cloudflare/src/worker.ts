@@ -519,17 +519,7 @@ app.post("/api/cloud-replays", async (c) => {
       id,
       userId,
       storageType: "r2",
-      title: String(meta.title || meta.slug || "Untitled").slice(0, 200),
-      provider: String(meta.provider || "unknown").slice(0, 50),
-      model: meta.model ? String(meta.model).slice(0, 100) : null,
-      sceneCount: clamp(stats.sceneCount, 0, 100_000),
-      userPrompts: clamp(stats.userPrompts, 0, 10_000),
-      toolCalls: clamp(stats.toolCalls, 0, 100_000),
-      durationMs: clamp(stats.durationMs, 0, 86_400_000),
-      costEstimate:
-        stats.costEstimate != null
-          ? String(Math.max(0, Math.min(Number(stats.costEstimate) || 0, 100_000)))
-          : null,
+      ...summarizeReplayMetaFields(meta, stats, meta.slug),
       firstMessage: extractFirstUserPrompt(body.replay),
       sizeBytes,
       visibility,
@@ -2135,6 +2125,23 @@ interface ReplayMetaSummary {
   firstMessage: string | null;
 }
 
+/** Normalize meta/stats fields shared by cloud-replay upload, JSON extraction, and gist import. */
+function summarizeReplayMetaFields(meta: any, stats: any, titleFallback: unknown) {
+  return {
+    title: String(meta.title || titleFallback || "Untitled").slice(0, 200),
+    provider: String(meta.provider || "unknown").slice(0, 50),
+    model: meta.model ? String(meta.model).slice(0, 100) : null,
+    sceneCount: clamp(stats.sceneCount, 0, 100_000),
+    userPrompts: clamp(stats.userPrompts, 0, 10_000),
+    toolCalls: clamp(stats.toolCalls, 0, 100_000),
+    durationMs: clamp(stats.durationMs, 0, 86_400_000),
+    costEstimate:
+      stats.costEstimate != null
+        ? String(Math.max(0, Math.min(Number(stats.costEstimate) || 0, 100_000)))
+        : null,
+  };
+}
+
 /** Extract replay metadata from raw JSON string (used by gist endpoints) */
 function extractMetaFromJson(json: string): ReplayMetaSummary {
   const meta = extractMeta(json);
@@ -2154,17 +2161,7 @@ function extractMetaFromJson(json: string): ReplayMetaSummary {
   }
   const stats = meta.stats || {};
   return {
-    title: String(meta.title || meta.project || "Untitled").slice(0, 200),
-    provider: String(meta.provider || "unknown").slice(0, 50),
-    model: meta.model ? String(meta.model).slice(0, 100) : null,
-    sceneCount: clamp(stats.sceneCount, 0, 100_000),
-    userPrompts: clamp(stats.userPrompts, 0, 10_000),
-    toolCalls: clamp(stats.toolCalls, 0, 100_000),
-    durationMs: clamp(stats.durationMs, 0, 86_400_000),
-    costEstimate:
-      stats.costEstimate != null
-        ? String(Math.max(0, Math.min(Number(stats.costEstimate) || 0, 100_000)))
-        : null,
+    ...summarizeReplayMetaFields(meta, stats, meta.project),
     firstMessage,
   };
 }
@@ -2529,17 +2526,7 @@ async function fetchGistMeta(
   const gistOwner = gistData.owner?.login || null;
 
   return {
-    title: String(meta.title || meta.project || "Untitled").slice(0, 200),
-    provider: String(meta.provider || "unknown").slice(0, 50),
-    model: meta.model ? String(meta.model).slice(0, 100) : null,
-    sceneCount: clamp(stats.sceneCount, 0, 100_000),
-    userPrompts: clamp(stats.userPrompts, 0, 10_000),
-    toolCalls: clamp(stats.toolCalls, 0, 100_000),
-    durationMs: clamp(stats.durationMs, 0, 86_400_000),
-    costEstimate:
-      stats.costEstimate != null
-        ? String(Math.max(0, Math.min(Number(stats.costEstimate) || 0, 100_000)))
-        : null,
+    ...summarizeReplayMetaFields(meta, stats, meta.project),
     firstMessage,
     gistOwner,
   };
