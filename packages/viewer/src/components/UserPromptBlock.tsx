@@ -16,6 +16,9 @@ interface Props {
 const COLLAPSE_DESKTOP = { lines: 8, chars: 900 };
 const COLLAPSE_MOBILE = { lines: 4, chars: 280 };
 
+// Hoisted so the default isn't re-created on every render (stable reference).
+const NO_HIGHLIGHTS: TextHighlight[] = [];
+
 function getCollapseConfig() {
   if (typeof window !== "undefined" && window.innerWidth < 768) return COLLAPSE_MOBILE;
   return COLLAPSE_DESKTOP;
@@ -25,7 +28,7 @@ export default memo(function UserPromptBlock({
   content,
   images,
   isActive,
-  highlights = [],
+  highlights = NO_HIGHLIGHTS,
   onHighlightClick,
 }: Props) {
   const [expanded, setExpanded] = useState(false);

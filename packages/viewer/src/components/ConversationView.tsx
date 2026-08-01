@@ -10,6 +10,9 @@ import { fmtNum, formatDuration, formatTokens, formatToolDuration } from "./Stat
 import TextResponseBlock from "./TextResponseBlock";
 import ThinkingBlock from "./ThinkingBlock";
 import ToolCallBlock from "./ToolCallBlock";
+
+// Hoisted so the default isn't re-created on every render (stable reference).
+const NO_HIGHLIGHTS: TextHighlight[] = [];
 import UserPromptBlock from "./UserPromptBlock";
 
 interface Props {
@@ -1685,7 +1688,7 @@ const SceneBlock = memo(function SceneBlock({
   isActive,
   collapseTools,
   effectiveContent,
-  highlights = [],
+  highlights = NO_HIGHLIGHTS,
   onHighlightClick,
 }: {
   scene: Scene;

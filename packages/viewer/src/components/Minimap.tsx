@@ -116,6 +116,7 @@ export default function Minimap({
             <button
               key={`c-${item.promptIndex}`}
               onClick={() => onSeek(item.promptIndex)}
+              aria-label={label}
               className={`text-left px-3 py-2 rounded-lg transition-all duration-200 ease-material ${
                 isActive
                   ? "bg-terminal-surface border-l-2 border-terminal-dim shadow-layer-sm"

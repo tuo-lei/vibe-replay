@@ -146,17 +146,20 @@ export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) 
   if (!open) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-[8vh] sm:pt-[15vh]"
-      onClick={onClose}
-      role="dialog"
-      aria-label="Search scenes"
-      aria-modal="true"
-    >
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[8vh] sm:pt-[15vh]">
+      <button
+        type="button"
+        aria-label="Close"
+        tabIndex={-1}
+        className="absolute inset-0 cursor-default bg-black/50 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      {/* oxlint-disable jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/prefer-tag-over-role -- dialog panel owns arrow-key nav; native <dialog> would need a showModal lifecycle refactor */}
       <div
+        role="dialog"
+        aria-label="Search scenes"
+        aria-modal="true"
         className="relative w-full max-w-xl mx-3 sm:mx-0 bg-terminal-bg border border-terminal-border-subtle rounded-2xl shadow-layer-xl overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
         {/* Search input */}
@@ -227,6 +230,7 @@ export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) 
           </div>
         )}
       </div>
+      {/* oxlint-enable jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/prefer-tag-over-role */}
     </div>
   );
 }

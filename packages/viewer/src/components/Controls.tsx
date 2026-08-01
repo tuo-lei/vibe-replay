@@ -75,6 +75,7 @@ export default function Controls({
           }}
           className={`${touchBtn} bg-terminal-surface text-terminal-text ${flashClass("prev")}`}
           title="Previous turn"
+          aria-label="Previous turn"
         >
           <svg
             width="20"
@@ -101,6 +102,7 @@ export default function Controls({
           }}
           className={`${touchBtn} bg-terminal-surface text-terminal-text ${flashClass("next")}`}
           title="Next turn"
+          aria-label="Next turn"
         >
           <svg
             width="20"
@@ -123,6 +125,7 @@ export default function Controls({
           }}
           className={`${touchBtn} bg-terminal-surface text-terminal-text ${flashClass("search")}`}
           title="Search"
+          aria-label="Search"
         >
           <svg
             width="18"

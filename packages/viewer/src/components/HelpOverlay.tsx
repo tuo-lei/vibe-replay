@@ -62,16 +62,20 @@ export default function HelpOverlay({ open, onClose }: Props) {
   if (!open) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-300"
-      onClick={onClose}
-      role="dialog"
-      aria-label="Keyboard shortcuts"
-      aria-modal="true"
-    >
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      <button
+        type="button"
+        aria-label="Close"
+        tabIndex={-1}
+        className="absolute inset-0 cursor-default bg-black/60 backdrop-blur-md animate-in fade-in duration-300"
+        onClick={onClose}
+      />
+      {/* oxlint-disable jsx-a11y/prefer-tag-over-role -- conditional-render overlay with document-level key handling; native <dialog> would need a showModal lifecycle refactor */}
       <div
+        role="dialog"
+        aria-label="Keyboard shortcuts"
+        aria-modal="true"
         className="w-full max-w-lg bg-terminal-bg border border-terminal-border-subtle rounded-2xl shadow-layer-xl overflow-hidden animate-in zoom-in-95 duration-200"
-        onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="px-6 py-5 border-b border-terminal-border-subtle flex items-center justify-between">
@@ -81,6 +85,7 @@ export default function HelpOverlay({ open, onClose }: Props) {
           <button
             onClick={onClose}
             className="text-terminal-dimmer hover:text-terminal-red transition-colors"
+            aria-label="Close"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -130,6 +135,7 @@ export default function HelpOverlay({ open, onClose }: Props) {
           </p>
         </div>
       </div>
+      {/* oxlint-enable jsx-a11y/prefer-tag-over-role */}
     </div>
   );
 }
