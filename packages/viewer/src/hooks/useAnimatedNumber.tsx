@@ -36,10 +36,13 @@ export function useAnimatedNumber(target: number, durationMs = 450): number {
   return display;
 }
 
+// Hoisted so the default isn't re-created on every render (stable reference).
+const defaultFormatter = (n: number) => Math.round(n).toLocaleString();
+
 export function AnimatedValue({
   value,
   durationMs,
-  formatter = (n) => Math.round(n).toLocaleString(),
+  formatter = defaultFormatter,
 }: {
   value: number;
   durationMs?: number;

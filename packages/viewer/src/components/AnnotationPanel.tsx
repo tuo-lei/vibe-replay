@@ -384,6 +384,9 @@ const AnnotationCard = memo(function AnnotationCard({
     <div
       data-annotation-scene={annotation.sceneIndex}
       data-annotation-id={annotation.id}
+      // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- item contains a nested action button; a real <button> would be invalid nested HTML
+      role="button"
+      tabIndex={0}
       className={`cursor-pointer px-3 py-2 border-b border-terminal-border-subtle transition-colors ${
         isAiFeedback
           ? isCurrent
@@ -397,6 +400,12 @@ const AnnotationCard = memo(function AnnotationCard({
       }`}
       onClick={() => {
         if (!isEditing) onSelect();
+      }}
+      onKeyDown={(event) => {
+        if ((event.key === "Enter" || event.key === " ") && !isEditing) {
+          event.preventDefault();
+          onSelect();
+        }
       }}
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}

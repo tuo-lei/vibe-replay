@@ -6,6 +6,9 @@ import {
 } from "../utils/annotation-highlights";
 import { formatTokens } from "./StatsPanel";
 
+// Hoisted so the default isn't re-created on every render (stable reference).
+const NO_HIGHLIGHTS: TextHighlight[] = [];
+
 interface Props {
   content: string;
   isActive: boolean;
@@ -18,7 +21,7 @@ export default memo(function ThinkingBlock({
   content,
   isActive,
   tokens,
-  highlights = [],
+  highlights = NO_HIGHLIGHTS,
   onHighlightClick,
 }: Props) {
   const [expanded, setExpanded] = useState(false);

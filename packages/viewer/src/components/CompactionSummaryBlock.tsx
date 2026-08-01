@@ -14,10 +14,13 @@ interface Props {
 
 const PREVIEW_LINES = 3;
 
+// Hoisted so the default isn't re-created on every render (stable reference).
+const NO_HIGHLIGHTS: TextHighlight[] = [];
+
 export default memo(function CompactionSummaryBlock({
   content,
   isActive,
-  highlights = [],
+  highlights = NO_HIGHLIGHTS,
   onHighlightClick,
 }: Props) {
   const [expanded, setExpanded] = useState(false);

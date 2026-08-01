@@ -65,6 +65,16 @@ const DAY_MS = 86400000;
 const DAYS_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const DAYS_FULL = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+// Hoisted from ShareCard so it isn't re-defined on every render (no-unstable-nested-components).
+function MetricLabel({ label, title }: { label: string; title?: string }) {
+  return (
+    <div className="mt-0.5 flex items-center gap-1">
+      <div className="ui-section-title">{label}</div>
+      {title ? <DataQualityIndicator title={title} className="shrink-0" /> : null}
+    </div>
+  );
+}
+
 // `dateKey` is a viewer-local alias that delegates to the shared helper.
 // Keeps callsites terse while guaranteeing a string return (Date input is always valid).
 function dateKey(d: Date): string {
@@ -524,13 +534,6 @@ function ShareCard({
   const metricQuality = useMemo(
     () => buildAggregateMetricQuality(dataQualityNotes),
     [dataQualityNotes],
-  );
-
-  const MetricLabel = ({ label, title }: { label: string; title?: string }) => (
-    <div className="mt-0.5 flex items-center gap-1">
-      <div className="ui-section-title">{label}</div>
-      {title ? <DataQualityIndicator title={title} className="shrink-0" /> : null}
-    </div>
   );
 
   return (

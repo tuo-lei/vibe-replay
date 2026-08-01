@@ -310,20 +310,26 @@ function RawJsonModal({
   };
 
   return (
+    // Native <dialog> would double-handle focus: this modal already implements a
+    // full focus trap (Escape + Tab cycling below).
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- custom focus-trap modal; native dialog would conflict
       role="dialog"
       aria-modal="true"
       aria-labelledby="raw-json-modal-title"
     >
-      <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-md animate-in fade-in duration-200"
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label="Close"
+        className="absolute inset-0 cursor-default bg-black/70 backdrop-blur-md animate-in fade-in duration-200"
         onClick={onClose}
       />
-      <div
+      <section
         ref={modalRef}
+        aria-label="Raw JSON content"
         className="relative w-full max-w-6xl max-h-[88vh] bg-terminal-bg border border-terminal-border-subtle rounded-2xl shadow-layer-xl animate-in zoom-in-95 fade-in duration-200 flex flex-col overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-terminal-border-subtle">
           <div className="min-w-0">
@@ -422,7 +428,7 @@ function RawJsonModal({
             <div className="p-6 text-sm font-mono text-terminal-dimmer">No JSON available.</div>
           )}
         </div>
-      </div>
+      </section>
     </div>
   );
 }
@@ -559,13 +565,16 @@ export function SessionDetailPopup({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-md animate-in fade-in duration-300"
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label="Close"
+        className="absolute inset-0 cursor-default bg-black/60 backdrop-blur-md animate-in fade-in duration-300"
         onClick={onClose}
       />
-      <div
+      <section
+        aria-label="Session details"
         className="relative max-w-4xl w-full bg-terminal-bg border border-terminal-border-subtle rounded-2xl shadow-layer-xl animate-in zoom-in-95 fade-in duration-200 flex flex-col max-h-[88vh]"
-        onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-7 pt-5 pb-3">
@@ -619,6 +628,7 @@ export function SessionDetailPopup({
           <button
             onClick={onClose}
             className="h-7 w-7 flex items-center justify-center rounded-md text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors"
+            aria-label="Close"
           >
             <svg
               width="14"
@@ -1043,7 +1053,7 @@ export function SessionDetailPopup({
             )}
           </div>
         </div>
-      </div>
+      </section>
     </div>
   );
 }
@@ -1114,6 +1124,15 @@ function ReplayCard({
   return (
     <div
       onClick={onOpen}
+      // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- card contains nested buttons (actions menu); a real <button> would be invalid nested HTML
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
       className={`bg-terminal-surface rounded-xl px-5 py-5 hover:bg-terminal-surface-hover transition-all duration-300 ease-material space-y-3 shadow-layer-sm cursor-pointer hover-lift ${isArchived ? "opacity-50" : ""}`}
     >
       {/* Row 1: provider icon + title | slug·time + menu */}
@@ -1123,7 +1142,12 @@ function ReplayCard({
             <ProviderBadge provider={s.provider} title={providerTooltip} />
           </span>
           {onTitleSave ? (
-            <div className="min-w-0 flex-1" onClick={(e) => e.stopPropagation()}>
+            <div
+              className="min-w-0 flex-1"
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => e.stopPropagation()}
+              role="none"
+            >
               <EditableTitle
                 slug={s.slug}
                 title={s.title}
@@ -1152,6 +1176,7 @@ function ReplayCard({
                 }}
                 className="h-7 w-7 flex items-center justify-center rounded-md bg-terminal-surface-2 text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors duration-200"
                 title="More actions"
+                aria-label="More actions"
               >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
                   <circle cx="8" cy="3" r="1.5" />
@@ -1379,6 +1404,7 @@ function ReplayCard({
               }}
               className="h-7 w-7 flex items-center justify-center rounded-md bg-terminal-orange-subtle text-terminal-orange hover:bg-terminal-orange-emphasis transition-all duration-200 ease-material shrink-0"
               title="Gist out of sync — click to update"
+              aria-label="Update gist"
             >
               <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M8 1a1 1 0 0 1 1 1v5.5a1 1 0 0 1-2 0V2a1 1 0 0 1 1-1zM8 11a1.25 1.25 0 1 1 0 2.5A1.25 1.25 0 0 1 8 11z" />
@@ -1623,6 +1649,10 @@ function FacetSection({
 }
 
 // ─── Sessions Tab (source sessions from providers) ─────────────────
+
+// Render-prop for FacetList leading icons. Hoisted to module scope so it isn't
+// re-created on every render (avoids remount churn + no-unstable-nested-components).
+const facetProviderLeading = (provider: string) => <ProviderBadge provider={provider} compact />;
 
 function SessionsPanel() {
   const [sources, setSources] = useState<SourceSession[]>([]);
@@ -2098,6 +2128,7 @@ function SessionsPanel() {
             }}
             className="p-1.5 rounded-md text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors duration-200"
             title="Refresh"
+            aria-label="Refresh"
           >
             <svg
               width="13"
@@ -2140,7 +2171,7 @@ function SessionsPanel() {
             selected={selectedProviders}
             onToggle={handleProviderToggle}
             labelFor={providerDisplayName}
-            leadingFor={(provider) => <ProviderBadge provider={provider} compact />}
+            leadingFor={facetProviderLeading}
             max={providerEntries.length}
           />
 
@@ -2617,6 +2648,16 @@ function SessionsPanel() {
                     onClick={() => {
                       if (replaySlug) navigateTo({ view: null, session: replaySlug });
                       else setSelectedSlug(s.slug);
+                    }}
+                    // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- card contains nested controls; cannot use a real <button>
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        if (replaySlug) navigateTo({ view: null, session: replaySlug });
+                        else setSelectedSlug(s.slug);
+                      }
                     }}
                     className={`bg-terminal-surface rounded-xl px-5 py-4 hover:bg-terminal-surface-hover transition-all duration-300 ease-material space-y-3 shadow-layer-sm cursor-pointer hover-lift ${
                       isPriorityEnriching ? "ring-1 ring-terminal-blue/20" : ""
@@ -3375,7 +3416,7 @@ function ReplaysPanel() {
             selected={selectedProviders}
             onToggle={handleProviderToggle}
             labelFor={providerDisplayName}
-            leadingFor={(provider) => <ProviderBadge provider={provider} compact />}
+            leadingFor={facetProviderLeading}
             max={providerEntries.length}
           />
 

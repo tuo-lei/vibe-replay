@@ -680,8 +680,11 @@ export default function App() {
 
       {/* Mobile menu backdrop */}
       {mobileMenuOpen && (
-        <div
-          className="md:hidden fixed inset-0 z-30 bg-black/30"
+        <button
+          type="button"
+          aria-label="Close menu"
+          tabIndex={-1}
+          className="md:hidden fixed inset-0 z-30 cursor-default bg-black/30"
           onClick={() => setMobileMenuOpen(false)}
         />
       )}

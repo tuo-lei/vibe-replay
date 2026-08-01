@@ -1839,6 +1839,7 @@ function TurnRow({
       </tr>
       {showCompaction && (
         <tr>
+          {/* oxlint-disable-next-line jsx-a11y/control-has-associated-label -- false positive: oxlint misattributes <td> inside a JSX conditional as a control */}
           <td colSpan={colCount} className="px-0 py-0">
             <div className="flex items-center gap-2 px-2 py-0.5 bg-terminal-red/5">
               <div className="flex-1 border-t border-dashed border-terminal-red/40" />

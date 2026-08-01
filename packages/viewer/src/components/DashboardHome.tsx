@@ -554,6 +554,15 @@ function RecentSessionsList({
     <div className="space-y-3 flex-1 flex flex-col">
       <div
         onClick={() => onSessionClick(primary)}
+        // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- card contains action buttons; a real <button> would be invalid nested HTML
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onSessionClick(primary);
+          }
+        }}
         className={`rounded-xl border bg-terminal-bg/55 px-3 py-3 cursor-pointer transition-all duration-200 hover:bg-terminal-bg/80 ${primaryToneClass}`}
       >
         <div className="flex items-start gap-3">
@@ -602,6 +611,15 @@ function RecentSessionsList({
             <div
               key={sessionKey(s)}
               onClick={() => onSessionClick(s)}
+              // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- row contains action buttons; a real <button> would be invalid nested HTML
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onSessionClick(s);
+                }
+              }}
               className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-terminal-surface-hover transition-colors duration-200 cursor-pointer"
             >
               <ProviderBadge provider={s.provider} />
@@ -1520,15 +1538,20 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
 
       {/* Sync login modal */}
       {(syncStatus === "needsLogin" || syncStatus === "awaitingLogin") && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-          onClick={(e) => {
-            if (e.target === e.currentTarget && syncStatus === "needsLogin") {
-              setSyncStatus("idle");
-            }
-          }}
-        >
-          <div className="relative bg-terminal-surface border border-terminal-border rounded-2xl shadow-2xl max-w-md w-full mx-4 p-6">
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <button
+            type="button"
+            aria-label="Close"
+            tabIndex={-1}
+            className="absolute inset-0 cursor-default bg-black/60 backdrop-blur-sm"
+            onClick={() => {
+              if (syncStatus === "needsLogin") setSyncStatus("idle");
+            }}
+          />
+          <section
+            aria-label="Sync login"
+            className="relative bg-terminal-surface border border-terminal-border rounded-2xl shadow-2xl max-w-md w-full mx-4 p-6"
+          >
             {/* Close button */}
             {syncStatus === "needsLogin" && (
               <button
@@ -1619,7 +1642,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
                 </p>
               </div>
             )}
-          </div>
+          </section>
         </div>
       )}
     </div>

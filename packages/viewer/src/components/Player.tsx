@@ -868,6 +868,7 @@ export default function Player({
                         onClick={() => setIsOutlineOpen(false)}
                         className="p-1 rounded hover:bg-terminal-surface text-terminal-dimmer hover:text-terminal-text transition-colors"
                         title="Hide Sidebar"
+                        aria-label="Hide Sidebar"
                       >
                         <svg
                           xmlns="http://www.w3.org/2000/svg"
@@ -971,6 +972,7 @@ export default function Player({
                     onClick={() => setIsOutlineOpen(true)}
                     className="absolute left-0 top-1/2 -translate-y-1/2 z-20 group/expand px-1.5 py-4 bg-terminal-surface/80 backdrop-blur-md border border-l-0 border-terminal-border-subtle rounded-r-xl text-terminal-dim hover:text-terminal-green transition-all shadow-layer-md animate-in slide-in-from-left-2 duration-300"
                     title="Show Sidebar"
+                    aria-label="Show Sidebar"
                   >
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
@@ -1134,14 +1136,18 @@ export default function Player({
         className={`fixed inset-0 z-40 md:hidden transition-opacity duration-300 ${
           mobileDrawerOpen ? "opacity-100" : "opacity-0 pointer-events-none"
         }`}
-        onClick={() => setMobileDrawerOpen(false)}
       >
-        <div className="absolute inset-0 bg-black/40" />
-        <div
+        <button
+          type="button"
+          aria-label="Close sidebar drawer"
+          tabIndex={-1}
+          className="absolute inset-0 cursor-default bg-black/40"
+          onClick={() => setMobileDrawerOpen(false)}
+        />
+        <aside
           className={`absolute bottom-0 left-0 right-0 h-[65vh] bg-terminal-bg border-t border-terminal-border-subtle rounded-t-2xl flex flex-col transition-transform duration-300 ease-material-decel safe-bottom shadow-layer-xl ${
             mobileDrawerOpen ? "translate-y-0" : "translate-y-full"
           }`}
-          onClick={(e) => e.stopPropagation()}
         >
           {/* Drag handle */}
           <div className="flex justify-center py-2.5 shrink-0">
@@ -1210,7 +1216,7 @@ export default function Player({
               />
             )}
           </div>
-        </div>
+        </aside>
       </div>
 
       <HelpOverlay open={showHelp} onClose={() => setShowHelp(false)} />

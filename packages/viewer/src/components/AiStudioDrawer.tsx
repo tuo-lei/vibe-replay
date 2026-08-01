@@ -36,14 +36,19 @@ export default function AiStudioDrawer({
       }`}
     >
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
+      <button
+        type="button"
+        aria-label="Close"
+        tabIndex={-1}
+        className="absolute inset-0 cursor-default bg-black/30"
+        onClick={onClose}
+      />
 
       {/* Panel */}
-      <div
+      <aside
         className={`absolute top-0 right-0 bottom-0 w-96 bg-terminal-bg border-l border-terminal-border-subtle shadow-layer-xl flex flex-col transition-transform duration-300 ease-material-decel ${
           open ? "translate-x-0" : "translate-x-full"
         }`}
-        onClick={(e) => e.stopPropagation()}
       >
         {/* Close button */}
         <button
@@ -55,7 +60,7 @@ export default function AiStudioDrawer({
         </button>
 
         <AiStudioPanel annotationActions={annotationActions} overlayActions={overlayActions} />
-      </div>
+      </aside>
     </div>
   );
 }

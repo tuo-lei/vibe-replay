@@ -99,7 +99,8 @@ export function renderHighlightedPlainText(
   ranges.forEach((range) => {
     if (range.start > cursor) nodes.push(content.slice(cursor, range.start));
     nodes.push(
-      <mark
+      <button
+        type="button"
         key={range.highlight.id}
         data-vibe-annotation-id={range.highlight.id}
         title={range.highlight.title}
@@ -110,7 +111,7 @@ export function renderHighlightedPlainText(
         }}
       >
         {content.slice(range.start, range.end)}
-      </mark>,
+      </button>,
     );
     cursor = range.end;
   });
@@ -134,16 +135,31 @@ function escapeHtmlAttribute(value: string): string {
     .replace(/>/g, "&gt;");
 }
 
-function createHighlightMark(doc: Document, highlight: TextHighlight, text: string): HTMLElement {
-  const mark = doc.createElement("mark");
+function createHighlightMark(
+  doc: Document,
+  highlight: TextHighlight,
+  text: string,
+  onHighlightClick?: (annotationId: string) => void,
+): HTMLElement {
+  // A real <button> (inline) gives native Enter/Space activation + focus.
+  const mark = doc.createElement("button");
+  mark.type = "button";
   mark.dataset.vibeAnnotationId = highlight.id;
   mark.title = highlight.title;
   mark.className = HIGHLIGHT_CLASS;
   mark.textContent = text;
+  mark.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onHighlightClick?.(highlight.id);
+  });
   return mark;
 }
 
-export function injectHtmlTextHighlights(html: string, highlights: TextHighlight[]): string {
+export function injectHtmlTextHighlights(
+  html: string,
+  highlights: TextHighlight[],
+  onHighlightClick?: (annotationId: string) => void,
+): string {
   if (typeof DOMParser === "undefined") return html;
 
   const doc = new DOMParser().parseFromString(html, "text/html");
@@ -190,7 +206,12 @@ export function injectHtmlTextHighlights(html: string, highlights: TextHighlight
       if (localStart > cursor)
         fragment.appendChild(doc.createTextNode(nodeText.slice(cursor, localStart)));
       fragment.appendChild(
-        createHighlightMark(doc, range.highlight, nodeText.slice(localStart, localEnd)),
+        createHighlightMark(
+          doc,
+          range.highlight,
+          nodeText.slice(localStart, localEnd),
+          onHighlightClick,
+        ),
       );
       cursor = localEnd;
     });
@@ -214,18 +235,4 @@ export function injectMarkdownHighlights(content: string, highlights: TextHighli
   });
   output += content.slice(cursor);
   return output;
-}
-
-export function handleMarkdownHighlightClick(
-  event: React.MouseEvent,
-  onHighlightClick?: (annotationId: string) => void,
-): void {
-  const target = event.target;
-  if (!(target instanceof Element)) return;
-  const mark = target.closest("[data-vibe-annotation-id]");
-  if (!(mark instanceof HTMLElement)) return;
-  const annotationId = mark.dataset.vibeAnnotationId;
-  if (!annotationId) return;
-  event.stopPropagation();
-  onHighlightClick?.(annotationId);
 }

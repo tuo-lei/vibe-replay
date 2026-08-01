@@ -151,6 +151,7 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
       className="px-4 pt-3 pb-1 cursor-pointer"
       onClick={handleSeekClick}
       onKeyDown={handleKeyDown}
+      // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- custom seekbar with annotation/compaction dots; <input type=range> cannot render the overlay markers
       role="slider"
       aria-label="Scene timeline"
       aria-valuemin={0}
@@ -171,6 +172,7 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
           {compactionDots.map((pct, i) => (
             <div
               key={`c-${i}`}
+              // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- styled marker dot; not an image file
               role="img"
               aria-label="Compaction"
               title="Compaction"

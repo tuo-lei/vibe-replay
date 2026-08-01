@@ -1,7 +1,6 @@
 import { marked } from "marked";
 import { memo, useEffect, useMemo, useState } from "react";
 import {
-  handleMarkdownHighlightClick,
   hasHtmlTextHighlights,
   hasVisibleTextHighlights,
   injectHtmlTextHighlights,
@@ -18,10 +17,13 @@ interface Props {
 
 const COLLAPSE_THRESHOLD = 600;
 
+// Hoisted so the default isn't re-created on every render (stable reference).
+const NO_HIGHLIGHTS: TextHighlight[] = [];
+
 export default memo(function TextResponseBlock({
   content,
   isActive,
-  highlights = [],
+  highlights = NO_HIGHLIGHTS,
   onHighlightClick,
 }: Props) {
   const isLong = content.length > COLLAPSE_THRESHOLD;
@@ -49,8 +51,8 @@ export default memo(function TextResponseBlock({
   }, [content, displayContent, displayHtml, expanded, fullHtml, highlights, isLong]);
 
   const html = useMemo(() => {
-    return injectHtmlTextHighlights(displayHtml, highlights);
-  }, [displayHtml, highlights]);
+    return injectHtmlTextHighlights(displayHtml, highlights, onHighlightClick);
+  }, [displayHtml, highlights, onHighlightClick]);
 
   return (
     <div>
@@ -59,10 +61,8 @@ export default memo(function TextResponseBlock({
           isActive ? "typing-cursor" : ""
         } ${isLong && !expanded ? "max-h-[200px] overflow-hidden relative" : ""}`}
       >
-        <div
-          onClick={(event) => handleMarkdownHighlightClick(event, onHighlightClick)}
-          dangerouslySetInnerHTML={{ __html: html }}
-        />
+        {/* Highlight marks are individually focusable/clickable (see createHighlightMark). */}
+        <div dangerouslySetInnerHTML={{ __html: html }} />
         {isLong && !expanded && (
           <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-terminal-bg to-transparent" />
         )}

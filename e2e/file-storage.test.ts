@@ -29,6 +29,30 @@ function wranglerExec(sql: string) {
   );
 }
 
+/**
+ * Run `pnpm db:migrate:local` with retries. miniflare's local D1 can transiently
+ * report SQLITE_BUSY_RECOVERY when a stale WAL/SHM is present (e.g. after a
+ * crashed `wrangler dev`); a short retry loop makes the suite robust to it.
+ */
+function migrateLocalD1(): void {
+  const MAX_ATTEMPTS = 3;
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      execSync("pnpm db:migrate:local", { cwd: "cloudflare", stdio: "pipe" });
+      return;
+    } catch (err) {
+      lastError = err;
+      if (attempt < MAX_ATTEMPTS) {
+        console.warn(`db:migrate:local attempt ${attempt} failed — retrying`);
+        // Give a lingering D1 connection time to checkpoint/release the lock.
+        execSync("sleep 1", { stdio: "pipe" });
+      }
+    }
+  }
+  throw lastError;
+}
+
 async function waitForWorker(url: string, timeout = 15_000) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
@@ -49,7 +73,7 @@ describeWorker("File serve via wrangler dev", () => {
   let wranglerProcess: ChildProcess;
 
   beforeAll(async () => {
-    execSync("pnpm db:migrate:local", { cwd: "cloudflare", stdio: "pipe" });
+    migrateLocalD1();
 
     // Seed test data directly into D1 + R2
     const gifBinary = Buffer.from(VALID_GIF_B64, "base64");
