@@ -10,6 +10,7 @@ import type {
 } from "@vibe-replay/provider-contract";
 import { openOpencodeDb, opencodeDataDir, opencodeDbPath } from "./sqlite.js";
 import { mapOpencodeToolArgs, mapOpencodeToolName } from "./tool-mapping.js";
+import { addParseWarning, compactWarningSample } from "@vibe-replay/provider-contract/warnings";
 
 interface OpencodeMessageRow {
   id: string;
@@ -27,6 +28,7 @@ interface OpencodePart {
   tool?: string;
   callID?: string;
   text?: string;
+  auto?: boolean;
   state?: {
     status?: string;
     input?: unknown;
@@ -90,6 +92,17 @@ function parseMeta<T>(raw: string | undefined | null): T | undefined {
     return JSON.parse(raw) as T;
   } catch {
     return undefined;
+  }
+}
+
+/** True when raw JSON exists but `parseMeta` failed to decode it. */
+function isUnparseable(raw: string | undefined | null): boolean {
+  if (!raw) return false;
+  try {
+    JSON.parse(raw);
+    return false;
+  } catch {
+    return true;
   }
 }
 
@@ -173,8 +186,25 @@ export function parseSessionFromDb(
 
   const modelMeta = parseMeta<{ id?: string }>(session?.model);
   if (modelMeta?.id && !model) model = modelMeta.id;
+  else if (isUnparseable(session?.model)) {
+    addParseWarning(parseWarnings, {
+      kind: "malformed-json",
+      source: "opencode session",
+      message: "session model: unparseable data, using fallback",
+      sample: compactWarningSample(session?.model ?? ""),
+    });
+  }
 
   for (const message of messages) {
+    if (isUnparseable(message.data)) {
+      addParseWarning(parseWarnings, {
+        kind: "malformed-json",
+        source: "opencode message",
+        message: `message ${message.id}: unparseable data, skipped`,
+        sample: compactWarningSample(message.data),
+      });
+      continue;
+    }
     const meta = parseMeta<MessageMeta>(message.data);
     if (!meta) continue;
     const timestampMs = meta.time?.completed || meta.time?.created;
@@ -196,13 +226,15 @@ export function parseSessionFromDb(
 
     if (meta.role === "user") {
       // opencode writes a `compaction` part on a synthetic user message that
-      // announces context compaction. Record it and skip rendering.
-      const hasCompaction = messageHasPartType(db, message.id, "compaction");
-      if (hasCompaction) {
-        recordCompaction(db, compactions, timestamp, message);
+      // announces context compaction. Fetch the parts once and branch on the
+      // compaction marker so user turns and compactions share a single query.
+      const parts = partsForMessage(db, message.id, parseWarnings);
+      const compactionPart = parts.find((p) => p.type === "compaction");
+      if (compactionPart) {
+        recordCompaction(compactions, timestamp, compactionPart);
         continue;
       }
-      const userTurns = userTurnsFromParts(db, message.id, timestamp);
+      const userTurns = userTurnsFromPartsList(parts, timestamp);
       turns.push(...userTurns);
       continue;
     }
@@ -211,7 +243,7 @@ export function parseSessionFromDb(
       if (meta.finish === "error" || meta.finish === "unknown") {
         // opencode writes `finish: "error"` on failed steps; surface the last
         // text part (if any) so the failure is visible rather than dropped.
-        const parts = partsForMessage(db, message.id);
+        const parts = partsForMessage(db, message.id, parseWarnings);
         const text = parts
           .filter((p) => p.type === "text" && p.text)
           .map((p) => p.text)
@@ -227,7 +259,7 @@ export function parseSessionFromDb(
         continue;
       }
 
-      const blocks = assistantBlocksFromParts(db, message.id);
+      const blocks = assistantBlocksFromParts(db, message.id, parseWarnings);
       if (blocks.length === 0) continue;
       if (meta.finish === "max_tokens") truncatedResponses++;
 
@@ -272,8 +304,7 @@ export function parseSessionFromDb(
   };
 }
 
-function userTurnsFromParts(db: Database, messageId: string, timestamp?: string): ParsedTurn[] {
-  const parts = partsForMessage(db, messageId);
+function userTurnsFromPartsList(parts: OpencodePart[], timestamp?: string): ParsedTurn[] {
   const text = parts
     .filter((p) => p.type === "text" && p.text)
     .map((p) => p.text)
@@ -290,10 +321,17 @@ function userTurnsFromParts(db: Database, messageId: string, timestamp?: string)
   return [{ role: "user", timestamp, blocks }];
 }
 
-function assistantBlocksFromParts(db: Database, messageId: string): ContentBlock[] {
-  const parts = partsForMessage(db, messageId);
+function assistantBlocksFromParts(
+  db: Database,
+  messageId: string,
+  warnings?: NonNullable<ProviderParseResult["parseWarnings"]>,
+): ContentBlock[] {
+  const parts = partsForMessage(db, messageId, warnings);
   const blocks: ContentBlock[] = [];
-  let pendingTool: { id: string; name: string; input: Record<string, any> } | null = null;
+  // Running tool parts are placeholder markers; when a completed part for the
+  // same callID arrives, remove only that callID's marker so interleaved
+  // concurrent tool calls each resolve to their real call with a result.
+  const pendingByCallId = new Map<string, Extract<ContentBlock, { type: "tool_use" }>>();
 
   for (const part of parts) {
     switch (part.type) {
@@ -317,10 +355,13 @@ function assistantBlocksFromParts(db: Database, messageId: string): ContentBlock
         const isPending = state.status === "running";
         const durationMs = durationFromState(state.time);
 
-        // A second tool part supersedes the first pending marker: drop the
-        // placeholder and emit the real call with its result.
-        if (pendingTool && pendingTool.id === callID) {
-          blocks.pop();
+        // A completed tool part supersedes its earlier pending marker: drop the
+        // placeholder (by callID) and emit the real call with its result.
+        const pendingBlock = pendingByCallId.get(callID);
+        if (pendingBlock && !isPending) {
+          const idx = blocks.indexOf(pendingBlock);
+          if (idx >= 0) blocks.splice(idx, 1);
+          pendingByCallId.delete(callID);
         }
 
         const block: Extract<ContentBlock, { type: "tool_use" }> = {
@@ -335,9 +376,7 @@ function assistantBlocksFromParts(db: Database, messageId: string): ContentBlock
         };
         blocks.push(block);
         if (isPending) {
-          pendingTool = { id: callID, name: toolName, input };
-        } else {
-          pendingTool = null;
+          pendingByCallId.set(callID, block);
         }
         break;
       }
@@ -352,42 +391,25 @@ function assistantBlocksFromParts(db: Database, messageId: string): ContentBlock
   return blocks;
 }
 
-function messageHasPartType(db: Database, messageId: string, type: string): boolean {
-  const row = firstValue(
-    db,
-    `SELECT count(*) AS c FROM part WHERE message_id = ? AND json_extract(data, '$.type') = ?`,
-    { mid: messageId, type },
-  );
-  return Number(row?.c ?? 0) > 0;
-}
-
 function recordCompaction(
-  db: Database,
   compactions: Compaction[],
   timestamp: string | undefined,
-  message: OpencodeMessageRow,
+  part: OpencodePart,
 ): void {
   if (!timestamp) return;
   // opencode compactions can be auto-triggered or user-requested.
-  let auto = true;
-  const part = firstValue(
-    db,
-    `SELECT data FROM part WHERE message_id = ? AND json_extract(data, '$.type') = 'compaction' LIMIT 1`,
-    { mid: message.id },
-  );
-  try {
-    const parsed = JSON.parse(part?.data as string) as { auto?: boolean };
-    auto = parsed.auto !== false;
-  } catch {
-    // keep default
-  }
+  const auto = part.auto !== false;
   compactions.push({
     timestamp,
     trigger: auto ? "opencode-context" : "opencode-user",
   });
 }
 
-function partsForMessage(db: Database, messageId: string): OpencodePart[] {
+function partsForMessage(
+  db: Database,
+  messageId: string,
+  warnings?: NonNullable<ProviderParseResult["parseWarnings"]>,
+): OpencodePart[] {
   const rows = rowValues(
     db,
     `
@@ -401,6 +423,17 @@ function partsForMessage(db: Database, messageId: string): OpencodePart[] {
 
   const parts: OpencodePart[] = [];
   for (const row of rows) {
+    if (isUnparseable(row.data)) {
+      if (warnings) {
+        addParseWarning(warnings, {
+          kind: "malformed-json",
+          source: "opencode part",
+          message: `part ${row.message_id}: unparseable data, skipped`,
+          sample: compactWarningSample(row.data),
+        });
+      }
+      continue;
+    }
     const parsed = parseMeta<OpencodePart>(row.data);
     if (parsed?.type) parts.push(parsed);
   }

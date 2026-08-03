@@ -273,4 +273,87 @@ describe("opencode parser", () => {
       db.close();
     }
   });
+
+  it("resolves interleaved running tool parts by callID", async () => {
+    const db = await buildOpencodeDb({
+      session: [baseSession],
+      messages: [
+        {
+          id: "msg_conc",
+          sessionId: "ses_111",
+          role: "assistant",
+          timeCreated: 1_800_000_008_000,
+          finish: "tool-calls",
+          parts: [
+            {
+              type: "tool",
+              tool: "grep",
+              callID: "call_a",
+              state: { status: "running", input: { pattern: "a" } },
+            },
+            {
+              type: "tool",
+              tool: "read",
+              callID: "call_b",
+              state: { status: "running", input: { filePath: "x.ts" } },
+            },
+            {
+              type: "tool",
+              tool: "grep",
+              callID: "call_a",
+              state: { status: "completed", input: { pattern: "a" }, output: "a-matches" },
+            },
+            {
+              type: "tool",
+              tool: "read",
+              callID: "call_b",
+              state: { status: "completed", input: { filePath: "x.ts" }, output: "file body" },
+            },
+          ],
+        },
+      ],
+    });
+
+    try {
+      const result = parseSessionFromDb(db, "ses_111");
+      const tools = result.turns[0]?.blocks.filter((b) => b.type === "tool_use") ?? [];
+      expect(tools).toHaveLength(2);
+      expect(tools[0]).toMatchObject({ id: "call_a", name: "Grep", _result: "a-matches" });
+      expect((tools[0] as any)._isPendingMarker).toBeUndefined();
+      expect(tools[1]).toMatchObject({ id: "call_b", name: "Read", _result: "file body" });
+      expect((tools[1] as any)._isPendingMarker).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("reports parseWarnings for unparseable message data", async () => {
+    const db = await buildOpencodeDb({
+      session: [baseSession],
+      messages: [
+        {
+          id: "msg_bad",
+          sessionId: "ses_111",
+          role: "user",
+          timeCreated: 1_800_000_009_000,
+          parts: [{ type: "text", text: "hello" }],
+        },
+      ],
+    });
+    // Corrupt the stored message JSON directly to simulate a malformed row.
+    db.run("UPDATE message SET data = 'not json{' WHERE id = 'msg_bad'");
+
+    try {
+      const result = parseSessionFromDb(db, "ses_111");
+      expect(result.turns).toHaveLength(0);
+      expect(result.parseWarnings).toHaveLength(1);
+      expect(result.parseWarnings?.[0]).toMatchObject({
+        kind: "malformed-json",
+        source: "opencode message",
+        message: "message msg_bad: unparseable data, skipped",
+      });
+    } finally {
+      db.close();
+    }
+  });
 });

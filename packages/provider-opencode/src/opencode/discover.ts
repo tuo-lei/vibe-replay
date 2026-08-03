@@ -35,11 +35,6 @@ function rowValues(db: Database, sql: string, params: Record<string, any> = {}):
   }
 }
 
-function firstValue(db: Database, sql: string, params: Record<string, any> = {}): any {
-  const rows = rowValues(db, sql, params);
-  return rows[0] ?? null;
-}
-
 export async function discoverOpencodeSessions(): Promise<SessionInfo[]> {
   const opened = await openOpencodeDb();
   if (!opened) return [];
@@ -65,27 +60,127 @@ export function listSessionsFromDb(db: Database): SessionInfo[] {
     `,
   );
 
+  // Aggregate stats are computed with a handful of GROUP BY queries (one per
+  // metric) instead of per-session round trips, so discovery scales with the
+  // number of distinct queries rather than the number of sessions.
+  const statsBySession = buildSessionStats(db);
+
   const sessions: SessionInfo[] = [];
   for (const row of rows) {
-    const info = sessionInfoFromRow(db, row);
+    const stats = statsBySession.get(row.id);
+    if (!stats) continue;
+    const info = sessionInfoFromRow(row, stats);
     if (info) sessions.push(info);
   }
   return sessions;
 }
 
-function sessionInfoFromRow(db: Database, row: OpencodeSessionRow): SessionInfo | null {
+interface SessionStats {
+  messageCount: number;
+  promptCount: number;
+  toolCallCount: number;
+  editCountEst: number;
+  firstPrompt: string;
+}
+
+function buildSessionStats(db: Database): Map<string, SessionStats> {
+  const messageCounts = countBySession(
+    db,
+    `SELECT session_id, count(*) AS c FROM message GROUP BY session_id`,
+  );
+  const promptCounts = countBySession(
+    db,
+    `
+      SELECT m.session_id, count(DISTINCT m.id) AS c
+      FROM part p
+      JOIN message m ON m.id = p.message_id
+      WHERE json_extract(m.data, '$.role') = 'user'
+        AND json_extract(p.data, '$.type') = 'text'
+      GROUP BY m.session_id
+    `,
+  );
+  const toolCounts = countBySession(
+    db,
+    `
+      SELECT session_id, count(*) AS c
+      FROM part
+      WHERE json_extract(data, '$.type') = 'tool'
+      GROUP BY session_id
+    `,
+  );
+  const editToolCounts = countBySession(
+    db,
+    `
+      SELECT session_id, count(*) AS c
+      FROM part
+      WHERE json_extract(data, '$.type') = 'tool'
+        AND json_extract(data, '$.tool') IN ('edit', 'write', 'patch')
+      GROUP BY session_id
+    `,
+  );
+  const firstPrompts = firstUserPrompts(db);
+
+  const map = new Map<string, SessionStats>();
+  for (const row of messageCounts) {
+    const [sessionId, messageCount] = row;
+    if (messageCount <= 0) continue;
+    map.set(sessionId, {
+      messageCount,
+      promptCount: promptCounts.get(sessionId) ?? 0,
+      toolCallCount: toolCounts.get(sessionId) ?? 0,
+      editCountEst: editToolCounts.get(sessionId) ?? 0,
+      firstPrompt: firstPrompts.get(sessionId) ?? "",
+    });
+  }
+  return map;
+}
+
+/** Map session_id → aggregate count for a `GROUP BY session_id` query. */
+function countBySession(db: Database, sql: string): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const row of rowValues(db, sql)) {
+    const id = String(row.session_id ?? "");
+    if (!id) continue;
+    map.set(id, Number(row.c ?? 0));
+  }
+  return map;
+}
+
+/** Map session_id → the first user text prompt (earliest by message time). */
+function firstUserPrompts(db: Database): Map<string, string> {
+  const map = new Map<string, string>();
+  const rows = rowValues(
+    db,
+    `
+      SELECT m.session_id, m.time_created, p.data
+      FROM part p
+      JOIN message m ON m.id = p.message_id
+      WHERE json_extract(m.data, '$.role') = 'user'
+        AND json_extract(p.data, '$.type') = 'text'
+      ORDER BY m.session_id ASC, m.time_created ASC
+    `,
+  );
+  for (const row of rows) {
+    const sessionId = String(row.session_id ?? "");
+    if (!sessionId || map.has(sessionId)) continue;
+    let text = "";
+    try {
+      const parsed = JSON.parse(row.data as string) as { text?: string };
+      text = typeof parsed.text === "string" ? parsed.text : "";
+    } catch {
+      // skip malformed part; fall through to keep map entry reserved
+    }
+    map.set(sessionId, text);
+  }
+  return map;
+}
+
+function sessionInfoFromRow(row: OpencodeSessionRow, stats: SessionStats): SessionInfo | null {
   if (!row.id || !row.directory) return null;
 
-  const messageCount = countMessages(db, row.id);
-  if (messageCount <= 0) return null;
-
-  const firstMsg = firstUserMessage(db, row.id);
-  const firstPrompt = cleanPromptText(firstMsg?.text || "");
+  const firstPrompt = cleanPromptText(stats.firstPrompt);
   if (!firstPrompt) return null;
 
-  const promptCount = countUserPrompts(db, row.id);
-  const toolCallCount = countToolCalls(db, row.id);
-  const editCountEst = countEditTools(db, row.id);
   const model = modelFromSessionRow(row);
 
   const dbPath = opencodeDbPath();
@@ -102,21 +197,21 @@ function sessionInfoFromRow(db: Database, row: OpencodeSessionRow): SessionInfo 
     gitBranch: undefined,
     gitRepo: undefined,
     timestamp: toIsoMs(row.time_updated) || new Date().toISOString(),
-    lineCount: messageCount,
+    lineCount: stats.messageCount,
     fileSize: 0,
     filePath: markerPath,
     filePaths: [markerPath],
     hasSqlite: true,
     firstPrompt,
     prompts: [firstPrompt],
-    promptCount,
-    toolCallCount,
+    promptCount: stats.promptCount,
+    toolCallCount: stats.toolCallCount,
     model,
     durationMsEst:
       row.time_created > 0 && row.time_updated > row.time_created
         ? row.time_updated - row.time_created
         : undefined,
-    editCountEst,
+    editCountEst: stats.editCountEst,
   };
 }
 
@@ -128,82 +223,6 @@ function modelFromSessionRow(row: OpencodeSessionRow): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-function countMessages(db: Database, sessionId: string): number {
-  const row = firstValue(db, `SELECT count(*) AS c FROM message WHERE session_id = ?`, {
-    sid: sessionId,
-  });
-  return Number(row?.c ?? 0);
-}
-
-function firstUserMessage(db: Database, sessionId: string): { text: string } | null {
-  const row = firstValue(
-    db,
-    `
-      SELECT p.data
-      FROM part p
-      JOIN message m ON m.id = p.message_id
-      WHERE m.session_id = ?
-        AND json_extract(m.data, '$.role') = 'user'
-        AND json_extract(p.data, '$.type') = 'text'
-      ORDER BY m.time_created ASC
-      LIMIT 1
-    `,
-    { sid: sessionId },
-  );
-  if (!row?.data) return null;
-  try {
-    const parsed = JSON.parse(row.data as string) as { text?: string };
-    return { text: typeof parsed.text === "string" ? parsed.text : "" };
-  } catch {
-    return null;
-  }
-}
-
-function countUserPrompts(db: Database, sessionId: string): number {
-  const row = firstValue(
-    db,
-    `
-      SELECT count(DISTINCT m.id) AS c
-      FROM part p
-      JOIN message m ON m.id = p.message_id
-      WHERE m.session_id = ?
-        AND json_extract(m.data, '$.role') = 'user'
-        AND json_extract(p.data, '$.type') = 'text'
-    `,
-    { sid: sessionId },
-  );
-  return Number(row?.c ?? 0);
-}
-
-function countToolCalls(db: Database, sessionId: string): number {
-  const row = firstValue(
-    db,
-    `
-      SELECT count(*) AS c
-      FROM part
-      WHERE session_id = ?
-        AND json_extract(data, '$.type') = 'tool'
-    `,
-    { sid: sessionId },
-  );
-  return Number(row?.c ?? 0);
-}
-
-function countEditTools(db: Database, sessionId: string): number {
-  const row = firstValue(
-    db,
-    `
-      SELECT count(*) AS c
-      FROM part
-      WHERE session_id = ?
-        AND json_extract(data, '$.type') = 'tool'
-        AND json_extract(data, '$.tool') IN ('edit', 'write', 'patch')
-    `,
-    { sid: sessionId },
-  );
-  return Number(row?.c ?? 0);
 }
 
 function toIsoMs(value?: number): string | undefined {

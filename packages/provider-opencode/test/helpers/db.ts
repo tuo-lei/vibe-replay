@@ -14,6 +14,7 @@ export interface DbSeed {
   directory?: string;
   agent?: string | null;
   model?: string | null;
+  parentId?: string | null;
   timeCreated?: number;
   timeUpdated?: number;
 }
@@ -82,7 +83,7 @@ export async function buildOpencodeDb(seeds: {
 
   for (const s of seeds.session || []) {
     db.run(
-      "INSERT INTO session (id, slug, title, directory, agent, model, time_created, time_updated) VALUES (?,?,?,?,?,?,?,?)",
+      "INSERT INTO session (id, slug, title, directory, agent, model, parent_id, time_created, time_updated) VALUES (?,?,?,?,?,?,?,?,?)",
       [
         s.id,
         s.slug || `slug-${s.id}`,
@@ -90,6 +91,7 @@ export async function buildOpencodeDb(seeds: {
         s.directory || "/Users/test/project",
         s.agent ?? null,
         s.model ?? JSON.stringify({ id: "deepseek-v4-flash-free", providerID: "opencode" }),
+        s.parentId ?? null,
         s.timeCreated ?? 1_800_000_000_000,
         s.timeUpdated ?? 1_800_000_000_000,
       ],

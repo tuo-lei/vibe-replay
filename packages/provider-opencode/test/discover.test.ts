@@ -19,6 +19,7 @@ describe("opencode discover", () => {
           id: "ses_sub",
           slug: "sub-agent",
           directory: "/Users/test/project",
+          parentId: "ses_main",
           timeCreated: 1_800_000_000_000,
           timeUpdated: 1_800_000_050_000,
         },
@@ -49,14 +50,24 @@ describe("opencode discover", () => {
           timeCreated: 1_800_000_030_000,
           parts: [{ type: "text", text: "Now the second prompt" }],
         },
+        {
+          id: "m4",
+          sessionId: "ses_sub",
+          role: "user",
+          timeCreated: 1_800_000_010_000,
+          parts: [{ type: "text", text: "Help with sub-agent work" }],
+        },
       ],
     });
 
     try {
       const sessions = listSessionsFromDb(db);
 
-      // The sub-agent session would need parent_id; our helper doesn't set it,
-      // so it is filtered by the missing first-prompt/text requirement instead.
+      // The sub-agent session has parent_id set, so it is excluded from
+      // discovery even though it has a directory and would otherwise qualify.
+      expect(sessions).toHaveLength(1);
+      expect(sessions.some((s) => s.sessionId === "ses_sub")).toBe(false);
+
       const main = sessions.find((s) => s.sessionId === "ses_main");
       expect(main).toBeDefined();
       expect(main).toMatchObject({

@@ -18,6 +18,7 @@ declare module "sql.js" {
   interface Database {
     exec(sql: string, params?: any[]): QueryExecResult[];
     prepare(sql: string): Statement;
+    run(sql: string, params?: any[] | Record<string, any>): Database;
     close(): void;
   }
 

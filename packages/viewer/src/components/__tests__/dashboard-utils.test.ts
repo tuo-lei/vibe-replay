@@ -446,7 +446,7 @@ describe("provider display helpers", () => {
   it("labels OpenCode as a first-class provider", () => {
     expect(providerBadgeLabel("opencode")).toBe("OpenCode");
     expect(providerDisplayName("opencode")).toBe("OpenCode");
-    expect(providerBadgeClass("opencode")).toContain("terminal-green");
+    expect(providerBadgeClass("opencode")).toBe("bg-terminal-green-subtle text-terminal-green");
     expect(providerBarClass("opencode")).toBe("bg-terminal-green");
     expect(providerFamily("opencode")).toBe("green");
   });
