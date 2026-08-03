@@ -130,6 +130,9 @@ importers:
       '@vibe-replay/provider-cursor':
         specifier: workspace:*
         version: link:../provider-cursor
+      '@vibe-replay/provider-opencode':
+        specifier: workspace:*
+        version: link:../provider-opencode
       '@vibe-replay/provider-pi':
         specifier: workspace:*
         version: link:../provider-pi
@@ -250,6 +253,31 @@ importers:
         specifier: ^4.1.9
         version: 4.1.9(@types/node@25.9.4)(@vitest/coverage-v8@4.1.9)(jsdom@26.1.0)(vite@7.3.1(@types/node@25.9.4)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.4)(yaml@2.9.0))
 
+  packages/provider-opencode:
+    dependencies:
+      '@vibe-replay/provider-contract':
+        specifier: workspace:*
+        version: link:../provider-contract
+      '@vibe-replay/provider-core':
+        specifier: workspace:*
+        version: link:../provider-core
+      '@vibe-replay/types':
+        specifier: workspace:*
+        version: link:../types
+      sql.js:
+        specifier: ^1.14.1
+        version: 1.14.1
+    devDependencies:
+      '@types/node':
+        specifier: ^25.9.3
+        version: 25.9.4
+      '@vibe-replay/replay-core':
+        specifier: workspace:*
+        version: link:../replay-core
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@types/node@25.9.4)(@vitest/coverage-v8@4.1.9)(jsdom@26.1.0)(vite@7.3.1(@types/node@25.9.4)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.4)(yaml@2.9.0))
+
   packages/provider-pi:
     dependencies:
       '@vibe-replay/provider-contract':
@@ -283,6 +311,9 @@ importers:
       '@vibe-replay/provider-cursor':
         specifier: workspace:*
         version: link:../provider-cursor
+      '@vibe-replay/provider-opencode':
+        specifier: workspace:*
+        version: link:../provider-opencode
       '@vibe-replay/provider-pi':
         specifier: workspace:*
         version: link:../provider-pi

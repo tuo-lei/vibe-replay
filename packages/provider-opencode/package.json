@@ -1,0 +1,50 @@
+{
+  "name": "@vibe-replay/provider-opencode",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "files": [
+    "src"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/opencode/index.ts",
+      "import": "./src/opencode/index.ts"
+    },
+    "./config": {
+      "types": "./src/opencode/config.ts",
+      "import": "./src/opencode/config.ts"
+    },
+    "./discover": {
+      "types": "./src/opencode/discover.ts",
+      "import": "./src/opencode/discover.ts"
+    },
+    "./parser": {
+      "types": "./src/opencode/parser.ts",
+      "import": "./src/opencode/parser.ts"
+    },
+    "./sqlite": {
+      "types": "./src/opencode/sqlite.ts",
+      "import": "./src/opencode/sqlite.ts"
+    },
+    "./tool-mapping": {
+      "types": "./src/opencode/tool-mapping.ts",
+      "import": "./src/opencode/tool-mapping.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vibe-replay/provider-contract": "workspace:*",
+    "@vibe-replay/provider-core": "workspace:*",
+    "@vibe-replay/types": "workspace:*",
+    "sql.js": "^1.14.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "@vibe-replay/replay-core": "workspace:*",
+    "vitest": "^4.1.9"
+  }
+}
