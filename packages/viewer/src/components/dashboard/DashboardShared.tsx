@@ -55,6 +55,14 @@ function ProviderIcon({ provider }: { provider: string }) {
     );
   }
 
+  if (provider === "opencode") {
+    return (
+      <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="currentColor">
+        <path d="M12 1.5 21 7v10l-9 5.5L3 17V7l9-5.5Zm0 2.2L4.8 8.4v7.2L12 20.3l7.2-4.7V8.4L12 3.7Zm-1.5 3.8 5 3-5 3V7.5Z" />
+      </svg>
+    );
+  }
+
   return (
     <span className="font-mono text-[10px] font-bold leading-none uppercase">
       {providerBadgeLabel(provider).slice(0, 1)}

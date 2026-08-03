@@ -163,6 +163,11 @@ export function scanInputFromSession(session: SessionInfo): ScanInput {
     timestamp: session.timestamp,
     title: session.title,
     firstPrompt: session.firstPrompt,
+    discoveryPromptCount: session.promptCount,
+    discoveryToolCallCount: session.toolCallCount,
+    discoveryEditCount: session.editCountEst,
+    discoveryModel: session.model,
+    discoveryDurationMs: session.durationMsEst,
   };
 }
 

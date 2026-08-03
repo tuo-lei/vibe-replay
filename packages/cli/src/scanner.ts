@@ -266,6 +266,15 @@ export interface ScanInput {
   timestamp?: string;
   title?: string;
   firstPrompt?: string;
+  /** Discovery-computed stats carried through for SQLite-backed providers whose
+   *  filePaths point into a database rather than JSONL files. */
+  discoveryPromptCount?: number;
+  discoveryToolCallCount?: number;
+  discoveryEditCount?: number;
+  discoveryModel?: string;
+  discoveryDurationMs?: number;
+  discoveryTokenUsage?: SessionScanResult["tokenUsage"];
+  discoveryCostEstimate?: number;
 }
 
 interface ScanProgress {
@@ -362,6 +371,9 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
       // Fall through to the lightweight scanner so Pi sessions still show up
       // if the richer parser hits an unknown entry shape.
     }
+  }
+  if (input.provider === "opencode") {
+    return buildLightweightOpencodeScanResult(input);
   }
 
   let startTime: string | undefined;
@@ -787,6 +799,34 @@ function buildLightweightCursorScanResult(input: ScanInput): SessionScanResult {
     dataSource,
     dataQualityNotes: [
       "Cursor SQLite/global-state details are deferred during background insights scans to avoid high dashboard CPU.",
+    ],
+  };
+}
+
+function buildLightweightOpencodeScanResult(input: ScanInput): SessionScanResult {
+  const firstPrompt = input.firstPrompt || input.title;
+  return {
+    sessionId: input.sessionId,
+    provider: input.provider,
+    project: input.project,
+    slug: input.slug,
+    title: input.title,
+    firstPrompt,
+    startTime: input.timestamp,
+    promptCount: input.discoveryPromptCount ?? (firstPrompt ? 1 : 0),
+    toolCallCount: input.discoveryToolCallCount ?? 0,
+    editCount: input.discoveryEditCount ?? 0,
+    filesModified: [],
+    model: input.discoveryModel,
+    durationMs: input.discoveryDurationMs,
+    tokenUsage: input.discoveryTokenUsage,
+    costEstimate: input.discoveryCostEstimate,
+    subAgentCount: 0,
+    apiErrorCount: 0,
+    compactionCount: 0,
+    dataSource: "sqlite",
+    dataQualityNotes: [
+      "OpenCode details are read from its SQLite database; rich per-file edit counts are resolved when a replay is generated.",
     ],
   };
 }

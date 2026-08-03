@@ -55,6 +55,7 @@ pnpm db:migrate:remote    # Apply to production D1 (requires auth)
 - **Multi-file sessions**: Claude Code `/resume` creates new JSONL files. Parser accepts `string | string[]` and merges by slug+project.
 - **Cursor tri-source**: Sessions come from SQLite `store.db` (primary), `globalStorage/state.vscdb`, or JSONL (fallback). Discovery merges all sources. DB data is source of truth; JSONL supplements missing thinking/images.
 - **Cursor SDK**: SDK agents (TypeScript `@cursor/sdk`) write to `~/.cursor/projects/<workspace>/sdk-agent-store/<projectHash>/index.db` (tables: `agents`, `runs`, `run_events`) and a parallel JSONL transcript at `agent-transcripts/<agentId>/<agentId>.jsonl`. The transcript is the source of user prompts (SDK doesn't store them in events) and the SDK index.db supplies tool *results*, structured per-run timing, and per-turn model. See `packages/provider-cursor/src/cursor/sdk-reader.ts`. Detection is by sessionId prefix `agent-` — IDE chat sessions (UUID-only) skip the SDK SQLite probe.
+- **opencode**: Sessions live in a SQLite DB at `~/.local/share/opencode/opencode.db` (`%LOCALAPPDATA%\opencode` on Windows, `OPENCODE_DATA` env var wins). Tables: `session`/`message`/`part`; role/user and tool payloads are JSON in `message.data`/`part.data`. Discovery writes `<dbPath>#session:<id>` marker paths. Parse is SQLite-backed (`parseSessionFromDb`), so background scan uses a lightweight path from discovery-computed stats (`buildLightweightOpencodeScanResult` in `scanner.ts`) to avoid opening the DB per session. `sql.js` named-param binds need their `:`-prefix in the key — this provider uses positional `?` params instead. See `packages/provider-opencode/`.
 - **Skip `progress` lines**: These are subagent streaming artifacts in JSONL.
 - **sql.js (WASM)**: Used instead of native SQLite bindings for portability — no C++ compiler needed.
 - **Session discovery cache**: CLI picker + local dashboard use file cache at `~/.vibe-replay/cache/*.json` (stale-while-refresh UX). Cache validity is tied to CLI release version (`CLI_VERSION`) plus envelope version, so caches auto-invalidate across releases. Keep cache writes best-effort and never block generation/parsing on cache failures.
@@ -101,6 +102,7 @@ If tag/release is updated but `packages/cli/package.json` is not, CLI will still
 | Editor server | `packages/cli/src/server.ts` |
 | Provider interface | `packages/provider-contract/src/index.ts` (contract) / `packages/providers-default/src/index.ts` (registry) |
 | Cursor SDK reader | `packages/provider-cursor/src/cursor/sdk-reader.ts` |
+| opencode provider | `packages/provider-opencode/src/opencode/` |
 | Viewer entry | `packages/viewer/src/App.tsx` |
 | Playback engine (pure) | `packages/viewer/src/engine/` |
 | Playback hook | `packages/viewer/src/hooks/usePlayback.ts` |

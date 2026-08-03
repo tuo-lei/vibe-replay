@@ -27,6 +27,7 @@ describe("default provider registry", () => {
       "claude-code",
       "codex",
       "cursor",
+      "opencode",
       "pi",
     ]);
   });

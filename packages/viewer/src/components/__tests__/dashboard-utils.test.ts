@@ -443,6 +443,14 @@ describe("provider display helpers", () => {
     expect(providerFamily("pi")).toBe("cyan");
   });
 
+  it("labels OpenCode as a first-class provider", () => {
+    expect(providerBadgeLabel("opencode")).toBe("OpenCode");
+    expect(providerDisplayName("opencode")).toBe("OpenCode");
+    expect(providerBadgeClass("opencode")).toBe("bg-terminal-green-subtle text-terminal-green");
+    expect(providerBarClass("opencode")).toBe("bg-terminal-green");
+    expect(providerFamily("opencode")).toBe("green");
+  });
+
   it("gives each Claude sub-kind a distinct warm hue", () => {
     expect(providerFamily("claude-code")).toBe("orange");
     expect(providerFamily("claude-cowork")).toBe("sienna");

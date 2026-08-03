@@ -33,6 +33,7 @@ describe("provider contract package boundary", () => {
       "claude-code",
       "codex",
       "cursor",
+      "opencode",
       "pi",
     ]);
     for (const provider of providers) {
