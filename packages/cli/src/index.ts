@@ -197,9 +197,11 @@ function formatProviderBadge(provider: string): string {
             ? chalk.hex("#B392F0")("codex")
             : provider === "opencode"
               ? chalk.hex("#22C55E")("opencode")
-              : provider === "pi"
-                ? chalk.hex("#14B8A6")("pi")
-                : chalk.yellow(provider);
+              : provider === "hermes"
+                ? chalk.hex("#F85149")("hermes")
+                : provider === "pi"
+                  ? chalk.hex("#14B8A6")("pi")
+                  : chalk.yellow(provider);
 }
 
 function printParseWarnings(warnings?: ParseWarning[]): void {

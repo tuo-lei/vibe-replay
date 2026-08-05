@@ -33,6 +33,7 @@ describe("provider contract package boundary", () => {
       "claude-code",
       "codex",
       "cursor",
+      "hermes",
       "opencode",
       "pi",
     ]);
