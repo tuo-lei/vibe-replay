@@ -44,11 +44,12 @@ const getSqlJs = createRetryableInit<SqlJsStatic>(async () => {
 export async function openHermesDb(
   dbPath = hermesDbPath(),
 ): Promise<{ db: Database; dbPath: string } | null> {
+  let db: Database | null = null;
   try {
     const SQL = await getSqlJs();
     const buffer = await readFile(dbPath);
     if (buffer.length < 1024) return null;
-    const db = new SQL.Database(buffer);
+    db = new SQL.Database(buffer);
     // Probe the table layout before handing the handle out: a state.db from an
     // older or unrelated Hermes build could open fine but crash later queries.
     const probe = db.exec(
@@ -56,10 +57,12 @@ export async function openHermesDb(
     );
     if (probe.length === 0 || probe[0].values.length !== 2) {
       db.close();
+      db = null;
       return null;
     }
     return { db, dbPath };
   } catch {
+    db?.close();
     return null;
   }
 }
