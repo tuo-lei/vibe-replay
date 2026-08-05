@@ -49,6 +49,15 @@ export async function openHermesDb(
     const buffer = await readFile(dbPath);
     if (buffer.length < 1024) return null;
     const db = new SQL.Database(buffer);
+    // Probe the table layout before handing the handle out: a state.db from an
+    // older or unrelated Hermes build could open fine but crash later queries.
+    const probe = db.exec(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('sessions','messages')",
+    );
+    if (probe.length === 0 || probe[0].values.length !== 2) {
+      db.close();
+      return null;
+    }
     return { db, dbPath };
   } catch {
     return null;

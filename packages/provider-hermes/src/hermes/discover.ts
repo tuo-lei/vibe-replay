@@ -213,7 +213,7 @@ function sessionInfoFromRow(
     model: row.model || undefined,
     durationMsEst:
       row.started_at > 0 && lastActivity > row.started_at
-        ? (lastActivity - row.started_at) * 1000
+        ? toMillis(lastActivity) - toMillis(row.started_at)
         : undefined,
     editCountEst: stats.editCountEst,
     isStarred: row.pinned === 1,
@@ -239,10 +239,18 @@ export function hermesVersion(): string {
   return cachedVersion;
 }
 
+/**
+ * Hermes timestamps are Unix seconds in current builds; older or future
+ * builds may store milliseconds. Normalize both to milliseconds so callers
+ * (ISO timestamps and duration math) agree on units.
+ */
+function toMillis(value: number): number {
+  return value < 1_577_836_800_000 ? value * 1000 : value;
+}
+
 function toIsoMs(value?: number): string | undefined {
   if (!value || value <= 0) return undefined;
-  const millis = value < 1_577_836_800_000 ? value * 1000 : value;
-  const d = new Date(millis);
+  const d = new Date(toMillis(value));
   return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
 }
 

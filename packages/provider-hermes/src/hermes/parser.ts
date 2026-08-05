@@ -214,8 +214,11 @@ export function parseSessionFromDb(
         }
       }
 
-      if (blocks.length === 0) continue;
+      // Count truncation even when the row carried no renderable blocks — a
+      // response cut off by max_tokens before any content is stored is still a
+      // truncated response.
       if (message.finish_reason === "max_tokens") truncatedResponses++;
+      if (blocks.length === 0) continue;
       turns.push({
         role: "assistant",
         timestamp,

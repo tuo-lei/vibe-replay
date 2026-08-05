@@ -2713,7 +2713,10 @@ export async function startServer(
       const requestedToolName = typeof body.toolName === "string" ? body.toolName : undefined;
       const detected = await detectFeedbackTools();
       if (detected.tools.length === 0) {
-        return c.json({ error: "No AI CLI tool available (claude, agent, or opencode)" }, 400);
+        return c.json(
+          { error: "No AI CLI tool available (claude, agent, opencode, or hermes)" },
+          400,
+        );
       }
       const tool = requestedToolName
         ? detected.tools.find((t) => t.name === requestedToolName) || null
@@ -2781,7 +2784,10 @@ export async function startServer(
         .catch(() => ({}));
       const detected = await detectFeedbackTools();
       if (detected.tools.length === 0) {
-        return c.json({ error: "No AI CLI tool available (claude, agent, or opencode)" }, 400);
+        return c.json(
+          { error: "No AI CLI tool available (claude, agent, opencode, or hermes)" },
+          400,
+        );
       }
       const toolName = typeof body.toolName === "string" ? body.toolName : undefined;
       const tool = toolName
@@ -2837,7 +2843,10 @@ export async function startServer(
         .catch(() => ({}));
       const detected = await detectFeedbackTools();
       if (detected.tools.length === 0) {
-        return c.json({ error: "No AI CLI tool available (claude, agent, or opencode)" }, 400);
+        return c.json(
+          { error: "No AI CLI tool available (claude, agent, opencode, or hermes)" },
+          400,
+        );
       }
       const toolName = typeof body.toolName === "string" ? body.toolName : undefined;
       const tool = toolName
