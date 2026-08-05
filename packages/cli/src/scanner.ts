@@ -375,6 +375,9 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
   if (input.provider === "opencode") {
     return buildLightweightOpencodeScanResult(input);
   }
+  if (input.provider === "hermes") {
+    return buildLightweightHermesScanResult(input);
+  }
 
   let startTime: string | undefined;
   let endTime: string | undefined;
@@ -827,6 +830,34 @@ function buildLightweightOpencodeScanResult(input: ScanInput): SessionScanResult
     dataSource: "sqlite",
     dataQualityNotes: [
       "OpenCode details are read from its SQLite database; rich per-file edit counts are resolved when a replay is generated.",
+    ],
+  };
+}
+
+function buildLightweightHermesScanResult(input: ScanInput): SessionScanResult {
+  const firstPrompt = input.firstPrompt || input.title;
+  return {
+    sessionId: input.sessionId,
+    provider: input.provider,
+    project: input.project,
+    slug: input.slug,
+    title: input.title,
+    firstPrompt,
+    startTime: input.timestamp,
+    promptCount: input.discoveryPromptCount ?? (firstPrompt ? 1 : 0),
+    toolCallCount: input.discoveryToolCallCount ?? 0,
+    editCount: input.discoveryEditCount ?? 0,
+    filesModified: [],
+    model: input.discoveryModel,
+    durationMs: input.discoveryDurationMs,
+    tokenUsage: input.discoveryTokenUsage,
+    costEstimate: input.discoveryCostEstimate,
+    subAgentCount: 0,
+    apiErrorCount: 0,
+    compactionCount: 0,
+    dataSource: "sqlite",
+    dataQualityNotes: [
+      "Hermes details are read from its SQLite database (~/.hermes/state.db); rich per-file edit counts are resolved when a replay is generated.",
     ],
   };
 }

@@ -37,7 +37,7 @@ function spawnTool(command: string, args: string[], options: SpawnOptions): Pipe
 // ---------------------------------------------------------------------------
 
 export interface FeedbackTool {
-  name: "claude" | "agent" | "opencode";
+  name: "claude" | "agent" | "opencode" | "hermes";
   command: string;
 }
 
@@ -81,7 +81,7 @@ export interface FeedbackResult {
 // Detection
 // ---------------------------------------------------------------------------
 
-const TOOL_PRIORITY: FeedbackTool["name"][] = ["claude", "agent", "opencode"];
+const TOOL_PRIORITY: FeedbackTool["name"][] = ["claude", "agent", "opencode", "hermes"];
 
 /** Detect available AI CLI tools and pick a default by priority. */
 export async function detectFeedbackTools(): Promise<{
@@ -95,6 +95,7 @@ export async function detectFeedbackTools(): Promise<{
     ...(!insideClaude ? [{ name: "claude" as const, cmd: "claude" }] : []),
     { name: "agent" as const, cmd: "agent" },
     { name: "opencode" as const, cmd: "opencode" },
+    { name: "hermes" as const, cmd: "hermes" },
   ];
 
   const tools: FeedbackTool[] = [];
@@ -371,6 +372,9 @@ async function executeFeedback(prompt: string, tool: FeedbackTool): Promise<stri
   if (tool.name === "agent") {
     return runAgent(prompt, tool.command);
   }
+  if (tool.name === "hermes") {
+    return runHermes(prompt, tool.command);
+  }
   return runOpencode(prompt, tool.command);
 }
 
@@ -433,6 +437,33 @@ function runOpencode(prompt: string, cmd: string): Promise<string> {
 
     proc.stdin.write(prompt);
     proc.stdin.end();
+  });
+}
+
+function runHermes(prompt: string, cmd: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    // `hermes chat -q` runs a single query non-interactively; `-Q` (quiet)
+    // suppresses the banner/spinner so stdout is the final response only.
+    const proc = spawnTool(cmd, ["chat", "-q", prompt, "-Q", "--no-restore-cwd"], {
+      env: { ...process.env, NO_COLOR: "1", TERM: "dumb" },
+      timeout: 600_000,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+    proc.stdout.on("data", (d) => (stdout += d.toString()));
+    proc.stderr.on("data", (d) => (stderr += d.toString()));
+
+    proc.on("close", (code) => {
+      if (code === 0) {
+        resolve(stripAnsi(stdout).trim());
+      } else {
+        reject(new Error(`hermes exited ${code}: ${stripAnsi(stderr).slice(0, 500)}`));
+      }
+    });
+
+    proc.on("error", (err) => reject(new Error(`Failed to start hermes: ${err.message}`)));
   });
 }
 

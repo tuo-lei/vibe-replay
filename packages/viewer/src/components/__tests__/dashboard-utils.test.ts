@@ -451,6 +451,14 @@ describe("provider display helpers", () => {
     expect(providerFamily("opencode")).toBe("green");
   });
 
+  it("labels Hermes as a first-class provider", () => {
+    expect(providerBadgeLabel("hermes")).toBe("Hermes");
+    expect(providerDisplayName("hermes")).toBe("Hermes");
+    expect(providerBadgeClass("hermes")).toBe("bg-terminal-red-subtle text-terminal-red");
+    expect(providerBarClass("hermes")).toBe("bg-terminal-red");
+    expect(providerFamily("hermes")).toBe("red");
+  });
+
   it("gives each Claude sub-kind a distinct warm hue", () => {
     expect(providerFamily("claude-code")).toBe("orange");
     expect(providerFamily("claude-cowork")).toBe("sienna");

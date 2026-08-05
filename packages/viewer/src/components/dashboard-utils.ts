@@ -476,6 +476,7 @@ export const PROVIDER_BADGE_COLORS: Record<string, string> = {
   codex: "bg-terminal-purple-subtle text-terminal-purple",
   cursor: "bg-terminal-blue-subtle text-terminal-blue",
   opencode: "bg-terminal-green-subtle text-terminal-green",
+  hermes: "bg-terminal-red-subtle text-terminal-red",
   pi: "bg-terminal-cyan-subtle text-terminal-cyan",
 };
 
@@ -486,6 +487,7 @@ const PROVIDER_BADGE_LABELS: Record<string, string> = {
   codex: "Codex",
   cursor: "Cursor",
   opencode: "OpenCode",
+  hermes: "Hermes",
   pi: "Pi",
 };
 
@@ -498,6 +500,7 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   codex: "Codex",
   cursor: "Cursor",
   opencode: "OpenCode",
+  hermes: "Hermes",
   pi: "Pi",
 };
 
@@ -510,6 +513,7 @@ const PROVIDER_BAR_COLORS: Record<string, string> = {
   codex: "bg-terminal-purple",
   cursor: "bg-terminal-blue",
   opencode: "bg-terminal-green",
+  hermes: "bg-terminal-red",
   pi: "bg-terminal-cyan",
 };
 
@@ -518,7 +522,7 @@ const PROVIDER_BAR_COLORS: Record<string, string> = {
 // Tailwind's static-class extraction happy and avoids template-string bugs.
 const PROVIDER_FAMILY: Record<
   string,
-  "orange" | "sienna" | "yellow" | "blue" | "purple" | "cyan" | "green" | "dim"
+  "orange" | "sienna" | "yellow" | "blue" | "purple" | "cyan" | "green" | "red" | "dim"
 > = {
   "claude-code": "orange",
   "claude-desktop": "yellow",
@@ -526,12 +530,13 @@ const PROVIDER_FAMILY: Record<
   codex: "purple",
   cursor: "blue",
   opencode: "green",
+  hermes: "red",
   pi: "cyan",
 };
 
 export function providerFamily(
   provider: string,
-): "orange" | "sienna" | "yellow" | "blue" | "purple" | "cyan" | "green" | "dim" {
+): "orange" | "sienna" | "yellow" | "blue" | "purple" | "cyan" | "green" | "red" | "dim" {
   return PROVIDER_FAMILY[provider] || "dim";
 }
 

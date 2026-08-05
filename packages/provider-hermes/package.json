@@ -1,0 +1,50 @@
+{
+  "name": "@vibe-replay/provider-hermes",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "files": [
+    "src"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/hermes/index.ts",
+      "import": "./src/hermes/index.ts"
+    },
+    "./config": {
+      "types": "./src/hermes/config.ts",
+      "import": "./src/hermes/config.ts"
+    },
+    "./discover": {
+      "types": "./src/hermes/discover.ts",
+      "import": "./src/hermes/discover.ts"
+    },
+    "./parser": {
+      "types": "./src/hermes/parser.ts",
+      "import": "./src/hermes/parser.ts"
+    },
+    "./sqlite": {
+      "types": "./src/hermes/sqlite.ts",
+      "import": "./src/hermes/sqlite.ts"
+    },
+    "./tool-mapping": {
+      "types": "./src/hermes/tool-mapping.ts",
+      "import": "./src/hermes/tool-mapping.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vibe-replay/provider-contract": "workspace:*",
+    "@vibe-replay/provider-core": "workspace:*",
+    "@vibe-replay/types": "workspace:*",
+    "sql.js": "^1.14.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "@vibe-replay/replay-core": "workspace:*",
+    "vitest": "^4.1.9"
+  }
+}

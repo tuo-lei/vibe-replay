@@ -2415,6 +2415,8 @@ export async function startServer(
             return auth.stdout.includes("0 credentials") ? "no credentials" : "configured";
           },
         ),
+      hermes: () =>
+        checkCli("hermes", "Hermes", "AI feedback via headless mode", "hermes", ["--version"]),
     };
 
     const requestedTool = c.req.query("tool");
