@@ -393,6 +393,7 @@ function buildMinimalCursorSubAgent(
       ? { description: input.description.trim() }
       : {}),
     prompt: typeof input.prompt === "string" ? redactSecrets(redactPath(input.prompt)) : "",
+    ...(typeof input.model === "string" && input.model.trim() ? { model: input.model.trim() } : {}),
     toolCalls: 0,
     thinkingBlocks: 0,
     textResponses: 0,

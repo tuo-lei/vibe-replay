@@ -48,6 +48,7 @@ export function mapCursorToolName(name: string): string {
     delete_file: "Delete",
     Task: "Agent",
     task_v2: "Agent",
+    Subagent: "Agent",
     todo_write: "TodoWrite",
     ask_question: "AskQuestion",
     semantic_search_full: "SemanticSearch",
@@ -344,11 +345,15 @@ export function mapToolArgs(toolName: string, args: unknown, resultText = ""): R
       ...(argsObj.includePattern ? { includePattern: argsObj.includePattern } : {}),
     };
   }
-  if (toolName === "task_v2" || toolName === "Task") {
+  if (toolName === "task_v2" || toolName === "Task" || toolName === "Subagent") {
+    // Cursor spells this key `subagentType` in SDK payloads and `subagent_type`
+    // in IDE transcripts; downstream consumers only read the snake_case form.
+    const subagentType = argsObj.subagentType ?? argsObj.subagent_type;
     return {
       ...(argsObj.description ? { description: argsObj.description } : {}),
       ...(argsObj.prompt ? { prompt: argsObj.prompt } : {}),
-      ...(argsObj.subagentType ? { subagent_type: argsObj.subagentType } : {}),
+      ...(subagentType ? { subagent_type: subagentType } : {}),
+      ...(argsObj.model ? { model: argsObj.model } : {}),
     };
   }
   if (toolName.startsWith("mcp-") && Array.isArray(argsObj.tools) && argsObj.tools.length > 0) {

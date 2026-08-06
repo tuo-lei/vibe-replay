@@ -1,8 +1,9 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, extname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import type { ContentBlock, ParsedTurn, SessionInfo } from "@vibe-replay/provider-contract";
 import type { DataSourceInfo, ProviderParseResult } from "@vibe-replay/provider-contract";
+import type { Scene, SubAgent } from "@vibe-replay/types";
 import {
   sanitizeCursorAssistantText,
   sanitizeCursorReasoningText,
@@ -117,6 +118,7 @@ async function parseCursorSessionWithDependencies(
           `cursor/projects/agent-transcripts/*.jsonl (thinking +${supplementedThinkingBlocks}, images +${supplementedUserImages})`,
         );
       }
+      await attachCursorSubagents(sqliteResult, transcriptPaths, deps);
       return sqliteResult;
     }
   }
@@ -191,6 +193,7 @@ async function parseCursorSessionWithDependencies(
       }
     }
   }
+  await attachCursorSubagents(jsonlResult, transcriptPaths, deps);
   return jsonlResult;
 }
 
@@ -264,6 +267,25 @@ interface ParseJsonlOptions {
 
 interface CursorToolResult {
   result: string;
+  timestamp?: string;
+}
+
+type ToolUseBlock = Extract<ContentBlock, { type: "tool_use" }>;
+
+interface ParsedCursorSubagentTranscript {
+  agentId: string;
+  sourcePrompt: string;
+  toolCalls: number;
+  thinkingBlocks: number;
+  textResponses: number;
+  scenes: Scene[];
+}
+
+interface PendingCursorSubagentTool {
+  scene: Extract<Scene, { type: "tool-call" }>;
+  id?: string;
+  rawName: string;
+  rawInput: unknown;
   timestamp?: string;
 }
 
@@ -490,6 +512,346 @@ async function parseCursorJsonl(
     },
     parseWarnings: parseWarnings.length > 0 ? parseWarnings : undefined,
   };
+}
+
+/**
+ * Cursor stores delegated-agent conversations beside the parent transcript:
+ *
+ *   agent-transcripts/<session>/<session>.jsonl
+ *   agent-transcripts/<session>/subagents/<agent>.jsonl
+ *
+ * The subagent filename is the only stable agent identifier. Parent `Task` /
+ * `Subagent` blocks do not carry that identifier, so correlate the two sources
+ * by the delegated prompt, which Cursor repeats inside the subagent's initial
+ * user message. We deliberately leave unmatched files unattached rather than
+ * guessing by position: parallel agents can finish in a different order.
+ */
+async function attachCursorSubagents(
+  parsed: ProviderParseResult,
+  transcriptPaths: string[],
+  deps: CursorParserDependencies,
+): Promise<void> {
+  if (transcriptPaths.length === 0) return;
+
+  const agentBlocks: ToolUseBlock[] = [];
+  for (const turn of parsed.turns) {
+    if (turn.role !== "assistant") continue;
+    for (const block of turn.blocks) {
+      if (block.type === "tool_use" && block.name === "Agent" && !block._subAgent) {
+        agentBlocks.push(block);
+      }
+    }
+  }
+  if (agentBlocks.length === 0) return;
+
+  const subagentPaths = await findCursorSubagentPaths(transcriptPaths);
+  if (subagentPaths.length === 0) return;
+
+  const parseWarnings: NonNullable<ProviderParseResult["parseWarnings"]> = [
+    ...(parsed.parseWarnings || []),
+  ];
+  const subagents: ParsedCursorSubagentTranscript[] = [];
+  for (const subagentPath of subagentPaths) {
+    const subagent = await parseCursorSubagentTranscript(subagentPath, deps, parseWarnings);
+    if (subagent) subagents.push(subagent);
+  }
+
+  const availableBlocks = new Set(agentBlocks.map((_, index) => index));
+  let attached = 0;
+  let attachedToolCalls = 0;
+  for (const subagent of subagents) {
+    const blockIndex = findMatchingAgentBlock(subagent.sourcePrompt, agentBlocks, availableBlocks);
+    if (blockIndex === undefined) continue;
+
+    const block = agentBlocks[blockIndex];
+    availableBlocks.delete(blockIndex);
+    block._subAgent = buildCursorSubagent(block, subagent);
+    attached++;
+    attachedToolCalls += subagent.toolCalls;
+  }
+
+  if (parseWarnings.length > 0) parsed.parseWarnings = parseWarnings;
+  if (attached === 0) return;
+
+  const attachedSummaries = agentBlocks.flatMap((block) => {
+    const subagent = block._subAgent;
+    if (!subagent) {
+      const rawAgentType =
+        typeof block.input?.subagent_type === "string" && block.input.subagent_type.trim()
+          ? block.input.subagent_type.trim()
+          : undefined;
+      if (!rawAgentType) return [];
+      return [
+        {
+          agentId: block.id,
+          agentType: normalizeCursorAgentType(rawAgentType),
+          description:
+            typeof block.input.description === "string" && block.input.description.trim()
+              ? block.input.description.trim()
+              : undefined,
+          toolCalls: 0,
+          model:
+            typeof block.input.model === "string" && block.input.model.trim()
+              ? block.input.model.trim()
+              : undefined,
+        },
+      ];
+    }
+    return [
+      {
+        agentId: subagent.agentId,
+        agentType: subagent.agentType,
+        description: subagent.description,
+        toolCalls: subagent.toolCalls,
+        model: subagent.model,
+      },
+    ];
+  });
+  const summaries = [...(parsed.subAgentSummary || [])];
+  const summarizedIds = new Set(summaries.map((summary) => summary.agentId));
+  for (const summary of attachedSummaries) {
+    if (summarizedIds.has(summary.agentId)) continue;
+    summaries.push(summary);
+    summarizedIds.add(summary.agentId);
+  }
+  parsed.subAgentSummary = summaries;
+  parsed.dataSourceInfo = withSupplement(
+    parsed.dataSourceInfo || defaultDataSourceInfo(parsed.dataSource),
+    `cursor subagent transcripts (${attached}/${subagents.length} linked, ${attachedToolCalls} tool calls)`,
+  );
+}
+
+async function findCursorSubagentPaths(transcriptPaths: string[]): Promise<string[]> {
+  const paths = new Set<string>();
+  for (const transcriptPath of transcriptPaths) {
+    const subagentsDir = join(dirname(transcriptPath), "subagents");
+    let entries: string[];
+    try {
+      entries = await readdir(subagentsDir);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.endsWith(".jsonl")) continue;
+      paths.add(join(subagentsDir, entry));
+    }
+  }
+  return sortByMtime([...paths]);
+}
+
+async function parseCursorSubagentTranscript(
+  filePath: string,
+  deps: CursorParserDependencies,
+  parseWarnings: NonNullable<ProviderParseResult["parseWarnings"]>,
+): Promise<ParsedCursorSubagentTranscript | null> {
+  let content: string;
+  try {
+    content = await readFile(filePath, "utf-8");
+  } catch {
+    addParseWarning(parseWarnings, {
+      kind: "unreadable-source",
+      source: "cursor subagent transcript",
+      message: "Skipped an unreadable Cursor subagent transcript",
+      sample: basename(filePath),
+    });
+    return null;
+  }
+
+  let sourcePrompt = "";
+  let toolCalls = 0;
+  let thinkingBlocks = 0;
+  let textResponses = 0;
+  const scenes: Scene[] = [];
+  const toolResults = new Map<string, CursorToolResult>();
+  const toolErrors = new Set<string>();
+  const toolImages = new Map<string, string[]>();
+  const pendingTools: PendingCursorSubagentTool[] = [];
+
+  const lines = content.split("\n");
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    const line = lines[lineIndex];
+    if (!line.trim()) continue;
+
+    let obj: any;
+    try {
+      obj = JSON.parse(line);
+    } catch {
+      addParseWarning(parseWarnings, {
+        kind: "malformed-json",
+        source: "cursor subagent transcript JSONL",
+        firstLine: lineIndex + 1,
+        message: "Skipped malformed subagent JSONL line",
+        sample: line,
+      });
+      continue;
+    }
+
+    const role = obj.role as "user" | "assistant" | undefined;
+    const contentBlocks = obj.message?.content;
+    if (!Array.isArray(contentBlocks)) continue;
+
+    for (const block of contentBlocks) {
+      if (block?.type !== "tool_result" || typeof block.tool_use_id !== "string") continue;
+      toolResults.set(block.tool_use_id, {
+        result: extractToolResultText(block),
+        timestamp: typeof obj.timestamp === "string" ? obj.timestamp : undefined,
+      });
+      if (block.is_error) toolErrors.add(block.tool_use_id);
+      const images = extractToolResultImages(block);
+      if (images.length > 0) toolImages.set(block.tool_use_id, images);
+    }
+
+    if (role === "user" && !sourcePrompt) {
+      sourcePrompt = contentBlocks
+        .filter(
+          (block: any): block is { type: "text"; text: string } =>
+            block?.type === "text" && typeof block.text === "string",
+        )
+        .map((block: { text: string }) => block.text)
+        .join("\n")
+        .trim();
+      continue;
+    }
+    if (role !== "assistant") continue;
+
+    const timestamp = typeof obj.timestamp === "string" ? obj.timestamp : undefined;
+    const hasInlineToolUse = contentBlocks.some((block: any) => block?.type === "tool_use");
+    for (const block of contentBlocks) {
+      if (block?.type === "text" && typeof block.text === "string") {
+        const text = sanitizeAssistantTextForReplay(block.text, hasInlineToolUse);
+        if (!text) continue;
+        scenes.push({ type: "text-response", content: text, timestamp });
+        textResponses++;
+        continue;
+      }
+
+      if (block?.type === "thinking" || block?.type === "reasoning") {
+        const rawThinking =
+          typeof block.thinking === "string"
+            ? block.thinking
+            : typeof block.text === "string"
+              ? block.text
+              : "";
+        const thinking = sanitizeCursorReasoningText(rawThinking);
+        if (!thinking) continue;
+        scenes.push({ type: "thinking", content: thinking, timestamp });
+        thinkingBlocks++;
+        continue;
+      }
+
+      if (block?.type !== "tool_use") continue;
+      const rawName =
+        typeof block.name === "string" && block.name.trim() ? block.name.trim() : "Tool";
+      const scene: Extract<Scene, { type: "tool-call" }> = {
+        type: "tool-call",
+        toolName: deps.mapCursorToolName(rawName),
+        input: deps.mapToolArgs(rawName, block.input),
+        result: "",
+        timestamp,
+        isError: false,
+      };
+      scenes.push(scene);
+      pendingTools.push({
+        scene,
+        ...(typeof block.id === "string" && block.id.trim() ? { id: block.id } : {}),
+        rawName,
+        rawInput: block.input,
+        timestamp,
+      });
+      toolCalls++;
+    }
+  }
+
+  for (const pending of pendingTools) {
+    if (!pending.id) continue;
+    const result = toolResults.get(pending.id);
+    if (result) {
+      pending.scene.result = result.result;
+      pending.scene.input = deps.mapToolArgs(pending.rawName, pending.rawInput, result.result);
+      const durationMs = durationBetween(pending.timestamp, result.timestamp);
+      if (durationMs !== undefined) pending.scene.durationMs = durationMs;
+    }
+    if (toolErrors.has(pending.id)) pending.scene.isError = true;
+    const images = toolImages.get(pending.id);
+    if (images?.length) pending.scene.images = images;
+  }
+
+  return {
+    agentId: basename(filePath, ".jsonl"),
+    sourcePrompt,
+    toolCalls,
+    thinkingBlocks,
+    textResponses,
+    scenes,
+  };
+}
+
+function findMatchingAgentBlock(
+  sourcePrompt: string,
+  blocks: ToolUseBlock[],
+  availableBlocks: Set<number>,
+): number | undefined {
+  const source = normalizePromptForMatch(sourcePrompt);
+  if (!source) return undefined;
+
+  let bestIndex: number | undefined;
+  let bestScore = 0;
+  for (const index of availableBlocks) {
+    const prompt = normalizePromptForMatch(blocks[index].input?.prompt);
+    if (!prompt) continue;
+
+    let score = 0;
+    if (prompt === source) {
+      score = 3;
+    } else if (prompt.length >= 8 && source.includes(prompt)) {
+      score = 2 + prompt.length / Math.max(prompt.length, source.length);
+    } else if (source.length >= 8 && prompt.includes(source)) {
+      score = 1 + source.length / Math.max(prompt.length, source.length);
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = index;
+    }
+  }
+  return bestScore > 0 ? bestIndex : undefined;
+}
+
+function normalizePromptForMatch(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return sanitizeCursorUserText(value).replace(/\s+/g, " ").trim();
+}
+
+function buildCursorSubagent(
+  block: ToolUseBlock,
+  transcript: ParsedCursorSubagentTranscript,
+): SubAgent {
+  const input = block.input || {};
+  const rawAgentType =
+    typeof input.subagent_type === "string" && input.subagent_type.trim()
+      ? input.subagent_type.trim()
+      : "unknown";
+  return {
+    agentId: transcript.agentId,
+    agentType: normalizeCursorAgentType(rawAgentType),
+    ...(typeof input.description === "string" && input.description.trim()
+      ? { description: input.description.trim() }
+      : {}),
+    prompt: typeof input.prompt === "string" ? input.prompt : transcript.sourcePrompt,
+    ...(typeof input.model === "string" && input.model.trim() ? { model: input.model.trim() } : {}),
+    toolCalls: transcript.toolCalls,
+    thinkingBlocks: transcript.thinkingBlocks,
+    textResponses: transcript.textResponses,
+    scenes: transcript.scenes,
+  };
+}
+
+function normalizeCursorAgentType(agentType: string): string {
+  const normalized = agentType.trim().toLowerCase();
+  if (normalized === "explore") return "Explore";
+  if (normalized === "plan") return "Plan";
+  if (normalized === "generalpurpose") return "general-purpose";
+  if (normalized === "shell") return "Shell";
+  return agentType;
 }
 
 function stripUserQueryWrapper(text: string): string {
@@ -873,8 +1235,6 @@ function inferToolName(result: string): string {
   if (/\$ |\bCommand\b|^\w+(\s+\w+){0,3}\s+-/.test(firstLine)) return "Bash";
   return "ToolOutput";
 }
-
-type ToolUseBlock = Extract<ContentBlock, { type: "tool_use" }>;
 
 function attachToolEvents(turns: ParsedTurn[], tools: ToolEvent[]): void {
   const markerBlocks: Array<{ block: ToolUseBlock; turn: ParsedTurn; blockIndex: number }> = [];

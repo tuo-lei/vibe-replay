@@ -46,19 +46,48 @@ export async function discoverOpencodeSessions(): Promise<SessionInfo[]> {
   }
 }
 
-export function listSessionsFromDb(db: Database): SessionInfo[] {
-  const rows: OpencodeSessionRow[] = rowValues(
-    db,
-    `
-      SELECT s.id, s.slug, s.title, s.directory, s.version, s.agent, s.model,
-             s.time_created, s.time_updated, s.cost, s.tokens_input, s.tokens_output,
-             p.worktree
+function tableColumns(db: Database, table: string): Set<string> {
+  try {
+    return new Set(rowValues(db, `PRAGMA table_info(${table})`).map((row) => String(row.name)));
+  } catch {
+    return new Set<string>();
+  }
+}
+
+/**
+ * opencode reshapes its `session` table between releases — `agent`, `model`,
+ * `cost`, and the token columns have all come and gone. Selecting them
+ * unconditionally makes discovery throw `no such column`, so we project only
+ * what the local schema actually has and let the optional fields stay
+ * undefined.
+ */
+function buildSessionSelect(db: Database): string {
+  const cols = tableColumns(db, "session");
+  const optional = ["version", "agent", "model", "cost", "tokens_input", "tokens_output"];
+  const selected = [
+    "s.id",
+    "s.slug",
+    "s.title",
+    "s.directory",
+    "s.time_created",
+    "s.time_updated",
+    ...optional.filter((c) => cols.has(c)).map((c) => `s.${c}`),
+  ];
+
+  const canJoinProject = cols.has("project_id") && tableColumns(db, "project").has("worktree");
+  if (canJoinProject) selected.push("p.worktree");
+
+  return `
+      SELECT ${selected.join(", ")}
       FROM session s
-      LEFT JOIN project p ON p.id = s.project_id
-      WHERE s.parent_id IS NULL
+      ${canJoinProject ? "LEFT JOIN project p ON p.id = s.project_id" : ""}
+      ${cols.has("parent_id") ? "WHERE s.parent_id IS NULL" : ""}
       ORDER BY s.time_updated DESC
-    `,
-  );
+    `;
+}
+
+export function listSessionsFromDb(db: Database): SessionInfo[] {
+  const rows: OpencodeSessionRow[] = rowValues(db, buildSessionSelect(db));
 
   // Aggregate stats are computed with a handful of GROUP BY queries (one per
   // metric) instead of per-session round trips, so discovery scales with the
