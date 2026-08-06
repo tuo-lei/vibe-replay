@@ -1,7 +1,12 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
-import type { ContentBlock, ParsedTurn, SessionInfo } from "@vibe-replay/provider-contract";
+import {
+  normalizeSubAgentType,
+  type ContentBlock,
+  type ParsedTurn,
+  type SessionInfo,
+} from "@vibe-replay/provider-contract";
 import type { DataSourceInfo, ProviderParseResult } from "@vibe-replay/provider-contract";
 import type { Scene, SubAgent } from "@vibe-replay/types";
 import {
@@ -557,14 +562,30 @@ async function attachCursorSubagents(
   }
 
   const availableBlocks = new Set(agentBlocks.map((_, index) => index));
+  const candidates: Array<{ subagentIndex: number; blockIndex: number; score: number }> = [];
+  for (let subagentIndex = 0; subagentIndex < subagents.length; subagentIndex++) {
+    for (const blockIndex of availableBlocks) {
+      const score = scorePromptMatch(
+        subagents[subagentIndex].sourcePrompt,
+        agentBlocks[blockIndex].input?.prompt,
+      );
+      if (score > 0) candidates.push({ subagentIndex, blockIndex, score });
+    }
+  }
+  candidates.sort(
+    (a, b) => b.score - a.score || a.subagentIndex - b.subagentIndex || a.blockIndex - b.blockIndex,
+  );
+
   let attached = 0;
   let attachedToolCalls = 0;
-  for (const subagent of subagents) {
-    const blockIndex = findMatchingAgentBlock(subagent.sourcePrompt, agentBlocks, availableBlocks);
-    if (blockIndex === undefined) continue;
-
-    const block = agentBlocks[blockIndex];
-    availableBlocks.delete(blockIndex);
+  const usedSubagents = new Set<number>();
+  for (const candidate of candidates) {
+    if (usedSubagents.has(candidate.subagentIndex)) continue;
+    if (!availableBlocks.has(candidate.blockIndex)) continue;
+    const subagent = subagents[candidate.subagentIndex];
+    const block = agentBlocks[candidate.blockIndex];
+    usedSubagents.add(candidate.subagentIndex);
+    availableBlocks.delete(candidate.blockIndex);
     block._subAgent = buildCursorSubagent(block, subagent);
     attached++;
     attachedToolCalls += subagent.toolCalls;
@@ -584,7 +605,7 @@ async function attachCursorSubagents(
       return [
         {
           agentId: block.id,
-          agentType: normalizeCursorAgentType(rawAgentType),
+          agentType: normalizeSubAgentType(rawAgentType),
           description:
             typeof block.input.description === "string" && block.input.description.trim()
               ? block.input.description.trim()
@@ -686,6 +707,8 @@ async function parseCursorSubagentTranscript(
       continue;
     }
 
+    if (obj.type === "progress") continue;
+
     const role = obj.role as "user" | "assistant" | undefined;
     const contentBlocks = obj.message?.content;
     if (!Array.isArray(contentBlocks)) continue;
@@ -786,34 +809,18 @@ async function parseCursorSubagentTranscript(
   };
 }
 
-function findMatchingAgentBlock(
-  sourcePrompt: string,
-  blocks: ToolUseBlock[],
-  availableBlocks: Set<number>,
-): number | undefined {
+function scorePromptMatch(sourcePrompt: unknown, blockPrompt: unknown): number {
   const source = normalizePromptForMatch(sourcePrompt);
-  if (!source) return undefined;
-
-  let bestIndex: number | undefined;
-  let bestScore = 0;
-  for (const index of availableBlocks) {
-    const prompt = normalizePromptForMatch(blocks[index].input?.prompt);
-    if (!prompt) continue;
-
-    let score = 0;
-    if (prompt === source) {
-      score = 3;
-    } else if (prompt.length >= 8 && source.includes(prompt)) {
-      score = 2 + prompt.length / Math.max(prompt.length, source.length);
-    } else if (source.length >= 8 && prompt.includes(source)) {
-      score = 1 + source.length / Math.max(prompt.length, source.length);
-    }
-    if (score > bestScore) {
-      bestScore = score;
-      bestIndex = index;
-    }
+  const prompt = normalizePromptForMatch(blockPrompt);
+  if (!source || !prompt) return 0;
+  if (prompt === source) return 3;
+  if (prompt.length >= 8 && source.includes(prompt)) {
+    return 2 + prompt.length / Math.max(prompt.length, source.length);
   }
-  return bestScore > 0 ? bestIndex : undefined;
+  if (source.length >= 8 && prompt.includes(source)) {
+    return 1 + source.length / Math.max(prompt.length, source.length);
+  }
+  return 0;
 }
 
 function normalizePromptForMatch(value: unknown): string {
@@ -832,7 +839,7 @@ function buildCursorSubagent(
       : "unknown";
   return {
     agentId: transcript.agentId,
-    agentType: normalizeCursorAgentType(rawAgentType),
+    agentType: normalizeSubAgentType(rawAgentType),
     ...(typeof input.description === "string" && input.description.trim()
       ? { description: input.description.trim() }
       : {}),
@@ -843,15 +850,6 @@ function buildCursorSubagent(
     textResponses: transcript.textResponses,
     scenes: transcript.scenes,
   };
-}
-
-function normalizeCursorAgentType(agentType: string): string {
-  const normalized = agentType.trim().toLowerCase();
-  if (normalized === "explore") return "Explore";
-  if (normalized === "plan") return "Plan";
-  if (normalized === "generalpurpose") return "general-purpose";
-  if (normalized === "shell") return "Shell";
-  return agentType;
 }
 
 function stripUserQueryWrapper(text: string): string {

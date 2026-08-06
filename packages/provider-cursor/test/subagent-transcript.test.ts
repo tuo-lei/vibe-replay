@@ -1,6 +1,6 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { transformToReplay } from "./helpers/transform.js";
 import { createCursorParser, parseCursorSession } from "../src/cursor/parser.js";
@@ -322,6 +322,93 @@ describe("Cursor subagent transcript ingestion", () => {
 
     const replay = transformToReplay(parsed, "cursor", "~/test");
     expect(replay.meta.subAgentSummary).toHaveLength(2);
+  });
+
+  it("assigns exact prompt matches before weaker containment matches", async () => {
+    const shortPrompt = "Inspect parser";
+    const exactPrompt = "Inspect parser deeply";
+    const broadAgentId = "broad-agent";
+    const exactAgentId = "exact-agent";
+    const { transcript } = await writeNestedSession(
+      [delegationBlock(shortPrompt), delegationBlock(exactPrompt)],
+      [
+        {
+          role: "user",
+          message: {
+            content: [{ type: "text", text: `Delegated task: ${exactPrompt} and tests` }],
+          },
+        },
+        {
+          role: "assistant",
+          message: { content: [{ type: "text", text: "Broad containment result" }] },
+        },
+      ],
+      broadAgentId,
+    );
+    const subagentsDir = join(dirname(transcript), "subagents");
+    const exactPath = join(subagentsDir, `${exactAgentId}.jsonl`);
+    await writeFile(
+      exactPath,
+      `${JSON.stringify({
+        role: "user",
+        message: { content: [{ type: "text", text: exactPrompt }] },
+      })}\n${JSON.stringify({
+        role: "assistant",
+        message: { content: [{ type: "text", text: "Exact result" }] },
+      })}\n`,
+      "utf-8",
+    );
+    await utimes(join(subagentsDir, `${broadAgentId}.jsonl`), new Date(1_000), new Date(1_000));
+    await utimes(exactPath, new Date(2_000), new Date(2_000));
+
+    const parsed = await parseCursorSession(transcript);
+    const agentBlocks = parsed.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.type === "tool_use" && block.name === "Agent");
+    const shortBlock = agentBlocks.find(
+      (block) => block.type === "tool_use" && block.input.prompt === shortPrompt,
+    );
+    const exactBlock = agentBlocks.find(
+      (block) => block.type === "tool_use" && block.input.prompt === exactPrompt,
+    );
+
+    expect(shortBlock?.type === "tool_use" && shortBlock._subAgent?.agentId).toBe(broadAgentId);
+    expect(exactBlock?.type === "tool_use" && exactBlock._subAgent?.agentId).toBe(exactAgentId);
+  });
+
+  it("skips progress records in subagent transcripts", async () => {
+    const prompt = "Inspect progress handling.";
+    const { transcript } = await writeNestedSession(
+      [delegationBlock(prompt)],
+      [
+        {
+          role: "user",
+          message: { content: [{ type: "text", text: `Delegated task: ${prompt}` }] },
+        },
+        {
+          type: "progress",
+          role: "assistant",
+          message: {
+            content: [{ type: "tool_use", name: "ReadFile", input: { path: "/repo/streamed.ts" } }],
+          },
+        },
+        {
+          role: "assistant",
+          message: {
+            content: [{ type: "tool_use", name: "ReadFile", input: { path: "/repo/real.ts" } }],
+          },
+        },
+      ],
+    );
+
+    const parsed = await parseCursorSession(transcript);
+    const agent = parsed.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.type === "tool_use" && block.name === "Agent");
+    expect(agent?.type === "tool_use" && agent._subAgent?.toolCalls).toBe(1);
+    expect(agent?.type === "tool_use" && agent._subAgent?.scenes).toEqual([
+      expect.objectContaining({ type: "tool-call", input: { file_path: "/repo/real.ts" } }),
+    ]);
   });
 
   it("keeps all scenes for large subagent transcripts instead of silently capping them", async () => {

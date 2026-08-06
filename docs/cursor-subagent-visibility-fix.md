@@ -1,7 +1,6 @@
 # Cursor subagent visibility — investigation and fix
 
-Status: **code changed, uncommitted, and fully verified.** Nothing has been
-staged or committed; the working tree holds the changes.
+Status: **fully verified.**
 
 ## TL;DR
 
@@ -116,7 +115,7 @@ triggering Bug 3.
 
 Actual local schema (`~/.local/share/opencode/opencode.db`, 18 sessions):
 
-```
+```text
 id project_id parent_id slug directory title version share_url
 summary_additions summary_deletions summary_files summary_diffs
 revert permission time_created time_updated time_compacting time_archived
@@ -153,7 +152,7 @@ Provider inventory, end to end:
 | pi | listing crashed | 70 sessions |
 
 Suite: `pnpm lint:check` clean, `pnpm test` green across all 11 packages —
-1107 tests, up from 1092 (15 new regression tests, no existing test touched).
+1110 tests, up from 1092 (18 regression tests added).
 
 The new parser path was also checked against four real local sessions, without
 printing conversation content:
