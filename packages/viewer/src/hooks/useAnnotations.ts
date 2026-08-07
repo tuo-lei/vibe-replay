@@ -67,29 +67,37 @@ export interface AnnotationActions {
   aiCoachRunning: boolean;
 }
 
-const LS_PREFIX = "vibe-replay-annotations-";
+const LEGACY_LS_PREFIX = "vibe-replay-annotations-";
+const SCOPED_LS_PREFIX = "vibe-replay-provider-annotations-";
 
 export function legacyAnnotationStorageKey(sessionId: string): string {
-  return LS_PREFIX + sessionId;
+  return LEGACY_LS_PREFIX + sessionId;
 }
 
 export function annotationStorageKey(provider: string, sessionId: string): string {
-  return `${LS_PREFIX}${encodeURIComponent(provider)}:${sessionId}`;
+  return `${SCOPED_LS_PREFIX}${encodeURIComponent(provider)}:${encodeURIComponent(sessionId)}`;
 }
 
 function loadAnnotationDraft(session: ReplaySession, isEditor: boolean): Annotation[] {
   const embedded = session.annotations ?? [];
   if (isEditor) return embedded;
+  let drafts: Array<string | null>;
   try {
-    const draft =
-      localStorage.getItem(annotationStorageKey(session.meta.provider, session.meta.sessionId)) ??
-      localStorage.getItem(legacyAnnotationStorageKey(session.meta.sessionId));
-    if (draft) {
-      const parsed = JSON.parse(draft) as Annotation[];
-      if (parsed.length > 0 || embedded.length === 0) return parsed;
-    }
+    drafts = [
+      localStorage.getItem(annotationStorageKey(session.meta.provider, session.meta.sessionId)),
+      localStorage.getItem(legacyAnnotationStorageKey(session.meta.sessionId)),
+    ];
   } catch {
-    /* ignore malformed or unavailable local drafts */
+    return embedded;
+  }
+  for (const draft of drafts) {
+    if (draft === null) continue;
+    try {
+      const parsed: unknown = JSON.parse(draft);
+      if (Array.isArray(parsed)) return parsed as Annotation[];
+    } catch {
+      // Try the fallback draft when the scoped value is malformed.
+    }
   }
   return embedded;
 }

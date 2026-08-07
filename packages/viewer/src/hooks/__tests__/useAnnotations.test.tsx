@@ -8,7 +8,11 @@ import {
   useAnnotations,
 } from "../useAnnotations";
 
-function session(provider: string): ReplaySession {
+function session(provider: string, sceneCount = 30): ReplaySession {
+  const scenes: ReplaySession["scenes"] = Array.from({ length: sceneCount }, (_, index) => ({
+    type: "user-prompt",
+    content: `Prompt ${index}`,
+  }));
   return {
     meta: {
       sessionId: "shared-session",
@@ -17,9 +21,9 @@ function session(provider: string): ReplaySession {
       startTime: "2026-01-01T00:00:00.000Z",
       cwd: "~/project",
       project: "~/project",
-      stats: { sceneCount: 0, userPrompts: 0, toolCalls: 0 },
+      stats: { sceneCount, userPrompts: sceneCount, toolCalls: 0 },
     },
-    scenes: [],
+    scenes,
   };
 }
 
@@ -41,15 +45,20 @@ describe("useAnnotations storage identity", () => {
     expect(annotationStorageKey("claude-code", "shared-session")).not.toBe(
       annotationStorageKey("cursor", "shared-session"),
     );
+    expect(annotationStorageKey("claude-code", "shared-session")).not.toBe(
+      legacyAnnotationStorageKey("claude-code:shared-session"),
+    );
   });
 
-  it("loads and migrates legacy session-only drafts", async () => {
+  it.each([30, 500])("loads and migrates legacy drafts for %i scenes", async (sceneCount) => {
     localStorage.setItem(
       legacyAnnotationStorageKey("shared-session"),
       JSON.stringify([annotation]),
     );
 
-    const { result } = renderHook(() => useAnnotations(session("claude-code"), "embedded"));
+    const { result } = renderHook(() =>
+      useAnnotations(session("claude-code", sceneCount), "embedded"),
+    );
     expect(result.current.annotations).toEqual([annotation]);
 
     await waitFor(() => {
@@ -60,27 +69,38 @@ describe("useAnnotations storage identity", () => {
     expect(localStorage.getItem(legacyAnnotationStorageKey("shared-session"))).toBeNull();
   });
 
-  it("reloads provider-scoped drafts when the replay identity changes", async () => {
-    const cursorAnnotation = { ...annotation, id: "cursor-note", body: "Cursor note" };
-    localStorage.setItem(
-      annotationStorageKey("claude-code", "shared-session"),
-      JSON.stringify([annotation]),
-    );
-    localStorage.setItem(
-      annotationStorageKey("cursor", "shared-session"),
-      JSON.stringify([cursorAnnotation]),
-    );
+  it("preserves an intentionally empty scoped draft over embedded annotations", () => {
+    localStorage.setItem(annotationStorageKey("claude-code", "shared-session"), "[]");
+    const replay = { ...session("claude-code"), annotations: [annotation] };
 
-    const { result, rerender } = renderHook(
-      ({ provider }) => useAnnotations(session(provider), "embedded"),
-      { initialProps: { provider: "claude-code" } },
-    );
-    expect(result.current.annotations).toEqual([annotation]);
-
-    rerender({ provider: "cursor" });
-    await waitFor(() => expect(result.current.annotations).toEqual([cursorAnnotation]));
-    expect(localStorage.getItem(annotationStorageKey("cursor", "shared-session"))).toBe(
-      JSON.stringify([cursorAnnotation]),
-    );
+    const { result } = renderHook(() => useAnnotations(replay, "embedded"));
+    expect(result.current.annotations).toEqual([]);
   });
+
+  it.each([30, 500])(
+    "reloads provider-scoped drafts across %i-scene replay changes",
+    async (sceneCount) => {
+      const cursorAnnotation = { ...annotation, id: "cursor-note", body: "Cursor note" };
+      localStorage.setItem(
+        annotationStorageKey("claude-code", "shared-session"),
+        JSON.stringify([annotation]),
+      );
+      localStorage.setItem(
+        annotationStorageKey("cursor", "shared-session"),
+        JSON.stringify([cursorAnnotation]),
+      );
+
+      const { result, rerender } = renderHook(
+        ({ provider }) => useAnnotations(session(provider, sceneCount), "embedded"),
+        { initialProps: { provider: "claude-code" } },
+      );
+      expect(result.current.annotations).toEqual([annotation]);
+
+      rerender({ provider: "cursor" });
+      await waitFor(() => expect(result.current.annotations).toEqual([cursorAnnotation]));
+      expect(localStorage.getItem(annotationStorageKey("cursor", "shared-session"))).toBe(
+        JSON.stringify([cursorAnnotation]),
+      );
+    },
+  );
 });
