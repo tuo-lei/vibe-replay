@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/vibe-replay)](https://www.npmjs.com/package/vibe-replay)
 [![license](https://img.shields.io/npm/l/vibe-replay)](./LICENSE)
 
-Turn Claude Code, Cursor, Codex, and Pi sessions into shareable, interactive replays.
+Turn Claude, Cursor, Codex, OpenCode, Hermes, and Pi sessions into shareable, interactive replays.
 
 ### The problem
 
@@ -31,7 +31,7 @@ npx vibe-replay
 
 ### All your sessions, one place
 
-Launch with `npx vibe-replay -d` and see every Claude Code, Cursor, Codex, and Pi session across all projects — with a daily activity snapshot, activity heatmaps, cost totals, and project analytics. Search sessions, filter by git repo, and generate any replay in one click.
+Launch with `npx vibe-replay -d` and see every Claude, Cursor, Codex, OpenCode, Hermes, and Pi session across all projects — with a daily activity snapshot, activity heatmaps, cost totals, and project analytics. Search sessions, filter by git repo, and generate any replay in one click.
 
 <p align="center">
   <img src="docs/screenshots/dashboard.png" alt="Local dashboard — browse sessions, activity heatmap, project analytics" width="800" />
@@ -70,7 +70,7 @@ vibe-replay is also available as a [Claude Code plugin](https://code.claude.com/
 ### What the plugin gives your agent
 
 - **Auto-discover sessions** — finds the current session's JSONL file via `$CLAUDE_SESSION_ID`
-- **Search past sessions** — uses `vibe-replay sessions` to find Claude Code, Cursor, Codex, and Pi sessions by project, provider, or fuzzy query
+- **Search past sessions** — uses `vibe-replay sessions` to find Claude, Cursor, Codex, OpenCode, Hermes, and Pi sessions by project, provider, or fuzzy query
 - **Generate PR artifacts** — markdown summary + animated GIF + SVG, ready for PR descriptions
 - **Generate HTML replays** — self-contained interactive replay files
 - **PR workflow integration** — agent automatically embeds replay context when you create PRs
@@ -125,7 +125,7 @@ curl -o ~/.claude/skills/replay/SKILL.md \
 - **Zero config** — one command, no setup, no account. Works instantly with existing sessions
 - **Cross-platform** — runs on macOS, Linux, and Windows
 - **Single HTML file** — self-contained, works offline, and makes no automatic external requests. Remote image attachments load only after an explicit click
-- **Claude Code, Cursor, Codex, and Pi** — all providers auto-discovered, including multi-file and resumed sessions
+- **Claude, Cursor, Codex, OpenCode, Hermes, and Pi** — all providers auto-discovered, including multi-file and resumed sessions
 - **Local dashboard** — browse and search every session, filter by git repo, with activity heatmaps, per-project analytics, and a personal-insights view across all your coding
 - **Share & export** — GitHub Gist, animated SVG, GIF, markdown summary, or cloud upload. Secret redaction built in
 - **Sub-agent visualization** — see delegated tool calls and sub-agent trees rendered inline
@@ -141,6 +141,8 @@ curl -o ~/.claude/skills/replay/SKILL.md \
 | Claude Cowork | Supported (agent-mode sessions) |
 | Codex | Supported (web search, GPT-5.x models, task timings, memory mode) |
 | Cursor | Supported (SQLite + JSONL + SDK store, auto-discovered) |
+| OpenCode | Supported (SQLite sessions, tools, reasoning, and compaction) |
+| Hermes | Supported (SQLite sessions, tools, reasoning, and compaction) |
 | Pi | Supported (JSONL tree sessions, branching, compaction summaries) |
 | More coming soon | — |
 
@@ -148,9 +150,9 @@ curl -o ~/.claude/skills/replay/SKILL.md \
 
 ```
 AI session files  →  vibe-replay  →  self-contained HTML
-(Claude Code,        (discover,       (animated viewer,
- Cursor, Codex, Pi)   parse,           insights panel,
-                      redact,          offline-ready,
+(Claude/Cursor,      (discover,       (animated viewer,
+ Codex/OpenCode,      parse,           insights panel,
+ Hermes/Pi)           redact,          offline-ready,
                       transform)       shareable)
 ```
 

@@ -35,28 +35,32 @@ See `src/hooks/__tests__/usePlayback.test.tsx` for the pattern.
 
 ## Architecture
 
-pnpm monorepo with three packages:
+pnpm monorepo with shared foundations, provider packages, and app layers:
 
-- **`packages/cli`** — CLI tool published as `vibe-replay` on npm. Discovers sessions, parses them, transforms into scenes, and generates output.
-- **`packages/viewer`** — React app built into a single HTML file (~430KB) via `vite-plugin-singlefile`. Handles playback, annotations, theming, and search.
 - **`packages/types`** — Shared TypeScript types (`@vibe-replay/types`). Both CLI and viewer re-export from here.
+- **`packages/provider-contract` / `provider-core`** — Stable provider interfaces and shared discovery/parser utilities.
+- **`packages/provider-*`** — Provider-owned discovery and parsing for Claude, Codex, Cursor, OpenCode, Hermes, and Pi.
+- **`packages/providers-default`** — Default provider registry and cross-provider discovery deduplication.
+- **`packages/replay-core`** — Provider-neutral scene transformation, redaction, token estimates, and pricing.
+- **`packages/cli`** — CLI tool published as `vibe-replay` on npm. Discovers sessions, generates replays, and serves the local dashboard/editor.
+- **`packages/viewer`** — React app built into a single HTML file (~920KB) via `vite-plugin-singlefile`. Handles playback, annotations, insights, theming, and search.
 
 ### Data flow
 
 ```
 Session files (JSONL / SQLite)
-  → providers/discover.ts    find sessions on disk
-  → providers/parser.ts      parse into ParsedTurn[]
-  → transform.ts             convert to Scene[], redact secrets/paths
-  → generator.ts             inject JSON into viewer HTML
-  → output                   vibe-replay/<slug>/index.html + replay.json
+  → provider-*/discover.ts       find sessions on disk
+  → provider-*/parser.ts         parse into ParsedTurn[]
+  → replay-core/transform.ts     convert to Scene[], redact secrets/paths
+  → cli/generator.ts             inject JSON into viewer HTML
+  → output                       vibe-replay/<slug>/index.html + replay.json
 ```
 
 ### Dashboard terminology and caches
 
 The dashboard uses product terminology that distinguishes original AI sessions from generated replays:
 
-- **Sessions** in the UI are **Source Sessions**: raw/discovered AI coding sessions from providers such as Claude, Cursor, Codex, and Pi. They may or may not have a generated replay yet.
+- **Sessions** in the UI are **Source Sessions**: raw/discovered AI coding sessions from providers such as Claude, Cursor, Codex, OpenCode, Hermes, and Pi. They may or may not have a generated replay yet.
 - **Raw transcript/provider data** is provider-owned local storage, such as Claude JSONL, Codex JSONL, Pi JSONL under `~/.pi/agent/sessions`, or Cursor SQLite/globalStorage data.
 - **Replays** are generated Vibe Replay artifacts under `vibe-replay/<slug>/`, including `index.html` and `replay.json`.
 - **Replay Summaries** are lightweight listings of generated replay artifacts.
@@ -149,10 +153,11 @@ The viewer runs in three modes, determined at load time:
 
 ### Adding a new provider
 
-1. Create `providers/<name>/discover.ts` — scan disk for sessions, return `SessionInfo[]`
-2. Create `providers/<name>/parser.ts` — parse files into `ParsedTurn[]`
-3. Create `providers/<name>/index.ts` — implement the `Provider` interface
-4. Register in `providers/index.ts`
+1. Create `packages/provider-<name>/src/<name>/discover.ts` — scan disk for sessions, return `SessionInfo[]`
+2. Create `packages/provider-<name>/src/<name>/parser.ts` — parse files into `ParsedTurn[]`
+3. Create `packages/provider-<name>/src/<name>/index.ts` — implement the `Provider` interface
+4. Register the provider in `packages/providers-default/src/index.ts`
+5. Add the package test command to the root `pnpm test` chain
 
 ## Build pipeline
 
@@ -169,7 +174,7 @@ The viewer is built once, then the CLI embeds it. The final HTML output is the v
 
 - **pnpm** only — no npm/yarn
 - **TypeScript strict mode**, ESM throughout
-- **Viewer must stay under 500KB** after build (currently ~430KB)
+- **Viewer must stay under 1MB** after build (currently ~920KB)
 - **Output HTML must be fully self-contained** — no automatic external requests; remote media requires explicit user consent
 - **Shared types** live in `packages/types` (`@vibe-replay/types`) — CLI and viewer re-export from there
 - **Secret redaction**: `transform.ts` strips API keys, tokens, PEM keys, paths. `scan.ts` does a second pass on the final output.
