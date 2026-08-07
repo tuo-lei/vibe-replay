@@ -2,7 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { PrLink, SubAgent, TurnStat } from "@vibe-replay/types";
 import { isSystemGeneratedMessage } from "@vibe-replay/provider-core/clean-prompt";
-import { estimateActiveDuration } from "@vibe-replay/provider-core/duration";
+import { estimateActiveDuration, getTimestampBounds } from "@vibe-replay/provider-core/duration";
 import type { ContentBlock, ParsedTurn, RawMessage } from "@vibe-replay/provider-contract";
 import type { Compaction, ProviderParseResult, TokenUsage } from "@vibe-replay/provider-contract";
 import { addParseWarning } from "@vibe-replay/provider-contract/warnings";
@@ -30,6 +30,11 @@ export interface ParseClaudeCodeLinesOptions {
    * omit it for sources (e.g. Cowork audit.jsonl) that don't have subagent files.
    */
   subagentsSourcePath?: string;
+  /**
+   * Derive session bounds from all event timestamps. Cowork disables this so
+   * its sibling metadata timestamp keeps the existing overlay semantics.
+   */
+  deriveTimestampBounds?: boolean;
 }
 
 export async function parseClaudeCodeLines(
@@ -217,8 +222,9 @@ export async function parseClaudeCodeLines(
     }
 
     if (obj.type === "file-history-snapshot") {
-      if (!startTime && obj.snapshot?.timestamp) {
-        startTime = obj.snapshot.timestamp;
+      if (obj.snapshot?.timestamp) {
+        if (!startTime) startTime = obj.snapshot.timestamp;
+        allTimestamps.push(obj.snapshot.timestamp);
       }
       const backups = obj.snapshot?.trackedFileBackups;
       if (backups && typeof backups === "object") {
@@ -605,6 +611,12 @@ export async function parseClaudeCodeLines(
           ...(worktreeBranch ? { branch: worktreeBranch } : {}),
         }
       : undefined;
+
+  if (options.deriveTimestampBounds !== false) {
+    const timestampBounds = getTimestampBounds(allTimestamps);
+    startTime = timestampBounds.startTime || startTime;
+    endTime = timestampBounds.endTime || endTime;
+  }
 
   return {
     sessionId,

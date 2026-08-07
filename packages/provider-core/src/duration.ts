@@ -30,3 +30,30 @@ export function estimateActiveDuration(
 
   return active > 0 ? active : undefined;
 }
+
+/** Return the earliest and latest valid timestamps without assuming input order. */
+export function getTimestampBounds(timestamps: Array<string | undefined>): {
+  startTime?: string;
+  endTime?: string;
+} {
+  let startTime: string | undefined;
+  let endTime: string | undefined;
+  let startMs = Number.POSITIVE_INFINITY;
+  let endMs = Number.NEGATIVE_INFINITY;
+
+  for (const timestamp of timestamps) {
+    if (!timestamp) continue;
+    const time = Date.parse(timestamp);
+    if (!Number.isFinite(time)) continue;
+    if (time < startMs) {
+      startMs = time;
+      startTime = timestamp;
+    }
+    if (time > endMs) {
+      endMs = time;
+      endTime = timestamp;
+    }
+  }
+
+  return { startTime, endTime };
+}

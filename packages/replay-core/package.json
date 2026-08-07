@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@vibe-replay/provider-contract": "workspace:*",
+    "@vibe-replay/provider-core": "workspace:*",
     "@vibe-replay/types": "workspace:*"
   },
   "devDependencies": {

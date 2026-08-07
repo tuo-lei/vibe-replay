@@ -1,4 +1,5 @@
 import { homedir } from "node:os";
+import { getTimestampBounds } from "@vibe-replay/provider-core/duration";
 import { estimateCost, estimateCostSimple, getModelContextLimit } from "./pricing.js";
 import { normalizeSubAgentType, type ProviderParseResult } from "@vibe-replay/provider-contract";
 import { compactWarningSample } from "@vibe-replay/provider-contract/warnings";
@@ -160,6 +161,14 @@ export function transformToReplay(
   // prompt-to-turn-end wall time inferred from local bubble timestamps.
   const durationMs =
     parsed.totalDurationMs && parsed.totalDurationMs > 0 ? parsed.totalDurationMs : undefined;
+  const turnTimestampBounds = getTimestampBounds(parsed.turns.map((turn) => turn.timestamp));
+  const startTime =
+    parsed.startTime ||
+    turnTimestampBounds.startTime ||
+    parsed.endTime ||
+    options?.generator?.generatedAt ||
+    new Date().toISOString();
+  const endTime = parsed.endTime || turnTimestampBounds.endTime;
 
   return {
     meta: {
@@ -169,8 +178,8 @@ export function transformToReplay(
       provider,
       dataSource: parsed.dataSource,
       dataSourceInfo: parsed.dataSourceInfo,
-      startTime: parsed.startTime || new Date().toISOString(),
-      endTime: parsed.endTime,
+      startTime,
+      endTime,
       model: parsed.model,
       cwd: redactFilePath(parsed.cwd),
       project,
