@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
+import { estimateActiveDuration } from "@vibe-replay/provider-core/duration";
 import { shortenPath } from "@vibe-replay/provider-core/utils";
 import type { ContentBlock, ParsedTurn, SessionInfo } from "@vibe-replay/provider-contract";
 import type { ProviderParseResult, TokenUsage } from "@vibe-replay/provider-contract";
@@ -686,19 +687,4 @@ function buildTurnStat(
     ...(tokenUsage ? { tokenUsage } : {}),
     ...(contextTokens ? { contextTokens } : {}),
   };
-}
-
-function estimateActiveDuration(timestamps: string[]): number | undefined {
-  if (timestamps.length < 2) return undefined;
-  const sorted = timestamps
-    .map((timestamp) => Date.parse(timestamp))
-    .filter((timestamp) => !Number.isNaN(timestamp))
-    .sort((a, b) => a - b);
-  if (sorted.length < 2) return undefined;
-  let total = 0;
-  for (let i = 1; i < sorted.length; i++) {
-    const gap = sorted[i] - sorted[i - 1];
-    if (gap > 0 && gap < 30 * 60_000) total += gap;
-  }
-  return total || undefined;
 }

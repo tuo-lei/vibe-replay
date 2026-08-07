@@ -574,4 +574,44 @@ describe("Pi parser", () => {
       expect(parsed.dataSourceInfo?.notes).toEqual(["1 off-branch Pi entries were omitted."]);
     });
   });
+
+  it.each([10, 40])(
+    "caps a %i-minute idle gap consistently with other providers",
+    async (gapMinutes) => {
+      const start = "2026-01-01T00:00:00.000Z";
+      const end = new Date(Date.parse(start) + gapMinutes * 60_000).toISOString();
+      const lines = [
+        {
+          type: "session",
+          version: 3,
+          id: `pi-duration-${gapMinutes}`,
+          timestamp: start,
+          cwd: "/Users/test/project",
+        },
+        {
+          type: "message",
+          id: "user1",
+          parentId: null,
+          timestamp: start,
+          message: { role: "user", content: [{ type: "text", text: "Start work" }] },
+        },
+        {
+          type: "message",
+          id: "assistant1",
+          parentId: "user1",
+          timestamp: end,
+          message: {
+            role: "assistant",
+            model: "gpt-5.5",
+            content: [{ type: "text", text: "Done" }],
+          },
+        },
+      ];
+
+      await withPiFixture(lines, async (path) => {
+        const parsed = await parsePiSession(path);
+        expect(parsed.totalDurationMs).toBe(5 * 60_000);
+      });
+    },
+  );
 });
