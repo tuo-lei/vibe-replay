@@ -48,6 +48,12 @@ describe("discoverPiSessions", () => {
               name: "apply_patch",
               arguments: { input: "*** Begin Patch\n*** Add File: auth.ts\n+ok\n*** End Patch" },
             },
+            {
+              type: "toolCall",
+              id: "other-patch-1",
+              name: "apply_patch",
+              arguments: { operation: "custom" },
+            },
           ],
         },
       },
@@ -65,7 +71,7 @@ describe("discoverPiSessions", () => {
     expect(sessions[0]).toMatchObject({
       sessionId: "pi-discovery-session",
       promptCount: 1,
-      toolCallCount: 2,
+      toolCallCount: 3,
       editCountEst: 1,
       model: "gpt-5.5",
     });
