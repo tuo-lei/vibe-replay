@@ -83,6 +83,18 @@ describe("scanForSecrets", () => {
     expect(findings.length).toBeGreaterThan(0);
   });
 
+  it("does not extend short env values across serialized newlines", () => {
+    expect(scanForSecrets(JSON.stringify({ output: "GH_TOKEN=set\nstore" }))).toEqual([]);
+    expect(
+      scanForSecrets(JSON.stringify({ patch: "export const auth = true;\n*** End Patch" })),
+    ).toEqual([]);
+  });
+
+  it("does not combine segmented source strings into a database URI", () => {
+    const source = ["postgres://", "admin", ":", "supersecret", "@", "db.example.com"];
+    expect(scanForSecrets(JSON.stringify({ source }))).toEqual([]);
+  });
+
   it("skips already-redacted values", () => {
     const findings = scanForSecrets(`{"key": "sk-pro...[REDACTED]"}`);
     expect(findings).toEqual([]);
