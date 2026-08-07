@@ -36,4 +36,14 @@ describe("Claude Code: promptSource field", () => {
     const userScenes = replay.scenes.filter((s) => s.type === "user-prompt");
     expect(userScenes).toHaveLength(2);
   });
+
+  it("derives session bounds from message timestamps when no file-history snapshot exists", async () => {
+    const parsed = await parseClaudeCodeSession(FIXTURE);
+    expect(parsed.startTime).toBe("2026-06-09T09:00:00Z");
+    expect(parsed.endTime).toBe("2026-06-09T09:01:05Z");
+
+    const replay = transformToReplay(parsed, "claude-code", "~/test");
+    expect(replay.meta.startTime).toBe("2026-06-09T09:00:00Z");
+    expect(replay.meta.endTime).toBe("2026-06-09T09:01:05Z");
+  });
 });

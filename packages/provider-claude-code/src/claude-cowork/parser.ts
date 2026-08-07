@@ -148,7 +148,7 @@ export async function parseClaudeCoworkSession(
 
   // Cowork transcripts are self-contained — no sibling `agents/` directory, so
   // subagentsSourcePath is intentionally omitted (parser will use an empty map).
-  const result = await parseClaudeCodeLines(normalized);
+  const result = await parseClaudeCodeLines(normalized, { deriveTimestampBounds: false });
   if (parseWarnings.length > 0) {
     result.parseWarnings = [...parseWarnings, ...(result.parseWarnings || [])];
   }

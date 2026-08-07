@@ -361,6 +361,9 @@ importers:
       '@vibe-replay/provider-contract':
         specifier: workspace:*
         version: link:../provider-contract
+      '@vibe-replay/provider-core':
+        specifier: workspace:*
+        version: link:../provider-core
       '@vibe-replay/types':
         specifier: workspace:*
         version: link:../types

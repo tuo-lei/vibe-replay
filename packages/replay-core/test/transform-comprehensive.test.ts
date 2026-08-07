@@ -653,6 +653,23 @@ describe("transform — metadata", () => {
     expect(replay.meta.generator).toEqual(gen);
   });
 
+  it("derives missing session bounds from valid turn timestamps", () => {
+    const replay = transformToReplay(
+      buildParsed({
+        turns: [
+          assistantTextTurn("Done", { timestamp: "2025-01-01T00:02:00Z" }),
+          userTurn("Start", { timestamp: "2025-01-01T00:00:00Z" }),
+          assistantTextTurn("Invalid timestamp", { timestamp: "not-a-date" }),
+        ],
+      }),
+      "claude-code",
+      "~/test",
+    );
+
+    expect(replay.meta.startTime).toBe("2025-01-01T00:00:00Z");
+    expect(replay.meta.endTime).toBe("2025-01-01T00:02:00Z");
+  });
+
   it("includes git repo metadata when provided by the caller", () => {
     const replay = transformToReplay(buildParsed({}), "claude-code", "~/test", {
       gitRepo: "tuo-lei/vibe-replay",
