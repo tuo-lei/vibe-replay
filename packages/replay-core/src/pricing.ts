@@ -91,6 +91,11 @@ const DEFAULT_PRICING = MODEL_PRICING.sonnet;
  * Checks specific version patterns first, then falls back to family names.
  */
 export function getModelPricing(model: string): ModelPricing {
+  return getKnownModelPricing(model) || DEFAULT_PRICING;
+}
+
+/** Resolve pricing only when the model family/version is known. */
+export function getKnownModelPricing(model: string): ModelPricing | undefined {
   const lower = model.toLowerCase();
   // GPT-5.x prices from OpenAI's public API pricing table.
   // Check mini before gpt-5.4 so "gpt-5.4-mini" is not shadowed.
@@ -98,17 +103,54 @@ export function getModelPricing(model: string): ModelPricing {
   if (lower.includes("gpt-5.5")) return MODEL_PRICING["gpt-5.5"];
   if (lower.includes("gpt-5.4")) return MODEL_PRICING["gpt-5.4"];
   // Opus: 4.6/4.5 → new pricing, 4.1 and earlier → legacy
-  if (lower.includes("opus-4-6") || lower.includes("opus-4-5")) return MODEL_PRICING["opus-4-new"];
+  const opusVersion = parseClaudeVersion(lower, "opus");
+  if (isUnsupportedClaudeVersion(opusVersion)) return undefined;
+  if (opusVersion?.major === 4 && (opusVersion.minor === 5 || opusVersion.minor === 6))
+    return MODEL_PRICING["opus-4-new"];
   if (lower.includes("opus")) return MODEL_PRICING.opus;
   // Sonnet: 4.6/4.5 → new pricing, Sonnet 4 → explicit, earlier → standard
-  if (lower.includes("sonnet-4-6") || lower.includes("sonnet-4-5"))
+  const sonnetVersion = parseClaudeVersion(lower, "sonnet");
+  if (isUnsupportedClaudeVersion(sonnetVersion)) return undefined;
+  if (sonnetVersion?.major === 4 && (sonnetVersion.minor === 5 || sonnetVersion.minor === 6))
     return MODEL_PRICING["sonnet-4-new"];
-  if (lower.includes("sonnet-4")) return MODEL_PRICING["sonnet-4"];
+  if (sonnetVersion?.major === 4 || lower.includes("sonnet-4")) return MODEL_PRICING["sonnet-4"];
   if (lower.includes("sonnet")) return MODEL_PRICING.sonnet;
   // Haiku: 4.5/4.6 → new pricing, 3.5 and earlier → legacy
-  if (lower.includes("haiku-4-5") || lower.includes("haiku-4-6")) return MODEL_PRICING["haiku-4-5"];
+  const haikuVersion = parseClaudeVersion(lower, "haiku");
+  if (isUnsupportedClaudeVersion(haikuVersion)) return undefined;
+  if (haikuVersion?.major === 4 && (haikuVersion.minor === 5 || haikuVersion.minor === 6))
+    return MODEL_PRICING["haiku-4-5"];
   if (lower.includes("haiku")) return MODEL_PRICING.haiku;
-  return DEFAULT_PRICING;
+  return undefined;
+}
+
+interface ClaudeVersion {
+  major: number;
+  minor?: number;
+}
+
+/** Parse both `claude-opus-4-6` and `claude-4-6-opus` version layouts. */
+function parseClaudeVersion(
+  model: string,
+  family: "opus" | "sonnet" | "haiku",
+): ClaudeVersion | undefined {
+  const versionFirst = model.match(new RegExp(`(?:^|-)claude-(\\d+)(?:-(\\d+))?-${family}(?:-|$)`));
+  const familyFirst = model.match(new RegExp(`(?:^|-)${family}-(\\d+)(?:-(\\d+))?(?:-|$)`));
+  const match = versionFirst || familyFirst;
+  if (!match) return undefined;
+  const minorToken = match[2];
+  const isReleaseDate = minorToken ? /^(?:19|20)\d{6}$/.test(minorToken) : false;
+  return {
+    major: Number(match[1]),
+    ...(minorToken && !isReleaseDate ? { minor: Number(minorToken) } : {}),
+  };
+}
+
+/** Reject future Claude generations and unsupported 4.x minor versions. */
+function isUnsupportedClaudeVersion(version: ClaudeVersion | undefined): boolean {
+  if (!version) return false;
+  if (version.major !== 3 && version.major !== 4) return true;
+  return version.major === 4 && version.minor !== undefined && version.minor > 6;
 }
 
 // Non-Claude context window limits. Claude models are handled by name detection below.
@@ -170,4 +212,22 @@ export function estimateCost(usageByModel: Record<string, TokenUsage>): number {
  */
 export function estimateCostSimple(usage: TokenUsage, model: string): number {
   return computeCost(usage, getModelPricing(model));
+}
+
+/** Estimate a complete per-model cost only when every model has known pricing. */
+export function estimateCostIfKnown(usageByModel: Record<string, TokenUsage>): number | undefined {
+  if (Object.keys(usageByModel).length === 0) return undefined;
+  let total = 0;
+  for (const [model, usage] of Object.entries(usageByModel)) {
+    const pricing = getKnownModelPricing(model);
+    if (!pricing) return undefined;
+    total += computeCost(usage, pricing);
+  }
+  return total;
+}
+
+/** Estimate a single-model cost without applying the legacy Sonnet fallback. */
+export function estimateCostSimpleIfKnown(usage: TokenUsage, model: string): number | undefined {
+  const pricing = getKnownModelPricing(model);
+  return pricing ? computeCost(usage, pricing) : undefined;
 }

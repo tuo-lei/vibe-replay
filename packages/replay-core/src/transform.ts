@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { getTimestampBounds } from "@vibe-replay/provider-core/duration";
-import { estimateCost, estimateCostSimple, getModelContextLimit } from "./pricing.js";
+import { estimateCostIfKnown, estimateCostSimpleIfKnown, getModelContextLimit } from "./pricing.js";
 import { normalizeSubAgentType, type ProviderParseResult } from "@vibe-replay/provider-contract";
 import { compactWarningSample } from "@vibe-replay/provider-contract/warnings";
 import type { ContentBlock } from "@vibe-replay/provider-contract";
@@ -151,10 +151,9 @@ export function transformToReplay(
   // Estimate cost based on per-model pricing (USD)
   let costEstimate: number | undefined;
   if (parsed.tokenUsageByModel) {
-    costEstimate = estimateCost(parsed.tokenUsageByModel);
+    costEstimate = estimateCostIfKnown(parsed.tokenUsageByModel);
   } else if (parsed.tokenUsage) {
-    // Empty string falls back to Sonnet rates via getModelPricing default
-    costEstimate = estimateCostSimple(parsed.tokenUsage, parsed.model || "");
+    costEstimate = estimateCostSimpleIfKnown(parsed.tokenUsage, parsed.model || "");
   }
 
   // Duration comes from provider-specific parsing. For Cursor this can be

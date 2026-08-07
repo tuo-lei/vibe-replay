@@ -33,6 +33,8 @@ export function getSessionDataQualityNotes(meta: ReplaySession["meta"]): string[
   }
   if (!meta.stats.tokenUsage) {
     notes.push("Token and cost metrics may be unavailable.");
+  } else if (meta.stats.costEstimate === undefined) {
+    notes.push("Cost estimate is unavailable because model pricing or attribution is unknown.");
   }
 
   return [...new Set(notes)];
