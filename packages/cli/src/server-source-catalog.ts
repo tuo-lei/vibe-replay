@@ -9,6 +9,7 @@ import { join } from "node:path";
 import type { FileCacheEntry } from "./cache.js";
 import { getPiSessionsDir } from "./providers/pi/config.js";
 import { sourceSessionKey } from "./server-enrichment.js";
+import { providerSessionKey } from "./server-enrichment.js";
 import type {
   CachedSourceRecord,
   NormalizedSourceSessionCatalogCache,
@@ -140,12 +141,14 @@ export function mergeSourceCatalogSessionUpdates(
   for (const update of updates) {
     byKey.set(sourceSessionKey(update.provider, update.project, update.slug), update);
     if (typeof update.sessionId === "string" && update.sessionId) {
-      bySessionId.set(update.sessionId, update);
+      bySessionId.set(providerSessionKey(update.provider, update.sessionId), update);
     }
   }
 
   return current.map((session) => {
-    const byId = session.sessionId ? bySessionId.get(session.sessionId) : undefined;
+    const byId = session.sessionId
+      ? bySessionId.get(providerSessionKey(session.provider, session.sessionId))
+      : undefined;
     const update =
       (byId?.provider === session.provider ? byId : undefined) ??
       byKey.get(sourceSessionKey(session.provider, session.project, session.slug));

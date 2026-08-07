@@ -97,7 +97,9 @@ export function resolveGenerateInputs(
 
   let sessionInfo: SessionInfo | undefined;
   if (requestedSessionSlug) {
-    const slugMatches = discoveredSessions.filter((s) => s.slug === requestedSessionSlug);
+    const slugMatches = discoveredSessions.filter(
+      (s) => s.provider === body.provider && s.slug === requestedSessionSlug,
+    );
     if (requestedSessionProject) {
       sessionInfo = slugMatches.find(
         (s) => normalizeProjectPath(s.project) === requestedSessionProject,
@@ -107,7 +109,9 @@ export function resolveGenerateInputs(
   }
   // Fallback: match by sessionId (covers old JSONL files where slug differs from replay slug)
   if (!sessionInfo && typeof body.sessionId === "string" && body.sessionId) {
-    sessionInfo = discoveredSessions.find((s) => s.sessionId === body.sessionId);
+    sessionInfo = discoveredSessions.find(
+      (s) => s.provider === body.provider && s.sessionId === body.sessionId,
+    );
   }
 
   const fallbackFilePaths = sessionInfo?.filePaths || [];
