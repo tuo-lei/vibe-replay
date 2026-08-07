@@ -135,6 +135,27 @@ describe("mergeInsights", () => {
     });
     expect(updated?.updatedAt).toBeDefined();
   });
+
+  it("keeps identical native session IDs isolated by provider", () => {
+    const merged = mergeInsights(
+      makeStore([
+        makeInsight({ provider: "claude-code", sessionId: "shared", promptCount: 1 }),
+        makeInsight({ provider: "cursor", sessionId: "shared", promptCount: 2 }),
+      ]),
+      [
+        makeScan({ provider: "cursor", sessionId: "shared", promptCount: 7 }),
+        makeScan({ provider: "pi", sessionId: "shared", promptCount: 3 }),
+      ],
+    );
+
+    expect(
+      merged.sessions.map((session) => [session.provider, session.sessionId, session.promptCount]),
+    ).toEqual([
+      ["claude-code", "shared", 1],
+      ["cursor", "shared", 7],
+      ["pi", "shared", 3],
+    ]);
+  });
 });
 
 describe("aggregateDailyInsights", () => {

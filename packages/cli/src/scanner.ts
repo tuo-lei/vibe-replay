@@ -31,7 +31,7 @@ import type { DataSource, PrLink, SessionInfo, TokenUsage } from "./types.js";
 import { localDayKey, shortenPath } from "./utils.js";
 
 // Bump this when we extract new fields — forces re-scan of all sessions.
-const SCANNER_VERSION = 9;
+const SCANNER_VERSION = 10;
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -96,7 +96,7 @@ interface ScanCacheEntry {
 
 export interface ScanCacheData {
   scannerVersion: number;
-  entries: Record<string, ScanCacheEntry>; // keyed by sessionId
+  entries: Record<string, ScanCacheEntry>; // keyed by provider + sessionId
 }
 
 export interface ProjectInsights {
@@ -277,6 +277,11 @@ export interface ScanInput {
   discoveryDurationMs?: number;
   discoveryTokenUsage?: SessionScanResult["tokenUsage"];
   discoveryCostEstimate?: number;
+}
+
+/** Keep provider-native IDs isolated when caching cross-provider scan results. */
+export function scanCacheEntryKey(session: Pick<ScanInput, "provider" | "sessionId">): string {
+  return `${session.provider}::${session.sessionId}`;
 }
 
 interface ScanProgress {
@@ -1167,7 +1172,8 @@ export async function runBackgroundScan(
 
   const processSession = async (index: number): Promise<void> => {
     const session = sessions[index];
-    const cached = cache.entries[session.sessionId];
+    const cacheKey = scanCacheEntryKey(session);
+    const cached = cache.entries[cacheKey];
     const cacheCheck = await checkCache(cached, session);
 
     if (cacheCheck.valid && cached) {
@@ -1181,7 +1187,7 @@ export async function runBackgroundScan(
           valid: false;
           meta: { mtimeMs: number; fileSize: number };
         };
-        cache.entries[session.sessionId] = {
+        cache.entries[cacheKey] = {
           mtimeMs: meta.mtimeMs,
           fileSize: meta.fileSize,
           scannedAt: new Date().toISOString(),

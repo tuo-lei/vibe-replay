@@ -77,8 +77,15 @@ function migrateInsightsStore(raw: Partial<InsightsStore>): InsightsStore {
     };
   }
 
-  // Future migrations go here:
-  // if (v < 2) { ... }
+  // v1 → v2: records are now keyed by provider + sessionId during merge.
+  // No record rewrite is needed because both fields already existed in v1.
+  if (v < 2) {
+    return {
+      schemaVersion: INSIGHTS_SCHEMA_VERSION,
+      lastUpdated: raw.lastUpdated || new Date().toISOString(),
+      sessions: Array.isArray(raw.sessions) ? raw.sessions : [],
+    };
+  }
 
   // Ensure required fields exist even for current/future schema versions
   return {
@@ -130,8 +137,12 @@ export function scanResultToInsight(scan: SessionScanResult): SessionInsight {
 }
 
 // ---------------------------------------------------------------------------
-// Merge — upsert by sessionId, never delete
+// Merge — upsert by provider + sessionId, never delete
 // ---------------------------------------------------------------------------
+
+function insightKey(provider: string, sessionId: string): string {
+  return `${provider}::${sessionId}`;
+}
 
 /**
  * Merge new scan results into the insights store.
@@ -145,11 +156,12 @@ export function mergeInsights(
 ): InsightsStore {
   const byId = new Map<string, SessionInsight>();
   for (const existing of store.sessions) {
-    byId.set(existing.sessionId, existing);
+    byId.set(insightKey(existing.provider, existing.sessionId), existing);
   }
 
   for (const scan of scanResults) {
-    const existing = byId.get(scan.sessionId);
+    const key = insightKey(scan.provider, scan.sessionId);
+    const existing = byId.get(key);
     if (existing) {
       // Update with fresh scan data but preserve original provenance
       const updated = scanResultToInsight(scan);
@@ -158,9 +170,9 @@ export function mergeInsights(
       // Preserve original capture machine (session belongs to where it ran, not where it's re-scanned)
       updated.machineId = existing.machineId ?? updated.machineId;
       updated.machineName = existing.machineName ?? updated.machineName;
-      byId.set(scan.sessionId, updated);
+      byId.set(key, updated);
     } else {
-      byId.set(scan.sessionId, scanResultToInsight(scan));
+      byId.set(key, scanResultToInsight(scan));
     }
   }
 
