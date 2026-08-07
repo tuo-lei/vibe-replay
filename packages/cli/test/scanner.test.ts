@@ -568,6 +568,48 @@ describe("scanSession", () => {
     expect(result.dataSource).toBe("global-state");
     expect(result.dataQualityNotes?.[0]).toContain("deferred");
   });
+
+  it("preserves Cursor discovery summaries while rich parsing is deferred", async () => {
+    const result = await scanSession({
+      sessionId: "cursor-discovery-summary",
+      provider: "cursor",
+      project: "~/test/project",
+      slug: "cursor-summary",
+      filePaths: [],
+      sourceFilePath: "/tmp/state.vscdb#composerData:cursor-discovery-summary",
+      hasSqlite: true,
+      deferRichCursorParse: true,
+      timestamp: "2026-03-20T10:00:00.000Z",
+      firstPrompt: "Build the dashboard.",
+      discoveryPromptCount: 3,
+      discoveryToolCallCount: 8,
+      discoveryEditCount: 2,
+      discoveryModel: "gpt-5.4",
+      discoveryDurationMs: 42_000,
+      discoveryTokenUsage: {
+        inputTokens: 100,
+        outputTokens: 20,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 10,
+      },
+      discoveryCostEstimate: 0.01,
+    });
+
+    expect(result).toMatchObject({
+      promptCount: 3,
+      toolCallCount: 8,
+      editCount: 2,
+      model: "gpt-5.4",
+      durationMs: 42_000,
+      costEstimate: 0.01,
+      tokenUsage: {
+        inputTokens: 100,
+        outputTokens: 20,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 10,
+      },
+    });
+  });
 });
 
 // ─── Aggregation tests ──────────────────────────────────────────────
