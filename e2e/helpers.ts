@@ -1,4 +1,4 @@
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generateOutput } from "../packages/cli/src/generator.ts";
@@ -54,8 +54,7 @@ export async function generateTestReplay(
     }
   }
 
-  const tmpDir = join(tmpdir(), `vibe-replay-e2e-${Date.now()}-${options.sceneCount || "default"}`);
-  await mkdir(tmpDir, { recursive: true });
+  const tmpDir = await mkdtemp(join(tmpdir(), "vibe-replay-e2e-"));
 
   // Generate into a slug-based subdirectory (mirrors real usage)
   const slug = session.meta.slug || "test-session";
