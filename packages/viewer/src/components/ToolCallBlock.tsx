@@ -4,6 +4,7 @@ import { displayToolName } from "../utils/toolName";
 import { ErrorBadge, ToolDuration, ToolTokens } from "./Badges";
 import BashBlock from "./BashBlock";
 import CodeDiffBlock from "./CodeDiffBlock";
+import ReplayImage from "./ReplayImage";
 import { formatTokens } from "./StatsPanel";
 
 const CHEVRON = "▶";
@@ -407,7 +408,7 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
               <div className="px-3 py-2 border-t border-terminal-border-subtle">
                 <div className="flex gap-2 flex-wrap">
                   {scene.images.map((src, i) => (
-                    <img
+                    <ReplayImage
                       key={i}
                       src={src}
                       alt={`Screenshot ${i + 1}`}

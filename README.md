@@ -124,7 +124,7 @@ curl -o ~/.claude/skills/replay/SKILL.md \
 
 - **Zero config** — one command, no setup, no account. Works instantly with existing sessions
 - **Cross-platform** — runs on macOS, Linux, and Windows
-- **Single HTML file** — self-contained, works offline, zero external requests. Drop it in Slack, email it, open it anywhere
+- **Single HTML file** — self-contained, works offline, and makes no automatic external requests. Remote image attachments load only after an explicit click
 - **Claude Code, Cursor, Codex, and Pi** — all providers auto-discovered, including multi-file and resumed sessions
 - **Local dashboard** — browse and search every session, filter by git repo, with activity heatmaps, per-project analytics, and a personal-insights view across all your coding
 - **Share & export** — GitHub Gist, animated SVG, GIF, markdown summary, or cloud upload. Secret redaction built in
@@ -172,7 +172,7 @@ The CLI auto-discovers sessions on your machine, parses conversation data from a
 
 ## Security & Privacy
 
-- **Self-contained HTML** — generated replay files embed all assets inline. When opened from disk they make zero external requests — works offline, behind firewalls, on an airplane. (Gist/cloud-backed replays fetch data from GitHub or vibe-replay API on load)
+- **Self-contained HTML** — generated replay files embed viewer assets inline and make no automatic external requests when opened from disk. Remote image URLs are blocked until you explicitly choose to load an individual image. (Gist/cloud-backed replays fetch data from GitHub or the vibe-replay API on load.)
 - **Secret redaction** — API keys, tokens, PEM keys, and sensitive paths are automatically detected and redacted before generation
 - **Local by default** — vibe-replay reads session files from your machine and generates a local HTML file. Data only leaves your machine when you explicitly publish (Gist or cloud upload), or if you log in — in which case aggregated session insights (counts, durations, costs — no conversation content) sync daily to the cloud
 - **No wrappers, no proxies** — vibe-replay does not modify, intercept, or wrap Claude Code or Cursor. It reads existing session logs after the fact
