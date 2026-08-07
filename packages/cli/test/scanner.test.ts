@@ -386,6 +386,44 @@ describe("scanSession", () => {
     expect(result.costEstimate).toBeGreaterThan(0);
   });
 
+  it("keeps tokens but omits fabricated cost for an unknown model", async () => {
+    const path = join(tmpDir, "unknown-model-session.jsonl");
+    await writeFile(
+      path,
+      makeLine({
+        type: "assistant",
+        timestamp: "2025-03-20T10:00:05Z",
+        message: {
+          role: "assistant",
+          id: "unknown-model-message",
+          model: "local-model",
+          content: [{ type: "text", text: "Done" }],
+          usage: {
+            input_tokens: 1000,
+            output_tokens: 100,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+          },
+        },
+      }),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "unknown-model-session",
+      provider: "claude-code",
+      project: "~/project",
+      slug: "unknown-model",
+      filePaths: [path],
+    });
+
+    expect(result.tokenUsage?.inputTokens).toBe(1000);
+    expect(result.costEstimate).toBeUndefined();
+    expect(result.dataQualityNotes).toContain(
+      "Cost estimate is unavailable because model pricing or attribution is unknown.",
+    );
+  });
+
   it("extracts entrypoint and permissionMode", async () => {
     const result = await scanSession({
       sessionId: "test-session-1",

@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   estimateCost,
+  estimateCostIfKnown,
   estimateCostSimple,
+  estimateCostSimpleIfKnown,
   getModelContextLimit,
+  getKnownModelPricing,
   getModelPricing,
 } from "../src/pricing.js";
 import type { TokenUsage } from "@vibe-replay/provider-contract";
@@ -99,6 +102,14 @@ describe("getModelPricing — model family detection", () => {
     const p = getModelPricing("");
     expect(p.inputRate).toBe(3);
     expect(p.outputRate).toBe(15);
+  });
+
+  it("distinguishes unknown pricing without changing the legacy fallback", () => {
+    expect(getKnownModelPricing("some-unknown-model")).toBeUndefined();
+    expect(getKnownModelPricing("claude-opus-4-8")).toBeUndefined();
+    expect(getKnownModelPricing("claude-opus-4-10")).toBeUndefined();
+    expect(getKnownModelPricing("claude-haiku-4-8")).toBeUndefined();
+    expect(getModelPricing("some-unknown-model").inputRate).toBe(3);
   });
 
   it("is case-insensitive", () => {
@@ -272,5 +283,23 @@ describe("estimateCost — per-model breakdown", () => {
     // Haiku 4.5: 1*0.1 + 5*0.01 = 0.1 + 0.05 = 0.15
     // Total: 1.35
     expect(estimateCost(usageByModel)).toBeCloseTo(1.35, 2);
+  });
+
+  it("does not fabricate a cost when any model has unknown pricing", () => {
+    const usage: TokenUsage = {
+      inputTokens: 1000,
+      outputTokens: 100,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+    };
+
+    expect(estimateCostSimpleIfKnown(usage, "local-model")).toBeUndefined();
+    expect(
+      estimateCostIfKnown({
+        "claude-sonnet-4-6": usage,
+        "local-model": usage,
+      }),
+    ).toBeUndefined();
+    expect(estimateCostIfKnown({ "claude-sonnet-4-6": usage })).toBeCloseTo(0.0045, 4);
   });
 });

@@ -52,4 +52,14 @@ describe("getSessionDataQualityNotes", () => {
       "1 image file skipped in cursor transcript image reference.",
     ]);
   });
+
+  it("explains why token usage can exist without a cost estimate", () => {
+    const meta = metaWithWarnings([]);
+    meta.provider = "opencode";
+    meta.model = "local-model";
+
+    expect(getSessionDataQualityNotes(meta)).toContain(
+      "Cost estimate is unavailable because model pricing or attribution is unknown.",
+    );
+  });
 });

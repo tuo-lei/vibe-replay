@@ -594,6 +594,32 @@ describe("transform — cost estimation", () => {
     expect(replay.meta.stats.costEstimate).toBeUndefined();
   });
 
+  it("returns undefined cost when model pricing is unknown", () => {
+    const replay = transformToReplay(
+      buildParsed({ model: "local-model", tokenUsage: baseUsage }),
+      "opencode",
+      "~/test",
+    );
+    expect(replay.meta.stats.tokenUsage).toEqual(baseUsage);
+    expect(replay.meta.stats.costEstimate).toBeUndefined();
+  });
+
+  it("returns undefined cost when a per-model breakdown is only partially priced", () => {
+    const replay = transformToReplay(
+      buildParsed({
+        model: "claude-sonnet-4-6",
+        tokenUsage: baseUsage,
+        tokenUsageByModel: {
+          "claude-sonnet-4-6": baseUsage,
+          "local-model": baseUsage,
+        },
+      }),
+      "opencode",
+      "~/test",
+    );
+    expect(replay.meta.stats.costEstimate).toBeUndefined();
+  });
+
   it("includes cache tokens in cost", () => {
     const usage: TokenUsage = {
       inputTokens: 0,

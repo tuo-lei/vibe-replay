@@ -91,6 +91,11 @@ const DEFAULT_PRICING = MODEL_PRICING.sonnet;
  * Checks specific version patterns first, then falls back to family names.
  */
 export function getModelPricing(model: string): ModelPricing {
+  return getKnownModelPricing(model) || DEFAULT_PRICING;
+}
+
+/** Resolve pricing only when the model family/version is known. */
+export function getKnownModelPricing(model: string): ModelPricing | undefined {
   const lower = model.toLowerCase();
   // GPT-5.x prices from OpenAI's public API pricing table.
   // Check mini before gpt-5.4 so "gpt-5.4-mini" is not shadowed.
@@ -99,6 +104,8 @@ export function getModelPricing(model: string): ModelPricing {
   if (lower.includes("gpt-5.4")) return MODEL_PRICING["gpt-5.4"];
   // Opus: 4.6/4.5 → new pricing, 4.1 and earlier → legacy
   if (lower.includes("opus-4-6") || lower.includes("opus-4-5")) return MODEL_PRICING["opus-4-new"];
+  const explicitOpusMinor = lower.match(/opus-4-(\d{1,2})(?:-|$)/)?.[1];
+  if (explicitOpusMinor && Number(explicitOpusMinor) > 6) return undefined;
   if (lower.includes("opus")) return MODEL_PRICING.opus;
   // Sonnet: 4.6/4.5 → new pricing, Sonnet 4 → explicit, earlier → standard
   if (lower.includes("sonnet-4-6") || lower.includes("sonnet-4-5"))
@@ -107,8 +114,10 @@ export function getModelPricing(model: string): ModelPricing {
   if (lower.includes("sonnet")) return MODEL_PRICING.sonnet;
   // Haiku: 4.5/4.6 → new pricing, 3.5 and earlier → legacy
   if (lower.includes("haiku-4-5") || lower.includes("haiku-4-6")) return MODEL_PRICING["haiku-4-5"];
+  const explicitHaikuMinor = lower.match(/haiku-4-(\d{1,2})(?:-|$)/)?.[1];
+  if (explicitHaikuMinor && Number(explicitHaikuMinor) > 6) return undefined;
   if (lower.includes("haiku")) return MODEL_PRICING.haiku;
-  return DEFAULT_PRICING;
+  return undefined;
 }
 
 // Non-Claude context window limits. Claude models are handled by name detection below.
@@ -170,4 +179,21 @@ export function estimateCost(usageByModel: Record<string, TokenUsage>): number {
  */
 export function estimateCostSimple(usage: TokenUsage, model: string): number {
   return computeCost(usage, getModelPricing(model));
+}
+
+/** Estimate a complete per-model cost only when every model has known pricing. */
+export function estimateCostIfKnown(usageByModel: Record<string, TokenUsage>): number | undefined {
+  let total = 0;
+  for (const [model, usage] of Object.entries(usageByModel)) {
+    const pricing = getKnownModelPricing(model);
+    if (!pricing) return undefined;
+    total += computeCost(usage, pricing);
+  }
+  return total;
+}
+
+/** Estimate a single-model cost without applying the legacy Sonnet fallback. */
+export function estimateCostSimpleIfKnown(usage: TokenUsage, model: string): number | undefined {
+  const pricing = getKnownModelPricing(model);
+  return pricing ? computeCost(usage, pricing) : undefined;
 }

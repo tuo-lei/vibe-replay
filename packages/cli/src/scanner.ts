@@ -21,7 +21,7 @@ import {
   extractToolFilePath,
   extractToolFilePaths,
 } from "@vibe-replay/provider-core/utils";
-import { estimateCost, estimateCostSimple } from "@vibe-replay/replay-core/pricing";
+import { estimateCostIfKnown, estimateCostSimpleIfKnown } from "@vibe-replay/replay-core/pricing";
 import { parseCodexSession } from "./providers/codex/parser.js";
 import { parseClaudeCoworkSession } from "@vibe-replay/provider-claude-code/claude-cowork/parser";
 import { parseCursorSession } from "./providers/cursor/parser.js";
@@ -691,9 +691,9 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
   // Estimate cost
   let costEstimate: number | undefined;
   if (Object.keys(usageByModel).length > 0) {
-    costEstimate = estimateCost(usageByModel);
+    costEstimate = estimateCostIfKnown(usageByModel);
   } else if (tokenUsage && model) {
-    costEstimate = estimateCostSimple(tokenUsage, model);
+    costEstimate = estimateCostSimpleIfKnown(tokenUsage, model);
   }
 
   // Derive duration: prefer turn_duration sum (CLI), fall back to active-duration estimate (VS Code)
@@ -735,6 +735,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
     skillsUsed: skillsUsed.size > 0 ? [...skillsUsed].sort() : undefined,
     mcpServersUsed: mcpServersUsed.size > 0 ? [...mcpServersUsed].sort() : undefined,
     turnDurations: turnDurations.length > 0 ? turnDurations : undefined,
+    dataQualityNotes: costDataQualityNotes(undefined, tokenUsage, costEstimate),
   };
 }
 
@@ -1019,7 +1020,11 @@ function buildScanResultFromParsed(
     skillsUsed: parsed.skillsUsed,
     mcpServersUsed: parsed.mcpServersUsed,
     dataSource: parsed.dataSource,
-    dataQualityNotes: parsed.dataSourceInfo?.notes,
+    dataQualityNotes: costDataQualityNotes(
+      parsed.dataSourceInfo?.notes,
+      parsed.tokenUsage,
+      costEstimate,
+    ),
     turnStatCount: parsed.turnStats?.length,
     turnDurations: parsed.turnStats
       ?.map((t) => t.durationMs)
@@ -1040,9 +1045,25 @@ function firstUserPrompt(turns: ProviderParseResult["turns"]): string | undefine
 }
 
 function estimateParsedCost(parsed: ProviderParseResult): number | undefined {
-  if (parsed.tokenUsageByModel) return estimateCost(parsed.tokenUsageByModel);
-  if (parsed.tokenUsage && parsed.model) return estimateCostSimple(parsed.tokenUsage, parsed.model);
+  if (parsed.tokenUsageByModel) return estimateCostIfKnown(parsed.tokenUsageByModel);
+  if (parsed.tokenUsage && parsed.model)
+    return estimateCostSimpleIfKnown(parsed.tokenUsage, parsed.model);
   return undefined;
+}
+
+const UNKNOWN_COST_NOTE =
+  "Cost estimate is unavailable because model pricing or attribution is unknown.";
+
+function costDataQualityNotes(
+  notes: string[] | undefined,
+  tokenUsage: TokenUsage | undefined,
+  costEstimate: number | undefined,
+): string[] | undefined {
+  const result = [...(notes || [])];
+  if (tokenUsage && costEstimate === undefined && !result.includes(UNKNOWN_COST_NOTE)) {
+    result.push(UNKNOWN_COST_NOTE);
+  }
+  return result.length > 0 ? result : undefined;
 }
 
 // ─── Cache management ───────────────────────────────────────────────
