@@ -37,4 +37,16 @@ describe("ReplayImage", () => {
     expect(screen.queryByRole("button", { name: "Load external image" })).toBeNull();
     expect(screen.getByText("Unsupported image source")).toBeTruthy();
   });
+
+  it("shows a source-neutral fallback when an approved image fails", () => {
+    render(
+      <ReplayImage src="https://images.example.test/missing.png" alt="Missing" className="image" />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Load external image" }));
+
+    fireEvent.error(screen.getByRole("img", { name: "Missing" }));
+
+    expect(screen.queryByRole("img", { name: "Missing" })).toBeNull();
+    expect(screen.getByText("Image unavailable")).toBeTruthy();
+  });
 });

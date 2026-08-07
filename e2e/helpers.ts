@@ -16,7 +16,9 @@ const FIXTURE = join(
  * Full pipeline: parse fixture → transform → generate HTML.
  * Returns paths and the session data for assertions.
  */
-export async function generateTestReplay(options: { externalImageUrl?: string } = {}): Promise<{
+export async function generateTestReplay(
+  options: { externalImageUrl?: string; sceneCount?: number } = {},
+): Promise<{
   htmlPath: string;
   session: ReplaySession;
   tmpDir: string;
@@ -29,6 +31,22 @@ export async function generateTestReplay(options: { externalImageUrl?: string } 
       generatedAt: new Date().toISOString(),
     },
   });
+  if (options.sceneCount && options.sceneCount > 0) {
+    const baseScenes = session.scenes;
+    session.scenes = Array.from({ length: options.sceneCount }, (_, index) =>
+      structuredClone(baseScenes[index % baseScenes.length]),
+    );
+    session.meta.stats.sceneCount = session.scenes.length;
+    session.meta.stats.userPrompts = session.scenes.filter(
+      (scene) => scene.type === "user-prompt",
+    ).length;
+    session.meta.stats.toolCalls = session.scenes.filter(
+      (scene) => scene.type === "tool-call",
+    ).length;
+    session.meta.stats.thinkingBlocks = session.scenes.filter(
+      (scene) => scene.type === "thinking",
+    ).length;
+  }
   if (options.externalImageUrl) {
     const firstPrompt = session.scenes.find((scene) => scene.type === "user-prompt");
     if (firstPrompt?.type === "user-prompt") {
@@ -36,7 +54,7 @@ export async function generateTestReplay(options: { externalImageUrl?: string } 
     }
   }
 
-  const tmpDir = join(tmpdir(), `vibe-replay-e2e-${Date.now()}`);
+  const tmpDir = join(tmpdir(), `vibe-replay-e2e-${Date.now()}-${options.sceneCount || "default"}`);
   await mkdir(tmpDir, { recursive: true });
 
   // Generate into a slug-based subdirectory (mirrors real usage)

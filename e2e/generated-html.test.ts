@@ -17,7 +17,7 @@ describe("Generated HTML E2E", () => {
 
   beforeAll(async () => {
     // Generate replay HTML from fixture
-    const result = await generateTestReplay({ externalImageUrl: EXTERNAL_IMAGE_URL });
+    const result = await generateTestReplay();
     htmlPath = result.htmlPath;
     session = result.session;
     tmpDir = result.tmpDir;
@@ -43,16 +43,6 @@ describe("Generated HTML E2E", () => {
       const url = route.request().url();
       if (url.startsWith("http://") || url.startsWith("https://")) {
         externalRequests.push(url);
-      }
-      if (url === EXTERNAL_IMAGE_URL) {
-        return route.fulfill({
-          status: 200,
-          contentType: "image/png",
-          body: Buffer.from(
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nJcAAAAASUVORK5CYII=",
-            "base64",
-          ),
-        });
       }
       route.continue();
     });
@@ -83,28 +73,55 @@ describe("Generated HTML E2E", () => {
     expect(dataRequests).toEqual([]);
   });
 
-  it("loads external images only after explicit user consent", async () => {
-    expect(externalRequests).not.toContain(EXTERNAL_IMAGE_URL);
-    expect(await page.locator(`img[src="${EXTERNAL_IMAGE_URL}"]`).count()).toBe(0);
+  it.each([30, 500])(
+    "loads external images only after explicit consent in a %i-scene replay",
+    async (sceneCount) => {
+      const generated = await generateTestReplay({
+        externalImageUrl: EXTERNAL_IMAGE_URL,
+        sceneCount,
+      });
+      const consentPage = await browser.newPage();
+      const requests: string[] = [];
+      await consentPage.route("**/*", (route) => {
+        const url = route.request().url();
+        if (url === EXTERNAL_IMAGE_URL) {
+          requests.push(url);
+          return route.fulfill({
+            status: 200,
+            contentType: "image/png",
+            body: Buffer.from(
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nJcAAAAASUVORK5CYII=",
+              "base64",
+            ),
+          });
+        }
+        route.continue();
+      });
 
-    const landingDismiss = page.locator("[data-testid='landing-dismiss']");
-    if (await landingDismiss.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await landingDismiss.click();
-    } else {
-      await page
-        .getByRole("button", { name: /Watch Replay/i })
-        .first()
-        .click();
-    }
-    await page.waitForTimeout(500);
+      try {
+        await consentPage.goto(`file://${generated.htmlPath}`, { waitUntil: "networkidle" });
+        await consentPage.waitForTimeout(500);
+        expect(requests).toEqual([]);
+        expect(await consentPage.locator(`img[src="${EXTERNAL_IMAGE_URL}"]`).count()).toBe(0);
 
-    const loadButton = page.getByRole("button", { name: "Load external image" });
-    expect(await loadButton.count()).toBe(1);
-    await Promise.all([page.waitForRequest(EXTERNAL_IMAGE_URL), loadButton.click()]);
+        await consentPage
+          .getByRole("button", { name: /Watch Replay/i })
+          .first()
+          .click();
+        await consentPage.waitForTimeout(500);
+        const loadButton = consentPage.getByRole("button", { name: "Load external image" }).first();
+        expect(await loadButton.count()).toBe(1);
+        await Promise.all([consentPage.waitForRequest(EXTERNAL_IMAGE_URL), loadButton.click()]);
 
-    expect(externalRequests).toContain(EXTERNAL_IMAGE_URL);
-    expect(await page.locator(`img[src="${EXTERNAL_IMAGE_URL}"]`).count()).toBe(1);
-  });
+        expect(requests).toEqual([EXTERNAL_IMAGE_URL]);
+        expect(await consentPage.locator(`img[src="${EXTERNAL_IMAGE_URL}"]`).count()).toBe(1);
+      } finally {
+        await consentPage.close();
+        await rm(generated.tmpDir, { recursive: true, force: true });
+      }
+    },
+    20_000,
+  );
 
   it("embeds session data correctly", async () => {
     const hasData = await page.evaluate(() => {

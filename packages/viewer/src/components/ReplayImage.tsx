@@ -6,10 +6,12 @@ interface Props {
   className: string;
 }
 
+/** Embedded image data can render without contacting another origin. */
 function isEmbeddedImage(src: string): boolean {
   return /^data:image\//i.test(src);
 }
 
+/** Return the disclosed host for user-approved HTTP(S) image requests. */
 function externalHost(src: string): string | undefined {
   try {
     const url = new URL(src);
@@ -54,7 +56,7 @@ export default function ReplayImage({ src, alt, className }: Props) {
   if (failed) {
     return (
       <div className="max-w-[300px] rounded-md border border-terminal-border px-3 py-2 font-mono text-xs text-terminal-dim">
-        External image unavailable
+        Image unavailable
       </div>
     );
   }
