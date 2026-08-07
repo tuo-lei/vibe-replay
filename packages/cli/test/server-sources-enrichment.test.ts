@@ -8,6 +8,8 @@ import { __testables } from "../src/server.js";
 import {
   pickSourceRecordForSession,
   prioritizeScanInputs,
+  providerSessionKey,
+  providerSlugKey,
   selectCursorEnrichmentCandidates,
   sourceSessionKey,
 } from "../src/server-enrichment.js";
@@ -145,6 +147,36 @@ describe("sources enrichment helpers", () => {
     expect(merged).toHaveLength(2);
     expect(merged.find((session) => session.slug === "pi-old")?.promptCount).toBe(5);
     expect(merged.find((session) => session.slug === "pi-new")?.promptCount).toBe(1);
+  });
+
+  it("keeps source catalog updates isolated across providers with the same session ID", () => {
+    const current: Parameters<typeof __testables.mergeSourceCatalogSessionUpdates>[0] = [
+      {
+        provider: "claude-code",
+        sessionId: "shared-id",
+        slug: "claude-session",
+        project: "~/project-a",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        filePaths: ["/tmp/claude.jsonl"],
+        promptCount: 1,
+      },
+      {
+        provider: "cursor",
+        sessionId: "shared-id",
+        slug: "cursor-session",
+        project: "~/project-a",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        filePaths: ["/tmp/cursor.jsonl"],
+        promptCount: 2,
+      },
+    ];
+    const updates: Parameters<typeof __testables.mergeSourceCatalogSessionUpdates>[1] = [
+      { ...current[1], promptCount: 9 },
+    ];
+
+    const merged = __testables.mergeSourceCatalogSessionUpdates(current, updates);
+    expect(merged.find((session) => session.provider === "claude-code")?.promptCount).toBe(1);
+    expect(merged.find((session) => session.provider === "cursor")?.promptCount).toBe(9);
   });
 
   it("marks Pi source sessions stale when a JSONL mtime is newer than discovery", async () => {
@@ -506,6 +538,35 @@ describe("sources enrichment helpers", () => {
     const picked = pickSourceRecordForSession(current, bySessionId, byKey);
     expect(picked?.provider).toBe("cursor");
     expect(picked?.promptCount).toBe(5);
+  });
+
+  it("builds provider-scoped replay linkage maps", () => {
+    type Replay = Parameters<typeof __testables.buildReplayMaps>[0][number];
+    const replay = (provider: string): Replay => ({
+      slug: "shared-slug",
+      baseDir: "/tmp/replays",
+      sessionId: "shared-id",
+      provider,
+      project: "~/project",
+      startTime: "2026-01-01T00:00:00.000Z",
+      stats: { sceneCount: 0, userPrompts: 0, toolCalls: 0 },
+      replaySize: 100,
+      replayOutdated: false,
+      hasAnnotations: false,
+      annotationCount: 0,
+    });
+    const maps = __testables.buildReplayMaps([replay("claude-code"), replay("cursor")]);
+
+    expect(maps.bySessionId.get(providerSessionKey("claude-code", "shared-id"))?.provider).toBe(
+      "claude-code",
+    );
+    expect(maps.bySessionId.get(providerSessionKey("cursor", "shared-id"))?.provider).toBe(
+      "cursor",
+    );
+    expect(maps.bySlug.get(providerSlugKey("claude-code", "shared-slug"))?.provider).toBe(
+      "claude-code",
+    );
+    expect(maps.bySlug.get(providerSlugKey("cursor", "shared-slug"))?.provider).toBe("cursor");
   });
 
   it("counts prompts/tools from parsed turns with compaction exclusion", () => {

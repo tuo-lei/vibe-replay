@@ -151,6 +151,36 @@ describe("resolveGenerateInputs", () => {
     expect(resolved.value.sessionInfo?.slug).toBe("newslug0");
   });
 
+  it("does not resolve a slug or session ID from a different provider", () => {
+    const resolved = resolveGenerateInputs(
+      {
+        provider: "cursor",
+        filePaths: [],
+        sessionSlug: "shared01",
+        sessionId: "shared-id",
+      },
+      [
+        makeSession({
+          provider: "claude-code",
+          slug: "shared01",
+          sessionId: "shared-id",
+          filePaths: ["/tmp/claude.jsonl"],
+          toolPaths: [],
+        }),
+        makeSession({
+          provider: "cursor",
+          slug: "cursor01",
+          sessionId: "cursor-id",
+          filePaths: [],
+          toolPaths: [],
+        }),
+      ],
+    );
+
+    expect(resolved.ok).toBe(false);
+    expect(resolved.ok === false && resolved.error).toContain("filePaths is required");
+  });
+
   it("uses explicit tool paths instead of discovered tool paths", () => {
     const resolved = resolveGenerateInputs(
       {

@@ -56,6 +56,8 @@ import {
   enrichmentHintsFromBody,
   mergeEnrichmentHints,
   pickSourceRecordForSession,
+  providerSessionKey,
+  providerSlugKey,
   prioritizeScanInputs,
   selectCursorEnrichmentCandidates,
   sourceSessionKey,
@@ -333,7 +335,7 @@ function extractPromptPreviewsFromTurns(turns: ParsedTurn[], limit = 3): string[
   return prompts;
 }
 
-/** Build dual lookup maps for replays — match by slug or sessionId */
+/** Build provider-scoped replay lookup maps by slug and native session ID. */
 function buildReplayMaps(replays: ReplaySummary[]): {
   bySlug: Map<string, ReplaySummary>;
   bySessionId: Map<string, ReplaySummary>;
@@ -341,8 +343,8 @@ function buildReplayMaps(replays: ReplaySummary[]): {
   const bySlug = new Map<string, ReplaySummary>();
   const bySessionId = new Map<string, ReplaySummary>();
   for (const r of replays) {
-    bySlug.set(r.slug, r);
-    if (r.sessionId) bySessionId.set(r.sessionId, r);
+    bySlug.set(providerSlugKey(r.provider, r.slug), r);
+    if (r.sessionId) bySessionId.set(providerSessionKey(r.provider, r.sessionId), r);
   }
   return { bySlug, bySessionId };
 }
@@ -396,13 +398,15 @@ async function buildSourcesResult(
     const key = sourceSessionKey(prev.provider, prev.project, prev.slug);
     previousByKey.set(key, prev);
     if (typeof prev.sessionId === "string" && prev.sessionId) {
-      previousBySessionId.set(prev.sessionId, prev);
+      previousBySessionId.set(providerSessionKey(prev.provider, prev.sessionId), prev);
     }
   }
 
   return merged.map((s) => {
     const previous = pickSourceRecordForSession(s, previousBySessionId, previousByKey);
-    const replay = replayBySlug.get(s.slug) || replayBySessionId.get(s.sessionId);
+    const replay =
+      replayBySlug.get(providerSlugKey(s.provider, s.slug)) ||
+      replayBySessionId.get(providerSessionKey(s.provider, s.sessionId));
     const promptCount = s.promptCount ?? previous?.promptCount;
     const toolCallCount = s.toolCallCount ?? previous?.toolCallCount;
     return {
@@ -637,7 +641,8 @@ export async function startServer(
       let changed = false;
       const updated = cached.sessions.map((s) => {
         const replay =
-          bySlug.get(s.slug) || (s.sessionId ? bySessionId.get(s.sessionId) : undefined);
+          bySlug.get(providerSlugKey(s.provider, s.slug)) ||
+          (s.sessionId ? bySessionId.get(providerSessionKey(s.provider, s.sessionId)) : undefined);
         const hadReplay = !!s.existingReplay;
         const hasReplay = !!replay;
         if (
@@ -740,7 +745,7 @@ export async function startServer(
       for (const source of enrichedSources) {
         byKey.set(sourceSessionKey(source.provider, source.project, source.slug), source);
         if (typeof source.sessionId === "string" && source.sessionId) {
-          bySessionId.set(source.sessionId, source);
+          bySessionId.set(providerSessionKey(source.provider, source.sessionId), source);
         }
       }
 
@@ -1965,7 +1970,9 @@ export async function startServer(
         }
 
         // Find source session by sessionId
-        const sessionInfo = allSessions.find((s) => s.sessionId === sessionId);
+        const sessionInfo = allSessions.find(
+          (s) => s.provider === providerName && s.sessionId === sessionId,
+        );
         if (!sessionInfo || sessionInfo.filePaths.length === 0) {
           results.push({ slug, status: "skipped: source not found" });
           continue;
@@ -2923,6 +2930,7 @@ export async function startDashboard(
 }
 
 export const __testables = {
+  buildReplayMaps,
   buildSourcesResult,
   buildSourceSessionCatalogCache,
   buildInsightsSyncBatches,
@@ -2931,6 +2939,8 @@ export const __testables = {
   mergeSourceCatalogSessionUpdates,
   normalizeSourceSessionCatalogCache,
   pickSourceRecordForSession,
+  providerSessionKey,
+  providerSlugKey,
   probePiSourceFreshness,
   probeSourceRecordsFreshness,
   prioritizeScanInputs,

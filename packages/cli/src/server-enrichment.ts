@@ -47,12 +47,22 @@ export function sourceSessionKey(provider: string, project: string, slug: string
   return `${provider}::${project}::${slug}`;
 }
 
+export function providerSessionKey(provider: string, sessionId: string): string {
+  return `${provider}::${sessionId}`;
+}
+
+export function providerSlugKey(provider: string, slug: string): string {
+  return `${provider}::${slug}`;
+}
+
 export function pickSourceRecordForSession<T extends EnrichmentSourceRecord>(
   session: Pick<SessionInfo, "provider" | "sessionId" | "project" | "slug">,
   bySessionId: Map<string, T>,
   byKey: Map<string, T>,
 ): T | undefined {
-  const byIdMatch = bySessionId.get(session.sessionId);
+  const byIdMatch =
+    bySessionId.get(providerSessionKey(session.provider, session.sessionId)) ??
+    bySessionId.get(session.sessionId);
   return (
     (byIdMatch?.provider === session.provider ? byIdMatch : undefined) ??
     byKey.get(sourceSessionKey(session.provider, session.project, session.slug))
@@ -72,7 +82,7 @@ export function selectCursorEnrichmentCandidates(
   const mergedBySessionId = new Map<string, SessionInfo>();
   const mergedByKey = new Map<string, SessionInfo>();
   for (const session of merged) {
-    mergedBySessionId.set(session.sessionId, session);
+    mergedBySessionId.set(providerSessionKey(session.provider, session.sessionId), session);
     mergedByKey.set(sourceSessionKey(session.provider, session.project, session.slug), session);
   }
 
@@ -93,7 +103,9 @@ export function selectCursorEnrichmentCandidates(
         (s.hasSqlite || s.filePaths.length > 0),
     )
     .map((s) => {
-      const byId = s.sessionId ? mergedBySessionId.get(s.sessionId) : undefined;
+      const byId = s.sessionId
+        ? mergedBySessionId.get(providerSessionKey(s.provider, s.sessionId))
+        : undefined;
       return byId || mergedByKey.get(sourceSessionKey(s.provider, s.project, s.slug));
     })
     .filter((s): s is SessionInfo => Boolean(s))
