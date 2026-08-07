@@ -561,9 +561,9 @@ function normalizeApplyPatchInput(input: Record<string, unknown>): Record<string
   const patch = patchTextFromInput(input) || "";
   if (!patch) return input;
 
-  const markers = [...patch.matchAll(/^\*\*\*\s+(?:Update|Add|Delete)\s+File:\s+(.+)$/gm)];
+  const markers = [...patch.matchAll(/^\*\*\*\s+(Update|Add|Delete)\s+File:\s+(.+)$/gm)];
   const filePaths = markers
-    .map((match) => match[1]?.trim())
+    .map((match) => match[2]?.trim())
     .filter((path): path is string => !!path);
   const firstStart = markers[0]?.index;
   const nextStart = markers[1]?.index;
@@ -571,15 +571,16 @@ function normalizeApplyPatchInput(input: Record<string, unknown>): Record<string
     firstStart === undefined ? patch : patch.slice(firstStart, nextStart ?? patch.length);
   const oldLines: string[] = [];
   const newLines: string[] = [];
+  let inHunk = markers[0]?.[1] === "Add" || markers[0]?.[1] === "Delete";
   for (const line of firstSection.split("\n")) {
-    if (
-      line.startsWith("*** ") ||
-      line.startsWith("@@") ||
-      line.startsWith("---") ||
-      line.startsWith("+++")
-    ) {
+    if (line.startsWith("*** ")) {
       continue;
     }
+    if (line.startsWith("@@")) {
+      inHunk = true;
+      continue;
+    }
+    if (!inHunk && (line.startsWith("---") || line.startsWith("+++"))) continue;
     if (line.startsWith("-")) {
       oldLines.push(line.slice(1));
     } else if (line.startsWith("+")) {

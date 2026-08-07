@@ -330,8 +330,8 @@ describe("Pi parser", () => {
     const legacyPatch = `*** Begin Patch
 *** Update File: src/legacy.ts
 @@
--old
-+new
+---old
++++new
 *** End Patch`;
     const toolCalls = [
       {
@@ -414,6 +414,8 @@ describe("Pi parser", () => {
         (scene) => scene.type === "tool-call" && scene.toolName === "Edit",
       );
       expect(edit?.type === "tool-call" && edit.diff?.filePath).toBe("src/legacy.ts");
+      expect(edit?.type === "tool-call" && edit.diff?.oldContent).toBe("--old");
+      expect(edit?.type === "tool-call" && edit.diff?.newContent).toBe("++new");
 
       const unrelated = replay.scenes.find(
         (scene) => scene.type === "tool-call" && scene.toolName === "apply_patch",

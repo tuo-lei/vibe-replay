@@ -331,6 +331,8 @@ interface ScanLine extends ScanLinePrLink {
   sourceToolAssistantUUID?: string;
   sourceToolUseID?: string;
   origin?: string;
+  parent_tool_use_id?: string;
+  parentToolUseID?: string;
   snapshot?: { timestamp?: string };
   data?: ScanLinePrLink;
   message?: ScanLineMessage;
@@ -540,11 +542,17 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
 
       // User prompts
       if (role === "user") {
+        const isToolResponse =
+          !!obj.sourceToolAssistantUUID ||
+          !!obj.sourceToolUseID ||
+          obj.origin === "tool_result" ||
+          !!obj.parent_tool_use_id ||
+          !!obj.parentToolUseID;
         if (typeof msgContent === "string") {
           const isCompaction =
             obj.isCompactSummary ||
             msgContent.startsWith("This session is being continued from a previous conversation");
-          if (!isCompaction && !isSystemGeneratedMessage(msgContent)) {
+          if (!isCompaction && !isToolResponse && !isSystemGeneratedMessage(msgContent)) {
             promptCount++;
             if (!firstPrompt && msgContent.trim()) {
               firstPrompt = msgContent.slice(0, 200);
@@ -568,8 +576,6 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
           const isOnlyToolResult = msgContent.every(
             (b: { type?: string }) => b.type === "tool_result",
           );
-          const isToolResponse =
-            !!obj.sourceToolAssistantUUID || !!obj.sourceToolUseID || obj.origin === "tool_result";
           if (hasText && !isOnlyToolResult && !isToolResponse && !isSystemGeneratedMessage(text)) {
             promptCount++;
           }

@@ -151,6 +151,12 @@ describe("extractCoworkSessionInfo", () => {
         }),
         JSON.stringify({
           type: "user",
+          isReplay: true,
+          uuid: "second-replay-user",
+          message: { role: "user", content: prompt },
+        }),
+        JSON.stringify({
+          type: "user",
           uuid: "original-user",
           message: { role: "user", content: prompt },
         }),
@@ -159,6 +165,37 @@ describe("extractCoworkSessionInfo", () => {
     );
 
     const info = await extractCoworkSessionInfo(jsonPath);
+    expect(info?.promptCount).toBe(1);
+  });
+
+  it("discovers sessions whose only human prompt is an image", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vr-cowork-image-prompt-"));
+    const metadataPath = join(root, "local_cowork-session-xyz789.json");
+    await writeFile(
+      metadataPath,
+      JSON.stringify({
+        sessionId: "local_cowork-session-002",
+        cwd: "/sessions/test/mnt/outputs",
+        createdAt: 1750000000000,
+        lastActivityAt: 1750000200000,
+      }),
+    );
+    const { jsonPath, auditPath } = await buildCoworkLayout({ metadataPath });
+    await writeFile(
+      auditPath,
+      `${JSON.stringify({
+        type: "user",
+        uuid: "image-user",
+        message: {
+          role: "user",
+          content: [{ type: "image", source: { type: "base64", data: "abc" } }],
+        },
+      })}\n`,
+      "utf-8",
+    );
+
+    const info = await extractCoworkSessionInfo(jsonPath);
+    expect(info?.firstPrompt).toBe("(image)");
     expect(info?.promptCount).toBe(1);
   });
 

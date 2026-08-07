@@ -229,6 +229,11 @@ describe("scanSession", () => {
           sourceToolUseID: "tool-1",
           message: { role: "user", content: [{ type: "text", text: "automated result" }] },
         }),
+        makeLine({
+          type: "user",
+          parent_tool_use_id: "tool-2",
+          message: { role: "user", content: "automated string result" },
+        }),
         makeLine({ type: "user", message: { role: "user", content: "Fix it" } }),
         makeLine({
           type: "user",

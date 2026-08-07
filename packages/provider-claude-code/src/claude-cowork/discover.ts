@@ -163,7 +163,9 @@ export async function extractCoworkSessionInfo(jsonPath: string): Promise<Sessio
           if (prompt) {
             const keys = coworkUserKeys(obj, prompt.text);
             if (obj.isReplay === true) {
-              const duplicateReplay = keys.some((key) => originalUserKeys.has(key));
+              const duplicateReplay = keys.some(
+                (key) => originalUserKeys.has(key) || countedReplayKeys.has(key),
+              );
               if (!duplicateReplay) {
                 promptCount++;
                 for (const key of keys) countedReplayKeys.add(key);
@@ -295,20 +297,9 @@ function collectPromptsFromLines(lines: string[], initialMessage?: string): stri
     if (!line) continue;
     try {
       const obj = JSON.parse(line);
-      if (obj.type !== "user" || obj.message?.role !== "user") continue;
-      // parent_tool_use_id != null means this is a subagent tool-result response, not a real prompt.
-      if (obj.parent_tool_use_id) continue;
-      const raw = obj.message.content;
-      const text =
-        typeof raw === "string"
-          ? raw
-          : Array.isArray(raw)
-            ? raw
-                .filter((b: { type: string }) => b.type === "text")
-                .map((b: { type: string; text?: string }) => b.text ?? "")
-                .join("")
-            : "";
-      pushCleaned(text);
+      const prompt = coworkHumanPrompt(obj);
+      if (!prompt) continue;
+      pushCleaned(prompt.text || "(image)");
     } catch {}
   }
 
