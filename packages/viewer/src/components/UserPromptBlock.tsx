@@ -4,6 +4,7 @@ import {
   renderHighlightedPlainText,
   type TextHighlight,
 } from "../utils/annotation-highlights";
+import ReplayImage from "./ReplayImage";
 
 interface Props {
   content: string;
@@ -92,7 +93,7 @@ export default memo(function UserPromptBlock({
       {images && images.length > 0 && (
         <div className="flex gap-2 mt-2 flex-wrap">
           {images.map((src, i) => (
-            <img
+            <ReplayImage
               key={i}
               src={src}
               alt={`Attachment ${i + 1}`}

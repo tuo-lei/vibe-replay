@@ -4,6 +4,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ReplaySession } from "../packages/types/src/index.ts";
 import { generateTestReplay } from "./helpers.ts";
 
+const EXTERNAL_IMAGE_URL = "https://images.example.test/replay.png";
+
 describe("Generated HTML E2E", () => {
   let browser: Browser;
   let page: Page;
@@ -15,7 +17,7 @@ describe("Generated HTML E2E", () => {
 
   beforeAll(async () => {
     // Generate replay HTML from fixture
-    const result = await generateTestReplay();
+    const result = await generateTestReplay({ externalImageUrl: EXTERNAL_IMAGE_URL });
     htmlPath = result.htmlPath;
     session = result.session;
     tmpDir = result.tmpDir;
@@ -41,6 +43,16 @@ describe("Generated HTML E2E", () => {
       const url = route.request().url();
       if (url.startsWith("http://") || url.startsWith("https://")) {
         externalRequests.push(url);
+      }
+      if (url === EXTERNAL_IMAGE_URL) {
+        return route.fulfill({
+          status: 200,
+          contentType: "image/png",
+          body: Buffer.from(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nJcAAAAASUVORK5CYII=",
+            "base64",
+          ),
+        });
       }
       route.continue();
     });
@@ -69,6 +81,29 @@ describe("Generated HTML E2E", () => {
       (url) => !url.includes("buttons.github.io") && !url.includes("api.github.com"),
     );
     expect(dataRequests).toEqual([]);
+  });
+
+  it("loads external images only after explicit user consent", async () => {
+    expect(externalRequests).not.toContain(EXTERNAL_IMAGE_URL);
+    expect(await page.locator(`img[src="${EXTERNAL_IMAGE_URL}"]`).count()).toBe(0);
+
+    const landingDismiss = page.locator("[data-testid='landing-dismiss']");
+    if (await landingDismiss.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await landingDismiss.click();
+    } else {
+      await page
+        .getByRole("button", { name: /Watch Replay/i })
+        .first()
+        .click();
+    }
+    await page.waitForTimeout(500);
+
+    const loadButton = page.getByRole("button", { name: "Load external image" });
+    expect(await loadButton.count()).toBe(1);
+    await Promise.all([page.waitForRequest(EXTERNAL_IMAGE_URL), loadButton.click()]);
+
+    expect(externalRequests).toContain(EXTERNAL_IMAGE_URL);
+    expect(await page.locator(`img[src="${EXTERNAL_IMAGE_URL}"]`).count()).toBe(1);
   });
 
   it("embeds session data correctly", async () => {

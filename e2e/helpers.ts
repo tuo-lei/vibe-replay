@@ -16,7 +16,7 @@ const FIXTURE = join(
  * Full pipeline: parse fixture → transform → generate HTML.
  * Returns paths and the session data for assertions.
  */
-export async function generateTestReplay(): Promise<{
+export async function generateTestReplay(options: { externalImageUrl?: string } = {}): Promise<{
   htmlPath: string;
   session: ReplaySession;
   tmpDir: string;
@@ -29,6 +29,12 @@ export async function generateTestReplay(): Promise<{
       generatedAt: new Date().toISOString(),
     },
   });
+  if (options.externalImageUrl) {
+    const firstPrompt = session.scenes.find((scene) => scene.type === "user-prompt");
+    if (firstPrompt?.type === "user-prompt") {
+      firstPrompt.images = [...(firstPrompt.images || []), options.externalImageUrl];
+    }
+  }
 
   const tmpDir = join(tmpdir(), `vibe-replay-e2e-${Date.now()}`);
   await mkdir(tmpDir, { recursive: true });
