@@ -103,34 +103,53 @@ export function getKnownModelPricing(model: string): ModelPricing | undefined {
   if (lower.includes("gpt-5.5")) return MODEL_PRICING["gpt-5.5"];
   if (lower.includes("gpt-5.4")) return MODEL_PRICING["gpt-5.4"];
   // Opus: 4.6/4.5 → new pricing, 4.1 and earlier → legacy
-  if (hasUnsupportedClaudeMajor(lower, "opus")) return undefined;
-  if (lower.includes("opus-4-6") || lower.includes("opus-4-5")) return MODEL_PRICING["opus-4-new"];
-  const explicitOpusMinor = lower.match(/opus-4-(\d{1,2})(?:-|$)/)?.[1];
-  if (explicitOpusMinor && Number(explicitOpusMinor) > 6) return undefined;
+  const opusVersion = parseClaudeVersion(lower, "opus");
+  if (isUnsupportedClaudeVersion(opusVersion)) return undefined;
+  if (opusVersion?.major === 4 && (opusVersion.minor === 5 || opusVersion.minor === 6))
+    return MODEL_PRICING["opus-4-new"];
   if (lower.includes("opus")) return MODEL_PRICING.opus;
   // Sonnet: 4.6/4.5 → new pricing, Sonnet 4 → explicit, earlier → standard
-  if (hasUnsupportedClaudeMajor(lower, "sonnet")) return undefined;
-  if (lower.includes("sonnet-4-6") || lower.includes("sonnet-4-5"))
+  const sonnetVersion = parseClaudeVersion(lower, "sonnet");
+  if (isUnsupportedClaudeVersion(sonnetVersion)) return undefined;
+  if (sonnetVersion?.major === 4 && (sonnetVersion.minor === 5 || sonnetVersion.minor === 6))
     return MODEL_PRICING["sonnet-4-new"];
-  const explicitSonnetMinor = lower.match(/sonnet-4-(\d{1,2})(?:-|$)/)?.[1];
-  if (explicitSonnetMinor && Number(explicitSonnetMinor) > 6) return undefined;
   if (lower.includes("sonnet-4")) return MODEL_PRICING["sonnet-4"];
   if (lower.includes("sonnet")) return MODEL_PRICING.sonnet;
   // Haiku: 4.5/4.6 → new pricing, 3.5 and earlier → legacy
-  if (hasUnsupportedClaudeMajor(lower, "haiku")) return undefined;
-  if (lower.includes("haiku-4-5") || lower.includes("haiku-4-6")) return MODEL_PRICING["haiku-4-5"];
-  const explicitHaikuMinor = lower.match(/haiku-4-(\d{1,2})(?:-|$)/)?.[1];
-  if (explicitHaikuMinor && Number(explicitHaikuMinor) > 6) return undefined;
+  const haikuVersion = parseClaudeVersion(lower, "haiku");
+  if (isUnsupportedClaudeVersion(haikuVersion)) return undefined;
+  if (haikuVersion?.major === 4 && (haikuVersion.minor === 5 || haikuVersion.minor === 6))
+    return MODEL_PRICING["haiku-4-5"];
   if (lower.includes("haiku")) return MODEL_PRICING.haiku;
   return undefined;
 }
 
-/** Reject explicitly versioned Claude families outside the supported 3.x/4.x generations. */
-function hasUnsupportedClaudeMajor(model: string, family: "opus" | "sonnet" | "haiku"): boolean {
-  const familyFirst = model.match(new RegExp(`${family}-(\\d+)(?:-|$)`))?.[1];
-  const versionFirst = model.match(new RegExp(`claude-(\\d+)(?:-\\d+)?-${family}(?:-|$)`))?.[1];
-  const major = versionFirst || familyFirst;
-  return major !== undefined && major !== "3" && major !== "4";
+interface ClaudeVersion {
+  major: number;
+  minor?: number;
+}
+
+/** Parse both `claude-opus-4-6` and `claude-4-6-opus` version layouts. */
+function parseClaudeVersion(
+  model: string,
+  family: "opus" | "sonnet" | "haiku",
+): ClaudeVersion | undefined {
+  const versionFirst = model.match(new RegExp(`(?:^|-)claude-(\\d+)(?:-(\\d+))?-${family}(?:-|$)`));
+  const familyFirst = model.match(new RegExp(`(?:^|-)${family}-(\\d+)(?:-(\\d+))?(?:-|$)`));
+  const match = versionFirst || familyFirst;
+  if (!match) return undefined;
+  const minorToken = match[2];
+  return {
+    major: Number(match[1]),
+    ...(minorToken && minorToken.length <= 2 ? { minor: Number(minorToken) } : {}),
+  };
+}
+
+/** Reject future Claude generations and unsupported 4.x minor versions. */
+function isUnsupportedClaudeVersion(version: ClaudeVersion | undefined): boolean {
+  if (!version) return false;
+  if (version.major !== 3 && version.major !== 4) return true;
+  return version.major === 4 && version.minor !== undefined && version.minor > 6;
 }
 
 // Non-Claude context window limits. Claude models are handled by name detection below.
