@@ -67,10 +67,39 @@ export interface AnnotationActions {
   aiCoachRunning: boolean;
 }
 
-const LS_PREFIX = "vibe-replay-annotations-";
+const LEGACY_LS_PREFIX = "vibe-replay-annotations-";
+const SCOPED_LS_PREFIX = "vibe-replay-provider-annotations-";
 
-function storageKey(sessionId: string): string {
-  return LS_PREFIX + sessionId;
+export function legacyAnnotationStorageKey(sessionId: string): string {
+  return LEGACY_LS_PREFIX + sessionId;
+}
+
+export function annotationStorageKey(provider: string, sessionId: string): string {
+  return `${SCOPED_LS_PREFIX}${encodeURIComponent(provider)}:${encodeURIComponent(sessionId)}`;
+}
+
+function loadAnnotationDraft(session: ReplaySession, isEditor: boolean): Annotation[] {
+  const embedded = session.annotations ?? [];
+  if (isEditor) return embedded;
+  let drafts: Array<string | null>;
+  try {
+    drafts = [
+      localStorage.getItem(annotationStorageKey(session.meta.provider, session.meta.sessionId)),
+      localStorage.getItem(legacyAnnotationStorageKey(session.meta.sessionId)),
+    ];
+  } catch {
+    return embedded;
+  }
+  for (const draft of drafts) {
+    if (draft === null) continue;
+    try {
+      const parsed: unknown = JSON.parse(draft);
+      if (Array.isArray(parsed)) return parsed as Annotation[];
+    } catch {
+      // Try the fallback draft when the scoped value is malformed.
+    }
+  }
+  return embedded;
 }
 
 export function useAnnotations(
@@ -78,30 +107,31 @@ export function useAnnotations(
   mode: ViewerMode = "embedded",
 ): AnnotationActions {
   const sessionId = session.meta.sessionId;
+  const provider = session.meta.provider;
   const isEditor = mode === "editor";
+  const storageIdentity = `${isEditor ? "editor" : "local"}::${provider}::${sessionId}`;
 
   // Save HTML only works from self-contained production builds (data embedded inline)
   // or in editor mode (server generates it).
   const canSaveHtml = !!window.__VIBE_REPLAY_DATA__ || isEditor;
 
   // Initialize from embedded data, then overlay localStorage draft
-  const [annotations, setAnnotations] = useState<Annotation[]>(() => {
-    const embedded = session.annotations ?? [];
-    if (isEditor) return embedded; // Editor mode: server is source of truth
-    try {
-      const draft = localStorage.getItem(storageKey(sessionId));
-      if (draft) {
-        const parsed = JSON.parse(draft) as Annotation[];
-        if (parsed.length > 0 || embedded.length === 0) return parsed;
-      }
-    } catch {
-      /* ignore */
-    }
-    return embedded;
-  });
+  const [annotations, setAnnotations] = useState<Annotation[]>(() =>
+    loadAnnotationDraft(session, isEditor),
+  );
 
   // Track whether we've diverged from embedded/server state
   const [savedSnapshot, setSavedSnapshot] = useState<Annotation[]>(() => session.annotations ?? []);
+  const loadedIdentityRef = useRef(storageIdentity);
+  const skipAutosaveIdentityRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (loadedIdentityRef.current === storageIdentity) return;
+    loadedIdentityRef.current = storageIdentity;
+    skipAutosaveIdentityRef.current = storageIdentity;
+    setAnnotations(loadAnnotationDraft(session, isEditor));
+    setSavedSnapshot(session.annotations ?? []);
+  }, [isEditor, session, storageIdentity]);
 
   const hasUnsaved = hasUnsavedChanges(annotations, savedSnapshot);
 
@@ -109,6 +139,10 @@ export function useAnnotations(
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    if (skipAutosaveIdentityRef.current === storageIdentity) {
+      skipAutosaveIdentityRef.current = null;
+      return;
+    }
     if (isEditor) {
       // Debounced save to server API
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -133,11 +167,12 @@ export function useAnnotations(
     }
     // Non-editor: save to localStorage
     try {
-      localStorage.setItem(storageKey(sessionId), JSON.stringify(annotations));
+      localStorage.setItem(annotationStorageKey(provider, sessionId), JSON.stringify(annotations));
+      localStorage.removeItem(legacyAnnotationStorageKey(sessionId));
     } catch {
       /* quota exceeded — silent */
     }
-  }, [annotations, sessionId, isEditor]);
+  }, [annotations, provider, sessionId, storageIdentity, isEditor]);
 
   const annotatedScenes = useMemo(() => computeAnnotatedScenes(annotations), [annotations]);
 
@@ -215,11 +250,12 @@ export function useAnnotations(
 
     setSavedSnapshot(annotations);
     try {
-      localStorage.removeItem(storageKey(sessionId));
+      localStorage.removeItem(annotationStorageKey(provider, sessionId));
+      localStorage.removeItem(legacyAnnotationStorageKey(sessionId));
     } catch {
       /* ignore */
     }
-  }, [session, annotations, sessionId, isEditor]);
+  }, [session, annotations, provider, sessionId, isEditor]);
 
   const downloadJson = useCallback(() => {
     const updatedSession: ReplaySession = { ...session, annotations };
@@ -236,11 +272,12 @@ export function useAnnotations(
 
     setSavedSnapshot(annotations);
     try {
-      localStorage.removeItem(storageKey(sessionId));
+      localStorage.removeItem(annotationStorageKey(provider, sessionId));
+      localStorage.removeItem(legacyAnnotationStorageKey(sessionId));
     } catch {
       /* ignore */
     }
-  }, [session, annotations, sessionId]);
+  }, [session, annotations, provider, sessionId]);
 
   // Editor mode: server-side gist publishing
   const [gistPublishing, setGistPublishing] = useState(false);
