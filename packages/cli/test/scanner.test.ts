@@ -7,6 +7,7 @@ import {
   aggregateUserInsights,
   type SessionScanResult,
   scanSession,
+  scanCacheEntryKey,
 } from "../src/scanner.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────
@@ -174,6 +175,12 @@ afterAll(async () => {
 // ─── Scanner tests ──────────────────────────────────────────────────
 
 describe("scanSession", () => {
+  it("uses provider-scoped cache identities", () => {
+    expect(scanCacheEntryKey({ provider: "claude-code", sessionId: "shared" })).not.toBe(
+      scanCacheEntryKey({ provider: "cursor", sessionId: "shared" }),
+    );
+  });
+
   it("extracts session metadata correctly", async () => {
     const result = await scanSession({
       sessionId: "test-session-1",

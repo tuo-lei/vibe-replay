@@ -167,7 +167,7 @@ export interface SessionOverlays {
 // ---------------------------------------------------------------------------
 
 /** Schema version for the insights store. Bump when adding breaking changes. */
-export const INSIGHTS_SCHEMA_VERSION = 1;
+export const INSIGHTS_SCHEMA_VERSION = 2;
 
 /**
  * A single session's insights — lightweight metadata persisted locally so it
