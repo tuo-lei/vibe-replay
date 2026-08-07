@@ -4,7 +4,7 @@ import { estimateCost, estimateCostSimple, getModelContextLimit } from "./pricin
 import { normalizeSubAgentType, type ProviderParseResult } from "@vibe-replay/provider-contract";
 import { compactWarningSample } from "@vibe-replay/provider-contract/warnings";
 import type { ContentBlock } from "@vibe-replay/provider-contract";
-import type { ReplaySession, Scene, SubAgent } from "@vibe-replay/types";
+import type { DataSourceInfo, ReplaySession, Scene, SubAgent } from "@vibe-replay/types";
 import { estimateTokens } from "./utils/tokenEstimate.js";
 
 type ToolCallScene = Extract<Scene, { type: "tool-call" }>;
@@ -177,7 +177,7 @@ export function transformToReplay(
       title: parsed.title,
       provider,
       dataSource: parsed.dataSource,
-      dataSourceInfo: parsed.dataSourceInfo,
+      dataSourceInfo: redactDataSourceInfo(parsed.dataSourceInfo),
       startTime,
       endTime,
       model: parsed.model,
@@ -303,6 +303,16 @@ function redactWarningText(value: string): string {
     /[A-Za-z0-9_-]{4,}\.\.\.\[REDACTED\]/g,
     "[REDACTED]",
   );
+}
+
+function redactDataSourceInfo(info: DataSourceInfo | undefined): DataSourceInfo | undefined {
+  if (!info) return undefined;
+  return {
+    primary: info.primary,
+    sources: info.sources.map(redactWarningText),
+    ...(info.supplements ? { supplements: info.supplements.map(redactWarningText) } : {}),
+    ...(info.notes ? { notes: info.notes.map(redactWarningText) } : {}),
+  };
 }
 
 function redactWarningPaths(value: string): string {

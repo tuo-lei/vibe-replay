@@ -230,6 +230,33 @@ describe("path redaction", () => {
     expect(replay.meta.cwd).toBe("~/my-workspace");
   });
 
+  it("redacts paths and secrets in data source metadata", () => {
+    const parsed = makeParsed([], {
+      dataSource: "jsonl",
+      dataSourceInfo: {
+        primary: "jsonl",
+        sources: [`${HOME}/.codex/sessions/session.jsonl`],
+        supplements: [`Parsed from ${HOME}/private/transcript.jsonl`],
+        notes: [
+          `Database: C:\\Users\\alice\\AppData\\Local\\opencode\\opencode.db`,
+          `Credential: ${EXAMPLE_GH_PAT}`,
+        ],
+      },
+    });
+
+    const replay = transform(parsed);
+    const serialized = JSON.stringify(replay.meta.dataSourceInfo);
+    expect(serialized).not.toContain(HOME);
+    expect(serialized).not.toContain("alice");
+    expect(serialized).not.toContain(EXAMPLE_GH_PAT);
+    expect(replay.meta.dataSourceInfo).toEqual({
+      primary: "jsonl",
+      sources: ["~/.codex/sessions/session.jsonl"],
+      supplements: ["Parsed from ~/private/transcript.jsonl"],
+      notes: ["Database: ~\\AppData\\Local\\opencode\\opencode.db", "Credential: [REDACTED]"],
+    });
+  });
+
   it("redacts multiple home dir occurrences in one string", () => {
     const parsed = makeParsed([
       {
