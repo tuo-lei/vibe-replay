@@ -108,6 +108,7 @@ describe("getModelPricing — model family detection", () => {
     expect(getKnownModelPricing("some-unknown-model")).toBeUndefined();
     expect(getKnownModelPricing("claude-opus-4-8")).toBeUndefined();
     expect(getKnownModelPricing("claude-opus-4-10")).toBeUndefined();
+    expect(getKnownModelPricing("claude-sonnet-4-8")).toBeUndefined();
     expect(getKnownModelPricing("claude-haiku-4-8")).toBeUndefined();
     expect(getModelPricing("some-unknown-model").inputRate).toBe(3);
   });
@@ -294,6 +295,7 @@ describe("estimateCost — per-model breakdown", () => {
     };
 
     expect(estimateCostSimpleIfKnown(usage, "local-model")).toBeUndefined();
+    expect(estimateCostIfKnown({})).toBeUndefined();
     expect(
       estimateCostIfKnown({
         "claude-sonnet-4-6": usage,

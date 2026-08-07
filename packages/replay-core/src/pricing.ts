@@ -110,6 +110,8 @@ export function getKnownModelPricing(model: string): ModelPricing | undefined {
   // Sonnet: 4.6/4.5 → new pricing, Sonnet 4 → explicit, earlier → standard
   if (lower.includes("sonnet-4-6") || lower.includes("sonnet-4-5"))
     return MODEL_PRICING["sonnet-4-new"];
+  const explicitSonnetMinor = lower.match(/sonnet-4-(\d{1,2})(?:-|$)/)?.[1];
+  if (explicitSonnetMinor && Number(explicitSonnetMinor) > 6) return undefined;
   if (lower.includes("sonnet-4")) return MODEL_PRICING["sonnet-4"];
   if (lower.includes("sonnet")) return MODEL_PRICING.sonnet;
   // Haiku: 4.5/4.6 → new pricing, 3.5 and earlier → legacy
@@ -183,6 +185,7 @@ export function estimateCostSimple(usage: TokenUsage, model: string): number {
 
 /** Estimate a complete per-model cost only when every model has known pricing. */
 export function estimateCostIfKnown(usageByModel: Record<string, TokenUsage>): number | undefined {
+  if (Object.keys(usageByModel).length === 0) return undefined;
   let total = 0;
   for (const [model, usage] of Object.entries(usageByModel)) {
     const pricing = getKnownModelPricing(model);
