@@ -33,6 +33,7 @@ import {
 } from "./publishers/gist.js";
 import { publishLocal } from "./publishers/local.js";
 import { scanForSecrets } from "./scan.js";
+import { mergeSameSessions } from "./session-merge.js";
 import { startDashboard, startServer } from "./server.js";
 import { formatSessionQueryText, queryLocalSessions } from "./session-query.js";
 import { transformToReplay } from "./transform.js";
@@ -1337,58 +1338,4 @@ function formatSessionChoices(sessions: SessionInfo[], cleanupPeriodDays?: numbe
   }
 
   return choices;
-}
-
-/**
- * Merge multiple JSONL files that share the same slug + project into one entry.
- * Claude Code creates a new file per /resume, but they're the same logical session.
- * We keep the most recent file as the representative and sum up the stats.
- */
-function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
-  const groups = new Map<string, SessionInfo[]>();
-
-  for (const s of sessions) {
-    const key = `${s.project}::${s.slug}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)?.push(s);
-  }
-
-  const result: SessionInfo[] = [];
-  for (const group of groups.values()) {
-    if (group.length === 1) {
-      result.push(group[0]);
-      continue;
-    }
-
-    // Sort by timestamp descending — pick the latest as representative
-    group.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-    const latest = group[0];
-
-    // Collect all file paths sorted by timestamp ascending (chronological order)
-    const allPaths = group
-      .slice()
-      .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
-      .flatMap((s) => s.filePaths);
-
-    const promptCount = group.some((s) => s.promptCount != null)
-      ? group.reduce((sum, s) => sum + (s.promptCount || 0), 0)
-      : undefined;
-    const toolCallCount = group.some((s) => s.toolCallCount != null)
-      ? group.reduce((sum, s) => sum + (s.toolCallCount || 0), 0)
-      : undefined;
-
-    result.push({
-      ...latest,
-      lineCount: group.reduce((sum, s) => sum + s.lineCount, 0),
-      fileSize: group.reduce((sum, s) => sum + s.fileSize, 0),
-      filePaths: allPaths,
-      toolPaths: [...new Set(group.flatMap((s) => s.toolPaths || []))],
-      promptCount,
-      toolCallCount,
-    });
-  }
-
-  // Re-sort by timestamp descending
-  result.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-  return result;
 }

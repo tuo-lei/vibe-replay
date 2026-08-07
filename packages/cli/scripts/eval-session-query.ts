@@ -1,6 +1,6 @@
 import { deduplicateSessionsByProvider, getAllProviders } from "../src/providers/index.js";
 import { queryLocalSessions, type SessionQueryMatch } from "../src/session-query.js";
-import type { SessionInfo } from "../src/types.js";
+import { mergeSameSessions } from "../src/session-merge.js";
 
 type QueryMode = "strict" | "any" | "brief";
 
@@ -333,19 +333,6 @@ function aggregate(
     negativeReturned:
       rows.find((row) => row.evalCase.intent === "Negative control.")?.[mode].count || 0,
   };
-}
-
-function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
-  const groups = new Map<string, SessionInfo[]>();
-  for (const session of sessions) {
-    const key = `${session.project}::${session.slug}`;
-    groups.set(key, [...(groups.get(key) || []), session]);
-  }
-
-  return [...groups.values()].map((group) => {
-    group.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-    return group[0];
-  });
 }
 
 function normalizedResultText(match: SessionQueryMatch): string {

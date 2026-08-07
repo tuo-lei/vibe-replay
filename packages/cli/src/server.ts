@@ -50,6 +50,7 @@ import {
   type SavedGistInfo,
 } from "./publishers/gist.js";
 import { scanForSecrets } from "./scan.js";
+import { mergeSameSessions } from "./session-merge.js";
 import {
   type EnrichmentHints,
   enrichmentHintsFromBody,
@@ -538,49 +539,6 @@ async function readClaudeSessionState(sessionId: string): Promise<LiveSessionSta
     // Dead PID — don't return yet; another file may be the live one.
   }
   return "stopped";
-}
-
-function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
-  const groups = new Map<string, SessionInfo[]>();
-  for (const s of sessions) {
-    const key = `${s.project}::${s.slug}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)?.push(s);
-  }
-
-  const result: SessionInfo[] = [];
-  for (const group of groups.values()) {
-    if (group.length === 1) {
-      result.push(group[0]);
-      continue;
-    }
-    group.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-    const latest = group[0];
-    const allPaths = group
-      .slice()
-      .sort((a, b) => a.timestamp.localeCompare(b.timestamp))
-      .flatMap((s) => s.filePaths);
-
-    const promptCount = group.some((s) => s.promptCount != null)
-      ? group.reduce((sum, s) => sum + (s.promptCount || 0), 0)
-      : undefined;
-    const toolCallCount = group.some((s) => s.toolCallCount != null)
-      ? group.reduce((sum, s) => sum + (s.toolCallCount || 0), 0)
-      : undefined;
-
-    result.push({
-      ...latest,
-      lineCount: group.reduce((sum, s) => sum + s.lineCount, 0),
-      fileSize: group.reduce((sum, s) => sum + s.fileSize, 0),
-      filePaths: allPaths,
-      toolPaths: [...new Set(group.flatMap((s) => s.toolPaths || []))],
-      promptCount,
-      toolCallCount,
-    });
-  }
-
-  result.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-  return result;
 }
 
 export async function startServer(
