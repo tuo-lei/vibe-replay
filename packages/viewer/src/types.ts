@@ -1,4 +1,5 @@
 // Shared types — single source of truth
+export { INSIGHTS_SCHEMA_VERSION, REPLAY_SCHEMA_VERSION } from "@vibe-replay/types";
 export type {
   Annotation,
   DataSource,

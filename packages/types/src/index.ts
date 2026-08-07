@@ -169,6 +169,9 @@ export interface SessionOverlays {
 /** Schema version for the insights store. Bump when adding breaking changes. */
 export const INSIGHTS_SCHEMA_VERSION = 2;
 
+/** Current replay JSON schema. Missing means a legacy v0 replay. */
+export const REPLAY_SCHEMA_VERSION = 1;
+
 /**
  * A single session's insights — lightweight metadata persisted locally so it
  * survives after source JSONL files are deleted (e.g. Claude Code 30-day cleanup).
@@ -267,6 +270,8 @@ export interface SessionScanWireData {
 }
 
 export interface ReplaySession {
+  /** Optional for backward compatibility with replays generated before schema versioning. */
+  schemaVersion?: number;
   meta: {
     sessionId: string;
     slug: string;

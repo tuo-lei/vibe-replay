@@ -2084,6 +2084,14 @@ function getBaseUrl(c: Context<HonoEnv>): string {
  * Intentionally loose — only checks fields the viewer needs to render.
  */
 function validateReplaySchema(replay: any): string | null {
+  if (
+    replay?.schemaVersion !== undefined &&
+    (!Number.isInteger(replay.schemaVersion) ||
+      replay.schemaVersion < 1 ||
+      replay.schemaVersion > 1)
+  ) {
+    return `Unsupported replay schema version: ${String(replay.schemaVersion)}`;
+  }
   if (!replay.meta || typeof replay.meta !== "object") {
     return "Missing meta object";
   }

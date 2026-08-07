@@ -5,6 +5,7 @@ import { normalizeSubAgentType, type ProviderParseResult } from "@vibe-replay/pr
 import { compactWarningSample } from "@vibe-replay/provider-contract/warnings";
 import type { ContentBlock } from "@vibe-replay/provider-contract";
 import type { DataSourceInfo, FileDiff, ReplaySession, Scene, SubAgent } from "@vibe-replay/types";
+import { REPLAY_SCHEMA_VERSION } from "@vibe-replay/types";
 import { estimateTokens } from "./utils/tokenEstimate.js";
 
 type ToolCallScene = Extract<Scene, { type: "tool-call" }>;
@@ -170,6 +171,7 @@ export function transformToReplay(
   const endTime = parsed.endTime || turnTimestampBounds.endTime;
 
   return {
+    schemaVersion: REPLAY_SCHEMA_VERSION,
     meta: {
       sessionId: parsed.sessionId,
       slug: parsed.slug,

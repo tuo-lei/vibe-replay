@@ -132,6 +132,11 @@ describe("Generated HTML E2E", () => {
     expect(hasData).toBe(true);
   });
 
+  it("embeds the current replay schema version", async () => {
+    const schemaVersion = await page.evaluate(() => window.__VIBE_REPLAY_DATA__?.schemaVersion);
+    expect(schemaVersion).toBe(1);
+  });
+
   it("renders correct number of scenes", async () => {
     const embeddedSceneCount = await page.evaluate(() => {
       return window.__VIBE_REPLAY_DATA__?.scenes?.length ?? 0;

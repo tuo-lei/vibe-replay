@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReplaySession } from "../types";
+import { parseReplaySession } from "../utils/replaySchema";
 
 export type ViewerMode = "embedded" | "editor" | "readonly";
 
@@ -219,7 +220,17 @@ function startLiveStream(
       return;
     }
     if (payload.type === "session" && payload.session) {
-      lastSession = payload.session;
+      try {
+        lastSession = parseReplaySession(payload.session);
+      } catch (error) {
+        liveStatus = {
+          ...liveStatus,
+          state: "error",
+          error: error instanceof Error ? error.message : "Invalid live replay payload",
+        };
+        emit();
+        return;
+      }
       liveStatus = {
         state: "open",
         scenes: payload.session.scenes.length,
@@ -266,7 +277,7 @@ function startLiveStream(
 async function loadSession(): Promise<LoadResult | "dashboard"> {
   // 1. Embedded data (from CLI generator)
   if (window.__VIBE_REPLAY_DATA__) {
-    return { session: window.__VIBE_REPLAY_DATA__, mode: "embedded" };
+    return { session: parseReplaySession(window.__VIBE_REPLAY_DATA__), mode: "embedded" };
   }
 
   const params = new URLSearchParams(window.location.search);
@@ -292,7 +303,7 @@ async function loadSession(): Promise<LoadResult | "dashboard"> {
       const { rawUrl } = await resolveGistUrl((data as any).gistId);
       return { session: await fetchJson(rawUrl), mode: "readonly" };
     }
-    return { session: data as ReplaySession, mode: "readonly" };
+    return { session: parseReplaySession(data), mode: "readonly" };
   }
 
   // 3. Gist parameter — always check (works in any mode)
@@ -321,7 +332,7 @@ async function loadSession(): Promise<LoadResult | "dashboard"> {
     if (slug) {
       const resp = await fetch(`/api/session?slug=${encodeURIComponent(slug)}`);
       if (!resp.ok) throw new Error(`Session not found: ${slug}`);
-      const session = (await resp.json()) as ReplaySession;
+      const session = parseReplaySession(await resp.json());
       return { session, mode: "editor" };
     }
 
@@ -340,7 +351,7 @@ async function loadSession(): Promise<LoadResult | "dashboard"> {
   if (file) {
     const resp = await fetch(file);
     if (!resp.ok) throw new Error(`Failed to load file: ${resp.status}`);
-    return { session: (await resp.json()) as ReplaySession, mode: "embedded" };
+    return { session: parseReplaySession(await resp.json()), mode: "embedded" };
   }
 
   // No data source — show dashboard/landing page
@@ -352,7 +363,7 @@ async function fetchJson(url: string): Promise<ReplaySession> {
   if (!resp.ok) throw new Error(`Failed to fetch: ${resp.status} ${resp.statusText}`);
   const text = await resp.text();
   if (text.trimStart().startsWith("{")) {
-    return JSON.parse(text) as ReplaySession;
+    return parseReplaySession(JSON.parse(text));
   }
   throw new Error("URL must point to a vibe-replay JSON replay file");
 }

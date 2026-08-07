@@ -11,7 +11,18 @@ const win = window as unknown as {
 
 // A minimal stand-in — the loader passes the object through unchanged and the
 // tests only assert status/mode, never the session shape.
-const fakeSession = { scenes: [], meta: {} } as unknown as ReplaySession;
+const fakeSession: ReplaySession = {
+  meta: {
+    sessionId: "session-1",
+    slug: "session-1",
+    provider: "claude-code",
+    startTime: "2026-01-01T00:00:00.000Z",
+    cwd: "~/project",
+    project: "~/project",
+    stats: { sceneCount: 0, userPrompts: 0, toolCalls: 0 },
+  },
+  scenes: [],
+};
 
 function setSearch(search: string) {
   window.history.replaceState({}, "", search || "/");

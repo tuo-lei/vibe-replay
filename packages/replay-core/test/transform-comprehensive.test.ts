@@ -1,8 +1,8 @@
 import { homedir } from "node:os";
 import { describe, expect, it } from "vitest";
-import type { ProviderParseResult, TokenUsage } from "@vibe-replay/provider-contract";
+import type { ParsedTurn, ProviderParseResult, TokenUsage } from "@vibe-replay/provider-contract";
 import { transformToReplay } from "../src/transform.js";
-import type { ParsedTurn } from "@vibe-replay/types";
+import { REPLAY_SCHEMA_VERSION } from "@vibe-replay/types";
 
 /** Build a minimal ProviderParseResult for testing */
 function buildParsed(overrides: Partial<ProviderParseResult> = {}): ProviderParseResult {
@@ -694,6 +694,7 @@ describe("transform — metadata", () => {
       "~/project",
     );
     expect(replay.meta.sessionId).toBe("s1");
+    expect(replay.schemaVersion).toBe(REPLAY_SCHEMA_VERSION);
     expect(replay.meta.slug).toBe("sl1");
     expect(replay.meta.title).toBe("My Title");
     expect(replay.meta.provider).toBe("cursor");

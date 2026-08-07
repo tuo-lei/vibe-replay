@@ -7,6 +7,14 @@ import { describe, expect, it } from "vitest";
  * this test and cloudflare/src/worker.ts's validateReplaySchema.
  */
 function validateReplaySchema(replay: any): string | null {
+  if (
+    replay?.schemaVersion !== undefined &&
+    (!Number.isInteger(replay.schemaVersion) ||
+      replay.schemaVersion < 1 ||
+      replay.schemaVersion > 1)
+  ) {
+    return `Unsupported replay schema version: ${String(replay.schemaVersion)}`;
+  }
   if (!replay.meta || typeof replay.meta !== "object") {
     return "Missing meta object";
   }
@@ -52,6 +60,14 @@ describe("replay schema validation", () => {
 
   it("accepts a valid replay", () => {
     expect(validateReplaySchema(validReplay)).toBeNull();
+  });
+
+  it("accepts legacy and current schema versions but rejects future versions", () => {
+    expect(validateReplaySchema(validReplay)).toBeNull();
+    expect(validateReplaySchema({ ...validReplay, schemaVersion: 1 })).toBeNull();
+    expect(validateReplaySchema({ ...validReplay, schemaVersion: 2 })).toBe(
+      "Unsupported replay schema version: 2",
+    );
   });
 
   it("accepts replay with empty scenes array", () => {
