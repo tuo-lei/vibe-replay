@@ -234,6 +234,41 @@ describe("parseClaudeCoworkSession", () => {
     expect(result.endTime).toBe("2025-06-15T09:03:20.000Z");
   });
 
+  it("does not emit invalid metadata timestamps when audit timestamps are absent", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-cowork-time-"));
+    const auditPath = join(tempDir, "audit.jsonl");
+    await writeFile(
+      auditPath,
+      JSON.stringify({
+        type: "user",
+        session_id: "cowork-no-time",
+        message: { role: "user", content: "Inspect the workspace" },
+      }),
+    );
+    const info: SessionInfo = {
+      provider: "claude-cowork",
+      sessionId: "cowork-no-time",
+      slug: "cowork-no-time",
+      project: "Cowork",
+      cwd: "/sessions/no-time",
+      version: "",
+      timestamp: "not-a-date",
+      lineCount: 1,
+      fileSize: 100,
+      filePath: auditPath,
+      filePaths: [auditPath],
+      firstPrompt: "Inspect the workspace",
+    };
+
+    try {
+      const result = await parseClaudeCoworkSession(auditPath, info);
+      expect(result.startTime).toBeUndefined();
+      expect(result.endTime).toBeUndefined();
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("sessionId matches what discover derives from the sibling metadata JSON", async () => {
     // Guards against the replay-linking bug: discover MUST use metadata.sessionId
     // (minus the `local_` prefix) because that's what audit.jsonl's outer-wrapper

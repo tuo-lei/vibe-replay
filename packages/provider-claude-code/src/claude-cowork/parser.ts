@@ -159,8 +159,9 @@ export async function parseClaudeCoworkSession(
   if (sessionInfo) {
     if (!result.title && sessionInfo.title) result.title = sessionInfo.title;
     if (!result.model && sessionInfo.model) result.model = sessionInfo.model;
-    if (!result.startTime && sessionInfo.timestamp) result.startTime = sessionInfo.timestamp;
-    const endBounds = getTimestampBounds([result.endTime, sessionInfo.timestamp]);
+    const metadataTimestamp = getTimestampBounds([sessionInfo.timestamp]).startTime;
+    if (!result.startTime && metadataTimestamp) result.startTime = metadataTimestamp;
+    const endBounds = getTimestampBounds([result.endTime, metadataTimestamp]);
     result.endTime = endBounds.endTime || result.startTime;
     if (!result.cwd && sessionInfo.cwd) result.cwd = sessionInfo.cwd;
   }
