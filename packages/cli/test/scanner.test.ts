@@ -29,6 +29,10 @@ const CURSOR_TOOL_FIXTURE_2 = join(
   import.meta.dirname,
   "../../provider-cursor/test/fixtures/cursor-tool-2.txt",
 );
+const COWORK_FIXTURE = join(
+  import.meta.dirname,
+  "../../provider-claude-code/test/fixtures/claude-cowork-audit.jsonl",
+);
 
 beforeAll(async () => {
   tmpDir = join(tmpdir(), `scanner-test-${Date.now()}`);
@@ -198,6 +202,69 @@ describe("scanSession", () => {
     // 2 user prompts: "Help me fix..." and "Now run the tests"
     // The tool_result-only message should NOT be counted
     expect(result.promptCount).toBe(2);
+  });
+
+  it("excludes Claude system wrappers and tool-originated text while keeping short prompts", async () => {
+    const path = join(tmpDir, "claude-prompt-filtering.jsonl");
+    await writeFile(
+      path,
+      [
+        makeLine({
+          type: "user",
+          message: {
+            role: "user",
+            content: "<local-command-caveat>ignore me</local-command-caveat>",
+          },
+        }),
+        makeLine({
+          type: "user",
+          isCompactSummary: true,
+          message: {
+            role: "user",
+            content: "This session is being continued from a previous conversation summary",
+          },
+        }),
+        makeLine({
+          type: "user",
+          sourceToolUseID: "tool-1",
+          message: { role: "user", content: [{ type: "text", text: "automated result" }] },
+        }),
+        makeLine({ type: "user", message: { role: "user", content: "Fix it" } }),
+        makeLine({
+          type: "user",
+          message: {
+            role: "user",
+            content: [{ type: "image", source: { type: "base64", data: "abc" } }],
+          },
+        }),
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "prompt-filtering",
+      provider: "claude-code",
+      project: "~/test/project",
+      slug: "prompt-filtering",
+      filePaths: [path],
+    });
+    expect(result.promptCount).toBe(2);
+  });
+
+  it("uses the Cowork parser so replay duplicates do not inflate prompt analytics", async () => {
+    const result = await scanSession({
+      sessionId: "cowork-session-002",
+      provider: "claude-cowork",
+      project: "Cowork",
+      slug: "cowork-s",
+      filePaths: [COWORK_FIXTURE],
+      timestamp: "2025-06-15T09:00:00.000Z",
+      title: "Cowork fixture",
+      firstPrompt: "Please investigate Cowork storage",
+      discoveryModel: "claude-opus-4-6",
+    });
+    expect(result.promptCount).toBe(1);
+    expect(result.toolCallCount).toBe(1);
   });
 
   it("counts tool calls and edits", async () => {

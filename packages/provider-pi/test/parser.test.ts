@@ -218,6 +218,114 @@ describe("Pi parser", () => {
     });
   });
 
+  it("maps harness exec_command and apply_patch tools into replay-native scenes", async () => {
+    const patch = `*** Begin Patch
+*** Update File: src/auth.ts
+@@
+-return null;
++return token;
+*** Add File: src/new.ts
++export const created = true;
+*** End Patch`;
+    const lines = [
+      {
+        type: "session",
+        version: 3,
+        id: "pi-harness-tools",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        cwd: "/Users/test/project",
+      },
+      {
+        type: "message",
+        id: "user1",
+        parentId: null,
+        timestamp: "2026-01-01T00:00:01.000Z",
+        message: { role: "user", content: [{ type: "text", text: "Patch auth" }] },
+      },
+      {
+        type: "message",
+        id: "assistant1",
+        parentId: "user1",
+        timestamp: "2026-01-01T00:00:02.000Z",
+        message: {
+          role: "assistant",
+          model: "gpt-5.5",
+          content: [
+            {
+              type: "toolCall",
+              id: "call-exec",
+              name: "exec_command",
+              arguments: { cmd: "pnpm test", workdir: "/Users/test/project" },
+            },
+            {
+              type: "toolCall",
+              id: "call-patch",
+              name: "apply_patch",
+              arguments: { input: patch },
+            },
+          ],
+        },
+      },
+      {
+        type: "message",
+        id: "result1",
+        parentId: "assistant1",
+        timestamp: "2026-01-01T00:00:03.000Z",
+        message: {
+          role: "toolResult",
+          toolCallId: "call-exec",
+          content: [{ type: "text", text: "tests passed" }],
+        },
+      },
+      {
+        type: "message",
+        id: "result2",
+        parentId: "result1",
+        timestamp: "2026-01-01T00:00:04.000Z",
+        message: {
+          role: "toolResult",
+          toolCallId: "call-patch",
+          content: [{ type: "text", text: "Done!" }],
+        },
+      },
+      {
+        type: "message",
+        id: "assistant2",
+        parentId: "result2",
+        timestamp: "2026-01-01T00:00:05.000Z",
+        message: {
+          role: "assistant",
+          model: "gpt-5.5",
+          content: [{ type: "text", text: "Done." }],
+        },
+      },
+    ];
+
+    await withPiFixture(lines, async (path) => {
+      const replay = transformToReplay(await parsePiSession(path), "pi", "~/project");
+      const bash = replay.scenes.find(
+        (scene) => scene.type === "tool-call" && scene.toolName === "Bash",
+      );
+      expect(bash?.type === "tool-call" && bash.bashOutput).toEqual({
+        command: "pnpm test",
+        stdout: "tests passed",
+      });
+
+      const edit = replay.scenes.find(
+        (scene) => scene.type === "tool-call" && scene.toolName === "Edit",
+      );
+      expect(edit?.type === "tool-call" && edit.input.file_paths).toEqual([
+        "src/auth.ts",
+        "src/new.ts",
+      ]);
+      expect(edit?.type === "tool-call" && edit.diff).toEqual({
+        filePath: "src/auth.ts",
+        oldContent: "return null;",
+        newContent: "return token;",
+      });
+    });
+  });
+
   it("uses the active leaf branch and omits abandoned branches", async () => {
     const lines = [
       {

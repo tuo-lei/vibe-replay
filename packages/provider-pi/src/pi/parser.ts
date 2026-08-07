@@ -489,10 +489,10 @@ function extractText(content: unknown): string {
 
 function mapToolName(name: string): string {
   const normalized = name.toLowerCase();
-  if (normalized === "bash") return "Bash";
+  if (normalized === "bash" || normalized === "exec_command") return "Bash";
   if (normalized === "read") return "Read";
   if (normalized === "write") return "Write";
-  if (normalized === "edit") return "Edit";
+  if (normalized === "edit" || normalized === "apply_patch") return "Edit";
   if (normalized === "grep") return "Grep";
   if (normalized === "find") return "Find";
   if (normalized === "ls") return "LS";
@@ -501,6 +501,15 @@ function mapToolName(name: string): string {
 
 function normalizeToolInput(name: string, input: Record<string, unknown>): Record<string, unknown> {
   const normalized = name.toLowerCase();
+  if (normalized === "exec_command") {
+    return {
+      ...input,
+      ...(typeof input.cmd === "string" ? { command: input.cmd } : {}),
+    };
+  }
+  if (normalized === "apply_patch") {
+    return normalizeApplyPatchInput(input);
+  }
   if (normalized === "write") {
     return {
       ...input,
@@ -521,6 +530,52 @@ function normalizeToolInput(name: string, input: Record<string, unknown>): Recor
     };
   }
   return input;
+}
+
+function normalizeApplyPatchInput(input: Record<string, unknown>): Record<string, unknown> {
+  const patch = typeof input.input === "string" ? input.input : "";
+  if (!patch) return input;
+
+  const markers = [...patch.matchAll(/^\*\*\*\s+(?:Update|Add|Delete)\s+File:\s+(.+)$/gm)];
+  const filePaths = markers
+    .map((match) => match[1]?.trim())
+    .filter((path): path is string => !!path);
+  const firstStart = markers[0]?.index;
+  const nextStart = markers[1]?.index;
+  const firstSection =
+    firstStart === undefined ? patch : patch.slice(firstStart, nextStart ?? patch.length);
+  const oldLines: string[] = [];
+  const newLines: string[] = [];
+  for (const line of firstSection.split("\n")) {
+    if (
+      line.startsWith("*** ") ||
+      line.startsWith("@@") ||
+      line.startsWith("---") ||
+      line.startsWith("+++")
+    ) {
+      continue;
+    }
+    if (line.startsWith("-")) {
+      oldLines.push(line.slice(1));
+    } else if (line.startsWith("+")) {
+      newLines.push(line.slice(1));
+    } else if (line.startsWith(" ")) {
+      const shared = line.slice(1);
+      oldLines.push(shared);
+      newLines.push(shared);
+    }
+  }
+
+  const normalized = { ...input };
+  delete normalized.input;
+  return {
+    ...normalized,
+    patch,
+    ...(filePaths[0] ? { file_path: filePaths[0] } : {}),
+    ...(filePaths.length > 0 ? { file_paths: filePaths } : {}),
+    old_string: oldLines.join("\n"),
+    new_string: newLines.join("\n"),
+  };
 }
 
 function normalizeUsage(usage: PiUsage): TokenUsage {

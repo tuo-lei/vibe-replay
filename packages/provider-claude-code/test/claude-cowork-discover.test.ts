@@ -113,10 +113,53 @@ describe("extractCoworkSessionInfo", () => {
     const { jsonPath } = await buildCoworkLayout();
     const info = await extractCoworkSessionInfo(jsonPath);
 
-    // Fixture has 2 user messages that look like prompts (the first isReplay + the initial one),
-    // and exactly 1 assistant tool_use (`mcp__workspace__bash`).
+    // The replay copy duplicates the initial user message and must not inflate analytics.
     expect(info?.toolCallCount).toBe(1);
-    expect((info?.promptCount ?? 0) >= 1).toBe(true);
+    expect(info?.promptCount).toBe(1);
+  });
+
+  it("keeps a short initial human prompt", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vr-cowork-short-prompt-"));
+    const metadataPath = join(root, "local_cowork-session-xyz789.json");
+    await writeFile(
+      metadataPath,
+      JSON.stringify({
+        sessionId: "local_cowork-session-002",
+        cwd: "/sessions/test/mnt/outputs",
+        createdAt: 1750000000000,
+        lastActivityAt: 1750000200000,
+        initialMessage: "Fix it",
+      }),
+    );
+
+    const { jsonPath } = await buildCoworkLayout({ metadataPath });
+    const info = await extractCoworkSessionInfo(jsonPath);
+    expect(info?.firstPrompt).toBe("Fix it");
+  });
+
+  it("deduplicates replay prompts even when the replay record appears first", async () => {
+    const { jsonPath, auditPath } = await buildCoworkLayout();
+    const prompt = "Please investigate how Cowork stores session data locally.";
+    await writeFile(
+      auditPath,
+      [
+        JSON.stringify({
+          type: "user",
+          isReplay: true,
+          uuid: "replay-user",
+          message: { role: "user", content: prompt },
+        }),
+        JSON.stringify({
+          type: "user",
+          uuid: "original-user",
+          message: { role: "user", content: prompt },
+        }),
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const info = await extractCoworkSessionInfo(jsonPath);
+    expect(info?.promptCount).toBe(1);
   });
 
   it("preserves newly observed Cowork metadata fields", async () => {

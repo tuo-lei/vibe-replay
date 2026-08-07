@@ -190,7 +190,7 @@ export async function extractSessionInfo(
                   : "";
             if (text && !isSystemGeneratedMessage(text)) {
               const cleaned = cleanPromptText(text);
-              if (cleaned.length >= 10) prompts.push(cleaned.slice(0, 200));
+              if (cleaned) prompts.push(cleaned.slice(0, 200));
             }
           }
         } catch {}

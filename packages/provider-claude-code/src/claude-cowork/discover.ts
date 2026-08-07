@@ -142,6 +142,8 @@ export async function extractCoworkSessionInfo(jsonPath: string): Promise<Sessio
   let toolCallCount = 0;
   let promptCount = 0;
   const earlyLines: string[] = [];
+  const originalUserKeys = new Set<string>();
+  const countedReplayKeys = new Set<string>();
 
   let rl: ReturnType<typeof createInterface> | undefined;
   try {
@@ -154,11 +156,28 @@ export async function extractCoworkSessionInfo(jsonPath: string): Promise<Sessio
       if (earlyLines.length < PROMPT_SCAN_LINES) earlyLines.push(line);
       const m = line.match(TOOL_USE_RE);
       if (m) toolCallCount += m.length;
-      if (
-        (line.includes('"type":"user"') || line.includes('"type": "user"')) &&
-        !line.includes('"tool_result"')
-      ) {
-        promptCount++;
+      if (line.includes('"type":"user"') || line.includes('"type": "user"')) {
+        try {
+          const obj = JSON.parse(line) as Record<string, any>;
+          const prompt = coworkHumanPrompt(obj);
+          if (prompt) {
+            const keys = coworkUserKeys(obj, prompt.text);
+            if (obj.isReplay === true) {
+              const duplicateReplay = keys.some((key) => originalUserKeys.has(key));
+              if (!duplicateReplay) {
+                promptCount++;
+                for (const key of keys) countedReplayKeys.add(key);
+              }
+            } else {
+              const replacesCountedReplay = keys.some((key) => countedReplayKeys.has(key));
+              if (!replacesCountedReplay) promptCount++;
+              for (const key of keys) originalUserKeys.add(key);
+            }
+          }
+        } catch {
+          // Malformed lines are ignored during lightweight discovery; the full
+          // parser reports structured warnings when a replay is generated.
+        }
       }
     }
   } catch {
@@ -222,6 +241,31 @@ export async function extractCoworkSessionInfo(jsonPath: string): Promise<Sessio
   };
 }
 
+function coworkHumanPrompt(obj: Record<string, any>): { text?: string } | null {
+  if (obj.type !== "user" || obj.message?.role !== "user") return null;
+  if (obj.parent_tool_use_id || obj.parentToolUseID) return null;
+  const content = obj.message.content;
+  if (typeof content === "string") {
+    if (!content.trim() || isSystemGeneratedMessage(content)) return null;
+    return { text: content };
+  }
+  if (!Array.isArray(content)) return null;
+  const text = content
+    .filter((block: any) => block?.type === "text" && typeof block.text === "string")
+    .map((block: { text: string }) => block.text)
+    .join("\n");
+  const hasImage = content.some((block: any) => block?.type === "image");
+  if (!text.trim() && !hasImage) return null;
+  if (text && isSystemGeneratedMessage(text)) return null;
+  return text ? { text } : {};
+}
+
+function coworkUserKeys(obj: Record<string, any>, prompt?: string): string[] {
+  const keys = prompt ? [`content:${prompt}`] : [];
+  if (typeof obj.uuid === "string" && obj.uuid) keys.unshift(`uuid:${obj.uuid}`);
+  return keys;
+}
+
 /**
  * Return up to 2 cleaned user prompts for the picker preview.
  * The Cowork metadata JSON already carries `initialMessage`; use it first and
@@ -237,7 +281,7 @@ function collectPromptsFromLines(lines: string[], initialMessage?: string): stri
     if (!text) return;
     if (isSystemGeneratedMessage(text)) return;
     const cleaned = previewPrompt(text);
-    if (cleaned.length < 10) return;
+    if (!cleaned) return;
     if (prompts.includes(cleaned)) return;
     prompts.push(cleaned);
   };

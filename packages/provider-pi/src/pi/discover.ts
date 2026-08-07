@@ -128,6 +128,8 @@ async function extractPiSessionInfo(
             if (isEditTool(block.name)) editCountEst++;
           }
         }
+      } else if (message.role === "bashExecution") {
+        toolCallCount++;
       }
     }
   } catch {
@@ -183,5 +185,11 @@ function extractText(content: unknown): string {
 }
 
 function isEditTool(name: unknown): boolean {
-  return name === "edit" || name === "write" || name === "Edit" || name === "Write";
+  return (
+    name === "edit" ||
+    name === "write" ||
+    name === "apply_patch" ||
+    name === "Edit" ||
+    name === "Write"
+  );
 }
