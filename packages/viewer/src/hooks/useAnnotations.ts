@@ -77,6 +77,23 @@ export function annotationStorageKey(provider: string, sessionId: string): strin
   return `${LS_PREFIX}${encodeURIComponent(provider)}:${sessionId}`;
 }
 
+function loadAnnotationDraft(session: ReplaySession, isEditor: boolean): Annotation[] {
+  const embedded = session.annotations ?? [];
+  if (isEditor) return embedded;
+  try {
+    const draft =
+      localStorage.getItem(annotationStorageKey(session.meta.provider, session.meta.sessionId)) ??
+      localStorage.getItem(legacyAnnotationStorageKey(session.meta.sessionId));
+    if (draft) {
+      const parsed = JSON.parse(draft) as Annotation[];
+      if (parsed.length > 0 || embedded.length === 0) return parsed;
+    }
+  } catch {
+    /* ignore malformed or unavailable local drafts */
+  }
+  return embedded;
+}
+
 export function useAnnotations(
   session: ReplaySession,
   mode: ViewerMode = "embedded",
@@ -84,31 +101,29 @@ export function useAnnotations(
   const sessionId = session.meta.sessionId;
   const provider = session.meta.provider;
   const isEditor = mode === "editor";
+  const storageIdentity = `${isEditor ? "editor" : "local"}::${provider}::${sessionId}`;
 
   // Save HTML only works from self-contained production builds (data embedded inline)
   // or in editor mode (server generates it).
   const canSaveHtml = !!window.__VIBE_REPLAY_DATA__ || isEditor;
 
   // Initialize from embedded data, then overlay localStorage draft
-  const [annotations, setAnnotations] = useState<Annotation[]>(() => {
-    const embedded = session.annotations ?? [];
-    if (isEditor) return embedded; // Editor mode: server is source of truth
-    try {
-      const draft =
-        localStorage.getItem(annotationStorageKey(provider, sessionId)) ??
-        localStorage.getItem(legacyAnnotationStorageKey(sessionId));
-      if (draft) {
-        const parsed = JSON.parse(draft) as Annotation[];
-        if (parsed.length > 0 || embedded.length === 0) return parsed;
-      }
-    } catch {
-      /* ignore */
-    }
-    return embedded;
-  });
+  const [annotations, setAnnotations] = useState<Annotation[]>(() =>
+    loadAnnotationDraft(session, isEditor),
+  );
 
   // Track whether we've diverged from embedded/server state
   const [savedSnapshot, setSavedSnapshot] = useState<Annotation[]>(() => session.annotations ?? []);
+  const loadedIdentityRef = useRef(storageIdentity);
+  const skipAutosaveIdentityRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (loadedIdentityRef.current === storageIdentity) return;
+    loadedIdentityRef.current = storageIdentity;
+    skipAutosaveIdentityRef.current = storageIdentity;
+    setAnnotations(loadAnnotationDraft(session, isEditor));
+    setSavedSnapshot(session.annotations ?? []);
+  }, [isEditor, session, storageIdentity]);
 
   const hasUnsaved = hasUnsavedChanges(annotations, savedSnapshot);
 
@@ -116,6 +131,10 @@ export function useAnnotations(
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    if (skipAutosaveIdentityRef.current === storageIdentity) {
+      skipAutosaveIdentityRef.current = null;
+      return;
+    }
     if (isEditor) {
       // Debounced save to server API
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -145,7 +164,7 @@ export function useAnnotations(
     } catch {
       /* quota exceeded — silent */
     }
-  }, [annotations, provider, sessionId, isEditor]);
+  }, [annotations, provider, sessionId, storageIdentity, isEditor]);
 
   const annotatedScenes = useMemo(() => computeAnnotatedScenes(annotations), [annotations]);
 

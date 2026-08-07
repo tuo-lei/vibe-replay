@@ -59,4 +59,28 @@ describe("useAnnotations storage identity", () => {
     });
     expect(localStorage.getItem(legacyAnnotationStorageKey("shared-session"))).toBeNull();
   });
+
+  it("reloads provider-scoped drafts when the replay identity changes", async () => {
+    const cursorAnnotation = { ...annotation, id: "cursor-note", body: "Cursor note" };
+    localStorage.setItem(
+      annotationStorageKey("claude-code", "shared-session"),
+      JSON.stringify([annotation]),
+    );
+    localStorage.setItem(
+      annotationStorageKey("cursor", "shared-session"),
+      JSON.stringify([cursorAnnotation]),
+    );
+
+    const { result, rerender } = renderHook(
+      ({ provider }) => useAnnotations(session(provider), "embedded"),
+      { initialProps: { provider: "claude-code" } },
+    );
+    expect(result.current.annotations).toEqual([annotation]);
+
+    rerender({ provider: "cursor" });
+    await waitFor(() => expect(result.current.annotations).toEqual([cursorAnnotation]));
+    expect(localStorage.getItem(annotationStorageKey("cursor", "shared-session"))).toBe(
+      JSON.stringify([cursorAnnotation]),
+    );
+  });
 });
