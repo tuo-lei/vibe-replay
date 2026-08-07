@@ -125,9 +125,11 @@ async function extractPiSessionInfo(
           for (const block of message.content) {
             if (block?.type !== "toolCall") continue;
             toolCallCount++;
-            if (isEditTool(block.name)) editCountEst++;
+            if (isEditTool(block.name, block.arguments)) editCountEst++;
           }
         }
+      } else if (message.role === "bashExecution") {
+        toolCallCount++;
       }
     }
   } catch {
@@ -182,6 +184,11 @@ function extractText(content: unknown): string {
     .join("\n");
 }
 
-function isEditTool(name: unknown): boolean {
-  return name === "edit" || name === "write" || name === "Edit" || name === "Write";
+function isEditTool(name: unknown, input: unknown): boolean {
+  if (name === "edit" || name === "write" || name === "Edit" || name === "Write") return true;
+  if (name !== "apply_patch" || !input || typeof input !== "object") return false;
+  const args = input as Record<string, unknown>;
+  return [args.input, args.patchText, args.patch].some(
+    (value) => typeof value === "string" && value.length > 0,
+  );
 }

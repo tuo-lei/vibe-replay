@@ -426,11 +426,12 @@ function buildAssistantBlocks(
       blocks.push({ type: "text", text: block.text });
     } else if (block.type === "toolCall") {
       const result = toolResults.get(block.id);
+      const rawInput = block.arguments || {};
       blocks.push({
         type: "tool_use",
         id: block.id,
-        name: mapToolName(block.name),
-        input: normalizeToolInput(block.name, block.arguments || {}),
+        name: mapToolName(block.name, rawInput),
+        input: normalizeToolInput(block.name, rawInput),
         _result: result?.text || "",
         ...(result?.images.length ? { _images: result.images } : {}),
         ...(result?.isError ? { _isError: true } : {}),
@@ -487,12 +488,14 @@ function extractText(content: unknown): string {
   return extractTextAndImages(content).text;
 }
 
-function mapToolName(name: string): string {
+function mapToolName(name: string, input: Record<string, unknown>): string {
   const normalized = name.toLowerCase();
   if (normalized === "bash") return "Bash";
+  if (normalized === "exec_command" && commandFromInput(input)) return "Bash";
   if (normalized === "read") return "Read";
   if (normalized === "write") return "Write";
   if (normalized === "edit") return "Edit";
+  if (normalized === "apply_patch" && patchTextFromInput(input)) return "Edit";
   if (normalized === "grep") return "Grep";
   if (normalized === "find") return "Find";
   if (normalized === "ls") return "LS";
@@ -501,6 +504,24 @@ function mapToolName(name: string): string {
 
 function normalizeToolInput(name: string, input: Record<string, unknown>): Record<string, unknown> {
   const normalized = name.toLowerCase();
+  if (normalized === "exec_command") {
+    const command = commandFromInput(input);
+    if (!command) return input;
+    return {
+      ...input,
+      command,
+      ...(typeof input.workdir !== "string" && typeof input.cwd === "string"
+        ? { workdir: input.cwd }
+        : {}),
+      ...(typeof input.workdir !== "string" && typeof input.working_directory === "string"
+        ? { workdir: input.working_directory }
+        : {}),
+    };
+  }
+  if (normalized === "apply_patch") {
+    if (!patchTextFromInput(input)) return input;
+    return normalizeApplyPatchInput(input);
+  }
   if (normalized === "write") {
     return {
       ...input,
@@ -521,6 +542,67 @@ function normalizeToolInput(name: string, input: Record<string, unknown>): Recor
     };
   }
   return input;
+}
+
+function commandFromInput(input: Record<string, unknown>): string | undefined {
+  if (typeof input.cmd === "string" && input.cmd) return input.cmd;
+  if (typeof input.command === "string" && input.command) return input.command;
+  return undefined;
+}
+
+function patchTextFromInput(input: Record<string, unknown>): string | undefined {
+  if (typeof input.input === "string" && input.input) return input.input;
+  if (typeof input.patchText === "string" && input.patchText) return input.patchText;
+  if (typeof input.patch === "string" && input.patch) return input.patch;
+  return undefined;
+}
+
+function normalizeApplyPatchInput(input: Record<string, unknown>): Record<string, unknown> {
+  const patch = patchTextFromInput(input) || "";
+  if (!patch) return input;
+
+  const markers = [...patch.matchAll(/^\*\*\*\s+(Update|Add|Delete)\s+File:\s+(.+)$/gm)];
+  const filePaths = markers
+    .map((match) => match[2]?.trim())
+    .filter((path): path is string => !!path);
+  const firstStart = markers[0]?.index;
+  const nextStart = markers[1]?.index;
+  const firstSection =
+    firstStart === undefined ? patch : patch.slice(firstStart, nextStart ?? patch.length);
+  const oldLines: string[] = [];
+  const newLines: string[] = [];
+  let inHunk = markers[0]?.[1] === "Add" || markers[0]?.[1] === "Delete";
+  for (const line of firstSection.split("\n")) {
+    if (line.startsWith("*** ")) {
+      continue;
+    }
+    if (line.startsWith("@@")) {
+      inHunk = true;
+      continue;
+    }
+    if (!inHunk && (line.startsWith("---") || line.startsWith("+++"))) continue;
+    if (line.startsWith("-")) {
+      oldLines.push(line.slice(1));
+    } else if (line.startsWith("+")) {
+      newLines.push(line.slice(1));
+    } else if (line.startsWith(" ")) {
+      const shared = line.slice(1);
+      oldLines.push(shared);
+      newLines.push(shared);
+    }
+  }
+
+  const normalized = { ...input };
+  delete normalized.input;
+  delete normalized.patchText;
+  return {
+    ...normalized,
+    patch,
+    ...(filePaths[0] ? { file_path: filePaths[0] } : {}),
+    ...(filePaths.length > 0 ? { file_paths: filePaths } : {}),
+    old_string: oldLines.join("\n"),
+    new_string: newLines.join("\n"),
+  };
 }
 
 function normalizeUsage(usage: PiUsage): TokenUsage {

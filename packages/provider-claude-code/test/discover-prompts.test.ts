@@ -1,4 +1,5 @@
-import { stat } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { extractSessionInfo } from "../src/claude-code/discover.js";
@@ -75,5 +76,29 @@ describe("extractSessionInfo – multi-prompt extraction", () => {
 
     expect(info?.timestamp).toBe("2025-06-01T10:00:12Z");
     expect(info?.lineCount).toBe(11); // 12 lines minus empty trailing
+  });
+
+  it("keeps short non-system human prompts", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vibe-claude-short-prompt-"));
+    const path = join(dir, "short.jsonl");
+    await writeFile(
+      path,
+      `${JSON.stringify({
+        type: "user",
+        sessionId: "short-session",
+        slug: "short",
+        cwd: "/tmp/project",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        message: { role: "user", content: "Fix it" },
+      })}\n`,
+      "utf-8",
+    );
+    try {
+      const fileStat = await stat(path);
+      const info = await extractSessionInfo(path, fileStat.size, "/tmp/project");
+      expect(info?.firstPrompt).toBe("Fix it");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

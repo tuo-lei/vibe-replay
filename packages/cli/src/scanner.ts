@@ -14,6 +14,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { readFileCache, writeFileCache } from "./cache.js";
+import { isSystemGeneratedMessage } from "@vibe-replay/provider-core/clean-prompt";
 import { estimateActiveDuration } from "@vibe-replay/provider-core/duration";
 import {
   FILE_EDIT_TOOLS,
@@ -22,6 +23,7 @@ import {
 } from "@vibe-replay/provider-core/utils";
 import { estimateCost, estimateCostSimple } from "@vibe-replay/replay-core/pricing";
 import { parseCodexSession } from "./providers/codex/parser.js";
+import { parseClaudeCoworkSession } from "@vibe-replay/provider-claude-code/claude-cowork/parser";
 import { parseCursorSession } from "./providers/cursor/parser.js";
 import { parsePiSession } from "./providers/pi/parser.js";
 import type { ProviderParseResult } from "./providers/types.js";
@@ -29,7 +31,7 @@ import type { DataSource, PrLink, SessionInfo, TokenUsage } from "./types.js";
 import { localDayKey, shortenPath } from "./utils.js";
 
 // Bump this when we extract new fields — forces re-scan of all sessions.
-const SCANNER_VERSION = 8;
+const SCANNER_VERSION = 9;
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -325,6 +327,12 @@ interface ScanLine extends ScanLinePrLink {
   title?: string;
   isApiErrorMessage?: boolean;
   isMeta?: boolean;
+  isCompactSummary?: boolean;
+  sourceToolAssistantUUID?: string;
+  sourceToolUseID?: string;
+  origin?: string;
+  parent_tool_use_id?: string;
+  parentToolUseID?: string;
   snapshot?: { timestamp?: string };
   data?: ScanLinePrLink;
   message?: ScanLineMessage;
@@ -348,6 +356,14 @@ interface SubAgentLine {
  * subagent JSONL reading, no transform step.
  */
 export async function scanSession(input: ScanInput): Promise<SessionScanResult> {
+  if (input.provider === "claude-cowork") {
+    try {
+      return await scanClaudeCoworkSession(input);
+    } catch {
+      // Fall through to the generic JSONL scanner if a Cowork audit contains a
+      // newer shape that the full normalizer does not yet understand.
+    }
+  }
   if (input.provider === "cursor") {
     try {
       return await scanCursorSession(input);
@@ -526,21 +542,43 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
 
       // User prompts
       if (role === "user") {
+        const isToolResponse =
+          !!obj.sourceToolAssistantUUID ||
+          !!obj.sourceToolUseID ||
+          obj.origin === "tool_result" ||
+          !!obj.parent_tool_use_id ||
+          !!obj.parentToolUseID;
         if (typeof msgContent === "string") {
-          promptCount++;
-          if (!firstPrompt && msgContent.length >= 10) {
-            firstPrompt = msgContent.slice(0, 200);
+          const isCompaction =
+            obj.isCompactSummary ||
+            msgContent.startsWith("This session is being continued from a previous conversation");
+          if (!isCompaction && !isToolResponse && !isSystemGeneratedMessage(msgContent)) {
+            promptCount++;
+            if (!firstPrompt && msgContent.trim()) {
+              firstPrompt = msgContent.slice(0, 200);
+            }
           }
         } else if (Array.isArray(msgContent)) {
           // Check if it has text (not just tool_result)
+          const text = msgContent
+            .filter(
+              (b: { type?: string; text?: string }) =>
+                b.type === "text" && typeof b.text === "string",
+            )
+            .map((b: { text?: string }) => b.text || "")
+            .join("");
           const hasText = msgContent.some(
             (b: { type?: string; text?: string }) =>
-              (b.type === "text" && b.text?.trim()) || b.type === "_user_images",
+              (b.type === "text" && b.text?.trim()) ||
+              b.type === "image" ||
+              b.type === "_user_images",
           );
           const isOnlyToolResult = msgContent.every(
             (b: { type?: string }) => b.type === "tool_result",
           );
-          if (hasText && !isOnlyToolResult) promptCount++;
+          if (hasText && !isOnlyToolResult && !isToolResponse && !isSystemGeneratedMessage(text)) {
+            promptCount++;
+          }
         }
       }
 
@@ -698,6 +736,27 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
     mcpServersUsed: mcpServersUsed.size > 0 ? [...mcpServersUsed].sort() : undefined,
     turnDurations: turnDurations.length > 0 ? turnDurations : undefined,
   };
+}
+
+async function scanClaudeCoworkSession(input: ScanInput): Promise<SessionScanResult> {
+  const sessionInfo: SessionInfo = {
+    provider: "claude-cowork",
+    sessionId: input.sessionId,
+    slug: input.slug,
+    title: input.title,
+    project: input.project,
+    cwd: input.project,
+    version: "",
+    timestamp: input.timestamp || new Date().toISOString(),
+    lineCount: input.sourceLineCount || 0,
+    fileSize: input.sourceFileSize || 0,
+    filePath: input.filePaths[0] || "",
+    filePaths: input.filePaths,
+    firstPrompt: input.firstPrompt || input.title || "(Cowork session)",
+    model: input.discoveryModel,
+  };
+  const parsed = await parseClaudeCoworkSession(input.filePaths, sessionInfo);
+  return buildScanResultFromParsed(input, parsed);
 }
 
 async function scanCodexSession(input: ScanInput): Promise<SessionScanResult> {
