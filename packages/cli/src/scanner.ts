@@ -1054,6 +1054,7 @@ function estimateParsedCost(parsed: ProviderParseResult): number | undefined {
 const UNKNOWN_COST_NOTE =
   "Cost estimate is unavailable because model pricing or attribution is unknown.";
 
+/** Preserve provider notes while explaining why token usage has no cost value. */
 function costDataQualityNotes(
   notes: string[] | undefined,
   tokenUsage: TokenUsage | undefined,

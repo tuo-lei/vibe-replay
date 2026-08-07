@@ -22,6 +22,7 @@ function metaWithWarnings(
         cacheCreationTokens: 0,
         cacheReadTokens: 0,
       },
+      costEstimate: 0.001,
     },
     parseWarnings,
   };
@@ -57,6 +58,17 @@ describe("getSessionDataQualityNotes", () => {
     const meta = metaWithWarnings([]);
     meta.provider = "opencode";
     meta.model = "local-model";
+    delete meta.stats.costEstimate;
+
+    expect(getSessionDataQualityNotes(meta)).toContain(
+      "Cost estimate is unavailable because model pricing or attribution is unknown.",
+    );
+  });
+
+  it("explains missing cost when model attribution is absent", () => {
+    const meta = metaWithWarnings([]);
+    meta.provider = "opencode";
+    delete meta.stats.costEstimate;
 
     expect(getSessionDataQualityNotes(meta)).toContain(
       "Cost estimate is unavailable because model pricing or attribution is unknown.",

@@ -103,11 +103,13 @@ export function getKnownModelPricing(model: string): ModelPricing | undefined {
   if (lower.includes("gpt-5.5")) return MODEL_PRICING["gpt-5.5"];
   if (lower.includes("gpt-5.4")) return MODEL_PRICING["gpt-5.4"];
   // Opus: 4.6/4.5 → new pricing, 4.1 and earlier → legacy
+  if (hasUnsupportedClaudeMajor(lower, "opus")) return undefined;
   if (lower.includes("opus-4-6") || lower.includes("opus-4-5")) return MODEL_PRICING["opus-4-new"];
   const explicitOpusMinor = lower.match(/opus-4-(\d{1,2})(?:-|$)/)?.[1];
   if (explicitOpusMinor && Number(explicitOpusMinor) > 6) return undefined;
   if (lower.includes("opus")) return MODEL_PRICING.opus;
   // Sonnet: 4.6/4.5 → new pricing, Sonnet 4 → explicit, earlier → standard
+  if (hasUnsupportedClaudeMajor(lower, "sonnet")) return undefined;
   if (lower.includes("sonnet-4-6") || lower.includes("sonnet-4-5"))
     return MODEL_PRICING["sonnet-4-new"];
   const explicitSonnetMinor = lower.match(/sonnet-4-(\d{1,2})(?:-|$)/)?.[1];
@@ -115,11 +117,20 @@ export function getKnownModelPricing(model: string): ModelPricing | undefined {
   if (lower.includes("sonnet-4")) return MODEL_PRICING["sonnet-4"];
   if (lower.includes("sonnet")) return MODEL_PRICING.sonnet;
   // Haiku: 4.5/4.6 → new pricing, 3.5 and earlier → legacy
+  if (hasUnsupportedClaudeMajor(lower, "haiku")) return undefined;
   if (lower.includes("haiku-4-5") || lower.includes("haiku-4-6")) return MODEL_PRICING["haiku-4-5"];
   const explicitHaikuMinor = lower.match(/haiku-4-(\d{1,2})(?:-|$)/)?.[1];
   if (explicitHaikuMinor && Number(explicitHaikuMinor) > 6) return undefined;
   if (lower.includes("haiku")) return MODEL_PRICING.haiku;
   return undefined;
+}
+
+/** Reject explicitly versioned Claude families outside the supported 3.x/4.x generations. */
+function hasUnsupportedClaudeMajor(model: string, family: "opus" | "sonnet" | "haiku"): boolean {
+  const familyFirst = model.match(new RegExp(`${family}-(\\d+)(?:-|$)`))?.[1];
+  const versionFirst = model.match(new RegExp(`claude-(\\d+)(?:-\\d+)?-${family}(?:-|$)`))?.[1];
+  const major = versionFirst || familyFirst;
+  return major !== undefined && major !== "3" && major !== "4";
 }
 
 // Non-Claude context window limits. Claude models are handled by name detection below.
