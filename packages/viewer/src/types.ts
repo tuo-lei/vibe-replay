@@ -3,6 +3,7 @@ export type {
   Annotation,
   DataSource,
   DataSourceInfo,
+  FileDiff,
   OverlaySource,
   PrLink,
   ReplaySession,

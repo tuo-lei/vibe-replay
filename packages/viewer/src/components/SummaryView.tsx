@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { computeCacheHitRate, computeContextLayers, turnCacheHitRate } from "../engine";
 import type { ReplaySession, TurnStat } from "../types";
+import { getToolDiffs } from "../utils/sceneDiffs";
 import { formatReplaySourceLabel } from "../utils/format";
 import {
   DataQualityIndicator,
@@ -185,13 +186,13 @@ export default function SummaryView({ session }: Props) {
             const fp = scene.input?.file_path as string | undefined;
             if (fp) getFile(fp).readCount++;
           } else if (tn === "Edit" || tn === "Write") {
-            if (scene.diff) {
-              const f = getFile(scene.diff.filePath);
+            for (const diff of getToolDiffs(scene)) {
+              const f = getFile(diff.filePath);
               f.editCount++;
               const turnIdx = turns.length; // current turn (1-indexed)
               f.turnEdits.set(turnIdx, (f.turnEdits.get(turnIdx) || 0) + 1);
-              const oldL = scene.diff.oldContent ? scene.diff.oldContent.split("\n").length : 0;
-              const newL = scene.diff.newContent ? scene.diff.newContent.split("\n").length : 0;
+              const oldL = diff.oldContent ? diff.oldContent.split("\n").length : 0;
+              const newL = diff.newContent ? diff.newContent.split("\n").length : 0;
               f.linesAdded += Math.max(0, newL - oldL);
               f.linesRemoved += Math.max(0, oldL - newL);
             }

@@ -319,6 +319,42 @@ describe("transform — tool scene enrichment", () => {
     expect(scene.type === "tool-call" && scene.diff?.newContent).toBe("const x = 2;");
   });
 
+  it("preserves every file in a multi-file apply_patch call", () => {
+    const patch = `*** Begin Patch
+*** Update File: src/app.ts
+@@
+-const enabled = false;
++const enabled = true;
+*** Add File: src/new.ts
++export const created = true;
+*** End Patch`;
+    const replay = transformToReplay(
+      buildParsed({ turns: [assistantToolTurn("Edit", { value: patch }, "Done")] }),
+      "codex",
+      "~/test",
+    );
+    const scene = replay.scenes[0];
+
+    expect(scene.type).toBe("tool-call");
+    expect(scene.type === "tool-call" && scene.diff).toEqual({
+      filePath: "src/app.ts",
+      oldContent: "const enabled = false;",
+      newContent: "const enabled = true;",
+    });
+    expect(scene.type === "tool-call" && scene.diffs).toEqual([
+      {
+        filePath: "src/app.ts",
+        oldContent: "const enabled = false;",
+        newContent: "const enabled = true;",
+      },
+      {
+        filePath: "src/new.ts",
+        oldContent: "",
+        newContent: "export const created = true;",
+      },
+    ]);
+  });
+
   it("enriches Write tool with diff (empty old)", () => {
     const replay = transformToReplay(
       buildParsed({

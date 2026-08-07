@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { ReplaySession } from "../types";
+import { getToolDiffs } from "../utils/sceneDiffs";
 import { formatReplaySourceLabel } from "../utils/format";
 import {
   DataQualityIndicator,
@@ -38,18 +39,19 @@ export default function StatsPanel({ session }: Props) {
           break;
         case "tool-call": {
           toolCounts.set(scene.toolName, (toolCounts.get(scene.toolName) || 0) + 1);
-          if (scene.diff) {
+          const diffs = getToolDiffs(scene);
+          if (diffs.length > 0) {
             editCount++;
-            filesModified.add(scene.diff.filePath);
+            for (const diff of diffs) filesModified.add(diff.filePath);
           }
           if (scene.subAgent) {
             subAgentCount++;
             delegatedTools += scene.subAgent.toolCalls;
             // Count file modifications from sub-agent scenes
             for (const saScene of scene.subAgent.scenes) {
-              if (saScene.type === "tool-call" && saScene.diff) {
+              if (saScene.type === "tool-call" && getToolDiffs(saScene).length > 0) {
                 editCount++;
-                filesModified.add(saScene.diff.filePath);
+                for (const diff of getToolDiffs(saScene)) filesModified.add(diff.filePath);
               }
             }
           }

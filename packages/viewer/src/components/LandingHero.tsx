@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { ReplaySession } from "../types";
+import { getToolDiffs } from "../utils/sceneDiffs";
 import { providerDisplayName, rollupProject } from "./dashboard-utils";
 import { formatDuration } from "./StatsPanel";
 
@@ -51,8 +52,8 @@ export default function LandingHero({ session, onStart, onViewInsights }: Props)
   const filesModified = useMemo(() => {
     const fileSet = new Set<string>();
     for (const scene of scenes) {
-      if (scene.type === "tool-call" && scene.diff) {
-        fileSet.add(scene.diff.filePath);
+      if (scene.type === "tool-call") {
+        for (const diff of getToolDiffs(scene)) fileSet.add(diff.filePath);
       }
     }
     return fileSet.size;

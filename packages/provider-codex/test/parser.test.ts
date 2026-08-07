@@ -755,6 +755,52 @@ describe("Codex parser", () => {
     });
   });
 
+  it("preserves multi-file apply_patch contents through replay transform", () => {
+    const patch = `*** Begin Patch
+*** Update File: src/app.ts
+@@
+-export const enabled = false;
++export const enabled = true;
+*** Add File: src/auth.ts
++export const auth = true;
+*** End Patch`;
+    const parsed = parseCodexLines(
+      [
+        {
+          timestamp: "2026-04-26T10:25:00.000Z",
+          type: "session_meta",
+          payload: { id: "codex-session-multi-patch", cwd: "/Users/test/project" },
+        },
+        {
+          timestamp: "2026-04-26T10:25:01.000Z",
+          type: "response_item",
+          payload: {
+            type: "custom_tool_call",
+            name: "apply_patch",
+            call_id: "patch_multi",
+            input: patch,
+          },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+    const replay = transformToReplay(parsed, "codex", "~/project");
+    const scene = replay.scenes.find((item) => item.type === "tool-call");
+
+    expect(scene?.type).toBe("tool-call");
+    expect(scene?.type === "tool-call" && scene.diffs).toEqual([
+      {
+        filePath: "src/app.ts",
+        oldContent: "export const enabled = false;",
+        newContent: "export const enabled = true;",
+      },
+      {
+        filePath: "src/auth.ts",
+        oldContent: "",
+        newContent: "export const auth = true;",
+      },
+    ]);
+  });
+
   it("parses Codex developer messages as context injections", () => {
     const result = parseCodexLines(
       [
