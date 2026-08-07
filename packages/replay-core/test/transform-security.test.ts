@@ -572,6 +572,40 @@ describe("secret redaction in transform", () => {
     expect(scene.diff?.newContent).toContain("[REDACTED]");
     expect(scene.diff?.newContent).toContain("~/created.env");
   });
+
+  it("redacts every file in a multi-file patch diff", () => {
+    const patch = `*** Begin Patch
+*** Update File: ${HOME}/project/app.ts
+@@
+-const token = "old";
++const token = "safe";
+*** Add File: ${HOME}/project/secret.ts
++export const token = "${EXAMPLE_GH_PAT}";
+*** End Patch`;
+    const replay = transform(
+      makeParsed([
+        {
+          role: "assistant",
+          blocks: [
+            {
+              type: "tool_use",
+              id: "patch-1",
+              name: "Edit",
+              input: { value: patch },
+              _result: "Done",
+            },
+          ],
+        },
+      ]),
+    );
+    const scene = replay.scenes[0] as ToolCallScene;
+    const serialized = JSON.stringify(scene.diffs);
+
+    expect(scene.diffs).toHaveLength(2);
+    expect(serialized).not.toContain(HOME);
+    expect(serialized).not.toContain(EXAMPLE_GH_PAT);
+    expect(serialized).toContain("[REDACTED]");
+  });
 });
 
 // ---------------------------------------------------------------------------

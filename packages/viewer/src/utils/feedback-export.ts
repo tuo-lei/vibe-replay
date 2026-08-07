@@ -1,5 +1,6 @@
 import type { Annotation, ReplaySession, Scene } from "../types";
 import { displayToolName } from "./toolName";
+import { getToolDiffs } from "./sceneDiffs";
 
 const MAX_CONTEXT_CHARS = 1_200;
 
@@ -44,7 +45,8 @@ export function sceneFeedbackContext(scene: Scene): { text: string; language?: s
       return { text: truncate(scene.content), language: "markdown" };
     case "tool-call": {
       const parts = [`Tool: ${displayToolName(scene.toolName)}`];
-      if (scene.diff?.filePath) parts.push(`File: ${scene.diff.filePath}`);
+      const files = getToolDiffs(scene).map((diff) => diff.filePath);
+      if (files.length > 0) parts.push(`Files: ${files.join(", ")}`);
       if (scene.bashOutput?.command) parts.push(`Command: ${scene.bashOutput.command}`);
       if (scene.isError) parts.push("Result: error");
       const input = JSON.stringify(scene.input, null, 2);

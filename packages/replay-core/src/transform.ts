@@ -4,7 +4,7 @@ import { estimateCostIfKnown, estimateCostSimpleIfKnown, getModelContextLimit } 
 import { normalizeSubAgentType, type ProviderParseResult } from "@vibe-replay/provider-contract";
 import { compactWarningSample } from "@vibe-replay/provider-contract/warnings";
 import type { ContentBlock } from "@vibe-replay/provider-contract";
-import type { DataSourceInfo, ReplaySession, Scene, SubAgent } from "@vibe-replay/types";
+import type { DataSourceInfo, FileDiff, ReplaySession, Scene, SubAgent } from "@vibe-replay/types";
 import { estimateTokens } from "./utils/tokenEstimate.js";
 
 type ToolCallScene = Extract<Scene, { type: "tool-call" }>;
@@ -246,16 +246,25 @@ export function transformToReplay(
   };
 }
 
-function buildFileDiff(
-  toolName: string,
-  input: Record<string, any>,
-): ToolCallScene["diff"] | undefined {
+function buildFileDiffs(toolName: string, input: Record<string, any>): FileDiff[] {
+  if (toolName === "Edit") {
+    const patch =
+      typeof input.patch === "string"
+        ? input.patch
+        : typeof input.value === "string"
+          ? input.value
+          : undefined;
+    const patchDiffs = patch ? parseApplyPatchDiffs(patch) : [];
+    if (patchDiffs.length > 0) return patchDiffs;
+  }
   if (toolName === "Edit" && input.file_path) {
-    return {
-      filePath: redactFilePath(input.file_path),
-      oldContent: redactDiffContent(input.old_string),
-      newContent: redactDiffContent(input.new_string),
-    };
+    return [
+      {
+        filePath: redactFilePath(input.file_path),
+        oldContent: redactDiffContent(input.old_string),
+        newContent: redactDiffContent(input.new_string),
+      },
+    ];
   }
   if (toolName === "MultiEdit" && input.file_path && Array.isArray(input.edits)) {
     const edits = input.edits.filter((edit: unknown): edit is Record<string, any> => {
@@ -264,31 +273,72 @@ function buildFileDiff(
     if (edits.length > 0) {
       // MultiEdit records independent replacements, not full before/after file
       // states. Show a synthetic chunk list so the replay still surfaces what changed.
-      return {
-        filePath: redactFilePath(input.file_path),
-        oldContent: edits.map((edit) => redactDiffContent(edit.old_string)).join("\n\n"),
-        newContent: edits.map((edit) => redactDiffContent(edit.new_string)).join("\n\n"),
-      };
+      return [
+        {
+          filePath: redactFilePath(input.file_path),
+          oldContent: edits.map((edit) => redactDiffContent(edit.old_string)).join("\n\n"),
+          newContent: edits.map((edit) => redactDiffContent(edit.new_string)).join("\n\n"),
+        },
+      ];
     }
   }
   if (toolName === "Write" && input.file_path) {
-    return {
-      filePath: redactFilePath(input.file_path),
-      oldContent: "",
-      newContent: truncate(redactDiffContent(input.content), 3000),
-    };
+    return [
+      {
+        filePath: redactFilePath(input.file_path),
+        oldContent: "",
+        newContent: truncate(redactDiffContent(input.content), 3000),
+      },
+    ];
   }
   if (toolName === "Delete" && input.file_path) {
-    return {
-      filePath: redactFilePath(input.file_path),
-      oldContent:
-        typeof input.old_string === "string"
-          ? redactDiffContent(input.old_string)
-          : "(file deleted)",
-      newContent: "",
-    };
+    return [
+      {
+        filePath: redactFilePath(input.file_path),
+        oldContent:
+          typeof input.old_string === "string"
+            ? redactDiffContent(input.old_string)
+            : "(file deleted)",
+        newContent: "",
+      },
+    ];
   }
-  return undefined;
+  return [];
+}
+
+/** Parse Codex/Pi `*** Update File:` patch sections into replay-native file diffs. */
+function parseApplyPatchDiffs(patch: string): FileDiff[] {
+  const markers = [...patch.matchAll(/^\*\*\*\s+(Update|Add|Delete)\s+File:\s+(.+)$/gm)];
+  return markers.map((marker, index) => {
+    const action = marker[1];
+    const start = marker.index ?? 0;
+    const end = markers[index + 1]?.index ?? patch.length;
+    const section = patch.slice(start, end);
+    const oldLines: string[] = [];
+    const newLines: string[] = [];
+    let inHunk = action === "Add" || action === "Delete";
+
+    for (const line of section.split("\n").slice(1)) {
+      if (line.startsWith("*** ")) continue;
+      if (line.startsWith("@@")) {
+        inHunk = true;
+        continue;
+      }
+      if (!inHunk) continue;
+      if (line.startsWith("-")) oldLines.push(line.slice(1));
+      else if (line.startsWith("+")) newLines.push(line.slice(1));
+      else if (line.startsWith(" ")) {
+        oldLines.push(line.slice(1));
+        newLines.push(line.slice(1));
+      }
+    }
+
+    return {
+      filePath: redactFilePath(marker[2].trim()),
+      oldContent: redactDiffContent(oldLines.join("\n")),
+      newContent: redactDiffContent(newLines.join("\n")),
+    };
+  });
 }
 
 function redactDiffContent(value: unknown): string {
@@ -348,9 +398,10 @@ function buildToolScene(
     ...(images && images.length > 0 ? { images } : {}),
   };
 
-  const diff = buildFileDiff(toolName, input);
-  if (diff) {
-    scene.diff = diff;
+  const diffs = buildFileDiffs(toolName, input);
+  if (diffs.length > 0) {
+    scene.diff = diffs[0];
+    if (diffs.length > 1) scene.diffs = diffs;
   } else if (toolName === "Bash" && input.command) {
     scene.bashOutput = {
       command: redactSecrets(redactPath(input.command)),
@@ -509,9 +560,10 @@ function redactSubAgentScene(s: Scene): Scene {
       ...(resultTokens > 0 ? { resultTokens } : {}),
     };
 
-    const diff = buildFileDiff(toolName, input);
-    if (diff) {
-      scene.diff = diff;
+    const diffs = buildFileDiffs(toolName, input);
+    if (diffs.length > 0) {
+      scene.diff = diffs[0];
+      if (diffs.length > 1) scene.diffs = diffs;
     }
 
     return scene;

@@ -1,6 +1,7 @@
 import { memo, useState } from "react";
 import type { Scene, SubAgent } from "../types";
 import { displayToolName } from "../utils/toolName";
+import { getToolDiffs } from "../utils/sceneDiffs";
 import { ErrorBadge, ToolDuration, ToolTokens } from "./Badges";
 import BashBlock from "./BashBlock";
 import CodeDiffBlock from "./CodeDiffBlock";
@@ -286,19 +287,39 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
     );
   }
 
-  // Special rendering for Edit/Write with diff
-  if (scene.diff) {
+  // Special rendering for Edit/Write with one or more file diffs
+  const diffs = getToolDiffs(scene);
+  if (diffs.length === 1) {
     return (
       <CodeDiffBlock
         toolName={scene.toolName}
-        filePath={scene.diff.filePath}
-        oldContent={scene.diff.oldContent}
-        newContent={scene.diff.newContent}
+        filePath={diffs[0].filePath}
+        oldContent={diffs[0].oldContent}
+        newContent={diffs[0].newContent}
         isActive={isActive}
         isError={scene.isError}
         durationMs={scene.durationMs}
         resultTokens={scene.resultTokens}
       />
+    );
+  }
+  if (diffs.length > 1) {
+    return (
+      <div className="space-y-3">
+        {diffs.map((diff, index) => (
+          <CodeDiffBlock
+            key={`${diff.filePath}-${index}`}
+            toolName={scene.toolName}
+            filePath={diff.filePath}
+            oldContent={diff.oldContent}
+            newContent={diff.newContent}
+            isActive={isActive}
+            isError={scene.isError}
+            durationMs={index === 0 ? scene.durationMs : undefined}
+            resultTokens={index === 0 ? scene.resultTokens : undefined}
+          />
+        ))}
+      </div>
     );
   }
 

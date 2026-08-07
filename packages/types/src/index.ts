@@ -65,6 +65,12 @@ export interface SubAgent {
   scenes: Scene[];
 }
 
+export interface FileDiff {
+  filePath: string;
+  oldContent: string;
+  newContent: string;
+}
+
 export type Scene =
   | { type: "user-prompt"; content: string; timestamp?: string; images?: string[] }
   | { type: "compaction-summary"; content: string; timestamp?: string }
@@ -90,7 +96,10 @@ export type Scene =
       result: string;
       timestamp?: string;
       isError?: boolean;
-      diff?: { filePath: string; oldContent: string; newContent: string };
+      /** Primary/first diff, retained for backward compatibility. */
+      diff?: FileDiff;
+      /** All file diffs when one tool call changes multiple files. */
+      diffs?: FileDiff[];
       bashOutput?: { command: string; stdout: string };
       images?: string[];
       subAgent?: SubAgent;
