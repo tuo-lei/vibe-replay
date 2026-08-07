@@ -950,8 +950,7 @@ async function readSubagents(
     let thinkingBlocks = 0;
     let textResponses = 0;
     const scenes: SubAgentParsed["scenes"] = [];
-    const saUsage = { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 };
-    let hasUsage = false;
+    const saUsageByMessageId = new Map<string, TokenUsage>();
 
     // Track tool results for enrichment
     const saToolResults = new Map<string, string>();
@@ -1015,17 +1014,15 @@ async function readSubagents(
           model = obj.message.model;
         }
 
-        // Accumulate usage
+        // Keep the last cumulative usage snapshot for each streamed message.
         const u = obj.message.usage;
         if (u && msgId) {
-          // Only count final usage per message ID
-          if (!saAssistantBlocks.has(msgId)) {
-            hasUsage = true;
-            saUsage.inputTokens += u.input_tokens || 0;
-            saUsage.outputTokens += u.output_tokens || 0;
-            saUsage.cacheCreationTokens += u.cache_creation_input_tokens || 0;
-            saUsage.cacheReadTokens += u.cache_read_input_tokens || 0;
-          }
+          saUsageByMessageId.set(msgId, {
+            inputTokens: u.input_tokens || 0,
+            outputTokens: u.output_tokens || 0,
+            cacheCreationTokens: u.cache_creation_input_tokens || 0,
+            cacheReadTokens: u.cache_read_input_tokens || 0,
+          });
         }
 
         if (!saAssistantBlocks.has(msgId)) {
@@ -1081,6 +1078,18 @@ async function readSubagents(
     // Cap scenes to keep HTML size reasonable
     const maxScenes = 60;
     const cappedScenes = scenes.length > maxScenes ? scenes.slice(0, maxScenes) : scenes;
+    const saUsage =
+      saUsageByMessageId.size > 0
+        ? [...saUsageByMessageId.values()].reduce<TokenUsage>(
+            (total, usage) => ({
+              inputTokens: total.inputTokens + usage.inputTokens,
+              outputTokens: total.outputTokens + usage.outputTokens,
+              cacheCreationTokens: total.cacheCreationTokens + usage.cacheCreationTokens,
+              cacheReadTokens: total.cacheReadTokens + usage.cacheReadTokens,
+            }),
+            { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 },
+          )
+        : undefined;
 
     result.set(agentId, {
       agentId,
@@ -1090,7 +1099,7 @@ async function readSubagents(
       toolCalls,
       thinkingBlocks,
       textResponses,
-      tokenUsage: hasUsage ? saUsage : undefined,
+      tokenUsage: saUsage,
       model,
       scenes: cappedScenes,
     });

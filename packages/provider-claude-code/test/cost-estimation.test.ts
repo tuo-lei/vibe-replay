@@ -1,3 +1,5 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { estimateCostSimple } from "@vibe-replay/replay-core/pricing";
@@ -100,6 +102,96 @@ describe("parser — per-model token usage breakdown", () => {
     expect(Object.keys(byModel)).toEqual(["claude-sonnet-4-20250514"]);
     expect(byModel["claude-sonnet-4-20250514"].inputTokens).toBe(result.tokenUsage!.inputTokens);
     expect(byModel["claude-sonnet-4-20250514"].outputTokens).toBe(result.tokenUsage!.outputTokens);
+  });
+
+  it("uses the final cumulative usage snapshot in subagent metadata", async () => {
+    const tempDir = await mkdtemp(resolve(tmpdir(), "vibe-replay-subagent-usage-"));
+    const mainPath = resolve(tempDir, "session.jsonl");
+    const subagentsDir = resolve(tempDir, "session", "subagents");
+    await mkdir(subagentsDir, { recursive: true });
+
+    const mainLines = [
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          id: "parent-message",
+          model: "claude-sonnet-4-20250514",
+          content: [
+            {
+              type: "tool_use",
+              id: "agent-tool",
+              name: "Agent",
+              input: { prompt: "Inspect the project", subagent_type: "Explore" },
+            },
+          ],
+        },
+        timestamp: "2026-01-01T00:00:00Z",
+      },
+      {
+        type: "progress",
+        parentToolUseID: "agent-tool",
+        data: { type: "agent_progress", agentId: "sub1" },
+        timestamp: "2026-01-01T00:00:01Z",
+      },
+    ];
+    const subagentLines = [
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          id: "streamed-message",
+          model: "claude-haiku-4-5-20251001",
+          content: [{ type: "text", text: "Inspecting" }],
+          usage: {
+            input_tokens: 100,
+            output_tokens: 10,
+            cache_creation_input_tokens: 20,
+            cache_read_input_tokens: 30,
+          },
+        },
+        timestamp: "2026-01-01T00:00:02Z",
+      },
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          id: "streamed-message",
+          model: "claude-haiku-4-5-20251001",
+          content: [{ type: "text", text: "Inspection complete" }],
+          usage: {
+            input_tokens: 400,
+            output_tokens: 40,
+            cache_creation_input_tokens: 50,
+            cache_read_input_tokens: 60,
+          },
+        },
+        timestamp: "2026-01-01T00:00:03Z",
+      },
+    ];
+
+    await writeFile(mainPath, mainLines.map((line) => JSON.stringify(line)).join("\n"));
+    await writeFile(
+      resolve(subagentsDir, "agent-sub1.jsonl"),
+      subagentLines.map((line) => JSON.stringify(line)).join("\n"),
+    );
+
+    try {
+      const result = await parseClaudeCodeSession(mainPath);
+      const agentBlock = result.turns
+        .flatMap((turn) => turn.blocks)
+        .find((block) => block.type === "tool_use" && block.name === "Agent");
+
+      expect(agentBlock?.type).toBe("tool_use");
+      expect(agentBlock?.type === "tool_use" && agentBlock._subAgent?.tokenUsage).toEqual({
+        inputTokens: 400,
+        outputTokens: 40,
+        cacheCreationTokens: 50,
+        cacheReadTokens: 60,
+      });
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   });
 });
 
