@@ -69,8 +69,12 @@ export interface AnnotationActions {
 
 const LS_PREFIX = "vibe-replay-annotations-";
 
-function storageKey(sessionId: string): string {
+export function legacyAnnotationStorageKey(sessionId: string): string {
   return LS_PREFIX + sessionId;
+}
+
+export function annotationStorageKey(provider: string, sessionId: string): string {
+  return `${LS_PREFIX}${encodeURIComponent(provider)}:${sessionId}`;
 }
 
 export function useAnnotations(
@@ -78,6 +82,7 @@ export function useAnnotations(
   mode: ViewerMode = "embedded",
 ): AnnotationActions {
   const sessionId = session.meta.sessionId;
+  const provider = session.meta.provider;
   const isEditor = mode === "editor";
 
   // Save HTML only works from self-contained production builds (data embedded inline)
@@ -89,7 +94,9 @@ export function useAnnotations(
     const embedded = session.annotations ?? [];
     if (isEditor) return embedded; // Editor mode: server is source of truth
     try {
-      const draft = localStorage.getItem(storageKey(sessionId));
+      const draft =
+        localStorage.getItem(annotationStorageKey(provider, sessionId)) ??
+        localStorage.getItem(legacyAnnotationStorageKey(sessionId));
       if (draft) {
         const parsed = JSON.parse(draft) as Annotation[];
         if (parsed.length > 0 || embedded.length === 0) return parsed;
@@ -133,11 +140,12 @@ export function useAnnotations(
     }
     // Non-editor: save to localStorage
     try {
-      localStorage.setItem(storageKey(sessionId), JSON.stringify(annotations));
+      localStorage.setItem(annotationStorageKey(provider, sessionId), JSON.stringify(annotations));
+      localStorage.removeItem(legacyAnnotationStorageKey(sessionId));
     } catch {
       /* quota exceeded — silent */
     }
-  }, [annotations, sessionId, isEditor]);
+  }, [annotations, provider, sessionId, isEditor]);
 
   const annotatedScenes = useMemo(() => computeAnnotatedScenes(annotations), [annotations]);
 
@@ -215,11 +223,12 @@ export function useAnnotations(
 
     setSavedSnapshot(annotations);
     try {
-      localStorage.removeItem(storageKey(sessionId));
+      localStorage.removeItem(annotationStorageKey(provider, sessionId));
+      localStorage.removeItem(legacyAnnotationStorageKey(sessionId));
     } catch {
       /* ignore */
     }
-  }, [session, annotations, sessionId, isEditor]);
+  }, [session, annotations, provider, sessionId, isEditor]);
 
   const downloadJson = useCallback(() => {
     const updatedSession: ReplaySession = { ...session, annotations };
@@ -236,11 +245,12 @@ export function useAnnotations(
 
     setSavedSnapshot(annotations);
     try {
-      localStorage.removeItem(storageKey(sessionId));
+      localStorage.removeItem(annotationStorageKey(provider, sessionId));
+      localStorage.removeItem(legacyAnnotationStorageKey(sessionId));
     } catch {
       /* ignore */
     }
-  }, [session, annotations, sessionId]);
+  }, [session, annotations, provider, sessionId]);
 
   // Editor mode: server-side gist publishing
   const [gistPublishing, setGistPublishing] = useState(false);
