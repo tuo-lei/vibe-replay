@@ -209,7 +209,7 @@ describe("parseClaudeCoworkSession", () => {
     }
   });
 
-  it("overlays title, model, startTime from sessionInfo when missing in audit", async () => {
+  it("uses audit start time and metadata last activity as the end bound", async () => {
     const info: SessionInfo = {
       provider: "claude-cowork",
       sessionId: "cowork-session-002",
@@ -230,7 +230,8 @@ describe("parseClaudeCoworkSession", () => {
 
     expect(result.title).toBe("Research Cowork session storage");
     expect(result.model).toBe("claude-opus-4-6");
-    expect(result.startTime).toBe("2025-06-15T09:03:20.000Z");
+    expect(result.startTime).toBe("2025-06-15T09:00:00.000Z");
+    expect(result.endTime).toBe("2025-06-15T09:03:20.000Z");
   });
 
   it("sessionId matches what discover derives from the sibling metadata JSON", async () => {

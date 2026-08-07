@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { parseClaudeCodeLines } from "../claude-code/parser.js";
+import { getTimestampBounds } from "@vibe-replay/provider-core/duration";
 import type { ProviderParseResult } from "@vibe-replay/provider-contract";
 import { addParseWarning } from "@vibe-replay/provider-contract/warnings";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
@@ -148,7 +149,7 @@ export async function parseClaudeCoworkSession(
 
   // Cowork transcripts are self-contained — no sibling `agents/` directory, so
   // subagentsSourcePath is intentionally omitted (parser will use an empty map).
-  const result = await parseClaudeCodeLines(normalized, { deriveTimestampBounds: false });
+  const result = await parseClaudeCodeLines(normalized);
   if (parseWarnings.length > 0) {
     result.parseWarnings = [...parseWarnings, ...(result.parseWarnings || [])];
   }
@@ -159,6 +160,8 @@ export async function parseClaudeCoworkSession(
     if (!result.title && sessionInfo.title) result.title = sessionInfo.title;
     if (!result.model && sessionInfo.model) result.model = sessionInfo.model;
     if (!result.startTime && sessionInfo.timestamp) result.startTime = sessionInfo.timestamp;
+    const endBounds = getTimestampBounds([result.endTime, sessionInfo.timestamp]);
+    result.endTime = endBounds.endTime || result.startTime;
     if (!result.cwd && sessionInfo.cwd) result.cwd = sessionInfo.cwd;
   }
 
