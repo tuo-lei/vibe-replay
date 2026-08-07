@@ -117,6 +117,11 @@ describe("getModelPricing — model family detection", () => {
       expect(getKnownModelPricing(`claude-${family}-4-60`)).toBeUndefined();
       expect(getKnownModelPricing(`claude-4-8-${family}`)).toBeUndefined();
     }
+    expect(getKnownModelPricing("claude-opus-4-100")).toBeUndefined();
+    expect(getKnownModelPricing("claude-4-600-haiku")).toBeUndefined();
+    expect(getKnownModelPricing("claude-4-1-sonnet")).toBe(
+      getKnownModelPricing("claude-sonnet-4-1"),
+    );
     expect(getModelPricing("some-unknown-model").inputRate).toBe(3);
   });
 

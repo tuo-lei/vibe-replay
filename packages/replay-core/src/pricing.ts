@@ -113,7 +113,7 @@ export function getKnownModelPricing(model: string): ModelPricing | undefined {
   if (isUnsupportedClaudeVersion(sonnetVersion)) return undefined;
   if (sonnetVersion?.major === 4 && (sonnetVersion.minor === 5 || sonnetVersion.minor === 6))
     return MODEL_PRICING["sonnet-4-new"];
-  if (lower.includes("sonnet-4")) return MODEL_PRICING["sonnet-4"];
+  if (sonnetVersion?.major === 4 || lower.includes("sonnet-4")) return MODEL_PRICING["sonnet-4"];
   if (lower.includes("sonnet")) return MODEL_PRICING.sonnet;
   // Haiku: 4.5/4.6 → new pricing, 3.5 and earlier → legacy
   const haikuVersion = parseClaudeVersion(lower, "haiku");
@@ -139,9 +139,10 @@ function parseClaudeVersion(
   const match = versionFirst || familyFirst;
   if (!match) return undefined;
   const minorToken = match[2];
+  const isReleaseDate = minorToken ? /^(?:19|20)\d{6}$/.test(minorToken) : false;
   return {
     major: Number(match[1]),
-    ...(minorToken && minorToken.length <= 2 ? { minor: Number(minorToken) } : {}),
+    ...(minorToken && !isReleaseDate ? { minor: Number(minorToken) } : {}),
   };
 }
 
