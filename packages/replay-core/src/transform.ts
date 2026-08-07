@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { estimateCost, estimateCostSimple, getModelContextLimit } from "./pricing.js";
-import type { ProviderParseResult } from "@vibe-replay/provider-contract";
+import { normalizeSubAgentType, type ProviderParseResult } from "@vibe-replay/provider-contract";
 import { compactWarningSample } from "@vibe-replay/provider-contract/warnings";
 import type { ContentBlock } from "@vibe-replay/provider-contract";
 import type { ReplaySession, Scene, SubAgent } from "@vibe-replay/types";
@@ -385,7 +385,7 @@ function buildMinimalCursorSubAgent(
       ? input.subagent_type.trim()
       : undefined;
   if (!rawAgentType) return null;
-  const agentType = normalizeCursorAgentType(rawAgentType);
+  const agentType = normalizeSubAgentType(rawAgentType);
   return {
     agentId: toolBlock.id.trim() || `cursor-agent-${agentType}`,
     agentType,
@@ -393,20 +393,12 @@ function buildMinimalCursorSubAgent(
       ? { description: input.description.trim() }
       : {}),
     prompt: typeof input.prompt === "string" ? redactSecrets(redactPath(input.prompt)) : "",
+    ...(typeof input.model === "string" && input.model.trim() ? { model: input.model.trim() } : {}),
     toolCalls: 0,
     thinkingBlocks: 0,
     textResponses: 0,
     scenes: [],
   };
-}
-
-function normalizeCursorAgentType(agentType: string): string {
-  const normalized = agentType.trim().toLowerCase();
-  if (normalized === "explore") return "Explore";
-  if (normalized === "plan") return "Plan";
-  if (normalized === "generalpurpose") return "general-purpose";
-  if (normalized === "shell") return "Shell";
-  return agentType;
 }
 
 /**

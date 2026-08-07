@@ -224,8 +224,16 @@ async function discoverAllSessions(): Promise<SessionInfo[]> {
   const providers = getAllProviders();
   const allSessions: SessionInfo[] = [];
   for (const provider of providers) {
-    const sessions = await provider.discover();
-    allSessions.push(...sessions);
+    try {
+      const sessions = await provider.discover();
+      allSessions.push(...sessions);
+    } catch (err) {
+      // A provider whose on-disk format drifted (e.g. an upstream SQLite schema
+      // change) must not take down discovery for every other provider.
+      if (process.env.VIBE_REPLAY_DEBUG) {
+        console.error(`[vibe-replay] ${provider.name} discovery failed:`, err);
+      }
+    }
   }
 
   const deduped = deduplicateSessionsByProvider(allSessions);

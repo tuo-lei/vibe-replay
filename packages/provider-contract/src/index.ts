@@ -14,6 +14,16 @@ export type { DataSource, DataSourceInfo, TokenUsage };
 /** Stable provider API version for the current in-repo provider contract. */
 export const PROVIDER_API_VERSION = 1;
 
+/** Normalize provider-specific subagent labels to the canonical replay vocabulary. */
+export function normalizeSubAgentType(agentType: string): string {
+  const normalized = agentType.trim().toLowerCase();
+  if (normalized === "explore") return "Explore";
+  if (normalized === "plan") return "Plan";
+  if (normalized === "generalpurpose") return "general-purpose";
+  if (normalized === "shell") return "Shell";
+  return agentType;
+}
+
 /**
  * Fast session summary returned by provider discovery.
  *
