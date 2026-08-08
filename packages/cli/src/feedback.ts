@@ -460,13 +460,15 @@ function runClaudeAttempt(prompt: string, cmd: string, promptAsArgument: boolean
           resolve(cleanStdout);
         }
       } else if (
+        !IS_WINDOWS &&
         !promptAsArgument &&
         cleanStdout.includes("Input must be provided either through stdin or as a prompt argument")
       ) {
         // Some managed Claude launchers do not forward stdin to the child CLI.
         // Retry with Claude's supported positional prompt form. Keep stdin as
         // the default so large prompts do not hit command-line length limits
-        // on normal installations.
+        // on normal installations. Windows launchers use a shell, so dynamic
+        // prompt arguments are intentionally excluded there.
         resolve(runClaudeAttempt(prompt, cmd, true));
       } else {
         reject(new Error(`claude exited ${code}: ${stderr.slice(0, 500)}`));
