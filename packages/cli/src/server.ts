@@ -28,6 +28,7 @@ import {
   generateFeedback,
   generateToneAdjustment,
   generateTranslation,
+  runWithFeedbackToolFallback,
 } from "./feedback.js";
 import { generateGitHubGif } from "./formatters/gif.js";
 import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.js";
@@ -2683,10 +2684,10 @@ export async function startServer(
           400,
         );
       }
-      const tool = requestedToolName
+      const preferredTool = requestedToolName
         ? detected.tools.find((t) => t.name === requestedToolName) || null
         : detected.defaultTool;
-      if (!tool) {
+      if (!preferredTool) {
         return c.json(
           { error: `Requested AI Coach tool is not available: ${requestedToolName}` },
           400,
@@ -2695,10 +2696,12 @@ export async function startServer(
 
       const targetSession = await loadSessionFromDisk(baseDir, result.slug);
 
-      const fb = await generateFeedback(targetSession, tool);
-      if (!fb) {
-        return c.json({ error: "Could not generate feedback (invalid AI output)" }, 500);
-      }
+      const fallbackResult = await runWithFeedbackToolFallback(
+        detected.tools,
+        preferredTool.name,
+        (tool) => generateFeedback(targetSession, tool),
+      );
+      const fb = fallbackResult.result;
 
       const existingAnns = targetSession.annotations ?? [];
       const newAnnotations = [
@@ -2719,6 +2722,9 @@ export async function startServer(
         itemCount: fb.result.feedbackItems.length,
         outcome: fb.result.outcome,
         sessionGoal: fb.result.sessionGoal,
+        toolName: fallbackResult.tool.name,
+        attemptedTools: fallbackResult.attemptedTools,
+        fallbackUsed: fallbackResult.fallbackUsed,
       });
     } catch (err) {
       return c.json({ error: getErrorMessage(err) }, 500);
@@ -2755,10 +2761,10 @@ export async function startServer(
         );
       }
       const toolName = typeof body.toolName === "string" ? body.toolName : undefined;
-      const tool = toolName
+      const preferredTool = toolName
         ? detected.tools.find((t) => t.name === toolName) || null
         : detected.defaultTool;
-      if (!tool) {
+      if (!preferredTool) {
         return c.json({ error: `Requested tool is not available: ${toolName}` }, 400);
       }
 
@@ -2773,13 +2779,12 @@ export async function startServer(
       const chainBase: SessionOverlays = { version: 1, overlays: nonTranslateOverlays };
       const effectiveSession = sessionWithEffectiveContent(targetSession, chainBase);
 
-      const translationResult = await generateTranslation(effectiveSession, tool, {
-        targetLang,
-        sourceLang,
-      });
-      if (!translationResult) {
-        return c.json({ error: "Could not generate translations (invalid AI output)" }, 500);
-      }
+      const fallbackResult = await runWithFeedbackToolFallback(
+        detected.tools,
+        preferredTool.name,
+        (tool) => generateTranslation(effectiveSession, tool, { targetLang, sourceLang }),
+      );
+      const translationResult = fallbackResult.result;
       // Restore true originalValue from the unmodified session
       fixOriginalValues(translationResult.overlays, targetSession);
       const merged: SessionOverlays = {
@@ -2791,6 +2796,9 @@ export async function startServer(
       return c.json({
         overlays: merged,
         stats: translationResult.stats,
+        toolName: fallbackResult.tool.name,
+        attemptedTools: fallbackResult.attemptedTools,
+        fallbackUsed: fallbackResult.fallbackUsed,
       });
     } catch (err) {
       return c.json({ error: getErrorMessage(err) }, 500);
@@ -2814,10 +2822,10 @@ export async function startServer(
         );
       }
       const toolName = typeof body.toolName === "string" ? body.toolName : undefined;
-      const tool = toolName
+      const preferredTool = toolName
         ? detected.tools.find((t) => t.name === toolName) || null
         : detected.defaultTool;
-      if (!tool) {
+      if (!preferredTool) {
         return c.json({ error: `Requested tool is not available: ${toolName}` }, 400);
       }
 
@@ -2835,10 +2843,12 @@ export async function startServer(
       const chainBase: SessionOverlays = { version: 1, overlays: nonToneOverlays };
       const effectiveSession = sessionWithEffectiveContent(targetSession, chainBase);
 
-      const toneResult = await generateToneAdjustment(effectiveSession, tool, { style });
-      if (!toneResult) {
-        return c.json({ error: "Could not adjust tone (invalid AI output)" }, 500);
-      }
+      const fallbackResult = await runWithFeedbackToolFallback(
+        detected.tools,
+        preferredTool.name,
+        (tool) => generateToneAdjustment(effectiveSession, tool, { style }),
+      );
+      const toneResult = fallbackResult.result;
       // Restore true originalValue from the unmodified session
       fixOriginalValues(toneResult.overlays, targetSession);
       const merged: SessionOverlays = {
@@ -2850,6 +2860,9 @@ export async function startServer(
       return c.json({
         overlays: merged,
         stats: toneResult.stats,
+        toolName: fallbackResult.tool.name,
+        attemptedTools: fallbackResult.attemptedTools,
+        fallbackUsed: fallbackResult.fallbackUsed,
       });
     } catch (err) {
       return c.json({ error: getErrorMessage(err) }, 500);

@@ -81,7 +81,7 @@ export interface FeedbackResult {
 // Detection
 // ---------------------------------------------------------------------------
 
-const TOOL_PRIORITY: FeedbackTool["name"][] = ["claude", "agent", "opencode", "hermes"];
+const TOOL_PRIORITY: FeedbackTool["name"][] = ["agent", "claude", "opencode", "hermes"];
 
 /** Detect available AI CLI tools and pick a default by priority. */
 export async function detectFeedbackTools(): Promise<{
@@ -92,8 +92,8 @@ export async function detectFeedbackTools(): Promise<{
   const insideClaude = !!process.env.CLAUDECODE;
 
   const candidates: { name: FeedbackTool["name"]; cmd: string }[] = [
-    ...(!insideClaude ? [{ name: "claude" as const, cmd: "claude" }] : []),
     { name: "agent" as const, cmd: "agent" },
+    ...(!insideClaude ? [{ name: "claude" as const, cmd: "claude" }] : []),
     { name: "opencode" as const, cmd: "opencode" },
     { name: "hermes" as const, cmd: "hermes" },
   ];
@@ -114,6 +114,58 @@ export async function detectFeedbackTools(): Promise<{
     ) || null;
 
   return { tools, defaultTool };
+}
+
+export interface FeedbackToolFallbackResult<T> {
+  result: T;
+  tool: FeedbackTool;
+  attemptedTools: FeedbackTool["name"][];
+  fallbackUsed: boolean;
+}
+
+/**
+ * Run an AI Studio operation with the preferred tool first, then each remaining
+ * detected tool in priority order. A thrown error or null result advances to
+ * the next tool; no partial result is persisted by this helper.
+ */
+export async function runWithFeedbackToolFallback<T>(
+  tools: FeedbackTool[],
+  preferredToolName: FeedbackTool["name"] | undefined,
+  run: (tool: FeedbackTool) => Promise<T | null>,
+): Promise<FeedbackToolFallbackResult<T>> {
+  if (tools.length === 0) throw new Error("No AI CLI tools are available");
+
+  const preferredTool = preferredToolName
+    ? tools.find((tool) => tool.name === preferredToolName)
+    : tools[0];
+  if (!preferredTool) {
+    throw new Error(`Requested AI CLI tool is not available: ${preferredToolName}`);
+  }
+
+  const orderedTools = [preferredTool, ...tools.filter((tool) => tool !== preferredTool)];
+  const attemptedTools: FeedbackTool["name"][] = [];
+  const failures: string[] = [];
+
+  for (const tool of orderedTools) {
+    attemptedTools.push(tool.name);
+    try {
+      const result = await run(tool);
+      if (result !== null) {
+        return {
+          result,
+          tool,
+          attemptedTools,
+          fallbackUsed: attemptedTools.length > 1,
+        };
+      }
+      failures.push(`${tool.name}: invalid output`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown error";
+      failures.push(`${tool.name}: ${message.replace(/\s+/g, " ").trim()}`);
+    }
+  }
+
+  throw new Error(`All available AI CLI tools failed (${failures.join("; ")})`);
 }
 
 // ---------------------------------------------------------------------------
@@ -379,8 +431,15 @@ async function executeFeedback(prompt: string, tool: FeedbackTool): Promise<stri
 }
 
 function runClaude(prompt: string, cmd: string): Promise<string> {
+  return runClaudeAttempt(prompt, cmd, false);
+}
+
+function runClaudeAttempt(prompt: string, cmd: string, promptAsArgument: boolean): Promise<string> {
   return new Promise((resolve, reject) => {
-    const proc = spawnTool(cmd, ["-p", "--output-format", "json"], {
+    const args = promptAsArgument
+      ? ["-p", prompt, "--output-format", "json"]
+      : ["-p", "--output-format", "json"];
+    const proc = spawnTool(cmd, args, {
       env: { ...process.env, NO_COLOR: "1" },
       timeout: 600_000,
       stdio: ["pipe", "pipe", "pipe"],
@@ -392,13 +451,23 @@ function runClaude(prompt: string, cmd: string): Promise<string> {
     proc.stderr.on("data", (d) => (stderr += d.toString()));
 
     proc.on("close", (code) => {
+      const cleanStdout = stripAnsi(stdout).trim();
       if (code === 0) {
         try {
-          const parsed = JSON.parse(stdout);
-          resolve(parsed.result || stdout);
+          const parsed = JSON.parse(cleanStdout);
+          resolve(parsed.result || cleanStdout);
         } catch {
-          resolve(stdout);
+          resolve(cleanStdout);
         }
+      } else if (
+        !promptAsArgument &&
+        cleanStdout.includes("Input must be provided either through stdin or as a prompt argument")
+      ) {
+        // Some managed Claude launchers do not forward stdin to the child CLI.
+        // Retry with Claude's supported positional prompt form. Keep stdin as
+        // the default so large prompts do not hit command-line length limits
+        // on normal installations.
+        resolve(runClaudeAttempt(prompt, cmd, true));
       } else {
         reject(new Error(`claude exited ${code}: ${stderr.slice(0, 500)}`));
       }
@@ -406,7 +475,7 @@ function runClaude(prompt: string, cmd: string): Promise<string> {
 
     proc.on("error", (err) => reject(new Error(`Failed to start claude: ${err.message}`)));
 
-    proc.stdin.write(prompt);
+    if (!promptAsArgument) proc.stdin.write(prompt);
     proc.stdin.end();
   });
 }
@@ -1348,7 +1417,7 @@ export async function generateToneAdjustment(
 
 export function stripAnsi(str: string): string {
   // eslint-disable-next-line no-control-regex
-  return str.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "").replace(/\x1B\][^\x07]*\x07/g, "");
+  return str.replace(/\x1B\[[0-9;?]*[ -/]*[@-~]/g, "").replace(/\x1B\][^\x07]*\x07/g, "");
 }
 
 /**
@@ -1373,3 +1442,5 @@ function locateCommand(cmd: string): Promise<string | null> {
     proc.on("error", reject);
   });
 }
+
+export const __testables = { runClaude };
