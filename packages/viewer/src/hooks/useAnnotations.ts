@@ -61,7 +61,15 @@ export interface AnnotationActions {
   /** Editor mode: update selected AI Coach tool */
   setAiCoachToolName: ((toolName: string) => void) | null;
   /** Editor mode: run AI Coach to generate feedback annotations */
-  runAiCoach: (() => Promise<{ score: number; itemCount: number }>) | null;
+  runAiCoach:
+    | (() => Promise<{
+        score: number;
+        itemCount: number;
+        toolName: string;
+        attemptedTools: string[];
+        fallbackUsed: boolean;
+      }>)
+    | null;
   /** Editor mode: cancel a running AI Coach operation */
   cancelAiCoach: (() => void) | null;
   aiCoachRunning: boolean;
@@ -356,7 +364,13 @@ export function useAnnotations(
             if (!resp.ok) throw new Error(data.error || "AI Coach failed");
             setAnnotations(data.annotations);
             setSavedSnapshot(data.annotations);
-            return { score: data.score as number, itemCount: data.itemCount as number };
+            return {
+              score: data.score as number,
+              itemCount: data.itemCount as number,
+              toolName: data.toolName as string,
+              attemptedTools: data.attemptedTools as string[],
+              fallbackUsed: data.fallbackUsed as boolean,
+            };
           } finally {
             aiCoachAbortRef.current = null;
             setAiCoachRunning(false);

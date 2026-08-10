@@ -48,6 +48,9 @@ export interface OverlayActions {
     | ((opts: { targetLang: string; sourceLang?: string }) => Promise<{
         translated: number;
         skipped: number;
+        toolName: string;
+        attemptedTools: string[];
+        fallbackUsed: boolean;
       }>)
     | null;
   /** Run tone adjustment */
@@ -55,6 +58,9 @@ export interface OverlayActions {
     | ((opts: { style: "professional" | "neutral" | "friendly" }) => Promise<{
         adjusted: number;
         skipped: number;
+        toolName: string;
+        attemptedTools: string[];
+        fallbackUsed: boolean;
       }>)
     | null;
 }
@@ -282,7 +288,12 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
               const data = await resp.json();
               if (!resp.ok) throw new Error(data.error || "Translation failed");
               if (data.overlays) setOverlaysState(data.overlays as SessionOverlays);
-              return data.stats as { translated: number; skipped: number };
+              return {
+                ...(data.stats as { translated: number; skipped: number }),
+                toolName: data.toolName as string,
+                attemptedTools: data.attemptedTools as string[],
+                fallbackUsed: data.fallbackUsed as boolean,
+              };
             } finally {
               abortRef.current = null;
               setTranslating(false);
@@ -312,7 +323,12 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
               const data = await resp.json();
               if (!resp.ok) throw new Error(data.error || "Tone adjustment failed");
               if (data.overlays) setOverlaysState(data.overlays as SessionOverlays);
-              return data.stats as { adjusted: number; skipped: number };
+              return {
+                ...(data.stats as { adjusted: number; skipped: number }),
+                toolName: data.toolName as string,
+                attemptedTools: data.attemptedTools as string[],
+                fallbackUsed: data.fallbackUsed as boolean,
+              };
             } finally {
               abortRef.current = null;
               setToningDown(false);

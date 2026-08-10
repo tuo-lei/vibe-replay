@@ -44,6 +44,25 @@ function Spinner({ className = "" }: { className?: string }) {
   );
 }
 
+function toolLabel(toolName: string): string {
+  if (toolName === "agent") return "Cursor Agent";
+  if (toolName === "claude") return "Claude Code";
+  if (toolName === "opencode") return "OpenCode";
+  if (toolName === "hermes") return "Hermes";
+  return toolName;
+}
+
+function toolRunSuffix(result: {
+  toolName: string;
+  attemptedTools: string[];
+  fallbackUsed: boolean;
+}): string {
+  if (!result.toolName) return "";
+  if (!result.fallbackUsed) return ` via ${toolLabel(result.toolName)}`;
+  const firstTool = result.attemptedTools[0];
+  return ` via ${toolLabel(result.toolName)} (fallback${firstTool ? ` from ${toolLabel(firstTool)}` : ""})`;
+}
+
 function ToolExplainer({ toolName }: { toolName: string | null }) {
   if (toolName === "claude") {
     return (
@@ -193,7 +212,7 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
       const result = await runAiCoach();
       setCoachStatus({
         type: "success",
-        text: `Score ${result.score}/10 \u2014 ${result.itemCount} comment(s)`,
+        text: `Score ${result.score}/10 \u2014 ${result.itemCount} comment(s)${toolRunSuffix(result)}`,
       });
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
@@ -209,7 +228,7 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
       const result = await runTranslate({ targetLang });
       setTranslateStatus({
         type: "success",
-        text: `${result.translated} message(s) translated, ${result.skipped} unchanged`,
+        text: `${result.translated} message(s) translated, ${result.skipped} unchanged${toolRunSuffix(result)}`,
       });
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
@@ -228,7 +247,7 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
       const result = await runTone({ style: toneStyle });
       setToneStatus({
         type: "success",
-        text: `${result.adjusted} prompt(s) adjusted, ${result.skipped} unchanged`,
+        text: `${result.adjusted} prompt(s) adjusted, ${result.skipped} unchanged${toolRunSuffix(result)}`,
       });
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
@@ -297,8 +316,12 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
           </p>
           <div className="w-full space-y-2 text-left">
             {[
-              { name: "Claude Code", cmd: "npm install -g @anthropic-ai/claude-code", rec: true },
-              { name: "Cursor CLI", cmd: 'Bundled with Cursor IDE (run as "agent")' },
+              {
+                name: "Cursor Agent",
+                cmd: 'Bundled with Cursor IDE (run "agent login")',
+                rec: true,
+              },
+              { name: "Claude Code", cmd: "pnpm add --global @anthropic-ai/claude-code" },
               { name: "OpenCode", cmd: "go install github.com/opencode-ai/opencode@latest" },
             ].map((t) => (
               <div
@@ -362,13 +385,13 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
               >
                 {tools.map((t) => (
                   <option key={t.name} value={t.name}>
-                    {t.name}
+                    {toolLabel(t.name)}
                   </option>
                 ))}
               </select>
             ) : (
               <span className="text-xs font-mono font-medium text-terminal-text px-2 py-0.5 rounded-lg bg-terminal-surface border border-terminal-border">
-                {toolName}
+                {toolName ? toolLabel(toolName) : ""}
               </span>
             )}
           </div>
