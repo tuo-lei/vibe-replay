@@ -123,6 +123,8 @@ export interface FeedbackToolFallbackResult<T> {
   fallbackUsed: boolean;
 }
 
+const AI_STUDIO_OPERATION_TIMEOUT_MS = 600_000;
+
 /**
  * Run an AI Studio operation with the preferred tool first, then each remaining
  * detected tool in priority order. A thrown error or null result advances to
@@ -131,7 +133,8 @@ export interface FeedbackToolFallbackResult<T> {
 export async function runWithFeedbackToolFallback<T>(
   tools: FeedbackTool[],
   preferredToolName: FeedbackTool["name"] | undefined,
-  run: (tool: FeedbackTool) => Promise<T | null>,
+  run: (tool: FeedbackTool, signal: AbortSignal) => Promise<T | null>,
+  options: { timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<FeedbackToolFallbackResult<T>> {
   if (tools.length === 0) throw new Error("No AI CLI tools are available");
 
@@ -145,26 +148,47 @@ export async function runWithFeedbackToolFallback<T>(
   const orderedTools = [preferredTool, ...tools.filter((tool) => tool !== preferredTool)];
   const attemptedTools: FeedbackTool["name"][] = [];
   const failures: string[] = [];
+  const timeoutMs = Math.max(1, options.timeoutMs ?? AI_STUDIO_OPERATION_TIMEOUT_MS);
+  const controller = new AbortController();
+  const cancelFromCaller = () => controller.abort(options.signal?.reason);
+  if (options.signal?.aborted) cancelFromCaller();
+  else options.signal?.addEventListener("abort", cancelFromCaller, { once: true });
+  const deadline = setTimeout(
+    () => controller.abort(new Error("operation deadline exceeded")),
+    timeoutMs,
+  );
 
-  for (const tool of orderedTools) {
-    attemptedTools.push(tool.name);
-    try {
-      const result = await run(tool);
-      if (result !== null) {
-        return {
-          result,
-          tool,
-          attemptedTools,
-          fallbackUsed: attemptedTools.length > 1,
-        };
+  try {
+    for (const tool of orderedTools) {
+      if (controller.signal.aborted) break;
+      attemptedTools.push(tool.name);
+      try {
+        const result = await run(tool, controller.signal);
+        if (controller.signal.aborted) break;
+        if (result !== null) {
+          return {
+            result,
+            tool,
+            attemptedTools,
+            fallbackUsed: attemptedTools.length > 1,
+          };
+        }
+        failures.push(`${tool.name}: invalid output`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "unknown error";
+        failures.push(`${tool.name}: ${message.replace(/\s+/g, " ").trim()}`);
+        if (controller.signal.aborted) break;
       }
-      failures.push(`${tool.name}: invalid output`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "unknown error";
-      failures.push(`${tool.name}: ${message.replace(/\s+/g, " ").trim()}`);
     }
+  } finally {
+    clearTimeout(deadline);
+    options.signal?.removeEventListener("abort", cancelFromCaller);
   }
 
+  if (controller.signal.aborted) {
+    const outcome = options.signal?.aborted ? "cancelled" : `timed out after ${timeoutMs}ms`;
+    throw new Error(`AI Studio operation ${outcome} (${failures.join("; ")})`);
+  }
   throw new Error(`All available AI CLI tools failed (${failures.join("; ")})`);
 }
 
@@ -417,30 +441,40 @@ CRITICAL RULES:
 // Execution
 // ---------------------------------------------------------------------------
 
-async function executeFeedback(prompt: string, tool: FeedbackTool): Promise<string> {
+async function executeFeedback(
+  prompt: string,
+  tool: FeedbackTool,
+  signal?: AbortSignal,
+): Promise<string> {
   if (tool.name === "claude") {
-    return runClaude(prompt, tool.command);
+    return runClaude(prompt, tool.command, signal);
   }
   if (tool.name === "agent") {
-    return runAgent(prompt, tool.command);
+    return runAgent(prompt, tool.command, signal);
   }
   if (tool.name === "hermes") {
-    return runHermes(prompt, tool.command);
+    return runHermes(prompt, tool.command, signal);
   }
-  return runOpencode(prompt, tool.command);
+  return runOpencode(prompt, tool.command, signal);
 }
 
-function runClaude(prompt: string, cmd: string): Promise<string> {
-  return runClaudeAttempt(prompt, cmd, false);
+function runClaude(prompt: string, cmd: string, signal?: AbortSignal): Promise<string> {
+  return runClaudeAttempt(prompt, cmd, false, signal);
 }
 
-function runClaudeAttempt(prompt: string, cmd: string, promptAsArgument: boolean): Promise<string> {
+function runClaudeAttempt(
+  prompt: string,
+  cmd: string,
+  promptAsArgument: boolean,
+  signal?: AbortSignal,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const args = promptAsArgument
       ? ["-p", prompt, "--output-format", "json"]
       : ["-p", "--output-format", "json"];
     const proc = spawnTool(cmd, args, {
       env: { ...process.env, NO_COLOR: "1" },
+      signal,
       timeout: 600_000,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -452,6 +486,7 @@ function runClaudeAttempt(prompt: string, cmd: string, promptAsArgument: boolean
 
     proc.on("close", (code) => {
       const cleanStdout = stripAnsi(stdout).trim();
+      const cleanStderr = stripAnsi(stderr).trim();
       if (code === 0) {
         try {
           const parsed = JSON.parse(cleanStdout);
@@ -461,15 +496,18 @@ function runClaudeAttempt(prompt: string, cmd: string, promptAsArgument: boolean
         }
       } else if (
         !IS_WINDOWS &&
+        !signal?.aborted &&
         !promptAsArgument &&
-        cleanStdout.includes("Input must be provided either through stdin or as a prompt argument")
+        `${cleanStdout}\n${cleanStderr}`.includes(
+          "Input must be provided either through stdin or as a prompt argument",
+        )
       ) {
         // Some managed Claude launchers do not forward stdin to the child CLI.
         // Retry with Claude's supported positional prompt form. Keep stdin as
         // the default so large prompts do not hit command-line length limits
         // on normal installations. Windows launchers use a shell, so dynamic
         // prompt arguments are intentionally excluded there.
-        resolve(runClaudeAttempt(prompt, cmd, true));
+        resolve(runClaudeAttempt(prompt, cmd, true, signal));
       } else {
         reject(new Error(`claude exited ${code}: ${stderr.slice(0, 500)}`));
       }
@@ -482,11 +520,12 @@ function runClaudeAttempt(prompt: string, cmd: string, promptAsArgument: boolean
   });
 }
 
-function runOpencode(prompt: string, cmd: string): Promise<string> {
+function runOpencode(prompt: string, cmd: string, signal?: AbortSignal): Promise<string> {
   return new Promise((resolve, reject) => {
     // Use stdin pipe: opencode reads from stdin when run without message args
     const proc = spawnTool(cmd, ["run"], {
       env: { ...process.env, NO_COLOR: "1", TERM: "dumb" },
+      signal,
       timeout: 600_000,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -511,12 +550,13 @@ function runOpencode(prompt: string, cmd: string): Promise<string> {
   });
 }
 
-function runHermes(prompt: string, cmd: string): Promise<string> {
+function runHermes(prompt: string, cmd: string, signal?: AbortSignal): Promise<string> {
   return new Promise((resolve, reject) => {
     // `hermes chat -q` runs a single query non-interactively; `-Q` (quiet)
     // suppresses the banner/spinner so stdout is the final response only.
     const proc = spawnTool(cmd, ["chat", "-q", prompt, "-Q", "--no-restore-cwd"], {
       env: { ...process.env, NO_COLOR: "1", TERM: "dumb" },
+      signal,
       timeout: 600_000,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -538,10 +578,11 @@ function runHermes(prompt: string, cmd: string): Promise<string> {
   });
 }
 
-function runAgent(prompt: string, cmd: string): Promise<string> {
+function runAgent(prompt: string, cmd: string, signal?: AbortSignal): Promise<string> {
   return new Promise((resolve, reject) => {
     const proc = spawnTool(cmd, ["-p", "--output-format", "json", "--mode", "ask", "--trust"], {
       env: { ...process.env, NO_COLOR: "1" },
+      signal,
       timeout: 600_000,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -1004,7 +1045,7 @@ export function feedbackToAnnotations(feedback: FeedbackResult): Annotation[] {
 export async function generateFeedback(
   session: ReplaySession,
   tool: FeedbackTool,
-  { debug = false }: { debug?: boolean } = {},
+  { debug = false, signal }: { debug?: boolean; signal?: AbortSignal } = {},
 ): Promise<{ annotations: Annotation[]; result: FeedbackResult } | null> {
   if (session.meta.stats.userPrompts === 0) {
     return null;
@@ -1018,7 +1059,7 @@ export async function generateFeedback(
     writeFileSync("/tmp/vibe-feedback-prompt.txt", prompt);
   }
 
-  const output = await executeFeedback(prompt, tool);
+  const output = await executeFeedback(prompt, tool, signal);
 
   if (debug) {
     const { writeFileSync } = await import("node:fs");
@@ -1102,6 +1143,28 @@ interface TranslationResult {
   stats: { translated: number; skipped: number };
 }
 
+interface OverlayBatchResult {
+  overlays: SceneOverlay[];
+  skipped: number;
+}
+
+function aggregateOverlayBatches(
+  batchResults: Array<OverlayBatchResult | null>,
+): OverlayBatchResult | null {
+  if (batchResults.some((result) => result === null)) return null;
+
+  const overlays: SceneOverlay[] = [];
+  let skipped = 0;
+  for (const result of batchResults) {
+    if (!result) return null;
+    overlays.push(...result.overlays);
+    skipped += result.skipped;
+  }
+
+  if (overlays.length === 0 && skipped === 0) return null;
+  return { overlays, skipped };
+}
+
 /** Max scenes per batch to avoid LLM output truncation */
 const TRANSLATE_BATCH_SIZE = 30;
 
@@ -1164,6 +1227,7 @@ export async function generateTranslation(
   session: ReplaySession,
   tool: FeedbackTool,
   opts: { targetLang: string; sourceLang?: string },
+  execution: { signal?: AbortSignal } = {},
 ): Promise<TranslationResult | null> {
   if (session.scenes.length === 0) return null;
 
@@ -1187,24 +1251,16 @@ export async function generateTranslation(
         { ...session, scenes: rebuildScenesForBatch(session.scenes, batch) },
         opts,
       );
-      const output = await executeFeedback(prompt, tool);
+      const output = await executeFeedback(prompt, tool, execution.signal);
       return parseTranslationBatch(output, batch, opts, now);
     }),
   );
 
-  const allOverlays: SceneOverlay[] = [];
-  let totalSkipped = 0;
-  for (const result of batchResults) {
-    if (result) {
-      allOverlays.push(...result.overlays);
-      totalSkipped += result.skipped;
-    }
-  }
-
-  if (allOverlays.length === 0 && totalSkipped === 0) return null;
+  const aggregate = aggregateOverlayBatches(batchResults);
+  if (!aggregate) return null;
   return {
-    overlays: allOverlays,
-    stats: { translated: allOverlays.length, skipped: totalSkipped },
+    overlays: aggregate.overlays,
+    stats: { translated: aggregate.overlays.length, skipped: aggregate.skipped },
   };
 }
 
@@ -1367,6 +1423,7 @@ export async function generateToneAdjustment(
   session: ReplaySession,
   tool: FeedbackTool,
   opts: { style: "professional" | "neutral" | "friendly" },
+  execution: { signal?: AbortSignal } = {},
 ): Promise<ToneResult | null> {
   if (session.meta.stats.userPrompts === 0) return null;
 
@@ -1392,24 +1449,16 @@ export async function generateToneAdjustment(
         { ...session, scenes: rebuildScenesForToneBatch(session.scenes, batch) },
         opts,
       );
-      const output = await executeFeedback(prompt, tool);
+      const output = await executeFeedback(prompt, tool, execution.signal);
       return parseToneBatch(output, batch, opts, now);
     }),
   );
 
-  const allOverlays: SceneOverlay[] = [];
-  let totalSkipped = 0;
-  for (const result of batchResults) {
-    if (result) {
-      allOverlays.push(...result.overlays);
-      totalSkipped += result.skipped;
-    }
-  }
-
-  if (allOverlays.length === 0 && totalSkipped === 0) return null;
+  const aggregate = aggregateOverlayBatches(batchResults);
+  if (!aggregate) return null;
   return {
-    overlays: allOverlays,
-    stats: { adjusted: allOverlays.length, skipped: totalSkipped },
+    overlays: aggregate.overlays,
+    stats: { adjusted: aggregate.overlays.length, skipped: aggregate.skipped },
   };
 }
 
@@ -1417,10 +1466,13 @@ export async function generateToneAdjustment(
 // Helpers
 // ---------------------------------------------------------------------------
 
+/* eslint-disable no-control-regex -- ANSI sequences intentionally contain control characters. */
 export function stripAnsi(str: string): string {
-  // eslint-disable-next-line no-control-regex
-  return str.replace(/\x1B\[[0-9;?]*[ -/]*[@-~]/g, "").replace(/\x1B\][^\x07]*\x07/g, "");
+  return str
+    .replace(/\x1B\[[0-9;?]*[ -/]*[@-~]/g, "")
+    .replace(/\x1B\][\s\S]*?(?:\x07|\x1B\\)/g, "");
 }
+/* eslint-enable no-control-regex */
 
 /**
  * Resolve a command to its absolute path, cross-platform. Uses `where` on
@@ -1445,4 +1497,4 @@ function locateCommand(cmd: string): Promise<string | null> {
   });
 }
 
-export const __testables = { runClaude };
+export const __testables = { aggregateOverlayBatches, runClaude };

@@ -2699,7 +2699,8 @@ export async function startServer(
       const fallbackResult = await runWithFeedbackToolFallback(
         detected.tools,
         preferredTool.name,
-        (tool) => generateFeedback(targetSession, tool),
+        (tool, signal) => generateFeedback(targetSession, tool, { signal }),
+        { signal: c.req.raw.signal },
       );
       const fb = fallbackResult.result;
 
@@ -2782,7 +2783,9 @@ export async function startServer(
       const fallbackResult = await runWithFeedbackToolFallback(
         detected.tools,
         preferredTool.name,
-        (tool) => generateTranslation(effectiveSession, tool, { targetLang, sourceLang }),
+        (tool, signal) =>
+          generateTranslation(effectiveSession, tool, { targetLang, sourceLang }, { signal }),
+        { signal: c.req.raw.signal },
       );
       const translationResult = fallbackResult.result;
       // Restore true originalValue from the unmodified session
@@ -2846,7 +2849,8 @@ export async function startServer(
       const fallbackResult = await runWithFeedbackToolFallback(
         detected.tools,
         preferredTool.name,
-        (tool) => generateToneAdjustment(effectiveSession, tool, { style }),
+        (tool, signal) => generateToneAdjustment(effectiveSession, tool, { style }, { signal }),
+        { signal: c.req.raw.signal },
       );
       const toneResult = fallbackResult.result;
       // Restore true originalValue from the unmodified session

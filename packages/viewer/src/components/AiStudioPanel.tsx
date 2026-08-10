@@ -321,7 +321,7 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
                 cmd: 'Bundled with Cursor IDE (run "agent login")',
                 rec: true,
               },
-              { name: "Claude Code", cmd: "npm install -g @anthropic-ai/claude-code" },
+              { name: "Claude Code", cmd: "pnpm add --global @anthropic-ai/claude-code" },
               { name: "OpenCode", cmd: "go install github.com/opencode-ai/opencode@latest" },
             ].map((t) => (
               <div
