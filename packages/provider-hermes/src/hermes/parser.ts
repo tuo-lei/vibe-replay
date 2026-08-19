@@ -9,7 +9,7 @@ import type {
   TokenUsage,
 } from "@vibe-replay/provider-contract";
 import { addParseWarning, compactWarningSample } from "@vibe-replay/provider-contract/warnings";
-import { openHermesDb, hermesDataDir, hermesDbPath } from "./sqlite.js";
+import { hermesDataDir, hermesDbPath, hermesDbPaths, openAllHermesDbs, openHermesDb } from "./sqlite.js";
 import { mapHermesToolArgs, mapHermesToolName } from "./tool-mapping.js";
 
 interface HermesMessageRow {
@@ -91,16 +91,85 @@ export async function parseHermesSession(
     );
   }
 
-  const opened = await openHermesDb();
-  if (!opened) {
-    throw new Error(`Hermes database not found at ${hermesDbPath()}`);
+  // Prefer the DB hinted by the marker path (fast path for the common case).
+  const hinted = hintedDbPath(paths, sessionInfo);
+  if (hinted) {
+    const opened = await openHermesDb(hinted);
+    if (opened) {
+      try {
+        const row = firstValue(opened.db, "SELECT id FROM sessions WHERE id = ?", { sid: sessionId });
+        if (row) return parseSessionFromDb(opened.db, sessionId, sessionInfo);
+      } finally {
+        opened.db.close();
+      }
+    }
   }
-  const { db } = opened;
+
+  const all = await openAllHermesDbs();
+  if (all.length === 0) {
+    throw new Error(`Hermes database not found (searched: ${hermesDbPaths().join(", ") || hermesDbPath()})`);
+  }
+  // Early close is deferred: find the winner first while handles are live.
+  let winner: { db: Database; dbPath: string } | undefined;
+  for (const entry of all) {
+    try {
+      const row = firstValue(entry.db, "SELECT id FROM sessions WHERE id = ?", { sid: sessionId });
+      if (row) {
+        winner = entry;
+        break;
+      }
+    } catch {
+      // ignore per-DB probe errors
+    }
+  }
+  const winnerPath = winner?.dbPath;
+  // Close all handles before (re)opening the winner fresh and parsing — keeps
+  // ownership simple and avoids leaving WASM handles alive on the happy path.
+  for (const { db } of all) {
+    try {
+      db.close();
+    } catch {
+      // ignore
+    }
+  }
+  if (!winnerPath) {
+    // Try the candidate list again in case a DB file changed on disk between
+    // the two opens (rare, but handles the "hinted probe was stale" edge).
+    const candidatePaths = hinted ? [hinted, ...hermesDbPaths().filter((p) => p !== hinted)] : hermesDbPaths();
+    for (const p of candidatePaths) {
+      const opened = await openHermesDb(p);
+      if (!opened) continue;
+      try {
+        const row = firstValue(opened.db, "SELECT id FROM sessions WHERE id = ?", { sid: sessionId });
+        if (row) return parseSessionFromDb(opened.db, sessionId, sessionInfo);
+      } finally {
+        opened.db.close();
+      }
+    }
+    throw new Error(`Hermes session '${sessionId}' not found in any known database`);
+  }
+  const opened = await openHermesDb(winnerPath);
+  if (!opened) throw new Error(`Hermes session '${sessionId}' not found in any known database`);
   try {
-    return parseSessionFromDb(db, sessionId, sessionInfo);
+    return parseSessionFromDb(opened.db, sessionId, sessionInfo);
   } finally {
-    db.close();
+    opened.db.close();
   }
+}
+
+function hintedDbPath(paths: string[], sessionInfo?: SessionInfo): string | undefined {
+  for (const p of paths) {
+    const idx = p.indexOf("#session:");
+    if (idx >= 0) {
+      const dbPath = p.slice(0, idx);
+      if (dbPath) return dbPath;
+    }
+  }
+  const fp = (sessionInfo as unknown as { filePath?: string })?.filePath;
+  if (typeof fp === "string" && fp.includes("#session:")) {
+    return fp.split("#session:")[0];
+  }
+  return undefined;
 }
 
 /**
@@ -256,9 +325,12 @@ export function parseSessionFromDb(
 
   const tokenUsageByModel = usageByModelFromDb(db, sessionId);
 
+  // Prefer the actual DB path that produced this session when available;
+  // otherwise fall back to the singular hermesDbPath() for backward compat.
+  const sourceDbPath = (session as unknown as { _dbPath?: string })?._dbPath ?? hermesDbPath();
   const defaultSource: DataSourceInfo = {
     primary: "sqlite",
-    sources: [hermesDbPath()],
+    sources: [sourceDbPath],
     notes: ["Discovered from the Hermes SQLite database (~/.hermes/state.db)."],
   };
 

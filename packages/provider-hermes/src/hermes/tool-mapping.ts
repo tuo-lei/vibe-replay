@@ -25,6 +25,19 @@ export function mapHermesToolName(name: string): string {
     execute_code: "ExecuteCode",
     session_search: "SessionSearch",
     text_to_speech: "TextToSpeech",
+    // Browser + cron — not in the original PR, added so the transform's scene
+    // detection sees them as first-class tool types instead of "unknown".
+    browser_navigate: "BrowserNavigate",
+    browser_click: "BrowserClick",
+    browser_type: "BrowserType",
+    browser_snapshot: "BrowserSnapshot",
+    browser_console: "BrowserConsole",
+    browser_scroll: "BrowserScroll",
+    browser_press: "BrowserPress",
+    browser_get_images: "BrowserImages",
+    cronjob: "Cron",
+    memory: "Memory",
+    codex: "Codex",
   };
   return mapping[name] || name;
 }
