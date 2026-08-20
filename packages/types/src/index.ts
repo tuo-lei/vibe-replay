@@ -54,6 +54,10 @@ export interface ParseWarning {
 
 export interface SubAgent {
   agentId: string;
+  /** Cursor global-state composer that owns this delegated agent. */
+  parentComposerId?: string;
+  /** Exact parent Agent tool call that launched this delegated agent. */
+  toolCallId?: string;
   agentType: string;
   description?: string;
   prompt: string;

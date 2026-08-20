@@ -5,6 +5,62 @@ import {
   isSystemContextText,
 } from "../src/cursor/sqlite-reader.js";
 
+describe("structured Cursor subagents", () => {
+  it("parses composer headers and links the exact parent Agent call", () => {
+    const headers = __testables.parseComposerHeaders(
+      JSON.stringify({
+        allComposers: [
+          { composerId: "parent" },
+          {
+            composerId: "child",
+            subagentInfo: { parentComposerId: "parent", toolCallId: "call-2" },
+          },
+        ],
+      }),
+    );
+    expect(headers.get("child")).toMatchObject({ isSubagent: true });
+
+    const turns: any[] = [
+      {
+        role: "assistant",
+        blocks: [
+          {
+            type: "tool_use",
+            id: "call-1",
+            name: "Agent",
+            input: { prompt: "wrong" },
+          },
+          {
+            type: "tool_use",
+            id: "call-2",
+            name: "Agent",
+            input: { prompt: "inspect data", subagent_type: "explore" },
+          },
+        ],
+      },
+    ];
+    expect(__testables.attachStructuredCursorSubagents(turns, "parent", headers)).toBe(1);
+    expect(turns[0].blocks[0]._subAgent).toBeUndefined();
+    expect(turns[0].blocks[1]._subAgent).toMatchObject({
+      agentId: "child",
+      parentComposerId: "parent",
+      toolCallId: "call-2",
+      agentType: "explore",
+      prompt: "inspect data",
+    });
+  });
+
+  it("keeps explicit isSubagent compatible without requiring relationship metadata", () => {
+    const headers = __testables.parseComposerHeaders(
+      JSON.stringify({ allComposers: [{ composerId: "child", isSubagent: true }] }),
+    );
+    expect(headers.get("child")).toEqual({
+      composerId: "child",
+      isSubagent: true,
+    });
+  });
+});
+
 describe("countComposerConversationHeaders", () => {
   it("returns zero when headers are missing", () => {
     expect(countComposerConversationHeaders({})).toBe(0);
@@ -37,6 +93,19 @@ describe("countComposerConversationHeaders", () => {
         conversation: [{ bubbleId: "a" }, { bubbleId: "b" }],
       }),
     ).toBe(2);
+  });
+
+  it("deduplicates repeated bubble IDs while preserving header order", () => {
+    expect(
+      __testables.composerHeaderBubbleIds({
+        fullConversationHeadersOnly: [
+          { bubbleId: "a" },
+          { bubbleId: "b" },
+          { bubbleId: "a" },
+          { bubbleId: "c" },
+        ],
+      }),
+    ).toEqual(["a", "b", "c"]);
   });
 });
 
@@ -144,6 +213,75 @@ describe("cursor sqlite metrics helpers", () => {
       name: "Bash",
       _result: "all green",
     });
+  });
+
+  it("preserves current agentKv block-array messages", () => {
+    const messages: any[] = [];
+    __testables.appendAgentKvBlobMessages(messages, [
+      {
+        key: "agentKv:blob:user-array",
+        value: JSON.stringify({
+          role: "user",
+          content: [{ type: "text", text: "Inspect the current schema" }],
+        }),
+      },
+      {
+        key: "agentKv:blob:assistant-array",
+        value: JSON.stringify({
+          role: "assistant",
+          content: [
+            { type: "reasoning", text: "I should inspect the file." },
+            {
+              type: "tool-call",
+              toolCallId: "call_array",
+              toolName: "read_file",
+              args: { path: "/tmp/schema.ts" },
+            },
+          ],
+        }),
+      },
+      {
+        key: "agentKv:blob:tool-array",
+        value: JSON.stringify({
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "call_array",
+              toolName: "read_file",
+              result: "export interface Schema {}",
+            },
+          ],
+        }),
+      },
+      {
+        key: "agentKv:blob:assistant-text-array",
+        value: JSON.stringify({
+          role: "assistant",
+          content: [{ type: "text", text: "Schema inspected." }],
+        }),
+      },
+    ]);
+
+    expect(messages.map((message) => Array.isArray(message.content))).toEqual([
+      true,
+      true,
+      true,
+      true,
+    ]);
+    const { turns } = __testables.messagesToTurns(messages);
+    expect(turns[0].blocks).toEqual([{ type: "text", text: "Inspect the current schema" }]);
+    expect(turns[1].blocks[0]).toEqual({
+      type: "thinking",
+      thinking: "I should inspect the file.",
+    });
+    expect(turns[1].blocks[1]).toMatchObject({
+      type: "tool_use",
+      id: "call_array",
+      name: "Read",
+      _result: "export interface Schema {}",
+    });
+    expect(turns[2].blocks).toEqual([{ type: "text", text: "Schema inspected." }]);
   });
 
   it("does not leak agentKv pending tool IDs across unrelated tool results", () => {
@@ -438,6 +576,12 @@ describe("cursor sqlite metrics helpers", () => {
     expect(
       __testables.cursorComposerSidecarMetadata({ restrictAgentModeSwitching: false }),
     ).toEqual({ restrictAgentModeSwitching: false });
+  });
+
+  it("does not stringify a false Glass parent flag into a parent ID", () => {
+    expect(
+      __testables.cursorComposerSidecarMetadata({ glassMetaParentAgent: false }),
+    ).toBeUndefined();
   });
 
   it("omits empty Cursor composerData sidecar metadata", () => {

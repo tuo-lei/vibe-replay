@@ -408,6 +408,70 @@ describe("Cursor parser — inline JSONL fixtures", () => {
     expect(toolScenes[1].toolName).toBe("WebFetch");
   });
 
+  it("does not synthesize sidecar calls beside structured inline tools", async () => {
+    const jsonl = await writeJsonl(tempDir, "inline-with-sidecar.jsonl", [
+      {
+        role: "user",
+        message: { content: [{ type: "text", text: "Inspect one file" }] },
+      },
+      {
+        role: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              id: "inline-read",
+              name: "ReadFile",
+              input: { path: "/tmp/example.ts" },
+            },
+          ],
+        },
+      },
+    ]);
+    const unrelatedSidecar = join(tempDir, "unrelated-sidecar.txt");
+    await writeFile(unrelatedSidecar, "arbitrary output without a compatible tool marker");
+
+    const result = await parseCursorSession([jsonl, unrelatedSidecar]);
+    const replay = transformToReplay(result, "cursor", "~/test");
+    const toolScenes = replay.scenes.filter((scene) => scene.type === "tool-call");
+    expect(toolScenes).toHaveLength(1);
+    expect(toolScenes[0]).toMatchObject({ type: "tool-call", toolName: "Read" });
+    expect(toolScenes[0].type === "tool-call" && toolScenes[0].result).toBe("");
+  });
+
+  it("uses a compatible sidecar only to fill an unresolved inline tool", async () => {
+    const jsonl = await writeJsonl(tempDir, "inline-bash-with-sidecar.jsonl", [
+      {
+        role: "user",
+        message: { content: [{ type: "text", text: "Run the command" }] },
+      },
+      {
+        role: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              id: "inline-bash",
+              name: "Shell",
+              input: { command: "pnpm test" },
+            },
+          ],
+        },
+      },
+    ]);
+    const sidecar = join(tempDir, "bash-sidecar.txt");
+    await writeFile(sidecar, "$ pnpm test\nall tests passed");
+
+    const result = await parseCursorSession([jsonl, sidecar]);
+    const replay = transformToReplay(result, "cursor", "~/test");
+    const toolScenes = replay.scenes.filter((scene) => scene.type === "tool-call");
+    expect(toolScenes).toHaveLength(1);
+    expect(toolScenes[0]).toMatchObject({ type: "tool-call", toolName: "Bash" });
+    expect(toolScenes[0].type === "tool-call" && toolScenes[0].result).toContain(
+      "all tests passed",
+    );
+  });
+
   it("infers tool names correctly from content", async () => {
     const jsonl = await writeJsonl(tempDir, "tool-names.jsonl", [
       {

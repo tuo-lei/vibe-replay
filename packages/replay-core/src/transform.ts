@@ -120,6 +120,8 @@ export function transformToReplay(
           const sa = block._subAgent;
           scene.subAgent = {
             agentId: sa.agentId,
+            parentComposerId: sa.parentComposerId,
+            toolCallId: sa.toolCallId,
             agentType: sa.agentType,
             description: sa.description,
             prompt: redactSecrets(redactPath(sa.prompt || "")),

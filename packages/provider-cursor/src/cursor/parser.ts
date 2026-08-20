@@ -343,6 +343,8 @@ async function parseCursorJsonl(
   const parseWarnings: NonNullable<ProviderParseResult["parseWarnings"]> = [];
   const sortedTranscriptPaths = await sortByMtime(transcriptPaths);
   const sessionId = basename(sortedTranscriptPaths[sortedTranscriptPaths.length - 1], ".jsonl");
+  const firstTranscriptPathByRecord = new Map<string, string>();
+  let duplicateTranscriptRecords = 0;
 
   for (const filePath of sortedTranscriptPaths) {
     const content = await readFile(filePath, "utf-8");
@@ -351,6 +353,13 @@ async function parseCursorJsonl(
     for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
       const line = lines[lineIndex];
       if (!line.trim()) continue;
+      const recordKey = line.trim();
+      const firstRecordPath = firstTranscriptPathByRecord.get(recordKey);
+      if (firstRecordPath && firstRecordPath !== filePath) {
+        duplicateTranscriptRecords++;
+        continue;
+      }
+      if (!firstRecordPath) firstTranscriptPathByRecord.set(recordKey, filePath);
       let obj: any;
       try {
         obj = JSON.parse(line);
@@ -497,8 +506,8 @@ async function parseCursorJsonl(
         ? await inferToolPaths(sortedTranscriptPaths)
         : [];
   const toolEvents = await loadToolEvents(toolPaths);
-  attachToolEvents(allTurns, toolEvents);
   attachToolResults(allTurns, toolResults, toolErrors, toolImages, deps);
+  attachToolEvents(allTurns, toolEvents);
 
   // Derive slug from session ID
   const slug = sessionId.slice(0, 8);
@@ -522,6 +531,13 @@ async function parseCursorJsonl(
         "cursor/projects/agent-transcripts/*.jsonl",
         ...(hasToolData ? ["cursor/projects/agent-tools/*.txt"] : []),
       ],
+      ...(duplicateTranscriptRecords > 0
+        ? {
+            notes: [
+              `${duplicateTranscriptRecords} duplicate Cursor transcript records were omitted.`,
+            ],
+          }
+        : {}),
     },
     parseWarnings: parseWarnings.length > 0 ? parseWarnings : undefined,
   };
@@ -1244,12 +1260,15 @@ function inferToolName(result: string): string {
 
 function attachToolEvents(turns: ParsedTurn[], tools: ToolEvent[]): void {
   const markerBlocks: Array<{ block: ToolUseBlock; turn: ParsedTurn; blockIndex: number }> = [];
+  const inlineBlocks: ToolUseBlock[] = [];
   for (const turn of turns) {
     if (turn.role !== "assistant") continue;
     for (let bi = 0; bi < turn.blocks.length; bi++) {
       const block = turn.blocks[bi];
       if (block.type === "tool_use" && block._isPendingMarker) {
         markerBlocks.push({ block, turn, blockIndex: bi });
+      } else if (block.type === "tool_use") {
+        inlineBlocks.push(block);
       }
     }
   }
@@ -1284,8 +1303,24 @@ function attachToolEvents(turns: ParsedTurn[], tools: ToolEvent[]): void {
     turn.blocks[blockIndex] = thinkingBlock;
   }
 
-  // Extra tool outputs with no matching marker → append as real tool calls
-  for (let i = paired; i < tools.length; i++) {
+  let nextToolIndex = paired;
+  // Current transcripts already contain structured tool_use blocks. A sidecar
+  // may fill a missing result only when its inferred tool name agrees; it must
+  // never become an additional synthetic call beside an inline call.
+  for (const block of inlineBlocks) {
+    if (typeof block._result === "string") continue;
+    const matchIndex = findCompatibleSidecarTool(tools, nextToolIndex, block.name);
+    if (matchIndex === -1) continue;
+    const tool = tools[matchIndex];
+    block._result = tool.result;
+    block.input = { ...block.input, ...tool.input };
+    nextToolIndex = matchIndex + 1;
+  }
+
+  // Legacy transcripts with no inline tools depended on unmarked sidecars.
+  // Preserve that fallback, but suppress extras when structured calls exist.
+  if (inlineBlocks.length > 0) return;
+  for (let i = nextToolIndex; i < tools.length; i++) {
     const tool = tools[i];
     turns.push({
       role: "assistant",
@@ -1293,6 +1328,19 @@ function attachToolEvents(turns: ParsedTurn[], tools: ToolEvent[]): void {
       blocks: [toToolUseBlock(tool)],
     });
   }
+}
+
+function findCompatibleSidecarTool(
+  tools: ToolEvent[],
+  startIndex: number,
+  blockName: string,
+): number {
+  const editFamily = new Set(["Edit", "MultiEdit", "Write"]);
+  for (let i = startIndex; i < tools.length; i++) {
+    if (tools[i].name === blockName) return i;
+    if (editFamily.has(tools[i].name) && editFamily.has(blockName)) return i;
+  }
+  return -1;
 }
 
 function toToolUseBlock(tool: ToolEvent): ContentBlock {

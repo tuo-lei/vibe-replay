@@ -81,7 +81,22 @@ export function buildSourceSessionCatalogCache(
   sessions: SourceSummaryRecord[],
   discoveredAt: string,
   previous?: NormalizedSourceSessionCatalogCache | null,
+  failedProviders: string[] = [],
 ): SourceSessionCatalogCache {
+  const failed = new Set(failedProviders);
+  const mergedSessions = [...sessions];
+  const seen = new Set(
+    sessions.map((session) =>
+      providerSessionKey(session.provider, session.sessionId || session.slug),
+    ),
+  );
+  for (const session of previous?.sessions || []) {
+    if (!failed.has(session.provider)) continue;
+    const key = providerSessionKey(session.provider, session.sessionId || session.slug);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    mergedSessions.push(session);
+  }
   const providerStates = {
     ...previous?.providerStates,
     ...buildProviderDiscoveryStates(sessions, discoveredAt),
@@ -91,7 +106,7 @@ export function buildSourceSessionCatalogCache(
     discoveredAt,
     updatedAt: discoveredAt,
     providerStates,
-    sessions: sessions as CachedSourceRecord[],
+    sessions: mergedSessions as CachedSourceRecord[],
   };
 }
 

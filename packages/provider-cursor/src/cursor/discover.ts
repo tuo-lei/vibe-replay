@@ -33,6 +33,9 @@ export async function discoverCursorSessions(): Promise<SessionInfo[]> {
   for (const projectSessionList of projectSessions) {
     sessions.push(...projectSessionList);
   }
+  const mergedTranscriptSessions = mergeDuplicateTranscriptSessions(sessions);
+  sessions.length = 0;
+  sessions.push(...mergedTranscriptSessions);
 
   // Discover SQLite-only sessions (devcontainer, SSH-remote, etc.)
   const transcriptSessions = sessions.slice();
@@ -60,6 +63,45 @@ export async function discoverCursorSessions(): Promise<SessionInfo[]> {
 
   sessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   return sessions;
+}
+
+/**
+ * The same Cursor transcript can be copied between encoded project directories.
+ * Keep one catalog entry per session ID while passing every unique path to the
+ * parser, which performs record-level deduplication for overlapping files.
+ */
+function mergeDuplicateTranscriptSessions(sessions: SessionInfo[]): SessionInfo[] {
+  const byId = new Map<string, SessionInfo[]>();
+  for (const session of sessions) {
+    const group = byId.get(session.sessionId) || [];
+    group.push(session);
+    byId.set(session.sessionId, group);
+  }
+
+  const merged: SessionInfo[] = [];
+  for (const group of byId.values()) {
+    if (group.length === 1) {
+      merged.push(group[0]);
+      continue;
+    }
+    const ranked = group.toSorted(
+      (a, b) =>
+        (b.lineCount || 0) - (a.lineCount || 0) ||
+        (b.fileSize || 0) - (a.fileSize || 0) ||
+        b.timestamp.localeCompare(a.timestamp),
+    );
+    const primary = ranked[0];
+    const filePaths = [...new Set(group.flatMap((session) => session.filePaths))];
+    const toolPaths = [...new Set(group.flatMap((session) => session.toolPaths || []))];
+    merged.push({
+      ...primary,
+      filePaths,
+      filePath: primary.filePath,
+      fileSize: Math.max(...group.map((session) => session.fileSize || 0)),
+      ...(toolPaths.length > 0 ? { toolPaths } : {}),
+    });
+  }
+  return merged;
 }
 
 async function discoverProjectSessions(projDir: string): Promise<SessionInfo[]> {
@@ -420,4 +462,5 @@ async function mapLimit<T, R>(
 
 export const __testables = {
   decodeProjectDir,
+  mergeDuplicateTranscriptSessions,
 };

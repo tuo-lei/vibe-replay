@@ -610,6 +610,32 @@ describe("scanSession", () => {
       },
     });
   });
+
+  it("marks Pi rich-parser fallback as partial and preserves discovery counts", async () => {
+    const missingPath = join(tmpDir, "missing-pi-session.jsonl");
+    const result = await scanSession({
+      sessionId: "pi-fallback-session",
+      provider: "pi",
+      project: "~/test/project",
+      slug: "pi-fallback",
+      filePaths: [missingPath],
+      sourceFilePath: missingPath,
+      discoveryPromptCount: 7,
+      discoveryToolCallCount: 19,
+      discoveryEditCount: 4,
+      discoveryModel: "roblox-llm",
+      discoveryDurationMs: 12_000,
+    });
+
+    expect(result.promptCount).toBe(7);
+    expect(result.toolCallCount).toBe(19);
+    expect(result.editCount).toBe(4);
+    expect(result.model).toBe("roblox-llm");
+    expect(result.durationMs).toBe(12_000);
+    expect(result.dataQualityNotes).toContain(
+      "Partial Pi scan: the rich parser failed, so available generic and discovery metadata was used.",
+    );
+  });
 });
 
 // ─── Aggregation tests ──────────────────────────────────────────────

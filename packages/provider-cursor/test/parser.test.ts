@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -161,6 +161,41 @@ describe("parseCursorSession", () => {
     expect(parsed.cwd).toBe(dir);
     expect(parsed.dataSourceInfo?.notes?.[0]).toContain("SQLite parse failed");
     expect(parsed.dataSourceInfo?.notes?.[0]).toContain("fell back to JSONL transcript");
+  });
+
+  it("deduplicates overlapping records across copied transcripts", async () => {
+    mockedParseCursorSqlite.mockResolvedValueOnce(null);
+    const dir = await mkdtemp(join(tmpdir(), "cursor-parser-duplicate-test-"));
+    tempDirs.push(dir);
+    const firstDir = join(dir, "project-a");
+    const secondDir = join(dir, "project-b");
+    await Promise.all([mkdir(firstDir), mkdir(secondDir)]);
+    const first = join(firstDir, "same-session.jsonl");
+    const second = join(secondDir, "same-session.jsonl");
+    const sharedUser = JSON.stringify({
+      role: "user",
+      timestamp: "2026-08-20T10:00:00.000Z",
+      message: { content: [{ type: "text", text: "<user_query>shared prompt</user_query>" }] },
+    });
+    const sharedAssistant = JSON.stringify({
+      role: "assistant",
+      timestamp: "2026-08-20T10:00:01.000Z",
+      message: { content: [{ type: "text", text: "shared response" }] },
+    });
+    const uniqueAssistant = JSON.stringify({
+      role: "assistant",
+      timestamp: "2026-08-20T10:00:02.000Z",
+      message: { content: [{ type: "text", text: "continued response" }] },
+    });
+    await writeFile(first, `${sharedUser}\n${sharedAssistant}\n`);
+    await writeFile(second, `${sharedUser}\n${sharedAssistant}\n${uniqueAssistant}\n`);
+
+    const parsed = await parseCursorSession([first, second]);
+    expect(parsed.turns).toHaveLength(3);
+    expect(parsed.turns.filter((turn) => turn.role === "user")).toHaveLength(1);
+    expect(parsed.dataSourceInfo?.notes).toEqual([
+      "2 duplicate Cursor transcript records were omitted.",
+    ]);
   });
 
   it("surfaces sqlite error details when no transcript fallback exists", async () => {
