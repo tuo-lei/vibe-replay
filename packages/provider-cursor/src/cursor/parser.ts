@@ -196,6 +196,14 @@ async function parseCursorSessionWithDependencies(
       if (enrichment.totalDurationMs && !jsonlResult.totalDurationMs) {
         jsonlResult.totalDurationMs = enrichment.totalDurationMs;
       }
+      // SDK transcripts carry no usage of their own, so the index.db totals are
+      // the only token accounting available for these sessions.
+      if (enrichment.tokenUsage && !jsonlResult.tokenUsage) {
+        jsonlResult.tokenUsage = enrichment.tokenUsage;
+      }
+      if (enrichment.tokenUsageByModel && !jsonlResult.tokenUsageByModel) {
+        jsonlResult.tokenUsageByModel = enrichment.tokenUsageByModel;
+      }
     }
   }
   await attachCursorSubagents(jsonlResult, transcriptPaths, deps);

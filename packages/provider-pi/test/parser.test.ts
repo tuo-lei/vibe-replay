@@ -575,6 +575,297 @@ describe("Pi parser", () => {
     });
   });
 
+  it("marks harness tool results failed when details report a non-zero exit code", async () => {
+    const lines = [
+      {
+        type: "session",
+        version: 3,
+        id: "pi-exit-code",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        cwd: "/Users/test/project",
+      },
+      {
+        type: "message",
+        id: "user1",
+        parentId: null,
+        timestamp: "2026-01-01T00:00:01.000Z",
+        message: { role: "user", content: [{ type: "text", text: "Run the suite" }] },
+      },
+      {
+        type: "message",
+        id: "assistant1",
+        parentId: "user1",
+        timestamp: "2026-01-01T00:00:02.000Z",
+        message: {
+          role: "assistant",
+          model: "gpt-5.5",
+          content: [
+            {
+              type: "toolCall",
+              id: "call-fail",
+              name: "exec_command",
+              arguments: { cmd: "pnpm test" },
+            },
+            {
+              type: "toolCall",
+              id: "call-pass",
+              name: "exec_command",
+              arguments: { cmd: "pnpm lint" },
+            },
+          ],
+        },
+      },
+      {
+        type: "message",
+        id: "result-fail",
+        parentId: "assistant1",
+        timestamp: "2026-01-01T00:00:03.000Z",
+        message: {
+          role: "toolResult",
+          toolCallId: "call-fail",
+          isError: false,
+          details: { exit_code: 1 },
+          content: [{ type: "text", text: "1 test failed" }],
+        },
+      },
+      {
+        type: "message",
+        id: "result-pass",
+        parentId: "result-fail",
+        timestamp: "2026-01-01T00:00:04.000Z",
+        message: {
+          role: "toolResult",
+          toolCallId: "call-pass",
+          isError: false,
+          details: { exit_code: 0 },
+          content: [{ type: "text", text: "lint clean" }],
+        },
+      },
+    ];
+
+    await withPiFixture(lines, async (path) => {
+      const parsed = await parsePiSession(path);
+      const blocks = parsed.turns
+        .flatMap((turn) => turn.blocks)
+        .filter((block) => block.type === "tool_use");
+      expect(blocks).toHaveLength(2);
+      expect(blocks[0].type === "tool_use" && blocks[0]._isError).toBe(true);
+      expect(blocks[1].type === "tool_use" && blocks[1]._isError).toBeUndefined();
+    });
+  });
+
+  it("counts compaction summary usage and keeps turn stats unchanged", async () => {
+    const buildLines = (compaction: Record<string, unknown>) => [
+      {
+        type: "session",
+        version: 3,
+        id: "pi-compaction-usage",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        cwd: "/Users/test/project",
+      },
+      {
+        type: "message",
+        id: "user1",
+        parentId: null,
+        timestamp: "2026-01-01T00:00:01.000Z",
+        message: { role: "user", content: [{ type: "text", text: "Long task" }] },
+      },
+      {
+        type: "message",
+        id: "assistant1",
+        parentId: "user1",
+        timestamp: "2026-01-01T00:00:02.000Z",
+        message: {
+          role: "assistant",
+          model: "gpt-5.5",
+          content: [{ type: "text", text: "Working" }],
+          usage: { input: 100, output: 20, cacheRead: 5, cacheWrite: 5 },
+        },
+      },
+      { type: "compaction", id: "compact1", parentId: "assistant1", ...compaction },
+    ];
+
+    await withPiFixture(
+      buildLines({
+        timestamp: "2026-01-01T00:00:03.000Z",
+        summary: "Earlier work condensed.",
+        tokensBefore: 90_000,
+        usage: { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 },
+      }),
+      async (path) => {
+        const parsed = await parsePiSession(path);
+        expect(parsed.tokenUsage).toEqual({
+          inputTokens: 140,
+          outputTokens: 30,
+          cacheCreationTokens: 5,
+          cacheReadTokens: 5,
+        });
+        expect(parsed.tokenUsageByModel?.["gpt-5.5"]).toEqual({
+          inputTokens: 140,
+          outputTokens: 30,
+          cacheCreationTokens: 5,
+          cacheReadTokens: 5,
+        });
+        expect(parsed.compactions?.[0]?.preTokens).toBe(90_000);
+        expect(parsed.turnStats).toEqual([
+          {
+            turnIndex: 0,
+            model: "gpt-5.5",
+            tokenUsage: {
+              inputTokens: 100,
+              outputTokens: 20,
+              cacheCreationTokens: 5,
+              cacheReadTokens: 5,
+            },
+            contextTokens: 110,
+          },
+        ]);
+      },
+    );
+
+    await withPiFixture(
+      buildLines({
+        timestamp: "2026-01-01T00:00:03.000Z",
+        summary: "Earlier work condensed.",
+        tokensBefore: 90_000,
+      }),
+      async (path) => {
+        const parsed = await parsePiSession(path);
+        expect(parsed.tokenUsage).toEqual({
+          inputTokens: 100,
+          outputTokens: 20,
+          cacheCreationTokens: 5,
+          cacheReadTokens: 5,
+        });
+      },
+    );
+  });
+
+  it("reports the last selected model so discovery and replay agree", async () => {
+    const lines = [
+      {
+        type: "session",
+        version: 3,
+        id: "pi-model-switch",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        cwd: "/Users/test/project",
+      },
+      {
+        type: "model_change",
+        id: "model1",
+        parentId: null,
+        timestamp: "2026-01-01T00:00:01.000Z",
+        modelId: "first-model",
+      },
+      {
+        type: "message",
+        id: "user1",
+        parentId: "model1",
+        timestamp: "2026-01-01T00:00:02.000Z",
+        message: { role: "user", content: [{ type: "text", text: "Switch models" }] },
+      },
+      {
+        type: "model_change",
+        id: "model2",
+        parentId: "user1",
+        timestamp: "2026-01-01T00:00:03.000Z",
+        modelId: "second-model",
+      },
+      {
+        type: "message",
+        id: "assistant1",
+        parentId: "model2",
+        timestamp: "2026-01-01T00:00:04.000Z",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "Done" }],
+          usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
+        },
+      },
+    ];
+
+    await withPiFixture(lines, async (path) => {
+      const parsed = await parsePiSession(path);
+      expect(parsed.model).toBe("second-model");
+      expect(parsed.tokenUsageByModel?.["second-model"]).toEqual({
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+      });
+    });
+  });
+
+  it("renders every replacement of a multi-part native edit", async () => {
+    const lines = [
+      {
+        type: "session",
+        version: 3,
+        id: "pi-multi-edit",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        cwd: "/Users/test/project",
+      },
+      {
+        type: "message",
+        id: "user1",
+        parentId: null,
+        timestamp: "2026-01-01T00:00:01.000Z",
+        message: { role: "user", content: [{ type: "text", text: "Rename helpers" }] },
+      },
+      {
+        type: "message",
+        id: "assistant1",
+        parentId: "user1",
+        timestamp: "2026-01-01T00:00:02.000Z",
+        message: {
+          role: "assistant",
+          model: "gpt-5.5",
+          content: [
+            {
+              type: "toolCall",
+              id: "call-edit",
+              name: "edit",
+              arguments: {
+                path: "/Users/test/project/util.ts",
+                edits: [
+                  { oldText: "const a = 1", newText: "const alpha = 1" },
+                  { oldText: "const b = 2", newText: "const beta = 2" },
+                  { oldText: "const c = 3", newText: "const gamma = 3" },
+                ],
+              },
+            },
+          ],
+        },
+      },
+      {
+        type: "message",
+        id: "result1",
+        parentId: "assistant1",
+        timestamp: "2026-01-01T00:00:03.000Z",
+        message: {
+          role: "toolResult",
+          toolCallId: "call-edit",
+          content: [{ type: "text", text: "edited" }],
+        },
+      },
+    ];
+
+    await withPiFixture(lines, async (path) => {
+      const replay = transformToReplay(await parsePiSession(path), "pi", "~/project");
+      const edit = replay.scenes.find(
+        (scene) => scene.type === "tool-call" && scene.toolName === "Edit",
+      );
+      expect(edit?.type).toBe("tool-call");
+      expect(edit?.type === "tool-call" && edit.diff?.filePath).toBe("/Users/test/project/util.ts");
+      expect(edit?.type === "tool-call" && edit.diff?.oldContent).toBe(
+        "const a = 1\n\nconst b = 2\n\nconst c = 3",
+      );
+      expect(edit?.type === "tool-call" && edit.diff?.newContent).toBe(
+        "const alpha = 1\n\nconst beta = 2\n\nconst gamma = 3",
+      );
+    });
+  });
+
   it.each([10, 40])(
     "caps a %i-minute idle gap consistently with other providers",
     async (gapMinutes) => {

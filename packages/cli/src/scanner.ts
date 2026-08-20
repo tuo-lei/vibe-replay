@@ -31,7 +31,7 @@ import type { DataSource, PrLink, SessionInfo, TokenUsage } from "./types.js";
 import { localDayKey, shortenPath } from "./utils.js";
 
 // Bump this when we extract new fields — forces re-scan of all sessions.
-const SCANNER_VERSION = 10;
+const SCANNER_VERSION = 11;
 
 // ─── Types ──────────────────────────────────────────────────────────
 

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { parseClaudeCodeLines } from "../claude-code/parser.js";
 import { getTimestampBounds } from "@vibe-replay/provider-core/duration";
-import type { ProviderParseResult } from "@vibe-replay/provider-contract";
+import type { ProviderParseResult, TokenUsage } from "@vibe-replay/provider-contract";
 import { addParseWarning } from "@vibe-replay/provider-contract/warnings";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
 
@@ -109,6 +109,146 @@ function collectOriginalCoworkUserKeys(lines: string[]): Set<string> {
 }
 
 /**
+ * Cowork writes one `result` record per completed host-loop run holding that
+ * run's final billing: token usage, per-model usage, cost and wall-clock time.
+ * Assistant messages only carry partial streaming snapshots, so a session total
+ * is the sum over result records — never a mix of both sources.
+ */
+interface CoworkRunTotals {
+  tokenUsage: TokenUsage;
+  tokenUsageByModel: Record<string, TokenUsage>;
+  reportedCostUsd?: number;
+  totalDurationMs?: number;
+}
+
+const EMPTY_USAGE: TokenUsage = {
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheCreationTokens: 0,
+  cacheReadTokens: 0,
+};
+
+function numberOrZero(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function addUsage(total: TokenUsage, next: TokenUsage): TokenUsage {
+  return {
+    inputTokens: total.inputTokens + next.inputTokens,
+    outputTokens: total.outputTokens + next.outputTokens,
+    cacheCreationTokens: total.cacheCreationTokens + next.cacheCreationTokens,
+    cacheReadTokens: total.cacheReadTokens + next.cacheReadTokens,
+  };
+}
+
+function isEmptyUsage(usage: TokenUsage): boolean {
+  return (
+    usage.inputTokens === 0 &&
+    usage.outputTokens === 0 &&
+    usage.cacheCreationTokens === 0 &&
+    usage.cacheReadTokens === 0
+  );
+}
+
+/** `result.usage` uses the Anthropic API field names. */
+function resultUsage(usage: Record<string, unknown>): TokenUsage {
+  return {
+    inputTokens: numberOrZero(usage.input_tokens),
+    outputTokens: numberOrZero(usage.output_tokens),
+    cacheCreationTokens: numberOrZero(usage.cache_creation_input_tokens),
+    cacheReadTokens: numberOrZero(usage.cache_read_input_tokens),
+  };
+}
+
+/** `result.modelUsage` is keyed by model and uses camelCase field names. */
+function modelUsageEntry(entry: Record<string, unknown>): TokenUsage {
+  return {
+    inputTokens: numberOrZero(entry.inputTokens),
+    outputTokens: numberOrZero(entry.outputTokens),
+    cacheCreationTokens: numberOrZero(entry.cacheCreationInputTokens),
+    cacheReadTokens: numberOrZero(entry.cacheReadInputTokens),
+  };
+}
+
+/** Model keys can carry a context-mode suffix such as `claude-sonnet-4-6[1m]`. */
+function modelUsageKey(rawKey: string, entry: Record<string, unknown>): string {
+  const canonical = entry.canonicalModel;
+  if (typeof canonical === "string" && canonical.trim()) return canonical.trim();
+  return rawKey.replace(/\[[^\]]*\]$/, "").trim() || rawKey;
+}
+
+function summarizeCoworkRuns(records: Record<string, unknown>[]): CoworkRunTotals | undefined {
+  if (records.length === 0) return undefined;
+
+  let tokenUsage = EMPTY_USAGE;
+  const tokenUsageByModel: Record<string, TokenUsage> = {};
+  let reportedCostUsd = 0;
+  let sawCost = false;
+  let totalDurationMs = 0;
+  let sawDuration = false;
+
+  for (const record of records) {
+    const usage = record.usage;
+    if (usage && typeof usage === "object") {
+      tokenUsage = addUsage(tokenUsage, resultUsage(usage as Record<string, unknown>));
+    }
+
+    const modelUsage = record.modelUsage;
+    if (modelUsage && typeof modelUsage === "object") {
+      for (const [rawKey, rawEntry] of Object.entries(modelUsage as Record<string, unknown>)) {
+        if (!rawEntry || typeof rawEntry !== "object") continue;
+        const entry = rawEntry as Record<string, unknown>;
+        const key = modelUsageKey(rawKey, entry);
+        tokenUsageByModel[key] = addUsage(tokenUsageByModel[key] || EMPTY_USAGE, {
+          ...modelUsageEntry(entry),
+        });
+      }
+    }
+
+    // `total_cost_usd` already equals the sum of the per-model costs, so only
+    // one of the two is counted.
+    if (typeof record.total_cost_usd === "number" && Number.isFinite(record.total_cost_usd)) {
+      reportedCostUsd += record.total_cost_usd;
+      sawCost = true;
+    }
+    if (typeof record.duration_ms === "number" && Number.isFinite(record.duration_ms)) {
+      totalDurationMs += Math.max(0, record.duration_ms);
+      sawDuration = true;
+    }
+  }
+
+  if (isEmptyUsage(tokenUsage) && Object.keys(tokenUsageByModel).length === 0 && !sawCost) {
+    return undefined;
+  }
+
+  return {
+    tokenUsage,
+    tokenUsageByModel,
+    ...(sawCost ? { reportedCostUsd } : {}),
+    ...(sawDuration && totalDurationMs > 0 ? { totalDurationMs } : {}),
+  };
+}
+
+/**
+ * Cowork records transient API failures as `system/api_retry`. Only the
+ * structured attempt metadata is kept — the raw error text is never stored.
+ */
+function coworkRetryError(
+  record: Record<string, unknown>,
+): NonNullable<ProviderParseResult["apiErrors"]>[number] | undefined {
+  const timestamp = record.timestamp || record["_audit_timestamp"];
+  if (typeof timestamp !== "string" || !timestamp) return undefined;
+  const status = record.error_status;
+  const attempt = record.attempt;
+  return {
+    timestamp,
+    errorType: "api_retry",
+    ...(typeof status === "number" && Number.isFinite(status) ? { statusCode: status } : {}),
+    ...(typeof attempt === "number" && Number.isFinite(attempt) ? { retryAttempt: attempt } : {}),
+  };
+}
+
+/**
  * Parse a Cowork audit.jsonl. When invoked from the CLI picker, `sessionInfo`
  * carries the overlay metadata (title, timestamps, model) pulled from the
  * sibling `local_{id}.json` during discovery.
@@ -120,6 +260,9 @@ export async function parseClaudeCoworkSession(
   const paths = Array.isArray(filePaths) ? filePaths : [filePaths];
   const normalized: string[] = [];
   const parseWarnings: NonNullable<ProviderParseResult["parseWarnings"]> = [];
+  const runRecords: Record<string, unknown>[] = [];
+  const seenRunUuids = new Set<string>();
+  const retryErrors: NonNullable<ProviderParseResult["apiErrors"]> = [];
   for (const fp of paths) {
     const content = await readFile(fp, "utf-8");
     const lines = content.split("\n");
@@ -131,6 +274,16 @@ export async function parseClaudeCoworkSession(
       try {
         const obj = JSON.parse(t) as Record<string, unknown>;
         if (isDuplicateCoworkReplayUser(obj, originalUserKeys)) continue;
+        if (obj.type === "result") {
+          const uuid = typeof obj.uuid === "string" ? obj.uuid : "";
+          if (!uuid || !seenRunUuids.has(uuid)) {
+            if (uuid) seenRunUuids.add(uuid);
+            runRecords.push(obj);
+          }
+        } else if (obj.type === "system" && obj.subtype === "api_retry") {
+          const retry = coworkRetryError(obj);
+          if (retry) retryErrors.push(retry);
+        }
       } catch {
         // Let normalizeCoworkLine report malformed JSON consistently below.
       }
@@ -152,6 +305,25 @@ export async function parseClaudeCoworkSession(
   const result = await parseClaudeCodeLines(normalized);
   if (parseWarnings.length > 0) {
     result.parseWarnings = [...parseWarnings, ...(result.parseWarnings || [])];
+  }
+
+  // Prefer the run-level billing records. Older audits without them keep the
+  // assistant-snapshot totals and timestamp-based duration estimate.
+  const runTotals = summarizeCoworkRuns(runRecords);
+  if (runTotals) {
+    result.tokenUsage = runTotals.tokenUsage;
+    if (Object.keys(runTotals.tokenUsageByModel).length > 0) {
+      result.tokenUsageByModel = runTotals.tokenUsageByModel;
+    }
+    if (runTotals.reportedCostUsd !== undefined) {
+      result.reportedCostUsd = runTotals.reportedCostUsd;
+    }
+    if (runTotals.totalDurationMs !== undefined) {
+      result.totalDurationMs = runTotals.totalDurationMs;
+    }
+  }
+  if (retryErrors.length > 0) {
+    result.apiErrors = [...(result.apiErrors || []), ...retryErrors];
   }
 
   // Overlay metadata that audit.jsonl does not carry but the sibling JSON does.

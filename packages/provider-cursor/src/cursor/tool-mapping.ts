@@ -47,6 +47,7 @@ export function mapCursorToolName(name: string): string {
     Delete: "Delete",
     delete_file: "Delete",
     Task: "Agent",
+    task: "Agent", // Cursor SDK lowercase tool name
     task_v2: "Agent",
     Subagent: "Agent",
     todo_write: "TodoWrite",

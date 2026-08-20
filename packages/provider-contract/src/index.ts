@@ -260,6 +260,11 @@ export interface ProviderParseResult {
   tokenUsage?: TokenUsage;
   /** Per-model token usage breakdown for accurate cost estimation */
   tokenUsageByModel?: Record<string, TokenUsage>;
+  /**
+   * Cost in USD reported by the provider itself. Preferred over local pricing
+   * estimates, which cannot price model generations they do not know about.
+   */
+  reportedCostUsd?: number;
   compactions?: Compaction[];
   /** Per-turn metrics (indexed by user-prompt turn, 0-based) */
   turnStats?: TurnStat[];

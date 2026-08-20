@@ -317,6 +317,188 @@ describe("parseClaudeCoworkSession", () => {
     expect(result.model).toBe("claude-opus-4-6");
   });
 
+  it("bills tokens, cost and duration from Cowork run result records", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-cowork-result-"));
+    const auditPath = join(tempDir, "audit.jsonl");
+    const runResult = (
+      uuid: string,
+      timestamp: string,
+      overrides: Record<string, unknown>,
+    ): Record<string, unknown> => ({
+      type: "result",
+      subtype: "success",
+      uuid,
+      session_id: "cowork-billing",
+      terminal_reason: "completed",
+      _audit_timestamp: timestamp,
+      ...overrides,
+    });
+    const lines = [
+      {
+        type: "user",
+        uuid: "u1",
+        session_id: "cowork-billing",
+        _audit_timestamp: "2026-01-01T00:00:00.000Z",
+        message: { role: "user", content: "First request" },
+      },
+      {
+        type: "assistant",
+        session_id: "cowork-billing",
+        _audit_timestamp: "2026-01-01T00:00:05.000Z",
+        message: {
+          role: "assistant",
+          id: "msg_1",
+          model: "claude-opus-9",
+          content: [{ type: "text", text: "Partial stream snapshot" }],
+          usage: {
+            input_tokens: 10,
+            output_tokens: 2,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+          },
+        },
+      },
+      runResult("run-1", "2026-01-01T00:00:06.000Z", {
+        duration_ms: 6_000,
+        duration_api_ms: 4_500,
+        total_cost_usd: 0.25,
+        usage: {
+          input_tokens: 100,
+          output_tokens: 900,
+          cache_creation_input_tokens: 30,
+          cache_read_input_tokens: 70,
+        },
+        modelUsage: {
+          "claude-opus-9[1m]": {
+            inputTokens: 100,
+            outputTokens: 900,
+            cacheCreationInputTokens: 30,
+            cacheReadInputTokens: 70,
+            costUSD: 0.25,
+          },
+        },
+      }),
+      // A repeated audit record for the same run must not be billed twice.
+      runResult("run-1", "2026-01-01T00:00:06.000Z", {
+        duration_ms: 6_000,
+        total_cost_usd: 0.25,
+        usage: {
+          input_tokens: 100,
+          output_tokens: 900,
+          cache_creation_input_tokens: 30,
+          cache_read_input_tokens: 70,
+        },
+      }),
+      {
+        type: "system",
+        subtype: "api_retry",
+        attempt: 2,
+        max_retries: 5,
+        error_status: 529,
+        error: "overloaded upstream detail that must not be stored",
+        session_id: "cowork-billing",
+        _audit_timestamp: "2026-01-01T00:00:07.000Z",
+      },
+      runResult("run-2", "2026-01-01T00:00:12.000Z", {
+        duration_ms: 4_000,
+        total_cost_usd: 0.1,
+        usage: {
+          input_tokens: 40,
+          output_tokens: 60,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 10,
+        },
+        modelUsage: {
+          "claude-opus-9": {
+            inputTokens: 40,
+            outputTokens: 60,
+            cacheCreationInputTokens: 0,
+            cacheReadInputTokens: 10,
+            costUSD: 0.1,
+            canonicalModel: "claude-opus-9",
+          },
+        },
+      }),
+    ];
+    await writeFile(auditPath, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+
+    try {
+      const result = await parseClaudeCoworkSession(auditPath);
+      expect(result.tokenUsage).toEqual({
+        inputTokens: 140,
+        outputTokens: 960,
+        cacheCreationTokens: 30,
+        cacheReadTokens: 80,
+      });
+      expect(result.tokenUsageByModel).toEqual({
+        "claude-opus-9": {
+          inputTokens: 140,
+          outputTokens: 960,
+          cacheCreationTokens: 30,
+          cacheReadTokens: 80,
+        },
+      });
+      expect(result.reportedCostUsd).toBeCloseTo(0.35, 10);
+      expect(result.totalDurationMs).toBe(10_000);
+      expect(result.apiErrors).toEqual([
+        {
+          timestamp: "2026-01-01T00:00:07.000Z",
+          errorType: "api_retry",
+          statusCode: 529,
+          retryAttempt: 2,
+        },
+      ]);
+      expect(JSON.stringify(result)).not.toContain("overloaded upstream detail");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps assistant-snapshot billing for older audits without result records", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-cowork-legacy-billing-"));
+    const auditPath = join(tempDir, "audit.jsonl");
+    const lines = [
+      {
+        type: "user",
+        uuid: "u1",
+        session_id: "cowork-legacy",
+        _audit_timestamp: "2026-01-01T00:00:00.000Z",
+        message: { role: "user", content: "Legacy audit request" },
+      },
+      {
+        type: "assistant",
+        session_id: "cowork-legacy",
+        _audit_timestamp: "2026-01-01T00:00:05.000Z",
+        message: {
+          role: "assistant",
+          id: "msg_legacy",
+          model: "claude-opus-4-6",
+          content: [{ type: "text", text: "Legacy answer" }],
+          usage: {
+            input_tokens: 10,
+            output_tokens: 2,
+            cache_creation_input_tokens: 1,
+            cache_read_input_tokens: 3,
+          },
+        },
+      },
+    ];
+    await writeFile(auditPath, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+
+    try {
+      const result = await parseClaudeCoworkSession(auditPath);
+      expect(result.tokenUsage).toEqual({
+        inputTokens: 10,
+        outputTokens: 2,
+        cacheCreationTokens: 1,
+        cacheReadTokens: 3,
+      });
+      expect(result.reportedCostUsd).toBeUndefined();
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("records malformed audit JSONL lines as parse warnings", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-cowork-malformed-"));
     const auditPath = join(tempDir, "audit.jsonl");
