@@ -47,4 +47,36 @@ describe("dashboard facet filtering", () => {
 
     expect(filtered.map((session) => session.slug)).toEqual(["pi-ros", "claude-ros"]);
   });
+
+  it("combines tool, MCP server, and skill facets", () => {
+    const usageSessions = [
+      {
+        ...sessions[0],
+        tools: ["Read", "CallMcpTool"],
+        mcpServers: ["user-github"],
+        mcpTools: ["user-github/get_pull_request"],
+        skills: ["replay"],
+      },
+      {
+        ...sessions[1],
+        tools: ["Read", "Shell"],
+        mcpServers: [],
+        mcpTools: [],
+        skills: ["review"],
+      },
+    ];
+    const filtered = applyDashboardFacetFilters(usageSessions, {
+      selectedProviders: [],
+      selectedRepos: [],
+      selectedProjectKey: ALL_PROJECTS,
+      allProjectsKey: ALL_PROJECTS,
+      rollupProject: identityRollup,
+      selectedTools: ["Read"],
+      selectedMcpServers: ["user-github"],
+      selectedMcpTools: ["user-github/get_pull_request"],
+      selectedSkills: ["replay"],
+    });
+
+    expect(filtered.map((session) => session.slug)).toEqual(["cursor-1"]);
+  });
 });

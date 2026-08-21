@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  agentRunWorkspaceParent,
   agentWorktreeParent,
   cleanPrompt,
   dataSourceBadgeClass,
@@ -62,6 +63,57 @@ function makeSource(overrides: Partial<SourceSession> = {}): SourceSession {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("agentRunWorkspaceParent", () => {
+  it("rolls a per-run scratch directory up to the directory holding it", () => {
+    expect(
+      agentRunWorkspaceParent(
+        "~/git/roblox/cursor-sdk/.cursor-sdk-control/artifacts/slack-inbox-0058bd61-76b9-4742-ba1d-ef3769cbdaa1",
+      ),
+    ).toBe("~/git/roblox/cursor-sdk/.cursor-sdk-control/artifacts");
+  });
+
+  it("matches a bare run id and a hex digest suffix alike", () => {
+    expect(agentRunWorkspaceParent("/var/folders/sm/T/5433add3-d507-4e0a-8f71-1bd30c541913")).toBe(
+      "/var/folders/sm/T",
+    );
+    expect(agentRunWorkspaceParent("~/sdk/worktrees/pr-review-ros-11883-14dac0782aab")).toBe(
+      "~/sdk/worktrees",
+    );
+  });
+
+  it("leaves real projects alone, including short hex-looking names", () => {
+    expect(agentRunWorkspaceParent("~/git/roblox/vibe-replay")).toBeNull();
+    expect(agentRunWorkspaceParent("~/git/roblox/ros-4")).toBeNull();
+    // A PR number is not a run id, and neither is a digest under 12 chars.
+    expect(agentRunWorkspaceParent("~/sdk/worktrees/pr-review-ros-11883")).toBeNull();
+    expect(agentRunWorkspaceParent("~/Code/build-abc123")).toBeNull();
+    expect(agentRunWorkspaceParent("~/Code/build-1735689600000")).toBeNull();
+  });
+
+  it("handles Windows project separators", () => {
+    expect(
+      agentRunWorkspaceParent(
+        "C:\\Users\\test\\artifacts\\slack-inbox-5433add3-d507-4e0a-8f71-1bd30c541913",
+      ),
+    ).toBe("C:\\Users\\test\\artifacts");
+    expect(agentRunWorkspaceParent("C:\\5433add3-d507-4e0a-8f71-1bd30c541913")).toBeNull();
+  });
+
+  it("returns null when there is no parent directory to roll up into", () => {
+    expect(agentRunWorkspaceParent("/1777073568840abc")).toBeNull();
+    expect(agentRunWorkspaceParent("Cowork")).toBeNull();
+    expect(agentRunWorkspaceParent("")).toBeNull();
+  });
+
+  it("feeds rollupProject alongside the Claude worktree rule", () => {
+    expect(rollupProject("~/sdk/artifacts/slack-inbox-14dac0782aab")).toBe("~/sdk/artifacts");
+    expect(rollupProject("~/Code/vibe-replay/.claude/worktrees/affectionate-darwin-968d37")).toBe(
+      "~/Code/vibe-replay",
+    );
+    expect(rollupProject("~/Code/vibe-replay")).toBe("~/Code/vibe-replay");
+  });
 });
 
 describe("agentWorktreeParent", () => {
@@ -209,6 +261,23 @@ describe("rollupTopProjects", () => {
     ]);
     expect(result).toHaveLength(2);
     expect(result.map((p) => p.project).sort()).toEqual(["~/Code/bar", "~/Code/foo"]);
+  });
+
+  it("can preserve agent run workspaces for the explicit Projects toggle", () => {
+    const result = rollupTopProjects(
+      [
+        makeProject({ project: "/tmp/review-abcdef123456", sessions: 2 }),
+        makeProject({ project: "/tmp", sessions: 3 }),
+      ],
+      { rollupAgentRuns: false },
+    );
+
+    expect(result).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ project: "/tmp/review-abcdef123456", sessions: 2 }),
+        expect.objectContaining({ project: "/tmp", sessions: 3 }),
+      ]),
+    );
   });
 
   it("does not mutate the input entries", () => {

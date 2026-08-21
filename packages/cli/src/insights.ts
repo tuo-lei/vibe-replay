@@ -122,6 +122,8 @@ export function scanResultToInsight(scan: SessionScanResult): SessionInsight {
     prLinks: scan.prLinks,
     skillsUsed: scan.skillsUsed,
     mcpServersUsed: scan.mcpServersUsed,
+    usageSummary: scan.usageSummary,
+    usageEvents: scan.usageEvents,
     subAgentCount: scan.subAgentCount,
     apiErrorCount: scan.apiErrorCount,
     compactionCount: scan.compactionCount,

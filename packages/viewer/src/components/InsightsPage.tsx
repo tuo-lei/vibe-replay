@@ -8,6 +8,11 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  rollupUsage,
+  type UsageRollupEntry,
+  type UsageRollupSession,
+} from "../engine/usage-rollup";
 import { AnimatedValue } from "../hooks/useAnimatedNumber";
 import type { SessionSummary, SourceSession } from "../types";
 import { localDayKey } from "../utils/date";
@@ -28,6 +33,12 @@ import { formatDuration } from "./StatsPanel";
 // ─── Types ──────────────────────────────────────────────────────────
 
 type TimeRange = "7d" | "30d" | "90d" | "all";
+
+interface UsageRollupPayload {
+  sessions: UsageRollupSession[];
+  indexedSessions: number;
+  totalSessions: number;
+}
 
 interface ComputedStats {
   sessions: number;
@@ -86,6 +97,16 @@ function rangeDays(range: TimeRange): number {
   if (range === "30d") return 30;
   if (range === "90d") return 90;
   return 0; // all
+}
+
+/** Start of the selected range as an instant, or undefined for "all". */
+function rangeSince(range: TimeRange): string | undefined {
+  const days = rangeDays(range);
+  if (days === 0) return undefined;
+  const cutoff = new Date();
+  cutoff.setHours(0, 0, 0, 0);
+  cutoff.setDate(cutoff.getDate() - days);
+  return cutoff.toISOString();
 }
 
 function filterSessionsByRange(
@@ -1309,6 +1330,77 @@ function useHomePageCounts() {
   return counts;
 }
 
+/**
+ * Per-session usage counters for the whole scan. Fetched once and aggregated
+ * locally so switching time range costs no request, and refetched when a scan
+ * finishes so the section isn't stuck on a stale snapshot.
+ */
+function useUsageRollupSessions(scanFinishedAt?: string, usageBackfillRunning = false) {
+  const [payload, setPayload] = useState<UsageRollupPayload | null>(null);
+
+  useEffect(() => {
+    let stopped = false;
+    fetch("/api/usage/rollup")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: UsageRollupPayload | null) => {
+        if (!stopped && data?.sessions) setPayload(data);
+      })
+      .catch(() => {});
+    return () => {
+      stopped = true;
+    };
+  }, [scanFinishedAt, usageBackfillRunning]);
+
+  return payload;
+}
+
+// ─── Tool & MCP Usage ───────────────────────────────────────────────
+
+function UsageBarList({
+  entries,
+  emptyLabel,
+  unit,
+}: {
+  entries: UsageRollupEntry[];
+  emptyLabel: string;
+  unit: string;
+}) {
+  if (entries.length === 0) {
+    return (
+      <div className="text-terminal-dimmer text-xs font-mono py-4 text-center">{emptyLabel}</div>
+    );
+  }
+
+  const max = Math.max(...entries.map((e) => e.calls), 1);
+
+  return (
+    <div className="space-y-2">
+      {entries.map((entry) => (
+        <div key={entry.name} className="space-y-1">
+          <div className="flex items-center justify-between gap-2">
+            <span
+              className="text-xs font-sans font-medium text-terminal-text truncate max-w-[55%]"
+              title={entry.name}
+            >
+              {entry.name}
+            </span>
+            <span className="text-[10px] font-mono text-terminal-dim tabular-nums shrink-0">
+              {formatCompactNum(entry.calls)} {unit} · {entry.sessions} session
+              {entry.sessions !== 1 ? "s" : ""}
+            </span>
+          </div>
+          <div className="h-1.5 rounded-full bg-terminal-surface-2 overflow-hidden">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-terminal-green to-terminal-blue transition-all duration-500"
+              style={{ width: `${Math.max((entry.calls / max) * 100, 3)}%`, opacity: 0.65 }}
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── Main Component ─────────────────────────────────────────────────
 
 export default function InsightsPage() {
@@ -1375,6 +1467,15 @@ export default function InsightsPage() {
   const rolledTopProjects = useMemo(
     () => rollupTopProjects(userInsights?.topProjects || []),
     [userInsights?.topProjects],
+  );
+
+  const usagePayload = useUsageRollupSessions(
+    scanStatus?.finishedAt,
+    scanStatus?.usageBackfill?.running === true,
+  );
+  const usage = useMemo(
+    () => rollupUsage(usagePayload?.sessions || [], { since: rangeSince(range), limit: 8 }),
+    [usagePayload, range],
   );
 
   if (!userInsights && (loading || isInitialScan || scanStatus?.phase === "discovering")) {
@@ -1551,6 +1652,52 @@ export default function InsightsPage() {
               <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm">
                 <h3 className="ui-section-title-strong mb-4">Token Usage</h3>
                 <TokenBreakdownChart breakdown={userInsights.tokenBreakdown} />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tool & MCP usage — aggregated from per-session usage counters */}
+        {usage.sessionCount > 0 && (
+          <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm space-y-5">
+            <div className="flex items-baseline justify-between gap-3">
+              <h3 className="ui-section-title-strong">Tools &amp; MCP</h3>
+              <span className="text-[10px] font-mono text-terminal-dimmer tabular-nums">
+                {formatCompactNum(usage.toolCalls)} tool · {formatCompactNum(usage.mcpCalls)} MCP
+                calls
+                {usage.errorCount > 0 && ` · ${formatCompactNum(usage.errorCount)} failed`}
+              </span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div>
+                <h4 className="ui-section-title mb-3">Top tools</h4>
+                <UsageBarList entries={usage.tools} emptyLabel="No tool data" unit="calls" />
+              </div>
+              <div>
+                <h4 className="ui-section-title mb-3">Top MCP servers</h4>
+                <UsageBarList entries={usage.mcpServers} emptyLabel="No MCP data" unit="calls" />
+              </div>
+            </div>
+            {usage.mcpTools.length > 0 && (
+              <div>
+                <h4 className="ui-section-title mb-3">Top MCP tools</h4>
+                <UsageBarList entries={usage.mcpTools} emptyLabel="No MCP data" unit="calls" />
+              </div>
+            )}
+            {usage.skills.length > 0 && (
+              <div>
+                <h4 className="ui-section-title mb-3">Top skills</h4>
+                <UsageBarList
+                  entries={usage.skills}
+                  emptyLabel="No skill data"
+                  unit="activations"
+                />
+              </div>
+            )}
+            {usagePayload && usagePayload.indexedSessions < usagePayload.totalSessions && (
+              <div className="text-[10px] font-mono text-terminal-dimmer">
+                Based on {usagePayload.indexedSessions} of {usagePayload.totalSessions} scanned
+                sessions — the rest have no usage index yet.
               </div>
             )}
           </div>

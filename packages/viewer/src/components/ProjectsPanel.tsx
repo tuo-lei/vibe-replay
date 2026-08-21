@@ -12,7 +12,7 @@ import { ALL_PROJECTS } from "../hooks/usePanelFilters";
 import { localDayKey } from "../utils/date";
 import { plural, timeAgo } from "../utils/format";
 import type { Tab } from "./Dashboard";
-import { navigateTo, projectName, rollupTopProjects } from "./dashboard-utils";
+import { isAgentRunWorkspace, navigateTo, projectName, rollupTopProjects } from "./dashboard-utils";
 import { useScanInsightsContext } from "./InsightsPanel";
 import SessionRelationshipsView from "./SessionRelationshipsView";
 import { fmtNum, formatDuration } from "./StatsPanel";
@@ -387,13 +387,32 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
   const { userInsights, scanStatus } = useScanInsightsContext();
   const [selectedProject, setSelectedProject] = useState<string>(ALL_PROJECTS);
   const [mode, setMode] = useState<PanelMode>("overview");
+  const [showAgentRuns, setShowAgentRuns] = useState(
+    () => new URLSearchParams(window.location.search).get("agentRuns") === "true",
+  );
+
+  // Scratch workspaces from automated runs are their own project each, so on a
+  // machine that runs agents on a schedule they crowd out everything the user
+  // actually worked in. They have to be dropped before the rollup, which folds
+  // them into a parent that no longer looks like a run workspace.
+  const agentRunCount = useMemo(
+    () => (userInsights?.topProjects || []).filter((p) => isAgentRunWorkspace(p.project)).length,
+    [userInsights],
+  );
 
   const projects = useMemo(() => {
     if (!userInsights) return [];
-    const sorted = rollupTopProjects(userInsights.topProjects);
+    const source = showAgentRuns
+      ? userInsights.topProjects
+      : userInsights.topProjects.filter((p) => !isAgentRunWorkspace(p.project));
+    // When the toggle is on, preserve each run workspace as its own project.
+    // When it is off, those entries were already removed above, so parent
+    // totals exclude run-workspace activity; agentRunCount reports it
+    // separately.
+    const sorted = rollupTopProjects(source, { rollupAgentRuns: !showAgentRuns });
     sorted.sort((a, b) => (b.lastActivity || "").localeCompare(a.lastActivity || ""));
     return sorted;
-  }, [userInsights]);
+  }, [userInsights, showAgentRuns]);
 
   const selectedInsight =
     selectedProject === ALL_PROJECTS
@@ -492,6 +511,24 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
                 <span className="w-1 h-1 rounded-full bg-terminal-purple animate-pulse" />
                 Analyzing... {scanStatus!.scanned}/{scanStatus!.total}
               </div>
+            )}
+            {(agentRunCount > 0 || showAgentRuns) && (
+              <button
+                onClick={() => {
+                  const next = !showAgentRuns;
+                  setShowAgentRuns(next);
+                  setSelectedProject(ALL_PROJECTS);
+                  navigateTo({ agentRuns: next ? "true" : null }, { notify: false });
+                }}
+                className="mt-1 text-[10px] font-mono text-terminal-dimmer hover:text-terminal-text transition-colors"
+                title="Scratch workspaces created one per automated agent run"
+              >
+                {showAgentRuns
+                  ? "Hide agent run workspaces"
+                  : `+ ${agentRunCount.toLocaleString()} agent run ${
+                      agentRunCount === 1 ? "workspace" : "workspaces"
+                    } hidden`}
+              </button>
             )}
           </div>
           <div className="inline-flex w-fit items-center rounded-xl bg-terminal-surface/80 p-0.5 shadow-layer-sm backdrop-blur-sm">

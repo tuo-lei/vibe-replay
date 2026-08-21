@@ -205,8 +205,29 @@ async function decodeProjectDirUncached(encoded: string): Promise<string> {
   const parts = encoded.split("-");
   const startIdx = parts[0] ? 0 : 1;
   const resolved = await resolveEncodedProjectParts(parts, startIdx, "/");
+  if (resolved) return joinUnresolvedRemainder(resolved, parts, "/");
   const fallbackEncoded = encoded.startsWith("-") ? encoded.slice(1) : encoded;
-  return `/${resolved ? resolved.slice(1) : fallbackEncoded.replace(/-/g, "/")}`;
+  return `/${fallbackEncoded.replace(/-/g, "/")}`;
+}
+
+/**
+ * Append whatever the filesystem walk could not confirm. Once a real parent
+ * directory is found, a missing child is far more likely to be one deleted
+ * directory whose name contains `-` than several nested ones, so the remainder
+ * stays in one piece. Splitting it would shred run ids — a deleted
+ * `.../artifacts/slack-inbox-<uuid>` scratch dir turned into five path
+ * segments and a project named after the tail of its UUID.
+ */
+function joinUnresolvedRemainder(
+  resolved: PartialResolution,
+  parts: string[],
+  separator: string,
+): string {
+  if (resolved.nextIdx >= parts.length) return resolved.path;
+  const remainder = parts.slice(resolved.nextIdx).join("-");
+  return resolved.path.endsWith(separator)
+    ? `${resolved.path}${remainder}`
+    : `${resolved.path}${separator}${remainder}`;
 }
 
 /**
@@ -229,18 +250,31 @@ async function decodeWindowsProjectDir(encoded: string): Promise<string> {
 
   const root = `${drive.toUpperCase()}:\\`;
   const resolved = await resolveEncodedProjectParts(parts, 1, root);
-  if (resolved) return resolved;
+  if (resolved) return joinUnresolvedRemainder(resolved, parts, "\\");
   return parts.length === 1 ? root : `${root}${parts.slice(1).join("\\")}`;
 }
 
+/** How far into the encoded segments the filesystem walk got. */
+interface PartialResolution {
+  path: string;
+  /** Index of the first segment that could not be matched on disk. */
+  nextIdx: number;
+}
+
+/**
+ * Walk the encoded segments against the real filesystem, returning the deepest
+ * directory that exists. A partial result matters because these workspaces are
+ * often deleted after the fact: the parent still pins down where the slashes
+ * go, which is all the caller needs to stop guessing at the missing tail.
+ */
 async function resolveEncodedProjectParts(
   parts: string[],
   idx: number,
   current: string,
-): Promise<string | null> {
+): Promise<PartialResolution | null> {
   if (idx >= parts.length) {
     const currentStat = await stat(current).catch(() => null);
-    return currentStat?.isDirectory() ? current : null;
+    return currentStat?.isDirectory() ? { path: current, nextIdx: idx } : null;
   }
 
   const entries = await readdir(current, { withFileTypes: true }).catch(() => []);
@@ -252,12 +286,22 @@ async function resolveEncodedProjectParts(
       .map((entry) => entry.name),
   );
 
+  let deepest: PartialResolution | null = null;
+
   // Try slash boundaries first to preserve the old behavior, but only explore
   // names that are real child directories instead of stat-ing every split.
   for (let end = idx + 1; end <= parts.length; end++) {
     const candidate = parts.slice(idx, end).join("-");
-    const candidatePath = join(current, candidate);
-    if (!dirNames.has(candidate)) {
+    // Cursor drops the leading dot when it encodes a path, so `/Users/me/.cursor`
+    // becomes `Users-me-cursor`. Without this the walk stops at every dotfile
+    // directory and everything below it gets guessed instead of read.
+    const actual = dirNames.has(candidate)
+      ? candidate
+      : dirNames.has(`.${candidate}`)
+        ? `.${candidate}`
+        : null;
+    const candidatePath = join(current, actual ?? candidate);
+    if (!actual) {
       // Windows temp/profile paths can contain 8.3 short-name segments such as
       // RUNNER~1. They are valid paths but do not appear in readdir(), so use a
       // targeted stat fallback before giving up on this split.
@@ -266,10 +310,12 @@ async function resolveEncodedProjectParts(
       if (!candidateStat?.isDirectory()) continue;
     }
     const resolved = await resolveEncodedProjectParts(parts, end, candidatePath);
-    if (resolved) return resolved;
+    if (resolved?.nextIdx === parts.length) return resolved;
+    const best = resolved ?? { path: candidatePath, nextIdx: end };
+    if (!deepest || best.nextIdx > deepest.nextIdx) deepest = best;
   }
 
-  return null;
+  return deepest;
 }
 
 async function extractSessionInfo(

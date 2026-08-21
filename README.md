@@ -31,7 +31,7 @@ npx vibe-replay
 
 ### All your sessions, one place
 
-Launch with `npx vibe-replay -d` and see every Claude, Cursor, Codex, OpenCode, Hermes, and Pi session across all projects — with a daily activity snapshot, activity heatmaps, cost totals, and project analytics. Search sessions, filter by git repo, and generate any replay in one click.
+Launch with `npx vibe-replay -d` and see every Claude, Cursor, Codex, OpenCode, Hermes, and Pi session across all projects — with a daily activity snapshot, activity heatmaps, cost totals, and project analytics. Search sessions, filter by git repo, tool, MCP server/tool, or skill, expand any session to see its own tool/MCP breakdown, and generate any replay in one click.
 
 <p align="center">
   <img src="docs/screenshots/dashboard.png" alt="Local dashboard — browse sessions, activity heatmap, project analytics" width="800" />
@@ -126,7 +126,7 @@ curl -o ~/.claude/skills/replay/SKILL.md \
 - **Cross-platform** — runs on macOS, Linux, and Windows
 - **Single HTML file** — self-contained, works offline, and makes no automatic external requests. Remote image attachments load only after an explicit click
 - **Claude, Cursor, Codex, OpenCode, Hermes, and Pi** — all providers auto-discovered, including multi-file and resumed sessions
-- **Local dashboard** — browse and search every session, filter by git repo, with activity heatmaps, per-project analytics, and a personal-insights view across all your coding
+- **Local dashboard** — browse and search every session, filter by git repo, tool, MCP server/tool, or skill, expand a session for its own tool/MCP/skill counts, with activity heatmaps, per-project analytics, and a personal-insights view (including which tools and MCP servers you lean on) across all your coding
 - **Share & export** — GitHub Gist, animated SVG, GIF, markdown summary, or cloud upload. Secret redaction built in
 - **Sub-agent visualization** — see delegated tool calls and sub-agent trees rendered inline
 - **Comments** — leave notes on any scene. Comments persist in the HTML and travel with the replay

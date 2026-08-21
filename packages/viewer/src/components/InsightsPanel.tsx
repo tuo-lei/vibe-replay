@@ -155,6 +155,7 @@ interface ScanStatus {
   cachedResultCount?: number;
   cachedAt?: string;
   failedProviders?: string[];
+  usageBackfill?: { running: boolean; scanned: number; total: number };
 }
 
 // ─── Singleton Context Provider ──────────────────────────────────────
@@ -206,7 +207,7 @@ export function ScanInsightsProvider({ children }: { children: ReactNode }) {
         const status = (await resp.json()) as ScanStatus;
         setScanStatus(status);
 
-        if (status.running) return;
+        if (status.running || status.usageBackfill?.running) return;
         if (!status.hasCachedResults || !isCacheFresh(status.cachedAt, CACHE_REFRESH_TTL_MS)) {
           startScan();
           return;
@@ -280,7 +281,7 @@ export function ScanInsightsProvider({ children }: { children: ReactNode }) {
       }
 
       // Stop polling when scan completes
-      if (!status.running && status.finishedAt) {
+      if (!status.running && !status.usageBackfill?.running && status.finishedAt) {
         if (status.resultCount > 0) {
           // Mark cache stale so project insights are re-fetched on next access,
           // but keep old entries until overwritten (stale-while-refresh).

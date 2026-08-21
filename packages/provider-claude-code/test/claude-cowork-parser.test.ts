@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -94,6 +94,39 @@ describe("parseClaudeCoworkSession", () => {
     const toolUses = assistantBlocks.filter((b) => b.type === "tool_use");
     expect(toolUses.length).toBe(1);
     expect((toolUses[0] as { name: string }).name).toBe("mcp__workspace__bash");
+  });
+
+  it("maps MCP server UUIDs to names from the sibling metadata JSON", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-cowork-mcp-names-"));
+    const sessionDir = join(tempDir, "local_session");
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      `${sessionDir}.json`,
+      JSON.stringify({
+        sessionId: "local_session",
+        remoteMcpServersConfig: [
+          { uuid: "02e3e881-77ef", name: "ROS: Roblox" },
+          { uuid: "no-name-server" },
+        ],
+      }),
+      "utf-8",
+    );
+    const auditPath = join(sessionDir, "audit.jsonl");
+    await writeFile(
+      auditPath,
+      JSON.stringify({
+        type: "assistant",
+        session_id: "session",
+        _audit_timestamp: "2026-01-01T00:00:00.000Z",
+        message: { role: "assistant", content: [{ type: "text", text: "hi" }] },
+      }),
+      "utf-8",
+    );
+
+    const result = await parseClaudeCoworkSession(auditPath);
+    expect(result.mcpServerNames).toEqual({ "02e3e881-77ef": "ROS: Roblox" });
+
+    await rm(tempDir, { recursive: true, force: true });
   });
 
   it("skips Cowork replay echo user messages when the original is present", async () => {

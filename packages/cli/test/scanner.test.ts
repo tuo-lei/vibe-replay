@@ -198,6 +198,436 @@ describe("scanSession", () => {
     expect(result.model).toBe("claude-sonnet-4-20250514");
   });
 
+  it("marks an otherwise ordinary session as usage-indexed even when it has no usage", async () => {
+    const path = join(tmpDir, "usage-empty.jsonl");
+    await writeFile(
+      path,
+      makeLine({
+        type: "user",
+        timestamp: "2025-03-20T10:00:00Z",
+        message: { role: "user", content: "A prompt without tool calls" },
+      }),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "usage-empty",
+      provider: "claude-code",
+      project: "~/test/project",
+      slug: "usage-empty",
+      filePaths: [path],
+    });
+
+    expect(result.usageSummary).toBeUndefined();
+    expect(result.usageEvents).toBeUndefined();
+    expect(result.usageIndexed).toBe(true);
+  });
+
+  it("keeps malformed tool blocks from aborting the usage scan", async () => {
+    const path = join(tmpDir, "usage-malformed-tool.jsonl");
+    await writeFile(
+      path,
+      makeLine({
+        type: "assistant",
+        timestamp: "2025-03-20T10:00:00Z",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "missing-name", input: {} }],
+        },
+      }),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "usage-malformed-tool",
+      provider: "claude-code",
+      project: "~/test/project",
+      slug: "usage-malformed-tool",
+      filePaths: [path],
+    });
+
+    expect(result.toolCallCount).toBe(1);
+    expect(result.usageSummary?.tools).toEqual({ Unknown: 1 });
+  });
+
+  it("indexes individual tool, MCP, and skill usage without payloads", async () => {
+    const path = join(tmpDir, "usage-index.jsonl");
+    await writeFile(
+      path,
+      [
+        makeLine({
+          type: "user",
+          isMeta: true,
+          timestamp: "2025-03-20T10:00:00Z",
+          message: {
+            role: "user",
+            content: "Base directory for this skill: /Users/test/.claude/skills/replay\n",
+          },
+        }),
+        makeLine({
+          type: "assistant",
+          timestamp: "2025-03-20T10:00:01Z",
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "tool-1",
+                name: "Read",
+                input: { file_path: "/secret/path.ts" },
+              },
+              {
+                type: "tool_use",
+                id: "tool-2",
+                name: "mcp__github__get_pull_request",
+                input: { owner: "test", repo: "app" },
+              },
+              {
+                type: "tool_use",
+                id: "tool-3",
+                name: "CallMcpTool",
+                input: { server: "user-slack", toolName: "slack_read_channel" },
+              },
+            ],
+          },
+        }),
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "usage-index",
+      provider: "claude-code",
+      project: "~/test/project",
+      slug: "usage-index",
+      filePaths: [path],
+    });
+
+    // MCP calls live only under the MCP counters, never duplicated as tools.
+    expect(result.usageSummary?.tools).toEqual({ Read: 1 });
+    expect(result.usageSummary).toMatchObject({
+      mcpServers: { github: 1, slack: 1 },
+      mcpTools: {
+        "github/get_pull_request": 1,
+        "slack/slack_read_channel": 1,
+      },
+      skills: { replay: 1 },
+    });
+    expect(result.usageEvents).toHaveLength(4);
+    expect(result.usageEvents?.find((event) => event.kind === "skill")).toMatchObject({
+      status: "unknown",
+      attribution: "session-metadata",
+    });
+    expect(JSON.stringify(result.usageEvents)).not.toContain("/secret/path.ts");
+  });
+
+  it("keeps usage summaries complete while bounding retained invocation details", async () => {
+    const path = join(tmpDir, "usage-events-bounded.jsonl");
+    const toolUses = Array.from({ length: 120 }, (_unused, index) => ({
+      type: "tool_use",
+      id: `tool-${index}`,
+      name: `Tool-${index}`,
+      input: {},
+    }));
+    await writeFile(
+      path,
+      makeLine({
+        type: "assistant",
+        timestamp: "2025-03-20T10:00:00Z",
+        message: { role: "assistant", content: toolUses },
+      }),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "usage-events-bounded",
+      provider: "claude-code",
+      project: "~/test/project",
+      slug: "usage-events-bounded",
+      filePaths: [path],
+    });
+
+    expect(result.usageSummary?.tools).toEqual(
+      Object.fromEntries(toolUses.map((tool) => [tool.name, 1])),
+    );
+    expect(result.usageEvents).toHaveLength(100);
+    expect(result.usageEvents?.[0]?.name).toBe("Tool-20");
+    expect(result.usageEvents?.[99]?.name).toBe("Tool-119");
+  });
+
+  it("marks tool outcomes from paired tool_result blocks", async () => {
+    const path = join(tmpDir, "usage-status.jsonl");
+    await writeFile(
+      path,
+      [
+        makeLine({
+          type: "assistant",
+          timestamp: "2025-03-20T10:00:01Z",
+          message: {
+            role: "assistant",
+            content: [
+              { type: "tool_use", id: "ok-1", name: "Bash", input: { command: "ls" } },
+              { type: "tool_use", id: "bad-1", name: "Bash", input: { command: "nope" } },
+              { type: "tool_use", id: "open-1", name: "Bash", input: { command: "sleep" } },
+            ],
+          },
+        }),
+        makeLine({
+          type: "user",
+          timestamp: "2025-03-20T10:00:02Z",
+          message: {
+            role: "user",
+            content: [
+              { type: "tool_result", tool_use_id: "ok-1", content: "done" },
+              { type: "tool_result", tool_use_id: "bad-1", is_error: true, content: "boom" },
+            ],
+          },
+        }),
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "usage-status",
+      provider: "claude-code",
+      project: "~/test/project",
+      slug: "usage-status",
+      filePaths: [path],
+    });
+
+    expect(result.usageSummary?.successCount).toBe(1);
+    expect(result.usageSummary?.errorCount).toBe(1);
+    expect(result.usageEvents?.map((event) => event.status)).toEqual([
+      "success",
+      "error",
+      "unknown",
+    ]);
+  });
+
+  it("uses Claude attribution fields when MCP names are generic", async () => {
+    const path = join(tmpDir, "usage-attribution.jsonl");
+    await writeFile(
+      path,
+      makeLine({
+        type: "assistant",
+        attributionMcpServer: "claude-in-chrome",
+        attributionMcpTool: "browser_open",
+        attributionSkill: "browser-skill",
+        timestamp: "2025-03-20T10:00:00Z",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "generic-mcp", name: "Browser", input: {} }],
+        },
+      }),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "usage-attribution",
+      provider: "claude-code",
+      project: "~/test/project",
+      slug: "usage-attribution",
+      filePaths: [path],
+    });
+
+    expect(result.usageSummary?.tools).toEqual({});
+    expect(result.usageSummary?.mcpServers).toEqual({ "claude-in-chrome": 1 });
+    expect(result.usageSummary?.mcpTools).toEqual({ "claude-in-chrome/browser_open": 1 });
+    expect(result.usageSummary?.skills).toEqual({ "browser-skill": 1 });
+  });
+
+  it("resolves MCP server and tool from Cursor's dashed tool naming", async () => {
+    const path = join(tmpDir, "usage-cursor-mcp.jsonl");
+    await writeFile(
+      path,
+      [
+        makeLine({
+          type: "assistant",
+          timestamp: "2025-03-20T10:00:01Z",
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "mcp-1",
+                name: "mcp-cursor-ide-browser-browser_navigate",
+                input: {},
+              },
+              {
+                type: "tool_use",
+                id: "mcp-2",
+                name: "mcp-sourcegraph-search",
+                input: { server: "user-sourcegraph", tool_name: "search" },
+              },
+              {
+                // Same server, reported with the profile scope Cursor resolved it under.
+                type: "tool_use",
+                id: "mcp-3",
+                name: "mcp-sourcegraph-search",
+                input: {
+                  server: "sourcegraph::mcpScope:profile:ZGVmYXVsdA:cfg:NGRkNzVmNGI",
+                  tool_name: "search",
+                },
+              },
+            ],
+          },
+        }),
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "usage-cursor-mcp",
+      provider: "claude-code",
+      project: "~/test/project",
+      slug: "usage-cursor-mcp",
+      filePaths: [path],
+    });
+
+    // The `user-` prefix, the profile scope, and the plain dashed name are all
+    // the same server.
+    expect(result.usageSummary?.mcpTools).toMatchObject({
+      "cursor-ide-browser/browser_navigate": 1,
+      "sourcegraph/search": 2,
+    });
+    expect(result.usageSummary?.mcpServers).toMatchObject({ sourcegraph: 2 });
+  });
+
+  it("keeps MCP attribution when Cursor maps a browser tool to its replay name", async () => {
+    const path = join(tmpDir, "usage-cursor-browser-mcp.jsonl");
+    await writeFile(
+      path,
+      [
+        makeLine({
+          role: "user",
+          timestamp: "2025-03-20T10:00:00Z",
+          message: { role: "user", content: [{ type: "text", text: "Open the page" }] },
+        }),
+        makeLine({
+          role: "assistant",
+          timestamp: "2025-03-20T10:00:01Z",
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "browser-1",
+                name: "mcp-cursor-ide-browser-cursor-ide-browser-browser_navigate",
+                input: {
+                  tools: [
+                    {
+                      serverName: "cursor-ide-browser",
+                      name: "browser_navigate",
+                      parameters: "{}",
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        }),
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "usage-cursor-browser-mcp",
+      provider: "cursor",
+      project: "~/test/project",
+      slug: "usage-cursor-browser-mcp",
+      filePaths: [path],
+    });
+
+    expect(result.usageSummary?.mcpServers).toEqual({ "cursor-ide-browser": 1 });
+    expect(result.usageSummary?.mcpTools).toEqual({ "cursor-ide-browser/browser_navigate": 1 });
+    expect(result.usageSummary?.tools).toEqual({});
+  });
+
+  it("resolves MCP server and tool from Cursor's underscore tool naming", async () => {
+    const path = join(tmpDir, "usage-cursor-mcp-underscore.jsonl");
+    await writeFile(
+      path,
+      [
+        makeLine({
+          type: "assistant",
+          timestamp: "2025-03-20T10:00:01Z",
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "mcp-1",
+                name: "mcp_TalkToFigma_get_document_info",
+                input: {},
+              },
+              { type: "tool_use", id: "mcp-2", name: "mcp_Sentry_whoami", input: {} },
+              // MCP management tools name no server and stay plain tools.
+              { type: "tool_use", id: "meta-1", name: "mcp_get_tools", input: {} },
+              { type: "tool_use", id: "meta-2", name: "mcp_auth", input: {} },
+            ],
+          },
+        }),
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "usage-cursor-mcp-underscore",
+      provider: "claude-code",
+      project: "~/test/project",
+      slug: "usage-cursor-mcp-underscore",
+      filePaths: [path],
+    });
+
+    expect(result.usageSummary?.mcpTools).toEqual({
+      "TalkToFigma/get_document_info": 1,
+      "Sentry/whoami": 1,
+    });
+    expect(result.usageSummary?.tools).toEqual({ mcp_get_tools: 1, mcp_auth: 1 });
+  });
+
+  it("resolves MCP server and tool from Pi's single-entrypoint mcp tool naming", async () => {
+    const path = join(tmpDir, "usage-pi-mcp.jsonl");
+    await writeFile(
+      path,
+      [
+        makeLine({
+          type: "assistant",
+          timestamp: "2025-03-20T10:00:01Z",
+          message: {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "mcp-1",
+                name: "mcp",
+                input: { search: "code search", server: "sourcegraph", limit: 10 },
+              },
+              {
+                type: "tool_use",
+                id: "mcp-2",
+                name: "mcp",
+                input: { tool: "slack_slack_read_thread", args: { channel_id: "C1" } },
+              },
+            ],
+          },
+        }),
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "usage-pi-mcp",
+      provider: "claude-code",
+      project: "~/test/project",
+      slug: "usage-pi-mcp",
+      filePaths: [path],
+    });
+
+    expect(result.usageSummary?.mcpServers).toMatchObject({ sourcegraph: 1, slack: 1 });
+    expect(result.usageSummary?.mcpTools).toMatchObject({ "slack/slack_read_thread": 1 });
+  });
+
   it("counts prompts correctly (excludes tool_result-only turns)", async () => {
     const result = await scanSession({
       sessionId: "test-session-1",
