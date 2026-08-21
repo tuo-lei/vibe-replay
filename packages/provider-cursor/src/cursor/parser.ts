@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
@@ -353,7 +354,7 @@ async function parseCursorJsonl(
     for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
       const line = lines[lineIndex];
       if (!line.trim()) continue;
-      const recordKey = line.trim();
+      const recordKey = createHash("sha256").update(line.trim()).digest("base64");
       const firstRecordPath = firstTranscriptPathByRecord.get(recordKey);
       if (firstRecordPath && firstRecordPath !== filePath) {
         duplicateTranscriptRecords++;
@@ -507,7 +508,7 @@ async function parseCursorJsonl(
         : [];
   const toolEvents = await loadToolEvents(toolPaths);
   attachToolResults(allTurns, toolResults, toolErrors, toolImages, deps);
-  attachToolEvents(allTurns, toolEvents);
+  attachToolEvents(allTurns, toolEvents, deps);
 
   // Derive slug from session ID
   const slug = sessionId.slice(0, 8);
@@ -1290,7 +1291,11 @@ function inferToolName(result: string): string {
   return "ToolOutput";
 }
 
-function attachToolEvents(turns: ParsedTurn[], tools: ToolEvent[]): void {
+function attachToolEvents(
+  turns: ParsedTurn[],
+  tools: ToolEvent[],
+  deps: CursorParserDependencies,
+): void {
   const markerBlocks: Array<{ block: ToolUseBlock; turn: ParsedTurn; blockIndex: number }> = [];
   const inlineBlocks: ToolUseBlock[] = [];
   for (const turn of turns) {
@@ -1350,6 +1355,11 @@ function attachToolEvents(turns: ParsedTurn[], tools: ToolEvent[]): void {
     if (typeof block._result === "string") continue;
     block._result = tool.result;
     block.input = { ...block.input, ...tool.input };
+    try {
+      block.input = deps.mapToolArgs(block.name, block.input, tool.result);
+    } catch {
+      // Keep the merged input when a provider-specific mapper cannot enrich it.
+    }
   }
 
   // Legacy transcripts with no inline tools depended on unmarked sidecars.

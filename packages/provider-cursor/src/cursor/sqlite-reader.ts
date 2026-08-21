@@ -3117,13 +3117,7 @@ async function parseCursorGlobalStateDb(
       Array.isArray(composer.fullConversationHeadersOnly) &&
       composer.fullConversationHeadersOnly.length > 0;
     if (hasFullConversationHeaders) {
-      const bubbleIds: string[] = composer.fullConversationHeadersOnly
-        .map((header: any) =>
-          header && typeof header === "object" && typeof header.bubbleId === "string"
-            ? header.bubbleId
-            : "",
-        )
-        .filter((bubbleId: string) => Boolean(bubbleId));
+      const bubbleIds: string[] = composerHeaderBubbleIds(composer);
       const expectedBubbleKeys = new Set(
         bubbleIds.map((bubbleId) => `bubbleId:${sessionId}:${bubbleId}`),
       );

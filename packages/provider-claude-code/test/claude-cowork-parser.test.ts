@@ -499,6 +499,87 @@ describe("parseClaudeCoworkSession", () => {
     }
   });
 
+  it("does not retain assistant model snapshots when result billing has no model breakdown", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-cowork-result-model-fallback-"));
+    const auditPath = join(tempDir, "audit.jsonl");
+    const lines = [
+      {
+        type: "assistant",
+        session_id: "cowork-model-fallback",
+        _audit_timestamp: "2026-01-01T00:00:01.000Z",
+        message: {
+          role: "assistant",
+          model: "claude-opus-9",
+          content: [{ type: "text", text: "Partial snapshot" }],
+          usage: { input_tokens: 5, output_tokens: 2 },
+        },
+      },
+      {
+        type: "result",
+        uuid: "run-model-fallback",
+        session_id: "cowork-model-fallback",
+        usage: { input_tokens: 100, output_tokens: 40 },
+        total_cost_usd: 0.2,
+      },
+    ];
+    await writeFile(auditPath, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+
+    try {
+      const result = await parseClaudeCoworkSession(auditPath);
+      expect(result.tokenUsage).toEqual({
+        inputTokens: 100,
+        outputTokens: 40,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+      });
+      expect(result.tokenUsageByModel).toBeUndefined();
+      expect(result.reportedCostUsd).toBe(0.2);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("derives aggregate tokens from model usage when result usage is absent", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-cowork-model-usage-only-"));
+    const auditPath = join(tempDir, "audit.jsonl");
+    const lines = [
+      {
+        type: "result",
+        uuid: "run-model-usage-only",
+        session_id: "cowork-model-usage-only",
+        modelUsage: {
+          "claude-sonnet-9": {
+            inputTokens: 11,
+            outputTokens: 7,
+            cacheCreationInputTokens: 3,
+            cacheReadInputTokens: 2,
+          },
+        },
+      },
+    ];
+    await writeFile(auditPath, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+
+    try {
+      const result = await parseClaudeCoworkSession(auditPath);
+      expect(result.tokenUsage).toEqual({
+        inputTokens: 11,
+        outputTokens: 7,
+        cacheCreationTokens: 3,
+        cacheReadTokens: 2,
+      });
+      expect(result.tokenUsageByModel).toEqual({
+        "claude-sonnet-9": {
+          inputTokens: 11,
+          outputTokens: 7,
+          cacheCreationTokens: 3,
+          cacheReadTokens: 2,
+        },
+      });
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("records malformed audit JSONL lines as parse warnings", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-cowork-malformed-"));
     const auditPath = join(tempDir, "audit.jsonl");

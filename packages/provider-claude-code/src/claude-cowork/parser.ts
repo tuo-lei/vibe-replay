@@ -217,6 +217,8 @@ function summarizeCoworkRuns(records: Record<string, unknown>[]): CoworkRunTotal
     }
   }
 
+  // Duration-only runs intentionally return no totals so callers retain their
+  // timestamp-gap duration fallback when usage and cost are unavailable.
   if (isEmptyUsage(tokenUsage) && Object.keys(tokenUsageByModel).length === 0 && !sawCost) {
     return undefined;
   }
@@ -311,10 +313,14 @@ export async function parseClaudeCoworkSession(
   // assistant-snapshot totals and timestamp-based duration estimate.
   const runTotals = summarizeCoworkRuns(runRecords);
   if (runTotals) {
-    result.tokenUsage = runTotals.tokenUsage;
-    if (Object.keys(runTotals.tokenUsageByModel).length > 0) {
-      result.tokenUsageByModel = runTotals.tokenUsageByModel;
-    }
+    const modelTotals = Object.values(runTotals.tokenUsageByModel);
+    result.tokenUsage =
+      isEmptyUsage(runTotals.tokenUsage) && modelTotals.length > 0
+        ? modelTotals.reduce(addUsage, EMPTY_USAGE)
+        : runTotals.tokenUsage;
+    // A result record is authoritative even when it has no modelUsage field;
+    // do not retain partial assistant-snapshot model totals in that case.
+    result.tokenUsageByModel = modelTotals.length > 0 ? runTotals.tokenUsageByModel : undefined;
     if (runTotals.reportedCostUsd !== undefined) {
       result.reportedCostUsd = runTotals.reportedCostUsd;
     }
