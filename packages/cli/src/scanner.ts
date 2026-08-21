@@ -1072,10 +1072,20 @@ function firstUserPrompt(turns: ProviderParseResult["turns"]): string | undefine
 }
 
 function estimateParsedCost(parsed: ProviderParseResult): number | undefined {
+  if (parsed.reportedCostUsd !== undefined) return parsed.reportedCostUsd;
   if (parsed.tokenUsageByModel) return estimateCostIfKnown(parsed.tokenUsageByModel);
   if (parsed.tokenUsage && parsed.model)
     return estimateCostSimpleIfKnown(parsed.tokenUsage, parsed.model);
   return undefined;
+}
+
+/** Rich parser fallbacks must be retried instead of being persisted as complete scans. */
+export function isPartialScanResult(result: Pick<SessionScanResult, "dataQualityNotes">): boolean {
+  return (
+    result.dataQualityNotes?.some((note) =>
+      /^Partial [a-z0-9_-]+(?: [a-z0-9_-]+)* scan:/i.test(note),
+    ) ?? false
+  );
 }
 
 const UNKNOWN_COST_NOTE =
@@ -1206,9 +1216,7 @@ export async function runBackgroundScan(
         const result = await scanSession(session);
         results[index] = result;
 
-        const partial = result.dataQualityNotes?.some((note) =>
-          /^Partial [a-z0-9_-]+ scan:/i.test(note),
-        );
+        const partial = isPartialScanResult(result);
         if (partial) {
           delete cache.entries[cacheKey];
         } else {

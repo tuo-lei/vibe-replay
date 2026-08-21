@@ -1308,13 +1308,16 @@ function attachToolEvents(turns: ParsedTurn[], tools: ToolEvent[]): void {
   // may fill a missing result only when its inferred tool name agrees; it must
   // never become an additional synthetic call beside an inline call.
   for (const block of inlineBlocks) {
-    if (typeof block._result === "string") continue;
     const matchIndex = findCompatibleSidecarTool(tools, nextToolIndex, block.name);
     if (matchIndex === -1) continue;
     const tool = tools[matchIndex];
+    nextToolIndex = matchIndex + 1;
+    // Consume the sidecar belonging to an inline-resolved call as well. Without
+    // advancing here, consecutive same-name calls can reuse the first call's
+    // sidecar result when the later call is still unresolved.
+    if (typeof block._result === "string") continue;
     block._result = tool.result;
     block.input = { ...block.input, ...tool.input };
-    nextToolIndex = matchIndex + 1;
   }
 
   // Legacy transcripts with no inline tools depended on unmarked sidecars.

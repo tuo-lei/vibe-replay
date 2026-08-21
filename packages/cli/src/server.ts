@@ -1136,6 +1136,7 @@ export async function startServer(
           phase: undefined,
           startedAt: scanState.startedAt,
           finishedAt: new Date().toISOString(),
+          failedProviders: scanState.failedProviders || [],
         };
 
         await writeFileCache(scanResultsCacheKey, results);

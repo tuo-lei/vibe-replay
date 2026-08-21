@@ -472,6 +472,54 @@ describe("Cursor parser — inline JSONL fixtures", () => {
     );
   });
 
+  it("consumes sidecars for resolved inline calls before enriching later calls", async () => {
+    const jsonl = await writeJsonl(tempDir, "consecutive-inline-tools.jsonl", [
+      {
+        role: "user",
+        message: { content: [{ type: "text", text: "Run both commands" }] },
+      },
+      {
+        role: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              id: "inline-shell-1",
+              name: "Shell",
+              input: { command: "echo first" },
+            },
+            {
+              type: "tool_use",
+              id: "inline-shell-2",
+              name: "Shell",
+              input: { command: "echo second" },
+            },
+          ],
+        },
+      },
+      {
+        role: "user",
+        message: {
+          content: [
+            { type: "tool_result", tool_use_id: "inline-shell-1", content: "inline first" },
+          ],
+        },
+      },
+    ]);
+    const firstSidecar = join(tempDir, "consecutive-shell-1.txt");
+    const secondSidecar = join(tempDir, "consecutive-shell-2.txt");
+    await writeFile(firstSidecar, "$ echo first\nsidecar first");
+    await writeFile(secondSidecar, "$ echo second\nsidecar second");
+
+    const result = await parseCursorSession([jsonl, firstSidecar, secondSidecar]);
+    const replay = transformToReplay(result, "cursor", "~/test");
+    const toolScenes = replay.scenes.filter((scene) => scene.type === "tool-call");
+
+    expect(toolScenes).toHaveLength(2);
+    expect(toolScenes[0].type === "tool-call" && toolScenes[0].result).toBe("inline first");
+    expect(toolScenes[1].type === "tool-call" && toolScenes[1].result).toContain("sidecar second");
+  });
+
   it("infers tool names correctly from content", async () => {
     const jsonl = await writeJsonl(tempDir, "tool-names.jsonl", [
       {
