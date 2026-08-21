@@ -123,7 +123,27 @@ function closeCachedSqlJsDb(): void {
 
 let cachedStoreDbIndex: Map<string, StoreDbIndexEntry> | null = null;
 const resolvedProjectRootCache = new Map<string, Promise<string | null>>();
-const GLOBAL_STATE_DISCOVERY_CACHE_PREFIX = "cursor-global-state-discovery-v4";
+const GLOBAL_STATE_DISCOVERY_CACHE_PREFIX = "cursor-global-state-discovery-v5";
+
+interface CursorComposerHeader {
+  composerId: string;
+  isSubagent: boolean;
+  subagentInfo?: {
+    parentComposerId?: string;
+    toolCallId?: string;
+  };
+}
+
+let cachedComposerHeaders:
+  | {
+      dbPath: string;
+      size: number;
+      mtimeMs: number;
+      walSize: number;
+      walMtimeMs: number;
+      headers: Map<string, CursorComposerHeader>;
+    }
+  | undefined;
 
 function globalStateDbCandidates(): string[] {
   const candidates = [
@@ -375,6 +395,88 @@ async function queryGlobalStateTextValue(
   );
   if (rows.length === 0) return null;
   return valueToString(rows[0].value) || null;
+}
+
+async function queryGlobalStateItemTableTextValue(
+  globalStateDb: CachedGlobalStateDb,
+  key: string,
+): Promise<string | null> {
+  if (globalStateDb.backend === "sqlite-cli") {
+    const value = await querySqliteCliText(
+      globalStateDb.dbPath,
+      `SELECT CAST(value AS TEXT) FROM ItemTable WHERE key = ${sqlString(key)} LIMIT 1`,
+    ).catch(() => "");
+    return value || null;
+  }
+  try {
+    const rows = sqlJsRows(
+      globalStateDb.db,
+      `SELECT value FROM ItemTable WHERE key = ${sqlString(key)} LIMIT 1`,
+    );
+    return rows.length > 0 ? valueToString(rows[0].value) || null : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseComposerHeaders(raw: string | null): Map<string, CursorComposerHeader> {
+  const index = new Map<string, CursorComposerHeader>();
+  if (!raw) return index;
+  const root = parseJson<Record<string, unknown>>(raw);
+  const allComposers = Array.isArray(root?.allComposers) ? root.allComposers : [];
+  for (const value of allComposers) {
+    if (!value || typeof value !== "object") continue;
+    const header = value as Record<string, unknown>;
+    const composerId = typeof header.composerId === "string" ? header.composerId.trim() : "";
+    if (!composerId) continue;
+    const rawInfo =
+      header.subagentInfo && typeof header.subagentInfo === "object"
+        ? (header.subagentInfo as Record<string, unknown>)
+        : undefined;
+    const parentComposerId =
+      typeof rawInfo?.parentComposerId === "string" ? rawInfo.parentComposerId.trim() : "";
+    const toolCallId = typeof rawInfo?.toolCallId === "string" ? rawInfo.toolCallId.trim() : "";
+    index.set(composerId, {
+      composerId,
+      isSubagent: header.isSubagent === true || !!parentComposerId,
+      ...(rawInfo
+        ? {
+            subagentInfo: {
+              ...(parentComposerId ? { parentComposerId } : {}),
+              ...(toolCallId ? { toolCallId } : {}),
+            },
+          }
+        : {}),
+    });
+  }
+  return index;
+}
+
+async function loadComposerHeaders(
+  globalStateDb: CachedGlobalStateDb,
+): Promise<Map<string, CursorComposerHeader>> {
+  if (
+    cachedComposerHeaders?.dbPath === globalStateDb.dbPath &&
+    cachedComposerHeaders.size === globalStateDb.size &&
+    cachedComposerHeaders.mtimeMs === globalStateDb.mtimeMs &&
+    cachedComposerHeaders.walSize === globalStateDb.walSize &&
+    cachedComposerHeaders.walMtimeMs === globalStateDb.walMtimeMs
+  ) {
+    return cachedComposerHeaders.headers;
+  }
+  const raw =
+    (await queryGlobalStateItemTableTextValue(globalStateDb, "composer.composerHeaders")) ||
+    (await queryGlobalStateTextValue(globalStateDb, "composerHeaders"));
+  const headers = parseComposerHeaders(raw);
+  cachedComposerHeaders = {
+    dbPath: globalStateDb.dbPath,
+    size: globalStateDb.size,
+    mtimeMs: globalStateDb.mtimeMs,
+    walSize: globalStateDb.walSize,
+    walMtimeMs: globalStateDb.walMtimeMs,
+    headers,
+  };
+  return headers;
 }
 
 async function openGlobalStateDb(): Promise<CachedGlobalStateDb | null> {
@@ -782,7 +884,10 @@ function cursorComposerSidecarMetadata(composer: Record<string, any>): CursorSid
     typeof composer.restrictAgentModeSwitching === "boolean"
       ? composer.restrictAgentModeSwitching
       : undefined;
-  const glassMetaParentAgent = valueToString(composer.glassMetaParentAgent);
+  const glassMetaParentAgent =
+    typeof composer.glassMetaParentAgent === "string"
+      ? composer.glassMetaParentAgent.trim()
+      : undefined;
 
   const metadata: CursorSidecars = {
     ...(conversationCheckpointLastUpdatedAt ? { conversationCheckpointLastUpdatedAt } : {}),
@@ -1234,13 +1339,17 @@ export function countComposerConversationHeaders(composer: Record<string, any>):
 
 function composerHeaderBubbleIds(composer: Record<string, any>): string[] {
   if (!Array.isArray(composer.fullConversationHeadersOnly)) return [];
-  return composer.fullConversationHeadersOnly
-    .map((header: any) =>
-      header && typeof header === "object" && typeof header.bubbleId === "string"
-        ? header.bubbleId
-        : "",
-    )
-    .filter((bubbleId: string) => Boolean(bubbleId));
+  return [
+    ...new Set(
+      composer.fullConversationHeadersOnly
+        .map((header: any) =>
+          header && typeof header === "object" && typeof header.bubbleId === "string"
+            ? header.bubbleId
+            : "",
+        )
+        .filter((bubbleId: string) => Boolean(bubbleId)),
+    ),
+  ];
 }
 
 function isReplayableGlobalStateBubble(bubble: Record<string, any>): boolean {
@@ -1329,6 +1438,7 @@ export async function discoverGlobalStateOnlySessions(
   }
 
   const discoveredSessions: SessionInfo[] = [];
+  const composerHeaders = await loadComposerHeaders(globalStateDb);
 
   try {
     const composerDiscoverySql =
@@ -1355,6 +1465,7 @@ export async function discoverGlobalStateOnlySessions(
       const key = valueToString(row.key);
       const sessionId = key.startsWith("composerData:") ? key.slice("composerData:".length) : "";
       if (!SESSION_ID_RE.test(sessionId)) continue;
+      if (composerHeaders.get(sessionId)?.isSubagent) continue;
 
       const rawComposer = row.value === undefined ? "" : valueToString(row.value);
       const composer = rawComposer ? parseJson<Record<string, any>>(rawComposer) : null;
@@ -1467,7 +1578,7 @@ interface CursorMessage {
 
 interface CursorAgentKvBlobMessage {
   role: "system" | "user" | "assistant" | "tool";
-  content?: string;
+  content?: string | CursorBlock[];
   toolCallId?: string;
   tool_call_id?: string;
   toolName?: string;
@@ -1495,7 +1606,15 @@ function agentKvBlobMessageToCursorMessage(
 ): CursorMessage | undefined {
   if (!message || typeof message !== "object") return undefined;
   if (!["system", "user", "assistant", "tool"].includes(message.role)) return undefined;
-  const content = typeof message.content === "string" ? message.content : "";
+  const content =
+    typeof message.content === "string" || Array.isArray(message.content) ? message.content : "";
+  // Current agentKv blobs use the same block arrays as store.db messages.
+  // Preserve them verbatim so text, reasoning and structured tool calls/results
+  // flow through the established messagesToTurns path. Top-level fields below
+  // remain as a fallback for older string-content blobs.
+  if (Array.isArray(content)) {
+    return { role: message.role, content };
+  }
   if (message.role === "assistant") {
     const toolMessage = message as CursorAgentKvBlobMessage & {
       toolCallId?: string;
@@ -2356,6 +2475,58 @@ function buildBubbleProjectHintData(entries: GlobalStateBubbleEntry[]): string {
     .join("\n");
 }
 
+function attachStructuredCursorSubagents(
+  turns: ParsedTurn[],
+  parentComposerId: string,
+  headers: Map<string, CursorComposerHeader>,
+): number {
+  const childByToolCallId = new Map<string, CursorComposerHeader>();
+  for (const header of headers.values()) {
+    const info = header.subagentInfo;
+    if (info?.parentComposerId === parentComposerId && info.toolCallId) {
+      childByToolCallId.set(info.toolCallId, header);
+    }
+  }
+  let attached = 0;
+  for (const turn of turns) {
+    for (const block of turn.blocks) {
+      if (block.type !== "tool_use" || block.name !== "Agent" || block._subAgent) continue;
+      const child = childByToolCallId.get(block.id);
+      if (!child) continue;
+      const prompt =
+        typeof block.input.prompt === "string"
+          ? block.input.prompt
+          : typeof block.input.task === "string"
+            ? block.input.task
+            : typeof block.input.description === "string"
+              ? block.input.description
+              : "";
+      const description =
+        typeof block.input.description === "string" ? block.input.description : undefined;
+      const agentType =
+        typeof block.input.subagent_type === "string"
+          ? block.input.subagent_type
+          : typeof block.input.type === "string"
+            ? block.input.type
+            : "subagent";
+      block._subAgent = {
+        agentId: child.composerId,
+        parentComposerId,
+        toolCallId: block.id,
+        agentType,
+        description,
+        prompt,
+        toolCalls: 0,
+        thinkingBlocks: 0,
+        textResponses: 0,
+        scenes: [],
+      };
+      attached++;
+    }
+  }
+  return attached;
+}
+
 async function loadCursorRequestContexts(
   globalStateDb: CachedGlobalStateDb,
   sessionId: string,
@@ -2426,6 +2597,28 @@ function mergeCursorParseResults(
   primary: ProviderParseResult,
   enrichment: ProviderParseResult,
 ): ProviderParseResult {
+  const enrichmentSubagents = new Map(
+    enrichment.turns.flatMap((turn) =>
+      turn.blocks
+        .filter(
+          (block): block is Extract<ContentBlock, { type: "tool_use" }> =>
+            block.type === "tool_use" && !!block._subAgent,
+        )
+        .map((block) => [block.id, block._subAgent] as const),
+    ),
+  );
+  const mergedTurns =
+    enrichmentSubagents.size === 0
+      ? primary.turns
+      : primary.turns.map((turn) => ({
+          ...turn,
+          blocks: turn.blocks.map((block) => {
+            if (block.type !== "tool_use" || block._subAgent) return block;
+            const subAgent = enrichmentSubagents.get(block.id);
+            return subAgent ? { ...block, _subAgent: subAgent } : block;
+          }),
+        }));
+  const mergedSubagents = mergedTurns !== primary.turns;
   const mergedModel = chooseMergedCursorModel(primary.model, enrichment.model);
   const preferEnrichmentDuration =
     enrichment.dataSource === "global-state" &&
@@ -2461,6 +2654,7 @@ function mergeCursorParseResults(
     (!!enrichment.apiErrors?.length && !primary.apiErrors?.length) ||
     (!!enrichment.contextFiles?.length && !primary.contextFiles?.length) ||
     (!!enrichment.cursorSidecars && !primary.cursorSidecars) ||
+    mergedSubagents ||
     (!!mergedTurnStats &&
       JSON.stringify(mergedTurnStats) !== JSON.stringify(primary.turnStats || undefined));
   const primaryNotes = (primary.dataSourceInfo?.notes || []).filter(
@@ -2484,6 +2678,7 @@ function mergeCursorParseResults(
 
   return {
     ...primary,
+    turns: mergedTurns,
     cwd: primary.cwd || enrichment.cwd,
     ...(mergedModel ? { model: mergedModel } : {}),
     ...(mergedTotalDurationMs !== undefined ? { totalDurationMs: mergedTotalDurationMs } : {}),
@@ -2922,13 +3117,7 @@ async function parseCursorGlobalStateDb(
       Array.isArray(composer.fullConversationHeadersOnly) &&
       composer.fullConversationHeadersOnly.length > 0;
     if (hasFullConversationHeaders) {
-      const bubbleIds: string[] = composer.fullConversationHeadersOnly
-        .map((header: any) =>
-          header && typeof header === "object" && typeof header.bubbleId === "string"
-            ? header.bubbleId
-            : "",
-        )
-        .filter((bubbleId: string) => Boolean(bubbleId));
+      const bubbleIds: string[] = composerHeaderBubbleIds(composer);
       const expectedBubbleKeys = new Set(
         bubbleIds.map((bubbleId) => `bubbleId:${sessionId}:${bubbleId}`),
       );
@@ -2974,6 +3163,11 @@ async function parseCursorGlobalStateDb(
 
     const turns = entries.map((entry) => entry.turn);
     if (turns.length === 0) return null;
+    const structuredSubagentCount = attachStructuredCursorSubagents(
+      turns,
+      sessionId,
+      await loadComposerHeaders(resolvedGlobalStateDb),
+    );
 
     const inferredProject =
       preferredWorkspacePath ||
@@ -3005,6 +3199,11 @@ async function parseCursorGlobalStateDb(
     const checkpointCount = await countCursorCheckpointEntries(resolvedGlobalStateDb, sessionId);
 
     const notes = ["cursorDiskKV keys: composerData:* + bubbleId:*"];
+    if (structuredSubagentCount > 0) {
+      notes.push(
+        `Linked ${structuredSubagentCount} Cursor subagent composer${structuredSubagentCount === 1 ? "" : "s"} to exact Agent tool calls.`,
+      );
+    }
     if (!metrics.tokenUsage) {
       notes.push("Token usage is unavailable in this Cursor global-state session.");
     } else if (metrics.tokenUsageByModel?.unknown) {
@@ -3272,10 +3471,12 @@ export const __testables = {
   estimateTokenIncrement,
   agentKvBlobMessageToCursorMessage,
   appendAgentKvBlobMessages,
+  attachStructuredCursorSubagents,
   extractAgentKvBlobIds,
   extractCursorApiErrors,
   loadAgentKvBlobMessages,
   cursorComposerSidecarMetadata,
+  composerHeaderBubbleIds,
   extractCursorBranchMetadata,
   extractCursorContextSummary,
   extractCursorPrLinks,
@@ -3288,6 +3489,7 @@ export const __testables = {
   messagesToTurns,
   mergeTurnStats,
   parseAssistantContent,
+  parseComposerHeaders,
   inferProjectFromComposerData,
   inferProjectFromComposerDataFast,
   inferProjectRootFromPathHint,

@@ -22,7 +22,7 @@ import {
   rollupTopProjects,
   shortModelName,
 } from "./dashboard-utils";
-import { useScanInsightsContext } from "./InsightsPanel";
+import { ScanFailureNotice, useScanInsightsContext } from "./InsightsPanel";
 import { formatDuration } from "./StatsPanel";
 
 // ─── Types ──────────────────────────────────────────────────────────
@@ -1210,6 +1210,7 @@ function InsightsLoadingState({
         total: number;
         phase?: "discovering" | "scanning";
         hasCachedResults?: boolean;
+        failedProviders?: string[];
       }
     | null
     | undefined;
@@ -1234,6 +1235,7 @@ function InsightsLoadingState({
           </div>
           <p className="mt-1 ui-caption">{detail}</p>
         </div>
+        <ScanFailureNotice failedProviders={scanStatus?.failedProviders} />
         <InsightsPageSkeleton />
       </div>
     </div>
@@ -1452,6 +1454,8 @@ export default function InsightsPage() {
             </div>
           </div>
         )}
+
+        <ScanFailureNotice failedProviders={scanStatus?.failedProviders} />
 
         {/* Share Card */}
         <ShareCard

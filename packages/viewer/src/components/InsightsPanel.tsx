@@ -22,6 +22,7 @@ import { DataQualityIndicator } from "./DataQualityIndicator";
 import {
   CACHE_REFRESH_TTL_MS,
   isCacheFresh,
+  providerDisplayName,
   rollupTopProjects,
   shortModelName,
 } from "./dashboard-utils";
@@ -153,6 +154,7 @@ interface ScanStatus {
   hasCachedResults?: boolean;
   cachedResultCount?: number;
   cachedAt?: string;
+  failedProviders?: string[];
 }
 
 // ─── Singleton Context Provider ──────────────────────────────────────
@@ -338,6 +340,28 @@ export function ScanInsightsProvider({ children }: { children: ReactNode }) {
 }
 
 // ─── Scan progress bar ──────────────────────────────────────────────
+
+export function ScanFailureNotice({ failedProviders }: { failedProviders?: string[] }) {
+  if (!failedProviders || failedProviders.length === 0) return null;
+  const providers = failedProviders.map(providerDisplayName).join(", ");
+  return (
+    <output className="block rounded-xl border border-terminal-orange/30 bg-terminal-orange-subtle/40 px-4 py-3">
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 text-terminal-orange" aria-hidden="true">
+          !
+        </span>
+        <div className="space-y-1 text-xs font-mono text-terminal-dim">
+          <div className="font-sans font-semibold text-terminal-text">
+            Insights may be incomplete
+          </div>
+          <div>
+            The background scan could not read {providers}. Existing results are still available.
+          </div>
+        </div>
+      </div>
+    </output>
+  );
+}
 
 export function ScanProgressBar({ status }: { status: ScanStatus }) {
   if (!status.running) return null;

@@ -4,7 +4,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import type { ParsedTurn } from "@vibe-replay/provider-contract";
+import type { ContentBlock, ParsedTurn, TokenUsage } from "@vibe-replay/provider-contract";
 import { mapCursorToolName, mapToolArgs, sqlJsRows, sqlString } from "./sqlite-reader.js";
 
 /**
@@ -71,6 +71,8 @@ export interface SdkRun {
   finishedAt?: string;
   /** Final assistant text (if recorded by the SDK). */
   result?: string;
+  /** Token usage recorded by the SDK for this run, when the column exists. */
+  tokenUsage?: TokenUsage;
 }
 
 export interface SdkToolCall {
@@ -102,6 +104,10 @@ export interface SdkAgentEnrichment {
   totalDurationMs?: number;
   /** Most-recent model seen across runs. */
   latestModel?: string;
+  /** Sum of per-run token usage. Absent on older SDK schemas. */
+  tokenUsage?: TokenUsage;
+  /** Per-model token usage totals, keyed by the run's model. */
+  tokenUsageByModel?: Record<string, TokenUsage>;
 }
 
 interface IndexDbHandle {
@@ -185,27 +191,44 @@ export async function loadSdkAgentEnrichment(agent: SdkAgent): Promise<SdkAgentE
     handle = await openIndexDb(agent.dbPath);
     if (!handle) return null;
 
+    // `usage_json` only exists on newer SDK schemas, so it is selected only when
+    // the column is present rather than failing the whole read.
+    const runColumns = await tableColumns(handle, "runs");
+    const runSelect = [
+      "run_id",
+      "agent_id",
+      "turn_number",
+      "status",
+      "model",
+      "started_at",
+      "finished_at",
+      "result",
+      ...(runColumns.has("usage_json") ? ["usage_json"] : []),
+    ].join(", ");
     const runRows = await queryIndexDb(
       handle,
       [
-        "SELECT run_id, agent_id, turn_number, status, model,",
-        "started_at, finished_at, result",
+        `SELECT ${runSelect}`,
         `FROM runs WHERE agent_id = ${sqlString(agent.agentId)}`,
         "ORDER BY turn_number ASC, created_at ASC",
       ].join(" "),
     );
     if (runRows.length === 0) return null;
 
-    const runs: SdkRun[] = runRows.map((row) => ({
-      runId: stringOrEmpty(row.run_id),
-      agentId: stringOrEmpty(row.agent_id),
-      turnNumber: typeof row.turn_number === "number" ? row.turn_number : Number(row.turn_number),
-      status: stringOrEmpty(row.status),
-      model: row.model ? String(row.model) : undefined,
-      startedAt: row.started_at ? String(row.started_at) : undefined,
-      finishedAt: row.finished_at ? String(row.finished_at) : undefined,
-      result: row.result ? String(row.result) : undefined,
-    }));
+    const runs: SdkRun[] = runRows.map((row) => {
+      const tokenUsage = parseRunUsage(row.usage_json);
+      return {
+        runId: stringOrEmpty(row.run_id),
+        agentId: stringOrEmpty(row.agent_id),
+        turnNumber: typeof row.turn_number === "number" ? row.turn_number : Number(row.turn_number),
+        status: stringOrEmpty(row.status),
+        model: row.model ? String(row.model) : undefined,
+        startedAt: row.started_at ? String(row.started_at) : undefined,
+        finishedAt: row.finished_at ? String(row.finished_at) : undefined,
+        result: row.result ? String(row.result) : undefined,
+        ...(tokenUsage ? { tokenUsage } : {}),
+      };
+    });
 
     const runIds = runs.map((r) => r.runId).filter(Boolean);
     if (runIds.length === 0) return { agent, runs, toolCallsByRun: new Map() };
@@ -213,10 +236,17 @@ export async function loadSdkAgentEnrichment(agent: SdkAgent): Promise<SdkAgentE
     // DB. Values are still SQLite-escaped, and the sqlite3 backend uses execFile
     // (no shell), so this stays local-data-only and shell-injection safe.
     const inList = runIds.map(sqlString).join(", ");
+    const eventColumns = await tableColumns(handle, "run_events");
+    const eventSelect = [
+      "run_id",
+      "seq",
+      "payload_json",
+      ...(eventColumns.has("created_at") ? ["created_at"] : []),
+    ].join(", ");
     const eventRows = await queryIndexDb(
       handle,
       [
-        "SELECT run_id, seq, payload_json FROM run_events",
+        `SELECT ${eventSelect} FROM run_events`,
         `WHERE run_id IN (${inList}) ORDER BY run_id, seq`,
       ].join(" "),
     );
@@ -231,6 +261,48 @@ export async function loadSdkAgentEnrichment(agent: SdkAgent): Promise<SdkAgentE
   }
 }
 
+/** `runs.usage_json` holds the SDK's own per-run token accounting. */
+function parseRunUsage(raw: unknown): TokenUsage | undefined {
+  if (typeof raw !== "string" || !raw.trim()) return undefined;
+  const parsed = safeJsonParse(raw);
+  if (!isPlainObject(parsed)) return undefined;
+  const usage: TokenUsage = {
+    inputTokens: finiteNumber(parsed.inputTokens),
+    outputTokens: finiteNumber(parsed.outputTokens),
+    cacheCreationTokens: finiteNumber(parsed.cacheWriteTokens),
+    cacheReadTokens: finiteNumber(parsed.cacheReadTokens),
+  };
+  const hasAny =
+    usage.inputTokens > 0 ||
+    usage.outputTokens > 0 ||
+    usage.cacheCreationTokens > 0 ||
+    usage.cacheReadTokens > 0;
+  return hasAny ? usage : undefined;
+}
+
+function finiteNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function addUsage(total: TokenUsage, next: TokenUsage): TokenUsage {
+  return {
+    inputTokens: total.inputTokens + next.inputTokens,
+    outputTokens: total.outputTokens + next.outputTokens,
+    cacheCreationTokens: total.cacheCreationTokens + next.cacheCreationTokens,
+    cacheReadTokens: total.cacheReadTokens + next.cacheReadTokens,
+  };
+}
+
+/** Read a table's column names so optional columns can be selected safely. */
+async function tableColumns(handle: IndexDbHandle, table: string): Promise<Set<string>> {
+  try {
+    const rows = await queryIndexDb(handle, `PRAGMA table_info(${table})`);
+    return new Set(rows.map((row) => stringOrEmpty(row.name)).filter(Boolean));
+  } catch {
+    return new Set();
+  }
+}
+
 function finalizeEnrichment(
   agent: SdkAgent,
   runs: SdkRun[],
@@ -241,8 +313,31 @@ function finalizeEnrichment(
   let totalDurationMs = 0;
   let totalDurationSeen = false;
   let latestModel: string | undefined;
+  let tokenUsage: TokenUsage | undefined;
+  const tokenUsageByModel: Record<string, TokenUsage> = {};
 
   for (const run of runs) {
+    if (run.tokenUsage) {
+      tokenUsage = addUsage(
+        tokenUsage || {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 0,
+        },
+        run.tokenUsage,
+      );
+      const key = run.model || "unknown";
+      tokenUsageByModel[key] = addUsage(
+        tokenUsageByModel[key] || {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 0,
+        },
+        run.tokenUsage,
+      );
+    }
     if (run.startedAt && (!startedAt || run.startedAt < startedAt)) startedAt = run.startedAt;
     if (run.finishedAt && (!finishedAt || run.finishedAt > finishedAt)) finishedAt = run.finishedAt;
     if (run.startedAt && run.finishedAt) {
@@ -264,6 +359,8 @@ function finalizeEnrichment(
     finishedAt,
     totalDurationMs: totalDurationSeen ? totalDurationMs : undefined,
     latestModel,
+    ...(tokenUsage ? { tokenUsage } : {}),
+    ...(Object.keys(tokenUsageByModel).length > 0 ? { tokenUsageByModel } : {}),
   };
 }
 
@@ -271,12 +368,27 @@ interface RunEventRow {
   run_id?: string;
   payload_json?: string;
   seq?: number | string;
+  created_at?: string | number;
 }
+
+/** SDK event timestamps are ISO strings on some schemas and epoch ms on others. */
+function eventTimeMs(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && /^\d+$/.test(value.trim())) return numeric;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+const MAX_TOOL_DURATION_MS = 60 * 60_000;
 
 function collectToolCalls(rows: Record<string, any>[]): Map<string, SdkToolCall[]> {
   const out = new Map<string, SdkToolCall[]>();
   // Track the call we're building per (runId, callId).
   const inProgress = new Map<string, SdkToolCall>();
+  // First observed event time per call, used to derive tool duration.
+  const startedAtByKey = new Map<string, number>();
 
   for (const rawRow of rows) {
     const row = rawRow as RunEventRow;
@@ -298,6 +410,8 @@ function collectToolCalls(rows: Record<string, any>[]): Map<string, SdkToolCall[
     const argsObj = isPlainObject(message.args) ? message.args : {};
     const status = typeof message.status === "string" ? message.status : "unknown";
 
+    const eventMs = eventTimeMs(row.created_at);
+
     let entry = inProgress.get(key);
     if (!entry) {
       entry = {
@@ -310,6 +424,7 @@ function collectToolCalls(rows: Record<string, any>[]): Map<string, SdkToolCall[
         status,
       };
       inProgress.set(key, entry);
+      if (eventMs !== undefined) startedAtByKey.set(key, eventMs);
       const list = out.get(runId) || [];
       list.push(entry);
       out.set(runId, list);
@@ -320,6 +435,11 @@ function collectToolCalls(rows: Record<string, any>[]): Map<string, SdkToolCall[
       // latest non-empty payload even when the key count stays the same.
       if (Object.keys(argsObj).length > 0) {
         entry.args = argsObj;
+      }
+      const startMs = startedAtByKey.get(key);
+      if (startMs !== undefined && eventMs !== undefined) {
+        const elapsed = eventMs - startMs;
+        if (elapsed > 0 && elapsed < MAX_TOOL_DURATION_MS) entry.durationMs = elapsed;
       }
     }
 
@@ -455,9 +575,13 @@ export function applySdkEnrichmentToTurns(
       // are valid tool outputs, so any string `_result` counts as already resolved.
       if (typeof block._result === "string") continue;
 
-      const sdkCall = sdkCalls[toolUseIdx];
-      toolUseIdx++;
-      if (!sdkCall) continue;
+      // Positional pairing only holds while both streams agree. When they drift
+      // (SDK-only calls, renamed tools), find the next compatible call instead of
+      // attaching a result that belongs to a different tool.
+      const matchIdx = findMatchingSdkCall(sdkCalls, toolUseIdx, block);
+      if (matchIdx === -1) continue;
+      const sdkCall = sdkCalls[matchIdx];
+      toolUseIdx = matchIdx + 1;
 
       // A running-only SDK event has no result payload. Leave it missing rather
       // than converting "not yet known" into a concrete empty result.
@@ -465,6 +589,9 @@ export function applySdkEnrichmentToTurns(
 
       block._result = sdkCall.result;
       if (sdkCall.isError) block._isError = true;
+      if (sdkCall.durationMs !== undefined && block._durationMs === undefined) {
+        block._durationMs = sdkCall.durationMs;
+      }
       // Re-run the Cursor arg mapper so Edit blocks pick up old/new strings from the
       // result we just attached.
       try {
@@ -477,6 +604,46 @@ export function applySdkEnrichmentToTurns(
   }
 
   return { turns, toolCallsEnriched, assistantTurnsModelTagged };
+}
+
+/** Edit-family tools are recorded under different names by the two streams. */
+const EDIT_FAMILY = new Set(["Edit", "MultiEdit", "Write"]);
+
+function isCompatibleToolName(sdkName: string, blockName: string): boolean {
+  if (sdkName === blockName) return true;
+  return EDIT_FAMILY.has(sdkName) && EDIT_FAMILY.has(blockName);
+}
+
+/** Primary argument used to disambiguate two calls of the same tool. */
+function primaryArgSignature(args: Record<string, any> | undefined): string | undefined {
+  if (!isPlainObject(args)) return undefined;
+  for (const key of ["file_path", "path", "command", "target_file", "pattern"]) {
+    const value = args[key];
+    if (typeof value === "string" && value) return `${key}:${value}`;
+  }
+  return undefined;
+}
+
+/**
+ * Locate the SDK call for a JSONL tool block, starting at the expected position.
+ * Returns -1 when nothing compatible remains, so the block stays unenriched
+ * rather than picking up another tool's result.
+ */
+function findMatchingSdkCall(
+  sdkCalls: SdkToolCall[],
+  startIdx: number,
+  block: Extract<ContentBlock, { type: "tool_use" }>,
+): number {
+  const blockSignature = primaryArgSignature(block.input);
+  let firstCompatible = -1;
+  for (let i = startIdx; i < sdkCalls.length; i++) {
+    const candidate = sdkCalls[i];
+    if (!isCompatibleToolName(candidate.name, block.name)) continue;
+    if (firstCompatible === -1) firstCompatible = i;
+    if (!blockSignature) break;
+    if (primaryArgSignature(candidate.args) === blockSignature) return i;
+  }
+  return firstCompatible;
 }
 
 // ---------------------------------------------------------------------------

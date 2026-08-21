@@ -43,6 +43,7 @@ import {
   resolveCursorLiveWatchPaths,
 } from "./providers/cursor/sqlite-reader.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
+import { discoverProvidersSafely } from "./provider-discovery.js";
 import { getApiUrl, loadSavedCloudInfo, publishCloudWithOverlays } from "./publishers/cloud.js";
 import {
   checkPublishStatus,
@@ -580,27 +581,35 @@ export async function startServer(
   const writeDiscoveredSourcesCatalog = async (
     sessions: SourceSummaryRecord[],
     previous?: NormalizedSourceSessionCatalogCache | null,
+    failedProviders: string[] = [],
   ): Promise<SourceSessionCatalogCache> => {
     const discoveredAt = new Date().toISOString();
-    const catalog = buildSourceSessionCatalogCache(sessions, discoveredAt, previous);
+    const catalog = buildSourceSessionCatalogCache(
+      sessions,
+      discoveredAt,
+      previous,
+      failedProviders,
+    );
     try {
-      const piProbe = await probeSourceRecordsFreshness(sessions, "pi");
-      const piSessionCount = sessions.filter((session) => session.provider === "pi").length;
-      catalog.providerStates = {
-        ...catalog.providerStates,
-        pi: {
-          ...(catalog.providerStates?.pi || {
+      if (!failedProviders.includes("pi")) {
+        const piProbe = await probeSourceRecordsFreshness(sessions, "pi");
+        const piSessionCount = sessions.filter((session) => session.provider === "pi").length;
+        catalog.providerStates = {
+          ...catalog.providerStates,
+          pi: {
+            ...(catalog.providerStates?.pi || {
+              provider: "pi",
+              discoveredAt,
+            }),
             provider: "pi",
             discoveredAt,
-          }),
-          provider: "pi",
-          discoveredAt,
-          sessionCount: piSessionCount,
-          newestSourceMtimeMs: piProbe.newestSourceMtimeMs,
-          newestSourcePath: piProbe.newestSourcePath,
-          fingerprint: sourceProviderFingerprint(piProbe),
-        },
-      };
+            sessionCount: piSessionCount,
+            newestSourceMtimeMs: piProbe.newestSourceMtimeMs,
+            newestSourcePath: piProbe.newestSourcePath,
+            fingerprint: sourceProviderFingerprint(piProbe),
+          },
+        };
+      }
     } catch {
       // Freshness metadata is best-effort; discovery results are still valid.
     }
@@ -1058,18 +1067,15 @@ export async function startServer(
       phase: "discovering",
       startedAt: new Date().toISOString(),
       finishedAt: previousFinishedAt,
+      failedProviders: [],
     };
 
     void (async () => {
       try {
         // Discover all sessions
-        const providers = getAllProviders();
-        const allSessions: SessionInfo[] = [];
-        for (const provider of providers) {
-          const sessions = await provider.discover();
-          allSessions.push(...sessions);
-        }
-        const merged = mergeSameSessions(allSessions);
+        const discovery = await discoverProvidersSafely(getAllProviders());
+        const merged = mergeSameSessions(discovery.sessions);
+        scanState.failedProviders = discovery.failedProviders;
 
         // Normalize project paths
         const home = homedir();
@@ -1130,6 +1136,7 @@ export async function startServer(
           phase: undefined,
           startedAt: scanState.startedAt,
           finishedAt: new Date().toISOString(),
+          failedProviders: scanState.failedProviders || [],
         };
 
         await writeFileCache(scanResultsCacheKey, results);
@@ -1757,14 +1764,8 @@ export async function startServer(
 
   const getSourceSessions = async (c: Context) => {
     try {
-      const providers = getAllProviders();
-      const allSessions: SessionInfo[] = [];
-      for (const provider of providers) {
-        const sessions = await provider.discover();
-        allSessions.push(...sessions);
-      }
-
-      const merged = mergeSameSessions(allSessions);
+      const discovery = await discoverProvidersSafely(getAllProviders());
+      const merged = mergeSameSessions(discovery.sessions);
       lastDiscoveredMergedSessions = normalizeSessionProjectsForHome(merged, homedir());
       const previous = await readSourcesCatalogCache();
       const result = await buildSourcesResult(
@@ -1775,14 +1776,19 @@ export async function startServer(
         cleanupPeriodDays,
       );
 
-      const catalog = await writeDiscoveredSourcesCatalog(result, previous);
+      const catalog = await writeDiscoveredSourcesCatalog(
+        result,
+        previous,
+        discovery.failedProviders,
+      );
       enrichCursorStatsInBackground(merged, result);
       return c.json({
-        sessions: result,
+        sessions: catalog.sessions,
         cleanupPeriodDays,
         discoveredAt: catalog.discoveredAt,
-        stale: false,
-        staleProviders: [],
+        stale: discovery.failedProviders.length > 0,
+        staleProviders: discovery.failedProviders,
+        failedProviders: discovery.failedProviders,
       });
     } catch (err) {
       return c.json({ error: getErrorMessage(err) }, 500);
@@ -1796,26 +1802,18 @@ export async function startServer(
   const streamSourceSessions = (c: Context) => {
     return streamSSE(c, async (stream) => {
       try {
-        const providers = getAllProviders();
-        const allSessions: SessionInfo[] = [];
         let scanned = 0;
-
-        for (const provider of providers) {
-          // Quick file count estimate per provider
-          const sessions = await provider.discover();
-          for (const s of sessions) {
-            allSessions.push(s);
-            scanned++;
-            // Emit progress every 5 sessions to avoid overwhelming the client
-            if (scanned % 5 === 0 || scanned === 1) {
-              await stream.writeSSE({
-                data: JSON.stringify({ type: "progress", scanned }),
-              });
-            }
+        const discovery = await discoverProvidersSafely(getAllProviders(), async () => {
+          scanned++;
+          // Emit progress every 5 sessions to avoid overwhelming the client
+          if (scanned % 5 === 0 || scanned === 1) {
+            await stream.writeSSE({
+              data: JSON.stringify({ type: "progress", scanned }),
+            });
           }
-        }
+        });
 
-        const merged = mergeSameSessions(allSessions);
+        const merged = mergeSameSessions(discovery.sessions);
         lastDiscoveredMergedSessions = normalizeSessionProjectsForHome(merged, homedir());
         const previous = await readSourcesCatalogCache();
         const result = await buildSourcesResult(
@@ -1826,16 +1824,21 @@ export async function startServer(
           cleanupPeriodDays,
         );
 
-        const catalog = await writeDiscoveredSourcesCatalog(result, previous);
+        const catalog = await writeDiscoveredSourcesCatalog(
+          result,
+          previous,
+          discovery.failedProviders,
+        );
         enrichCursorStatsInBackground(merged, result);
         await stream.writeSSE({
           data: JSON.stringify({
             type: "complete",
-            sessions: result,
+            sessions: catalog.sessions,
             cleanupPeriodDays,
             discoveredAt: catalog.discoveredAt,
-            stale: false,
-            staleProviders: [],
+            stale: discovery.failedProviders.length > 0,
+            staleProviders: discovery.failedProviders,
+            failedProviders: discovery.failedProviders,
           }),
         });
       } catch (err) {
@@ -2040,6 +2043,7 @@ export async function startServer(
       phase: scanState.phase,
       startedAt: scanState.startedAt,
       finishedAt: scanState.finishedAt,
+      failedProviders: scanState.failedProviders || [],
       hasInsights: insightsCache.userInsights !== null,
       hasCachedResults: scanState.results.length > 0,
       cachedResultCount: scanState.results.length,
@@ -2054,6 +2058,7 @@ export async function startServer(
       scanned: scanState.scanned,
       total: scanState.total,
       finishedAt: scanState.finishedAt,
+      failedProviders: scanState.failedProviders || [],
     });
   });
 

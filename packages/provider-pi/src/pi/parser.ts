@@ -174,6 +174,9 @@ export function parsePiLines(
   let currentModel: string | undefined = model;
   let firstTimestamp: string | undefined;
   let lastTimestamp: string | undefined;
+  // Summarization requests are billed on top of the messages they replace, so
+  // Pi counts them separately from any assistant message usage.
+  const summaryUsages: { usage: TokenUsage; model?: string }[] = [];
 
   for (const entry of branchEntries) {
     if (entry.timestamp) {
@@ -193,7 +196,7 @@ export function parsePiLines(
       const nextModel = (entry as { modelId?: unknown }).modelId;
       if (typeof nextModel === "string" && nextModel) {
         currentModel = nextModel;
-        model = model || nextModel;
+        model = nextModel;
       }
       continue;
     }
@@ -209,6 +212,7 @@ export function parsePiLines(
           blocks: [{ type: "text", text: summary }],
         });
       }
+      collectSummaryUsage(entry, currentModel, summaryUsages);
       compactions.push({
         timestamp: entry.timestamp || lastTimestamp || new Date().toISOString(),
         trigger: "pi",
@@ -229,6 +233,7 @@ export function parsePiLines(
           blocks: [{ type: "text", text: `Branch summary:\n${summary}` }],
         });
       }
+      collectSummaryUsage(entry, currentModel, summaryUsages);
       continue;
     }
 
@@ -271,7 +276,10 @@ export function parsePiLines(
       }
       if (blocks.length > 0) {
         const msgModel = message.model || currentModel;
-        if (msgModel) model = model || msgModel;
+        if (msgModel) {
+          model = model || msgModel;
+          currentModel = msgModel;
+        }
         if (message.usage && entry.id) {
           const usage = normalizeUsage(message.usage);
           usageByMessageId.set(entry.id, {
@@ -298,8 +306,14 @@ export function parsePiLines(
     }
   }
 
-  const tokenUsage = aggregateUsage([...usageByMessageId.values()].map((value) => value.usage));
-  const tokenUsageByModel = aggregateUsageByModel(usageByMessageId);
+  const messageUsages = [...usageByMessageId.values()].map((value) => ({
+    usage: value.usage,
+    model: value.model,
+  }));
+  const tokenUsage = aggregateUsage(
+    [...messageUsages, ...summaryUsages].map((value) => value.usage),
+  );
+  const tokenUsageByModel = aggregateUsageByModel([...messageUsages, ...summaryUsages]);
   const turnStats = buildTurnStats(turns, usageByMessageId);
   const sessionId = header?.id || options.sessionInfo?.sessionId || "pi-session";
   const sourcePath = options.sourcePath || options.sessionInfo?.filePath || "";
@@ -398,11 +412,20 @@ function collectToolResults(entries: PiEntryBase[]): Map<string, ToolResultData>
     results.set(message.toolCallId, {
       text,
       images,
-      isError: message.isError,
+      isError: message.isError || failedByExitCode(message.details),
       timestamp: entry.timestamp,
     });
   }
   return results;
+}
+
+// Harness tools such as exec_command report failures through the result
+// details rather than the isError flag that native Pi tools set.
+function failedByExitCode(details: unknown): boolean {
+  if (!details || typeof details !== "object") return false;
+  const record = details as Record<string, unknown>;
+  const exitCode = typeof record.exit_code === "number" ? record.exit_code : record.exitCode;
+  return typeof exitCode === "number" && Number.isFinite(exitCode) && exitCode !== 0;
 }
 
 function buildUserBlocks(content: unknown): ContentBlock[] {
@@ -530,19 +553,37 @@ function normalizeToolInput(name: string, input: Record<string, unknown>): Recor
     };
   }
   if (normalized === "edit") {
-    // Pi's edit tool can carry multiple replacements, but the viewer renders
-    // one diff per tool call, so map the first edit as the representative diff.
-    const firstEdit = Array.isArray(input.edits) ? input.edits[0] : undefined;
-    const edit =
-      firstEdit && typeof firstEdit === "object" ? (firstEdit as Record<string, unknown>) : input;
+    // Pi's edit tool can carry multiple replacements while the viewer renders a
+    // single diff per tool call, so every replacement is joined into one diff.
+    const edits = Array.isArray(input.edits)
+      ? input.edits.filter(
+          (edit): edit is Record<string, unknown> => !!edit && typeof edit === "object",
+        )
+      : [];
+    const replacements = edits.filter(
+      (edit) => typeof edit.oldText === "string" && typeof edit.newText === "string",
+    );
+    const source = replacements.length > 0 ? replacements : [input];
+    const oldText = joinEditSegments(source, "oldText");
+    const newText = joinEditSegments(source, "newText");
     return {
       ...input,
       ...(typeof input.path === "string" ? { file_path: input.path } : {}),
-      ...(typeof edit.oldText === "string" ? { old_string: edit.oldText } : {}),
-      ...(typeof edit.newText === "string" ? { new_string: edit.newText } : {}),
+      ...(oldText === undefined ? {} : { old_string: oldText }),
+      ...(newText === undefined ? {} : { new_string: newText }),
     };
   }
   return input;
+}
+
+function joinEditSegments(
+  edits: Record<string, unknown>[],
+  key: "oldText" | "newText",
+): string | undefined {
+  const segments = edits
+    .map((edit) => edit[key])
+    .filter((value): value is string => typeof value === "string");
+  return segments.length > 0 ? segments.join("\n\n") : undefined;
 }
 
 function commandFromInput(input: Record<string, unknown>): string | undefined {
@@ -606,13 +647,42 @@ function normalizeApplyPatchInput(input: Record<string, unknown>): Record<string
   };
 }
 
+function collectSummaryUsage(
+  entry: PiEntryBase,
+  model: string | undefined,
+  target: { usage: TokenUsage; model?: string }[],
+): void {
+  const usage = (entry as { usage?: unknown }).usage;
+  if (!usage || typeof usage !== "object") return;
+  const rawUsage = usage as PiUsage;
+  if (!hasValidUsageValues(rawUsage)) return;
+  const normalized = normalizeUsage(rawUsage);
+  const total =
+    normalized.inputTokens +
+    normalized.outputTokens +
+    normalized.cacheCreationTokens +
+    normalized.cacheReadTokens;
+  if (total === 0) return;
+  target.push({ usage: normalized, ...(model ? { model } : {}) });
+}
+
 function normalizeUsage(usage: PiUsage): TokenUsage {
   return {
-    inputTokens: usage.input || 0,
-    outputTokens: usage.output || 0,
-    cacheCreationTokens: usage.cacheWrite || 0,
-    cacheReadTokens: usage.cacheRead || 0,
+    inputTokens: tokenCount(usage.input),
+    outputTokens: tokenCount(usage.output),
+    cacheCreationTokens: tokenCount(usage.cacheWrite),
+    cacheReadTokens: tokenCount(usage.cacheRead),
   };
+}
+
+function tokenCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+function hasValidUsageValues(usage: PiUsage): boolean {
+  return [usage.input, usage.output, usage.cacheRead, usage.cacheWrite].every(
+    (value) => value === undefined || tokenCount(value) === value,
+  );
 }
 
 function aggregateUsage(usages: TokenUsage[]): TokenUsage | undefined {
@@ -629,11 +699,11 @@ function aggregateUsage(usages: TokenUsage[]): TokenUsage | undefined {
 }
 
 function aggregateUsageByModel(
-  usageByMessageId: Map<string, { usage: TokenUsage; model?: string; contextTokens?: number }>,
+  usages: { usage: TokenUsage; model?: string }[],
 ): Record<string, TokenUsage> | undefined {
-  if (usageByMessageId.size === 0) return undefined;
+  if (usages.length === 0) return undefined;
   const result: Record<string, TokenUsage> = {};
-  for (const { usage, model } of usageByMessageId.values()) {
+  for (const { usage, model } of usages) {
     const key = model || "unknown";
     result[key] = aggregateUsage(
       [result[key], usage].filter((value): value is TokenUsage => !!value),

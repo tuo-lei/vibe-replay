@@ -31,7 +31,7 @@ import type { DataSource, PrLink, SessionInfo, TokenUsage } from "./types.js";
 import { localDayKey, shortenPath } from "./utils.js";
 
 // Bump this when we extract new fields — forces re-scan of all sessions.
-const SCANNER_VERSION = 10;
+const SCANNER_VERSION = 12;
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -361,12 +361,14 @@ interface SubAgentLine {
  * subagent JSONL reading, no transform step.
  */
 export async function scanSession(input: ScanInput): Promise<SessionScanResult> {
+  let richFallbackProvider: string | undefined;
   if (input.provider === "claude-cowork") {
     try {
       return await scanClaudeCoworkSession(input);
     } catch {
       // Fall through to the generic JSONL scanner if a Cowork audit contains a
       // newer shape that the full normalizer does not yet understand.
+      richFallbackProvider = "Claude Cowork";
     }
   }
   if (input.provider === "cursor") {
@@ -375,6 +377,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
     } catch {
       // Fall back to the legacy lightweight scanner below so Cursor sessions
       // still show up even if richer parsing fails for one host/schema.
+      richFallbackProvider = "Cursor";
     }
   }
   if (input.provider === "codex") {
@@ -383,6 +386,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
     } catch {
       // Fall through to the lightweight scanner so a partial Codex rollout
       // still appears in insights if the richer parser hits an unknown event.
+      richFallbackProvider = "Codex";
     }
   }
   if (input.provider === "pi") {
@@ -391,6 +395,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
     } catch {
       // Fall through to the lightweight scanner so Pi sessions still show up
       // if the richer parser hits an unknown entry shape.
+      richFallbackProvider = "Pi";
     }
   }
   if (input.provider === "opencode") {
@@ -708,6 +713,19 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
   }
 
   const gitBranch = gitBranches.length > 0 ? gitBranches[gitBranches.length - 1] : undefined;
+  if (richFallbackProvider) {
+    promptCount ||= input.discoveryPromptCount || 0;
+    toolCallCount ||= input.discoveryToolCallCount || 0;
+    editCount ||= input.discoveryEditCount || 0;
+    model ||= input.discoveryModel;
+    durationMs ||= input.discoveryDurationMs;
+  }
+  const qualityNotes = [...(costDataQualityNotes(undefined, tokenUsage, costEstimate) || [])];
+  if (richFallbackProvider) {
+    qualityNotes.push(
+      `Partial ${richFallbackProvider} scan: the rich parser failed, so available generic and discovery metadata was used.`,
+    );
+  }
 
   return {
     sessionId: input.sessionId,
@@ -740,7 +758,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
     skillsUsed: skillsUsed.size > 0 ? [...skillsUsed].sort() : undefined,
     mcpServersUsed: mcpServersUsed.size > 0 ? [...mcpServersUsed].sort() : undefined,
     turnDurations: turnDurations.length > 0 ? turnDurations : undefined,
-    dataQualityNotes: costDataQualityNotes(undefined, tokenUsage, costEstimate),
+    dataQualityNotes: qualityNotes.length > 0 ? qualityNotes : undefined,
   };
 }
 
@@ -1054,10 +1072,20 @@ function firstUserPrompt(turns: ProviderParseResult["turns"]): string | undefine
 }
 
 function estimateParsedCost(parsed: ProviderParseResult): number | undefined {
+  if (parsed.reportedCostUsd !== undefined) return parsed.reportedCostUsd;
   if (parsed.tokenUsageByModel) return estimateCostIfKnown(parsed.tokenUsageByModel);
   if (parsed.tokenUsage && parsed.model)
     return estimateCostSimpleIfKnown(parsed.tokenUsage, parsed.model);
   return undefined;
+}
+
+/** Rich parser fallbacks must be retried instead of being persisted as complete scans. */
+export function isPartialScanResult(result: Pick<SessionScanResult, "dataQualityNotes">): boolean {
+  return (
+    result.dataQualityNotes?.some((note) =>
+      /^Partial [a-z0-9_-]+(?: [a-z0-9_-]+)* scan:/i.test(note),
+    ) ?? false
+  );
 }
 
 const UNKNOWN_COST_NOTE =
@@ -1154,6 +1182,7 @@ export interface BackgroundScanState {
   phase?: "discovering" | "scanning";
   startedAt?: string;
   finishedAt?: string;
+  failedProviders?: string[];
 }
 
 /**
@@ -1187,16 +1216,21 @@ export async function runBackgroundScan(
         const result = await scanSession(session);
         results[index] = result;
 
-        const { meta } = cacheCheck as {
-          valid: false;
-          meta: { mtimeMs: number; fileSize: number };
-        };
-        cache.entries[cacheKey] = {
-          mtimeMs: meta.mtimeMs,
-          fileSize: meta.fileSize,
-          scannedAt: new Date().toISOString(),
-          result,
-        };
+        const partial = isPartialScanResult(result);
+        if (partial) {
+          delete cache.entries[cacheKey];
+        } else {
+          const { meta } = cacheCheck as {
+            valid: false;
+            meta: { mtimeMs: number; fileSize: number };
+          };
+          cache.entries[cacheKey] = {
+            mtimeMs: meta.mtimeMs,
+            fileSize: meta.fileSize,
+            scannedAt: new Date().toISOString(),
+            result,
+          };
+        }
       } catch {
         // Skip failed sessions silently
       }

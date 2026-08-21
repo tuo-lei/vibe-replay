@@ -272,6 +272,112 @@ describe("Cursor subagent transcript ingestion", () => {
     expect(agent?.type === "tool_use" && agent._subAgent?.toolCalls).toBe(1);
   });
 
+  it("merges transcript scenes into structured SQLite subagents without replacing identity", async () => {
+    const prompt = "Inspect the auth middleware deeply.";
+    const { transcript } = await writeNestedSession(
+      [delegationBlock(prompt)],
+      [
+        {
+          role: "user",
+          message: { content: [{ type: "text", text: `Delegated task:\n${prompt}` }] },
+        },
+        {
+          role: "assistant",
+          message: {
+            content: [{ type: "tool_use", name: "ReadFile", input: { path: "/repo/auth.ts" } }],
+          },
+        },
+      ],
+      "structured-transcript",
+    );
+    const parseCursorSqlite = vi.fn().mockResolvedValue({
+      sessionId: "session-123",
+      slug: "session-",
+      cwd: "/repo",
+      turns: [
+        { role: "user", blocks: [{ type: "text", text: "Inspect the parser" }] },
+        {
+          role: "assistant",
+          blocks: [
+            {
+              type: "tool_use",
+              id: "structured-task-1",
+              name: "Agent",
+              input: {
+                description: "Structured auth task",
+                prompt,
+                subagent_type: "explore",
+              },
+              _subAgent: {
+                agentId: "structured-child",
+                parentComposerId: "parent-composer",
+                toolCallId: "structured-task-1",
+                agentType: "Explore",
+                description: "Structured auth task",
+                prompt,
+                toolCalls: 0,
+                thinkingBlocks: 0,
+                textResponses: 0,
+                scenes: [],
+              },
+            },
+          ],
+        },
+      ],
+      dataSource: "sqlite",
+      dataSourceInfo: { primary: "sqlite", sources: ["cursor/store.db"] },
+    });
+    const parser = createCursorParser({
+      isSystemContextText,
+      mapCursorToolName,
+      mapToolArgs,
+      parseCursorSqlite,
+    });
+
+    const parsed = await parser(transcript, {
+      provider: "cursor",
+      sessionId: "session-123",
+      slug: "session-",
+      project: "/repo",
+      cwd: "/repo",
+      version: "",
+      timestamp: "2026-08-06T12:00:00.000Z",
+      lineCount: 2,
+      fileSize: 1,
+      filePath: transcript,
+      filePaths: [transcript],
+      firstPrompt: "Inspect the parser",
+    });
+    const agent = parsed.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.type === "tool_use" && block.name === "Agent");
+
+    expect(agent?.type === "tool_use" && agent._subAgent).toMatchObject({
+      agentId: "structured-child",
+      parentComposerId: "parent-composer",
+      toolCallId: "structured-task-1",
+      toolCalls: 1,
+    });
+    expect(parsed.subAgentSummary).toEqual([
+      {
+        agentId: "structured-child",
+        agentType: "Explore",
+        description: "Structured auth task",
+        toolCalls: 1,
+        model: undefined,
+      },
+    ]);
+
+    const replay = transformToReplay(parsed, "cursor", "~/test");
+    const replayAgent = replay.scenes.find(
+      (scene) => scene.type === "tool-call" && scene.toolName === "Agent",
+    );
+    expect(replayAgent?.type === "tool-call" && replayAgent.subAgent?.scenes).toHaveLength(1);
+    expect(replayAgent?.type === "tool-call" && replayAgent.subAgent?.agentId).toBe(
+      "structured-child",
+    );
+  });
+
   it("does not guess when a subagent prompt cannot be linked", async () => {
     const { transcript } = await writeNestedSession(
       [delegationBlock("Inspect the parser")],

@@ -39,12 +39,16 @@ async function createSyntheticSdkIndexDb(
       started_at?: string;
       finished_at?: string;
       result?: string;
+      usage_json?: string;
     }>;
     events: Array<{
       run_id: string;
       seq: number;
       payload: Record<string, any>;
+      created_at?: string;
     }>;
+    /** Build the pre-usage_json SDK schema to cover older Cursor installs. */
+    legacyRunsSchema?: boolean;
   },
 ): Promise<string> {
   const initSqlJs = (await import("sql.js")).default;
@@ -76,6 +80,7 @@ async function createSyntheticSdkIndexDb(
       latest_checkpoint_ref_json TEXT,
       error_code TEXT,
       usage_ref TEXT,
+      ${data.legacyRunsSchema ? "" : "request_id TEXT,\n      usage_json TEXT,"}
       result TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -114,8 +119,10 @@ async function createSyntheticSdkIndexDb(
     );
   }
   for (const r of data.runs) {
+    const usageColumn = data.legacyRunsSchema ? "" : ", usage_json";
+    const usagePlaceholder = data.legacyRunsSchema ? "" : ", ?";
     db.run(
-      `INSERT INTO runs (run_id, agent_id, turn_number, status, model, started_at, finished_at, result, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO runs (run_id, agent_id, turn_number, status, model, started_at, finished_at, result, created_at, updated_at${usageColumn}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?${usagePlaceholder})`,
       [
         r.run_id,
         r.agent_id,
@@ -127,6 +134,7 @@ async function createSyntheticSdkIndexDb(
         r.result ?? null,
         r.started_at ?? "2026-01-01T00:00:00.000Z",
         r.finished_at ?? "2026-01-01T00:00:01.000Z",
+        ...(data.legacyRunsSchema ? [] : [r.usage_json ?? null]),
       ],
     );
   }
@@ -139,7 +147,7 @@ async function createSyntheticSdkIndexDb(
         String(e.seq),
         "run_stream_event",
         JSON.stringify(e.payload),
-        "2026-01-01T00:00:00.000Z",
+        e.created_at ?? "2026-01-01T00:00:00.000Z",
       ],
     );
   }
@@ -567,6 +575,121 @@ describe("applySdkEnrichmentToTurns", () => {
     expect(blocks[1]._result).toBeUndefined();
   });
 
+  it("copies SDK tool durations onto enriched blocks", () => {
+    const enrichment = makeEnrichment();
+    const calls = enrichment.toolCallsByRun.get("r1") ?? [];
+    calls[0] = { ...calls[0], durationMs: 2_500 };
+
+    const turns: ParsedTurn[] = [
+      { role: "user", blocks: [{ type: "text", text: "prompt" }] },
+      {
+        role: "assistant",
+        blocks: [{ type: "tool_use", id: "j1", name: "Bash", input: { command: "ls" } }],
+      },
+    ];
+    applySdkEnrichmentToTurns(turns, enrichment);
+    const block = turns[1].blocks[0];
+    if (block.type !== "tool_use") throw new Error("type narrow");
+    expect(block._durationMs).toBe(2_500);
+  });
+
+  it("skips enrichment when the SDK call is a different tool", () => {
+    const turns: ParsedTurn[] = [
+      { role: "user", blocks: [{ type: "text", text: "prompt" }] },
+      {
+        role: "assistant",
+        blocks: [{ type: "tool_use", id: "j1", name: "Read", input: { file_path: "/tmp/a.txt" } }],
+      },
+    ];
+    // Run r1 only holds a Bash call, so the Read block must stay unenriched.
+    const result = applySdkEnrichmentToTurns(turns, makeEnrichment());
+    expect(result.toolCallsEnriched).toBe(0);
+    const block = turns[1].blocks[0];
+    if (block.type !== "tool_use") throw new Error("type narrow");
+    expect(block._result).toBeUndefined();
+  });
+
+  it("realigns to the matching SDK call when the streams drift", () => {
+    const enrichment = makeEnrichment();
+    enrichment.toolCallsByRun.set("r1", [
+      {
+        callId: "sdk-only",
+        runId: "r1",
+        firstSeq: 1,
+        lastSeq: 2,
+        name: "Read",
+        args: { file_path: "/tmp/not-in-transcript.txt" },
+        status: "completed",
+        result: "sdk-only result",
+        isError: false,
+      },
+      {
+        callId: "c1",
+        runId: "r1",
+        firstSeq: 3,
+        lastSeq: 4,
+        name: "Bash",
+        args: { command: "ls" },
+        status: "completed",
+        result: "file1\nfile2",
+        isError: false,
+      },
+    ]);
+
+    const turns: ParsedTurn[] = [
+      { role: "user", blocks: [{ type: "text", text: "prompt" }] },
+      {
+        role: "assistant",
+        blocks: [{ type: "tool_use", id: "j1", name: "Bash", input: { command: "ls" } }],
+      },
+    ];
+    const result = applySdkEnrichmentToTurns(turns, enrichment);
+    expect(result.toolCallsEnriched).toBe(1);
+    const block = turns[1].blocks[0];
+    if (block.type !== "tool_use") throw new Error("type narrow");
+    expect(block._result).toBe("file1\nfile2");
+  });
+
+  it("prefers the SDK call whose primary argument matches the block", () => {
+    const enrichment = makeEnrichment();
+    enrichment.toolCallsByRun.set("r1", [
+      {
+        callId: "read-a",
+        runId: "r1",
+        firstSeq: 1,
+        lastSeq: 2,
+        name: "Read",
+        args: { file_path: "/tmp/a.txt" },
+        status: "completed",
+        result: "contents of a",
+        isError: false,
+      },
+      {
+        callId: "read-b",
+        runId: "r1",
+        firstSeq: 3,
+        lastSeq: 4,
+        name: "Read",
+        args: { file_path: "/tmp/b.txt" },
+        status: "completed",
+        result: "contents of b",
+        isError: false,
+      },
+    ]);
+
+    const turns: ParsedTurn[] = [
+      { role: "user", blocks: [{ type: "text", text: "prompt" }] },
+      {
+        role: "assistant",
+        blocks: [{ type: "tool_use", id: "j1", name: "Read", input: { file_path: "/tmp/b.txt" } }],
+      },
+    ];
+    applySdkEnrichmentToTurns(turns, enrichment);
+    const block = turns[1].blocks[0];
+    if (block.type !== "tool_use") throw new Error("type narrow");
+    expect(block._result).toBe("contents of b");
+  });
+
   it("ignores assistant text that appears before any user prompt", () => {
     const turns: ParsedTurn[] = [
       {
@@ -694,5 +817,175 @@ describe("loadSdkAgentEnrichment + listSdkIndexDbPaths (integration with synthet
     expect(calls[0].name).toBe("Bash");
     expect(calls[0].result).toBe("hi");
     expect(calls[0].status).toBe("completed");
+  });
+});
+
+describe("SDK usage and tool timing", () => {
+  let tempRoot: string;
+
+  async function buildDb(
+    data: Parameters<typeof createSyntheticSdkIndexDb>[1],
+    hash: string,
+  ): Promise<string> {
+    const projectDir = join(
+      tempRoot,
+      ".cursor",
+      "projects",
+      "Users-tlei-usage-ws",
+      "sdk-agent-store",
+      hash,
+    );
+    await mkdir(projectDir, { recursive: true });
+    return createSyntheticSdkIndexDb(projectDir, data);
+  }
+
+  const agent = (dbPath: string) => ({
+    agentId: "agent-usage-1",
+    workspaceRef: "/Users/tlei/usage/ws",
+    status: "IDLE",
+    name: "usage-agent",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:01:00.000Z",
+    dbPath,
+  });
+
+  const toolEvents = (runId: string) => [
+    {
+      run_id: runId,
+      seq: 1,
+      created_at: "2026-01-01T00:00:02.000Z",
+      payload: {
+        schemaVersion: 1,
+        type: "sdk_message",
+        message: {
+          type: "tool_call",
+          call_id: "call_usage_1",
+          name: "shell",
+          status: "running",
+          args: { command: "echo hi" },
+        },
+      },
+    },
+    {
+      run_id: runId,
+      seq: 2,
+      created_at: "2026-01-01T00:00:05.500Z",
+      payload: {
+        schemaVersion: 1,
+        type: "sdk_message",
+        message: {
+          type: "tool_call",
+          call_id: "call_usage_1",
+          name: "shell",
+          status: "completed",
+          args: { command: "echo hi" },
+          result: { status: "success", value: { exitCode: 0, stdout: "hi\n", stderr: "" } },
+        },
+      },
+    },
+  ];
+
+  beforeAll(async () => {
+    tempRoot = await mkdtemp(join(tmpdir(), "vibe-replay-sdk-usage-"));
+  });
+
+  afterAll(async () => {
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("aggregates run usage and derives tool duration from event timestamps", async () => {
+    const dbPath = await buildDb(
+      {
+        agents: [{ agent_id: "agent-usage-1", workspace_ref: "/Users/tlei/usage/ws" }],
+        runs: [
+          {
+            run_id: "run-usage-1",
+            agent_id: "agent-usage-1",
+            turn_number: 1,
+            model: "composer-2",
+            started_at: "2026-01-01T00:00:01.000Z",
+            finished_at: "2026-01-01T00:00:30.000Z",
+            usage_json: JSON.stringify({
+              inputTokens: 120,
+              outputTokens: 40,
+              cacheReadTokens: 15,
+              cacheWriteTokens: 5,
+              reasoningTokens: 8,
+              totalTokens: 180,
+            }),
+          },
+          {
+            run_id: "run-usage-2",
+            agent_id: "agent-usage-1",
+            turn_number: 2,
+            model: "composer-2",
+            started_at: "2026-01-01T00:00:31.000Z",
+            finished_at: "2026-01-01T00:00:40.000Z",
+            usage_json: JSON.stringify({
+              inputTokens: 80,
+              outputTokens: 10,
+              cacheReadTokens: 5,
+              cacheWriteTokens: 0,
+            }),
+          },
+        ],
+        events: toolEvents("run-usage-1"),
+      },
+      "usage-new",
+    );
+
+    const { loadSdkAgentEnrichment } = await import("../src/cursor/sdk-reader.js");
+    const enrichment = await loadSdkAgentEnrichment(agent(dbPath));
+    if (!enrichment) throw new Error("guard");
+
+    expect(enrichment.tokenUsage).toEqual({
+      inputTokens: 200,
+      outputTokens: 50,
+      cacheCreationTokens: 5,
+      cacheReadTokens: 20,
+    });
+    expect(enrichment.tokenUsageByModel).toEqual({
+      "composer-2": {
+        inputTokens: 200,
+        outputTokens: 50,
+        cacheCreationTokens: 5,
+        cacheReadTokens: 20,
+      },
+    });
+
+    const calls = enrichment.toolCallsByRun.get("run-usage-1") ?? [];
+    expect(calls).toHaveLength(1);
+    expect(calls[0].durationMs).toBe(3_500);
+  });
+
+  it("still reads older SDK databases without a usage_json column", async () => {
+    const dbPath = await buildDb(
+      {
+        agents: [{ agent_id: "agent-usage-1", workspace_ref: "/Users/tlei/usage/ws" }],
+        runs: [
+          {
+            run_id: "run-legacy-1",
+            agent_id: "agent-usage-1",
+            turn_number: 1,
+            model: "composer-1",
+            started_at: "2026-01-01T00:00:01.000Z",
+            finished_at: "2026-01-01T00:00:11.000Z",
+          },
+        ],
+        events: toolEvents("run-legacy-1"),
+        legacyRunsSchema: true,
+      },
+      "usage-legacy",
+    );
+
+    const { loadSdkAgentEnrichment } = await import("../src/cursor/sdk-reader.js");
+    const enrichment = await loadSdkAgentEnrichment(agent(dbPath));
+    if (!enrichment) throw new Error("guard");
+
+    expect(enrichment.runs).toHaveLength(1);
+    expect(enrichment.tokenUsage).toBeUndefined();
+    expect(enrichment.tokenUsageByModel).toBeUndefined();
+    expect(enrichment.totalDurationMs).toBe(10_000);
+    expect((enrichment.toolCallsByRun.get("run-legacy-1") ?? [])[0]?.result).toBe("hi");
   });
 });

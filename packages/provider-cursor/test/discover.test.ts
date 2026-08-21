@@ -74,3 +74,56 @@ describe("cursor project directory decoding", () => {
     },
   );
 });
+
+describe("duplicate Cursor transcript discovery", () => {
+  it("merges paths for the same session ID without summing prompt counts", () => {
+    const base = {
+      provider: "cursor",
+      sessionId: "same-session",
+      slug: "same-ses",
+      version: "",
+      timestamp: "2026-08-20T10:00:00.000Z",
+      firstPrompt: "Inspect compatibility",
+      promptCount: 2,
+      toolCallCount: 3,
+    };
+    const merged = __testables.mergeDuplicateTranscriptSessions([
+      {
+        ...base,
+        project: "/repo-a",
+        cwd: "/repo-a",
+        lineCount: 100,
+        fileSize: 1_000,
+        filePath: "/cursor/a/same-session.jsonl",
+        filePaths: ["/cursor/a/same-session.jsonl"],
+        toolPaths: ["/cursor/a/tool-1.txt"],
+      },
+      {
+        ...base,
+        project: "/repo-b",
+        cwd: "/repo-b",
+        timestamp: "2026-08-20T11:00:00.000Z",
+        lineCount: 80,
+        fileSize: 800,
+        filePath: "/cursor/b/same-session.jsonl",
+        filePaths: ["/cursor/b/same-session.jsonl"],
+        toolPaths: ["/cursor/b/tool-2.txt"],
+      },
+    ]);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      sessionId: "same-session",
+      lineCount: 100,
+      promptCount: 2,
+      toolCallCount: 3,
+      fileSize: 1_000,
+      project: "/repo-a",
+    });
+    expect(merged[0].filePaths).toEqual([
+      "/cursor/a/same-session.jsonl",
+      "/cursor/b/same-session.jsonl",
+    ]);
+    expect(merged[0].toolPaths).toEqual(["/cursor/a/tool-1.txt", "/cursor/b/tool-2.txt"]);
+  });
+});

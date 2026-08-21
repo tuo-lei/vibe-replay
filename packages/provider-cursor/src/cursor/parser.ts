@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
@@ -196,6 +197,14 @@ async function parseCursorSessionWithDependencies(
       if (enrichment.totalDurationMs && !jsonlResult.totalDurationMs) {
         jsonlResult.totalDurationMs = enrichment.totalDurationMs;
       }
+      // SDK transcripts carry no usage of their own, so the index.db totals are
+      // the only token accounting available for these sessions.
+      if (enrichment.tokenUsage && !jsonlResult.tokenUsage) {
+        jsonlResult.tokenUsage = enrichment.tokenUsage;
+      }
+      if (enrichment.tokenUsageByModel && !jsonlResult.tokenUsageByModel) {
+        jsonlResult.tokenUsageByModel = enrichment.tokenUsageByModel;
+      }
     }
   }
   await attachCursorSubagents(jsonlResult, transcriptPaths, deps);
@@ -335,6 +344,8 @@ async function parseCursorJsonl(
   const parseWarnings: NonNullable<ProviderParseResult["parseWarnings"]> = [];
   const sortedTranscriptPaths = await sortByMtime(transcriptPaths);
   const sessionId = basename(sortedTranscriptPaths[sortedTranscriptPaths.length - 1], ".jsonl");
+  const firstTranscriptPathByRecord = new Map<string, string>();
+  let duplicateTranscriptRecords = 0;
 
   for (const filePath of sortedTranscriptPaths) {
     const content = await readFile(filePath, "utf-8");
@@ -343,6 +354,13 @@ async function parseCursorJsonl(
     for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
       const line = lines[lineIndex];
       if (!line.trim()) continue;
+      const recordKey = createHash("sha256").update(line.trim()).digest("base64");
+      const firstRecordPath = firstTranscriptPathByRecord.get(recordKey);
+      if (firstRecordPath && firstRecordPath !== filePath) {
+        duplicateTranscriptRecords++;
+        continue;
+      }
+      if (!firstRecordPath) firstTranscriptPathByRecord.set(recordKey, filePath);
       let obj: any;
       try {
         obj = JSON.parse(line);
@@ -489,8 +507,8 @@ async function parseCursorJsonl(
         ? await inferToolPaths(sortedTranscriptPaths)
         : [];
   const toolEvents = await loadToolEvents(toolPaths);
-  attachToolEvents(allTurns, toolEvents);
   attachToolResults(allTurns, toolResults, toolErrors, toolImages, deps);
+  attachToolEvents(allTurns, toolEvents, deps);
 
   // Derive slug from session ID
   const slug = sessionId.slice(0, 8);
@@ -514,6 +532,13 @@ async function parseCursorJsonl(
         "cursor/projects/agent-transcripts/*.jsonl",
         ...(hasToolData ? ["cursor/projects/agent-tools/*.txt"] : []),
       ],
+      ...(duplicateTranscriptRecords > 0
+        ? {
+            notes: [
+              `${duplicateTranscriptRecords} duplicate Cursor transcript records were omitted.`,
+            ],
+          }
+        : {}),
     },
     parseWarnings: parseWarnings.length > 0 ? parseWarnings : undefined,
   };
@@ -536,21 +561,31 @@ async function attachCursorSubagents(
   transcriptPaths: string[],
   deps: CursorParserDependencies,
 ): Promise<void> {
-  if (transcriptPaths.length === 0) return;
-
   const agentBlocks: ToolUseBlock[] = [];
   for (const turn of parsed.turns) {
     if (turn.role !== "assistant") continue;
     for (const block of turn.blocks) {
-      if (block.type === "tool_use" && block.name === "Agent" && !block._subAgent) {
+      if (block.type === "tool_use" && block.name === "Agent") {
         agentBlocks.push(block);
       }
     }
   }
   if (agentBlocks.length === 0) return;
+  const hasStructuredSubagents = agentBlocks.some((block) => !!block._subAgent);
+
+  // SQLite/global-state parsing can identify a structured child composer even
+  // when no transcript file is available. Preserve that metadata in the
+  // session summary rather than dropping it with the transcript enrichment.
+  if (transcriptPaths.length === 0) {
+    if (hasStructuredSubagents) appendCursorSubagentSummaries(parsed, agentBlocks);
+    return;
+  }
 
   const subagentPaths = await findCursorSubagentPaths(transcriptPaths);
-  if (subagentPaths.length === 0) return;
+  if (subagentPaths.length === 0) {
+    if (hasStructuredSubagents) appendCursorSubagentSummaries(parsed, agentBlocks);
+    return;
+  }
 
   const parseWarnings: NonNullable<ProviderParseResult["parseWarnings"]> = [
     ...(parsed.parseWarnings || []),
@@ -586,14 +621,27 @@ async function attachCursorSubagents(
     const block = agentBlocks[candidate.blockIndex];
     usedSubagents.add(candidate.subagentIndex);
     availableBlocks.delete(candidate.blockIndex);
-    block._subAgent = buildCursorSubagent(block, subagent);
+    block._subAgent = block._subAgent
+      ? mergeCursorSubagentTranscript(block._subAgent, subagent)
+      : buildCursorSubagent(block, subagent);
     attached++;
     attachedToolCalls += subagent.toolCalls;
   }
 
   if (parseWarnings.length > 0) parsed.parseWarnings = parseWarnings;
+  if (attached === 0 && !hasStructuredSubagents) return;
+  appendCursorSubagentSummaries(parsed, agentBlocks);
   if (attached === 0) return;
+  parsed.dataSourceInfo = withSupplement(
+    parsed.dataSourceInfo || defaultDataSourceInfo(parsed.dataSource),
+    `cursor subagent transcripts (${attached}/${subagents.length} linked, ${attachedToolCalls} tool calls)`,
+  );
+}
 
+function appendCursorSubagentSummaries(
+  parsed: ProviderParseResult,
+  agentBlocks: ToolUseBlock[],
+): void {
   const attachedSummaries = agentBlocks.flatMap((block) => {
     const subagent = block._subAgent;
     if (!subagent) {
@@ -636,10 +684,6 @@ async function attachCursorSubagents(
     summarizedIds.add(summary.agentId);
   }
   parsed.subAgentSummary = summaries;
-  parsed.dataSourceInfo = withSupplement(
-    parsed.dataSourceInfo || defaultDataSourceInfo(parsed.dataSource),
-    `cursor subagent transcripts (${attached}/${subagents.length} linked, ${attachedToolCalls} tool calls)`,
-  );
 }
 
 async function findCursorSubagentPaths(transcriptPaths: string[]): Promise<string[]> {
@@ -845,6 +889,19 @@ function buildCursorSubagent(
       : {}),
     prompt: typeof input.prompt === "string" ? input.prompt : transcript.sourcePrompt,
     ...(typeof input.model === "string" && input.model.trim() ? { model: input.model.trim() } : {}),
+    toolCalls: transcript.toolCalls,
+    thinkingBlocks: transcript.thinkingBlocks,
+    textResponses: transcript.textResponses,
+    scenes: transcript.scenes,
+  };
+}
+
+function mergeCursorSubagentTranscript(
+  structured: SubAgent,
+  transcript: ParsedCursorSubagentTranscript,
+): SubAgent {
+  return {
+    ...structured,
     toolCalls: transcript.toolCalls,
     thinkingBlocks: transcript.thinkingBlocks,
     textResponses: transcript.textResponses,
@@ -1234,14 +1291,21 @@ function inferToolName(result: string): string {
   return "ToolOutput";
 }
 
-function attachToolEvents(turns: ParsedTurn[], tools: ToolEvent[]): void {
+function attachToolEvents(
+  turns: ParsedTurn[],
+  tools: ToolEvent[],
+  deps: CursorParserDependencies,
+): void {
   const markerBlocks: Array<{ block: ToolUseBlock; turn: ParsedTurn; blockIndex: number }> = [];
+  const inlineBlocks: ToolUseBlock[] = [];
   for (const turn of turns) {
     if (turn.role !== "assistant") continue;
     for (let bi = 0; bi < turn.blocks.length; bi++) {
       const block = turn.blocks[bi];
       if (block.type === "tool_use" && block._isPendingMarker) {
         markerBlocks.push({ block, turn, blockIndex: bi });
+      } else if (block.type === "tool_use") {
+        inlineBlocks.push(block);
       }
     }
   }
@@ -1276,8 +1340,32 @@ function attachToolEvents(turns: ParsedTurn[], tools: ToolEvent[]): void {
     turn.blocks[blockIndex] = thinkingBlock;
   }
 
-  // Extra tool outputs with no matching marker → append as real tool calls
-  for (let i = paired; i < tools.length; i++) {
+  let nextToolIndex = paired;
+  // Current transcripts already contain structured tool_use blocks. A sidecar
+  // may fill a missing result only when its inferred tool name agrees; it must
+  // never become an additional synthetic call beside an inline call.
+  for (const block of inlineBlocks) {
+    const matchIndex = findCompatibleSidecarTool(tools, nextToolIndex, block.name);
+    if (matchIndex === -1) continue;
+    const tool = tools[matchIndex];
+    nextToolIndex = matchIndex + 1;
+    // Consume the sidecar belonging to an inline-resolved call as well. Without
+    // advancing here, consecutive same-name calls can reuse the first call's
+    // sidecar result when the later call is still unresolved.
+    if (typeof block._result === "string") continue;
+    block._result = tool.result;
+    block.input = { ...block.input, ...tool.input };
+    try {
+      block.input = deps.mapToolArgs(block.name, block.input, tool.result);
+    } catch {
+      // Keep the merged input when a provider-specific mapper cannot enrich it.
+    }
+  }
+
+  // Legacy transcripts with no inline tools depended on unmarked sidecars.
+  // Preserve that fallback, but suppress extras when structured calls exist.
+  if (inlineBlocks.length > 0) return;
+  for (let i = nextToolIndex; i < tools.length; i++) {
     const tool = tools[i];
     turns.push({
       role: "assistant",
@@ -1285,6 +1373,19 @@ function attachToolEvents(turns: ParsedTurn[], tools: ToolEvent[]): void {
       blocks: [toToolUseBlock(tool)],
     });
   }
+}
+
+function findCompatibleSidecarTool(
+  tools: ToolEvent[],
+  startIndex: number,
+  blockName: string,
+): number {
+  const editFamily = new Set(["Edit", "MultiEdit", "Write"]);
+  for (let i = startIndex; i < tools.length; i++) {
+    if (tools[i].name === blockName) return i;
+    if (editFamily.has(tools[i].name) && editFamily.has(blockName)) return i;
+  }
+  return -1;
 }
 
 function toToolUseBlock(tool: ToolEvent): ContentBlock {

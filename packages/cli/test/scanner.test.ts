@@ -6,6 +6,7 @@ import {
   aggregateProjectInsights,
   aggregateUserInsights,
   type SessionScanResult,
+  isPartialScanResult,
   scanSession,
   scanCacheEntryKey,
 } from "../src/scanner.js";
@@ -277,6 +278,50 @@ describe("scanSession", () => {
     });
     expect(result.promptCount).toBe(1);
     expect(result.toolCallCount).toBe(1);
+  });
+
+  it("uses provider-reported Cowork cost in scan results", async () => {
+    const path = join(tmpDir, "cowork-reported-cost.jsonl");
+    await writeFile(
+      path,
+      [
+        {
+          type: "user",
+          uuid: "cowork-cost-user",
+          session_id: "cowork-reported-cost",
+          _audit_timestamp: "2026-01-01T00:00:00.000Z",
+          message: { role: "user", content: "Calculate this session cost" },
+        },
+        {
+          type: "result",
+          subtype: "success",
+          uuid: "cowork-cost-run",
+          session_id: "cowork-reported-cost",
+          _audit_timestamp: "2026-01-01T00:00:06.000Z",
+          total_cost_usd: 0.35,
+          usage: {
+            input_tokens: 100,
+            output_tokens: 200,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+          },
+        },
+      ]
+        .map((line) => JSON.stringify(line))
+        .join("\n"),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "cowork-reported-cost",
+      provider: "claude-cowork",
+      project: "Cowork",
+      slug: "cowork-reported-cost",
+      filePaths: [path],
+      timestamp: "2026-01-01T00:00:00.000Z",
+    });
+
+    expect(result.costEstimate).toBe(0.35);
   });
 
   it("counts tool calls and edits", async () => {
@@ -609,6 +654,45 @@ describe("scanSession", () => {
         cacheReadTokens: 10,
       },
     });
+  });
+
+  it("marks Pi rich-parser fallback as partial and preserves discovery counts", async () => {
+    const missingPath = join(tmpDir, "missing-pi-session.jsonl");
+    const result = await scanSession({
+      sessionId: "pi-fallback-session",
+      provider: "pi",
+      project: "~/test/project",
+      slug: "pi-fallback",
+      filePaths: [missingPath],
+      sourceFilePath: missingPath,
+      discoveryPromptCount: 7,
+      discoveryToolCallCount: 19,
+      discoveryEditCount: 4,
+      discoveryModel: "roblox-llm",
+      discoveryDurationMs: 12_000,
+    });
+
+    expect(result.promptCount).toBe(7);
+    expect(result.toolCallCount).toBe(19);
+    expect(result.editCount).toBe(4);
+    expect(result.model).toBe("roblox-llm");
+    expect(result.durationMs).toBe(12_000);
+    expect(result.dataQualityNotes).toContain(
+      "Partial Pi scan: the rich parser failed, so available generic and discovery metadata was used.",
+    );
+  });
+
+  it("recognizes multi-word provider names in partial scan notes", () => {
+    expect(
+      isPartialScanResult({
+        dataQualityNotes: ["Partial Claude Cowork scan: rich parsing failed."],
+      }),
+    ).toBe(true);
+    expect(
+      isPartialScanResult({
+        dataQualityNotes: ["Cursor scan completed successfully."],
+      }),
+    ).toBe(false);
   });
 });
 

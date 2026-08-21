@@ -120,6 +120,8 @@ export function transformToReplay(
           const sa = block._subAgent;
           scene.subAgent = {
             agentId: sa.agentId,
+            parentComposerId: sa.parentComposerId,
+            toolCallId: sa.toolCallId,
             agentType: sa.agentType,
             description: sa.description,
             prompt: redactSecrets(redactPath(sa.prompt || "")),
@@ -149,9 +151,12 @@ export function transformToReplay(
     }
   }
 
-  // Estimate cost based on per-model pricing (USD)
+  // Cost in USD. A provider-reported total is authoritative; the local pricing
+  // table is only an estimate and cannot price unknown model generations.
   let costEstimate: number | undefined;
-  if (parsed.tokenUsageByModel) {
+  if (typeof parsed.reportedCostUsd === "number" && parsed.reportedCostUsd >= 0) {
+    costEstimate = parsed.reportedCostUsd;
+  } else if (parsed.tokenUsageByModel) {
     costEstimate = estimateCostIfKnown(parsed.tokenUsageByModel);
   } else if (parsed.tokenUsage) {
     costEstimate = estimateCostSimpleIfKnown(parsed.tokenUsage, parsed.model || "");
