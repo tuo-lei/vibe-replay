@@ -79,6 +79,25 @@ describe("scanResultToInsight", () => {
           },
         ],
         skillsUsed: ["replay"],
+        usageSummary: {
+          tools: { Read: 1 },
+          mcpServers: {},
+          mcpTools: {},
+          skills: { replay: 1 },
+          successCount: 1,
+          errorCount: 0,
+          totalDurationMs: 25,
+          durationCount: 1,
+        },
+        usageEvents: [
+          {
+            kind: "tool",
+            name: "Read",
+            status: "success",
+            durationMs: 25,
+            attribution: "explicit",
+          },
+        ],
       }),
     );
 
@@ -95,6 +114,8 @@ describe("scanResultToInsight", () => {
         },
       ],
       skillsUsed: ["replay"],
+      usageSummary: { tools: { Read: 1 }, skills: { replay: 1 } },
+      usageEvents: [{ kind: "tool", name: "Read", status: "success" }],
       filesModified: [{ file: "src/app.ts", count: 1 }],
       dataSource: "jsonl",
     });

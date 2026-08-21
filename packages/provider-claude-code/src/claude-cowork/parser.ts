@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { parseClaudeCodeLines } from "../claude-code/parser.js";
 import { getTimestampBounds } from "@vibe-replay/provider-core/duration";
 import type { ProviderParseResult, TokenUsage } from "@vibe-replay/provider-contract";
@@ -251,6 +252,51 @@ function coworkRetryError(
 }
 
 /**
+ * Cowork names MCP tool calls `mcp__<serverUuid>__<tool>`, so usage analytics
+ * would otherwise only ever show UUIDs. The sibling `local_{id}.json` carries
+ * `remoteMcpServersConfig` with the human name for each server UUID.
+ */
+async function readCoworkMcpServerNames(
+  auditPath?: string,
+): Promise<Record<string, string> | undefined> {
+  if (!auditPath) return undefined;
+  const metadataPath = `${dirname(auditPath)}.json`;
+  let raw: string;
+  try {
+    raw = await readFile(metadataPath, "utf-8");
+  } catch {
+    return undefined;
+  }
+
+  let servers: unknown;
+  try {
+    servers = (JSON.parse(raw) as { remoteMcpServersConfig?: unknown }).remoteMcpServersConfig;
+  } catch {
+    return undefined;
+  }
+  const serverEntries = Array.isArray(servers)
+    ? servers.map((server) => ({ key: undefined, value: server }))
+    : servers && typeof servers === "object"
+      ? Object.entries(servers as Record<string, unknown>).map(([key, value]) => ({ key, value }))
+      : [];
+  if (serverEntries.length === 0) return undefined;
+
+  const names: Record<string, string> = {};
+  for (const { key, value } of serverEntries) {
+    const { uuid: rawUuid, name: rawName } = (value || {}) as {
+      uuid?: unknown;
+      name?: unknown;
+    };
+    const uuid = typeof rawUuid === "string" && rawUuid ? rawUuid : key;
+    const name = typeof rawName === "string" ? rawName : undefined;
+    if (uuid && name) {
+      names[uuid] = name;
+    }
+  }
+  return Object.keys(names).length > 0 ? names : undefined;
+}
+
+/**
  * Parse a Cowork audit.jsonl. When invoked from the CLI picker, `sessionInfo`
  * carries the overlay metadata (title, timestamps, model) pulled from the
  * sibling `local_{id}.json` during discovery.
@@ -331,6 +377,9 @@ export async function parseClaudeCoworkSession(
   if (retryErrors.length > 0) {
     result.apiErrors = [...(result.apiErrors || []), ...retryErrors];
   }
+
+  const mcpServerNames = await readCoworkMcpServerNames(paths[0]);
+  if (mcpServerNames) result.mcpServerNames = mcpServerNames;
 
   // Overlay metadata that audit.jsonl does not carry but the sibling JSON does.
   // Only fall back to the overlay — parsed values always win when present.

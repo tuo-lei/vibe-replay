@@ -176,6 +176,40 @@ export const INSIGHTS_SCHEMA_VERSION = 2;
 /** Current replay JSON schema. Missing means a legacy v0 replay. */
 export const REPLAY_SCHEMA_VERSION = 1;
 
+export type UsageEventStatus = "success" | "error" | "unknown";
+
+/**
+ * Privacy-bounded record of one tool invocation or skill activation.
+ * Inputs and results intentionally stay in the source replay rather than this index.
+ */
+export interface UsageEvent {
+  kind: "tool" | "skill";
+  name: string;
+  rawName?: string;
+  turnIndex?: number;
+  timestamp?: string;
+  durationMs?: number;
+  status: UsageEventStatus;
+  mcpServer?: string;
+  mcpTool?: string;
+  skillName?: string;
+  parentAgentId?: string;
+  attribution: "explicit" | "parsed-name" | "session-metadata";
+}
+
+/** Per-session facet counts derived from usage events. */
+export interface SessionUsageSummary {
+  tools: Record<string, number>;
+  mcpServers: Record<string, number>;
+  /** Keys use the stable `server/tool` form. */
+  mcpTools: Record<string, number>;
+  skills: Record<string, number>;
+  successCount: number;
+  errorCount: number;
+  totalDurationMs: number;
+  durationCount: number;
+}
+
 /**
  * A single session's insights — lightweight metadata persisted locally so it
  * survives after source JSONL files are deleted (e.g. Claude Code 30-day cleanup).
@@ -214,6 +248,8 @@ export interface SessionInsight {
   prLinks?: PrLink[];
   skillsUsed?: string[];
   mcpServersUsed?: string[];
+  usageSummary?: SessionUsageSummary;
+  usageEvents?: UsageEvent[];
   subAgentCount: number;
   apiErrorCount: number;
   compactionCount: number;
@@ -269,6 +305,9 @@ export interface SessionScanWireData {
   subAgentCount: number;
   entrypoint?: string;
   prLinks?: PrLink[];
+  skillsUsed?: string[];
+  mcpServersUsed?: string[];
+  usageSummary?: SessionUsageSummary;
   dataSource?: DataSource;
   dataQualityNotes?: string[];
 }

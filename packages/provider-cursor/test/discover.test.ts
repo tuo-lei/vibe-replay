@@ -59,6 +59,26 @@ describe("cursor project directory decoding", () => {
     ).resolves.toBe(slashPreferred);
   });
 
+  it("resolves directories whose leading dot Cursor drops when encoding", async () => {
+    const root = await makeTempRoot();
+    const workspace = join(root, ".cursor-sdk-control", "artifacts");
+    await mkdir(workspace, { recursive: true });
+
+    const encoded = encodeCursorProjectPath(workspace).replace("-.", "-");
+    await expect(__testables.decodeProjectDir(encoded)).resolves.toBe(workspace);
+  });
+
+  it("keeps a deleted leaf directory in one piece once its parent resolves", async () => {
+    const root = await makeTempRoot();
+    const parent = join(root, "artifacts");
+    await mkdir(parent, { recursive: true });
+
+    const deleted = join(parent, "slack-inbox-5433add3-d507-4e0a-8f71-1bd30c541913");
+    await expect(__testables.decodeProjectDir(encodeCursorProjectPath(deleted))).resolves.toBe(
+      deleted,
+    );
+  });
+
   it.skipIf(IS_WINDOWS)("falls back to slash-decoded paths when no real path matches", async () => {
     await expect(__testables.decodeProjectDir("-definitely-missing-cursor-path")).resolves.toBe(
       "/definitely/missing/cursor/path",

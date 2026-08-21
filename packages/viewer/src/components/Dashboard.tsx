@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useOutsideClick } from "../hooks/useOutsideClick";
 import { ALL_PROJECTS, usePanelFilters } from "../hooks/usePanelFilters";
-import type { SessionSummary, SourceSession } from "../types";
+import type { SessionSummary, SessionUsageSummary, SourceSession } from "../types";
 import DashboardHome from "./DashboardHome";
 import {
   applyDashboardFacetFilters,
@@ -11,6 +11,7 @@ import {
   NO_REPO_FILTER,
   repoFilterValue,
 } from "../engine/dashboard-filtering";
+import { summarizeSessionUsage, type UsageEntry } from "../engine/session-usage";
 import {
   cleanPrompt,
   computeProjectLabels,
@@ -25,6 +26,7 @@ import {
   fetchWithRetry,
   getErrorMessage,
   getFriendlyErrorMessage,
+  isAgentRunWorkspace,
   isCacheFresh,
   navigateTo,
   navigateToLive,
@@ -79,13 +81,24 @@ interface ScanResultsPayload {
 }
 let scanResultsCache: ScanResultsPayload | null = null;
 let scanResultsFetchPromise: Promise<ScanResultsPayload | null> | null = null;
+let scanResultsRequestVersion = 0;
 
-function fetchScanResults(): Promise<ScanResultsPayload | null> {
+function fetchScanResults(forceRefresh = false): Promise<ScanResultsPayload | null> {
+  if (forceRefresh) {
+    scanResultsCache = null;
+    scanResultsFetchPromise = null;
+    scanResultsRequestVersion++;
+  }
   if (scanResultsCache) return Promise.resolve(scanResultsCache);
   if (scanResultsFetchPromise) return scanResultsFetchPromise;
-  scanResultsFetchPromise = fetch("/api/scan/results")
+  const requestVersion = ++scanResultsRequestVersion;
+  const request = fetch("/api/scan/results")
     .then((r) => (r.ok ? r.json() : null))
     .then((data) => {
+      // A usage-backfill refresh may have superseded this request while it was
+      // in flight. Do not let the older response repopulate the module cache
+      // or overwrite the caller's newly indexed facet data.
+      if (requestVersion !== scanResultsRequestVersion) return null;
       const payload: ScanResultsPayload = {
         results: data?.results ?? null,
         finishedAt: data?.finishedAt,
@@ -93,13 +106,17 @@ function fetchScanResults(): Promise<ScanResultsPayload | null> {
       scanResultsCache = payload;
       // Invalidate after 30s so fresh data can come in
       setTimeout(() => {
+        if (requestVersion !== scanResultsRequestVersion) return;
         scanResultsCache = null;
-        scanResultsFetchPromise = null;
       }, 30_000);
       return payload;
     })
-    .catch(() => null);
-  return scanResultsFetchPromise;
+    .catch(() => null)
+    .finally(() => {
+      if (requestVersion === scanResultsRequestVersion) scanResultsFetchPromise = null;
+    });
+  scanResultsFetchPromise = request;
+  return request;
 }
 
 /** Per-session scan result (from background scanner) */
@@ -124,6 +141,7 @@ export interface SessionScanData {
   permissionMode?: string;
   skillsUsed?: string[];
   mcpServersUsed?: string[];
+  usageSummary?: SessionUsageSummary;
   model?: string;
   gitBranch?: string;
   startTime?: string;
@@ -1504,6 +1522,9 @@ const SESSION_RENDER_BATCH_SIZE = 100;
 /** Only surface the "Watch live" CTA for sessions newer than this (24h). */
 const LIVE_RECENT_MS = 24 * 60 * 60 * 1000;
 
+/** Project rows shown before the sidebar collapses the rest behind a toggle. */
+const PROJECT_FACET_MAX = 8;
+
 function repoFilterLabel(repo: string): string {
   return repo === NO_REPO_FILTER ? "No repo" : repo;
 }
@@ -1523,6 +1544,28 @@ function facetCountMap<T>(items: T[], keyFor: (session: T) => string): Map<strin
     counts.set(key, (counts.get(key) || 0) + 1);
   }
   return counts;
+}
+
+function multiFacetCountMap<T>(
+  items: T[],
+  valuesFor: (session: T) => readonly string[],
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    for (const value of new Set(valuesFor(item))) {
+      counts.set(value, (counts.get(value) || 0) + 1);
+    }
+  }
+  return counts;
+}
+
+function usageFacetValues(scanData?: SessionScanData) {
+  return {
+    tools: Object.keys(scanData?.usageSummary?.tools || {}),
+    mcpServers: Object.keys(scanData?.usageSummary?.mcpServers || {}),
+    mcpTools: Object.keys(scanData?.usageSummary?.mcpTools || {}),
+    skills: Object.keys(scanData?.usageSummary?.skills || {}),
+  };
 }
 
 function sortedFacetEntries(counts: Map<string, number>) {
@@ -1580,6 +1623,8 @@ function FacetSection({
   leadingFor,
   titleFor,
   max = 12,
+  nested = false,
+  variant = "rows",
 }: {
   title: string;
   entries: Array<[string, number]>;
@@ -1589,45 +1634,83 @@ function FacetSection({
   leadingFor?: (value: string) => ReactNode;
   titleFor?: (value: string) => string;
   max?: number;
+  /** Renders without the section divider, for a facet that refines the one above. */
+  nested?: boolean;
+  /** "pills" wraps several values per line — for short names in long lists. */
+  variant?: "rows" | "pills";
 }) {
   const [expanded, setExpanded] = useState(false);
   useEffect(() => {
     if (entries.length <= max) setExpanded(false);
   }, [entries.length, max]);
   const visible = expanded ? entries : entries.slice(0, max);
+  const pills = variant === "pills";
   return (
-    <div className="space-y-1 border-t border-terminal-border-subtle pt-4">
+    <div className={`space-y-1 pt-4 ${nested ? "" : "border-t border-terminal-border-subtle"}`}>
       <FacetHeader title={title} count={entries.length} />
-      {visible.map(([value, count]) => {
-        const active = selected.includes(value);
-        return (
-          <button
-            key={value}
-            aria-pressed={active}
-            onClick={() => onToggle(value)}
-            title={titleFor?.(value) || labelFor(value)}
-            className={`w-full text-left px-3 py-2 rounded-lg transition-all duration-200 ease-material flex items-center justify-between gap-2 group ${
-              active
-                ? "bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
-                : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface"
-            }`}
-          >
-            <span className="min-w-0 flex items-center gap-2">
-              {leadingFor && <span className="shrink-0">{leadingFor(value)}</span>}
-              <span className="text-xs font-sans truncate font-medium">{labelFor(value)}</span>
-            </span>
-            <span
-              className={`tabular-nums px-1.5 py-0.5 rounded-md text-xs shrink-0 ${
+      {/* Expanded lists scroll inside the section instead of pushing every other
+          facet (project path especially) off the bottom of the sidebar. The cap
+          stays well above the collapsed height so expanding always shows more. */}
+      <div
+        className={`${pills ? "flex flex-wrap gap-1.5 px-3 pb-0.5" : "space-y-1"} ${
+          expanded ? "max-h-80 overflow-y-auto" : ""
+        }`}
+      >
+        {visible.map(([value, count]) => {
+          const active = selected.includes(value);
+          if (pills) {
+            return (
+              <button
+                key={value}
+                aria-pressed={active}
+                onClick={() => onToggle(value)}
+                title={`${titleFor?.(value) || labelFor(value)} · ${count}`}
+                className={`max-w-full inline-flex items-center gap-1.5 rounded-full border px-2 py-1 transition-all duration-200 ease-material ${
+                  active
+                    ? "border-terminal-green bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
+                    : "border-terminal-border-subtle bg-terminal-surface text-terminal-dim hover:border-terminal-border hover:text-terminal-text"
+                }`}
+              >
+                <span className="text-xs font-sans font-medium truncate">{labelFor(value)}</span>
+                <span
+                  className={`tabular-nums text-[10px] font-mono shrink-0 ${
+                    active ? "text-terminal-green" : "text-terminal-dimmer"
+                  }`}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          }
+          return (
+            <button
+              key={value}
+              aria-pressed={active}
+              onClick={() => onToggle(value)}
+              title={titleFor?.(value) || labelFor(value)}
+              className={`w-full text-left px-3 py-2 rounded-lg transition-all duration-200 ease-material flex items-center justify-between gap-2 group ${
                 active
-                  ? "bg-terminal-green-emphasis text-terminal-green"
-                  : "bg-terminal-surface text-terminal-dimmer group-hover:text-terminal-dim"
+                  ? "bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
+                  : "text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface"
               }`}
             >
-              {count}
-            </span>
-          </button>
-        );
-      })}
+              <span className="min-w-0 flex items-center gap-2">
+                {leadingFor && <span className="shrink-0">{leadingFor(value)}</span>}
+                <span className="text-xs font-sans truncate font-medium">{labelFor(value)}</span>
+              </span>
+              <span
+                className={`tabular-nums px-1.5 py-0.5 rounded-md text-xs shrink-0 ${
+                  active
+                    ? "bg-terminal-green-emphasis text-terminal-green"
+                    : "bg-terminal-surface text-terminal-dimmer group-hover:text-terminal-dim"
+                }`}
+              >
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
       {entries.length > max && !expanded && (
         <button
           onClick={() => setExpanded(true)}
@@ -1654,6 +1737,150 @@ function FacetSection({
 // re-created on every render (avoids remount churn + no-unstable-nested-components).
 const facetProviderLeading = (provider: string) => <ProviderBadge provider={provider} compact />;
 
+function UsageChip({
+  entry,
+  selected,
+  onToggle,
+}: {
+  entry: UsageEntry;
+  selected: boolean;
+  onToggle: (name: string) => void;
+}) {
+  return (
+    <button
+      onClick={(e) => {
+        // The whole card is a click target that opens the session.
+        e.stopPropagation();
+        onToggle(entry.name);
+      }}
+      onKeyDown={(e) => e.stopPropagation()}
+      title={`Filter sessions by ${entry.name}`}
+      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md transition-colors duration-200 ${
+        selected
+          ? "bg-terminal-green-subtle text-terminal-green"
+          : "bg-terminal-surface-2 text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover"
+      }`}
+    >
+      <span className="truncate max-w-[15rem]">{entry.name}</span>
+      <span className="text-terminal-dimmer tabular-nums">{entry.count}</span>
+    </button>
+  );
+}
+
+/**
+ * Per-session tool/MCP/skill breakdown, collapsed by default so the list stays
+ * scannable. Counts come from the scan summary that already ships with the
+ * session list, so expanding costs no extra request.
+ */
+function SessionUsageDetails({
+  summary,
+  selectedTools,
+  selectedMcpTools,
+  selectedSkills,
+  onToolToggle,
+  onMcpToolToggle,
+  onSkillToggle,
+}: {
+  summary?: SessionUsageSummary;
+  selectedTools: readonly string[];
+  selectedMcpTools: readonly string[];
+  selectedSkills: readonly string[];
+  onToolToggle: (name: string) => void;
+  onMcpToolToggle: (name: string) => void;
+  onSkillToggle: (name: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const breakdown = useMemo(() => summarizeSessionUsage(summary), [summary]);
+  if (!breakdown) return null;
+
+  const headline = [
+    breakdown.totalCalls > 0 ? `${breakdown.totalCalls} calls` : null,
+    breakdown.mcpServerCount > 0
+      ? `${breakdown.mcpServerCount} MCP server${breakdown.mcpServerCount !== 1 ? "s" : ""}`
+      : null,
+    breakdown.skills.length > 0 ? `${Object.keys(summary?.skills || {}).length} skills` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <div className="text-xs font-mono">
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          setExpanded((v) => !v);
+        }}
+        onKeyDown={(e) => e.stopPropagation()}
+        className="inline-flex items-center gap-1.5 text-terminal-dimmer hover:text-terminal-text transition-colors duration-200"
+        aria-expanded={expanded}
+      >
+        <span className={`transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}>
+          ›
+        </span>
+        <span>usage</span>
+        <span className="text-terminal-dim">{headline}</span>
+      </button>
+
+      {expanded && (
+        <div className="mt-2 space-y-1.5 pl-3.5">
+          {breakdown.tools.length > 0 && (
+            <div className="flex items-start gap-2 flex-wrap">
+              <span className="text-terminal-dimmer shrink-0 w-10">tools</span>
+              {breakdown.tools.map((entry) => (
+                <UsageChip
+                  key={entry.name}
+                  entry={entry}
+                  selected={selectedTools.includes(entry.name)}
+                  onToggle={onToolToggle}
+                />
+              ))}
+            </div>
+          )}
+          {breakdown.mcpTools.length > 0 && (
+            <div className="flex items-start gap-2 flex-wrap">
+              <span className="text-terminal-dimmer shrink-0 w-10">mcp</span>
+              {breakdown.mcpTools.map((entry) => (
+                <UsageChip
+                  key={entry.name}
+                  entry={entry}
+                  selected={selectedMcpTools.includes(entry.name)}
+                  onToggle={onMcpToolToggle}
+                />
+              ))}
+            </div>
+          )}
+          {breakdown.skills.length > 0 && (
+            <div className="flex items-start gap-2 flex-wrap">
+              <span className="text-terminal-dimmer shrink-0 w-10">skills</span>
+              {breakdown.skills.map((entry) => (
+                <UsageChip
+                  key={entry.name}
+                  entry={entry}
+                  selected={selectedSkills.includes(entry.name)}
+                  onToggle={onSkillToggle}
+                />
+              ))}
+            </div>
+          )}
+          <div className="flex items-center gap-3 text-terminal-dimmer tabular-nums">
+            {breakdown.successCount > 0 && (
+              <span className="text-terminal-green">{breakdown.successCount} ok</span>
+            )}
+            {breakdown.errorCount > 0 && (
+              <span className="text-terminal-red">{breakdown.errorCount} failed</span>
+            )}
+            {breakdown.avgDurationMs !== undefined && (
+              <span title="Average duration per recorded call">
+                {formatDuration(breakdown.avgDurationMs)} avg
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SessionsPanel() {
   const [sources, setSources] = useState<SourceSession[]>([]);
   const [scanResultsBySlug, setScanResultsBySlug] = useState<Record<string, SessionScanData>>({});
@@ -1666,24 +1893,40 @@ function SessionsPanel() {
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const [refreshClockMs, setRefreshClockMs] = useState(() => Date.now());
+  const [projectsExpanded, setProjectsExpanded] = useState(false);
   const {
     selectedProject,
     filter,
     showArchived,
+    showAgentRuns,
     selectedProviders,
     selectedRepos,
+    selectedTools,
+    selectedMcpServers,
+    selectedMcpTools,
+    selectedSkills,
     handleProjectChange,
     handleFilterChange,
     handleProviderSet,
     handleProviderToggle,
     handleRepoSet,
     handleRepoToggle,
+    handleToolToggle,
+    handleMcpServerToggle,
+    handleMcpToolToggle,
+    handleSkillToggle,
     handleToggleArchived,
+    handleToggleAgentRuns,
     handleClearAllFilters,
   } = usePanelFilters();
 
   // Background scan + insights (shared singleton context)
   const { scanStatus } = useScanInsightsContext();
+  const usageBackfillKey = scanStatus?.usageBackfill
+    ? scanStatus.usageBackfill.running
+      ? "running"
+      : "done"
+    : "none";
 
   // Roll worktree paths up to the parent project so URL navigation to a
   // (possibly cleaned-up) worktree path still hits the parent's data.
@@ -1696,6 +1939,7 @@ function SessionsPanel() {
     source: SourceSession;
     scanData: SessionScanData | null;
   } | null>(null);
+  const scanResultsRefreshRef = useRef({ running: false, usageBackfillKey: "none" });
   // When another panel (Projects → Timeline / Hot Files) opens a session via
   // the `vibe-open-session` event, route the slug into the popup. Two paths:
   //   1. If SessionsPanel just mounted (e.g. tab switched from Projects),
@@ -1807,8 +2051,16 @@ function SessionsPanel() {
   useEffect(() => {
     if (sources.length === 0) return;
     let cancelled = false;
-    const loadScanResults = async () => {
-      const payload = await fetchScanResults();
+    const scanRunning = scanStatus?.running === true;
+    const forceRefresh =
+      scanResultsRefreshRef.current.running !== scanRunning ||
+      scanResultsRefreshRef.current.usageBackfillKey !== usageBackfillKey;
+    scanResultsRefreshRef.current = { running: scanRunning, usageBackfillKey };
+    const loadScanResults = async (refresh = false) => {
+      // The fast pass and usage backfill both update the same result endpoint;
+      // invalidate the short-lived module cache when that phase changes so
+      // facets do not stay blind to newly indexed usage for 30 seconds.
+      const payload = await fetchScanResults(refresh);
       if (cancelled || !payload?.results) return;
       setScanFinishedAt(payload.finishedAt ?? null);
       setScanResultsBySlug(
@@ -1817,18 +2069,18 @@ function SessionsPanel() {
         ),
       );
     };
-    void loadScanResults();
+    void loadScanResults(forceRefresh);
     const timer = window.setInterval(
       () => {
         void loadScanResults();
       },
-      scanStatus?.running ? 5000 : 30000,
+      scanStatus?.running || usageBackfillKey === "running" ? 5000 : 30000,
     );
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [scanStatus?.running, sources.length]);
+  }, [scanStatus?.running, usageBackfillKey, sources.length]);
 
   useEffect(() => {
     if (!loading && !hasCursorSources && !wasEnrichingRef.current) return;
@@ -1942,7 +2194,18 @@ function SessionsPanel() {
 
   // Visible sessions (excluding archived unless toggled)
   const archivedCount = sources.filter((s) => archivedSlugs.has(s.slug)).length;
-  const visibleSources = showArchived ? sources : sources.filter((s) => !archivedSlugs.has(s.slug));
+  const unarchivedSources = showArchived
+    ? sources
+    : sources.filter((s) => !archivedSlugs.has(s.slug));
+  // One-off scratch workspaces are hidden by default: a machine that reviews
+  // PRs or triages alerts on a schedule accumulates far more of them than real
+  // projects, and each one is a single session the user never opened by hand.
+  const agentRunCount = new Set(
+    unarchivedSources.filter((s) => isAgentRunWorkspace(s.project)).map((s) => s.project),
+  ).size;
+  const visibleSources = showAgentRuns
+    ? unarchivedSources
+    : unarchivedSources.filter((s) => !isAgentRunWorkspace(s.project));
 
   const selectedProviderSet = new Set(selectedProviders);
   const selectedRepoSet = new Set(selectedRepos);
@@ -1957,6 +2220,7 @@ function SessionsPanel() {
     const scanData = scanResultsBySlug[s.slug];
     const displayTitle = sourceDisplayTitle(s, scanData);
     const prompts = sessionPromptPreview(s, scanData, displayTitle).join(" ");
+    const usage = usageFacetValues(scanData);
     return [
       s.slug,
       s.title,
@@ -1971,26 +2235,73 @@ function SessionsPanel() {
       s.model,
       scanData?.model,
       scanData?.gitBranch,
+      ...usage.tools,
+      ...usage.mcpServers,
+      ...usage.mcpTools,
+      ...usage.skills,
     ]
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(query));
   };
 
   const searchMatchedSources = visibleSources.filter(matchesSearchFilter);
-  const providerFacetSources = searchMatchedSources.filter(
+  const usageEnrichedSources = searchMatchedSources.map((source) => ({
+    ...source,
+    ...usageFacetValues(scanResultsBySlug[source.slug]),
+  }));
+  const usageMatchedSources = applyDashboardFacetFilters(usageEnrichedSources, {
+    selectedProviders: [],
+    selectedRepos: [],
+    selectedProjectKey: ALL_PROJECTS,
+    allProjectsKey: ALL_PROJECTS,
+    rollupProject,
+    selectedTools,
+    selectedMcpServers,
+    selectedMcpTools,
+    selectedSkills,
+  });
+  const providerFacetSources = usageMatchedSources.filter(
     (s) => matchesRepoFilter(s) && matchesProjectFilter(s),
   );
-  const repoFacetSources = searchMatchedSources.filter(
+  const repoFacetSources = usageMatchedSources.filter(
     (s) => matchesProviderFilter(s) && matchesProjectFilter(s),
   );
-  const projectFacetSources = searchMatchedSources.filter(
+  const projectFacetSources = usageMatchedSources.filter(
     (s) => matchesProviderFilter(s) && matchesRepoFilter(s),
+  );
+  const usageFacetSources = usageEnrichedSources.filter(
+    (s) => matchesProviderFilter(s) && matchesRepoFilter(s) && matchesProjectFilter(s),
   );
 
   const providerEntries = sortedFacetEntries(
     facetCountMap(providerFacetSources, (s) => s.provider),
   );
   const repoEntries = sortedFacetEntries(facetCountMap(repoFacetSources, repoFilterValue));
+  const toolEntries = sortedFacetEntries(
+    multiFacetCountMap(usageFacetSources, (source) => source.tools),
+  );
+  const mcpServerEntries = sortedFacetEntries(
+    multiFacetCountMap(usageFacetSources, (source) => source.mcpServers),
+  );
+  const mcpToolEntries = sortedFacetEntries(
+    multiFacetCountMap(usageFacetSources, (source) => source.mcpTools),
+  );
+  const skillEntries = sortedFacetEntries(
+    multiFacetCountMap(usageFacetSources, (source) => source.skills),
+  );
+
+  const showMcpToolFacet = selectedMcpServers.length > 0 || selectedMcpTools.length > 0;
+  // Under a selected server the `server/` prefix is the same on every row.
+  const mcpToolFacetLabel = (value: string) => {
+    const server = selectedMcpServers.find((s) => value.startsWith(`${s}/`));
+    return server ? value.slice(server.length + 1) : value;
+  };
+  const scopedMcpToolEntries =
+    selectedMcpServers.length > 0
+      ? mcpToolEntries.filter(([value]) =>
+          selectedMcpServers.some((server) => value.startsWith(`${server}/`)),
+        )
+      : mcpToolEntries;
 
   // Group by project, rolling up auto-created Claude agent worktrees under
   // their parent project so the sidebar isn't drowned by sandbox dirs. The
@@ -2011,14 +2322,30 @@ function SessionsPanel() {
   // Compute disambiguated labels for projects
   const projectLabels = computeProjectLabels(projectEntries.map(([p]) => p));
 
+  // Hundreds of projects would otherwise bury every facet below this one.
+  // The selected project stays visible even when it ranks past the cutoff.
+  const visibleProjectEntries = projectsExpanded
+    ? projectEntries
+    : projectEntries
+        .slice(0, PROJECT_FACET_MAX)
+        .concat(
+          projectEntries
+            .slice(PROJECT_FACET_MAX)
+            .filter(([project]) => project === selectedProjectKey),
+        );
+
   // Final list applies every selected facet directly. The facet-specific
   // intermediate arrays above are only for sidebar counts.
-  const filtered = applyDashboardFacetFilters(searchMatchedSources, {
+  const filtered = applyDashboardFacetFilters(usageEnrichedSources, {
     selectedProviders,
     selectedRepos,
     selectedProjectKey,
     allProjectsKey: ALL_PROJECTS,
     rollupProject,
+    selectedTools,
+    selectedMcpServers,
+    selectedMcpTools,
+    selectedSkills,
   });
   const refreshAge = lastRefreshedAt ? formatCompactAge(lastRefreshedAt, refreshClockMs) : null;
   const priorityEnrichmentSlugs = new Set(filtered.slice(0, 25).map((session) => session.slug));
@@ -2026,6 +2353,10 @@ function SessionsPanel() {
     Boolean(filter) ||
     selectedProviders.length > 0 ||
     selectedRepos.length > 0 ||
+    selectedTools.length > 0 ||
+    selectedMcpServers.length > 0 ||
+    selectedMcpTools.length > 0 ||
+    selectedSkills.length > 0 ||
     selectedProjectKey !== ALL_PROJECTS;
   const [renderLimit, setRenderLimit] = useState(SESSION_RENDER_BATCH_SIZE);
   const providerFilterKey = selectedProviders.join("\0");
@@ -2034,12 +2365,28 @@ function SessionsPanel() {
     filter,
     providerFilterKey,
     repoFilterKey,
+    selectedTools.join("\0"),
+    selectedMcpServers.join("\0"),
+    selectedMcpTools.join("\0"),
+    selectedSkills.join("\0"),
     selectedProjectKey,
     showArchived ? "archived" : "active",
+    showAgentRuns ? "agent-runs" : "no-agent-runs",
   ].join("\0");
   useEffect(() => {
     setRenderLimit(SESSION_RENDER_BATCH_SIZE);
-  }, [filter, providerFilterKey, repoFilterKey, selectedProjectKey, showArchived]);
+  }, [
+    filter,
+    providerFilterKey,
+    repoFilterKey,
+    selectedTools,
+    selectedMcpServers,
+    selectedMcpTools,
+    selectedSkills,
+    selectedProjectKey,
+    showArchived,
+    showAgentRuns,
+  ]);
   const renderedSessions = filtered.slice(0, renderLimit);
   const remainingRenderCount = Math.max(0, filtered.length - renderedSessions.length);
 
@@ -2187,79 +2534,156 @@ function SessionsPanel() {
           <div className="space-y-1 border-t border-terminal-border-subtle pt-4">
             <FacetHeader title="Project path" count={projectEntries.length} />
 
-            {projectEntries.map(([project, sessions]) => {
-              const replayCount = sessions.filter((s) => s.existingReplay).length;
-              const isActive = selectedProjectKey === project;
-              const label = projectFilterLabel(project, projectLabels);
-              // After worktree rollup, sessions[0] may be from a deleted worktree;
-              // treat the parent as existing if any session reports it exists.
-              const exists = sessions.some((s) => s.projectExists !== false);
-              const isGit = sessions.some((s) => s.isGitRepo || s.gitBranch || s.gitRepo);
-              return (
-                <button
-                  key={project}
-                  onClick={() => handleProjectChange(isActive ? ALL_PROJECTS : project)}
-                  title={project}
-                  className={`w-full text-left px-3 py-2.5 rounded-lg transition-all duration-200 ease-material group ${
-                    isActive
-                      ? "bg-terminal-green-subtle shadow-layer-sm"
-                      : "hover:bg-terminal-surface"
-                  } ${!exists ? "opacity-50" : ""}`}
-                >
-                  <div className="flex items-center justify-between gap-1.5">
-                    <span
-                      className={`text-xs font-sans truncate flex items-center gap-1.5 ${
-                        isActive
-                          ? "text-terminal-green font-medium"
-                          : !exists
-                            ? "text-terminal-dim"
-                            : "text-terminal-text group-hover:text-terminal-text"
-                      }`}
-                    >
-                      {isGit && (
-                        <svg
-                          width="12"
-                          height="12"
-                          viewBox="0 0 16 16"
-                          fill="currentColor"
-                          className={`shrink-0 ${isActive ? "opacity-70" : "opacity-40"}`}
-                        >
-                          <path
-                            fillRule="evenodd"
-                            d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
-                          />
-                        </svg>
-                      )}
-                      {label}
-                    </span>
-                    <span
-                      className={`tabular-nums px-1.5 py-0.5 rounded-md text-xs shrink-0 ${
-                        isActive
-                          ? "bg-terminal-green-emphasis text-terminal-green"
-                          : "bg-terminal-surface text-terminal-dimmer"
-                      }`}
-                    >
-                      {sessions.length}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 mt-1 ml-0.5">
-                    <span
-                      className={`text-xs font-mono truncate ${isActive ? "text-terminal-dim" : "text-terminal-dimmer"}`}
-                    >
-                      {timeAgo(sessions[0]?.timestamp || "")}
-                    </span>
-                    {replayCount > 0 && (
+            {/* The scroll cap has to clear the collapsed height (PROJECT_FACET_MAX
+                two-line rows ≈ 320px) or expanding would show fewer rows. */}
+            <div
+              className={projectsExpanded ? "max-h-[30rem] overflow-y-auto space-y-1" : "space-y-1"}
+            >
+              {visibleProjectEntries.map(([project, sessions]) => {
+                const replayCount = sessions.filter((s) => s.existingReplay).length;
+                const isActive = selectedProjectKey === project;
+                const label = projectFilterLabel(project, projectLabels);
+                // After worktree rollup, sessions[0] may be from a deleted worktree;
+                // treat the parent as existing if any session reports it exists.
+                const exists = sessions.some((s) => s.projectExists !== false);
+                const isGit = sessions.some((s) => s.isGitRepo || s.gitBranch || s.gitRepo);
+                return (
+                  <button
+                    key={project}
+                    onClick={() => handleProjectChange(isActive ? ALL_PROJECTS : project)}
+                    title={project}
+                    className={`w-full text-left px-3 py-2.5 rounded-lg transition-all duration-200 ease-material group ${
+                      isActive
+                        ? "bg-terminal-green-subtle shadow-layer-sm"
+                        : "hover:bg-terminal-surface"
+                    } ${!exists ? "opacity-50" : ""}`}
+                  >
+                    <div className="flex items-center justify-between gap-1.5">
                       <span
-                        className={`text-xs font-mono ${isActive ? "text-terminal-green" : "text-terminal-dimmer"}`}
+                        className={`text-xs font-sans truncate flex items-center gap-1.5 ${
+                          isActive
+                            ? "text-terminal-green font-medium"
+                            : !exists
+                              ? "text-terminal-dim"
+                              : "text-terminal-text group-hover:text-terminal-text"
+                        }`}
                       >
-                        {replayCount} {replayCount === 1 ? "replay" : "replays"}
+                        {isGit && (
+                          <svg
+                            width="12"
+                            height="12"
+                            viewBox="0 0 16 16"
+                            fill="currentColor"
+                            className={`shrink-0 ${isActive ? "opacity-70" : "opacity-40"}`}
+                          >
+                            <path
+                              fillRule="evenodd"
+                              d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
+                            />
+                          </svg>
+                        )}
+                        {label}
                       </span>
-                    )}
-                  </div>
-                </button>
-              );
-            })}
+                      <span
+                        className={`tabular-nums px-1.5 py-0.5 rounded-md text-xs shrink-0 ${
+                          isActive
+                            ? "bg-terminal-green-emphasis text-terminal-green"
+                            : "bg-terminal-surface text-terminal-dimmer"
+                        }`}
+                      >
+                        {sessions.length}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-1 ml-0.5">
+                      <span
+                        className={`text-xs font-mono truncate ${isActive ? "text-terminal-dim" : "text-terminal-dimmer"}`}
+                      >
+                        {timeAgo(sessions[0]?.timestamp || "")}
+                      </span>
+                      {replayCount > 0 && (
+                        <span
+                          className={`text-xs font-mono ${isActive ? "text-terminal-green" : "text-terminal-dimmer"}`}
+                        >
+                          {replayCount} {replayCount === 1 ? "replay" : "replays"}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            {projectEntries.length > PROJECT_FACET_MAX && (
+              <button
+                onClick={() => setProjectsExpanded((v) => !v)}
+                className="w-full rounded-md px-3 py-1.5 text-left ui-caption-muted hover:text-terminal-text hover:bg-terminal-surface transition-colors"
+              >
+                {projectsExpanded
+                  ? "Show fewer"
+                  : `Show ${projectEntries.length - PROJECT_FACET_MAX} more`}
+              </button>
+            )}
+            {(agentRunCount > 0 || showAgentRuns) && (
+              <button
+                onClick={handleToggleAgentRuns}
+                className="w-full rounded-md px-3 py-1.5 text-left ui-caption-muted hover:text-terminal-text hover:bg-terminal-surface transition-colors"
+                title="Scratch workspaces created one per automated agent run"
+              >
+                {showAgentRuns
+                  ? "Hide agent run workspaces"
+                  : `Show ${agentRunCount.toLocaleString()} agent run ${
+                      agentRunCount === 1 ? "workspace" : "workspaces"
+                    }`}
+              </button>
+            )}
           </div>
+
+          <FacetSection
+            title="Tool"
+            entries={toolEntries}
+            selected={selectedTools}
+            onToggle={handleToolToggle}
+            labelFor={(value) => value}
+            max={12}
+            variant="pills"
+          />
+
+          <FacetSection
+            title="MCP server"
+            entries={mcpServerEntries}
+            selected={selectedMcpServers}
+            onToggle={handleMcpServerToggle}
+            labelFor={(value) => value}
+            max={12}
+            variant="pills"
+          />
+
+          {/* Drilldown: every MCP tool name repeats its server, so the list only
+              earns its space once a server (or a tool) is actually selected. */}
+          {showMcpToolFacet && (
+            <FacetSection
+              title="MCP tool"
+              entries={scopedMcpToolEntries}
+              selected={selectedMcpTools}
+              onToggle={handleMcpToolToggle}
+              labelFor={mcpToolFacetLabel}
+              titleFor={(value) => value}
+              max={12}
+              nested
+              variant="pills"
+            />
+          )}
+
+          {skillEntries.length > 0 && (
+            <FacetSection
+              title="Skill"
+              entries={skillEntries}
+              selected={selectedSkills}
+              onToggle={handleSkillToggle}
+              labelFor={(value) => value}
+              max={12}
+              variant="pills"
+            />
+          )}
         </div>
       </div>
 
@@ -2393,6 +2817,38 @@ function SessionsPanel() {
                     onRemove={() => handleRepoToggle(repo)}
                   />
                 ))}
+                {selectedTools.map((tool) => (
+                  <ActiveFilterChip
+                    key={tool}
+                    label="Tool"
+                    value={tool}
+                    onRemove={() => handleToolToggle(tool)}
+                  />
+                ))}
+                {selectedMcpServers.map((server) => (
+                  <ActiveFilterChip
+                    key={server}
+                    label="MCP"
+                    value={server}
+                    onRemove={() => handleMcpServerToggle(server)}
+                  />
+                ))}
+                {selectedMcpTools.map((tool) => (
+                  <ActiveFilterChip
+                    key={tool}
+                    label="MCP tool"
+                    value={tool}
+                    onRemove={() => handleMcpToolToggle(tool)}
+                  />
+                ))}
+                {selectedSkills.map((skill) => (
+                  <ActiveFilterChip
+                    key={skill}
+                    label="Skill"
+                    value={skill}
+                    onRemove={() => handleSkillToggle(skill)}
+                  />
+                ))}
                 {selectedProjectKey !== ALL_PROJECTS && (
                   <ActiveFilterChip
                     label="Project"
@@ -2428,7 +2884,7 @@ function SessionsPanel() {
               <input
                 value={filter}
                 onChange={(e) => handleFilterChange(e.target.value)}
-                placeholder="Search title, prompt, slug, repo, project..."
+                placeholder="Search sessions, tools, MCP, skills..."
                 className="w-full bg-terminal-surface rounded-lg pl-9 pr-3 py-2.5 text-sm font-mono text-terminal-text placeholder:text-terminal-dimmer outline-none ring-1 ring-transparent focus:ring-terminal-green/40 transition-shadow duration-200 shadow-layer-sm"
               />
             </div>
@@ -2470,6 +2926,38 @@ function SessionsPanel() {
                   label="Repo"
                   value={repoFilterLabel(repo)}
                   onRemove={() => handleRepoToggle(repo)}
+                />
+              ))}
+              {selectedTools.map((tool) => (
+                <ActiveFilterChip
+                  key={tool}
+                  label="Tool"
+                  value={tool}
+                  onRemove={() => handleToolToggle(tool)}
+                />
+              ))}
+              {selectedMcpServers.map((server) => (
+                <ActiveFilterChip
+                  key={server}
+                  label="MCP"
+                  value={server}
+                  onRemove={() => handleMcpServerToggle(server)}
+                />
+              ))}
+              {selectedMcpTools.map((tool) => (
+                <ActiveFilterChip
+                  key={tool}
+                  label="MCP tool"
+                  value={tool}
+                  onRemove={() => handleMcpToolToggle(tool)}
+                />
+              ))}
+              {selectedSkills.map((skill) => (
+                <ActiveFilterChip
+                  key={skill}
+                  label="Skill"
+                  value={skill}
+                  onRemove={() => handleSkillToggle(skill)}
                 />
               ))}
               {selectedProjectKey !== ALL_PROJECTS && (
@@ -2877,6 +3365,16 @@ function SessionsPanel() {
                       )}
                     </div>
 
+                    <SessionUsageDetails
+                      summary={scanData?.usageSummary}
+                      selectedTools={selectedTools}
+                      selectedMcpTools={selectedMcpTools}
+                      selectedSkills={selectedSkills}
+                      onToolToggle={handleToolToggle}
+                      onMcpToolToggle={handleMcpToolToggle}
+                      onSkillToggle={handleSkillToggle}
+                    />
+
                     {/* Row 5: outcome facts (left) | state + CTAs (right) */}
                     <div className="flex items-end justify-between gap-3">
                       <div className="flex items-center gap-x-2 gap-y-1 flex-wrap text-xs font-mono min-w-0">
@@ -3108,6 +3606,7 @@ function ReplaysPanel() {
     selectedProject,
     filter,
     showArchived,
+    showAgentRuns,
     selectedProviders,
     selectedRepos,
     handleProjectChange,
@@ -3117,6 +3616,7 @@ function ReplaysPanel() {
     handleRepoSet,
     handleRepoToggle,
     handleToggleArchived,
+    handleToggleAgentRuns,
     handleClearAllFilters,
   } = usePanelFilters();
 
@@ -3258,9 +3758,15 @@ function ReplaysPanel() {
   };
 
   const archivedCount = sessions.filter((s) => archivedSlugs.has(s.slug)).length;
-  const visibleSessions = showArchived
+  const unarchivedSessions = showArchived
     ? sessions
     : sessions.filter((s) => !archivedSlugs.has(s.slug));
+  const agentRunCount = new Set(
+    unarchivedSessions.filter((s) => isAgentRunWorkspace(s.project)).map((s) => s.project),
+  ).size;
+  const visibleSessions = showAgentRuns
+    ? unarchivedSessions
+    : unarchivedSessions.filter((s) => !isAgentRunWorkspace(s.project));
 
   const selectedProviderSet = new Set(selectedProviders);
   const selectedRepoSet = new Set(selectedRepos);
@@ -3343,10 +3849,11 @@ function ReplaysPanel() {
     repoFilterKey,
     selectedProjectKey,
     showArchived ? "archived" : "active",
+    showAgentRuns ? "agent-runs" : "no-agent-runs",
   ].join("\0");
   useEffect(() => {
     setRenderLimit(SESSION_RENDER_BATCH_SIZE);
-  }, [filter, providerFilterKey, repoFilterKey, selectedProjectKey, showArchived]);
+  }, [filter, providerFilterKey, repoFilterKey, selectedProjectKey, showArchived, showAgentRuns]);
   const renderedReplays = filtered.slice(0, renderLimit);
   const remainingRenderCount = Math.max(0, filtered.length - renderedReplays.length);
   const showInitialLoading = loading && sessions.length === 0;
@@ -3483,6 +3990,19 @@ function ReplaysPanel() {
                 </button>
               );
             })}
+            {(agentRunCount > 0 || showAgentRuns) && (
+              <button
+                onClick={handleToggleAgentRuns}
+                className="w-full rounded-md px-3 py-1.5 text-left ui-caption-muted hover:text-terminal-text hover:bg-terminal-surface transition-colors"
+                title="Scratch workspaces created one per automated agent run"
+              >
+                {showAgentRuns
+                  ? "Hide agent run workspaces"
+                  : `Show ${agentRunCount.toLocaleString()} agent run ${
+                      agentRunCount === 1 ? "workspace" : "workspaces"
+                    }`}
+              </button>
+            )}
           </div>
         </div>
       </div>

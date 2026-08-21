@@ -4,6 +4,10 @@ export interface DashboardFilterItem {
   provider: string;
   gitRepo?: string;
   project: string;
+  tools?: readonly string[];
+  mcpServers?: readonly string[];
+  mcpTools?: readonly string[];
+  skills?: readonly string[];
 }
 
 export function repoFilterValue(s: Pick<DashboardFilterItem, "gitRepo">): string {
@@ -33,6 +37,28 @@ export function matchesProjectFacet(
   return selectedProjectKey === allProjectsKey || rollupProject(s.project) === selectedProjectKey;
 }
 
+function matchesMultiValueFacet(
+  values: readonly string[] | undefined,
+  selectedValues: ReadonlySet<string>,
+): boolean {
+  return selectedValues.size === 0 || values?.some((value) => selectedValues.has(value)) === true;
+}
+
+export function matchesUsageFacets(
+  item: Pick<DashboardFilterItem, "tools" | "mcpServers" | "mcpTools" | "skills">,
+  selectedTools: ReadonlySet<string>,
+  selectedMcpServers: ReadonlySet<string>,
+  selectedMcpTools: ReadonlySet<string>,
+  selectedSkills: ReadonlySet<string>,
+): boolean {
+  return (
+    matchesMultiValueFacet(item.tools, selectedTools) &&
+    matchesMultiValueFacet(item.mcpServers, selectedMcpServers) &&
+    matchesMultiValueFacet(item.mcpTools, selectedMcpTools) &&
+    matchesMultiValueFacet(item.skills, selectedSkills)
+  );
+}
+
 export function applyDashboardFacetFilters<T extends DashboardFilterItem>(
   items: T[],
   options: {
@@ -41,10 +67,18 @@ export function applyDashboardFacetFilters<T extends DashboardFilterItem>(
     selectedProjectKey: string;
     allProjectsKey: string;
     rollupProject: (project: string) => string;
+    selectedTools?: readonly string[];
+    selectedMcpServers?: readonly string[];
+    selectedMcpTools?: readonly string[];
+    selectedSkills?: readonly string[];
   },
 ): T[] {
   const selectedProviderSet = new Set(options.selectedProviders);
   const selectedRepoSet = new Set(options.selectedRepos);
+  const selectedToolSet = new Set(options.selectedTools);
+  const selectedMcpServerSet = new Set(options.selectedMcpServers);
+  const selectedMcpToolSet = new Set(options.selectedMcpTools);
+  const selectedSkillSet = new Set(options.selectedSkills);
   return items.filter(
     (item) =>
       matchesProviderFacet(item, selectedProviderSet) &&
@@ -54,6 +88,13 @@ export function applyDashboardFacetFilters<T extends DashboardFilterItem>(
         options.selectedProjectKey,
         options.allProjectsKey,
         options.rollupProject,
+      ) &&
+      matchesUsageFacets(
+        item,
+        selectedToolSet,
+        selectedMcpServerSet,
+        selectedMcpToolSet,
+        selectedSkillSet,
       ),
   );
 }

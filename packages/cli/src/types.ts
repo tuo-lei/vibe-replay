@@ -11,10 +11,12 @@ export type {
   Scene,
   SceneOverlay,
   SessionInsight,
+  SessionUsageSummary,
   SessionOverlays,
   SubAgent,
   TokenUsage,
   TurnStat,
+  UsageEvent,
 } from "@vibe-replay/types";
 
 export { INSIGHTS_SCHEMA_VERSION } from "@vibe-replay/types";

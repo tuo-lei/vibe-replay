@@ -138,7 +138,9 @@ function getDevViewerOpts(): { externalViewerUrl: string } | undefined {
 // Bumped v2 → v3 alongside the Cowork sessionId fix (see server.ts
 // sourcesCacheKey comment). Old caches carry the wrong Cowork identity and
 // must be thrown out so the next discovery sweep writes a correct one.
-const SESSION_DISCOVERY_CACHE_KEY = "session-discovery-v3";
+// v3 → v4: Cursor project paths decode differently, so cached entries would
+// keep showing the old exploded paths in the picker.
+const SESSION_DISCOVERY_CACHE_KEY = "session-discovery-v4";
 
 function normalizePromptTitle(value?: string): string {
   return normalizeTitle(cleanPromptText(value || "")) || "";

@@ -102,6 +102,7 @@ import {
   readProjectMemory,
   runBackgroundScan,
   type ScanInput,
+  SCANNER_VERSION,
   type SessionScanResult,
   type UserInsights,
 } from "./scanner.js";
@@ -570,10 +571,15 @@ export async function startServer(
   // permanently broke replay-to-source linking. Bumping discards those caches.
   // v3 → v4: added `hasSdk` flag for Cursor SDK-backed sessions; old caches
   // omit the field so the dashboard can't render the SDK badge until refreshed.
-  const sourcesCacheKey = `dashboard-sources-v4-${cacheKeySuffix}`;
+  // v4 → v5: Cursor project paths decode differently, so cached entries would
+  // keep reporting the old exploded paths as separate projects.
+  const sourcesCacheKey = `dashboard-sources-v5-${cacheKeySuffix}`;
   const replaysCacheKey = `dashboard-replays-v1-${cacheKeySuffix}`;
-  const scanResultsCacheKey = `dashboard-scan-results-v1-${cacheKeySuffix}`;
-  const insightsCacheKey = `dashboard-insights-v1-${cacheKeySuffix}`;
+  // Keyed by scanner version too: a bump changes the shape of what a scan
+  // extracts, so serving the previous run's results would show stale facets
+  // until the next scan happened to finish.
+  const scanResultsCacheKey = `dashboard-scan-results-v${SCANNER_VERSION}-${cacheKeySuffix}`;
+  const insightsCacheKey = `dashboard-insights-v2-${cacheKeySuffix}`;
   const readSourcesCatalogCache = async (): Promise<NormalizedSourceSessionCatalogCache | null> =>
     normalizeSourceSessionCatalogCache(
       await readFileCache<SourceSessionCatalogCache | CachedSourceRecord[]>(sourcesCacheKey),
@@ -880,6 +886,8 @@ export async function startServer(
     results: persistedScanResults?.data || [],
     finishedAt: persistedScanResults?.updatedAt,
   };
+  // Incremented per scan so a slower follow-up pass can tell it was superseded.
+  let scanGeneration = 0;
 
   // Pre-computed insights cache — populated after each scan completes.
   // Kept across scans (stale-while-refresh): new scan overwrites, never clears.
@@ -900,10 +908,18 @@ export async function startServer(
       };
 
   /** Persist scan results into the durable local insights store. */
-  const persistInsightsFromScan = async (results: SessionScanResult[]): Promise<void> => {
-    const store = await readInsightsStore();
-    const updated = mergeInsights(store, results);
-    await writeInsightsStore(updated);
+  let insightsPersistChain: Promise<void> = Promise.resolve();
+  const persistInsightsFromScan = (results: SessionScanResult[]): Promise<void> => {
+    // The fast Cursor pass and its usage backfill complete close together. Keep
+    // their read/merge/write cycles ordered or the older, usage-less snapshot
+    // can finish last and erase the enriched fields from the durable store.
+    const job = insightsPersistChain.then(async () => {
+      const store = await readInsightsStore();
+      const updated = mergeInsights(store, results);
+      await writeInsightsStore(updated);
+    });
+    insightsPersistChain = job.catch(() => {});
+    return job;
   };
 
   /** Track last auto-sync date to avoid syncing more than once per day. */
@@ -1017,37 +1033,126 @@ export async function startServer(
   };
 
   /** Pre-compute all insights from scan results and store in cache. */
-  const precomputeInsightsCache = async (results: SessionScanResult[]): Promise<void> => {
-    // User-level insights
-    const user = aggregateUserInsights(results);
+  let insightsPrecomputeChain: Promise<void> = Promise.resolve();
+  const precomputeInsightsCache = (results: SessionScanResult[]): Promise<void> => {
+    // Project memory reads make this operation asynchronous. Serialize cache
+    // writes so the usage-enriched backfill cannot be overwritten by the fast
+    // pass completing later.
+    const job = insightsPrecomputeChain.then(async () => {
+      // User-level insights
+      const user = aggregateUserInsights(results);
 
-    // Project-level insights for each unique project
-    const projects = new Map<string, ProjectInsights>();
-    const uniqueProjects = new Set(results.map((r) => r.project));
-    for (const project of uniqueProjects) {
-      const memory = await readProjectMemory(project);
-      const pi = aggregateProjectInsights(project, results, memory || undefined);
-      projects.set(project, pi);
-    }
+      // Project-level insights for each unique project
+      const projects = new Map<string, ProjectInsights>();
+      const uniqueProjects = new Set(results.map((r) => r.project));
+      for (const project of uniqueProjects) {
+        const memory = await readProjectMemory(project);
+        const pi = aggregateProjectInsights(project, results, memory || undefined);
+        projects.set(project, pi);
+      }
 
-    // Enrich topProjects with memoryFileCount
-    for (const tp of user.topProjects) {
-      const pi = projects.get(tp.project);
-      if (pi?.memory) {
-        tp.memoryFileCount = pi.memory.memoryFiles.length;
+      // Enrich topProjects with memoryFileCount
+      for (const tp of user.topProjects) {
+        const pi = projects.get(tp.project);
+        if (pi?.memory) {
+          tp.memoryFileCount = pi.memory.memoryFiles.length;
+        }
+      }
+
+      insightsCache = {
+        userInsights: user,
+        projectInsights: projects,
+        computedAt: new Date().toISOString(),
+      };
+      await writeFileCache<PersistedInsightsCache>(insightsCacheKey, {
+        userInsights: insightsCache.userInsights,
+        projectInsights: [...insightsCache.projectInsights.entries()],
+        computedAt: insightsCache.computedAt,
+      });
+    });
+    insightsPrecomputeChain = job.catch(() => {});
+    return job;
+  };
+
+  /**
+   * Second pass over sessions the fast scan indexed in a cheaper mode. Cursor's
+   * SQLite-backed sessions skip rich parsing there (it costs ~250ms each), which
+   * also means no tool/MCP/skill usage — the dominant gap for usage analytics.
+   * Results are spliced in as they land and rewritten to the scan cache, so the
+   * cost is paid once per session rather than on every dashboard launch.
+   */
+  const backfillDeferredUsage = async (
+    scanInputs: ScanInput[],
+    fastResults: SessionScanResult[],
+    generation: number,
+  ): Promise<void> => {
+    const pending = scanInputs
+      .filter((input) => input.deferRichCursorParse && input.hasSqlite)
+      .map((input) => ({ ...input, deferRichCursorParse: false }));
+    if (pending.length === 0) return;
+
+    const superseded = (): boolean => generation !== scanGeneration;
+    scanState = {
+      ...scanState,
+      usageBackfill: { running: true, scanned: 0, total: pending.length },
+    };
+
+    try {
+      const enriched = await runBackgroundScan(
+        pending,
+        (progress) => {
+          if (superseded()) return;
+          scanState = {
+            ...scanState,
+            usageBackfill: { running: true, scanned: progress.scanned, total: progress.total },
+          };
+        },
+        {
+          // An empty usage summary is a valid result: it means the rich pass
+          // ran and found no tools/skills. Only retry sessions whose result
+          // still advertises that usage indexing was deferred.
+          rescanCached: (cached) => cached.usageIndexed !== true,
+          shouldStop: superseded,
+        },
+      );
+      if (superseded()) return;
+
+      const byKey = new Map(
+        enriched.map((result) => [`${result.provider}:${result.sessionId}`, result]),
+      );
+      const merged = fastResults.map(
+        (result) => byKey.get(`${result.provider}:${result.sessionId}`) || result,
+      );
+      scanState = {
+        ...scanState,
+        results: merged,
+        usageBackfill: { running: true, scanned: enriched.length, total: pending.length },
+      };
+
+      await writeFileCache(scanResultsCacheKey, merged);
+      await persistInsightsFromScan(merged).catch(() => {});
+      void autoSyncInsights().catch(() => {});
+      // Do not advertise the backfill as complete until the usage-enriched
+      // project/user cache is also ready; otherwise the viewer can fetch the
+      // old fast-pass insights in the small window between these operations.
+      await precomputeInsightsCache(merged).catch(() => {});
+      if (superseded()) return;
+      scanState = {
+        ...scanState,
+        usageBackfill: { running: false, scanned: enriched.length, total: pending.length },
+      };
+    } catch {
+      if (!superseded()) {
+        scanState = {
+          ...scanState,
+          usageBackfill: {
+            running: false,
+            scanned: scanState.usageBackfill?.scanned ?? 0,
+            total: scanState.usageBackfill?.total ?? 0,
+          },
+        };
       }
     }
-
-    insightsCache = {
-      userInsights: user,
-      projectInsights: projects,
-      computedAt: new Date().toISOString(),
-    };
-    await writeFileCache<PersistedInsightsCache>(insightsCacheKey, {
-      userInsights: insightsCache.userInsights,
-      projectInsights: [...insightsCache.projectInsights.entries()],
-      computedAt: insightsCache.computedAt,
-    });
   };
 
   /**
@@ -1056,7 +1161,11 @@ export async function startServer(
    * so unchanged sessions are skipped.
    */
   const startBackgroundScan = (hints: EnrichmentHints = {}): void => {
-    if (scanState.running) return;
+    // The backfill writes the same scan cache as the fast pass. Starting a new
+    // full scan while it is still writing could let the older snapshot win and
+    // discard newly discovered entries, so let the current generation finish.
+    if (scanState.running || scanState.usageBackfill?.running) return;
+    const generation = ++scanGeneration;
     const previousResults = scanState.results;
     const previousFinishedAt = scanState.finishedAt;
     scanState = {
@@ -1148,6 +1257,8 @@ export async function startServer(
 
         // Pre-compute insights cache in background (non-blocking)
         precomputeInsightsCache(results).catch(() => {});
+
+        void backfillDeferredUsage(scanInputs, results, generation);
       } catch {
         scanState = {
           ...scanState,
@@ -2044,6 +2155,7 @@ export async function startServer(
       startedAt: scanState.startedAt,
       finishedAt: scanState.finishedAt,
       failedProviders: scanState.failedProviders || [],
+      usageBackfill: scanState.usageBackfill,
       hasInsights: insightsCache.userInsights !== null,
       hasCachedResults: scanState.results.length > 0,
       cachedResultCount: scanState.results.length,
@@ -2053,12 +2165,52 @@ export async function startServer(
 
   app.get("/api/scan/results", async (c) => {
     return c.json({
-      results: scanState.results,
+      // Invocation events are available from the focused usage endpoint; keep
+      // the dashboard's initial scan payload bounded to per-session summaries.
+      results: scanState.results.map((result) => ({ ...result, usageEvents: undefined })),
       running: scanState.running,
       scanned: scanState.scanned,
       total: scanState.total,
       finishedAt: scanState.finishedAt,
       failedProviders: scanState.failedProviders || [],
+    });
+  });
+
+  app.get("/api/usage/events", async (c) => {
+    const provider = c.req.query("provider");
+    const sessionId = c.req.query("sessionId");
+    if (!provider || !sessionId) {
+      return c.json({ error: "provider and sessionId are required" }, 400);
+    }
+    const result = scanState.results.find(
+      (scan) => scan.provider === provider && scan.sessionId === sessionId,
+    );
+    if (!result) return c.json({ error: "Session usage not found" }, 404);
+    return c.json({
+      provider,
+      sessionId,
+      summary: result.usageSummary,
+      events: result.usageEvents || [],
+    });
+  });
+
+  // Compact projection of the scan results: just enough to aggregate usage over
+  // any time range client-side, without shipping the multi-MB scan payload.
+  app.get("/api/usage/rollup", async (c) => {
+    const sessions = scanState.results
+      .filter((scan) => scan.usageSummary)
+      .map((scan) => ({
+        provider: scan.provider,
+        sessionId: scan.sessionId,
+        project: scan.project,
+        startTime: scan.startTime,
+        usage: scan.usageSummary,
+      }));
+    return c.json({
+      sessions,
+      indexedSessions: scanState.results.filter((scan) => scan.usageIndexed === true).length,
+      totalSessions: scanState.results.length,
+      scannedAt: scanState.finishedAt,
     });
   });
 

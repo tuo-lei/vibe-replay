@@ -306,6 +306,12 @@ export interface ProviderParseResult {
   skillsUsed?: string[];
   /** MCP servers used in the session (e.g. ["claude-in-chrome", "playwright"]) */
   mcpServersUsed?: string[];
+  /**
+   * Display names for MCP server identifiers, when the provider records servers
+   * by opaque ID. Cowork names tool calls `mcp__<uuid>__<tool>`, so without this
+   * map every MCP facet would read as a UUID.
+   */
+  mcpServerNames?: Record<string, string>;
   /** Count of assistant responses truncated by max_tokens */
   truncatedResponses?: number;
   /** Agent's custom name (from `/rename` or swarm) */

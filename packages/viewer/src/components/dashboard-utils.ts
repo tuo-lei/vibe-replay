@@ -355,7 +355,20 @@ export function navigateTo(
   options: { replace?: boolean; notify?: boolean } = {},
 ) {
   const url = new URL(window.location.href);
-  const DASHBOARD_PARAMS = ["tab", "project", "q", "archived", "provider", "repo", "replay"];
+  const DASHBOARD_PARAMS = [
+    "tab",
+    "project",
+    "q",
+    "archived",
+    "provider",
+    "repo",
+    "tool",
+    "mcp",
+    "mcpTool",
+    "skill",
+    "agentRuns",
+    "replay",
+  ];
 
   // 1. If we are currently on dashboard, capture its state to sessionStorage
   const isCurrentlyDashboard =
@@ -449,6 +462,11 @@ export function navigateToLive(provider: string, sessionId: string) {
     "q",
     "archived",
     "repo",
+    "tool",
+    "mcp",
+    "mcpTool",
+    "skill",
+    "agentRuns",
     "replay",
     "v",
     "s",
@@ -747,8 +765,36 @@ export function agentWorktreeParent(project: string): string | null {
   return m ? m[1] : null;
 }
 
+/**
+ * A run id at the end of a directory name: a UUID, or the hex digest that
+ * tools use to keep concurrent runs from colliding. Twelve characters is the
+ * shortest digest worth trusting — below that, ordinary names (`ros-4`, a
+ * date, a PR number) start matching.
+ */
+const RUN_ID_SUFFIX_RE =
+  /(?:^|-)(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{12,})$/i;
+
+/**
+ * Scratch workspaces created one per automated run — SDK agents, PR-review
+ * worktrees, temp dirs. Each run gets its own directory, so left alone they
+ * outnumber real projects several times over while telling the reader nothing:
+ * the run id is the only thing separating them. They roll up under the
+ * directory that holds them, which is the level a human would recognize.
+ */
+export function agentRunWorkspaceParent(project: string): string | null {
+  const clean = project.replace(/[\\/]+$/, "");
+  const slash = Math.max(clean.lastIndexOf("/"), clean.lastIndexOf("\\"));
+  if (slash <= 0) return null;
+  if (!RUN_ID_SUFFIX_RE.test(clean.slice(slash + 1))) return null;
+  return clean.slice(0, slash);
+}
+
+export function isAgentRunWorkspace(project: string): boolean {
+  return agentRunWorkspaceParent(project) !== null;
+}
+
 export function rollupProject(project: string): string {
-  return agentWorktreeParent(project) ?? project;
+  return agentWorktreeParent(project) ?? agentRunWorkspaceParent(project) ?? project;
 }
 
 export interface TopProjectEntry {
@@ -773,13 +819,21 @@ export interface TopProjectEntry {
  * the scanner counts per-path), takes the max of `lastActivity` and
  * `memoryFileCount` (parent typically owns the memory files), and merges
  * `sessionsPerDay` by day key. The resulting entry's `project` is the
- * parent path.
+ * parent path, except when callers explicitly preserve agent-run workspaces
+ * for the Projects toggle.
  */
-export function rollupTopProjects(projects: readonly TopProjectEntry[]): TopProjectEntry[] {
+export function rollupTopProjects(
+  projects: readonly TopProjectEntry[],
+  options: { rollupAgentRuns?: boolean } = {},
+): TopProjectEntry[] {
   const byParent = new Map<string, TopProjectEntry>();
+  const rollupAgentRuns = options.rollupAgentRuns !== false;
 
   for (const p of projects) {
-    const key = rollupProject(p.project);
+    const key =
+      agentWorktreeParent(p.project) ??
+      (rollupAgentRuns ? agentRunWorkspaceParent(p.project) : null) ??
+      p.project;
     const existing = byParent.get(key);
     if (existing) {
       existing.sessions += p.sessions;
