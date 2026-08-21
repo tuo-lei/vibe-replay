@@ -866,6 +866,154 @@ describe("Pi parser", () => {
     });
   });
 
+  it("ignores incomplete native edit replacement pairs", async () => {
+    const lines = [
+      {
+        type: "session",
+        version: 3,
+        id: "pi-incomplete-edit",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        cwd: "/Users/test/project",
+      },
+      {
+        type: "message",
+        id: "user1",
+        parentId: null,
+        timestamp: "2026-01-01T00:00:01.000Z",
+        message: { role: "user", content: [{ type: "text", text: "Fix the file" }] },
+      },
+      {
+        type: "message",
+        id: "assistant1",
+        parentId: "user1",
+        timestamp: "2026-01-01T00:00:02.000Z",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "call-edit",
+              name: "edit",
+              arguments: {
+                path: "/Users/test/project/util.ts",
+                edits: [
+                  { oldText: "const old = 1", newText: "const next = 1" },
+                  { oldText: "orphaned old text" },
+                  { newText: "orphaned new text" },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    ];
+
+    await withPiFixture(lines, async (path) => {
+      const replay = transformToReplay(await parsePiSession(path), "pi", "~/project");
+      const edit = replay.scenes.find(
+        (scene) => scene.type === "tool-call" && scene.toolName === "Edit",
+      );
+      expect(edit?.type).toBe("tool-call");
+      expect(edit?.type === "tool-call" && edit.diff?.oldContent).toBe("const old = 1");
+      expect(edit?.type === "tool-call" && edit.diff?.newContent).toBe("const next = 1");
+    });
+  });
+
+  it("ignores summary usage entries with invalid token values", async () => {
+    const lines = [
+      {
+        type: "session",
+        version: 3,
+        id: "pi-invalid-summary-usage",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        cwd: "/Users/test/project",
+      },
+      {
+        type: "message",
+        id: "user1",
+        parentId: null,
+        timestamp: "2026-01-01T00:00:01.000Z",
+        message: { role: "user", content: [{ type: "text", text: "Summarize" }] },
+      },
+      {
+        type: "message",
+        id: "assistant1",
+        parentId: "user1",
+        timestamp: "2026-01-01T00:00:02.000Z",
+        message: {
+          role: "assistant",
+          model: "gpt-5.5",
+          content: [{ type: "text", text: "Working" }],
+          usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
+        },
+      },
+      {
+        type: "compaction",
+        id: "compact1",
+        parentId: "assistant1",
+        timestamp: "2026-01-01T00:00:03.000Z",
+        summary: "Earlier work condensed.",
+        usage: { input: -1, output: 100, cacheRead: 0, cacheWrite: 0 },
+      },
+    ];
+
+    await withPiFixture(lines, async (path) => {
+      const parsed = await parsePiSession(path);
+      expect(parsed.tokenUsage).toEqual({
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+      });
+    });
+  });
+
+  it.each([
+    { pairs: 15, expectedScenes: 30 },
+    { pairs: 250, expectedScenes: 500 },
+  ])(
+    "parses generated Pi sessions with $expectedScenes scenes",
+    async ({ pairs, expectedScenes }) => {
+      const lines: Record<string, unknown>[] = [
+        {
+          type: "session",
+          version: 3,
+          id: `pi-generated-${pairs}`,
+          timestamp: "2026-01-01T00:00:00.000Z",
+          cwd: "/Users/test/project",
+        },
+      ];
+      let parentId: string | null = null;
+      for (let index = 0; index < pairs; index++) {
+        const userId = `user-${index}`;
+        const assistantId = `assistant-${index}`;
+        const timestamp = new Date(
+          Date.parse("2026-01-01T00:00:00.000Z") + index * 1_000,
+        ).toISOString();
+        lines.push({
+          type: "message",
+          id: userId,
+          parentId,
+          timestamp,
+          message: { role: "user", content: [{ type: "text", text: `Prompt ${index}` }] },
+        });
+        lines.push({
+          type: "message",
+          id: assistantId,
+          parentId: userId,
+          timestamp: new Date(Date.parse(timestamp) + 500).toISOString(),
+          message: { role: "assistant", content: [{ type: "text", text: `Response ${index}` }] },
+        });
+        parentId = assistantId;
+      }
+
+      await withPiFixture(lines, async (path) => {
+        const replay = transformToReplay(await parsePiSession(path), "pi", "~/project");
+        expect(replay.scenes).toHaveLength(expectedScenes);
+      });
+    },
+  );
+
   it.each([10, 40])(
     "caps a %i-minute idle gap consistently with other providers",
     async (gapMinutes) => {

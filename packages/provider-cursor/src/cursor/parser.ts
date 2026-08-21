@@ -560,21 +560,31 @@ async function attachCursorSubagents(
   transcriptPaths: string[],
   deps: CursorParserDependencies,
 ): Promise<void> {
-  if (transcriptPaths.length === 0) return;
-
   const agentBlocks: ToolUseBlock[] = [];
   for (const turn of parsed.turns) {
     if (turn.role !== "assistant") continue;
     for (const block of turn.blocks) {
-      if (block.type === "tool_use" && block.name === "Agent" && !block._subAgent) {
+      if (block.type === "tool_use" && block.name === "Agent") {
         agentBlocks.push(block);
       }
     }
   }
   if (agentBlocks.length === 0) return;
+  const hasStructuredSubagents = agentBlocks.some((block) => !!block._subAgent);
+
+  // SQLite/global-state parsing can identify a structured child composer even
+  // when no transcript file is available. Preserve that metadata in the
+  // session summary rather than dropping it with the transcript enrichment.
+  if (transcriptPaths.length === 0) {
+    if (hasStructuredSubagents) appendCursorSubagentSummaries(parsed, agentBlocks);
+    return;
+  }
 
   const subagentPaths = await findCursorSubagentPaths(transcriptPaths);
-  if (subagentPaths.length === 0) return;
+  if (subagentPaths.length === 0) {
+    if (hasStructuredSubagents) appendCursorSubagentSummaries(parsed, agentBlocks);
+    return;
+  }
 
   const parseWarnings: NonNullable<ProviderParseResult["parseWarnings"]> = [
     ...(parsed.parseWarnings || []),
@@ -610,14 +620,27 @@ async function attachCursorSubagents(
     const block = agentBlocks[candidate.blockIndex];
     usedSubagents.add(candidate.subagentIndex);
     availableBlocks.delete(candidate.blockIndex);
-    block._subAgent = buildCursorSubagent(block, subagent);
+    block._subAgent = block._subAgent
+      ? mergeCursorSubagentTranscript(block._subAgent, subagent)
+      : buildCursorSubagent(block, subagent);
     attached++;
     attachedToolCalls += subagent.toolCalls;
   }
 
   if (parseWarnings.length > 0) parsed.parseWarnings = parseWarnings;
+  if (attached === 0 && !hasStructuredSubagents) return;
+  appendCursorSubagentSummaries(parsed, agentBlocks);
   if (attached === 0) return;
+  parsed.dataSourceInfo = withSupplement(
+    parsed.dataSourceInfo || defaultDataSourceInfo(parsed.dataSource),
+    `cursor subagent transcripts (${attached}/${subagents.length} linked, ${attachedToolCalls} tool calls)`,
+  );
+}
 
+function appendCursorSubagentSummaries(
+  parsed: ProviderParseResult,
+  agentBlocks: ToolUseBlock[],
+): void {
   const attachedSummaries = agentBlocks.flatMap((block) => {
     const subagent = block._subAgent;
     if (!subagent) {
@@ -660,10 +683,6 @@ async function attachCursorSubagents(
     summarizedIds.add(summary.agentId);
   }
   parsed.subAgentSummary = summaries;
-  parsed.dataSourceInfo = withSupplement(
-    parsed.dataSourceInfo || defaultDataSourceInfo(parsed.dataSource),
-    `cursor subagent transcripts (${attached}/${subagents.length} linked, ${attachedToolCalls} tool calls)`,
-  );
 }
 
 async function findCursorSubagentPaths(transcriptPaths: string[]): Promise<string[]> {
@@ -869,6 +888,19 @@ function buildCursorSubagent(
       : {}),
     prompt: typeof input.prompt === "string" ? input.prompt : transcript.sourcePrompt,
     ...(typeof input.model === "string" && input.model.trim() ? { model: input.model.trim() } : {}),
+    toolCalls: transcript.toolCalls,
+    thinkingBlocks: transcript.thinkingBlocks,
+    textResponses: transcript.textResponses,
+    scenes: transcript.scenes,
+  };
+}
+
+function mergeCursorSubagentTranscript(
+  structured: SubAgent,
+  transcript: ParsedCursorSubagentTranscript,
+): SubAgent {
+  return {
+    ...structured,
     toolCalls: transcript.toolCalls,
     thinkingBlocks: transcript.thinkingBlocks,
     textResponses: transcript.textResponses,

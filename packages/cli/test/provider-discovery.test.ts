@@ -57,4 +57,17 @@ describe("discoverProvidersSafely", () => {
     expect(result.sessions[0].provider).toBe("claude-desktop");
     expect(result.failedProviders).toEqual([]);
   });
+
+  it("propagates session callback failures without blaming the provider", async () => {
+    const callbackError = new Error("SSE stream closed");
+
+    await expect(
+      discoverProvidersSafely(
+        [provider("cursor", async () => [session("cursor", "cursor-session")])],
+        () => {
+          throw callbackError;
+        },
+      ),
+    ).rejects.toThrow("SSE stream closed");
+  });
 });

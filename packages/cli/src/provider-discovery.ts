@@ -19,17 +19,19 @@ export async function discoverProvidersSafely(
   const failedProviders: string[] = [];
 
   for (const provider of providers) {
+    let sessions: SessionInfo[];
     try {
-      const sessions = await provider.discover();
-      for (const session of sessions) {
-        allSessions.push(session);
-        await onSession?.(session);
-      }
+      sessions = await provider.discover();
     } catch (error) {
       failedProviders.push(provider.name);
       if (process.env.VIBE_REPLAY_DEBUG) {
         console.error(`[vibe-replay] ${provider.name} discovery failed:`, error);
       }
+      continue;
+    }
+    for (const session of sessions) {
+      allSessions.push(session);
+      await onSession?.(session);
     }
   }
 

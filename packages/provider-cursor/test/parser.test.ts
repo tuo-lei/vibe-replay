@@ -164,7 +164,6 @@ describe("parseCursorSession", () => {
   });
 
   it("deduplicates overlapping records across copied transcripts", async () => {
-    mockedParseCursorSqlite.mockResolvedValueOnce(null);
     const dir = await mkdtemp(join(tmpdir(), "cursor-parser-duplicate-test-"));
     tempDirs.push(dir);
     const firstDir = join(dir, "project-a");

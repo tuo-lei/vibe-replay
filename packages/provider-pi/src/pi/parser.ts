@@ -560,7 +560,10 @@ function normalizeToolInput(name: string, input: Record<string, unknown>): Recor
           (edit): edit is Record<string, unknown> => !!edit && typeof edit === "object",
         )
       : [];
-    const source = edits.length > 0 ? edits : [input];
+    const replacements = edits.filter(
+      (edit) => typeof edit.oldText === "string" && typeof edit.newText === "string",
+    );
+    const source = replacements.length > 0 ? replacements : [input];
     const oldText = joinEditSegments(source, "oldText");
     const newText = joinEditSegments(source, "newText");
     return {
@@ -651,7 +654,9 @@ function collectSummaryUsage(
 ): void {
   const usage = (entry as { usage?: unknown }).usage;
   if (!usage || typeof usage !== "object") return;
-  const normalized = normalizeUsage(usage as PiUsage);
+  const rawUsage = usage as PiUsage;
+  if (!hasValidUsageValues(rawUsage)) return;
+  const normalized = normalizeUsage(rawUsage);
   const total =
     normalized.inputTokens +
     normalized.outputTokens +
@@ -663,11 +668,21 @@ function collectSummaryUsage(
 
 function normalizeUsage(usage: PiUsage): TokenUsage {
   return {
-    inputTokens: usage.input || 0,
-    outputTokens: usage.output || 0,
-    cacheCreationTokens: usage.cacheWrite || 0,
-    cacheReadTokens: usage.cacheRead || 0,
+    inputTokens: tokenCount(usage.input),
+    outputTokens: tokenCount(usage.output),
+    cacheCreationTokens: tokenCount(usage.cacheWrite),
+    cacheReadTokens: tokenCount(usage.cacheRead),
   };
+}
+
+function tokenCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+function hasValidUsageValues(usage: PiUsage): boolean {
+  return [usage.input, usage.output, usage.cacheRead, usage.cacheWrite].every(
+    (value) => value === undefined || tokenCount(value) === value,
+  );
 }
 
 function aggregateUsage(usages: TokenUsage[]): TokenUsage | undefined {
