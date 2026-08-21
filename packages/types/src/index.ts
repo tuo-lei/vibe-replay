@@ -185,7 +185,6 @@ export type UsageEventStatus = "success" | "error" | "unknown";
 export interface UsageEvent {
   kind: "tool" | "skill";
   name: string;
-  rawName?: string;
   turnIndex?: number;
   timestamp?: string;
   durationMs?: number;

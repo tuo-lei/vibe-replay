@@ -405,9 +405,10 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
     const source = showAgentRuns
       ? userInsights.topProjects
       : userInsights.topProjects.filter((p) => !isAgentRunWorkspace(p.project));
-    // When the toggle is on, preserve each run workspace as its own project;
-    // otherwise the default rollup intentionally hides those scratch paths
-    // under their parent.
+    // When the toggle is on, preserve each run workspace as its own project.
+    // When it is off, those entries were already removed above, so parent
+    // totals exclude run-workspace activity; agentRunCount reports it
+    // separately.
     const sorted = rollupTopProjects(source, { rollupAgentRuns: !showAgentRuns });
     sorted.sort((a, b) => (b.lastActivity || "").localeCompare(a.lastActivity || ""));
     return sorted;

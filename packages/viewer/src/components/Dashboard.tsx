@@ -1798,7 +1798,9 @@ function SessionUsageDetails({
     breakdown.mcpServerCount > 0
       ? `${breakdown.mcpServerCount} MCP server${breakdown.mcpServerCount !== 1 ? "s" : ""}`
       : null,
-    breakdown.skills.length > 0 ? `${Object.keys(summary?.skills || {}).length} skills` : null,
+    breakdown.skills.length > 0
+      ? `${breakdown.skills.length} skill${breakdown.skills.length !== 1 ? "s" : ""}`
+      : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -2194,18 +2196,23 @@ function SessionsPanel() {
 
   // Visible sessions (excluding archived unless toggled)
   const archivedCount = sources.filter((s) => archivedSlugs.has(s.slug)).length;
-  const unarchivedSources = showArchived
-    ? sources
-    : sources.filter((s) => !archivedSlugs.has(s.slug));
+  const unarchivedSources = useMemo(
+    () => (showArchived ? sources : sources.filter((s) => !archivedSlugs.has(s.slug))),
+    [archivedSlugs, showArchived, sources],
+  );
   // One-off scratch workspaces are hidden by default: a machine that reviews
   // PRs or triages alerts on a schedule accumulates far more of them than real
   // projects, and each one is a single session the user never opened by hand.
   const agentRunCount = new Set(
     unarchivedSources.filter((s) => isAgentRunWorkspace(s.project)).map((s) => s.project),
   ).size;
-  const visibleSources = showAgentRuns
-    ? unarchivedSources
-    : unarchivedSources.filter((s) => !isAgentRunWorkspace(s.project));
+  const visibleSources = useMemo(
+    () =>
+      showAgentRuns
+        ? unarchivedSources
+        : unarchivedSources.filter((s) => !isAgentRunWorkspace(s.project)),
+    [showAgentRuns, unarchivedSources],
+  );
 
   const selectedProviderSet = new Set(selectedProviders);
   const selectedRepoSet = new Set(selectedRepos);
@@ -2215,40 +2222,46 @@ function SessionsPanel() {
   const matchesRepoFilter = (s: SourceSession) => matchesRepoFacet(s, selectedRepoSet);
   const matchesProjectFilter = (s: SourceSession) =>
     matchesProjectFacet(s, selectedProjectKey, ALL_PROJECTS, rollupProject);
-  const matchesSearchFilter = (s: SourceSession) => {
-    if (!query) return true;
-    const scanData = scanResultsBySlug[s.slug];
-    const displayTitle = sourceDisplayTitle(s, scanData);
-    const prompts = sessionPromptPreview(s, scanData, displayTitle).join(" ");
-    const usage = usageFacetValues(scanData);
-    return [
-      s.slug,
-      s.title,
-      displayTitle,
-      s.firstPrompt,
-      prompts,
-      s.gitBranch,
-      s.gitRepo,
-      s.project,
-      s.provider,
-      providerDisplayName(s.provider),
-      s.model,
-      scanData?.model,
-      scanData?.gitBranch,
-      ...usage.tools,
-      ...usage.mcpServers,
-      ...usage.mcpTools,
-      ...usage.skills,
-    ]
-      .filter(Boolean)
-      .some((value) => String(value).toLowerCase().includes(query));
-  };
-
-  const searchMatchedSources = visibleSources.filter(matchesSearchFilter);
-  const usageEnrichedSources = searchMatchedSources.map((source) => ({
-    ...source,
-    ...usageFacetValues(scanResultsBySlug[source.slug]),
-  }));
+  const searchMatchedSources = useMemo(
+    () =>
+      visibleSources.filter((s) => {
+        if (!query) return true;
+        const scanData = scanResultsBySlug[s.slug];
+        const displayTitle = sourceDisplayTitle(s, scanData);
+        const prompts = sessionPromptPreview(s, scanData, displayTitle).join(" ");
+        const usage = usageFacetValues(scanData);
+        return [
+          s.slug,
+          s.title,
+          displayTitle,
+          s.firstPrompt,
+          prompts,
+          s.gitBranch,
+          s.gitRepo,
+          s.project,
+          s.provider,
+          providerDisplayName(s.provider),
+          s.model,
+          scanData?.model,
+          scanData?.gitBranch,
+          ...usage.tools,
+          ...usage.mcpServers,
+          ...usage.mcpTools,
+          ...usage.skills,
+        ]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(query));
+      }),
+    [query, scanResultsBySlug, visibleSources],
+  );
+  const usageEnrichedSources = useMemo(
+    () =>
+      searchMatchedSources.map((source) => ({
+        ...source,
+        ...usageFacetValues(scanResultsBySlug[source.slug]),
+      })),
+    [scanResultsBySlug, searchMatchedSources],
+  );
   const usageMatchedSources = applyDashboardFacetFilters(usageEnrichedSources, {
     selectedProviders: [],
     selectedRepos: [],

@@ -1017,14 +1017,15 @@ export async function startServer(
 
   /**
    * Auto-sync insights to cloud if user is logged in.
-   * Runs at most once per calendar day to avoid excessive writes.
+   * Normal scans run at most once per calendar day; usage backfills may force
+   * a refresh of the current day's row after enriching the persisted snapshot.
    */
-  const autoSyncInsights = (): Promise<void> => {
+  const autoSyncInsights = (force = false): Promise<void> => {
     const today = localDayKey(new Date())!;
-    if (lastAutoSyncDate === today) return Promise.resolve();
+    if (!force && lastAutoSyncDate === today) return Promise.resolve();
     // Serialize through syncLock to prevent concurrent read-modify-write on the store
     const job = syncLock.then(async () => {
-      if (lastAutoSyncDate === today) return; // Re-check after acquiring lock
+      if (!force && lastAutoSyncDate === today) return; // Re-check after acquiring lock
       const result = await syncInsightsToCloud();
       if (!result.error) lastAutoSyncDate = today;
     });
@@ -1131,7 +1132,10 @@ export async function startServer(
 
       await writeFileCache(scanResultsCacheKey, merged);
       await persistInsightsFromScan(merged).catch(() => {});
-      void autoSyncInsights().catch(() => {});
+      // The fast pass may already have consumed today's normal sync gate. The
+      // backfill changes the persisted snapshot, so it must sync today's row
+      // again; buildInsightsSyncBatches deliberately keeps today in the delta.
+      void autoSyncInsights(true).catch(() => {});
       // Do not advertise the backfill as complete until the usage-enriched
       // project/user cache is also ready; otherwise the viewer can fetch the
       // old fast-pass insights in the small window between these operations.

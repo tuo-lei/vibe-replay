@@ -43,6 +43,11 @@ import { localDayKey, shortenPath } from "./utils.js";
 // results cannot make that distinction.
 export const SCANNER_VERSION = 19;
 
+// Keep per-invocation detail bounded in the durable insight store. The full
+// event set is still used to compute usageSummary below; only the retained
+// detail returned to the cache/API is capped.
+const MAX_RETAINED_USAGE_EVENTS = 100;
+
 // ─── Types ──────────────────────────────────────────────────────────
 
 export interface SessionScanResult {
@@ -324,6 +329,13 @@ function summarizeUsage(
   }
 
   return summary;
+}
+
+function retainedUsageEvents(events: UsageEvent[]): UsageEvent[] | undefined {
+  if (events.length === 0) return undefined;
+  return events.length > MAX_RETAINED_USAGE_EVENTS
+    ? events.slice(-MAX_RETAINED_USAGE_EVENTS)
+    : events;
 }
 
 export interface ScanCacheData {
@@ -768,8 +780,8 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
               name,
               skillName: name,
               timestamp: obj.timestamp,
-              status: "success",
-              attribution: "explicit",
+              status: "unknown",
+              attribution: "session-metadata",
             });
           }
         } else if (text.startsWith("The user just ran /")) {
@@ -782,8 +794,8 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
               name,
               skillName: name,
               timestamp: obj.timestamp,
-              status: "success",
-              attribution: "explicit",
+              status: "unknown",
+              attribution: "session-metadata",
             });
           }
         }
@@ -1041,7 +1053,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
     skillsUsed: skillsUsed.size > 0 ? [...skillsUsed].sort() : undefined,
     mcpServersUsed: mcpServersUsed.size > 0 ? [...mcpServersUsed].sort() : undefined,
     usageSummary: summarizeUsage(usageEvents, skillsUsed, mcpServersUsed),
-    usageEvents: usageEvents.length > 0 ? usageEvents : undefined,
+    usageEvents: retainedUsageEvents(usageEvents),
     // A normal generic scan is the usage-aware path even when a source file
     // disappeared between discovery and reading. Rich-parser fallbacks need a
     // readable source before they can claim the usage index is complete.
@@ -1380,7 +1392,7 @@ function buildScanResultFromParsed(
     skillsUsed: parsed.skillsUsed,
     mcpServersUsed: derivedMcpServers.size > 0 ? [...derivedMcpServers].sort() : undefined,
     usageSummary: summarizeUsage(usageEvents, parsed.skillsUsed, derivedMcpServers),
-    usageEvents: usageEvents.length > 0 ? usageEvents : undefined,
+    usageEvents: retainedUsageEvents(usageEvents),
     usageIndexed: true,
     dataSource: parsed.dataSource,
     dataQualityNotes: costDataQualityNotes(
@@ -1521,10 +1533,6 @@ export interface BackgroundScanState {
   usageBackfill?: { running: boolean; scanned: number; total: number };
 }
 
-/**
- * Run background scan on a list of sessions. Scans newest first.
- * Uses cache to skip unchanged sessions. Reports progress via callback.
- */
 export interface BackgroundScanOptions {
   /**
    * Treat an otherwise valid cache entry as stale. Used by the usage backfill
@@ -1535,6 +1543,10 @@ export interface BackgroundScanOptions {
   shouldStop?: () => boolean;
 }
 
+/**
+ * Run background scan on a list of sessions. Scans newest first.
+ * Uses cache to skip unchanged sessions. Reports progress via callback.
+ */
 export async function runBackgroundScan(
   sessions: ScanInput[],
   onProgress?: (progress: ScanProgress) => void,

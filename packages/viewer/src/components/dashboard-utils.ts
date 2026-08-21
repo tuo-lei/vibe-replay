@@ -355,20 +355,6 @@ export function navigateTo(
   options: { replace?: boolean; notify?: boolean } = {},
 ) {
   const url = new URL(window.location.href);
-  const DASHBOARD_PARAMS = [
-    "tab",
-    "project",
-    "q",
-    "archived",
-    "provider",
-    "repo",
-    "tool",
-    "mcp",
-    "mcpTool",
-    "skill",
-    "agentRuns",
-    "replay",
-  ];
 
   // 1. If we are currently on dashboard, capture its state to sessionStorage
   const isCurrentlyDashboard =
@@ -441,6 +427,21 @@ export function navigateTo(
   }
 }
 
+export const DASHBOARD_PARAMS = [
+  "tab",
+  "project",
+  "q",
+  "archived",
+  "provider",
+  "repo",
+  "tool",
+  "mcp",
+  "mcpTool",
+  "skill",
+  "agentRuns",
+  "replay",
+] as const;
+
 /**
  * Navigate to live mode for a running source session.
  *
@@ -451,26 +452,7 @@ export function navigateTo(
  */
 export function navigateToLive(provider: string, sessionId: string) {
   const url = new URL(window.location.href);
-  for (const k of [
-    "view",
-    "tab",
-    "session",
-    "gist",
-    "cloud",
-    "url",
-    "project",
-    "q",
-    "archived",
-    "repo",
-    "tool",
-    "mcp",
-    "mcpTool",
-    "skill",
-    "agentRuns",
-    "replay",
-    "v",
-    "s",
-  ]) {
+  for (const k of [...DASHBOARD_PARAMS, "view", "session", "gist", "cloud", "url", "v", "s"]) {
     url.searchParams.delete(k);
   }
   url.searchParams.set("live", "1");
@@ -769,10 +751,11 @@ export function agentWorktreeParent(project: string): string | null {
  * A run id at the end of a directory name: a UUID, or the hex digest that
  * tools use to keep concurrent runs from colliding. Twelve characters is the
  * shortest digest worth trusting — below that, ordinary names (`ros-4`, a
- * date, a PR number) start matching.
+ * date, a PR number) start matching. All-numeric suffixes are excluded because
+ * timestamp-like project names are common and are not run identifiers.
  */
 const RUN_ID_SUFFIX_RE =
-  /(?:^|-)(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{12,})$/i;
+  /(?:^|-)(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?=[0-9a-f]{12,}$)[0-9]*[a-f][0-9a-f]*)$/i;
 
 /**
  * Scratch workspaces created one per automated run — SDK agents, PR-review
@@ -786,7 +769,8 @@ export function agentRunWorkspaceParent(project: string): string | null {
   const slash = Math.max(clean.lastIndexOf("/"), clean.lastIndexOf("\\"));
   if (slash <= 0) return null;
   if (!RUN_ID_SUFFIX_RE.test(clean.slice(slash + 1))) return null;
-  return clean.slice(0, slash);
+  const parent = clean.slice(0, slash);
+  return /^[A-Za-z]:$/.test(parent) ? null : parent;
 }
 
 export function isAgentRunWorkspace(project: string): boolean {

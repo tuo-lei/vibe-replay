@@ -64,7 +64,10 @@ describe("cursor project directory decoding", () => {
     const workspace = join(root, ".cursor-sdk-control", "artifacts");
     await mkdir(workspace, { recursive: true });
 
-    const encoded = encodeCursorProjectPath(workspace).replace("-.", "-");
+    const encoded = encodeCursorProjectPath(workspace).replace(
+      "-.cursor-sdk-control-",
+      "-cursor-sdk-control-",
+    );
     await expect(__testables.decodeProjectDir(encoded)).resolves.toBe(workspace);
   });
 

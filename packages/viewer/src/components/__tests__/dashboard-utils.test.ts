@@ -89,6 +89,7 @@ describe("agentRunWorkspaceParent", () => {
     // A PR number is not a run id, and neither is a digest under 12 chars.
     expect(agentRunWorkspaceParent("~/sdk/worktrees/pr-review-ros-11883")).toBeNull();
     expect(agentRunWorkspaceParent("~/Code/build-abc123")).toBeNull();
+    expect(agentRunWorkspaceParent("~/Code/build-1735689600000")).toBeNull();
   });
 
   it("handles Windows project separators", () => {
@@ -97,6 +98,7 @@ describe("agentRunWorkspaceParent", () => {
         "C:\\Users\\test\\artifacts\\slack-inbox-5433add3-d507-4e0a-8f71-1bd30c541913",
       ),
     ).toBe("C:\\Users\\test\\artifacts");
+    expect(agentRunWorkspaceParent("C:\\5433add3-d507-4e0a-8f71-1bd30c541913")).toBeNull();
   });
 
   it("returns null when there is no parent directory to roll up into", () => {

@@ -314,7 +314,45 @@ describe("scanSession", () => {
       skills: { replay: 1 },
     });
     expect(result.usageEvents).toHaveLength(4);
+    expect(result.usageEvents?.find((event) => event.kind === "skill")).toMatchObject({
+      status: "unknown",
+      attribution: "session-metadata",
+    });
     expect(JSON.stringify(result.usageEvents)).not.toContain("/secret/path.ts");
+  });
+
+  it("keeps usage summaries complete while bounding retained invocation details", async () => {
+    const path = join(tmpDir, "usage-events-bounded.jsonl");
+    const toolUses = Array.from({ length: 120 }, (_unused, index) => ({
+      type: "tool_use",
+      id: `tool-${index}`,
+      name: `Tool-${index}`,
+      input: {},
+    }));
+    await writeFile(
+      path,
+      makeLine({
+        type: "assistant",
+        timestamp: "2025-03-20T10:00:00Z",
+        message: { role: "assistant", content: toolUses },
+      }),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "usage-events-bounded",
+      provider: "claude-code",
+      project: "~/test/project",
+      slug: "usage-events-bounded",
+      filePaths: [path],
+    });
+
+    expect(result.usageSummary?.tools).toEqual(
+      Object.fromEntries(toolUses.map((tool) => [tool.name, 1])),
+    );
+    expect(result.usageEvents).toHaveLength(100);
+    expect(result.usageEvents?.[0]?.name).toBe("Tool-20");
+    expect(result.usageEvents?.[99]?.name).toBe("Tool-119");
   });
 
   it("marks tool outcomes from paired tool_result blocks", async () => {
