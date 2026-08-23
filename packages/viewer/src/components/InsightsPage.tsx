@@ -1081,7 +1081,7 @@ function InsightsRangeLoadingState({
           </div>
           {error && (
             <p className="mt-2 text-xs font-mono text-terminal-dim">
-              Refresh the dashboard to retry. All-time totals remain available.
+              Refresh the dashboard to retry, or select All to view available all-time totals.
             </p>
           )}
         </output>
@@ -1225,13 +1225,6 @@ function useUsageRollupSessions(scanFinishedAt?: string, usageBackfillRunning = 
 
 // ─── Tool & MCP Usage ───────────────────────────────────────────────
 
-function encodeUsageFacetValue(name: string): string {
-  // URLSearchParams performs the URL encoding. Keep MCP's conventional
-  // server/tool slash readable so the resulting query is a normal single
-  // facet value rather than a doubly encoded `%252F` sequence.
-  return encodeURIComponent(name).replace(/%2F/gi, "/");
-}
-
 export function navigateToUsageSessions(facet: "tool" | "mcp" | "mcpTool" | "skill", name: string) {
   navigateTo({
     view: "dashboard",
@@ -1248,7 +1241,7 @@ export function navigateToUsageSessions(facet: "tool" | "mcp" | "mcpTool" | "ski
     archived: null,
     agentRuns: null,
     replay: null,
-    [facet]: encodeUsageFacetValue(name),
+    [facet]: name,
   });
 }
 

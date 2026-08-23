@@ -87,4 +87,34 @@ describe("buildInsightsRollup", () => {
     });
     expect(JSON.stringify(payload)).not.toContain("private");
   });
+
+  it.each([30, 500])("keeps a %d-session scan set compact", (sessionCount) => {
+    const scans = Array.from({ length: sessionCount }, (_, index) =>
+      makeScan({
+        sessionId: `session-${index}`,
+        slug: `session-${index}`,
+        project: `~/Code/app-${index % 3}`,
+        usageEvents: Array.from({ length: 30 }, (_, eventIndex) => ({
+          kind: "tool",
+          name: `tool-${eventIndex}`,
+          status: "success",
+          attribution: "explicit",
+        })),
+      }),
+    );
+
+    const payload = buildInsightsRollup(scans, []);
+
+    expect(payload.sessions).toHaveLength(sessionCount);
+    expect(payload.sessions[0]).toEqual({
+      project: "~/Code/app-0",
+      startTime: "2026-08-20T10:00:00.000Z",
+      durationMs: 60_000,
+      cost: 0.25,
+      prompts: 2,
+      edits: 1,
+      toolCalls: 5,
+    });
+    expect(JSON.stringify(payload)).not.toContain("tool-");
+  });
 });

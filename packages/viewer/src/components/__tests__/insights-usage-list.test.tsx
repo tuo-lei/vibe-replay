@@ -50,7 +50,6 @@ describe("UsageBarList", () => {
     ]) {
       expect(params.get(key), `${key} should be cleared`).toBeNull();
     }
-    expect(decodeURIComponent(params.get("mcpTool")!)).toBe("sourcegraph/search");
     expect(params.get("mcpTool")).toBe("sourcegraph/search");
   });
 
@@ -64,6 +63,15 @@ describe("UsageBarList", () => {
 
     const params = new URLSearchParams(window.location.search);
     expect(params.get("tab")).toBe("sessions");
-    expect(decodeURIComponent(params.get(facet)!)).toBe(value);
+    expect(params.get(facet)).toBe(value);
+  });
+
+  it("round-trips facet names with URL-sensitive characters exactly once", () => {
+    const value = "sourcegraph/search?query=foo bar&scope=100%";
+
+    navigateToUsageSessions("mcpTool", value);
+
+    const params = new URLSearchParams(window.location.search);
+    expect(params.get("mcpTool")).toBe(value);
   });
 });

@@ -1635,12 +1635,38 @@ export async function runBackgroundScan(
 
 // ─── Aggregation ────────────────────────────────────────────────────
 
+const AGENT_WORKTREE_RE = /^(.+?)\/\.claude\/worktrees\/[^/]+(?:\/.*)?$/;
+const RUN_ID_SUFFIX_RE =
+  /(?:^|-)(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?=[0-9a-f]{12,}$)[0-9]*[a-f][0-9a-f]*)$/i;
+
+function agentWorktreeParent(project: string): string | null {
+  const normalized = project.replace(/\\/g, "/").replace(/\/+$/, "");
+  const match = normalized.match(AGENT_WORKTREE_RE);
+  return match ? match[1] : null;
+}
+
+function agentRunWorkspaceParent(project: string): string | null {
+  const clean = project.replace(/[\\/]+$/, "");
+  const slash = Math.max(clean.lastIndexOf("/"), clean.lastIndexOf("\\"));
+  if (slash <= 0 || !RUN_ID_SUFFIX_RE.test(clean.slice(slash + 1))) return null;
+  const parent = clean.slice(0, slash);
+  return /^[A-Za-z]:$/.test(parent) ? null : parent;
+}
+
+function projectMatches(project: string, requestedProject: string): boolean {
+  return (
+    project === requestedProject ||
+    agentWorktreeParent(project) === requestedProject ||
+    agentRunWorkspaceParent(project) === requestedProject
+  );
+}
+
 export function aggregateProjectInsights(
   project: string,
   scans: SessionScanResult[],
   memory?: ProjectMemory,
 ): ProjectInsights {
-  const projectScans = scans.filter((s) => s.project === project);
+  const projectScans = scans.filter((s) => projectMatches(s.project, project));
 
   let totalDurationMs = 0;
   let totalCost = 0;

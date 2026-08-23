@@ -143,4 +143,28 @@ describe("rollupInsights", () => {
 
     expect(result).toMatchObject({ sessions: 1, prompts: 1, edits: 0, toolCalls: 0 });
   });
+
+  it.each([30, 500])("aggregates exact bounded totals for %d sessions", (sessionCount) => {
+    const sessions = Array.from({ length: sessionCount }, (_, index) => ({
+      project: `~/code/project-${index % 2}`,
+      startTime: "2026-08-20T12:00:00Z",
+      durationMs: 1_000,
+      cost: 0.25,
+      prompts: 2,
+      edits: 1,
+      toolCalls: 3,
+    }));
+    const replays = sessions.map(({ project, startTime }) => ({ project, startTime }));
+
+    expect(rollupInsights({ sessions, replays }, { since: "2026-08-20T00:00:00Z" })).toEqual({
+      sessions: sessionCount,
+      replays: sessionCount,
+      durationMs: sessionCount * 1_000,
+      cost: sessionCount * 0.25,
+      prompts: sessionCount * 2,
+      edits: sessionCount,
+      toolCalls: sessionCount * 3,
+      projects: 2,
+    });
+  });
 });
