@@ -1225,6 +1225,13 @@ function useUsageRollupSessions(scanFinishedAt?: string, usageBackfillRunning = 
 
 // ─── Tool & MCP Usage ───────────────────────────────────────────────
 
+function encodeUsageFacetValue(name: string): string {
+  // URLSearchParams performs the URL encoding. Keep MCP's conventional
+  // server/tool slash readable so the resulting query is a normal single
+  // facet value rather than a doubly encoded `%252F` sequence.
+  return encodeURIComponent(name).replace(/%2F/gi, "/");
+}
+
 export function navigateToUsageSessions(facet: "tool" | "mcp" | "mcpTool" | "skill", name: string) {
   navigateTo({
     view: "dashboard",
@@ -1241,7 +1248,7 @@ export function navigateToUsageSessions(facet: "tool" | "mcp" | "mcpTool" | "ski
     archived: null,
     agentRuns: null,
     replay: null,
-    [facet]: encodeURIComponent(name),
+    [facet]: encodeUsageFacetValue(name),
   });
 }
 

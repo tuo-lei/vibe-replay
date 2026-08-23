@@ -51,6 +51,7 @@ describe("UsageBarList", () => {
       expect(params.get(key), `${key} should be cleared`).toBeNull();
     }
     expect(decodeURIComponent(params.get("mcpTool")!)).toBe("sourcegraph/search");
+    expect(params.get("mcpTool")).toBe("sourcegraph/search");
   });
 
   it.each([
