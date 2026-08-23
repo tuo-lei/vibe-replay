@@ -1,8 +1,8 @@
 # vibe-replay
 
-> vibe-replay turns your Claude Code and Cursor AI coding sessions into interactive, shareable web replays as single self-contained HTML files. One command, no account, free and open source.
+> vibe-replay turns your AI coding sessions — Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, OpenCode, Hermes, and Pi — into interactive, shareable web replays as single self-contained HTML files. One command, no account, free and open source.
 
-vibe-replay is a CLI (npm package: `vibe-replay`) that reads your local Claude Code (`~/.claude/`) and Cursor (`~/.cursor/`) session data, then renders it as a scrubbable timeline showing every prompt, AI response, tool call, file diff, and thinking block. Output is a single HTML file with all assets inlined — no server, no external requests.
+vibe-replay is a CLI (npm package: `vibe-replay`) that reads your local AI agent session data (Claude Code `~/.claude/`, Cursor `~/.cursor/` + SQLite stores, Codex, OpenCode `~/.local/share/opencode/opencode.db`, Hermes `~/.hermes/state.db`, Pi `~/.pi/agent/sessions/`), then renders it as a scrubbable timeline showing every prompt, AI response, tool call, file diff, and thinking block. Output is a single HTML file with all assets inlined — no server, no external requests.
 
 Install: `npx vibe-replay`
 Source: https://github.com/tuo-lei/vibe-replay
@@ -11,14 +11,35 @@ License: MIT
 ## Core pages
 
 - [Homepage](https://vibe-replay.com/): Product overview, install instructions, feature list.
-- [Explore replays](https://vibe-replay.com/explore/): Public AI coding sessions shared by the community (Claude Code + Cursor).
+- [Explore replays](https://vibe-replay.com/explore/): Public AI coding sessions shared by the community (Claude Code, Cursor, Codex, OpenCode, Hermes, and Pi).
 - [Insights dashboard](https://vibe-replay.com/insights/): Personal AI coding analytics — sessions, prompts, tool calls, costs, streaks across machines and providers.
 - [Blog](https://vibe-replay.com/blog/): Deep-dives on Claude Code, Cursor, and AI coding workflows.
 
+## What it does
+
+- **All your sessions, one place**: a local dashboard (`npx vibe-replay -d`) lists every session across all supported agents with activity heatmaps, per-project analytics, and cost estimates. Search and filter by git repo, tool, MCP server/tool, or skill.
+- **Full replay**: step through every prompt, thinking block, tool call, and code diff with All/Compact/Custom view modes, outline navigation, search, and playback controls.
+- **Session insights**: per-session analytics — token burn and cost per turn, context window usage, cache hit rates, tool call distribution, model breakdown, and data-quality hints.
+- **Personal insights**: GitHub-style activity heatmap, streaks, weekly trends, top projects, model usage, provider breakdown, and cost tracking across all sessions.
+- **Share & export**: self-contained HTML, animated SVG, GIF, or markdown summary. Publish to GitHub Gist for a shareable link, or upload to the cloud. Secret redaction built in.
+- **Claude Code plugin**: install from the plugin marketplace so your agent generates replays automatically during PR creation. A portable Agent Skills `SKILL.md` is also included for Cursor, Codex, and other compatible agents.
+- **Live mode**: `vibe-replay live` streams a running Claude Code or Codex session into the viewer, pinned to the latest turn as it lands on disk.
+
+## Supported providers
+
+- Claude Code (JSONL transcripts, multi-file and resumed sessions)
+- Claude Desktop and Claude Cowork (agent-mode sessions)
+- Cursor (SQLite `store.db` + `state.vscdb` + JSONL fallback + SDK agent store)
+- Codex (web search, GPT-5.x models, task timings, memory mode)
+- OpenCode (SQLite sessions, tools, reasoning, and compaction)
+- Hermes (SQLite sessions, tools, reasoning, and compaction)
+- Pi (JSONL tree sessions, branching, compaction summaries)
+
 ## Blog posts
 
+- [Where Does Cursor's SDK Actually Store Your Agents? A Deep Dive into sdk-agent-store](https://vibe-replay.com/blog/cursor-sdk-deep-dive/): Inside the Cursor SDK's local storage layer — its own schema, event stream, and tool-result format.
 - [Capturing Claude's Autonomous Agent Mode: A Deep Dive into Dispatch](https://vibe-replay.com/blog/dispatch-deep-dive/): How vibe-replay captures Claude Desktop Cowork / autonomous sessions, including the technical challenges and the parser changes required.
-- [878 Sessions, 52.9k Tool Calls — What a Year of Vibe Coding Looks Like](https://vibe-replay.com/blog/personal-insights/): Year-long usage breakdown: prompts, tool calls, model distribution (79% Cursor, 21% Claude Code), and what the data reveals about real AI coding habits.
+- [878 Sessions, 52.9k Tool Calls — What a Year of Vibe Coding Looks Like](https://vibe-replay.com/blog/personal-insights/): Year-long usage breakdown: prompts, tool calls, model distribution, and what the data reveals about real AI coding habits.
 - [What Actually Happens When Claude Code /simplify Cleans Your Codebase](https://vibe-replay.com/blog/simplify-codebase-with-ai/): Behavioral analysis of Claude Code's `/simplify` slash command and the kinds of refactors it produces.
 - [Claude Code's Source Leaked. We Read It and Shipped 5 Features in a Day](https://vibe-replay.com/blog/claude-code-source-leak/): Findings from the Claude Code source leak, with concrete features built on that knowledge.
 - [What Does Cursor Store on Your Machine? A Deep Dive into ~/.cursor/](https://vibe-replay.com/blog/cursor-local-storage/): Walkthrough of Cursor's local storage layout — SQLite `store.db`, `state.vscdb`, JSONL fallback, and how vibe-replay merges them.
