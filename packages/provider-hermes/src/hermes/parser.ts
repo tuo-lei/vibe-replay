@@ -417,7 +417,7 @@ function usageFromSession(session: HermesSessionRow | null): TokenUsage | undefi
  * when billing data is available, an actual cost — prefer the actual value
  * and only report positive numbers (status "included"/"unknown" store 0).
  */
-export function reportedCostFromSession(session: HermesSessionRow | null): number | undefined {
+function reportedCostFromSession(session: HermesSessionRow | null): number | undefined {
   if (!session) return undefined;
   const actual = Number(session.actual_cost_usd ?? 0);
   if (Number.isFinite(actual) && actual > 0) return actual;
