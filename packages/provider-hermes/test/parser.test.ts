@@ -226,40 +226,59 @@ describe("hermes parser", () => {
         {
           id: 2,
           sessionId: baseSession.id,
-          role: "user",
-          content: "[CONTEXT COMPACTION — REFERENCE ONLY] summary one",
+          role: "assistant",
+          content: "first answer",
+          compacted: 1,
           timestamp: 1_800_000_002,
         },
         {
           id: 3,
           sessionId: baseSession.id,
           role: "user",
-          content: "second prompt",
+          content: "[CONTEXT COMPACTION — REFERENCE ONLY] summary one",
           timestamp: 1_800_000_003,
         },
         {
           id: 4,
           sessionId: baseSession.id,
-          role: "assistant",
-          content: "answer",
-          compacted: 1,
+          role: "user",
+          content: "second prompt",
           timestamp: 1_800_000_004,
         },
         {
           id: 5,
           sessionId: baseSession.id,
+          role: "assistant",
+          content: "second answer",
+          compacted: 1,
+          timestamp: 1_800_000_005,
+        },
+        {
+          id: 6,
+          sessionId: baseSession.id,
+          role: "tool",
+          toolName: "terminal",
+          toolCallId: "call_c2",
+          content: "{}",
+          compacted: 1,
+          timestamp: 1_800_000_006,
+        },
+        {
+          id: 7,
+          sessionId: baseSession.id,
           role: "user",
           content: "third prompt",
-          timestamp: 1_800_000_005,
+          timestamp: 1_800_000_007,
         },
       ],
     });
 
     try {
       const result = parseSessionFromDb(db, baseSession.id);
+      // Each contiguous compacted run collapses into exactly one event.
       expect(result.compactions).toHaveLength(2);
       expect(result.compactions?.[0].timestamp).toBe("2027-01-15T08:00:01.000Z");
-      expect(result.compactions?.[1].timestamp).toBe("2027-01-15T08:00:04.000Z");
+      expect(result.compactions?.[1].timestamp).toBe("2027-01-15T08:00:05.000Z");
     } finally {
       db.close();
     }

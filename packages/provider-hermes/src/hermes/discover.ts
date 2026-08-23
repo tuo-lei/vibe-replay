@@ -126,7 +126,7 @@ function buildSessionStats(db: Database, rows: HermesSessionRow[]): Map<string, 
       WHERE role = 'user'
         AND content IS NOT NULL
         AND length(trim(content)) > 0
-        AND content NOT LIKE '[CONTEXT COMPACTION%'
+        AND trim(content) NOT LIKE '[CONTEXT COMPACTION%'
       GROUP BY session_id
     `,
   );
@@ -185,7 +185,7 @@ function firstUserPrompts(db: Database): Map<string, string> {
         WHERE role = 'user'
           AND content IS NOT NULL
           AND length(trim(content)) > 0
-          AND content NOT LIKE '[CONTEXT COMPACTION%'
+          AND trim(content) NOT LIKE '[CONTEXT COMPACTION%'
         GROUP BY session_id
       )
     `,
