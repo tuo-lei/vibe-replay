@@ -79,6 +79,8 @@ export async function buildHermesDb(seeds: {
       cache_write_tokens INTEGER DEFAULT 0,
       reasoning_tokens INTEGER DEFAULT 0,
       estimated_cost_usd REAL,
+      actual_cost_usd REAL,
+      cost_status TEXT,
       git_branch TEXT,
       git_repo_root TEXT,
       parent_session_id TEXT,

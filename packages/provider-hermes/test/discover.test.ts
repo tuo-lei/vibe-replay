@@ -89,6 +89,44 @@ describe("hermes discover", () => {
     }
   });
 
+  it("does not count context-compaction markers as prompts", async () => {
+    const db = await buildHermesDb({
+      sessions: [
+        {
+          id: "20260806_090000_cmpct1",
+          cwd: "/Users/test/project",
+          startedAt: 1_800_000_000,
+          lastActivityAt: 1_800_000_010,
+        },
+      ],
+      messages: [
+        {
+          id: 1,
+          sessionId: "20260806_090000_cmpct1",
+          role: "user",
+          content: "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted.",
+          timestamp: 1_800_000_001,
+        },
+        {
+          id: 2,
+          sessionId: "20260806_090000_cmpct1",
+          role: "user",
+          content: "real prompt after compaction",
+          timestamp: 1_800_000_002,
+        },
+      ],
+    });
+
+    try {
+      const sessions = listSessionsFromDb(db);
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].promptCount).toBe(1);
+      expect(sessions[0].firstPrompt).toBe("real prompt after compaction");
+    } finally {
+      db.close();
+    }
+  });
+
   it("maps pinned sessions to isStarred", async () => {
     const db = await buildHermesDb({
       sessions: [

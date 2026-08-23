@@ -137,6 +137,134 @@ describe("hermes parser", () => {
     }
   });
 
+  it("prefers actual_cost_usd over estimated_cost_usd for reportedCostUsd", async () => {
+    const db = await buildHermesDb({
+      sessions: [baseSession],
+      messages: [
+        {
+          id: 1,
+          sessionId: baseSession.id,
+          role: "user",
+          content: "hello",
+          timestamp: 1_800_000_001,
+        },
+      ],
+    });
+    db.run("UPDATE sessions SET actual_cost_usd = 0.42, estimated_cost_usd = 0.5 WHERE id = ?", [
+      baseSession.id,
+    ]);
+
+    try {
+      const result = parseSessionFromDb(db, baseSession.id);
+      expect(result.reportedCostUsd).toBe(0.42);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("falls back to estimated_cost_usd when no actual cost is recorded", async () => {
+    const db = await buildHermesDb({
+      sessions: [baseSession],
+      messages: [
+        {
+          id: 1,
+          sessionId: baseSession.id,
+          role: "user",
+          content: "hello",
+          timestamp: 1_800_000_001,
+        },
+      ],
+    });
+    db.run("UPDATE sessions SET estimated_cost_usd = 0.24 WHERE id = ?", [baseSession.id]);
+
+    try {
+      const result = parseSessionFromDb(db, baseSession.id);
+      expect(result.reportedCostUsd).toBe(0.24);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("omits reportedCostUsd when hermes reports zero cost", async () => {
+    const db = await buildHermesDb({
+      sessions: [{ ...baseSession, inputTokens: 10, outputTokens: 5 }],
+      messages: [
+        {
+          id: 1,
+          sessionId: baseSession.id,
+          role: "user",
+          content: "hello",
+          timestamp: 1_800_000_001,
+        },
+      ],
+    });
+    // Hermes stores 0 for cost_status 'included' / 'unknown'.
+    db.run("UPDATE sessions SET estimated_cost_usd = 0, actual_cost_usd = NULL WHERE id = ?", [
+      baseSession.id,
+    ]);
+
+    try {
+      const result = parseSessionFromDb(db, baseSession.id);
+      expect(result.reportedCostUsd).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("records every compaction boundary, not just the first", async () => {
+    const db = await buildHermesDb({
+      sessions: [baseSession],
+      messages: [
+        {
+          id: 1,
+          sessionId: baseSession.id,
+          role: "user",
+          content: "first prompt",
+          compacted: 1,
+          timestamp: 1_800_000_001,
+        },
+        {
+          id: 2,
+          sessionId: baseSession.id,
+          role: "user",
+          content: "[CONTEXT COMPACTION — REFERENCE ONLY] summary one",
+          timestamp: 1_800_000_002,
+        },
+        {
+          id: 3,
+          sessionId: baseSession.id,
+          role: "user",
+          content: "second prompt",
+          timestamp: 1_800_000_003,
+        },
+        {
+          id: 4,
+          sessionId: baseSession.id,
+          role: "assistant",
+          content: "answer",
+          compacted: 1,
+          timestamp: 1_800_000_004,
+        },
+        {
+          id: 5,
+          sessionId: baseSession.id,
+          role: "user",
+          content: "third prompt",
+          timestamp: 1_800_000_005,
+        },
+      ],
+    });
+
+    try {
+      const result = parseSessionFromDb(db, baseSession.id);
+      expect(result.compactions).toHaveLength(2);
+      expect(result.compactions?.[0].timestamp).toBe("2027-01-15T08:00:01.000Z");
+      expect(result.compactions?.[1].timestamp).toBe("2027-01-15T08:00:04.000Z");
+    } finally {
+      db.close();
+    }
+  });
+
   it("pairs parallel tool calls with their results by call id", async () => {
     const db = await buildHermesDb({
       sessions: [baseSession],

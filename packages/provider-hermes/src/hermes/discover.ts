@@ -116,6 +116,8 @@ interface SessionStats {
 function buildSessionStats(db: Database, rows: HermesSessionRow[]): Map<string, SessionStats> {
   // message/tool counts come straight from the sessions row columns that
   // Hermes maintains; prompts and edits need message-level scans.
+  // Context-compaction marker rows are summaries Hermes injects as user rows,
+  // not human prompts, so they are excluded here to match replay output.
   const promptCounts = countBySession(
     db,
     `
@@ -124,6 +126,7 @@ function buildSessionStats(db: Database, rows: HermesSessionRow[]): Map<string, 
       WHERE role = 'user'
         AND content IS NOT NULL
         AND length(trim(content)) > 0
+        AND content NOT LIKE '[CONTEXT COMPACTION%'
       GROUP BY session_id
     `,
   );
@@ -182,6 +185,7 @@ function firstUserPrompts(db: Database): Map<string, string> {
         WHERE role = 'user'
           AND content IS NOT NULL
           AND length(trim(content)) > 0
+          AND content NOT LIKE '[CONTEXT COMPACTION%'
         GROUP BY session_id
       )
     `,
