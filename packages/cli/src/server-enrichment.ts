@@ -193,6 +193,46 @@ export function prioritizeScanInputs(
   });
 }
 
+/**
+ * Keep the last successful scan for a provider whose discovery failed.
+ *
+ * Source discovery already preserves the provider's cached source records in
+ * this situation. The background insights scan must do the same; otherwise a
+ * transient provider/filesystem failure makes that provider disappear from
+ * the dashboard until the next successful scan.
+ */
+export function preserveFailedProviderScanResults(
+  currentResults: SessionScanResult[],
+  previousResults: SessionScanResult[],
+  failedProviders: readonly string[],
+): SessionScanResult[] {
+  if (failedProviders.length === 0 || previousResults.length === 0) return currentResults;
+
+  const failed = new Set(failedProviders);
+  const seen = new Set(
+    currentResults.map((result) => providerSessionKey(result.provider, result.sessionId)),
+  );
+  const staleResults: SessionScanResult[] = [];
+
+  for (const previous of previousResults) {
+    if (!failed.has(previous.provider)) continue;
+
+    const key = providerSessionKey(previous.provider, previous.sessionId);
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const note = `Provider discovery failed for ${previous.provider}; showing the last successful scan.`;
+    staleResults.push({
+      ...previous,
+      dataQualityNotes: previous.dataQualityNotes?.includes(note)
+        ? previous.dataQualityNotes
+        : [...(previous.dataQualityNotes || []), note],
+    });
+  }
+
+  return staleResults.length > 0 ? [...currentResults, ...staleResults] : currentResults;
+}
+
 function scanInputPriorityScore(
   input: ScanInput,
   previousSessionIds: Set<string>,

@@ -60,6 +60,7 @@ import {
   pickSourceRecordForSession,
   providerSessionKey,
   providerSlugKey,
+  preserveFailedProviderScanResults,
   prioritizeScanInputs,
   selectCursorEnrichmentCandidates,
   sourceSessionKey,
@@ -1230,7 +1231,7 @@ export async function startServer(
 
         scanState.total = scanInputs.length;
 
-        const results = await runBackgroundScan(scanInputs, (progress) => {
+        const freshResults = await runBackgroundScan(scanInputs, (progress) => {
           scanState = {
             ...scanState,
             phase: "scanning",
@@ -1239,11 +1240,16 @@ export async function startServer(
             currentSession: progress.currentSession,
           };
         });
+        const results = preserveFailedProviderScanResults(
+          freshResults,
+          previousResults,
+          discovery.failedProviders,
+        );
 
         scanState = {
           running: false,
           scanned: results.length,
-          total: scanInputs.length,
+          total: results.length,
           results,
           currentSession: undefined,
           phase: undefined,
