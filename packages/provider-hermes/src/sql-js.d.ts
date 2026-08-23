@@ -19,6 +19,8 @@ declare module "sql.js" {
     exec(sql: string, params?: any[]): QueryExecResult[];
     prepare(sql: string): Statement;
     run(sql: string, params?: any[] | Record<string, any>): Database;
+    /** Dump the database contents as SQLite file bytes (e.g. for persisting to disk). */
+    export(): Uint8Array;
     close(): void;
   }
 
