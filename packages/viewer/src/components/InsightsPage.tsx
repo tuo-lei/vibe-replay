@@ -4,7 +4,8 @@
  * Shows a shareable stats card, GitHub-style activity heatmap, streak/highlights,
  * weekly trend, project breakdown, and model/provider usage.
  *
- * All data comes from the existing ScanInsightsProvider (UserInsights).
+ * Aggregate data comes from ScanInsightsProvider; exact range totals and usage
+ * facets use compact per-session rollups from the local dashboard API.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -13,13 +14,21 @@ import {
   type UsageRollupEntry,
   type UsageRollupSession,
 } from "../engine/usage-rollup";
+import {
+  rollupInsights,
+  type InsightsRangeStats,
+  type InsightsRollupPayload,
+  rangeSince as insightsRangeSince,
+} from "../engine/insights-rollup";
 import { AnimatedValue } from "../hooks/useAnimatedNumber";
 import type { SessionSummary, SourceSession } from "../types";
 import { localDayKey } from "../utils/date";
 import { DataQualityIndicator } from "./DataQualityIndicator";
+import { TokenBreakdownChart, TurnDurationChart } from "./InsightCharts";
 import {
   formatCompactAge,
   formatCompactDuration,
+  navigateTo,
   parseCachedList,
   projectName,
   providerBarClass,
@@ -40,16 +49,7 @@ interface UsageRollupPayload {
   totalSessions: number;
 }
 
-interface ComputedStats {
-  sessions: number;
-  replays: number;
-  durationMs: number;
-  cost: number;
-  prompts: number;
-  edits: number;
-  toolCalls: number;
-  projects: number;
-}
+type ComputedStats = InsightsRangeStats;
 
 interface StreakInfo {
   current: number;
@@ -100,14 +100,7 @@ function rangeDays(range: TimeRange): number {
 }
 
 /** Start of the selected range as an instant, or undefined for "all". */
-function rangeSince(range: TimeRange): string | undefined {
-  const days = rangeDays(range);
-  if (days === 0) return undefined;
-  const cutoff = new Date();
-  cutoff.setHours(0, 0, 0, 0);
-  cutoff.setDate(cutoff.getDate() - days);
-  return cutoff.toISOString();
-}
+const rangeSince = insightsRangeSince;
 
 function filterSessionsByRange(
   sessionsPerDay: Record<string, number>,
@@ -117,55 +110,13 @@ function filterSessionsByRange(
   const days = rangeDays(range);
   const cutoff = new Date();
   cutoff.setHours(0, 0, 0, 0);
-  cutoff.setDate(cutoff.getDate() - days);
+  cutoff.setDate(cutoff.getDate() - (days - 1));
   const cutoffKey = dateKey(cutoff);
   const filtered: Record<string, number> = {};
   for (const [k, v] of Object.entries(sessionsPerDay)) {
     if (k >= cutoffKey) filtered[k] = v;
   }
   return filtered;
-}
-
-function computeStats(
-  sessionsPerDay: Record<string, number>,
-  totalStats: {
-    totalDurationMs: number;
-    totalCost: number;
-    totalPrompts: number;
-    totalEdits: number;
-    totalToolCalls: number;
-    totalSessions: number;
-    totalReplays: number;
-    totalProjects: number;
-  },
-  range: TimeRange,
-): ComputedStats {
-  if (range === "all") {
-    return {
-      sessions: totalStats.totalSessions,
-      replays: totalStats.totalReplays,
-      durationMs: totalStats.totalDurationMs,
-      cost: totalStats.totalCost,
-      prompts: totalStats.totalPrompts,
-      edits: totalStats.totalEdits,
-      toolCalls: totalStats.totalToolCalls,
-      projects: totalStats.totalProjects,
-    };
-  }
-  // For filtered ranges, count sessions from sessionsPerDay
-  const filtered = filterSessionsByRange(sessionsPerDay, range);
-  const sessions = Object.values(filtered).reduce((a, b) => a + b, 0);
-  const ratio = totalStats.totalSessions > 0 ? sessions / totalStats.totalSessions : 0;
-  return {
-    sessions,
-    replays: Math.round(totalStats.totalReplays * ratio),
-    durationMs: Math.round(totalStats.totalDurationMs * ratio),
-    cost: totalStats.totalCost * ratio,
-    prompts: Math.round(totalStats.totalPrompts * ratio),
-    edits: Math.round(totalStats.totalEdits * ratio),
-    toolCalls: Math.round(totalStats.totalToolCalls * ratio),
-    projects: totalStats.totalProjects,
-  };
 }
 
 function computeStreak(sessionsPerDay: Record<string, number>): StreakInfo {
@@ -303,12 +254,6 @@ function formatCost(cost: number): string {
 function formatCompactNum(n: number): string {
   if (n >= 10000) return `${(n / 1000).toFixed(1)}k`;
   return n.toLocaleString();
-}
-
-function fmtTokenCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${Math.floor(n / 1_000)}k`;
-  return n.toString();
 }
 
 function buildAggregateMetricQuality(notes: string[] | undefined): {
@@ -697,176 +642,6 @@ function HighlightCard({
 }
 
 // ─── Weekly Trend Chart ─────────────────────────────────────────────
-
-function formatDurationShort(ms: number): string {
-  if (ms < 1000) return "<1s";
-  const totalSec = Math.round(ms / 1000);
-  if (totalSec < 60) return `${totalSec}s`;
-  const min = Math.floor(totalSec / 60);
-  const sec = totalSec % 60;
-  if (min < 60) return sec > 0 ? `${min}m ${sec}s` : `${min}m`;
-  const hr = Math.floor(min / 60);
-  const remMin = min % 60;
-  return remMin > 0 ? `${hr}h ${remMin}m` : `${hr}h`;
-}
-
-function TurnDurationChart({
-  histogram,
-}: {
-  histogram: {
-    buckets: Array<{ label: string; count: number; pct: number }>;
-    percentiles: { p50Ms: number; p75Ms: number; p90Ms: number };
-    totalTurns: number;
-  };
-}) {
-  const maxPct = Math.max(...histogram.buckets.map((b) => b.pct), 1);
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-end gap-2 h-32">
-        {histogram.buckets.map((bucket) => {
-          const heightPct = Math.max((bucket.pct / maxPct) * 100, bucket.count > 0 ? 6 : 0);
-          return (
-            <div
-              key={bucket.label}
-              className="flex-1 flex flex-col items-center justify-end h-full group relative"
-            >
-              {/* Tooltip */}
-              <div className="absolute bottom-full mb-1 hidden group-hover:block z-10">
-                <div className="bg-terminal-surface-2 border border-terminal-border-subtle rounded-lg px-2 py-1 shadow-layer-md whitespace-nowrap">
-                  <div className="text-[10px] font-mono text-terminal-dim">{bucket.label}</div>
-                  <div className="text-[10px] font-mono text-terminal-green font-bold">
-                    {bucket.count} turn{bucket.count !== 1 ? "s" : ""} ({bucket.pct}%)
-                  </div>
-                </div>
-              </div>
-              {/* Percentage label above bar */}
-              {bucket.pct > 0 && (
-                <div className="text-[9px] font-mono text-terminal-dimmer tabular-nums mb-1">
-                  {bucket.pct >= 10 ? Math.round(bucket.pct) : bucket.pct.toFixed(1)}%
-                </div>
-              )}
-              <div
-                className="w-full rounded-md bg-terminal-green hover:opacity-90 transition-all"
-                style={{
-                  height: `${heightPct}%`,
-                  minHeight: bucket.count > 0 ? "4px" : "0",
-                  opacity: bucket.count > 0 ? 0.7 : 0.1,
-                }}
-              />
-            </div>
-          );
-        })}
-      </div>
-      {/* X-axis labels */}
-      <div className="flex gap-2">
-        {histogram.buckets.map((b) => (
-          <div
-            key={b.label}
-            className="flex-1 text-center text-[9px] font-mono text-terminal-dimmer"
-          >
-            {b.label}
-          </div>
-        ))}
-      </div>
-      {/* Percentiles + total */}
-      <div className="flex items-center justify-between pt-2 border-t border-terminal-border/20">
-        <div className="flex items-center gap-3 text-[10px] font-mono text-terminal-dim">
-          <span>
-            P50{" "}
-            <span className="text-terminal-text font-bold">
-              {formatDurationShort(histogram.percentiles.p50Ms)}
-            </span>
-          </span>
-          <span className="text-terminal-dimmer">{"\u00b7"}</span>
-          <span>
-            P75{" "}
-            <span className="text-terminal-text font-bold">
-              {formatDurationShort(histogram.percentiles.p75Ms)}
-            </span>
-          </span>
-          <span className="text-terminal-dimmer">{"\u00b7"}</span>
-          <span>
-            P90{" "}
-            <span className="text-terminal-text font-bold">
-              {formatDurationShort(histogram.percentiles.p90Ms)}
-            </span>
-          </span>
-        </div>
-        <span className="text-[10px] font-mono text-terminal-dimmer">
-          {histogram.totalTurns.toLocaleString()} turns
-        </span>
-      </div>
-    </div>
-  );
-}
-
-const TOKEN_COLORS = [
-  { key: "cacheRead", label: "Cache Read", color: "bg-terminal-purple" },
-  { key: "cacheCreation", label: "Cache Write", color: "bg-terminal-orange" },
-  { key: "output", label: "Output", color: "bg-terminal-green" },
-  { key: "input", label: "Input", color: "bg-terminal-blue" },
-] as const;
-
-function TokenBreakdownChart({
-  breakdown,
-}: {
-  breakdown: { input: number; output: number; cacheRead: number; cacheCreation: number };
-}) {
-  const total = breakdown.input + breakdown.output + breakdown.cacheRead + breakdown.cacheCreation;
-  if (total === 0) return null;
-
-  const items = TOKEN_COLORS.map((t) => ({
-    ...t,
-    value: breakdown[t.key],
-    pct: (breakdown[t.key] / total) * 100,
-  })).filter((t) => t.value > 0);
-
-  return (
-    <div className="space-y-4">
-      {/* Stacked bar */}
-      <div className="h-4 rounded-full bg-terminal-surface-2 overflow-hidden flex">
-        {items.map((item) => (
-          <div
-            key={item.key}
-            className={`h-full ${item.color} transition-all duration-500`}
-            style={{ width: `${item.pct}%`, opacity: 0.7 }}
-          />
-        ))}
-      </div>
-      {/* Legend rows */}
-      <div className="space-y-2">
-        {items.map((item) => (
-          <div key={item.key} className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className={`w-2.5 h-2.5 rounded-sm ${item.color}`} style={{ opacity: 0.7 }} />
-              <span className="text-[11px] font-mono text-terminal-dim">{item.label}</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="text-[11px] font-mono text-terminal-text tabular-nums">
-                {fmtTokenCount(item.value)}
-              </span>
-              <span className="text-[10px] font-mono text-terminal-dimmer tabular-nums w-10 text-right">
-                {item.pct < 0.1
-                  ? "<0.1%"
-                  : item.pct < 1
-                    ? `${item.pct.toFixed(1)}%`
-                    : `${Math.round(item.pct)}%`}
-              </span>
-            </div>
-          </div>
-        ))}
-      </div>
-      {/* Total */}
-      <div className="flex items-center justify-between pt-2 border-t border-terminal-border/20">
-        <span className="text-[10px] font-mono text-terminal-dimmer">Total</span>
-        <span className="text-[11px] font-mono text-terminal-text font-bold tabular-nums">
-          {fmtTokenCount(total)}
-        </span>
-      </div>
-    </div>
-  );
-}
 
 function WeeklyTrendChart({ data }: { data: WeeklyData[] }) {
   const maxVal = Math.max(...data.map((d) => d.sessions), 1);
@@ -1263,6 +1038,58 @@ function InsightsLoadingState({
   );
 }
 
+function InsightsRangeLoadingState({
+  range,
+  onRangeChange,
+  loading,
+  error,
+}: {
+  range: TimeRange;
+  onRangeChange: (range: TimeRange) => void;
+  loading: boolean;
+  error: boolean;
+}) {
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <div className="max-w-4xl mx-auto px-4 md:px-6 py-6 space-y-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-lg font-sans font-bold text-terminal-text">Your Insights</h1>
+          <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-terminal-surface">
+            {(["7d", "30d", "90d", "all"] as TimeRange[]).map((value) => (
+              <button
+                key={value}
+                onClick={() => onRangeChange(value)}
+                className={`px-3 py-1.5 text-xs font-sans rounded-md transition-all ${
+                  range === value
+                    ? "bg-terminal-green-subtle text-terminal-green font-bold"
+                    : "text-terminal-dim hover:text-terminal-text"
+                }`}
+              >
+                {value === "all" ? "All" : value}
+              </button>
+            ))}
+          </div>
+        </div>
+        <output className="block rounded-xl border border-terminal-purple/20 bg-terminal-surface px-4 py-5 text-sm font-sans text-terminal-text">
+          <div className="flex items-center gap-2">
+            {!error && <span className="w-2 h-2 rounded-full bg-terminal-purple animate-pulse" />}
+            <span>
+              {loading
+                ? `Loading exact ${range} per-session totals...`
+                : "Exact range totals are unavailable."}
+            </span>
+          </div>
+          {error && (
+            <p className="mt-2 text-xs font-mono text-terminal-dim">
+              Refresh the dashboard to retry, or select All to view available all-time totals.
+            </p>
+          )}
+        </output>
+      </div>
+    </div>
+  );
+}
+
 // ─── Source/Replay counts (consistent with homepage) ────────────────
 
 /** Fetch same source + replay data as homepage to ensure consistent totals. */
@@ -1331,11 +1158,57 @@ function useHomePageCounts() {
 }
 
 /**
- * Per-session usage counters for the whole scan. Fetched once and aggregated
- * locally so switching time range costs no request, and refetched when a scan
- * finishes so the section isn't stuck on a stale snapshot.
+ * Compact per-session metrics used to compute exact time-range totals locally.
+ * Refetch when the background scan snapshot changes, including deferred usage
+ * backfill; changing the selected range itself remains request-free.
  */
-function useUsageRollupSessions(scanFinishedAt?: string, usageBackfillRunning = false) {
+function useInsightsRollup(scanFinishedAt?: string, scanRevision?: number) {
+  const [payload, setPayload] = useState<InsightsRollupPayload | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let stopped = false;
+    setLoading(true);
+    setError(false);
+    fetch("/api/insights/rollup")
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`Insights rollup request failed: ${r.status}`);
+        return (await r.json()) as InsightsRollupPayload;
+      })
+      .then((data) => {
+        if (!Array.isArray(data.sessions) || !Array.isArray(data.replays)) {
+          throw new Error("Invalid insights rollup payload");
+        }
+        if (!stopped) setPayload(data);
+      })
+      .catch(() => {
+        if (!stopped) {
+          setPayload(null);
+          setError(true);
+        }
+      })
+      .finally(() => {
+        if (!stopped) setLoading(false);
+      });
+    return () => {
+      stopped = true;
+    };
+  }, [scanFinishedAt, scanRevision]);
+
+  return { payload, loading, error };
+}
+
+/**
+ * Per-session usage counters for the whole scan. Fetched once and aggregated
+ * locally so switching time range costs no request, and refetched when the scan
+ * snapshot changes so the section isn't stuck on a stale snapshot.
+ */
+function useUsageRollupSessions(
+  scanFinishedAt?: string,
+  usageBackfillRunning = false,
+  scanRevision?: number,
+) {
   const [payload, setPayload] = useState<UsageRollupPayload | null>(null);
 
   useEffect(() => {
@@ -1349,21 +1222,43 @@ function useUsageRollupSessions(scanFinishedAt?: string, usageBackfillRunning = 
     return () => {
       stopped = true;
     };
-  }, [scanFinishedAt, usageBackfillRunning]);
+  }, [scanFinishedAt, usageBackfillRunning, scanRevision]);
 
   return payload;
 }
 
 // ─── Tool & MCP Usage ───────────────────────────────────────────────
 
-function UsageBarList({
+export function navigateToUsageSessions(facet: "tool" | "mcp" | "mcpTool" | "skill", name: string) {
+  navigateTo({
+    view: "dashboard",
+    session: null,
+    tab: "sessions",
+    project: null,
+    q: null,
+    provider: null,
+    repo: null,
+    tool: null,
+    mcp: null,
+    mcpTool: null,
+    skill: null,
+    archived: "true",
+    agentRuns: "true",
+    replay: null,
+    [facet]: [name],
+  });
+}
+
+export function UsageBarList({
   entries,
   emptyLabel,
   unit,
+  onSelect,
 }: {
   entries: UsageRollupEntry[];
   emptyLabel: string;
   unit: string;
+  onSelect?: (name: string) => void;
 }) {
   if (entries.length === 0) {
     return (
@@ -1376,7 +1271,21 @@ function UsageBarList({
   return (
     <div className="space-y-2">
       {entries.map((entry) => (
-        <div key={entry.name} className="space-y-1">
+        <button
+          key={entry.name}
+          type="button"
+          disabled={!onSelect}
+          onClick={() => onSelect?.(entry.name)}
+          title={onSelect ? `View sessions using ${entry.name}` : undefined}
+          aria-label={`${entry.name}: ${entry.calls} ${unit} across ${entry.sessions} session${
+            entry.sessions === 1 ? "" : "s"
+          }${onSelect ? ". View matching sessions" : ""}`}
+          className={`w-full text-left space-y-1 rounded-md ${
+            onSelect
+              ? "cursor-pointer hover:bg-terminal-surface-2/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-terminal-green/50"
+              : ""
+          }`}
+        >
           <div className="flex items-center justify-between gap-2">
             <span
               className="text-xs font-sans font-medium text-terminal-text truncate max-w-[55%]"
@@ -1395,7 +1304,7 @@ function UsageBarList({
               style={{ width: `${Math.max((entry.calls / max) * 100, 3)}%`, opacity: 0.65 }}
             />
           </div>
-        </div>
+        </button>
       ))}
     </div>
   );
@@ -1407,6 +1316,11 @@ export default function InsightsPage() {
   const { userInsights, loading, scanStatus } = useScanInsightsContext();
   const homePageCounts = useHomePageCounts();
   const [range, setRange] = useState<TimeRange>("all");
+  const {
+    payload: insightsRollupPayload,
+    loading: insightsRollupLoading,
+    error: insightsRollupError,
+  } = useInsightsRollup(scanStatus?.finishedAt, scanStatus?.revision);
 
   const isInitialScan = scanStatus?.running && !userInsights;
 
@@ -1436,14 +1350,18 @@ export default function InsightsPage() {
 
       const spd = userInsights.sessionsPerDay || {};
       const filtered = filterSessionsByRange(spd, range);
-      const scanSnapshotTotals = {
-        ...userInsights,
-        // Replays come from generated artifacts rather than the scan snapshot, so
-        // keep using the homepage cache here while the rest of the stats stay on
-        // the single insights-scan timeline.
-        totalReplays: homePageCounts?.replays ?? 0,
-      };
-      const s = computeStats(filtered, scanSnapshotTotals, range);
+      const s = insightsRollupPayload
+        ? rollupInsights(insightsRollupPayload, { since: rangeSince(range) })
+        : {
+            sessions: userInsights.totalSessions,
+            replays: homePageCounts?.replays ?? 0,
+            durationMs: userInsights.totalDurationMs,
+            cost: userInsights.totalCost,
+            prompts: userInsights.totalPrompts,
+            edits: userInsights.totalEdits,
+            toolCalls: userInsights.totalToolCalls,
+            projects: userInsights.totalProjects,
+          };
       const sk = computeStreak(spd); // always compute streak from all data
       const dow = computeDayOfWeek(filtered);
       const best = [...dow].sort((a, b) => b.count - a.count)[0] || null;
@@ -1462,7 +1380,7 @@ export default function InsightsPage() {
         activeDays: ad,
         firstSessionDate: first,
       };
-    }, [userInsights, range, homePageCounts]);
+    }, [userInsights, range, homePageCounts, insightsRollupPayload]);
 
   const rolledTopProjects = useMemo(
     () => rollupTopProjects(userInsights?.topProjects || []),
@@ -1472,6 +1390,7 @@ export default function InsightsPage() {
   const usagePayload = useUsageRollupSessions(
     scanStatus?.finishedAt,
     scanStatus?.usageBackfill?.running === true,
+    scanStatus?.revision,
   );
   const usage = useMemo(
     () => rollupUsage(usagePayload?.sessions || [], { since: rangeSince(range), limit: 8 }),
@@ -1489,6 +1408,17 @@ export default function InsightsPage() {
 
   if (!userInsights) {
     return <InsightsPageSkeleton />;
+  }
+
+  if (range !== "all" && !insightsRollupPayload) {
+    return (
+      <InsightsRangeLoadingState
+        range={range}
+        onRangeChange={setRange}
+        loading={insightsRollupLoading}
+        error={insightsRollupError}
+      />
+    );
   }
 
   const avgPerActiveDay = activeDays > 0 ? (stats.sessions / activeDays).toFixed(1) : "0";
@@ -1671,17 +1601,32 @@ export default function InsightsPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div>
                 <h4 className="ui-section-title mb-3">Top tools</h4>
-                <UsageBarList entries={usage.tools} emptyLabel="No tool data" unit="calls" />
+                <UsageBarList
+                  entries={usage.tools}
+                  emptyLabel="No tool data"
+                  unit="calls"
+                  onSelect={(name) => navigateToUsageSessions("tool", name)}
+                />
               </div>
               <div>
                 <h4 className="ui-section-title mb-3">Top MCP servers</h4>
-                <UsageBarList entries={usage.mcpServers} emptyLabel="No MCP data" unit="calls" />
+                <UsageBarList
+                  entries={usage.mcpServers}
+                  emptyLabel="No MCP data"
+                  unit="calls"
+                  onSelect={(name) => navigateToUsageSessions("mcp", name)}
+                />
               </div>
             </div>
             {usage.mcpTools.length > 0 && (
               <div>
                 <h4 className="ui-section-title mb-3">Top MCP tools</h4>
-                <UsageBarList entries={usage.mcpTools} emptyLabel="No MCP data" unit="calls" />
+                <UsageBarList
+                  entries={usage.mcpTools}
+                  emptyLabel="No MCP data"
+                  unit="calls"
+                  onSelect={(name) => navigateToUsageSessions("mcpTool", name)}
+                />
               </div>
             )}
             {usage.skills.length > 0 && (
@@ -1691,6 +1636,7 @@ export default function InsightsPage() {
                   entries={usage.skills}
                   emptyLabel="No skill data"
                   unit="activations"
+                  onSelect={(name) => navigateToUsageSessions("skill", name)}
                 />
               </div>
             )}

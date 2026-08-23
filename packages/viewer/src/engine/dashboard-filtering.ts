@@ -34,7 +34,11 @@ export function matchesProjectFacet(
   allProjectsKey: string,
   rollupProject: (project: string) => string,
 ): boolean {
-  return selectedProjectKey === allProjectsKey || rollupProject(s.project) === selectedProjectKey;
+  return (
+    selectedProjectKey === allProjectsKey ||
+    s.project === selectedProjectKey ||
+    rollupProject(s.project) === selectedProjectKey
+  );
 }
 
 function matchesMultiValueFacet(

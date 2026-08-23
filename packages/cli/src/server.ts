@@ -33,6 +33,7 @@ import {
 import { generateGitHubGif } from "./formatters/gif.js";
 import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.js";
 import { generateOutput, injectDataScript, loadViewerHtml } from "./generator.js";
+import { buildInsightsRollup } from "./insights-rollup.js";
 import { mergeInsights, readInsightsStore, writeInsightsStore } from "./insights.js";
 import { loadOverlays, sessionWithEffectiveContent } from "./overlays.js";
 import { parseClaudeCodeLines } from "./providers/claude-code/parser.js";
@@ -635,7 +636,7 @@ export async function startServer(
       ),
     );
   };
-  const refreshReplaysCache = async (): Promise<any[] | null> => {
+  const refreshReplaysCache = async (): Promise<ReplaySummary[] | null> => {
     try {
       const sessions = await scanSessions(baseDir);
       await writeFileCache(replaysCacheKey, sessions);
@@ -885,6 +886,8 @@ export async function startServer(
     scanned: persistedScanResults?.data.length || 0,
     total: persistedScanResults?.data.length || 0,
     results: persistedScanResults?.data || [],
+    revision: persistedScanResults ? 1 : 0,
+    hasSnapshot: persistedScanResults !== null,
     finishedAt: persistedScanResults?.updatedAt,
   };
   // Incremented per scan so a slower follow-up pass can tell it was superseded.
@@ -1145,6 +1148,8 @@ export async function startServer(
       scanState = {
         ...scanState,
         usageBackfill: { running: false, scanned: enriched.length, total: pending.length },
+        revision: scanState.revision + 1,
+        hasSnapshot: true,
       };
     } catch {
       if (!superseded()) {
@@ -1172,12 +1177,16 @@ export async function startServer(
     if (scanState.running || scanState.usageBackfill?.running) return;
     const generation = ++scanGeneration;
     const previousResults = scanState.results;
+    const previousRevision = scanState.revision;
+    const previousHasSnapshot = scanState.hasSnapshot;
     const previousFinishedAt = scanState.finishedAt;
     scanState = {
       running: true,
       scanned: 0,
       total: 0,
       results: previousResults,
+      revision: previousRevision,
+      hasSnapshot: previousHasSnapshot,
       phase: "discovering",
       startedAt: new Date().toISOString(),
       finishedAt: previousFinishedAt,
@@ -1251,6 +1260,8 @@ export async function startServer(
           scanned: results.length,
           total: results.length,
           results,
+          revision: scanState.revision + 1,
+          hasSnapshot: true,
           currentSession: undefined,
           phase: undefined,
           startedAt: scanState.startedAt,
@@ -2160,6 +2171,8 @@ export async function startServer(
       scanned: scanState.scanned,
       total: scanState.total,
       resultCount: scanState.results.length,
+      revision: scanState.revision,
+      hasSnapshot: scanState.hasSnapshot,
       currentSession: scanState.currentSession,
       phase: scanState.phase,
       startedAt: scanState.startedAt,
@@ -2181,6 +2194,7 @@ export async function startServer(
       running: scanState.running,
       scanned: scanState.scanned,
       total: scanState.total,
+      revision: scanState.revision,
       finishedAt: scanState.finishedAt,
       failedProviders: scanState.failedProviders || [],
     });
@@ -2222,6 +2236,24 @@ export async function startServer(
       totalSessions: scanState.results.length,
       scannedAt: scanState.finishedAt,
     });
+  });
+
+  // Compact per-session projection for exact 7d/30d/90d insight totals.
+  // Conversation content and tool inputs/results intentionally never leave the
+  // scanner here; the viewer only needs additive metrics and timestamps.
+  app.get("/api/insights/rollup", async (c) => {
+    if (!scanState.hasSnapshot) {
+      return c.json({ error: "No scan results available. Start a scan first." }, 503);
+    }
+    // Replay files can be created or deleted without a source scan, so refresh
+    // this small list instead of trusting a potentially stale dashboard cache.
+    const refreshedReplays = await refreshReplaysCache();
+    let replays = refreshedReplays;
+    if (!replays) {
+      const cachedReplays = await readFileCache<ReplaySummary[]>(replaysCacheKey);
+      replays = cachedReplays?.data || [];
+    }
+    return c.json(buildInsightsRollup(scanState.results, replays));
   });
 
   app.get("/api/insights", async (c) => {

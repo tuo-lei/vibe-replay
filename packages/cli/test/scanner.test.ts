@@ -1207,6 +1207,22 @@ describe("aggregateProjectInsights", () => {
     expect(insights.apiErrorTotal).toBe(1);
   });
 
+  it("aggregates sessions from collapsed workspaces under their parent project", () => {
+    const worktreeScan = {
+      ...scans[0],
+      sessionId: "worktree-session",
+      project: "~/Code/proj-a/.claude/worktrees/feature",
+    };
+    const runWorkspaceScan = {
+      ...scans[0],
+      sessionId: "run-session",
+      project: "/tmp/review-abcdef123456",
+    };
+
+    expect(aggregateProjectInsights("~/Code/proj-a", [worktreeScan]).sessionCount).toBe(1);
+    expect(aggregateProjectInsights("/tmp", [runWorkspaceScan]).sessionCount).toBe(1);
+  });
+
   it("groups branches with session IDs", () => {
     const insights = aggregateProjectInsights("~/Code/proj-a", scans);
 

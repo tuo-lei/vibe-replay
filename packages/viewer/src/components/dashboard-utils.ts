@@ -350,8 +350,10 @@ export function replaySuggestedTitle(s: SessionSummary): string {
 
 // ─── Navigation ──────────────────────────────────────────────────────
 
+export type NavigationValue = string | readonly string[] | null;
+
 export function navigateTo(
-  params: Record<string, string | null>,
+  params: Record<string, NavigationValue>,
   options: { replace?: boolean; notify?: boolean } = {},
 ) {
   const url = new URL(window.location.href);
@@ -363,10 +365,11 @@ export function navigateTo(
       !url.searchParams.has("gist") &&
       !url.searchParams.has("url"));
   if (isCurrentlyDashboard) {
-    const dashboardState: Record<string, string> = {};
+    const dashboardState: Record<string, string | string[]> = {};
     DASHBOARD_PARAMS.forEach((p) => {
-      const v = url.searchParams.get(p);
-      if (v) dashboardState[p] = v;
+      const values = url.searchParams.getAll(p);
+      if (values.length === 1) dashboardState[p] = values[0]!;
+      else if (values.length > 1) dashboardState[p] = values;
     });
     if (Object.keys(dashboardState).length > 0) {
       safeStorageSet(sessionStorage, "vibe_dashboard_state", JSON.stringify(dashboardState));
@@ -397,7 +400,13 @@ export function navigateTo(
         const state = JSON.parse(saved);
         Object.entries(state).forEach(([k, v]) => {
           if (params[k] === undefined && !url.searchParams.has(k)) {
-            url.searchParams.set(k, v as string);
+            if (Array.isArray(v)) {
+              for (const value of v) {
+                if (typeof value === "string") url.searchParams.append(k, value);
+              }
+            } else if (typeof v === "string") {
+              url.searchParams.set(k, v);
+            }
           }
         });
       } catch (e) {
@@ -411,7 +420,12 @@ export function navigateTo(
 
   for (const [key, value] of Object.entries(params)) {
     if (value === null) url.searchParams.delete(key);
-    else url.searchParams.set(key, value);
+    else if (Array.isArray(value)) {
+      url.searchParams.delete(key);
+      for (const item of value) url.searchParams.append(key, item);
+    } else if (typeof value === "string") {
+      url.searchParams.set(key, value);
+    }
   }
   const changed = url.toString() !== window.location.href;
   if (options.replace) {

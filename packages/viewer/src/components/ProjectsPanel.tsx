@@ -7,13 +7,15 @@
  * project is selected or "All projects".
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ALL_PROJECTS } from "../hooks/usePanelFilters";
 import { localDayKey } from "../utils/date";
 import { plural, timeAgo } from "../utils/format";
 import type { Tab } from "./Dashboard";
+import { DataQualityIndicator } from "./DataQualityIndicator";
 import { isAgentRunWorkspace, navigateTo, projectName, rollupTopProjects } from "./dashboard-utils";
-import { useScanInsightsContext } from "./InsightsPanel";
+import { TokenBreakdownChart, TurnDurationChart } from "./InsightCharts";
+import { type ProjectInsights, useScanInsightsContext } from "./InsightsPanel";
 import SessionRelationshipsView from "./SessionRelationshipsView";
 import { fmtNum, formatDuration } from "./StatsPanel";
 
@@ -268,6 +270,52 @@ function ProjectOverview({
   );
 }
 
+export function ProjectPerformance({
+  insights,
+  loading,
+}: {
+  insights?: ProjectInsights;
+  loading: boolean;
+}) {
+  if (!insights && loading) {
+    return (
+      <div className="rounded-xl bg-terminal-surface p-5 shadow-layer-sm animate-pulse">
+        <div className="h-4 w-28 skeleton rounded" />
+        <div className="mt-4 h-24 skeleton rounded-lg" />
+      </div>
+    );
+  }
+  if (!insights || (!insights.turnDurationHistogram && !insights.tokenBreakdown)) return null;
+
+  const dataQualityNotes = insights.dataQuality?.notes || [];
+  return (
+    <section className="space-y-3" aria-labelledby="project-performance-title">
+      <div className="flex items-center gap-2">
+        <h3 id="project-performance-title" className="ui-section-title-strong">
+          Performance
+        </h3>
+        {dataQualityNotes.length > 0 && (
+          <DataQualityIndicator title={dataQualityNotes.join("\n")} />
+        )}
+      </div>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+        {insights.turnDurationHistogram && (
+          <div className="rounded-xl bg-terminal-surface p-5 shadow-layer-sm">
+            <h4 className="ui-section-title-strong mb-4">Turn Duration</h4>
+            <TurnDurationChart histogram={insights.turnDurationHistogram} />
+          </div>
+        )}
+        {insights.tokenBreakdown && (
+          <div className="rounded-xl bg-terminal-surface p-5 shadow-layer-sm">
+            <h4 className="ui-section-title-strong mb-4">Token Usage</h4>
+            <TokenBreakdownChart breakdown={insights.tokenBreakdown} />
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function Stat({
   label,
   value,
@@ -384,7 +432,13 @@ function ProjectsGrid({
 // ─── Main Component ─────────────────────────────────────────────────
 
 export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
-  const { userInsights, scanStatus } = useScanInsightsContext();
+  const {
+    userInsights,
+    scanStatus,
+    projectInsightsCache,
+    fetchProjectInsights,
+    loading: insightsLoading,
+  } = useScanInsightsContext();
   const [selectedProject, setSelectedProject] = useState<string>(ALL_PROJECTS);
   const [mode, setMode] = useState<PanelMode>("overview");
   const [showAgentRuns, setShowAgentRuns] = useState(
@@ -393,8 +447,8 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
 
   // Scratch workspaces from automated runs are their own project each, so on a
   // machine that runs agents on a schedule they crowd out everything the user
-  // actually worked in. They have to be dropped before the rollup, which folds
-  // them into a parent that no longer looks like a run workspace.
+  // actually worked in. Keep them in the source set so the default rollup can
+  // add their activity to the parent project.
   const agentRunCount = useMemo(
     () => (userInsights?.topProjects || []).filter((p) => isAgentRunWorkspace(p.project)).length,
     [userInsights],
@@ -402,14 +456,11 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
 
   const projects = useMemo(() => {
     if (!userInsights) return [];
-    const source = showAgentRuns
-      ? userInsights.topProjects
-      : userInsights.topProjects.filter((p) => !isAgentRunWorkspace(p.project));
-    // When the toggle is on, preserve each run workspace as its own project.
-    // When it is off, those entries were already removed above, so parent
-    // totals exclude run-workspace activity; agentRunCount reports it
-    // separately.
-    const sorted = rollupTopProjects(source, { rollupAgentRuns: !showAgentRuns });
+    // When the toggle is on, preserve each run workspace as its own project;
+    // otherwise roll its activity into the parent project.
+    const sorted = rollupTopProjects(userInsights.topProjects, {
+      rollupAgentRuns: !showAgentRuns,
+    });
     sorted.sort((a, b) => (b.lastActivity || "").localeCompare(a.lastActivity || ""));
     return sorted;
   }, [userInsights, showAgentRuns]);
@@ -418,6 +469,12 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
     selectedProject === ALL_PROJECTS
       ? null
       : (projects.find((p) => p.project === selectedProject) ?? null);
+  const detailedInsight =
+    selectedProject === ALL_PROJECTS ? undefined : projectInsightsCache.get(selectedProject);
+
+  useEffect(() => {
+    if (selectedProject !== ALL_PROJECTS) fetchProjectInsights(selectedProject);
+  }, [selectedProject, fetchProjectInsights, scanStatus?.finishedAt, scanStatus?.revision]);
 
   const isScanning = scanStatus?.running && scanStatus.total > 0;
 
@@ -560,6 +617,7 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
                 insight={selectedInsight}
                 onOpenSessions={() => openSessionsForProject(selectedProject)}
               />
+              <ProjectPerformance insights={detailedInsight} loading={insightsLoading} />
               <SessionRelationshipsView view="timeline" projectFilter={projectFilterArg} />
             </>
           )}

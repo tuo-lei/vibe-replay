@@ -5,6 +5,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import { matchesProjectFacet } from "../engine/dashboard-filtering";
 import { type ScanResultSession, useRelationshipData } from "../hooks/useRelationshipData";
 import { plural } from "../utils/format";
 import { isAutomated, sessionScore } from "../utils/sessionSignals";
@@ -1192,7 +1193,9 @@ export default function SessionRelationshipsView({
   // session rows still expose the original path when it matters.
   const filteredSessions = useMemo(
     () =>
-      projectFilter ? sessions.filter((s) => rollupProject(s.project) === projectFilter) : sessions,
+      projectFilter
+        ? sessions.filter((s) => matchesProjectFacet(s, projectFilter, "__all__", rollupProject))
+        : sessions,
     [sessions, projectFilter],
   );
   const groups = useMemo(

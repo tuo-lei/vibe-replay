@@ -62,13 +62,13 @@ interface TurnDurationBucket {
   pct: number;
 }
 
-interface TurnDurationHistogram {
+export interface TurnDurationHistogram {
   buckets: TurnDurationBucket[];
   percentiles: { p50Ms: number; p75Ms: number; p90Ms: number };
   totalTurns: number;
 }
 
-interface ProjectInsights {
+export interface ProjectInsights {
   project: string;
   sessionCount: number;
   totalDurationMs: number;
@@ -91,7 +91,6 @@ interface ProjectInsights {
     cacheRead: number;
     cacheCreation: number;
   };
-  // TODO: render in project-level panel (currently only rendered in user-level InsightsPage)
   turnDurationHistogram?: TurnDurationHistogram;
   memory?: ProjectMemory;
   dataQuality?: {
@@ -146,6 +145,8 @@ interface ScanStatus {
   scanned: number;
   total: number;
   resultCount: number;
+  revision?: number;
+  hasSnapshot?: boolean;
   currentSession?: string;
   phase?: "discovering" | "scanning";
   startedAt?: string;
@@ -208,7 +209,8 @@ export function ScanInsightsProvider({ children }: { children: ReactNode }) {
         setScanStatus(status);
 
         if (status.running || status.usageBackfill?.running) return;
-        if (!status.hasCachedResults || !isCacheFresh(status.cachedAt, CACHE_REFRESH_TTL_MS)) {
+        const hasSnapshot = status.hasSnapshot ?? status.hasCachedResults;
+        if (!hasSnapshot || !isCacheFresh(status.cachedAt, CACHE_REFRESH_TTL_MS)) {
           startScan();
           return;
         }
