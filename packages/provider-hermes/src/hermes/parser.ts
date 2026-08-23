@@ -9,7 +9,13 @@ import type {
   TokenUsage,
 } from "@vibe-replay/provider-contract";
 import { addParseWarning, compactWarningSample } from "@vibe-replay/provider-contract/warnings";
-import { hermesDataDir, hermesDbPath, hermesDbPaths, openAllHermesDbs, openHermesDb } from "./sqlite.js";
+import {
+  hermesDataDir,
+  hermesDbPath,
+  hermesDbPaths,
+  openAllHermesDbs,
+  openHermesDb,
+} from "./sqlite.js";
 import { mapHermesToolArgs, mapHermesToolName } from "./tool-mapping.js";
 
 interface HermesMessageRow {
@@ -97,8 +103,10 @@ export async function parseHermesSession(
     const opened = await openHermesDb(hinted);
     if (opened) {
       try {
-        const row = firstValue(opened.db, "SELECT id FROM sessions WHERE id = ?", { sid: sessionId });
-        if (row) return parseSessionFromDb(opened.db, sessionId, sessionInfo);
+        const row = firstValue(opened.db, "SELECT id FROM sessions WHERE id = ?", {
+          sid: sessionId,
+        });
+        if (row) return parseSessionFromDb(opened.db, sessionId, sessionInfo, opened.dbPath);
       } finally {
         opened.db.close();
       }
@@ -107,24 +115,24 @@ export async function parseHermesSession(
 
   const all = await openAllHermesDbs();
   if (all.length === 0) {
-    throw new Error(`Hermes database not found (searched: ${hermesDbPaths().join(", ") || hermesDbPath()})`);
+    throw new Error(
+      `Hermes database not found (searched: ${hermesDbPaths().join(", ") || hermesDbPath()})`,
+    );
   }
-  // Early close is deferred: find the winner first while handles are live.
-  let winner: { db: Database; dbPath: string } | undefined;
+  // Find the winning DB while handles are live, close everything, then re-open
+  // just the winner fresh for parsing — keeps WASM handle ownership simple.
+  let winnerPath: string | undefined;
   for (const entry of all) {
     try {
       const row = firstValue(entry.db, "SELECT id FROM sessions WHERE id = ?", { sid: sessionId });
       if (row) {
-        winner = entry;
+        winnerPath = entry.dbPath;
         break;
       }
     } catch {
       // ignore per-DB probe errors
     }
   }
-  const winnerPath = winner?.dbPath;
-  // Close all handles before (re)opening the winner fresh and parsing — keeps
-  // ownership simple and avoids leaving WASM handles alive on the happy path.
   for (const { db } of all) {
     try {
       db.close();
@@ -133,25 +141,12 @@ export async function parseHermesSession(
     }
   }
   if (!winnerPath) {
-    // Try the candidate list again in case a DB file changed on disk between
-    // the two opens (rare, but handles the "hinted probe was stale" edge).
-    const candidatePaths = hinted ? [hinted, ...hermesDbPaths().filter((p) => p !== hinted)] : hermesDbPaths();
-    for (const p of candidatePaths) {
-      const opened = await openHermesDb(p);
-      if (!opened) continue;
-      try {
-        const row = firstValue(opened.db, "SELECT id FROM sessions WHERE id = ?", { sid: sessionId });
-        if (row) return parseSessionFromDb(opened.db, sessionId, sessionInfo);
-      } finally {
-        opened.db.close();
-      }
-    }
     throw new Error(`Hermes session '${sessionId}' not found in any known database`);
   }
   const opened = await openHermesDb(winnerPath);
   if (!opened) throw new Error(`Hermes session '${sessionId}' not found in any known database`);
   try {
-    return parseSessionFromDb(opened.db, sessionId, sessionInfo);
+    return parseSessionFromDb(opened.db, sessionId, sessionInfo, winnerPath);
   } finally {
     opened.db.close();
   }
@@ -198,6 +193,7 @@ export function parseSessionFromDb(
   db: Database,
   sessionId: string,
   sessionInfo?: SessionInfo,
+  sourceDbPath?: string,
 ): ProviderParseResult {
   const session = firstValue(db, `SELECT * FROM sessions WHERE id = ?`, {
     sid: sessionId,
@@ -325,13 +321,10 @@ export function parseSessionFromDb(
 
   const tokenUsageByModel = usageByModelFromDb(db, sessionId);
 
-  // Prefer the actual DB path that produced this session when available;
-  // otherwise fall back to the singular hermesDbPath() for backward compat.
-  const sourceDbPath = (session as unknown as { _dbPath?: string })?._dbPath ?? hermesDbPath();
   const defaultSource: DataSourceInfo = {
     primary: "sqlite",
-    sources: [sourceDbPath],
-    notes: ["Discovered from the Hermes SQLite database (~/.hermes/state.db)."],
+    sources: [sourceDbPath ?? hermesDbPath()],
+    notes: ["Discovered from the Hermes SQLite database."],
   };
 
   return {

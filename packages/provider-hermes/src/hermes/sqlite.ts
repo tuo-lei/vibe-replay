@@ -1,9 +1,10 @@
 /// <reference path="../sql-js.d.ts" />
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { Database, SqlJsStatic } from "sql.js";
+import type { Dirent } from "node:fs";
 
 export const HERMES_DIRNAME = ".hermes";
 export const HERMES_DB_FILENAME = "state.db";
@@ -11,8 +12,6 @@ export const HERMES_DB_FILENAME = "state.db";
 /**
  * Resolve the Hermes data directory — `~/.hermes` by default. An explicit
  * `HERMES_HOME` env var wins (mirrors how Hermes itself resolves its state).
- * When HERMES_HOME is set, only that single directory is used; otherwise the
- * default home plus every `~/.hermes/profiles/<name>/state.db` is considered.
  */
 export function hermesDataDir(): string {
   return process.env.HERMES_HOME || join(homedir(), HERMES_DIRNAME);
@@ -22,34 +21,60 @@ export function hermesDbPath(): string {
   return join(hermesDataDir(), HERMES_DB_FILENAME);
 }
 
+function resolveExisting(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
+/**
+ * Root directory that holds the default DB and the named profiles — mirrors
+ * Hermes's own `get_default_hermes_root()`:
+ *
+ * - No `HERMES_HOME`: root is `~/.hermes`.
+ * - `HERMES_HOME` inside `~/.hermes` (profile mode, e.g. a path under
+ *   `~/.hermes/profiles/`): root stays `~/.hermes` so all profiles are visible.
+ * - `HERMES_HOME` outside `~/.hermes` (Docker/custom deployment): root is
+ *   `HERMES_HOME` itself — unless it points at `<root>/profiles/<name>`, in
+ *   which case root is that grandparent.
+ */
+export function hermesRootDir(): string {
+  const envHome = process.env.HERMES_HOME;
+  const nativeHome = join(homedir(), HERMES_DIRNAME);
+  if (!envHome) return nativeHome;
+  const envPath = resolveExisting(resolve(envHome));
+  const rel = relative(resolveExisting(nativeHome), envPath);
+  if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) {
+    return nativeHome;
+  }
+  if (basename(dirname(envPath)) === "profiles") {
+    return dirname(dirname(envPath));
+  }
+  return envPath;
+}
+
 /**
  * All `state.db` paths that belong to this Hermes install: the default home
- * plus every named profile's DB. Respects `HERMES_HOME` — when it is set we
- * only look at that single directory.
+ * plus every named profile's DB (`<root>/profiles/<name>/state.db`). Missing
+ * locations are skipped so partial installs still work.
  */
 export function hermesDbPaths(): string[] {
-  const explicit = process.env.HERMES_HOME;
-  if (explicit) {
-    const p = join(explicit, HERMES_DB_FILENAME);
-    return existsSync(p) ? [p] : [];
-  }
   const out: string[] = [];
-  const defaultDb = hermesDbPath();
+  const defaultDb = join(hermesRootDir(), HERMES_DB_FILENAME);
   if (existsSync(defaultDb)) out.push(defaultDb);
-  const profilesDir = join(hermesDataDir(), "profiles");
+  const profilesDir = join(hermesRootDir(), "profiles");
+  let entries: Dirent[] = [];
   try {
-    for (const name of readdirSync(profilesDir)) {
-      const p = join(profilesDir, name, HERMES_DB_FILENAME);
-      if (!existsSync(p)) continue;
-      try {
-        if (!statSync(join(profilesDir, name)).isDirectory()) continue;
-      } catch {
-        continue;
-      }
-      out.push(p);
-    }
+    entries = readdirSync(profilesDir, { withFileTypes: true });
   } catch {
-    // no profiles — ignore
+    // no profiles dir — default DB only
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const p = join(profilesDir, entry.name, HERMES_DB_FILENAME);
+    if (existsSync(p)) out.push(p);
   }
   return out;
 }
@@ -119,5 +144,5 @@ export async function openAllHermesDbs(): Promise<Array<{ db: Database; dbPath: 
 
 /** True when the session id looks like a Hermes session id (`YYYYMMDD_HHMMSS_...`). */
 export function isHermesSessionId(value: string): boolean {
-  return /^\\d{8}_\\d{6}_/.test(value) || value.startsWith("session_");
+  return /^\d{8}_\d{6}_/.test(value) || value.startsWith("session_");
 }

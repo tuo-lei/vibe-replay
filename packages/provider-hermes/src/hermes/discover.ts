@@ -5,7 +5,7 @@ import type { Database } from "sql.js";
 import { cleanPromptText } from "@vibe-replay/provider-core/clean-prompt";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
 import { shortenPath } from "@vibe-replay/provider-core/utils";
-import { hermesDataDir, hermesDbPath, hermesDbPaths, openAllHermesDbs, openHermesDb } from "./sqlite.js";
+import { hermesDataDir, hermesDbPath, openAllHermesDbs } from "./sqlite.js";
 
 export const HERMES_PROVIDER = "hermes";
 
@@ -209,9 +209,6 @@ function sessionInfoFromRow(
   const markerPath = `${resolvedDbPath}#session:${row.id}`;
   const lastActivity = row.last_activity_at ?? row.ended_at ?? row.started_at;
 
-  // Derive profile label for UI filtering (e.g. "codex", "default").
-  const profile = profileFromDbPath(resolvedDbPath);
-
   return {
     provider: HERMES_PROVIDER,
     sessionId: row.id,
@@ -239,17 +236,7 @@ function sessionInfoFromRow(
         : undefined,
     editCountEst: stats.editCountEst,
     isStarred: row.pinned === 1,
-    // stash profile for badge rendering without breaking SessionInfo shape
-    ...(profile ? { profile } : {}),
-  } as SessionInfo & { profile?: string };
-}
-
-function profileFromDbPath(dbPath: string): string | undefined {
-  const marker = "/profiles/";
-  const idx = dbPath.indexOf(marker);
-  if (idx === -1) return undefined;
-  const rest = dbPath.slice(idx + marker.length);
-  return rest.split("/")[0] || undefined;
+  };
 }
 
 let cachedVersion: string | undefined;

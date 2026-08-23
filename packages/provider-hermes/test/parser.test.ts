@@ -379,4 +379,27 @@ describe("hermes parser", () => {
       db.close();
     }
   });
+
+  it("reports the producing database path in dataSourceInfo when provided", async () => {
+    const db = await buildHermesDb({
+      sessions: [baseSession],
+      messages: [
+        {
+          id: 1,
+          sessionId: baseSession.id,
+          role: "user",
+          content: "profile session prompt",
+          timestamp: 1_800_000_001,
+        },
+      ],
+    });
+
+    try {
+      const profileDbPath = "/Users/test/.hermes/profiles/codex/state.db";
+      const result = parseSessionFromDb(db, baseSession.id, undefined, profileDbPath);
+      expect(result.dataSourceInfo?.sources).toEqual([profileDbPath]);
+    } finally {
+      db.close();
+    }
+  });
 });

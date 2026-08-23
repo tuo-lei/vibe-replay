@@ -1,5 +1,8 @@
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { listSessionsFromDb } from "../src/hermes/discover.js";
+import { discoverHermesSessions, listSessionsFromDb } from "../src/hermes/discover.js";
 import { resolveSessionId } from "../src/hermes/parser.js";
 import { buildHermesDb, toolCallsFor } from "./helpers/db.js";
 
@@ -122,5 +125,122 @@ describe("hermes discover", () => {
     );
     expect(resolveSessionId(["20260804_202053_7b0f72"])).toBe("20260804_202053_7b0f72");
     expect(resolveSessionId(["/some/other/path.jsonl"])).toBeUndefined();
+  });
+});
+
+describe("hermes multi-profile discovery", () => {
+  it("merges sessions from the default DB and profile DBs with correct marker paths", async () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "vibe-replay-hermes-")));
+    const prevHermesHome = process.env.HERMES_HOME;
+    process.env.HERMES_HOME = home;
+    try {
+      mkdirSync(join(home, "profiles", "codex"), { recursive: true });
+
+      // Default DB: one legacy session.
+      const defaultDb = await buildHermesDb({
+        sessions: [
+          {
+            id: "20260801_090000_default",
+            cwd: "/Users/test/legacy",
+            startedAt: 1_700_000_000,
+            lastActivityAt: 1_700_000_100,
+          },
+        ],
+        messages: [
+          {
+            id: 1,
+            sessionId: "20260801_090000_default",
+            role: "user",
+            content: "legacy default session",
+            timestamp: 1_700_000_001,
+          },
+        ],
+      });
+      writeFileSync(join(home, "state.db"), defaultDb.export());
+      defaultDb.close();
+
+      // Profile DB: one newer session.
+      const profileDb = await buildHermesDb({
+        sessions: [
+          {
+            id: "20260822_222249_profile",
+            cwd: "/Users/test/codex",
+            startedAt: 1_800_000_000,
+            lastActivityAt: 1_800_000_200,
+          },
+        ],
+        messages: [
+          {
+            id: 1,
+            sessionId: "20260822_222249_profile",
+            role: "user",
+            content: "active profile session",
+            timestamp: 1_800_000_001,
+          },
+        ],
+      });
+      writeFileSync(join(home, "profiles", "codex", "state.db"), profileDb.export());
+      profileDb.close();
+
+      const sessions = await discoverHermesSessions();
+      expect(sessions).toHaveLength(2);
+
+      const byId = new Map(sessions.map((s) => [s.sessionId, s]));
+      expect(byId.get("20260822_222249_profile")?.filePath).toBe(
+        `${join(home, "profiles", "codex", "state.db")}#session:20260822_222249_profile`,
+      );
+      expect(byId.get("20260801_090000_default")?.filePath).toBe(
+        `${join(home, "state.db")}#session:20260801_090000_default`,
+      );
+
+      // Newest activity first across profiles.
+      expect(sessions[0].sessionId).toBe("20260822_222249_profile");
+    } finally {
+      if (prevHermesHome === undefined) delete process.env.HERMES_HOME;
+      else process.env.HERMES_HOME = prevHermesHome;
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("deduplicates a session id present in more than one database", async () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "vibe-replay-hermes-")));
+    const prevHermesHome = process.env.HERMES_HOME;
+    process.env.HERMES_HOME = home;
+    try {
+      mkdirSync(join(home, "profiles", "copy"), { recursive: true });
+
+      for (const dir of [home, join(home, "profiles", "copy")]) {
+        const db = await buildHermesDb({
+          sessions: [
+            {
+              id: "20260803_100000_dupe",
+              cwd: "/Users/test/project",
+              startedAt: 1_750_000_000,
+              lastActivityAt: 1_750_000_100,
+            },
+          ],
+          messages: [
+            {
+              id: 1,
+              sessionId: "20260803_100000_dupe",
+              role: "user",
+              content: "duplicated session",
+              timestamp: 1_750_000_001,
+            },
+          ],
+        });
+        writeFileSync(join(dir, "state.db"), db.export());
+        db.close();
+      }
+
+      const sessions = await discoverHermesSessions();
+      expect(sessions).toHaveLength(1);
+      // The default DB is scanned first and wins the dedup.
+      expect(sessions[0].filePath.startsWith(`${join(home, "state.db")}#session:`)).toBe(true);
+    } finally {
+      if (prevHermesHome === undefined) delete process.env.HERMES_HOME;
+      else process.env.HERMES_HOME = prevHermesHome;
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
