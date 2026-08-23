@@ -11,7 +11,7 @@ License: MIT
 ## Core pages
 
 - [Homepage](https://vibe-replay.com/): Product overview, install instructions, feature list.
-- [Explore replays](https://vibe-replay.com/explore/): Public AI coding sessions shared by the community (Claude Code, Cursor, Codex, OpenCode, Hermes, and Pi).
+- [Explore replays](https://vibe-replay.com/explore/): Public AI coding sessions shared by the community (Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, OpenCode, Hermes, and Pi).
 - [Insights dashboard](https://vibe-replay.com/insights/): Personal AI coding analytics — sessions, prompts, tool calls, costs, streaks across machines and providers.
 - [Blog](https://vibe-replay.com/blog/): Deep-dives on Claude Code, Cursor, and AI coding workflows.
 
