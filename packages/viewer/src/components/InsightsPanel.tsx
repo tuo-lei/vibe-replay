@@ -62,13 +62,13 @@ interface TurnDurationBucket {
   pct: number;
 }
 
-interface TurnDurationHistogram {
+export interface TurnDurationHistogram {
   buckets: TurnDurationBucket[];
   percentiles: { p50Ms: number; p75Ms: number; p90Ms: number };
   totalTurns: number;
 }
 
-interface ProjectInsights {
+export interface ProjectInsights {
   project: string;
   sessionCount: number;
   totalDurationMs: number;
@@ -91,7 +91,6 @@ interface ProjectInsights {
     cacheRead: number;
     cacheCreation: number;
   };
-  // TODO: render in project-level panel (currently only rendered in user-level InsightsPage)
   turnDurationHistogram?: TurnDurationHistogram;
   memory?: ProjectMemory;
   dataQuality?: {

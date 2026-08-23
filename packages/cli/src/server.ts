@@ -33,6 +33,7 @@ import {
 import { generateGitHubGif } from "./formatters/gif.js";
 import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.js";
 import { generateOutput, injectDataScript, loadViewerHtml } from "./generator.js";
+import { buildInsightsRollup } from "./insights-rollup.js";
 import { mergeInsights, readInsightsStore, writeInsightsStore } from "./insights.js";
 import { loadOverlays, sessionWithEffectiveContent } from "./overlays.js";
 import { parseClaudeCodeLines } from "./providers/claude-code/parser.js";
@@ -2222,6 +2223,23 @@ export async function startServer(
       totalSessions: scanState.results.length,
       scannedAt: scanState.finishedAt,
     });
+  });
+
+  // Compact per-session projection for exact 7d/30d/90d insight totals.
+  // Conversation content and tool inputs/results intentionally never leave the
+  // scanner here; the viewer only needs additive metrics and timestamps.
+  app.get("/api/insights/rollup", async (c) => {
+    const cachedReplays = await readFileCache<ReplaySummary[]>(replaysCacheKey);
+    let replays = cachedReplays?.data;
+    if (!replays) {
+      try {
+        replays = await scanSessions(baseDir);
+        await writeFileCache(replaysCacheKey, replays);
+      } catch {
+        replays = [];
+      }
+    }
+    return c.json(buildInsightsRollup(scanState.results, replays));
   });
 
   app.get("/api/insights", async (c) => {

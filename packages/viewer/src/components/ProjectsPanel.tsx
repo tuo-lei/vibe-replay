@@ -7,13 +7,15 @@
  * project is selected or "All projects".
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ALL_PROJECTS } from "../hooks/usePanelFilters";
 import { localDayKey } from "../utils/date";
 import { plural, timeAgo } from "../utils/format";
 import type { Tab } from "./Dashboard";
+import { DataQualityIndicator } from "./DataQualityIndicator";
 import { isAgentRunWorkspace, navigateTo, projectName, rollupTopProjects } from "./dashboard-utils";
-import { useScanInsightsContext } from "./InsightsPanel";
+import { TokenBreakdownChart, TurnDurationChart } from "./InsightCharts";
+import { type ProjectInsights, useScanInsightsContext } from "./InsightsPanel";
 import SessionRelationshipsView from "./SessionRelationshipsView";
 import { fmtNum, formatDuration } from "./StatsPanel";
 
@@ -268,6 +270,52 @@ function ProjectOverview({
   );
 }
 
+export function ProjectPerformance({
+  insights,
+  loading,
+}: {
+  insights?: ProjectInsights;
+  loading: boolean;
+}) {
+  if (!insights && loading) {
+    return (
+      <div className="rounded-xl bg-terminal-surface p-5 shadow-layer-sm animate-pulse">
+        <div className="h-4 w-28 skeleton rounded" />
+        <div className="mt-4 h-24 skeleton rounded-lg" />
+      </div>
+    );
+  }
+  if (!insights || (!insights.turnDurationHistogram && !insights.tokenBreakdown)) return null;
+
+  const dataQualityNotes = insights.dataQuality?.notes || [];
+  return (
+    <section className="space-y-3" aria-labelledby="project-performance-title">
+      <div className="flex items-center gap-2">
+        <h3 id="project-performance-title" className="ui-section-title-strong">
+          Performance
+        </h3>
+        {dataQualityNotes.length > 0 && (
+          <DataQualityIndicator title={dataQualityNotes.join("\n")} />
+        )}
+      </div>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+        {insights.turnDurationHistogram && (
+          <div className="rounded-xl bg-terminal-surface p-5 shadow-layer-sm">
+            <h4 className="ui-section-title-strong mb-4">Turn Duration</h4>
+            <TurnDurationChart histogram={insights.turnDurationHistogram} />
+          </div>
+        )}
+        {insights.tokenBreakdown && (
+          <div className="rounded-xl bg-terminal-surface p-5 shadow-layer-sm">
+            <h4 className="ui-section-title-strong mb-4">Token Usage</h4>
+            <TokenBreakdownChart breakdown={insights.tokenBreakdown} />
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function Stat({
   label,
   value,
@@ -384,7 +432,13 @@ function ProjectsGrid({
 // ─── Main Component ─────────────────────────────────────────────────
 
 export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
-  const { userInsights, scanStatus } = useScanInsightsContext();
+  const {
+    userInsights,
+    scanStatus,
+    projectInsightsCache,
+    fetchProjectInsights,
+    loading: insightsLoading,
+  } = useScanInsightsContext();
   const [selectedProject, setSelectedProject] = useState<string>(ALL_PROJECTS);
   const [mode, setMode] = useState<PanelMode>("overview");
   const [showAgentRuns, setShowAgentRuns] = useState(
@@ -418,6 +472,12 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
     selectedProject === ALL_PROJECTS
       ? null
       : (projects.find((p) => p.project === selectedProject) ?? null);
+  const detailedInsight =
+    selectedProject === ALL_PROJECTS ? undefined : projectInsightsCache.get(selectedProject);
+
+  useEffect(() => {
+    if (selectedProject !== ALL_PROJECTS) fetchProjectInsights(selectedProject);
+  }, [selectedProject, fetchProjectInsights, scanStatus?.finishedAt]);
 
   const isScanning = scanStatus?.running && scanStatus.total > 0;
 
@@ -560,6 +620,7 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
                 insight={selectedInsight}
                 onOpenSessions={() => openSessionsForProject(selectedProject)}
               />
+              <ProjectPerformance insights={detailedInsight} loading={insightsLoading} />
               <SessionRelationshipsView view="timeline" projectFilter={projectFilterArg} />
             </>
           )}
