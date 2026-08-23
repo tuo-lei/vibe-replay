@@ -25,8 +25,9 @@ export function mapHermesToolName(name: string): string {
     execute_code: "ExecuteCode",
     session_search: "SessionSearch",
     text_to_speech: "TextToSpeech",
-    // Browser + cron — not in the original PR, added so the transform's scene
-    // detection sees them as first-class tool types instead of "unknown".
+    // Browser + cron + memory tools: no special scene handling in the
+    // transform yet, but CamelCase ids read better than raw snake_case in
+    // tool lists and labels.
     browser_navigate: "BrowserNavigate",
     browser_click: "BrowserClick",
     browser_type: "BrowserType",
