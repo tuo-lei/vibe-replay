@@ -2,11 +2,12 @@ import { mkdir, mkdtemp, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { ScanInput } from "../src/scanner.js";
+import type { ScanInput, SessionScanResult } from "../src/scanner.js";
 import type { SourceSummaryRecord } from "../src/server.js";
 import { __testables } from "../src/server.js";
 import {
   pickSourceRecordForSession,
+  preserveFailedProviderScanResults,
   prioritizeScanInputs,
   providerSessionKey,
   providerSlugKey,
@@ -41,6 +42,22 @@ function makeCursorSession(overrides: Partial<SessionInfo> = {}): SessionInfo {
     toolPaths: ["/tmp/tool-a.txt"],
     firstPrompt: "test prompt",
     ...overrides,
+  };
+}
+
+function makeScanResult(provider: string, sessionId: string): SessionScanResult {
+  return {
+    sessionId,
+    provider,
+    project: "~/project-a",
+    slug: sessionId,
+    promptCount: 1,
+    toolCallCount: 1,
+    editCount: 0,
+    filesModified: [],
+    subAgentCount: 0,
+    apiErrorCount: 0,
+    compactionCount: 0,
   };
 }
 
@@ -500,6 +517,40 @@ describe("sources enrichment helpers", () => {
       "unscanned-old",
       "already-new",
     ]);
+  });
+
+  it("preserves previous scan results when a provider discovery fails", () => {
+    const fresh = makeScanResult("claude-code", "fresh");
+    const previousCursor = makeScanResult("cursor", "cursor-old");
+    const previousClaude = makeScanResult("claude-code", "fresh");
+
+    const merged = preserveFailedProviderScanResults(
+      [fresh],
+      [previousCursor, previousClaude],
+      ["cursor"],
+    );
+
+    expect(merged.map((result) => `${result.provider}:${result.sessionId}`)).toEqual([
+      "claude-code:fresh",
+      "cursor:cursor-old",
+    ]);
+    expect(merged[1]?.dataQualityNotes).toEqual([
+      "Provider discovery failed for cursor; showing the last successful scan.",
+    ]);
+  });
+
+  it("does not retain stale results from healthy providers or duplicate fresh results", () => {
+    const fresh = makeScanResult("cursor", "cursor-old");
+    const previousCursor = makeScanResult("cursor", "cursor-old");
+    const previousPi = makeScanResult("pi", "pi-old");
+
+    const merged = preserveFailedProviderScanResults(
+      [fresh],
+      [previousCursor, previousPi],
+      ["cursor"],
+    );
+
+    expect(merged).toEqual([fresh]);
   });
 
   it("does not cross-provider match by sessionId when picking cache records", () => {
