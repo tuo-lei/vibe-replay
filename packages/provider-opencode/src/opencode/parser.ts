@@ -278,6 +278,10 @@ export function parseSessionFromDb(
   const tokenUsageByModel =
     tokenByModel.size > 0 ? Object.fromEntries(tokenByModel.entries()) : undefined;
 
+  // opencode persists its own cumulative cost estimate on the session row;
+  // surface it so it wins over local pricing-table estimates.
+  const reportedCostUsd = Number(session?.cost ?? 0);
+
   const defaultSource: DataSourceInfo = {
     primary: "sqlite",
     sources: [opencodeDbPath()],
@@ -298,6 +302,7 @@ export function parseSessionFromDb(
     dataSourceInfo: defaultSource,
     ...(tokenUsage ? { tokenUsage } : {}),
     ...(tokenUsageByModel ? { tokenUsageByModel } : {}),
+    ...(Number.isFinite(reportedCostUsd) && reportedCostUsd > 0 ? { reportedCostUsd } : {}),
     compactions: compactions.length > 0 ? compactions : undefined,
     parseWarnings: parseWarnings.length > 0 ? parseWarnings : undefined,
     ...(truncatedResponses > 0 ? { truncatedResponses } : {}),

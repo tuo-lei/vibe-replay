@@ -47,6 +47,8 @@ interface HermesSessionRow {
   git_branch: string | null;
   git_repo_root: string | null;
   end_reason: string | null;
+  estimated_cost_usd: number | null;
+  actual_cost_usd: number | null;
 }
 
 interface HermesModelUsageRow {
@@ -305,21 +307,27 @@ export function parseSessionFromDb(
     // role='session_meta' and anything unknown: skip
   }
 
-  // Hermes compression marks the pre-compaction transcript rows compacted=1
-  // (they stay in the DB, so the replay keeps full history). Record a single
-  // compaction event so the viewer can annotate the context change.
-  const firstCompacted = messages.find((m) => m.compacted === 1);
-  if (firstCompacted) {
-    compactions.push({
-      timestamp: toIsoMs(firstCompacted.timestamp) || startTime || new Date().toISOString(),
-      trigger: "hermes-compaction",
-    });
+  // Hermes compression marks each pre-compaction transcript run with
+  // compacted=1 (the rows stay in the DB, so the replay keeps full history).
+  // Every compacted run boundary is its own compaction event — long sessions
+  // can compact several times.
+  let previousCompacted = false;
+  for (const message of messages) {
+    const isCompacted = message.compacted === 1;
+    if (isCompacted && !previousCompacted) {
+      compactions.push({
+        timestamp: toIsoMs(message.timestamp) || startTime || new Date().toISOString(),
+        trigger: "hermes-compaction",
+      });
+    }
+    previousCompacted = isCompacted;
   }
 
   const tokenUsage = usageFromSession(session);
   if (tokenUsage) totalTokens = tokenUsage;
 
   const tokenUsageByModel = usageByModelFromDb(db, sessionId);
+  const reportedCostUsd = reportedCostFromSession(session);
 
   const defaultSource: DataSourceInfo = {
     primary: "sqlite",
@@ -343,6 +351,7 @@ export function parseSessionFromDb(
     ...(tokenUsageByModel && Object.keys(tokenUsageByModel).length > 0
       ? { tokenUsageByModel }
       : {}),
+    ...(reportedCostUsd !== undefined ? { reportedCostUsd } : {}),
     compactions: compactions.length > 0 ? compactions : undefined,
     gitBranch: session?.git_branch || undefined,
     ...(skillsUsed.size > 0 ? { skillsUsed: Array.from(skillsUsed) } : {}),
@@ -401,6 +410,19 @@ function usageFromSession(session: HermesSessionRow | null): TokenUsage | undefi
   };
   if (Object.values(usage).every((v) => v === 0)) return undefined;
   return usage;
+}
+
+/**
+ * Provider-reported cost for the session. Hermes maintains an estimate and,
+ * when billing data is available, an actual cost — prefer the actual value
+ * and only report positive numbers (status "included"/"unknown" store 0).
+ */
+function reportedCostFromSession(session: HermesSessionRow | null): number | undefined {
+  if (!session) return undefined;
+  const actual = Number(session.actual_cost_usd ?? 0);
+  if (Number.isFinite(actual) && actual > 0) return actual;
+  const estimated = Number(session.estimated_cost_usd ?? 0);
+  return Number.isFinite(estimated) && estimated > 0 ? estimated : undefined;
 }
 
 /** Per-model token usage from the session_model_usage table (Hermes ≥ 0.20). */

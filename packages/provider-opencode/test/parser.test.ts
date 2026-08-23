@@ -99,6 +99,46 @@ describe("opencode parser", () => {
     }
   });
 
+  it("reports the session's own cost as reportedCostUsd when positive", async () => {
+    const withCost = await buildOpencodeDb({
+      session: [{ ...baseSession, cost: 0.177 }],
+      messages: [
+        {
+          id: "msg_u1",
+          sessionId: "ses_111",
+          role: "user",
+          timeCreated: 1_800_000_001_000,
+          parts: [{ type: "text", text: "hello" }],
+        },
+      ],
+    });
+    try {
+      const result = parseSessionFromDb(withCost, "ses_111");
+      expect(result.reportedCostUsd).toBeCloseTo(0.177, 6);
+    } finally {
+      withCost.close();
+    }
+
+    const withoutCost = await buildOpencodeDb({
+      session: [baseSession],
+      messages: [
+        {
+          id: "msg_u1",
+          sessionId: "ses_111",
+          role: "user",
+          timeCreated: 1_800_000_001_000,
+          parts: [{ type: "text", text: "hello" }],
+        },
+      ],
+    });
+    try {
+      const result = parseSessionFromDb(withoutCost, "ses_111");
+      expect(result.reportedCostUsd).toBeUndefined();
+    } finally {
+      withoutCost.close();
+    }
+  });
+
   it("maps edit/write/read tool args to snake_case fields", () => {
     expect(mapOpencodeToolName("edit")).toBe("Edit");
     expect(mapOpencodeToolName("bash")).toBe("Bash");
