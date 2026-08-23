@@ -25,6 +25,20 @@ export function mapHermesToolName(name: string): string {
     execute_code: "ExecuteCode",
     session_search: "SessionSearch",
     text_to_speech: "TextToSpeech",
+    // Browser + cron + memory tools: no special scene handling in the
+    // transform yet, but CamelCase ids read better than raw snake_case in
+    // tool lists and labels.
+    browser_navigate: "BrowserNavigate",
+    browser_click: "BrowserClick",
+    browser_type: "BrowserType",
+    browser_snapshot: "BrowserSnapshot",
+    browser_console: "BrowserConsole",
+    browser_scroll: "BrowserScroll",
+    browser_press: "BrowserPress",
+    browser_get_images: "BrowserImages",
+    cronjob: "Cron",
+    memory: "Memory",
+    codex: "Codex",
   };
   return mapping[name] || name;
 }

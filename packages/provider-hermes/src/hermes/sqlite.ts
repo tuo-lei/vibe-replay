@@ -1,8 +1,10 @@
 /// <reference path="../sql-js.d.ts" />
+import { existsSync, readdirSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { Database, SqlJsStatic } from "sql.js";
+import type { Dirent } from "node:fs";
 
 export const HERMES_DIRNAME = ".hermes";
 export const HERMES_DB_FILENAME = "state.db";
@@ -17,6 +19,64 @@ export function hermesDataDir(): string {
 
 export function hermesDbPath(): string {
   return join(hermesDataDir(), HERMES_DB_FILENAME);
+}
+
+function resolveExisting(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
+/**
+ * Root directory that holds the default DB and the named profiles — mirrors
+ * Hermes's own `get_default_hermes_root()`:
+ *
+ * - No `HERMES_HOME`: root is `~/.hermes`.
+ * - `HERMES_HOME` inside `~/.hermes` (profile mode, e.g. a path under
+ *   `~/.hermes/profiles/`): root stays `~/.hermes` so all profiles are visible.
+ * - `HERMES_HOME` outside `~/.hermes` (Docker/custom deployment): root is
+ *   `HERMES_HOME` itself — unless it points at `<root>/profiles/<name>`, in
+ *   which case root is that grandparent.
+ */
+export function hermesRootDir(): string {
+  const envHome = process.env.HERMES_HOME;
+  const nativeHome = join(homedir(), HERMES_DIRNAME);
+  if (!envHome) return nativeHome;
+  const envPath = resolveExisting(resolve(envHome));
+  const rel = relative(resolveExisting(nativeHome), envPath);
+  if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) {
+    return nativeHome;
+  }
+  if (basename(dirname(envPath)) === "profiles") {
+    return dirname(dirname(envPath));
+  }
+  return envPath;
+}
+
+/**
+ * All `state.db` paths that belong to this Hermes install: the default home
+ * plus every named profile's DB (`<root>/profiles/<name>/state.db`). Missing
+ * locations are skipped so partial installs still work.
+ */
+export function hermesDbPaths(): string[] {
+  const out: string[] = [];
+  const defaultDb = join(hermesRootDir(), HERMES_DB_FILENAME);
+  if (existsSync(defaultDb)) out.push(defaultDb);
+  const profilesDir = join(hermesRootDir(), "profiles");
+  let entries: Dirent[] = [];
+  try {
+    entries = readdirSync(profilesDir, { withFileTypes: true });
+  } catch {
+    // no profiles dir — default DB only
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const p = join(profilesDir, entry.name, HERMES_DB_FILENAME);
+    if (existsSync(p)) out.push(p);
+  }
+  return out;
 }
 
 export function createRetryableInit<T>(factory: () => Promise<T>): () => Promise<T> {
@@ -65,6 +125,21 @@ export async function openHermesDb(
     db?.close();
     return null;
   }
+}
+
+/**
+ * Open each known Hermes DB (default + profiles). Useful for discovery and
+ * for parsing a session that could live in any profile.
+ */
+export async function openAllHermesDbs(): Promise<Array<{ db: Database; dbPath: string }>> {
+  const paths = hermesDbPaths();
+  if (paths.length === 0) return [];
+  const out: Array<{ db: Database; dbPath: string }> = [];
+  for (const p of paths) {
+    const opened = await openHermesDb(p);
+    if (opened) out.push(opened);
+  }
+  return out;
 }
 
 /** True when the session id looks like a Hermes session id (`YYYYMMDD_HHMMSS_...`). */

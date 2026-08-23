@@ -5,7 +5,7 @@ import type { Database } from "sql.js";
 import { cleanPromptText } from "@vibe-replay/provider-core/clean-prompt";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
 import { shortenPath } from "@vibe-replay/provider-core/utils";
-import { hermesDataDir, hermesDbPath, openHermesDb } from "./sqlite.js";
+import { hermesDataDir, hermesDbPath, openAllHermesDbs } from "./sqlite.js";
 
 export const HERMES_PROVIDER = "hermes";
 
@@ -47,17 +47,34 @@ function rowValues(db: Database, sql: string, params: Record<string, any> = {}):
 }
 
 export async function discoverHermesSessions(): Promise<SessionInfo[]> {
-  const opened = await openHermesDb();
-  if (!opened) return [];
-  const { db } = opened;
+  const all = await openAllHermesDbs();
+  if (all.length === 0) return [];
+  const sessions: SessionInfo[] = [];
+  const seen = new Set<string>();
   try {
-    return listSessionsFromDb(db);
+    for (const { db, dbPath } of all) {
+      const fromDb = listSessionsFromDb(db, dbPath);
+      for (const s of fromDb) {
+        if (seen.has(s.sessionId)) continue;
+        seen.add(s.sessionId);
+        sessions.push(s);
+      }
+    }
   } finally {
-    db.close();
+    for (const { db } of all) {
+      try {
+        db.close();
+      } catch {
+        // ignore
+      }
+    }
   }
+  // Deterministic ordering: newest last_activity first across profiles.
+  sessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  return sessions;
 }
 
-export function listSessionsFromDb(db: Database): SessionInfo[] {
+export function listSessionsFromDb(db: Database, dbPathOverride?: string): SessionInfo[] {
   const rows = rowValues(
     db,
     `
@@ -77,11 +94,12 @@ export function listSessionsFromDb(db: Database): SessionInfo[] {
   const statsBySession = buildSessionStats(db, rows);
 
   const version = hermesVersion();
+  const fallbackDbPath = dbPathOverride ?? hermesDbPath();
   const sessions: SessionInfo[] = [];
   for (const row of rows) {
     const stats = statsBySession.get(row.id);
     if (!stats) continue;
-    const info = sessionInfoFromRow(row, stats, version);
+    const info = sessionInfoFromRow(row, stats, version, fallbackDbPath);
     if (info) sessions.push(info);
   }
   return sessions;
@@ -180,14 +198,15 @@ function sessionInfoFromRow(
   row: HermesSessionRow,
   stats: SessionStats,
   version: string,
+  dbPath?: string,
 ): SessionInfo | null {
   if (!row.id) return null;
 
   const firstPrompt = cleanPromptText(stats.firstPrompt);
   if (!firstPrompt) return null;
 
-  const dbPath = hermesDbPath();
-  const markerPath = `${dbPath}#session:${row.id}`;
+  const resolvedDbPath = dbPath ?? hermesDbPath();
+  const markerPath = `${resolvedDbPath}#session:${row.id}`;
   const lastActivity = row.last_activity_at ?? row.ended_at ?? row.started_at;
 
   return {
