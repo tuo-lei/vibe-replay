@@ -167,4 +167,30 @@ describe("rollupInsights", () => {
       projects: 2,
     });
   });
+
+  it("counts collapsed worktrees as one canonical project", () => {
+    const project = "~/code/example";
+    const worktree = `${project}/.claude/worktrees/feature`;
+    const payload: InsightsRollupPayload = {
+      sessions: [
+        {
+          project,
+          startTime: "2026-08-20T12:00:00Z",
+          prompts: 1,
+          edits: 0,
+          toolCalls: 0,
+        },
+        {
+          project: worktree,
+          startTime: "2026-08-20T13:00:00Z",
+          prompts: 1,
+          edits: 0,
+          toolCalls: 0,
+        },
+      ],
+      replays: [{ project: worktree, startTime: "2026-08-20T14:00:00Z" }],
+    };
+
+    expect(rollupInsights(payload).projects).toBe(1);
+  });
 });

@@ -1159,10 +1159,10 @@ function useHomePageCounts() {
 
 /**
  * Compact per-session metrics used to compute exact time-range totals locally.
- * Refetch after a background scan finishes; changing the selected range itself
- * remains request-free.
+ * Refetch when the background scan snapshot changes, including deferred usage
+ * backfill; changing the selected range itself remains request-free.
  */
-function useInsightsRollup(scanFinishedAt?: string) {
+function useInsightsRollup(scanFinishedAt?: string, scanRevision?: number) {
   const [payload, setPayload] = useState<InsightsRollupPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -1194,17 +1194,21 @@ function useInsightsRollup(scanFinishedAt?: string) {
     return () => {
       stopped = true;
     };
-  }, [scanFinishedAt]);
+  }, [scanFinishedAt, scanRevision]);
 
   return { payload, loading, error };
 }
 
 /**
  * Per-session usage counters for the whole scan. Fetched once and aggregated
- * locally so switching time range costs no request, and refetched when a scan
- * finishes so the section isn't stuck on a stale snapshot.
+ * locally so switching time range costs no request, and refetched when the scan
+ * snapshot changes so the section isn't stuck on a stale snapshot.
  */
-function useUsageRollupSessions(scanFinishedAt?: string, usageBackfillRunning = false) {
+function useUsageRollupSessions(
+  scanFinishedAt?: string,
+  usageBackfillRunning = false,
+  scanRevision?: number,
+) {
   const [payload, setPayload] = useState<UsageRollupPayload | null>(null);
 
   useEffect(() => {
@@ -1218,7 +1222,7 @@ function useUsageRollupSessions(scanFinishedAt?: string, usageBackfillRunning = 
     return () => {
       stopped = true;
     };
-  }, [scanFinishedAt, usageBackfillRunning]);
+  }, [scanFinishedAt, usageBackfillRunning, scanRevision]);
 
   return payload;
 }
@@ -1238,10 +1242,10 @@ export function navigateToUsageSessions(facet: "tool" | "mcp" | "mcpTool" | "ski
     mcp: null,
     mcpTool: null,
     skill: null,
-    archived: null,
-    agentRuns: null,
+    archived: "true",
+    agentRuns: "true",
     replay: null,
-    [facet]: name,
+    [facet]: [name],
   });
 }
 
@@ -1316,7 +1320,7 @@ export default function InsightsPage() {
     payload: insightsRollupPayload,
     loading: insightsRollupLoading,
     error: insightsRollupError,
-  } = useInsightsRollup(scanStatus?.finishedAt);
+  } = useInsightsRollup(scanStatus?.finishedAt, scanStatus?.revision);
 
   const isInitialScan = scanStatus?.running && !userInsights;
 
@@ -1386,6 +1390,7 @@ export default function InsightsPage() {
   const usagePayload = useUsageRollupSessions(
     scanStatus?.finishedAt,
     scanStatus?.usageBackfill?.running === true,
+    scanStatus?.revision,
   );
   const usage = useMemo(
     () => rollupUsage(usagePayload?.sessions || [], { since: rangeSince(range), limit: 8 }),

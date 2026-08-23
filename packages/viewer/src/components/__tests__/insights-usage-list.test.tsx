@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { navigateToUsageSessions, UsageBarList } from "../InsightsPage";
+import { getMultiFromUrl } from "../../hooks/usePanelFilters";
 
 afterEach(() => {
   cleanup();
@@ -36,20 +37,11 @@ describe("UsageBarList", () => {
 
     const params = new URLSearchParams(window.location.search);
     expect(params.get("tab")).toBe("sessions");
-    for (const key of [
-      "project",
-      "q",
-      "provider",
-      "repo",
-      "tool",
-      "mcp",
-      "skill",
-      "archived",
-      "agentRuns",
-      "replay",
-    ]) {
+    for (const key of ["project", "q", "provider", "repo", "tool", "mcp", "skill", "replay"]) {
       expect(params.get(key), `${key} should be cleared`).toBeNull();
     }
+    expect(params.get("archived")).toBe("true");
+    expect(params.get("agentRuns")).toBe("true");
     expect(params.get("mcpTool")).toBe("sourcegraph/search");
   });
 
@@ -67,11 +59,12 @@ describe("UsageBarList", () => {
   });
 
   it("round-trips facet names with URL-sensitive characters exactly once", () => {
-    const value = "sourcegraph/search?query=foo bar&scope=100%";
+    const value = "sourcegraph/search?query=foo bar&scope=100%,comma";
 
     navigateToUsageSessions("mcpTool", value);
 
     const params = new URLSearchParams(window.location.search);
     expect(params.get("mcpTool")).toBe(value);
+    expect(getMultiFromUrl("mcpTool")).toEqual([value]);
   });
 });

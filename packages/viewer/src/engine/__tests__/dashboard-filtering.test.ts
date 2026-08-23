@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyDashboardFacetFilters } from "../dashboard-filtering";
+import { applyDashboardFacetFilters, matchesProjectFacet } from "../dashboard-filtering";
 
 const ALL_PROJECTS = "__all__";
 const identityRollup = (project: string) => project;
@@ -78,5 +78,20 @@ describe("dashboard facet filtering", () => {
     });
 
     expect(filtered.map((session) => session.slug)).toEqual(["cursor-1"]);
+  });
+
+  it("matches both canonical projects and explicitly shown run workspaces", () => {
+    const parent = "~/code/example";
+    const runWorkspace = `${parent}/run-abcdef123456`;
+    const rollup = (project: string) => (project === runWorkspace ? parent : project);
+
+    expect(matchesProjectFacet({ project: parent }, parent, ALL_PROJECTS, rollup)).toBe(true);
+    expect(matchesProjectFacet({ project: runWorkspace }, parent, ALL_PROJECTS, rollup)).toBe(true);
+    expect(matchesProjectFacet({ project: runWorkspace }, runWorkspace, ALL_PROJECTS, rollup)).toBe(
+      true,
+    );
+    expect(matchesProjectFacet({ project: parent }, runWorkspace, ALL_PROJECTS, rollup)).toBe(
+      false,
+    );
   });
 });

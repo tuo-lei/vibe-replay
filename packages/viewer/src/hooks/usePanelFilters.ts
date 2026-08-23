@@ -3,23 +3,14 @@ import { navigateTo } from "../components/dashboard-utils";
 
 export const ALL_PROJECTS = "__all__";
 
-function getMultiFromUrl(param: string): string[] {
-  const raw = new URLSearchParams(window.location.search).get(param);
-  if (!raw) return [];
-  return raw
-    .split(",")
-    .map((v) => {
-      try {
-        return decodeURIComponent(v.trim());
-      } catch {
-        return v.trim();
-      }
-    })
-    .filter(Boolean);
+export function getMultiFromUrl(param: string): string[] {
+  return new URLSearchParams(window.location.search)
+    .getAll(param)
+    .filter((value) => value.length > 0);
 }
 
-function multiParam(values: readonly string[]): string | null {
-  return values.length > 0 ? values.map(encodeURIComponent).join(",") : null;
+function multiParam(values: readonly string[]): readonly string[] | null {
+  return values.length > 0 ? [...values] : null;
 }
 
 function getProjectFromUrl(): string {

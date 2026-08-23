@@ -1524,6 +1524,10 @@ export interface BackgroundScanState {
   scanned: number;
   total: number;
   results: SessionScanResult[];
+  /** Increments whenever the result snapshot changes, including usage backfill. */
+  revision: number;
+  /** True when results represent a completed or persisted scan, even if empty. */
+  hasSnapshot: boolean;
   currentSession?: string;
   phase?: "discovering" | "scanning";
   startedAt?: string;

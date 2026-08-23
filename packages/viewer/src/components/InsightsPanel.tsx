@@ -145,6 +145,8 @@ interface ScanStatus {
   scanned: number;
   total: number;
   resultCount: number;
+  revision?: number;
+  hasSnapshot?: boolean;
   currentSession?: string;
   phase?: "discovering" | "scanning";
   startedAt?: string;
@@ -207,7 +209,8 @@ export function ScanInsightsProvider({ children }: { children: ReactNode }) {
         setScanStatus(status);
 
         if (status.running || status.usageBackfill?.running) return;
-        if (!status.hasCachedResults || !isCacheFresh(status.cachedAt, CACHE_REFRESH_TTL_MS)) {
+        const hasSnapshot = status.hasSnapshot ?? status.hasCachedResults;
+        if (!hasSnapshot || !isCacheFresh(status.cachedAt, CACHE_REFRESH_TTL_MS)) {
           startScan();
           return;
         }

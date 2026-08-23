@@ -70,4 +70,24 @@ describe("ProjectsPanel project insights", () => {
     expect(context.fetchProjectInsights).toHaveBeenCalledTimes(1);
     expect(context.fetchProjectInsights).toHaveBeenCalledWith("~/code/example");
   });
+
+  it("keeps hidden agent-run activity in the default parent rollup", () => {
+    const context = contextValue();
+    context.userInsights!.topProjects.push({
+      ...context.userInsights!.topProjects[0],
+      project: "~/code/example/run-abcdef123456",
+      sessions: 1,
+      cost: 0.5,
+      prompts: 1,
+      durationMs: 1_000,
+      toolCalls: 1,
+      edits: 0,
+      lastActivity: "2026-08-21T00:00:00Z",
+    });
+    vi.spyOn(InsightsPanel, "useScanInsightsContext").mockReturnValue(context);
+
+    render(<ProjectsPanel onNavigate={vi.fn()} />);
+
+    expect(screen.getAllByRole("button", { name: /example/i })[0]?.textContent).toContain("3");
+  });
 });

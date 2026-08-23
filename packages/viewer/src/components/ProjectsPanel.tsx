@@ -447,8 +447,8 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
 
   // Scratch workspaces from automated runs are their own project each, so on a
   // machine that runs agents on a schedule they crowd out everything the user
-  // actually worked in. They have to be dropped before the rollup, which folds
-  // them into a parent that no longer looks like a run workspace.
+  // actually worked in. Keep them in the source set so the default rollup can
+  // add their activity to the parent project.
   const agentRunCount = useMemo(
     () => (userInsights?.topProjects || []).filter((p) => isAgentRunWorkspace(p.project)).length,
     [userInsights],
@@ -456,14 +456,11 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
 
   const projects = useMemo(() => {
     if (!userInsights) return [];
-    const source = showAgentRuns
-      ? userInsights.topProjects
-      : userInsights.topProjects.filter((p) => !isAgentRunWorkspace(p.project));
-    // When the toggle is on, preserve each run workspace as its own project.
-    // When it is off, those entries were already removed above, so parent
-    // totals exclude run-workspace activity; agentRunCount reports it
-    // separately.
-    const sorted = rollupTopProjects(source, { rollupAgentRuns: !showAgentRuns });
+    // When the toggle is on, preserve each run workspace as its own project;
+    // otherwise roll its activity into the parent project.
+    const sorted = rollupTopProjects(userInsights.topProjects, {
+      rollupAgentRuns: !showAgentRuns,
+    });
     sorted.sort((a, b) => (b.lastActivity || "").localeCompare(a.lastActivity || ""));
     return sorted;
   }, [userInsights, showAgentRuns]);
@@ -477,7 +474,7 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
 
   useEffect(() => {
     if (selectedProject !== ALL_PROJECTS) fetchProjectInsights(selectedProject);
-  }, [selectedProject, fetchProjectInsights, scanStatus?.finishedAt]);
+  }, [selectedProject, fetchProjectInsights, scanStatus?.finishedAt, scanStatus?.revision]);
 
   const isScanning = scanStatus?.running && scanStatus.total > 0;
 

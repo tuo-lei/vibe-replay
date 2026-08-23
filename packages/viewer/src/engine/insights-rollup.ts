@@ -1,3 +1,5 @@
+import { rollupProject } from "../components/dashboard-utils";
+
 export interface InsightsMetricSession {
   project: string;
   startTime?: string;
@@ -82,7 +84,7 @@ export function rollupInsights(
   let toolCalls = 0;
 
   for (const session of sessions) {
-    if (session.project) projects.add(session.project);
+    if (session.project) projects.add(rollupProject(session.project));
     durationMs += session.durationMs || 0;
     cost += session.cost || 0;
     prompts += session.prompts;
@@ -90,7 +92,7 @@ export function rollupInsights(
     toolCalls += session.toolCalls;
   }
   for (const replay of replays) {
-    if (replay.project) projects.add(replay.project);
+    if (replay.project) projects.add(rollupProject(replay.project));
   }
 
   return {
