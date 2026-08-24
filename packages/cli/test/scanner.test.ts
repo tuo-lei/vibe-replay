@@ -1345,7 +1345,7 @@ describe("aggregateUserInsights", () => {
       key: "cursor-sdk:github-pr-review:Roblox/ros",
       kind: "cursor-sdk-automation" as const,
       isAutomated: true,
-      displayName: "Automated · Roblox/ros",
+      displayName: "Automated · Roblox/ros · GitHub PR review",
       workflowId: "github-pr-review",
       repository: "Roblox/ros",
     };

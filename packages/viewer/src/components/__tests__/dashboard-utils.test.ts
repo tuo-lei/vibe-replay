@@ -143,7 +143,7 @@ describe("Cursor SDK project identity", () => {
       key: "cursor-sdk:github-pr-review:Roblox/ros",
       kind: "cursor-sdk-automation",
       isAutomated: true,
-      displayName: "Automated · Roblox/ros",
+      displayName: "Automated · Roblox/ros · GitHub PR review",
       repository: "Roblox/ros",
       prNumber: 13473,
     });

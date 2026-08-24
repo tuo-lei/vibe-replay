@@ -100,7 +100,7 @@ describe("dashboard facet filtering", () => {
       key: "cursor-sdk:github-pr-review:Roblox/ros",
       kind: "cursor-sdk-automation" as const,
       isAutomated: true,
-      displayName: "Automated · Roblox/ros",
+      displayName: "Automated · Roblox/ros · GitHub PR review",
     };
 
     expect(
