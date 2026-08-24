@@ -41,9 +41,13 @@ function add(
   counts: Record<string, number>,
   normalizeName: (name: string) => string = (name) => name,
 ): void {
+  const normalizedCounts = new Map<string, number>();
   for (const [name, calls] of Object.entries(counts)) {
     if (calls <= 0) continue;
     const normalizedName = normalizeName(name);
+    normalizedCounts.set(normalizedName, (normalizedCounts.get(normalizedName) || 0) + calls);
+  }
+  for (const [normalizedName, calls] of normalizedCounts) {
     const entry = into.get(normalizedName);
     if (entry) {
       entry.calls += calls;

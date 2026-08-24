@@ -2240,6 +2240,13 @@ function SessionsPanel() {
         : rangeUnarchivedSources.filter((s) => !isAgentRunWorkspace(s.project)),
     [rangeUnarchivedSources, showAgentRuns],
   );
+  const baseSourceCount = useMemo(
+    () =>
+      showAgentRuns
+        ? unarchivedSources.length
+        : unarchivedSources.filter((s) => !isAgentRunWorkspace(s.project)).length,
+    [showAgentRuns, unarchivedSources],
+  );
 
   const selectedProviderSet = new Set(selectedProviders);
   const selectedRepoSet = new Set(selectedRepos);
@@ -2811,12 +2818,12 @@ function SessionsPanel() {
                   <span className="text-xs font-mono text-terminal-dimmer shrink-0">
                     {hasActiveFilters
                       ? `${filtered.length.toLocaleString()} matching`
-                      : `${visibleSources.length.toLocaleString()} local sessions`}
+                      : `${baseSourceCount.toLocaleString()} local sessions`}
                   </span>
                 </div>
                 <div className="mt-0.5 text-xs font-mono text-terminal-dimmer">
                   {hasActiveFilters
-                    ? `Filtered from ${visibleSources.length.toLocaleString()} local sessions`
+                    ? `Filtered from ${baseSourceCount.toLocaleString()} local sessions`
                     : "Use sidebar facets or search to narrow the list"}
                   {showArchived && " · including archived"}
                 </div>
