@@ -5,6 +5,7 @@ export type {
   DataSourceInfo,
   InsightsStore,
   OverlaySource,
+  ProjectIdentity,
   ParseWarning,
   PrLink,
   ReplaySession,

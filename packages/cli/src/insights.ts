@@ -106,6 +106,7 @@ export function scanResultToInsight(scan: SessionScanResult): SessionInsight {
     provider: scan.provider,
     title: scan.title,
     project: scan.project,
+    projectIdentity: scan.projectIdentity,
     model: scan.model,
     gitBranch: scan.gitBranch,
     gitBranches: scan.gitBranches,

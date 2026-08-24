@@ -1,9 +1,12 @@
+import type { ProjectIdentity } from "@vibe-replay/types";
+
 export const NO_REPO_FILTER = "__no_repo__";
 
 export interface DashboardFilterItem {
   provider: string;
   gitRepo?: string;
   project: string;
+  projectIdentity?: ProjectIdentity;
   tools?: readonly string[];
   mcpServers?: readonly string[];
   mcpTools?: readonly string[];
@@ -29,7 +32,7 @@ export function matchesRepoFacet(
 }
 
 export function matchesProjectFacet(
-  s: Pick<DashboardFilterItem, "project">,
+  s: Pick<DashboardFilterItem, "project" | "projectIdentity">,
   selectedProjectKey: string,
   allProjectsKey: string,
   rollupProject: (project: string) => string,
@@ -37,6 +40,7 @@ export function matchesProjectFacet(
   return (
     selectedProjectKey === allProjectsKey ||
     s.project === selectedProjectKey ||
+    s.projectIdentity?.key === selectedProjectKey ||
     rollupProject(s.project) === selectedProjectKey
   );
 }

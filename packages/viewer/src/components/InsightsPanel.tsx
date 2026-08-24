@@ -22,11 +22,13 @@ import { DataQualityIndicator } from "./DataQualityIndicator";
 import {
   CACHE_REFRESH_TTL_MS,
   isCacheFresh,
+  projectDisplayName,
   providerDisplayName,
   rollupTopProjects,
   shortModelName,
 } from "./dashboard-utils";
 import { formatDuration } from "./StatsPanel";
+import type { ProjectIdentity } from "@vibe-replay/types";
 
 // ─── Types (mirror the server scanner types) ────────────────────────
 
@@ -70,6 +72,7 @@ export interface TurnDurationHistogram {
 
 export interface ProjectInsights {
   project: string;
+  projectIdentity?: ProjectIdentity;
   sessionCount: number;
   totalDurationMs: number;
   totalCost: number;
@@ -109,6 +112,7 @@ interface UserInsights {
   providers: Record<string, number>;
   topProjects: Array<{
     project: string;
+    projectIdentity?: ProjectIdentity;
     sessions: number;
     cost: number;
     prompts: number;
@@ -756,7 +760,7 @@ export function UserInsightsPanel({ insights }: { insights: UserInsights }) {
               </div>
               <div className="space-y-1.5">
                 {rolledTopProjects.map((p) => {
-                  const name = p.project.split("/").pop() || p.project;
+                  const name = projectDisplayName(p.project, p.projectIdentity);
                   return (
                     <div key={p.project} className="flex items-center gap-2 text-xs">
                       <span
@@ -880,8 +884,10 @@ export function TitleInsightsHeader({
   const dataQualityNotes = pi?.dataQuality?.notes ?? ui?.dataQuality?.notes ?? [];
   const timeRange = pi?.timeRange ?? ui?.timeRange;
 
-  const title = pi ? pi.project.split("/").pop() || pi.project : "All Projects";
-  const subtitle = pi ? pi.project : `${ui?.totalProjects ?? 0} projects`;
+  const title = pi ? projectDisplayName(pi.project, pi.projectIdentity) : "All Projects";
+  const subtitle = pi
+    ? pi.projectIdentity?.repository || pi.project
+    : `${ui?.totalProjects ?? 0} projects`;
 
   const uiTopProjects = ui?.topProjects;
   const rolledTopProjects = useMemo(

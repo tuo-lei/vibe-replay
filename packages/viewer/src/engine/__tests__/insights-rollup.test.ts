@@ -200,6 +200,38 @@ describe("rollupInsights", () => {
     expect(rollupInsights(payload).projects).toBe(1);
   });
 
+  it("uses canonical SDK identity for range project counts", () => {
+    const identity = {
+      key: "cursor-sdk:github-pr-review:Roblox/ros",
+      kind: "cursor-sdk-automation" as const,
+      isAutomated: true,
+      displayName: "Automated · Roblox/ros",
+    };
+    const result = rollupInsights({
+      sessions: [
+        {
+          project: "~/cursor-sdk/worktrees/github-pr-review-Roblox-ros-13473",
+          projectIdentity: identity,
+          startTime: "2026-08-20T12:00:00Z",
+          prompts: 1,
+          edits: 0,
+          toolCalls: 0,
+        },
+        {
+          project: "~/cursor-sdk/worktrees/github_pr_review-Roblox-ros-14156",
+          projectIdentity: identity,
+          startTime: "2026-08-20T13:00:00Z",
+          prompts: 1,
+          edits: 0,
+          toolCalls: 0,
+        },
+      ],
+      replays: [],
+    });
+
+    expect(result.projects).toBe(1);
+  });
+
   it("filters secondary breakdowns by the same session boundary", () => {
     const result = rollupInsightsBreakdown(
       {

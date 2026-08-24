@@ -1,7 +1,9 @@
-import { rollupProject } from "../components/dashboard-utils";
+import { mergeProjectIdentities, projectIdentityKey } from "@vibe-replay/types";
+import type { ProjectIdentity } from "@vibe-replay/types";
 
 export interface InsightsMetricSession {
   project: string;
+  projectIdentity?: ProjectIdentity;
   startTime?: string;
   durationMs?: number;
   cost?: number;
@@ -42,6 +44,7 @@ export interface InsightsRangeStats {
 
 export interface InsightsRangeProject {
   project: string;
+  projectIdentity?: ProjectIdentity;
   sessions: number;
   cost: number;
   prompts: number;
@@ -133,7 +136,7 @@ export function rollupInsights(
   let toolCalls = 0;
 
   for (const session of sessions) {
-    if (session.project) projects.add(rollupProject(session.project));
+    if (session.project) projects.add(projectIdentityKey(session.project, session.projectIdentity));
     durationMs += session.durationMs || 0;
     cost += session.cost || 0;
     prompts += session.prompts;
@@ -141,7 +144,7 @@ export function rollupInsights(
     toolCalls += session.toolCalls;
   }
   for (const replay of replays) {
-    if (replay.project) projects.add(rollupProject(replay.project));
+    if (replay.project) projects.add(projectIdentityKey(replay.project));
   }
 
   return {
@@ -221,7 +224,7 @@ export function rollupInsightsBreakdown(
 
   for (const session of sessions) {
     if (session.project) {
-      const project = rollupProject(session.project);
+      const project = projectIdentityKey(session.project, session.projectIdentity);
       const existing = projects.get(project);
       if (existing) {
         existing.sessions++;
@@ -230,9 +233,14 @@ export function rollupInsightsBreakdown(
         existing.durationMs += session.durationMs || 0;
         existing.toolCalls += session.toolCalls;
         existing.edits += session.edits;
+        existing.projectIdentity = mergeProjectIdentities(
+          existing.projectIdentity,
+          session.projectIdentity,
+        );
       } else {
         projects.set(project, {
           project,
+          projectIdentity: session.projectIdentity,
           sessions: 1,
           cost: session.cost || 0,
           prompts: session.prompts,

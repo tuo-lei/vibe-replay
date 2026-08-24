@@ -6,6 +6,7 @@ export type {
   DataSourceInfo,
   FileDiff,
   OverlaySource,
+  ProjectIdentity,
   PrLink,
   ReplaySession,
   Scene,
@@ -18,7 +19,7 @@ export type {
 } from "@vibe-replay/types";
 
 // Re-import for local use in this file
-import type { ReplaySession } from "@vibe-replay/types";
+import type { ProjectIdentity, ReplaySession } from "@vibe-replay/types";
 
 // Viewer-only types below
 
@@ -30,6 +31,7 @@ export interface SessionSummary {
   model?: string;
   gitRepo?: string;
   project: string;
+  projectIdentity?: ProjectIdentity;
   startTime: string;
   endTime?: string;
   stats: ReplaySession["meta"]["stats"];
@@ -63,6 +65,7 @@ export interface SourceSession {
   slug: string;
   title?: string;
   project: string;
+  projectIdentity?: ProjectIdentity;
   timestamp: string;
   fileSize: number;
   lineCount: number;

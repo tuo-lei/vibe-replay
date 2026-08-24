@@ -1,3 +1,5 @@
+import type { ProjectIdentity } from "./project-identity.js";
+
 export type DataSource = "jsonl" | "sqlite" | "jsonl+tools" | "global-state";
 
 export interface TokenUsage {
@@ -21,6 +23,21 @@ export interface PrLink {
   prUrl: string;
   prRepository: string;
 }
+
+export {
+  agentRunWorkspaceParent,
+  agentWorktreeParent,
+  classifyProject,
+  isAutomatedProject,
+  isCursorSdkAutomationPath,
+  mergeProjectIdentities,
+  projectIdentityKey,
+} from "./project-identity.js";
+export type {
+  ProjectIdentity,
+  ProjectIdentityHints,
+  ProjectIdentityKind,
+} from "./project-identity.js";
 
 export interface CursorSidecars {
   /** Number of non-empty messageRequestContext sidecars observed for the session */
@@ -223,6 +240,7 @@ export interface SessionInsight {
   // Metadata
   title?: string;
   project: string;
+  projectIdentity?: ProjectIdentity;
   model?: string;
   gitBranch?: string;
   gitBranches?: string[];
@@ -288,6 +306,7 @@ export interface SessionScanWireData {
   sessionId: string;
   provider: string;
   project: string;
+  projectIdentity?: ProjectIdentity;
   slug: string;
   title?: string;
   firstPrompt?: string;

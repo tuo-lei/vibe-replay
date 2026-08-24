@@ -4,12 +4,13 @@
  * dependency-free module so helpers don't need to import back from server.ts.
  */
 
-import type { ReplaySession } from "./types.js";
+import type { ProjectIdentity, ReplaySession } from "./types.js";
 
 export interface SourceSummaryRecord {
   provider: string;
   slug: string;
   project: string;
+  projectIdentity?: ProjectIdentity;
   sessionId?: string;
   promptCount?: number;
   toolCallCount?: number;

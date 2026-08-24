@@ -11,7 +11,7 @@ import {
   navigateTo,
   normalizeTitleText,
   parseCachedList,
-  projectName,
+  projectDisplayName,
   replaySuggestedTitle,
   rollupTopProjects,
   shouldRefreshCachedList,
@@ -24,6 +24,7 @@ import { ContributionHeatmap } from "./InsightsPage";
 import { useScanInsightsContext } from "./InsightsPanel";
 import { DataLevelBadge, SessionLoadingToast, sessionDataState } from "./SessionDataProgress";
 import { formatDuration } from "./StatsPanel";
+import { mergeProjectIdentities, projectIdentityKey } from "@vibe-replay/types";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -271,8 +272,8 @@ function computeInsights(sources: SourceSession[], replays: SessionSummary[]): I
 
   // Projects
   const projects = new Set<string>();
-  for (const s of sources) projects.add(s.project);
-  for (const r of replays) projects.add(r.project);
+  for (const s of sources) projects.add(projectIdentityKey(s.project, s.projectIdentity));
+  for (const r of replays) projects.add(projectIdentityKey(r.project));
 
   // Home activity should reflect the latest discovered sessions immediately,
   // even while richer scan insights are still refreshing in the background.
@@ -333,10 +334,14 @@ function computeLocalTopProjects(
   const replayBySlug = new Map(replays.map((replay) => [replay.slug, replay]));
   const countedReplaySlugs = new Set<string>();
 
-  const entryFor = (project: string) => {
+  const entryFor = (project: string, projectIdentity?: SourceSession["projectIdentity"]) => {
     const existing = byProject.get(project);
-    if (existing) return existing;
+    if (existing) {
+      existing.projectIdentity = mergeProjectIdentities(existing.projectIdentity, projectIdentity);
+      return existing;
+    }
     const created = createLocalProject(project);
+    created.projectIdentity = projectIdentity;
     byProject.set(project, created);
     return created;
   };
@@ -351,7 +356,7 @@ function computeLocalTopProjects(
     const replay = replayBySlug.get(source.slug);
     if (replay) countedReplaySlugs.add(replay.slug);
 
-    const entry = entryFor(source.project);
+    const entry = entryFor(source.project, source.projectIdentity);
     entry.sessions += 1;
     entry.cost += replay?.stats.costEstimate ?? 0;
     entry.prompts +=
@@ -591,7 +596,9 @@ function RecentSessionsList({
               {sourceSuggestedTitle(primary)}
             </p>
             <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-mono text-terminal-dimmer">
-              <span className="truncate">{primary.gitRepo || projectName(primary.project)}</span>
+              <span className="truncate">
+                {primary.gitRepo || projectDisplayName(primary.project, primary.projectIdentity)}
+              </span>
               {primaryPromptCount > 0 && <span>{primaryPromptCount} prompts</span>}
               {primaryToolCount > 0 && <span>{primaryToolCount} tools</span>}
               <span className={primaryHasReplay ? "text-terminal-green" : "text-terminal-blue"}>
@@ -629,7 +636,7 @@ function RecentSessionsList({
                 </p>
                 <div className="flex items-center gap-1.5 min-w-0">
                   <p className="text-[11px] font-mono text-terminal-dimmer truncate">
-                    {s.gitRepo || projectName(s.project)}
+                    {s.gitRepo || projectDisplayName(s.project, s.projectIdentity)}
                   </p>
                   {isEnriching && <DataLevelBadge state={dataState} active compact />}
                 </div>
@@ -1474,7 +1481,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
                 .sort((a, b) => (b.lastActivity || "").localeCompare(a.lastActivity || ""))
                 .slice(0, HOME_RECENT_PROJECT_LIMIT)
                 .map((p) => {
-                  const name = projectName(p.project);
+                  const name = projectDisplayName(p.project, p.projectIdentity);
                   return (
                     <button
                       key={p.project}

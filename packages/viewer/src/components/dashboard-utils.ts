@@ -1,3 +1,11 @@
+import {
+  agentRunWorkspaceParent as sharedAgentRunWorkspaceParent,
+  agentWorktreeParent as sharedAgentWorktreeParent,
+  isAutomatedProject,
+  mergeProjectIdentities,
+  projectIdentityKey,
+} from "@vibe-replay/types";
+import type { ProjectIdentity } from "@vibe-replay/types";
 import type { SessionSummary, SourceSession } from "../types";
 import { safeStorageGet, safeStorageRemove, safeStorageSet } from "../utils/safe-storage";
 
@@ -780,22 +788,9 @@ export function formatDataSourceLabel(
  * sandboxes the user has no awareness of and may be cleaned up at any time, so
  * we roll their sessions up under the parent project for display.
  */
-const AGENT_WORKTREE_RE = /^(.+?)\/\.claude\/worktrees\/[^/]+(?:\/.*)?$/;
-
 export function agentWorktreeParent(project: string): string | null {
-  const m = project.replace(/\/$/, "").match(AGENT_WORKTREE_RE);
-  return m ? m[1] : null;
+  return sharedAgentWorktreeParent(project);
 }
-
-/**
- * A run id at the end of a directory name: a UUID, or the hex digest that
- * tools use to keep concurrent runs from colliding. Twelve characters is the
- * shortest digest worth trusting — below that, ordinary names (`ros-4`, a
- * date, a PR number) start matching. All-numeric suffixes are excluded because
- * timestamp-like project names are common and are not run identifiers.
- */
-const RUN_ID_SUFFIX_RE =
-  /(?:^|-)(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?=[0-9a-f]{12,}$)[0-9]*[a-f][0-9a-f]*)$/i;
 
 /**
  * Scratch workspaces created one per automated run — SDK agents, PR-review
@@ -805,24 +800,25 @@ const RUN_ID_SUFFIX_RE =
  * directory that holds them, which is the level a human would recognize.
  */
 export function agentRunWorkspaceParent(project: string): string | null {
-  const clean = project.replace(/[\\/]+$/, "");
-  const slash = Math.max(clean.lastIndexOf("/"), clean.lastIndexOf("\\"));
-  if (slash <= 0) return null;
-  if (!RUN_ID_SUFFIX_RE.test(clean.slice(slash + 1))) return null;
-  const parent = clean.slice(0, slash);
-  return /^[A-Za-z]:$/.test(parent) ? null : parent;
+  return sharedAgentRunWorkspaceParent(project);
 }
 
-export function isAgentRunWorkspace(project: string): boolean {
-  return agentRunWorkspaceParent(project) !== null;
+export function isAgentRunWorkspace(project: string, identity?: ProjectIdentity): boolean {
+  return isAutomatedProject(project, identity);
 }
 
-export function rollupProject(project: string): string {
-  return agentWorktreeParent(project) ?? agentRunWorkspaceParent(project) ?? project;
+export function rollupProject(project: string, identity?: ProjectIdentity): string {
+  return projectIdentityKey(project, identity);
+}
+
+export function projectDisplayName(project: string, identity?: ProjectIdentity): string {
+  if (identity?.key === project && identity.displayName) return identity.displayName;
+  return projectName(project);
 }
 
 export interface TopProjectEntry {
   project: string;
+  projectIdentity?: ProjectIdentity;
   sessions: number;
   cost: number;
   prompts: number;
@@ -856,7 +852,7 @@ export function rollupTopProjects(
   for (const p of projects) {
     const key =
       agentWorktreeParent(p.project) ??
-      (rollupAgentRuns ? agentRunWorkspaceParent(p.project) : null) ??
+      (rollupAgentRuns ? rollupProject(p.project, p.projectIdentity) : null) ??
       p.project;
     const existing = byParent.get(key);
     if (existing) {
@@ -869,6 +865,10 @@ export function rollupTopProjects(
       existing.branchCount += p.branchCount;
       existing.prCount += p.prCount;
       existing.memoryFileCount = Math.max(existing.memoryFileCount, p.memoryFileCount);
+      existing.projectIdentity = mergeProjectIdentities(
+        existing.projectIdentity,
+        p.projectIdentity,
+      );
       if ((p.lastActivity || "") > (existing.lastActivity || "")) {
         existing.lastActivity = p.lastActivity;
       }
@@ -879,6 +879,10 @@ export function rollupTopProjects(
       byParent.set(key, {
         ...p,
         project: key,
+        projectIdentity:
+          key === p.project
+            ? p.projectIdentity
+            : mergeProjectIdentities(undefined, p.projectIdentity),
         sessionsPerDay: { ...p.sessionsPerDay },
       });
     }
@@ -892,6 +896,11 @@ function specialProjectLabel(project: string): string | null {
   if (!normalized) return null;
   if (normalized === "(globalStorage)") return "Cursor Global Storage";
   if (normalized === "~") return "Home";
+  const cursorAutomation = normalized.match(/^cursor-sdk:([^:]+):(.+)$/);
+  if (cursorAutomation) {
+    const target = cursorAutomation[2].replace(/^all$/, cursorAutomation[1]);
+    return `Automated · ${target}`;
+  }
   if (/\/\.cursor\/projects\/.+\/terminals$/.test(normalized)) return "Cursor Terminals";
   if (/\/\.cursor\/extensions\//.test(normalized)) return "Cursor Extension";
   return null;

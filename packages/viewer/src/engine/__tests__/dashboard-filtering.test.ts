@@ -94,4 +94,25 @@ describe("dashboard facet filtering", () => {
       false,
     );
   });
+
+  it("matches a session through its canonical project identity", () => {
+    const identity = {
+      key: "cursor-sdk:github-pr-review:Roblox/ros",
+      kind: "cursor-sdk-automation" as const,
+      isAutomated: true,
+      displayName: "Automated · Roblox/ros",
+    };
+
+    expect(
+      matchesProjectFacet(
+        {
+          project: "~/cursor-sdk/worktrees/github_pr_review-Roblox-ros-13473",
+          projectIdentity: identity,
+        },
+        identity.key,
+        ALL_PROJECTS,
+        identityRollup,
+      ),
+    ).toBe(true);
+  });
 });

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { classifyProject } from "@vibe-replay/types";
 import {
   agentRunWorkspaceParent,
   agentWorktreeParent,
@@ -113,6 +114,78 @@ describe("agentRunWorkspaceParent", () => {
       "~/Code/vibe-replay",
     );
     expect(rollupProject("~/Code/vibe-replay")).toBe("~/Code/vibe-replay");
+  });
+});
+
+describe("Cursor SDK project identity", () => {
+  it("groups hyphenated and underscored PR worktrees by repository", () => {
+    const identity = classifyProject(
+      "~/git/roblox/cursor-sdk/repos/cursor-coworktrees/worktrees/github-pr-review-Roblox-ros-13473-6873354cf2f3",
+      {
+        provider: "cursor",
+        hasSdk: true,
+        sdkAgentName:
+          "workflow-recovery-github-pr-review-github_pr_review-Roblox-ros-13473-6873354cf2f3",
+        sdkWorkspaceRef:
+          "/Users/tuo/git/roblox/cursor-sdk/repos/cursor-coworktrees/worktrees/github_pr_review-Roblox-ros-13473-6873354cf2f3",
+      },
+    );
+    const equivalent = classifyProject(
+      "~/git/roblox/cursor-sdk/repos/cursor-coworktrees/worktrees/github_pr_review-Roblox-ros-14156-f4ca4e119f1f",
+      {
+        provider: "cursor",
+        hasSdk: true,
+        sdkAgentName: "github-pr-review-github_pr_review-Roblox-ros-14156-f4ca4e119f1f",
+      },
+    );
+
+    expect(identity).toMatchObject({
+      key: "cursor-sdk:github-pr-review:Roblox/ros",
+      kind: "cursor-sdk-automation",
+      isAutomated: true,
+      displayName: "Automated · Roblox/ros",
+      repository: "Roblox/ros",
+      prNumber: 13473,
+    });
+    expect(equivalent.key).toBe(identity.key);
+    expect(equivalent.prNumber).toBe(14156);
+  });
+
+  it("preserves hyphens in inferred repository names", () => {
+    const identity = classifyProject(
+      "~/cursor-sdk/repos/cursor-coworktrees/worktrees/github-pr-review-Roblox-vibe-replay-912",
+      { hasSdk: true },
+    );
+
+    expect(identity.repository).toBe("Roblox/vibe-replay");
+    expect(identity.key).toBe("cursor-sdk:github-pr-review:Roblox/vibe-replay");
+    expect(identity.prNumber).toBe(912);
+  });
+
+  it("does not put an absolute SDK workspace path in an unknown identity key", () => {
+    const identity = classifyProject("~/cursor-sdk/repos/cursor-coworktrees/worktrees/agent-abc", {
+      hasSdk: true,
+      sdkWorkspaceRef: "/Users/tuo/cursor-sdk/repos/cursor-coworktrees/worktrees/agent-abc",
+    });
+
+    expect(identity.key).toBe("cursor-sdk:cursor-sdk:~/cursor-sdk/repos");
+  });
+
+  it("rolls Cursor control-plane context worktrees up to the SDK project", () => {
+    const identity = classifyProject(
+      "~/git/roblox/cursor-sdk/.cursor-sdk-control/context-worktrees/google-drive-search-run",
+      { hasSdk: true, sdkAgentName: "google-drive-search-run" },
+    );
+
+    expect(identity.key).toBe("cursor-sdk:google-drive-search:~/git/roblox/cursor-sdk");
+  });
+
+  it("does not treat a numeric PR directory as a generic run", () => {
+    expect(classifyProject("~/sdk/worktrees/pr-review-ros-11883")).toMatchObject({
+      key: "~/sdk/worktrees/pr-review-ros-11883",
+      kind: "project",
+      isAutomated: false,
+    });
   });
 });
 

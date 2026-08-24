@@ -35,6 +35,7 @@ import {
   navigateTo,
   computeProjectLabels,
   parseCachedList,
+  projectDisplayName,
   providerBarClass,
   providerDisplayName,
   rollupTopProjects,
@@ -758,6 +759,7 @@ export function TopProjectsList({
 }: {
   projects: Array<{
     project: string;
+    projectIdentity?: SourceSession["projectIdentity"];
     sessions: number;
     cost: number;
     prompts: number;
@@ -777,7 +779,10 @@ export function TopProjectsList({
   return (
     <div className="space-y-2">
       {projects.slice(0, 8).map((p) => {
-        const name = projectLabels.get(p.project) || p.project;
+        const name =
+          p.projectIdentity?.key === p.project
+            ? projectDisplayName(p.project, p.projectIdentity)
+            : projectLabels.get(p.project) || p.project;
         const pct = (p.sessions / maxSessions) * 100;
         return (
           <div key={p.project} className="space-y-1">

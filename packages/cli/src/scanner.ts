@@ -22,6 +22,7 @@ import {
   extractToolFilePaths,
 } from "@vibe-replay/provider-core/utils";
 import { estimateCostIfKnown, estimateCostSimpleIfKnown } from "@vibe-replay/replay-core/pricing";
+import { classifyProject, mergeProjectIdentities, projectIdentityKey } from "@vibe-replay/types";
 import { parseCodexSession } from "./providers/codex/parser.js";
 import { parseClaudeCoworkSession } from "@vibe-replay/provider-claude-code/claude-cowork/parser";
 import { parseCursorSession } from "./providers/cursor/parser.js";
@@ -29,6 +30,7 @@ import { parsePiSession } from "./providers/pi/parser.js";
 import type { ProviderParseResult } from "./providers/types.js";
 import type {
   DataSource,
+  ProjectIdentity,
   PrLink,
   SessionInfo,
   SessionUsageSummary,
@@ -42,7 +44,9 @@ import { localDayKey, shortenPath } from "./utils.js";
 // have no usage from sessions whose rich usage scan was deferred. Cached v18
 // results cannot make that distinction.
 // v20: normalize placeholder MCP server names in cached usage summaries.
-export const SCANNER_VERSION = 20;
+// v21: persist canonical project identity alongside scan results.
+// v22: refine Cursor SDK context-worktree classification and fallback keys.
+export const SCANNER_VERSION = 22;
 
 // Keep per-invocation detail bounded in the durable insight store. The full
 // event set is still used to compute usageSummary below; only the retained
@@ -55,6 +59,7 @@ export interface SessionScanResult {
   sessionId: string;
   provider: string;
   project: string;
+  projectIdentity?: ProjectIdentity;
   slug: string;
   title?: string;
   firstPrompt?: string;
@@ -353,6 +358,7 @@ export interface ScanCacheData {
 
 export interface ProjectInsights {
   project: string;
+  projectIdentity?: ProjectIdentity;
   sessionCount: number;
   totalDurationMs: number;
   totalCost: number;
@@ -408,6 +414,7 @@ export interface UserInsights {
   providers: Record<string, number>; // provider → session count
   topProjects: Array<{
     project: string;
+    projectIdentity?: ProjectIdentity;
     sessions: number;
     cost: number;
     prompts: number;
@@ -508,6 +515,7 @@ export interface ScanInput {
   sessionId: string;
   provider: string;
   project: string;
+  projectIdentity?: ProjectIdentity;
   slug: string;
   filePaths: string[];
   toolPaths?: string[];
@@ -1036,6 +1044,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
     sessionId: input.sessionId,
     provider: input.provider,
     project: input.project,
+    projectIdentity: input.projectIdentity,
     slug: input.slug,
     title,
     firstPrompt,
@@ -1182,6 +1191,7 @@ function buildLightweightCursorScanResult(input: ScanInput): SessionScanResult {
     sessionId: input.sessionId,
     provider: input.provider,
     project: input.project,
+    projectIdentity: input.projectIdentity,
     slug: input.slug,
     title: input.title,
     firstPrompt,
@@ -1212,6 +1222,7 @@ function buildLightweightOpencodeScanResult(input: ScanInput): SessionScanResult
     sessionId: input.sessionId,
     provider: input.provider,
     project: input.project,
+    projectIdentity: input.projectIdentity,
     slug: input.slug,
     title: input.title,
     firstPrompt,
@@ -1242,6 +1253,7 @@ function buildLightweightHermesScanResult(input: ScanInput): SessionScanResult {
     sessionId: input.sessionId,
     provider: input.provider,
     project: input.project,
+    projectIdentity: input.projectIdentity,
     slug: input.slug,
     title: input.title,
     firstPrompt,
@@ -1377,6 +1389,7 @@ function buildScanResultFromParsed(
     sessionId: input.sessionId,
     provider: input.provider,
     project: input.project,
+    projectIdentity: input.projectIdentity,
     slug: input.slug,
     title: parsed.title || input.title,
     firstPrompt,
@@ -1651,29 +1664,24 @@ export async function runBackgroundScan(
 
 // ─── Aggregation ────────────────────────────────────────────────────
 
-const AGENT_WORKTREE_RE = /^(.+?)\/\.claude\/worktrees\/[^/]+(?:\/.*)?$/;
-const RUN_ID_SUFFIX_RE =
-  /(?:^|-)(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?=[0-9a-f]{12,}$)[0-9]*[a-f][0-9a-f]*)$/i;
-
-function agentWorktreeParent(project: string): string | null {
-  const normalized = project.replace(/\\/g, "/").replace(/\/+$/, "");
-  const match = normalized.match(AGENT_WORKTREE_RE);
-  return match ? match[1] : null;
-}
-
-function agentRunWorkspaceParent(project: string): string | null {
-  const clean = project.replace(/[\\/]+$/, "");
-  const slash = Math.max(clean.lastIndexOf("/"), clean.lastIndexOf("\\"));
-  if (slash <= 0 || !RUN_ID_SUFFIX_RE.test(clean.slice(slash + 1))) return null;
-  const parent = clean.slice(0, slash);
-  return /^[A-Za-z]:$/.test(parent) ? null : parent;
-}
-
-function projectMatches(project: string, requestedProject: string): boolean {
+function identityForScan(
+  scan: Pick<SessionScanResult, "project" | "projectIdentity" | "provider">,
+) {
   return (
-    project === requestedProject ||
-    agentWorktreeParent(project) === requestedProject ||
-    agentRunWorkspaceParent(project) === requestedProject
+    scan.projectIdentity ||
+    classifyProject(scan.project, {
+      provider: scan.provider,
+    })
+  );
+}
+
+function projectMatches(
+  scan: Pick<SessionScanResult, "project" | "projectIdentity" | "provider">,
+  requestedProject: string,
+): boolean {
+  return (
+    scan.project === requestedProject ||
+    projectIdentityKey(scan.project, identityForScan(scan)) === requestedProject
   );
 }
 
@@ -1682,7 +1690,12 @@ export function aggregateProjectInsights(
   scans: SessionScanResult[],
   memory?: ProjectMemory,
 ): ProjectInsights {
-  const projectScans = scans.filter((s) => projectMatches(s.project, project));
+  const projectScans = scans.filter((s) => projectMatches(s, project));
+  const projectIdentity =
+    projectScans
+      .map((scan) => identityForScan(scan))
+      .find((identity) => identity.key === project) ||
+    (projectScans.length > 0 ? identityForScan(projectScans[0]) : undefined);
 
   let totalDurationMs = 0;
   let totalCost = 0;
@@ -1786,6 +1799,7 @@ export function aggregateProjectInsights(
 
   return {
     project,
+    projectIdentity,
     sessionCount: projectScans.length,
     totalDurationMs,
     totalCost,
@@ -1834,6 +1848,7 @@ export function aggregateUserInsights(scans: SessionScanResult[]): UserInsights 
   const projectStats = new Map<
     string,
     {
+      projectIdentity?: ProjectIdentity;
       sessions: number;
       cost: number;
       prompts: number;
@@ -1871,8 +1886,13 @@ export function aggregateUserInsights(scans: SessionScanResult[]): UserInsights 
     providers[s.provider] = (providers[s.provider] || 0) + 1;
     if (s.model) models[s.model] = (models[s.model] || 0) + 1;
 
+    const identity = identityForScan(s);
+    // Keep one entry per raw workspace so the Projects page can optionally
+    // reveal individual automated runs. Canonical project counts and the
+    // default display rollup are derived from projectIdentity below.
     if (!projectStats.has(s.project)) {
       projectStats.set(s.project, {
+        projectIdentity: identity,
         sessions: 0,
         cost: 0,
         prompts: 0,
@@ -1886,6 +1906,7 @@ export function aggregateUserInsights(scans: SessionScanResult[]): UserInsights 
       });
     }
     const ps = projectStats.get(s.project)!;
+    ps.projectIdentity = mergeProjectIdentities(ps.projectIdentity, identity);
     ps.sessions++;
     ps.cost += s.costEstimate || 0;
     ps.prompts += s.promptCount;
@@ -1896,6 +1917,8 @@ export function aggregateUserInsights(scans: SessionScanResult[]): UserInsights 
     for (const b of branches) ps.branches.add(b);
     if (s.prLinks) {
       for (const pr of s.prLinks) ps.prUrls.add(pr.prUrl);
+    } else if (identity.prNumber !== undefined) {
+      ps.prUrls.add(`${identity.key}#${identity.prNumber}`);
     }
     const ts = s.startTime || "";
     if (ts && (!ps.lastActivity || ts > ps.lastActivity)) ps.lastActivity = ts;
@@ -1912,6 +1935,7 @@ export function aggregateUserInsights(scans: SessionScanResult[]): UserInsights 
   const topProjects = [...projectStats.entries()]
     .map(([project, data]) => ({
       project,
+      projectIdentity: data.projectIdentity,
       sessions: data.sessions,
       cost: data.cost,
       prompts: data.prompts,
@@ -1926,7 +1950,9 @@ export function aggregateUserInsights(scans: SessionScanResult[]): UserInsights 
     }))
     .sort((a, b) => b.sessions - a.sessions);
 
-  const uniqueProjects = new Set(scans.map((s) => s.project));
+  const uniqueProjects = new Set(
+    scans.map((s) => projectIdentityKey(s.project, identityForScan(s))),
+  );
   const hasTokens = totalInputTokens + totalOutputTokens + totalCacheRead + totalCacheCreation > 0;
   const histogram = buildTurnDurationHistogram(allTurnDurations);
 
