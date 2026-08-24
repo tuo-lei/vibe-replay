@@ -90,7 +90,7 @@ export default memo(function CodeDiffBlock({
 
   return (
     <div
-      className={`bg-terminal-surface rounded-xl overflow-hidden shadow-layer-sm ${isError ? "ring-1 ring-red-500/40 border-l-2 border-l-red-500" : ""}`}
+      className={`bg-terminal-surface rounded-xl overflow-hidden shadow-layer-sm ${isError ? "ring-1 ring-red-500/40" : ""}`}
     >
       <div
         className={`flex items-center gap-2 px-3 py-2 bg-terminal-surface ${isError ? "bg-red-500/5" : ""}`}

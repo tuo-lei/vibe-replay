@@ -191,10 +191,7 @@ function ProjectOverview({
 }) {
   const name = projectDisplayName(project, insight.projectIdentity);
   return (
-    <div className="hover-lift relative overflow-hidden rounded-2xl bg-gradient-to-br from-terminal-surface via-terminal-surface to-terminal-bg/70 p-5 shadow-layer-md">
-      <span className="absolute inset-y-3 left-0 w-0.5 rounded-r-full bg-gradient-to-b from-terminal-green to-terminal-blue opacity-60" />
-      <span className="pointer-events-none absolute -right-10 -top-12 h-32 w-32 rounded-full bg-terminal-green/5 blur-2xl" />
-
+    <div className="hover-lift rounded-2xl bg-terminal-surface p-5 shadow-layer-md">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-base font-sans font-semibold text-terminal-text truncate">
@@ -362,10 +359,8 @@ function ProjectsGrid({
           <button
             key={p.project}
             onClick={() => onProjectClick(p.project)}
-            className="hover-lift group relative overflow-hidden rounded-xl bg-gradient-to-br from-terminal-surface via-terminal-surface to-terminal-bg/70 p-4 text-left shadow-layer-sm transition-all duration-200 ease-material hover:bg-terminal-surface-hover"
+            className="hover-lift group rounded-xl bg-terminal-surface p-4 text-left shadow-layer-sm transition-all duration-200 ease-material hover:bg-terminal-surface-hover"
           >
-            <span className="absolute inset-y-3 left-0 w-0.5 rounded-r-full bg-gradient-to-b from-terminal-green to-terminal-blue opacity-50 transition-opacity group-hover:opacity-100" />
-            <span className="pointer-events-none absolute -right-10 -top-12 h-28 w-28 rounded-full bg-terminal-green/5 blur-2xl opacity-0 transition-opacity group-hover:opacity-100" />
             <div className="flex items-start justify-between gap-2 mb-3">
               <div className="min-w-0">
                 <div className="text-sm font-sans font-medium text-terminal-text truncate group-hover:text-terminal-green transition-colors">

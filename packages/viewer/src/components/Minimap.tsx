@@ -119,7 +119,7 @@ export default function Minimap({
               aria-label={label}
               className={`text-left px-3 py-2 rounded-lg transition-all duration-200 ease-material ${
                 isActive
-                  ? "bg-terminal-surface border-l-2 border-terminal-dim shadow-layer-sm"
+                  ? "bg-terminal-surface shadow-layer-sm"
                   : "hover:bg-terminal-surface-hover text-terminal-dimmer hover:text-terminal-dim"
               }`}
             >
@@ -139,7 +139,7 @@ export default function Minimap({
             onClick={() => onSeek(item.promptIndex)}
             className={`group text-left px-3 py-2.5 rounded-xl transition-all duration-200 ease-material ${
               isActive
-                ? "bg-terminal-green-subtle border-l-2 border-terminal-green shadow-layer-sm"
+                ? "bg-terminal-green-subtle shadow-layer-sm"
                 : isPast
                   ? "hover:bg-terminal-surface-hover text-terminal-dim hover:text-terminal-text"
                   : "hover:bg-terminal-surface-hover"

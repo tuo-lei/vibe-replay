@@ -884,9 +884,9 @@ const GroupCard = memo(function GroupCard({
         data-scene-index={firstIndex}
         className={`group relative rounded-xl px-5 py-3.5 transition-all duration-200 ease-material ${
           groupHasFocusedTarget
-            ? "scene-nav-focused bg-terminal-surface border-l-2 border-terminal-dim shadow-layer-sm"
+            ? "scene-nav-focused bg-terminal-surface shadow-layer-sm"
             : groupHasCurrent
-              ? "bg-terminal-surface border-l-2 border-terminal-dim shadow-layer-sm"
+              ? "bg-terminal-surface shadow-layer-sm"
               : "bg-terminal-surface/50"
         }`}
       >
@@ -935,9 +935,9 @@ const GroupCard = memo(function GroupCard({
         data-scene-index={firstIndex}
         className={`group relative rounded-xl px-5 py-3.5 transition-all duration-200 ease-material ${
           groupHasFocusedTarget
-            ? "scene-nav-focused bg-terminal-surface border-l-2 border-blue-500/60 shadow-layer-sm"
+            ? "scene-nav-focused bg-terminal-surface shadow-layer-sm"
             : groupHasCurrent
-              ? "bg-terminal-surface border-l-2 border-blue-500/40 shadow-layer-sm"
+              ? "bg-terminal-surface shadow-layer-sm"
               : "bg-terminal-surface/50"
         }`}
       >
@@ -1000,9 +1000,9 @@ const GroupCard = memo(function GroupCard({
       data-scene-index={firstIndex}
       className={`relative rounded-xl px-5 py-4 transition-all duration-200 ease-material ${
         groupHasFocusedTarget
-          ? "scene-nav-focused bg-terminal-blue-subtle border-l-2 border-terminal-blue shadow-layer-lg"
+          ? "scene-nav-focused bg-terminal-blue-subtle shadow-layer-lg"
           : groupHasCurrent
-            ? "bg-terminal-blue-subtle border-l-2 border-terminal-blue shadow-layer-sm"
+            ? "bg-terminal-blue-subtle shadow-layer-sm"
             : "bg-terminal-surface shadow-layer-sm"
       }`}
     >
@@ -1201,9 +1201,9 @@ function CompactAssistantGroup({
       data-scene-index={firstIndex}
       className={`group relative rounded-xl px-5 py-4 transition-all duration-200 ease-material ${
         groupHasFocusedTarget
-          ? "scene-nav-focused bg-terminal-blue-subtle border-l-2 border-terminal-blue shadow-layer-lg"
+          ? "scene-nav-focused bg-terminal-blue-subtle shadow-layer-lg"
           : groupHasCurrent
-            ? "bg-terminal-blue-subtle border-l-2 border-terminal-blue shadow-layer-sm"
+            ? "bg-terminal-blue-subtle shadow-layer-sm"
             : "bg-terminal-surface shadow-layer-sm"
       }`}
       onMouseEnter={() => setHovered(true)}

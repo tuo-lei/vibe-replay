@@ -495,8 +495,9 @@ button,
   font-weight: 600;
 }
 .prose-terminal blockquote {
-  border-left: 3px solid var(--border);
-  padding-left: 1em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5em 1em;
   color: var(--dim);
   margin: 0.5em 0;
 }
