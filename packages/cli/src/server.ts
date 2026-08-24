@@ -20,6 +20,7 @@ import { streamSSE } from "hono/streaming";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import open from "open";
 import { readGitRepo } from "@vibe-replay/provider-core/utils";
+import { classifyProject, projectIdentityKey } from "@vibe-replay/types";
 import { readFileCache, writeFileCache } from "./cache.js";
 import { cleanPromptText, previewPrompt } from "./clean-prompt.js";
 import { computeDaysUntilCleanup, getClaudeCodeCleanupPeriod } from "./cleanup-warning.js";
@@ -299,6 +300,15 @@ function normalizeSessionProjectsForHome(sessions: SessionInfo[], home: string):
   );
 }
 
+function isFilesystemProjectKey(project: string): boolean {
+  return (
+    project === "~" ||
+    project.startsWith("~/") ||
+    project.startsWith("/") ||
+    /^[A-Za-z]:[\\/]/.test(project)
+  );
+}
+
 function countSessionStats(turns: ParsedTurn[]): {
   promptCount: number;
   toolCallCount: number;
@@ -414,12 +424,21 @@ async function buildSourcesResult(
       replayBySessionId.get(providerSessionKey(s.provider, s.sessionId));
     const promptCount = s.promptCount ?? previous?.promptCount;
     const toolCallCount = s.toolCallCount ?? previous?.toolCallCount;
+    const projectIdentity =
+      s.projectIdentity ||
+      classifyProject(s.project, {
+        provider: s.provider,
+        hasSdk: s.hasSdk,
+        sdkWorkspaceRef: s.workspacePath,
+        gitRepo: s.gitRepo,
+      });
     return {
       provider: s.provider,
       sessionId: s.sessionId,
       slug: s.slug,
       title: normalizeTitle(cleanPromptText(typeof s.title === "string" ? s.title : "")),
       project: s.project,
+      projectIdentity,
       timestamp: s.timestamp,
       fileSize: s.fileSize,
       lineCount: s.lineCount,
@@ -575,13 +594,16 @@ export async function startServer(
   // omit the field so the dashboard can't render the SDK badge until refreshed.
   // v4 → v5: Cursor project paths decode differently, so cached entries would
   // keep reporting the old exploded paths as separate projects.
-  const sourcesCacheKey = `dashboard-sources-v5-${cacheKeySuffix}`;
+  // v5 → v6: source records carry canonical project identity and corrected
+  // Cursor SDK worktree paths.
+  // v6 → v7: refine Cursor SDK context-worktree identity grouping.
+  const sourcesCacheKey = `dashboard-sources-v7-${cacheKeySuffix}`;
   const replaysCacheKey = `dashboard-replays-v1-${cacheKeySuffix}`;
   // Keyed by scanner version too: a bump changes the shape of what a scan
   // extracts, so serving the previous run's results would show stale facets
   // until the next scan happened to finish.
   const scanResultsCacheKey = `dashboard-scan-results-v${SCANNER_VERSION}-${cacheKeySuffix}`;
-  const insightsCacheKey = `dashboard-insights-v2-${cacheKeySuffix}`;
+  const insightsCacheKey = `dashboard-insights-v4-${cacheKeySuffix}`;
   const readSourcesCatalogCache = async (): Promise<NormalizedSourceSessionCatalogCache | null> =>
     normalizeSourceSessionCatalogCache(
       await readFileCache<SourceSessionCatalogCache | CachedSourceRecord[]>(sourcesCacheKey),
@@ -1049,16 +1071,22 @@ export async function startServer(
 
       // Project-level insights for each unique project
       const projects = new Map<string, ProjectInsights>();
-      const uniqueProjects = new Set(results.map((r) => r.project));
+      const uniqueProjects = new Set(
+        results.map((result) => projectIdentityKey(result.project, result.projectIdentity)),
+      );
       for (const project of uniqueProjects) {
-        const memory = await readProjectMemory(project);
+        const memory = isFilesystemProjectKey(project)
+          ? await readProjectMemory(project)
+          : undefined;
         const pi = aggregateProjectInsights(project, results, memory || undefined);
         projects.set(project, pi);
       }
 
       // Enrich topProjects with memoryFileCount
       for (const tp of user.topProjects) {
-        const pi = projects.get(tp.project);
+        const pi =
+          projects.get(projectIdentityKey(tp.project, tp.projectIdentity)) ||
+          projects.get(tp.project);
         if (pi?.memory) {
           tp.memoryFileCount = pi.memory.memoryFiles.length;
         }
@@ -1216,6 +1244,8 @@ export async function startServer(
             sessionId: s.sessionId,
             provider: s.provider,
             project: s.project,
+            projectIdentity:
+              s.projectIdentity || classifyProject(s.project, { provider: s.provider }),
             slug: s.slug,
             filePaths: s.filePaths,
             toolPaths: s.toolPaths,

@@ -36,6 +36,7 @@ import {
   normalizeMcpServerName,
   normalizeMcpToolName,
   parseCachedList,
+  projectDisplayName,
   projectName,
   providerDisplayName,
   replaySuggestedTitle,
@@ -127,6 +128,7 @@ export interface SessionScanData {
   title?: string;
   firstPrompt?: string;
   slug?: string;
+  projectIdentity?: SourceSession["projectIdentity"];
   costEstimate?: number;
   tokenUsage?: {
     inputTokens: number;
@@ -163,6 +165,19 @@ export function getSessionRangeTimestamp(
   scanData?: SessionScanData | null,
 ): string | undefined {
   return scanData?.startTime || source.timestamp;
+}
+
+export function shouldIncludeSessionForProject(
+  session: Pick<SourceSession, "project" | "projectIdentity">,
+  selectedProjectKey: string,
+  showAgentRuns: boolean,
+): boolean {
+  return (
+    showAgentRuns ||
+    !isAgentRunWorkspace(session.project, session.projectIdentity) ||
+    (selectedProjectKey !== ALL_PROJECTS &&
+      matchesProjectFacet(session, selectedProjectKey, ALL_PROJECTS, rollupProject))
+  );
 }
 
 interface RawJsonItem {
@@ -718,7 +733,11 @@ export function SessionDetailPopup({
               <div className="text-[10px] font-sans uppercase tracking-widest text-terminal-dimmer mb-1">
                 Session Info
               </div>
-              <InfoRow label="Project" value={projectName(s.project)} title={s.project} />
+              <InfoRow
+                label="Project"
+                value={projectDisplayName(s.project, s.projectIdentity)}
+                title={s.project}
+              />
               {s.gitRepo && <InfoRow label="Repo" value={s.gitRepo} />}
               {branch && <InfoRow label="Branch" value={branch} />}
               {scanData?.gitBranches && scanData.gitBranches.length > 1 && (
@@ -1126,7 +1145,7 @@ function ReplayCard({
   }, []);
   useOutsideClick(menuRef, closeMenu, menuOpen);
 
-  const displayProject = rollupProject(s.project);
+  const displayProject = rollupProject(s.project, s.projectIdentity);
   const isWorktreeReplay = displayProject !== s.project;
 
   // New-design derived values, mirroring the Sessions-tab source card.
@@ -2231,21 +2250,23 @@ function SessionsPanel() {
   // PRs or triages alerts on a schedule accumulates far more of them than real
   // projects, and each one is a single session the user never opened by hand.
   const agentRunCount = new Set(
-    rangeUnarchivedSources.filter((s) => isAgentRunWorkspace(s.project)).map((s) => s.project),
+    rangeUnarchivedSources
+      .filter((s) => isAgentRunWorkspace(s.project, s.projectIdentity))
+      .map((s) => s.project),
   ).size;
   const visibleSources = useMemo(
     () =>
-      showAgentRuns
-        ? rangeUnarchivedSources
-        : rangeUnarchivedSources.filter((s) => !isAgentRunWorkspace(s.project)),
-    [rangeUnarchivedSources, showAgentRuns],
+      rangeUnarchivedSources.filter((s) =>
+        shouldIncludeSessionForProject(s, selectedProjectKey, showAgentRuns),
+      ),
+    [rangeUnarchivedSources, selectedProjectKey, showAgentRuns],
   );
   const baseSourceCount = useMemo(
     () =>
-      showAgentRuns
-        ? unarchivedSources.length
-        : unarchivedSources.filter((s) => !isAgentRunWorkspace(s.project)).length,
-    [showAgentRuns, unarchivedSources],
+      unarchivedSources.filter((s) =>
+        shouldIncludeSessionForProject(s, selectedProjectKey, showAgentRuns),
+      ).length,
+    [selectedProjectKey, showAgentRuns, unarchivedSources],
   );
 
   const selectedProviderSet = new Set(selectedProviders);
@@ -2356,7 +2377,7 @@ function SessionsPanel() {
   // ran in a sandbox, so we don't surface a parent-level count here.
   const byProject = new Map<string, SourceSession[]>();
   for (const s of projectFacetSources) {
-    const key = rollupProject(s.project);
+    const key = rollupProject(s.project, s.projectIdentity);
     if (!byProject.has(key)) byProject.set(key, []);
     byProject.get(key)?.push(s);
   }
@@ -3129,7 +3150,7 @@ function SessionsPanel() {
                 const sessionTitle = sourceDisplayTitle(s, scanData);
                 const prompts = sessionPromptPreview(s, scanData, sessionTitle).slice(0, 2);
                 const branch = nonDefaultBranch(scanData?.gitBranch || s.gitBranch);
-                const rolledProject = rollupProject(s.project);
+                const rolledProject = rollupProject(s.project, s.projectIdentity);
                 // True when the display project is a rolled-up agent worktree path.
                 const isWorktree = rolledProject !== s.project;
                 const displayPromptCount =
@@ -3158,7 +3179,7 @@ function SessionsPanel() {
                 const projectLabel =
                   projectLabels.get(rolledProject) ||
                   projectLabels.get(s.project) ||
-                  projectName(rolledProject);
+                  projectDisplayName(rolledProject, s.projectIdentity);
                 // New-design derived values (see design/session-card-comparison.html)
                 const prLink = scanData?.prLinks?.[0];
                 const repoUrl = s.gitRepo ? `https://github.com/${s.gitRepo}` : undefined;
@@ -3826,11 +3847,13 @@ function ReplaysPanel() {
     ? sessions
     : sessions.filter((s) => !archivedSlugs.has(s.slug));
   const agentRunCount = new Set(
-    unarchivedSessions.filter((s) => isAgentRunWorkspace(s.project)).map((s) => s.project),
+    unarchivedSessions
+      .filter((s) => isAgentRunWorkspace(s.project, s.projectIdentity))
+      .map((s) => s.project),
   ).size;
-  const visibleSessions = showAgentRuns
-    ? unarchivedSessions
-    : unarchivedSessions.filter((s) => !isAgentRunWorkspace(s.project));
+  const visibleSessions = unarchivedSessions.filter((s) =>
+    shouldIncludeSessionForProject(s, selectedProjectKey, showAgentRuns),
+  );
 
   const selectedProviderSet = new Set(selectedProviders);
   const selectedRepoSet = new Set(selectedRepos);
@@ -3877,7 +3900,7 @@ function ReplaysPanel() {
   // Group by project, rolling up Claude agent worktrees under their parent.
   const byProject = new Map<string, SessionSummary[]>();
   for (const s of projectFacetSessions) {
-    const key = rollupProject(s.project);
+    const key = rollupProject(s.project, s.projectIdentity);
     if (!byProject.has(key)) byProject.set(key, []);
     byProject.get(key)?.push(s);
   }

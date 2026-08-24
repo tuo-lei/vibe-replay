@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
 import { readGitRepo, shortenPath } from "@vibe-replay/provider-core/utils";
+import { classifyProject, isCursorSdkAutomationPath } from "@vibe-replay/types";
 import {
   discoverGlobalStateOnlySessions,
   discoverSqliteOnlySessions,
@@ -16,6 +17,7 @@ const PROJECT_DISCOVERY_CONCURRENCY = 6;
 const TRANSCRIPT_INFO_CONCURRENCY = 6;
 const ENTRY_STAT_CONCURRENCY = 32;
 const decodedProjectDirCache = new Map<string, Promise<string>>();
+const sdkWorkspaceRepoCache = new Map<string, Promise<string | undefined>>();
 
 export async function discoverCursorSessions(): Promise<SessionInfo[]> {
   const sessions: SessionInfo[] = [];
@@ -172,13 +174,41 @@ async function enrichWithSdkAgents(sessions: SessionInfo[]): Promise<void> {
     const existing = sessionsByAgentId.get(agent.agentId);
     if (!existing) continue;
     existing.hasSdk = true;
-    // SDK store knows the workspace path authoritatively — backfill if the
-    // transcript-only path was best-effort guessed.
-    if (agent.workspaceRef && (!existing.cwd || existing.cwd.startsWith("/-"))) {
-      existing.cwd = agent.workspaceRef;
-      existing.workspacePath = agent.workspaceRef;
+    const workspaceRef = agent.workspaceRef.trim();
+
+    // The SDK's workspace_ref is authoritative when it points at one of its
+    // actual worktrees. Cursor's encoded project directory can turn literal
+    // underscores into hyphens, so the decoded transcript path may not exist
+    // even though the SDK path does.
+    if (workspaceRef && isCursorSdkAutomationPath(workspaceRef)) {
+      const workspaceStat = await stat(workspaceRef).catch(() => null);
+      if (workspaceStat?.isDirectory()) {
+        existing.project = shortenPath(workspaceRef);
+        existing.cwd = workspaceRef;
+        existing.workspacePath = workspaceRef;
+        const gitRepo = await readSdkWorkspaceRepo(workspaceRef);
+        if (gitRepo) existing.gitRepo = gitRepo;
+      }
     }
+
+    existing.projectIdentity = classifyProject(existing.project, {
+      provider: existing.provider,
+      hasSdk: true,
+      sdkAgentId: agent.agentId,
+      sdkAgentName: agent.name,
+      sdkWorkspaceRef: workspaceRef,
+      gitRepo: existing.gitRepo,
+    });
   }
+}
+
+function readSdkWorkspaceRepo(workspacePath: string): Promise<string | undefined> {
+  let cached = sdkWorkspaceRepoCache.get(workspacePath);
+  if (!cached) {
+    cached = readGitRepo(workspacePath);
+    sdkWorkspaceRepoCache.set(workspacePath, cached);
+  }
+  return cached;
 }
 
 /**

@@ -13,7 +13,12 @@ import { localDayKey } from "../utils/date";
 import { plural, timeAgo } from "../utils/format";
 import type { Tab } from "./Dashboard";
 import { DataQualityIndicator } from "./DataQualityIndicator";
-import { isAgentRunWorkspace, navigateTo, projectName, rollupTopProjects } from "./dashboard-utils";
+import {
+  isAgentRunWorkspace,
+  navigateTo,
+  projectDisplayName,
+  rollupTopProjects,
+} from "./dashboard-utils";
 import { TokenBreakdownChart, TurnDurationChart } from "./InsightCharts";
 import { type ProjectInsights, useScanInsightsContext } from "./InsightsPanel";
 import SessionRelationshipsView from "./SessionRelationshipsView";
@@ -79,6 +84,7 @@ function MiniSparkline({
 
 interface SidebarProject {
   project: string;
+  projectIdentity?: ProjectInsight["projectIdentity"];
   sessions: number;
   lastActivity?: string;
 }
@@ -92,7 +98,7 @@ function ProjectSidebar({
   selected: string;
   onSelect: (project: string) => void;
 }) {
-  const totalSessions = projects.reduce((sum, p) => sum + p.sessions, 0);
+  const totalProjects = projects.length;
   return (
     <div className="hidden md:flex w-60 shrink-0 flex-col border-r border-terminal-border-subtle bg-terminal-surface/20">
       <div className="flex items-center justify-between px-4 py-3 border-b border-terminal-border-subtle">
@@ -118,7 +124,7 @@ function ProjectSidebar({
                 : "bg-terminal-surface text-terminal-dimmer"
             }`}
           >
-            {totalSessions}
+            {totalProjects}
           </span>
         </button>
 
@@ -127,7 +133,7 @@ function ProjectSidebar({
         {/* Per-project items */}
         {projects.map((p) => {
           const isActive = selected === p.project;
-          const label = projectName(p.project);
+          const label = projectDisplayName(p.project, p.projectIdentity);
           return (
             <button
               key={p.project}
@@ -183,7 +189,7 @@ function ProjectOverview({
   insight: ProjectInsight;
   onOpenSessions: () => void;
 }) {
-  const name = projectName(project);
+  const name = projectDisplayName(project, insight.projectIdentity);
   return (
     <div className="hover-lift relative overflow-hidden rounded-2xl bg-gradient-to-br from-terminal-surface via-terminal-surface to-terminal-bg/70 p-5 shadow-layer-md">
       <span className="absolute inset-y-3 left-0 w-0.5 rounded-r-full bg-gradient-to-b from-terminal-green to-terminal-blue opacity-60" />
@@ -351,7 +357,7 @@ function ProjectsGrid({
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-3">
       {projects.map((p) => {
-        const name = projectName(p.project);
+        const name = projectDisplayName(p.project, p.projectIdentity);
         return (
           <button
             key={p.project}
@@ -450,7 +456,10 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
   // actually worked in. Keep them in the source set so the default rollup can
   // add their activity to the parent project.
   const agentRunCount = useMemo(
-    () => (userInsights?.topProjects || []).filter((p) => isAgentRunWorkspace(p.project)).length,
+    () =>
+      (userInsights?.topProjects || []).filter((p) =>
+        isAgentRunWorkspace(p.project, p.projectIdentity),
+      ).length,
     [userInsights],
   );
 
@@ -507,6 +516,7 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
 
   const sidebarProjects: SidebarProject[] = projects.map((p) => ({
     project: p.project,
+    projectIdentity: p.projectIdentity,
     sessions: p.sessions,
     lastActivity: p.lastActivity,
   }));
@@ -548,7 +558,7 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
             <option value={ALL_PROJECTS}>All projects ({projects.length})</option>
             {projects.map((p) => (
               <option key={p.project} value={p.project}>
-                {projectName(p.project)} ({p.sessions})
+                {projectDisplayName(p.project, p.projectIdentity)} ({p.sessions})
               </option>
             ))}
           </select>
@@ -558,7 +568,12 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
         <div className="px-4 md:px-6 pt-5 pb-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
             <h2 className="text-sm font-sans font-semibold text-terminal-text truncate">
-              {selectedProject === ALL_PROJECTS ? "All Projects" : projectName(selectedProject)}
+              {selectedProject === ALL_PROJECTS
+                ? "All Projects"
+                : projectDisplayName(
+                    selectedProject,
+                    projects.find((p) => p.project === selectedProject)?.projectIdentity,
+                  )}
               {selectedProject === ALL_PROJECTS && (
                 <span className="ml-2 text-terminal-dimmer font-normal">({projects.length})</span>
               )}

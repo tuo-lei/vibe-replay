@@ -1,8 +1,10 @@
 import type { ReplaySummary } from "./server-types.js";
 import type { SessionScanResult } from "./scanner.js";
+import type { ProjectIdentity } from "@vibe-replay/types";
 
 export interface InsightsRollupSession {
   project: string;
+  projectIdentity?: ProjectIdentity;
   startTime?: string;
   durationMs?: number;
   cost?: number;
@@ -47,6 +49,7 @@ export function buildInsightsRollup(
     sessions: scans.map((scan) => {
       const session: InsightsRollupSession = {
         project: scan.project,
+        projectIdentity: scan.projectIdentity,
         startTime: scan.startTime,
         durationMs: scan.durationMs,
         cost: scan.costEstimate,

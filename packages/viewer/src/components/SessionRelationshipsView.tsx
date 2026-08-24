@@ -13,6 +13,7 @@ import {
   cleanPrompt,
   formatDataSourceLabel,
   normalizeTitleText,
+  projectDisplayName,
   projectName,
   providerBadgeLabel,
   rollupProject,
@@ -142,7 +143,7 @@ function groupByProject(
 ): ProjectGroup[] {
   const map = new Map<string, ScanResultSession[]>();
   for (const s of sessions) {
-    const key = options.collapseWorktrees ? rollupProject(s.project) : s.project;
+    const key = options.collapseWorktrees ? rollupProject(s.project, s.projectIdentity) : s.project;
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(s);
   }
@@ -684,7 +685,7 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                       style={{ width: LABEL_WIDTH, height: rowHeight }}
                     >
                       <div className={`text-xs font-sans font-medium truncate ${color.text}`}>
-                        {projectName(p.project)}
+                        {projectDisplayName(p.project, p.sessions[0]?.session.projectIdentity)}
                       </div>
                       <div className="text-[9px] font-mono text-terminal-dimmer truncate">
                         {p.sessions.length} {plural(p.sessions.length, "session")}
@@ -902,6 +903,7 @@ interface FileCluster {
 
 interface ProjectFileGroup {
   project: string;
+  projectIdentity?: ScanResultSession["projectIdentity"];
   colorIdx: number;
   files: FileCluster[];
   totalEdits: number;
@@ -951,6 +953,7 @@ function buildProjectFileGroups(groups: ProjectGroup[]): ProjectFileGroup[] {
     files.sort((a, b) => b.totalEdits - a.totalEdits || b.sessions.length - a.sessions.length);
     projectFileGroups.push({
       project: g.project,
+      projectIdentity: g.sessions[0]?.projectIdentity,
       colorIdx: g.colorIdx,
       files,
       totalEdits: files.reduce((sum, file) => sum + file.totalEdits, 0),
@@ -1033,7 +1036,7 @@ function FileConnectionsView({
                 }`}
               >
                 <div className="truncate text-xs font-sans font-semibold">
-                  {projectName(group.project)}
+                  {projectDisplayName(group.project, group.projectIdentity)}
                 </div>
                 <div className="mt-0.5 truncate text-[10px] font-mono text-terminal-dimmer">
                   {group.project}
@@ -1056,7 +1059,10 @@ function FileConnectionsView({
           <div className="pointer-events-none absolute -right-12 -top-12 h-28 w-28 rounded-full bg-terminal-green/5 blur-2xl" />
           <div className="relative">
             <div className="text-sm font-sans font-semibold text-terminal-text">
-              {projectName(selectedProjectGroup.project)}
+              {projectDisplayName(
+                selectedProjectGroup.project,
+                selectedProjectGroup.projectIdentity,
+              )}
             </div>
             <div className="mt-0.5 truncate text-xs font-mono text-terminal-dimmer">
               {selectedProjectGroup.project}

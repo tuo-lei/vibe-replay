@@ -1340,6 +1340,50 @@ describe("aggregateUserInsights", () => {
     expect(insights.topProjects[0].sessions).toBe(1);
   });
 
+  it("counts SDK automation by canonical project while retaining raw session paths", () => {
+    const projectIdentity = {
+      key: "cursor-sdk:github-pr-review:Roblox/ros",
+      kind: "cursor-sdk-automation" as const,
+      isAutomated: true,
+      displayName: "Automated · Roblox/ros",
+      workflowId: "github-pr-review",
+      repository: "Roblox/ros",
+    };
+    const sdkScans = [
+      {
+        ...scans[0],
+        provider: "cursor",
+        sessionId: "sdk-1",
+        project:
+          "~/git/roblox/cursor-sdk/repos/cursor-coworktrees/worktrees/github-pr-review-Roblox-ros-13473",
+        projectIdentity: { ...projectIdentity, prNumber: 13473 },
+      },
+      {
+        ...scans[0],
+        provider: "cursor",
+        sessionId: "sdk-2",
+        project:
+          "~/git/roblox/cursor-sdk/repos/cursor-coworktrees/worktrees/github_pr_review-Roblox-ros-14156",
+        projectIdentity: { ...projectIdentity, prNumber: 14156 },
+      },
+    ];
+
+    const insights = aggregateUserInsights(sdkScans);
+
+    expect(insights.totalProjects).toBe(1);
+    expect(insights.topProjects).toHaveLength(2);
+    expect(insights.topProjects.map((p) => p.project)).toEqual(
+      expect.arrayContaining([
+        "~/git/roblox/cursor-sdk/repos/cursor-coworktrees/worktrees/github-pr-review-Roblox-ros-13473",
+        "~/git/roblox/cursor-sdk/repos/cursor-coworktrees/worktrees/github_pr_review-Roblox-ros-14156",
+      ]),
+    );
+    expect(insights.topProjects.every((p) => p.projectIdentity?.key === projectIdentity.key)).toBe(
+      true,
+    );
+    expect(aggregateProjectInsights(projectIdentity.key, sdkScans).sessionCount).toBe(2);
+  });
+
   it("calculates average session duration", () => {
     const insights = aggregateUserInsights(scans);
 
