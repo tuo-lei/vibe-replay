@@ -62,6 +62,26 @@ const CURSOR_SDK_WORKFLOWS: Array<{ id: string; pattern: RegExp }> = [
   { id: "slack-inbox", pattern: /slack[-_]inbox/i },
 ];
 
+const CURSOR_SDK_WORKFLOW_LABELS: Record<string, string> = {
+  "github-pr-review": "GitHub PR review",
+  "google-drive-search": "Google Drive search",
+  "google-doc-review": "Google Doc review",
+  "source-extraction-sentry": "Source extraction · Sentry",
+  "source-extraction-slack-inbox": "Source extraction · Slack inbox",
+  "sentry-triage": "Sentry triage",
+  "slack-inbox": "Slack inbox",
+};
+
+export function cursorSdkWorkflowLabel(workflowId: string): string {
+  const knownLabel = CURSOR_SDK_WORKFLOW_LABELS[workflowId];
+  if (knownLabel) return knownLabel;
+  return workflowId
+    .split("-")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")
+    .replace(/\bPr\b/g, "PR");
+}
+
 function normalizePath(value: string): string {
   return value.replace(/\\/g, "/").replace(/\/+$/, "");
 }
@@ -192,14 +212,15 @@ export function classifyProject(
     const group = repository || target || cursorSdkGroupParent(projectValue, hints.sdkWorkspaceRef);
     const key = `cursor-sdk:${resolvedWorkflow}:${group || "unknown"}`;
     const displayTarget = repository || target;
+    const workflowLabel = cursorSdkWorkflowLabel(resolvedWorkflow);
 
     return {
       key,
       kind: "cursor-sdk-automation",
       isAutomated: true,
       displayName: displayTarget
-        ? `Automated · ${displayTarget}`
-        : `Automated · ${resolvedWorkflow}`,
+        ? `Automated · ${displayTarget} · ${workflowLabel}`
+        : `Automated · ${workflowLabel}`,
       workflowId: resolvedWorkflow,
       repository,
       prNumber,

@@ -1,6 +1,7 @@
 import {
   agentRunWorkspaceParent as sharedAgentRunWorkspaceParent,
   agentWorktreeParent as sharedAgentWorktreeParent,
+  cursorSdkWorkflowLabel,
   isAutomatedProject,
   mergeProjectIdentities,
   projectIdentityKey,
@@ -898,8 +899,9 @@ function specialProjectLabel(project: string): string | null {
   if (normalized === "~") return "Home";
   const cursorAutomation = normalized.match(/^cursor-sdk:([^:]+):(.+)$/);
   if (cursorAutomation) {
-    const target = cursorAutomation[2].replace(/^all$/, cursorAutomation[1]);
-    return `Automated · ${target}`;
+    const workflowLabel = cursorSdkWorkflowLabel(cursorAutomation[1]);
+    if (cursorAutomation[2] === "all") return `Automated · ${workflowLabel}`;
+    return `Automated · ${cursorAutomation[2]} · ${workflowLabel}`;
   }
   if (/\/\.cursor\/projects\/.+\/terminals$/.test(normalized)) return "Cursor Terminals";
   if (/\/\.cursor\/extensions\//.test(normalized)) return "Cursor Extension";

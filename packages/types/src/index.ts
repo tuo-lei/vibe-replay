@@ -28,6 +28,7 @@ export {
   agentRunWorkspaceParent,
   agentWorktreeParent,
   classifyProject,
+  cursorSdkWorkflowLabel,
   isAutomatedProject,
   isCursorSdkAutomationPath,
   mergeProjectIdentities,
