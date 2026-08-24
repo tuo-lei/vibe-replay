@@ -65,6 +65,32 @@ function makeReplay(overrides: Partial<ReplaySummary> = {}): ReplaySummary {
 }
 
 describe("buildInsightsRollup", () => {
+  it("can include secondary range fields without conversation content", () => {
+    const payload = buildInsightsRollup(
+      [
+        makeScan({
+          model: "claude-sonnet-4",
+          turnDurations: [10_000, 45_000],
+        }),
+      ],
+      [],
+      { includeDetails: true },
+    );
+
+    expect(payload.sessions[0]).toMatchObject({
+      provider: "claude-code",
+      model: "claude-sonnet-4",
+      tokenUsage: {
+        inputTokens: 100,
+        outputTokens: 20,
+        cacheReadTokens: 30,
+        cacheCreationTokens: 40,
+      },
+      turnDurations: [10_000, 45_000],
+    });
+    expect(JSON.stringify(payload)).not.toContain("private");
+  });
+
   it("keeps only compact additive metrics and timestamps", () => {
     const payload = buildInsightsRollup(
       [makeScan()],

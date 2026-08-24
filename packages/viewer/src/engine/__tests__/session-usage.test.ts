@@ -39,6 +39,18 @@ describe("summarizeSessionUsage", () => {
     expect(breakdown?.totalCalls).toBe(7);
   });
 
+  it("normalizes placeholder MCP names in session details", () => {
+    const breakdown = summarizeSessionUsage(
+      makeSummary({
+        mcpServers: { "-": 2 },
+        mcpTools: { "-/search": 2 },
+      }),
+    );
+
+    expect(breakdown?.mcpServerCount).toBe(1);
+    expect(breakdown?.mcpTools).toEqual([{ name: "Unknown/search", count: 2 }]);
+  });
+
   it("limits each list and counts distinct MCP servers", () => {
     const breakdown = summarizeSessionUsage(
       makeSummary({

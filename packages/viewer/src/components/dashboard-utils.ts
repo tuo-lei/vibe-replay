@@ -174,6 +174,17 @@ export function projectName(project: string): string {
   return parts[parts.length - 1] || project;
 }
 
+export function normalizeMcpServerName(server: string): string {
+  const normalized = server.trim();
+  return normalized === "" || normalized === "-" ? "Unknown" : normalized;
+}
+
+export function normalizeMcpToolName(tool: string): string {
+  if (tool === "-") return "Unknown";
+  if (tool.startsWith("-/")) return `Unknown${tool.slice(1)}`;
+  return tool;
+}
+
 // ─── Text helpers ────────────────────────────────────────────────────
 
 export const TITLE_MAX_CHARS = 120;
@@ -453,6 +464,7 @@ export const DASHBOARD_PARAMS = [
   "mcpTool",
   "skill",
   "agentRuns",
+  "insightsRange",
   "replay",
 ] as const;
 
@@ -721,8 +733,22 @@ export function shortenPath(path: string): string {
 
 export function computeProjectLabels(projects: string[]): Map<string, string> {
   const labels = new Map<string, string>();
+  const projectsByLabel = new Map<string, string[]>();
   for (const p of projects) {
-    labels.set(p, specialProjectLabel(p) || shortenPath(p));
+    const label = specialProjectLabel(p) || shortenPath(p);
+    labels.set(p, label);
+    const matchingProjects = projectsByLabel.get(label) || [];
+    matchingProjects.push(p);
+    projectsByLabel.set(label, matchingProjects);
+  }
+  for (const matchingProjects of projectsByLabel.values()) {
+    if (matchingProjects.length < 2) continue;
+    for (const project of matchingProjects) {
+      // The compact path can still collide for long projects that share their
+      // first and last segments. Fall back to the full path rather than
+      // showing two indistinguishable project rows.
+      labels.set(project, project);
+    }
   }
   return labels;
 }

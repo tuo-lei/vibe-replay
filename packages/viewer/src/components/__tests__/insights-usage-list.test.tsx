@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { navigateToUsageSessions, UsageBarList } from "../InsightsPage";
-import { getMultiFromUrl } from "../../hooks/usePanelFilters";
+import { navigateToUsageSessions, TopProjectsList, UsageBarList } from "../InsightsPage";
+import { getInsightsRangeFromUrl, getMultiFromUrl } from "../../hooks/usePanelFilters";
 
 afterEach(() => {
   cleanup();
@@ -58,6 +58,20 @@ describe("UsageBarList", () => {
     expect(params.get(facet)).toBe(value);
   });
 
+  it("preserves the selected Insights range in the Sessions URL", () => {
+    navigateToUsageSessions("tool", "Read", "7d");
+
+    expect(new URLSearchParams(window.location.search).get("insightsRange")).toBe("7d");
+  });
+
+  it("reads only supported Insights ranges from the URL", () => {
+    window.history.replaceState({}, "", "/?insightsRange=30d");
+    expect(getInsightsRangeFromUrl()).toBe("30d");
+
+    window.history.replaceState({}, "", "/?insightsRange=invalid");
+    expect(getInsightsRangeFromUrl()).toBe("all");
+  });
+
   it("round-trips facet names with URL-sensitive characters exactly once", () => {
     const value = "sourcegraph/search?query=foo bar&scope=100%,comma";
 
@@ -66,5 +80,35 @@ describe("UsageBarList", () => {
     const params = new URLSearchParams(window.location.search);
     expect(params.get("mcpTool")).toBe(value);
     expect(getMultiFromUrl("mcpTool")).toEqual([value]);
+  });
+});
+
+describe("TopProjectsList", () => {
+  it("keeps projects with the same basename distinguishable", () => {
+    render(
+      <TopProjectsList
+        projects={[
+          {
+            project: "~/git/roblox/ros-2",
+            sessions: 2,
+            cost: 1,
+            prompts: 2,
+            durationMs: 1_000,
+            edits: 1,
+          },
+          {
+            project: "~/Code/ros-2",
+            sessions: 1,
+            cost: 0,
+            prompts: 1,
+            durationMs: 500,
+            edits: 0,
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("~/git/roblox/ros-2")).toBeDefined();
+    expect(screen.getByText("~/Code/ros-2")).toBeDefined();
   });
 });

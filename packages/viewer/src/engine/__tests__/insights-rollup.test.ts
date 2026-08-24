@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { rangeSince, rollupInsights, type InsightsRollupPayload } from "../insights-rollup";
+import {
+  isInInsightsRange,
+  rangeSince,
+  rollupInsights,
+  rollupInsightsBreakdown,
+  type InsightsRollupPayload,
+} from "../insights-rollup";
 
 const payload: InsightsRollupPayload = {
   sessions: [
@@ -192,5 +198,89 @@ describe("rollupInsights", () => {
     };
 
     expect(rollupInsights(payload).projects).toBe(1);
+  });
+
+  it("filters secondary breakdowns by the same session boundary", () => {
+    const result = rollupInsightsBreakdown(
+      {
+        sessions: [
+          {
+            project: "~/code/recent",
+            startTime: "2026-08-20T12:00:00Z",
+            durationMs: 60_000,
+            cost: 3,
+            prompts: 10,
+            edits: 8,
+            toolCalls: 40,
+            provider: "claude-code",
+            model: "claude-sonnet-4",
+            tokenUsage: {
+              inputTokens: 100,
+              outputTokens: 20,
+              cacheReadTokens: 30,
+              cacheCreationTokens: 40,
+            },
+            turnDurations: [10_000, 45_000],
+          },
+          {
+            project: "~/code/old",
+            startTime: "2026-01-01T00:00:00Z",
+            durationMs: 600_000,
+            cost: 20,
+            prompts: 100,
+            edits: 70,
+            toolCalls: 400,
+            provider: "cursor",
+            model: "gpt-4",
+            tokenUsage: {
+              inputTokens: 1_000,
+              outputTokens: 2_000,
+              cacheReadTokens: 3_000,
+              cacheCreationTokens: 4_000,
+            },
+            turnDurations: [720_000],
+          },
+        ],
+        replays: [],
+      },
+      { since: "2026-08-15T00:00:00Z" },
+    );
+
+    expect(result.projects).toEqual([
+      {
+        project: "~/code/recent",
+        sessions: 1,
+        cost: 3,
+        prompts: 10,
+        durationMs: 60_000,
+        toolCalls: 40,
+        edits: 8,
+      },
+    ]);
+    expect(result.models).toEqual({ "claude-sonnet-4": 1 });
+    expect(result.providers).toEqual({ "claude-code": 1 });
+    expect(result.tokenBreakdown).toEqual({
+      input: 100,
+      output: 20,
+      cacheRead: 30,
+      cacheCreation: 40,
+    });
+    expect(result.turnDurationHistogram).toMatchObject({
+      totalTurns: 2,
+      buckets: [
+        { label: "<30s", count: 1, pct: 50 },
+        { label: "30s-1m", count: 1, pct: 50 },
+        { label: "1-2m", count: 0, pct: 0 },
+        { label: "2-5m", count: 0, pct: 0 },
+        { label: "5-10m", count: 0, pct: 0 },
+        { label: "10m+", count: 0, pct: 0 },
+      ],
+      percentiles: { p50Ms: 27_500, p75Ms: 36_250, p90Ms: 41_500 },
+    });
+  });
+
+  it("excludes undated sessions from bounded secondary breakdowns", () => {
+    expect(isInInsightsRange(undefined, "2026-08-15T00:00:00Z")).toBe(false);
+    expect(isInInsightsRange(undefined)).toBe(true);
   });
 });

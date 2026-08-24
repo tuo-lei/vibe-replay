@@ -436,6 +436,35 @@ describe("scanSession", () => {
     expect(result.usageSummary?.skills).toEqual({ "browser-skill": 1 });
   });
 
+  it("normalizes placeholder MCP server names to Unknown", async () => {
+    const path = join(tmpDir, "usage-unknown-mcp.jsonl");
+    await writeFile(
+      path,
+      makeLine({
+        type: "assistant",
+        attributionMcpServer: "-",
+        attributionMcpTool: "search",
+        timestamp: "2025-03-20T10:00:00Z",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "unknown-mcp", name: "Browser", input: {} }],
+        },
+      }),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "usage-unknown-mcp",
+      provider: "claude-code",
+      project: "~/test/project",
+      slug: "usage-unknown-mcp",
+      filePaths: [path],
+    });
+
+    expect(result.usageSummary?.mcpServers).toEqual({ Unknown: 1 });
+    expect(result.usageSummary?.mcpTools).toEqual({ "Unknown/search": 1 });
+  });
+
   it("resolves MCP server and tool from Cursor's dashed tool naming", async () => {
     const path = join(tmpDir, "usage-cursor-mcp.jsonl");
     await writeFile(

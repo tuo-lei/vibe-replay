@@ -16,11 +16,15 @@ import {
 } from "../engine/usage-rollup";
 import {
   rollupInsights,
+  rollupInsightsBreakdown,
+  type InsightsRange,
+  type InsightsRangeBreakdown,
   type InsightsRangeStats,
   type InsightsRollupPayload,
   rangeSince as insightsRangeSince,
 } from "../engine/insights-rollup";
 import { AnimatedValue } from "../hooks/useAnimatedNumber";
+import { getInsightsRangeFromUrl, INSIGHTS_RANGE_PARAM } from "../hooks/usePanelFilters";
 import type { SessionSummary, SourceSession } from "../types";
 import { localDayKey } from "../utils/date";
 import { DataQualityIndicator } from "./DataQualityIndicator";
@@ -29,8 +33,8 @@ import {
   formatCompactAge,
   formatCompactDuration,
   navigateTo,
+  computeProjectLabels,
   parseCachedList,
-  projectName,
   providerBarClass,
   providerDisplayName,
   rollupTopProjects,
@@ -41,7 +45,7 @@ import { formatDuration } from "./StatsPanel";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
-type TimeRange = "7d" | "30d" | "90d" | "all";
+type TimeRange = InsightsRange;
 
 interface UsageRollupPayload {
   sessions: UsageRollupSession[];
@@ -749,7 +753,7 @@ function DayOfWeekChart({ data }: { data: DayOfWeekStats[] }) {
 
 // ─── Top Projects ───────────────────────────────────────────────────
 
-function TopProjectsList({
+export function TopProjectsList({
   projects,
 }: {
   projects: Array<{
@@ -768,16 +772,20 @@ function TopProjectsList({
   }
 
   const maxSessions = Math.max(...projects.map((p) => p.sessions), 1);
+  const projectLabels = computeProjectLabels(projects.map((p) => p.project));
 
   return (
     <div className="space-y-2">
       {projects.slice(0, 8).map((p) => {
-        const name = projectName(p.project);
+        const name = projectLabels.get(p.project) || p.project;
         const pct = (p.sessions / maxSessions) * 100;
         return (
           <div key={p.project} className="space-y-1">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-sans font-medium text-terminal-text truncate max-w-[60%]">
+              <span
+                className="text-xs font-sans font-medium text-terminal-text truncate max-w-[60%]"
+                title={p.project}
+              >
                 {name}
               </span>
               <span className="text-[10px] font-mono text-terminal-dim tabular-nums">
@@ -1229,7 +1237,11 @@ function useUsageRollupSessions(
 
 // ─── Tool & MCP Usage ───────────────────────────────────────────────
 
-export function navigateToUsageSessions(facet: "tool" | "mcp" | "mcpTool" | "skill", name: string) {
+export function navigateToUsageSessions(
+  facet: "tool" | "mcp" | "mcpTool" | "skill",
+  name: string,
+  range: TimeRange = "all",
+) {
   navigateTo({
     view: "dashboard",
     session: null,
@@ -1245,6 +1257,7 @@ export function navigateToUsageSessions(facet: "tool" | "mcp" | "mcpTool" | "ski
     archived: "true",
     agentRuns: "true",
     replay: null,
+    [INSIGHTS_RANGE_PARAM]: range === "all" ? null : range,
     [facet]: [name],
   });
 }
@@ -1315,7 +1328,16 @@ export function UsageBarList({
 export default function InsightsPage() {
   const { userInsights, loading, scanStatus } = useScanInsightsContext();
   const homePageCounts = useHomePageCounts();
-  const [range, setRange] = useState<TimeRange>("all");
+  const [range, setRange] = useState<TimeRange>(getInsightsRangeFromUrl);
+  const handleRangeChange = useCallback((next: TimeRange) => {
+    setRange(next);
+    navigateTo({ [INSIGHTS_RANGE_PARAM]: next === "all" ? null : next }, { notify: false });
+  }, []);
+  useEffect(() => {
+    const handlePopState = () => setRange(getInsightsRangeFromUrl());
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
   const {
     payload: insightsRollupPayload,
     loading: insightsRollupLoading,
@@ -1324,68 +1346,92 @@ export default function InsightsPage() {
 
   const isInitialScan = scanStatus?.running && !userInsights;
 
-  const { stats, streak, dayOfWeek, bestDay, peak, weeklyTrend, activeDays, firstSessionDate } =
-    useMemo(() => {
-      if (!userInsights) {
-        return {
-          stats: {
-            sessions: 0,
-            replays: 0,
-            durationMs: 0,
-            cost: 0,
-            prompts: 0,
-            edits: 0,
-            toolCalls: 0,
-            projects: 0,
-          },
-          streak: { current: 0, longest: 0 },
-          dayOfWeek: [],
-          bestDay: null,
-          peak: null,
-          weeklyTrend: [],
-          activeDays: 0,
-          firstSessionDate: null,
-        };
-      }
-
-      const spd = userInsights.sessionsPerDay || {};
-      const filtered = filterSessionsByRange(spd, range);
-      const s = insightsRollupPayload
-        ? rollupInsights(insightsRollupPayload, { since: rangeSince(range) })
-        : {
-            sessions: userInsights.totalSessions,
-            replays: homePageCounts?.replays ?? 0,
-            durationMs: userInsights.totalDurationMs,
-            cost: userInsights.totalCost,
-            prompts: userInsights.totalPrompts,
-            edits: userInsights.totalEdits,
-            toolCalls: userInsights.totalToolCalls,
-            projects: userInsights.totalProjects,
-          };
-      const sk = computeStreak(spd); // always compute streak from all data
-      const dow = computeDayOfWeek(filtered);
-      const best = [...dow].sort((a, b) => b.count - a.count)[0] || null;
-      const pk = peakDay(filtered);
-      const wt = computeWeeklyTrend(spd, 12);
-      const ad = Object.values(filtered).filter((v) => v > 0).length;
-      const first = userInsights.timeRange?.first || null;
-
+  const {
+    stats,
+    streak,
+    dayOfWeek,
+    bestDay,
+    peak,
+    weeklyTrend,
+    activeDays,
+    firstSessionDate,
+    sessionsPerDay,
+  } = useMemo(() => {
+    if (!userInsights) {
       return {
-        stats: s,
-        streak: sk,
-        dayOfWeek: dow,
-        bestDay: best,
-        peak: pk,
-        weeklyTrend: wt,
-        activeDays: ad,
-        firstSessionDate: first,
+        stats: {
+          sessions: 0,
+          replays: 0,
+          durationMs: 0,
+          cost: 0,
+          prompts: 0,
+          edits: 0,
+          toolCalls: 0,
+          projects: 0,
+        },
+        streak: { current: 0, longest: 0 },
+        dayOfWeek: [],
+        bestDay: null,
+        peak: null,
+        weeklyTrend: [],
+        activeDays: 0,
+        firstSessionDate: null,
+        sessionsPerDay: {},
       };
-    }, [userInsights, range, homePageCounts, insightsRollupPayload]);
+    }
+
+    const spd = userInsights.sessionsPerDay || {};
+    const filtered = filterSessionsByRange(spd, range);
+    const s = insightsRollupPayload
+      ? rollupInsights(insightsRollupPayload, { since: rangeSince(range) })
+      : {
+          sessions: userInsights.totalSessions,
+          replays: homePageCounts?.replays ?? 0,
+          durationMs: userInsights.totalDurationMs,
+          cost: userInsights.totalCost,
+          prompts: userInsights.totalPrompts,
+          edits: userInsights.totalEdits,
+          toolCalls: userInsights.totalToolCalls,
+          projects: userInsights.totalProjects,
+        };
+    const sk = computeStreak(spd); // always compute streak from all data
+    const dow = computeDayOfWeek(filtered);
+    const best = [...dow].sort((a, b) => b.count - a.count)[0] || null;
+    const pk = peakDay(filtered);
+    const wt = computeWeeklyTrend(filtered, 12);
+    const ad = Object.values(filtered).filter((v) => v > 0).length;
+    const first = userInsights.timeRange?.first || null;
+
+    return {
+      stats: s,
+      streak: sk,
+      dayOfWeek: dow,
+      bestDay: best,
+      peak: pk,
+      weeklyTrend: wt,
+      activeDays: ad,
+      firstSessionDate: first,
+      sessionsPerDay: filtered,
+    };
+  }, [userInsights, range, homePageCounts, insightsRollupPayload]);
+
+  const rangeBreakdown = useMemo<InsightsRangeBreakdown | null>(() => {
+    if (range === "all" || !insightsRollupPayload) return null;
+    return rollupInsightsBreakdown(insightsRollupPayload, { since: rangeSince(range) });
+  }, [insightsRollupPayload, range]);
 
   const rolledTopProjects = useMemo(
     () => rollupTopProjects(userInsights?.topProjects || []),
     [userInsights?.topProjects],
   );
+  const topProjects = range === "all" ? rolledTopProjects : (rangeBreakdown?.projects ?? []);
+  const models = range === "all" ? userInsights?.models || {} : (rangeBreakdown?.models ?? {});
+  const providers =
+    range === "all" ? userInsights?.providers || {} : (rangeBreakdown?.providers ?? {});
+  const tokenBreakdown =
+    range === "all" ? userInsights?.tokenBreakdown : rangeBreakdown?.tokenBreakdown;
+  const turnDurationHistogram =
+    range === "all" ? userInsights?.turnDurationHistogram : rangeBreakdown?.turnDurationHistogram;
 
   const usagePayload = useUsageRollupSessions(
     scanStatus?.finishedAt,
@@ -1414,7 +1460,7 @@ export default function InsightsPage() {
     return (
       <InsightsRangeLoadingState
         range={range}
-        onRangeChange={setRange}
+        onRangeChange={handleRangeChange}
         loading={insightsRollupLoading}
         error={insightsRollupError}
       />
@@ -1445,7 +1491,7 @@ export default function InsightsPage() {
             {(["7d", "30d", "90d", "all"] as TimeRange[]).map((r) => (
               <button
                 key={r}
-                onClick={() => setRange(r)}
+                onClick={() => handleRangeChange(r)}
                 className={`px-3 py-1.5 text-xs font-sans rounded-md transition-all ${
                   range === r
                     ? "bg-terminal-green-subtle text-terminal-green font-bold"
@@ -1493,9 +1539,9 @@ export default function InsightsPage() {
           stats={stats}
           streak={streak}
           bestDay={bestDay}
-          sessionsPerDay={userInsights.sessionsPerDay || {}}
+          sessionsPerDay={sessionsPerDay}
           range={range}
-          providers={userInsights.providers || {}}
+          providers={providers}
           dataQualityNotes={userInsights.dataQuality?.notes}
         />
 
@@ -1570,18 +1616,18 @@ export default function InsightsPage() {
         </div>
 
         {/* Turn Duration Distribution + Token Breakdown */}
-        {(userInsights.turnDurationHistogram || userInsights.tokenBreakdown) && (
+        {(turnDurationHistogram || tokenBreakdown) && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {userInsights.turnDurationHistogram && (
+            {turnDurationHistogram && (
               <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm">
                 <h3 className="ui-section-title-strong mb-4">Turn Duration Distribution</h3>
-                <TurnDurationChart histogram={userInsights.turnDurationHistogram} />
+                <TurnDurationChart histogram={turnDurationHistogram} />
               </div>
             )}
-            {userInsights.tokenBreakdown && (
+            {tokenBreakdown && (
               <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm">
                 <h3 className="ui-section-title-strong mb-4">Token Usage</h3>
-                <TokenBreakdownChart breakdown={userInsights.tokenBreakdown} />
+                <TokenBreakdownChart breakdown={tokenBreakdown} />
               </div>
             )}
           </div>
@@ -1605,7 +1651,7 @@ export default function InsightsPage() {
                   entries={usage.tools}
                   emptyLabel="No tool data"
                   unit="calls"
-                  onSelect={(name) => navigateToUsageSessions("tool", name)}
+                  onSelect={(name) => navigateToUsageSessions("tool", name, range)}
                 />
               </div>
               <div>
@@ -1614,7 +1660,7 @@ export default function InsightsPage() {
                   entries={usage.mcpServers}
                   emptyLabel="No MCP data"
                   unit="calls"
-                  onSelect={(name) => navigateToUsageSessions("mcp", name)}
+                  onSelect={(name) => navigateToUsageSessions("mcp", name, range)}
                 />
               </div>
             </div>
@@ -1625,7 +1671,7 @@ export default function InsightsPage() {
                   entries={usage.mcpTools}
                   emptyLabel="No MCP data"
                   unit="calls"
-                  onSelect={(name) => navigateToUsageSessions("mcpTool", name)}
+                  onSelect={(name) => navigateToUsageSessions("mcpTool", name, range)}
                 />
               </div>
             )}
@@ -1636,7 +1682,7 @@ export default function InsightsPage() {
                   entries={usage.skills}
                   emptyLabel="No skill data"
                   unit="activations"
-                  onSelect={(name) => navigateToUsageSessions("skill", name)}
+                  onSelect={(name) => navigateToUsageSessions("skill", name, range)}
                 />
               </div>
             )}
@@ -1665,26 +1711,17 @@ export default function InsightsPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm">
             <h3 className="ui-section-title-strong mb-4">Top Projects</h3>
-            <TopProjectsList
-              projects={rolledTopProjects.map((p) => ({
-                project: p.project,
-                sessions: p.sessions,
-                cost: p.cost,
-                prompts: p.prompts,
-                durationMs: p.durationMs,
-                edits: p.edits,
-              }))}
-            />
+            <TopProjectsList projects={topProjects} />
           </div>
           <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm space-y-5">
             <div>
               <h3 className="ui-section-title-strong mb-4">Models</h3>
-              <ModelBreakdown models={userInsights.models || {}} />
+              <ModelBreakdown models={models} />
             </div>
-            {Object.keys(userInsights.providers || {}).length > 1 && (
+            {Object.keys(providers).length > 1 && (
               <div>
                 <h3 className="ui-section-title-strong mb-4">Providers</h3>
-                <ProviderBreakdown providers={userInsights.providers || {}} />
+                <ProviderBreakdown providers={providers} />
               </div>
             )}
           </div>

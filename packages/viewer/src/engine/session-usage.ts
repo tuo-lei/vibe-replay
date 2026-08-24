@@ -1,4 +1,5 @@
 import type { SessionUsageSummary } from "@vibe-replay/types";
+import { normalizeMcpServerName, normalizeMcpToolName } from "../components/dashboard-utils";
 
 export interface UsageEntry {
   name: string;
@@ -19,9 +20,18 @@ export interface SessionUsageBreakdown {
   avgDurationMs?: number;
 }
 
-function rank(counts: Record<string, number>, limit: number): UsageEntry[] {
+function rank(
+  counts: Record<string, number>,
+  limit: number,
+  normalizeName: (name: string) => string = (name) => name,
+): UsageEntry[] {
+  const normalized = new Map<string, number>();
+  for (const [name, count] of Object.entries(counts)) {
+    const normalizedName = normalizeName(name);
+    normalized.set(normalizedName, (normalized.get(normalizedName) || 0) + count);
+  }
   return (
-    Object.entries(counts)
+    [...normalized.entries()]
       .map(([name, count]) => ({ name, count }))
       // Ties break alphabetically so the list is stable across re-renders.
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
@@ -47,13 +57,14 @@ export function summarizeSessionUsage(
   // MCP call total without double-counting calls that never named a tool.
   const totalCalls = sum(summary.tools) + sum(summary.mcpServers);
   const skills = rank(summary.skills, limit);
+  const mcpServers = new Set(Object.keys(summary.mcpServers).map(normalizeMcpServerName));
   if (totalCalls === 0 && skills.length === 0) return undefined;
 
   return {
     tools: rank(summary.tools, limit),
-    mcpTools: rank(summary.mcpTools, limit),
+    mcpTools: rank(summary.mcpTools, limit, normalizeMcpToolName),
     skills,
-    mcpServerCount: Object.keys(summary.mcpServers).length,
+    mcpServerCount: mcpServers.size,
     totalCalls,
     successCount: summary.successCount,
     errorCount: summary.errorCount,
