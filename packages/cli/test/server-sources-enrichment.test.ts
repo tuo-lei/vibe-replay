@@ -620,6 +620,67 @@ describe("sources enrichment helpers", () => {
     expect(maps.bySlug.get(providerSlugKey("cursor", "shared-slug"))?.provider).toBe("cursor");
   });
 
+  it("prefers exact session IDs and rejects ambiguous slug fallbacks", () => {
+    type Replay = Parameters<typeof __testables.buildReplayMaps>[0][number];
+    const replay = (sessionId: string): Replay => ({
+      slug: "agent-a9",
+      baseDir: "/tmp/replays",
+      sessionId,
+      provider: "cursor",
+      project: "~/project",
+      startTime: "2026-01-01T00:00:00.000Z",
+      stats: { sceneCount: 0, userPrompts: 0, toolCalls: 0 },
+      replaySize: 100,
+      replayOutdated: false,
+      hasAnnotations: false,
+      annotationCount: 0,
+    });
+    const first = replay("agent-first");
+    const second = replay("agent-second");
+    const maps = __testables.buildReplayMaps([first, second]);
+    const sourceSlugCounts = new Map([[providerSlugKey("cursor", "agent-a9"), 1]]);
+
+    expect(
+      __testables.findReplayForSource(
+        { provider: "cursor", sessionId: "agent-second", slug: "agent-a9" },
+        maps,
+        sourceSlugCounts,
+      ),
+    ).toBe(second);
+    expect(
+      __testables.findReplayForSource(
+        { provider: "cursor", slug: "agent-a9" },
+        maps,
+        sourceSlugCounts,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("does not use a slug when multiple source sessions share it", () => {
+    type Replay = Parameters<typeof __testables.buildReplayMaps>[0][number];
+    const replay: Replay = {
+      slug: "agent-a9",
+      baseDir: "/tmp/replays",
+      sessionId: "agent-only",
+      provider: "cursor",
+      project: "~/project",
+      startTime: "2026-01-01T00:00:00.000Z",
+      stats: { sceneCount: 0, userPrompts: 0, toolCalls: 0 },
+      replaySize: 100,
+      replayOutdated: false,
+      hasAnnotations: false,
+      annotationCount: 0,
+    };
+
+    expect(
+      __testables.findReplayForSource(
+        { provider: "cursor", slug: "agent-a9" },
+        __testables.buildReplayMaps([replay]),
+        new Map([[providerSlugKey("cursor", "agent-a9"), 2]]),
+      ),
+    ).toBeUndefined();
+  });
+
   it("counts prompts/tools from parsed turns with compaction exclusion", () => {
     const counts = __testables.countSessionStats([
       {
