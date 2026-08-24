@@ -121,14 +121,11 @@ export function DataLevelBadge({
 }) {
   return (
     <span
-      className={`relative ui-pill overflow-hidden ${
+      className={`ui-pill ${
         state.className
       } ${active ? "ring-1 ring-terminal-blue/25" : ""} ${compact ? "text-[11px] leading-4" : ""}`}
       title={state.description}
     >
-      {active && (
-        <span className="absolute inset-y-0 left-0 w-0.5 bg-terminal-blue animate-pulse" />
-      )}
       {active && <span className="w-1 h-1 rounded-full bg-current animate-pulse" />}
       {state.label}
     </span>

@@ -26,7 +26,7 @@ export default memo(function BashBlock({
 
   return (
     <div
-      className={`bg-terminal-surface rounded-xl overflow-hidden shadow-layer-sm ${isError ? "ring-1 ring-red-500/40 border-l-2 border-l-red-500" : ""}`}
+      className={`bg-terminal-surface rounded-xl overflow-hidden shadow-layer-sm ${isError ? "ring-1 ring-red-500/40" : ""}`}
     >
       <button
         onClick={() => hasOutput && setExpanded(!expanded)}

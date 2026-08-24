@@ -88,32 +88,25 @@ function agentTheme(type: string): AgentTheme {
   return AGENT_TYPE_THEME[type] || "purple";
 }
 
-const THEME_CLASSES: Record<
-  AgentTheme,
-  { text: string; bgSubtle: string; borderL: string; pill: string }
-> = {
+const THEME_CLASSES: Record<AgentTheme, { text: string; bgSubtle: string; pill: string }> = {
   blue: {
     text: "text-terminal-blue",
     bgSubtle: "bg-terminal-blue-subtle",
-    borderL: "border-terminal-blue",
     pill: "bg-terminal-blue-emphasis text-terminal-blue",
   },
   purple: {
     text: "text-terminal-purple",
     bgSubtle: "bg-terminal-purple-subtle",
-    borderL: "border-terminal-purple",
     pill: "bg-terminal-purple-emphasis text-terminal-purple",
   },
   green: {
     text: "text-terminal-green",
     bgSubtle: "bg-terminal-green-subtle",
-    borderL: "border-terminal-green",
     pill: "bg-terminal-green-emphasis text-terminal-green",
   },
   orange: {
     text: "text-terminal-orange",
     bgSubtle: "bg-terminal-orange-subtle",
-    borderL: "border-terminal-orange",
     pill: "bg-terminal-orange-emphasis text-terminal-orange",
   },
 };
@@ -192,7 +185,7 @@ function SubAgentSceneItem({ scene }: { scene: Scene }) {
   if (scene.type === "thinking") {
     const tokenLabel = formatTokens(scene.tokens);
     return (
-      <div className="text-[10px] font-mono text-purple-400/80 pl-2 border-l-2 border-purple-500/30 py-0.5">
+      <div className="text-[10px] font-mono text-purple-400/80 pl-2 py-0.5">
         <span className="text-purple-400/70 font-bold mr-1">[thinking]</span>
         {tokenLabel && (
           <span className="text-purple-400/70 mr-1" title="Approximate thinking tokens">
@@ -209,7 +202,7 @@ function SubAgentSceneItem({ scene }: { scene: Scene }) {
 
   if (scene.type === "text-response") {
     return (
-      <div className="text-[10px] font-mono text-terminal-text/80 pl-2 border-l-2 border-blue-500/30 py-0.5">
+      <div className="text-[10px] font-mono text-terminal-text/80 pl-2 py-0.5">
         {(scene.content || "").slice(0, 200)}
         {(scene.content || "").length > 200 ? "..." : ""}
       </div>
@@ -218,11 +211,9 @@ function SubAgentSceneItem({ scene }: { scene: Scene }) {
 
   if (scene.type === "tool-call") {
     const toolScene = scene as ToolScene;
-    const errorAccent = toolScene.isError
-      ? "border-l-red-500 bg-red-500/5"
-      : "border-l-orange-500/30";
+    const errorAccent = toolScene.isError ? "bg-red-500/5" : "";
     return (
-      <div className={`pl-2 border-l-2 py-0.5 ${errorAccent}`}>
+      <div className={`pl-2 py-0.5 rounded-md ${errorAccent}`}>
         <button
           onClick={() => setExpanded(!expanded)}
           className="flex items-center gap-1 text-[10px] font-mono w-full text-left hover:bg-terminal-surface-hover/30 rounded px-1"
@@ -258,7 +249,7 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
   if (forceCollapse) {
     return (
       <div
-        className={`flex items-center gap-2 px-3 py-1 text-xs font-mono text-terminal-dim ${scene.isError ? "border-l-2 border-l-red-500 bg-red-500/5" : ""}`}
+        className={`flex items-center gap-2 px-3 py-1 text-xs font-mono text-terminal-dim ${scene.isError ? "bg-red-500/5 ring-1 ring-red-500/30 rounded-md" : ""}`}
       >
         <span>{toolIcon(scene.toolName)}</span>
         <span className={`font-bold ${scene.isError ? "text-red-400" : "text-terminal-orange"}`}>
@@ -335,7 +326,7 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
     const description = sa.description || (scene.input.description as string) || "";
     return (
       <div
-        className={`relative rounded-xl px-5 py-4 border-l-2 ${c.borderL} ${c.bgSubtle} shadow-layer-sm transition-all duration-200 ease-material`}
+        className={`rounded-xl px-5 py-4 ${c.bgSubtle} shadow-layer-sm transition-all duration-200 ease-material`}
       >
         <button onClick={() => setExpanded(!expanded)} className="w-full text-left">
           {/* Header row — mirrors the Assistant group header */}
@@ -380,7 +371,7 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
   }
 
   // Generic tool call
-  const errorRing = scene.isError ? "ring-1 ring-red-500/40 border-l-2 border-l-red-500" : "";
+  const errorRing = scene.isError ? "ring-1 ring-red-500/40" : "";
   const errorBg = scene.isError ? "bg-red-500/5" : "";
   return (
     <div>

@@ -53,7 +53,7 @@ export default memo(function ThinkingBlock({
         )}
       </button>
       {expanded && (
-        <div className="mt-2 pl-5 text-xs text-terminal-dim font-mono whitespace-pre-wrap break-words border-l-2 border-terminal-purple/30 max-h-[300px] overflow-y-auto">
+        <div className="mt-2 rounded-lg bg-terminal-surface-inset px-3 py-2 text-xs text-terminal-dim font-mono whitespace-pre-wrap break-words max-h-[300px] overflow-y-auto">
           {renderHighlightedPlainText(content, highlights, onHighlightClick)}
         </div>
       )}

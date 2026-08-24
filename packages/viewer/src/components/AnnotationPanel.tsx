@@ -390,12 +390,12 @@ const AnnotationCard = memo(function AnnotationCard({
       className={`cursor-pointer px-3 py-2 border-b border-terminal-border-subtle transition-colors ${
         isAiFeedback
           ? isCurrent
-            ? "bg-terminal-purple/10 border-l-2 border-l-terminal-purple"
+            ? "bg-terminal-purple/10"
             : "bg-terminal-purple/[0.03] hover:bg-terminal-purple/[0.06]"
           : isFocused
-            ? "bg-terminal-blue/15 border-l-2 border-l-terminal-blue shadow-[inset_0_0_0_1px_rgba(96,165,250,0.16)]"
+            ? "bg-terminal-blue/15 shadow-[inset_0_0_0_1px_rgba(96,165,250,0.16)]"
             : isCurrent
-              ? "bg-terminal-blue/10 border-l-2 border-l-terminal-blue"
+              ? "bg-terminal-blue/10"
               : "hover:bg-terminal-surface/50"
       }`}
       onClick={() => {
@@ -450,7 +450,7 @@ const AnnotationCard = memo(function AnnotationCard({
           {annotation.selectedText && (
             <blockquote
               title={annotation.selectedText}
-              className="mb-2 max-h-11 overflow-hidden rounded-md border-l-2 border-terminal-blue/60 bg-terminal-blue-subtle/30 px-2 py-1.5 text-xs font-mono text-terminal-text/80 whitespace-pre-wrap break-words"
+              className="mb-2 max-h-11 overflow-hidden rounded-md border border-terminal-blue/20 bg-terminal-blue-subtle/30 px-2 py-1.5 text-xs font-mono text-terminal-text/80 whitespace-pre-wrap break-words"
             >
               {annotation.selectedText}
             </blockquote>
