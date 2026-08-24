@@ -191,7 +191,7 @@ async function enrichWithSdkAgents(sessions: SessionInfo[]): Promise<void> {
       }
     }
 
-    existing.projectIdentity = classifyProject(existing.project, {
+    existing.projectIdentity = classifyProject(shortenPath(existing.project), {
       provider: existing.provider,
       hasSdk: true,
       sdkAgentId: agent.agentId,
