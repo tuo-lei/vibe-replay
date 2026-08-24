@@ -8,6 +8,10 @@ import { basename, dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import type { CursorSidecars, PrLink, TokenUsage, TurnStat } from "@vibe-replay/types";
 import { readFileCache, writeFileCache } from "@vibe-replay/provider-core/cache";
+import {
+  buildTurnDurationIntervals,
+  sumDurationIntervals,
+} from "@vibe-replay/provider-core/duration";
 import type { ContentBlock, ParsedTurn, SessionInfo } from "@vibe-replay/provider-contract";
 import { shortenPath } from "@vibe-replay/provider-core/utils";
 import type { ProviderParseResult } from "@vibe-replay/provider-contract";
@@ -2906,37 +2910,18 @@ function applyGlobalStateWallClockDurations(
     return { turnStats, usedWallClock: false };
   }
 
-  const durationsByTurn = new Map<number, number>();
-  let currentTurnIndex = -1;
-  let currentUserAt: number | undefined;
-  let currentAssistantAt: number | undefined;
-
-  const finalizeTurn = () => {
-    if (
-      currentTurnIndex >= 0 &&
-      currentUserAt !== undefined &&
-      currentAssistantAt !== undefined &&
-      currentAssistantAt > currentUserAt
-    ) {
-      durationsByTurn.set(currentTurnIndex, currentAssistantAt - currentUserAt);
-    }
-  };
-
-  for (const entry of entries) {
-    if (entry.turn.role === "user") {
-      finalizeTurn();
-      currentTurnIndex++;
-      currentUserAt = bubbleWallClockStartMs(entry.bubble);
-      currentAssistantAt = undefined;
-      continue;
-    }
-    const bubbleTimestamp = bubbleWallClockEndMs(entry.bubble);
-    if (currentTurnIndex < 0 || bubbleTimestamp === undefined) continue;
-    if (currentAssistantAt === undefined || bubbleTimestamp > currentAssistantAt) {
-      currentAssistantAt = bubbleTimestamp;
-    }
-  }
-  finalizeTurn();
+  const intervals = buildTurnDurationIntervals(
+    entries.map((entry) => ({
+      role: entry.turn.role,
+      startMs: entry.turn.role === "user" ? bubbleWallClockStartMs(entry.bubble) : undefined,
+      endMs: entry.turn.role === "assistant" ? bubbleWallClockEndMs(entry.bubble) : undefined,
+    })),
+  );
+  const durationsByTurn = new Map(
+    intervals.flatMap((interval, turnIndex) =>
+      interval ? [[turnIndex, interval.endMs - interval.startMs] as const] : [],
+    ),
+  );
 
   if (durationsByTurn.size === 0) {
     return {
@@ -2951,11 +2936,16 @@ function applyGlobalStateWallClockDurations(
     const wallClockDuration = durationsByTurn.get(stat.turnIndex);
     return wallClockDuration !== undefined ? { ...stat, durationMs: wallClockDuration } : stat;
   });
+  const fallbackDurationMs = turnStats.reduce(
+    (sum, stat) => sum + (durationsByTurn.has(stat.turnIndex) ? 0 : stat.durationMs || 0),
+    0,
+  );
+  const wallClockDurationMs = sumDurationIntervals(intervals);
+  const totalDurationMs = (wallClockDurationMs || 0) + fallbackDurationMs || undefined;
 
   return {
     turnStats: mergedTurnStats,
-    totalDurationMs:
-      mergedTurnStats.reduce((sum, stat) => sum + (stat.durationMs || 0), 0) || undefined,
+    totalDurationMs,
     usedWallClock: true,
   };
 }

@@ -215,6 +215,8 @@ export type ContentBlock =
       name: string;
       input: Record<string, any>;
       _result?: string;
+      /** Internal source timestamp for the tool result; omitted from replay scenes. */
+      _resultTimestamp?: string;
       _images?: string[];
       _isError?: boolean;
       _subAgent?: SubAgent;

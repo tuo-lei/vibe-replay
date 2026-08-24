@@ -31,6 +31,93 @@ export function sanitizeCursorUserText(value: string): string {
     .trim();
 }
 
+/** Read Cursor's leading human-readable prompt timestamp and normalize it to ISO. */
+export function extractCursorTimestamp(value: string): string | undefined {
+  const match = /^\s*<timestamp>([^<]*?)<\/timestamp>/i.exec(value);
+  if (!match?.[1]) return undefined;
+  const rawTimestamp = match[1].trim();
+  const timestampMs =
+    parseCursorTimestamp(rawTimestamp) ??
+    (/^(?:[A-Za-z]+,\s+)?[A-Za-z]+\s+\d{1,2},\s+\d{4},/i.test(rawTimestamp)
+      ? undefined
+      : Date.parse(rawTimestamp));
+  return timestampMs !== undefined && Number.isFinite(timestampMs)
+    ? new Date(timestampMs).toISOString()
+    : undefined;
+}
+
+function parseCursorTimestamp(value: string): number | undefined {
+  const match =
+    /^(?:[A-Za-z]+,\s+)?([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4}),\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)\s+\(UTC([+-]\d{1,2})(?::?(\d{2}))?\)$/i.exec(
+      value.trim(),
+    );
+  if (!match) return undefined;
+
+  const [
+    ,
+    monthName,
+    dayText,
+    yearText,
+    hourText,
+    minuteText,
+    secondText,
+    meridiem,
+    offsetText,
+    offsetMinuteText,
+  ] = match;
+  const month = [
+    "jan",
+    "feb",
+    "mar",
+    "apr",
+    "may",
+    "jun",
+    "jul",
+    "aug",
+    "sep",
+    "oct",
+    "nov",
+    "dec",
+  ].indexOf(monthName.toLowerCase().slice(0, 3));
+  const day = Number(dayText);
+  const year = Number(yearText);
+  const minute = Number(minuteText);
+  const second = secondText ? Number(secondText) : 0;
+  let hour = Number(hourText);
+  if (month < 0 || day < 1 || year < 1 || hour < 1 || hour > 12 || minute > 59 || second > 59) {
+    return undefined;
+  }
+  if (meridiem.toLowerCase() === "pm" && hour !== 12) hour += 12;
+  if (meridiem.toLowerCase() === "am" && hour === 12) hour = 0;
+
+  const localMs = Date.UTC(year, month, day, hour, minute, second);
+  const localDate = new Date(localMs);
+  if (
+    localDate.getUTCFullYear() !== year ||
+    localDate.getUTCMonth() !== month ||
+    localDate.getUTCDate() !== day ||
+    localDate.getUTCHours() !== hour ||
+    localDate.getUTCMinutes() !== minute ||
+    localDate.getUTCSeconds() !== second
+  ) {
+    return undefined;
+  }
+
+  const offsetHours = Number(offsetText);
+  const offsetMinutes = offsetMinuteText ? Number(offsetMinuteText) : 0;
+  if (
+    !Number.isFinite(offsetHours) ||
+    Math.abs(offsetHours) > 23 ||
+    offsetMinutes < 0 ||
+    offsetMinutes > 59
+  ) {
+    return undefined;
+  }
+  const signedOffsetMinutes =
+    (offsetText.startsWith("-") ? -1 : 1) * (Math.abs(offsetHours) * 60 + offsetMinutes);
+  return localMs - signedOffsetMinutes * 60_000;
+}
+
 export function sanitizeCursorReasoningText(value: string): string {
   return trimInternalPlanningTail(value);
 }

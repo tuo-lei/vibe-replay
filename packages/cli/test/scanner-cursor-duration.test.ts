@@ -44,6 +44,46 @@ describe("scanSession cursor duration", () => {
     expect(result.durationMs).toBeUndefined();
   });
 
+  it("uses parser-provided turn duration when Cursor timestamps are available", async () => {
+    mockedParseCursorSession.mockResolvedValueOnce({
+      sessionId: "cursor-session",
+      slug: "cursor-slug",
+      title: "Cursor session",
+      cwd: "/repo",
+      turns: [
+        {
+          role: "user",
+          timestamp: "2025-01-01T00:00:00.000Z",
+          blocks: [{ type: "text", text: "hello" }],
+        },
+        {
+          role: "assistant",
+          timestamp: "2025-01-01T00:00:05.000Z",
+          blocks: [{ type: "text", text: "hi" }],
+        },
+      ],
+      startTime: "2025-01-01T00:00:00.000Z",
+      endTime: "2025-01-01T00:00:05.000Z",
+      totalDurationMs: 5_000,
+      turnStats: [{ turnIndex: 0, durationMs: 5_000 }],
+      dataSource: "jsonl",
+    });
+
+    const result = await scanSession({
+      sessionId: "cursor-session",
+      provider: "cursor",
+      project: "~/Code/project",
+      slug: "cursor-slug",
+      filePaths: ["/tmp/session.jsonl"],
+      timestamp: "2025-01-01T00:00:00.000Z",
+    });
+
+    expect(result.startTime).toBe("2025-01-01T00:00:00.000Z");
+    expect(result.endTime).toBe("2025-01-01T00:00:05.000Z");
+    expect(result.durationMs).toBe(5_000);
+    expect(result.turnDurations).toEqual([5_000]);
+  });
+
   it("does not double-count subagents when parser summary already exists", async () => {
     mockedParseCursorSession.mockResolvedValueOnce({
       sessionId: "cursor-session",
