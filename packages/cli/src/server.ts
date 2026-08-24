@@ -354,14 +354,51 @@ function extractPromptPreviewsFromTurns(turns: ParsedTurn[], limit = 3): string[
 function buildReplayMaps(replays: ReplaySummary[]): {
   bySlug: Map<string, ReplaySummary>;
   bySessionId: Map<string, ReplaySummary>;
+  ambiguousSlugs: Set<string>;
 } {
   const bySlug = new Map<string, ReplaySummary>();
   const bySessionId = new Map<string, ReplaySummary>();
+  const ambiguousSlugs = new Set<string>();
   for (const r of replays) {
-    bySlug.set(providerSlugKey(r.provider, r.slug), r);
+    const slugKey = providerSlugKey(r.provider, r.slug);
+    if (bySlug.has(slugKey)) {
+      ambiguousSlugs.add(slugKey);
+    } else {
+      bySlug.set(slugKey, r);
+    }
     if (r.sessionId) bySessionId.set(providerSessionKey(r.provider, r.sessionId), r);
   }
-  return { bySlug, bySessionId };
+  return { bySlug, bySessionId, ambiguousSlugs };
+}
+
+function providerSlugCounts(
+  sessions: ReadonlyArray<Pick<SessionInfo, "provider" | "slug">>,
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const session of sessions) {
+    const key = providerSlugKey(session.provider, session.slug);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return counts;
+}
+
+function findReplayForSource(
+  source: { provider: string; sessionId?: string; slug: string },
+  maps: ReturnType<typeof buildReplayMaps>,
+  sourceSlugCounts: ReadonlyMap<string, number>,
+): ReplaySummary | undefined {
+  // Native session IDs are stable; always prefer them over the human-readable
+  // slug, which can collide across Cursor sessions.
+  if (source.sessionId) {
+    const bySessionId = maps.bySessionId.get(providerSessionKey(source.provider, source.sessionId));
+    if (bySessionId) return bySessionId;
+  }
+
+  const slugKey = providerSlugKey(source.provider, source.slug);
+  if (maps.ambiguousSlugs.has(slugKey) || sourceSlugCounts.get(slugKey) !== 1) {
+    return undefined;
+  }
+  return maps.bySlug.get(slugKey);
 }
 
 async function buildSourcesResult(
@@ -405,7 +442,8 @@ async function buildSourcesResult(
   // Match by both slug and sessionId — replay directory name may differ from source slug
   // (e.g. source slug "mighty-questing-waffle" vs replay dir "045ef7d9" from sessionId)
   const existingReplays = await scanSessions(baseDir);
-  const { bySlug: replayBySlug, bySessionId: replayBySessionId } = buildReplayMaps(existingReplays);
+  const replayMaps = buildReplayMaps(existingReplays);
+  const sourceSlugCounts = providerSlugCounts(merged);
 
   const previousBySessionId = new Map<string, SourceSummaryRecord>();
   const previousByKey = new Map<string, SourceSummaryRecord>();
@@ -419,9 +457,7 @@ async function buildSourcesResult(
 
   return merged.map((s) => {
     const previous = pickSourceRecordForSession(s, previousBySessionId, previousByKey);
-    const replay =
-      replayBySlug.get(providerSlugKey(s.provider, s.slug)) ||
-      replayBySessionId.get(providerSessionKey(s.provider, s.sessionId));
+    const replay = findReplayForSource(s, replayMaps, sourceSlugCounts);
     const promptCount = s.promptCount ?? previous?.promptCount;
     const toolCallCount = s.toolCallCount ?? previous?.toolCallCount;
     const projectIdentity =
@@ -678,13 +714,12 @@ export async function startServer(
       const cached = await readSourcesCatalogCache();
       if (!cached?.sessions.length) return;
 
-      const { bySlug, bySessionId } = buildReplayMaps(replays);
+      const replayMaps = buildReplayMaps(replays);
+      const sourceSlugCounts = providerSlugCounts(cached.sessions);
 
       let changed = false;
       const updated = cached.sessions.map((s) => {
-        const replay =
-          bySlug.get(providerSlugKey(s.provider, s.slug)) ||
-          (s.sessionId ? bySessionId.get(providerSessionKey(s.provider, s.sessionId)) : undefined);
+        const replay = findReplayForSource(s, replayMaps, sourceSlugCounts);
         const hadReplay = !!s.existingReplay;
         const hasReplay = !!replay;
         if (
@@ -3184,6 +3219,7 @@ export const __testables = {
   buildInsightsSyncBatches,
   countSessionStats,
   getStaleSourceProviders,
+  findReplayForSource,
   mergeSourceCatalogSessionUpdates,
   normalizeSourceSessionCatalogCache,
   pickSourceRecordForSession,

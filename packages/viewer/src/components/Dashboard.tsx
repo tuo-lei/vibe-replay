@@ -125,6 +125,9 @@ function fetchScanResults(forceRefresh = false): Promise<ScanResultsPayload | nu
 
 /** Per-session scan result (from background scanner) */
 export interface SessionScanData {
+  sessionId?: string;
+  provider?: string;
+  project?: string;
   title?: string;
   firstPrompt?: string;
   slug?: string;
@@ -157,6 +160,44 @@ export interface SessionScanData {
   gitBranches?: string[];
   dataSource?: string;
   dataQualityNotes?: string[];
+}
+
+export interface SessionScanIndex {
+  bySessionId: Map<string, SessionScanData>;
+  bySlug: Map<string, SessionScanData[]>;
+}
+
+function scanLookupKey(provider: string, value: string): string {
+  return `${provider}\0${value}`;
+}
+
+export function buildSessionScanIndex(results: readonly SessionScanData[]): SessionScanIndex {
+  const bySessionId = new Map<string, SessionScanData>();
+  const bySlug = new Map<string, SessionScanData[]>();
+  for (const result of results) {
+    if (result.provider && result.sessionId) {
+      bySessionId.set(scanLookupKey(result.provider, result.sessionId), result);
+    }
+    if (result.provider && result.slug) {
+      const key = scanLookupKey(result.provider, result.slug);
+      const candidates = bySlug.get(key) || [];
+      candidates.push(result);
+      bySlug.set(key, candidates);
+    }
+  }
+  return { bySessionId, bySlug };
+}
+
+export function findSessionScanData(
+  session: Pick<SessionSummary, "provider" | "sessionId" | "slug">,
+  index: SessionScanIndex,
+): SessionScanData | undefined {
+  if (session.sessionId) {
+    const exact = index.bySessionId.get(scanLookupKey(session.provider, session.sessionId));
+    if (exact) return exact;
+  }
+  const candidates = index.bySlug.get(scanLookupKey(session.provider, session.slug));
+  return candidates?.length === 1 ? candidates[0] : undefined;
 }
 
 /** Use the scanner's session start when range filtering, with discovery as a fallback. */
@@ -1918,7 +1959,9 @@ function SessionUsageDetails({
 
 function SessionsPanel() {
   const [sources, setSources] = useState<SourceSession[]>([]);
-  const [scanResultsBySlug, setScanResultsBySlug] = useState<Record<string, SessionScanData>>({});
+  const [scanResultsIndex, setScanResultsIndex] = useState<SessionScanIndex>(() =>
+    buildSessionScanIndex([]),
+  );
   const [scanFinishedAt, setScanFinishedAt] = useState<string | null>(null);
   const [cleanupPeriodDays, setCleanupPeriodDays] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -2078,7 +2121,10 @@ function SessionsPanel() {
   const toggleArchive = (slug: string) => toggleArchiveSlug(slug, archivedSlugs, setArchivedSlugs);
 
   const openRawSourceJson = (source: SourceSession, scanData?: SessionScanData | null) => {
-    setRawSourceTarget({ source, scanData: scanData ?? scanResultsBySlug[source.slug] ?? null });
+    setRawSourceTarget({
+      source,
+      scanData: scanData ?? findSessionScanData(source, scanResultsIndex) ?? null,
+    });
   };
 
   useEffect(() => {
@@ -2100,11 +2146,7 @@ function SessionsPanel() {
       const payload = await fetchScanResults(refresh);
       if (cancelled || !payload?.results) return;
       setScanFinishedAt(payload.finishedAt ?? null);
-      setScanResultsBySlug(
-        Object.fromEntries(
-          payload.results.filter((result) => result.slug).map((result) => [result.slug!, result]),
-        ),
-      );
+      setScanResultsIndex(buildSessionScanIndex(payload.results));
     };
     void loadScanResults(forceRefresh);
     const timer = window.setInterval(
@@ -2240,11 +2282,11 @@ function SessionsPanel() {
     () =>
       unarchivedSources.filter((source) =>
         isInInsightsRange(
-          getSessionRangeTimestamp(source, scanResultsBySlug[source.slug]),
+          getSessionRangeTimestamp(source, findSessionScanData(source, scanResultsIndex)),
           selectedRangeSince,
         ),
       ),
-    [scanResultsBySlug, selectedRangeSince, unarchivedSources],
+    [scanResultsIndex, selectedRangeSince, unarchivedSources],
   );
   // One-off scratch workspaces are hidden by default: a machine that reviews
   // PRs or triages alerts on a schedule accumulates far more of them than real
@@ -2281,7 +2323,7 @@ function SessionsPanel() {
     () =>
       visibleSources.filter((s) => {
         if (!query) return true;
-        const scanData = scanResultsBySlug[s.slug];
+        const scanData = findSessionScanData(s, scanResultsIndex);
         const displayTitle = sourceDisplayTitle(s, scanData);
         const prompts = sessionPromptPreview(s, scanData, displayTitle).join(" ");
         const usage = usageFacetValues(scanData);
@@ -2307,15 +2349,15 @@ function SessionsPanel() {
           .filter(Boolean)
           .some((value) => String(value).toLowerCase().includes(query));
       }),
-    [query, scanResultsBySlug, visibleSources],
+    [query, scanResultsIndex, visibleSources],
   );
   const usageEnrichedSources = useMemo(
     () =>
       searchMatchedSources.map((source) => ({
         ...source,
-        ...usageFacetValues(scanResultsBySlug[source.slug]),
+        ...usageFacetValues(findSessionScanData(source, scanResultsIndex)),
       })),
-    [scanResultsBySlug, searchMatchedSources],
+    [scanResultsIndex, searchMatchedSources],
   );
   const usageMatchedSources = applyDashboardFacetFilters(usageEnrichedSources, {
     selectedProviders: [],
@@ -3146,7 +3188,7 @@ function SessionsPanel() {
           ) : (
             <div key={listFilterKey} className="space-y-2.5 px-4 py-3">
               {renderedSessions.map((s) => {
-                const scanData = scanResultsBySlug[s.slug];
+                const scanData = findSessionScanData(s, scanResultsIndex);
                 const sessionTitle = sourceDisplayTitle(s, scanData);
                 const prompts = sessionPromptPreview(s, scanData, sessionTitle).slice(0, 2);
                 const branch = nonDefaultBranch(scanData?.gitBranch || s.gitBranch);
@@ -3645,7 +3687,7 @@ function SessionsPanel() {
         {selectedSession && (
           <SessionDetailPopup
             session={selectedSession}
-            scanData={scanResultsBySlug[selectedSession.slug] || null}
+            scanData={findSessionScanData(selectedSession, scanResultsIndex) || null}
             onClose={() => setSelectedSlug(null)}
             onGenerate={submitGenerate}
             onViewReplay={(slug) => navigateTo({ view: null, session: slug })}
@@ -3676,6 +3718,9 @@ function SessionsPanel() {
 
 function ReplaysPanel() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [scanResultsIndex, setScanResultsIndex] = useState<SessionScanIndex>(() =>
+    buildSessionScanIndex([]),
+  );
   const [loading, setLoading] = useState(true);
   const [serverAvailable, setServerAvailable] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -3694,16 +3739,31 @@ function ReplaysPanel() {
     showAgentRuns,
     selectedProviders,
     selectedRepos,
+    selectedTools,
+    selectedMcpServers,
+    selectedMcpTools,
+    selectedSkills,
     handleProjectChange,
     handleFilterChange,
     handleProviderSet,
     handleProviderToggle,
     handleRepoSet,
     handleRepoToggle,
+    handleToolToggle,
+    handleMcpServerToggle,
+    handleMcpToolToggle,
+    handleSkillToggle,
     handleToggleArchived,
     handleToggleAgentRuns,
     handleClearAllFilters,
   } = usePanelFilters();
+  const { scanStatus } = useScanInsightsContext();
+  const usageBackfillKey = scanStatus?.usageBackfill
+    ? scanStatus.usageBackfill.running
+      ? "running"
+      : "done"
+    : "none";
+  const scanResultsRefreshRef = useRef({ running: false, usageBackfillKey: "none" });
 
   // Roll worktree paths up to the parent project so URL navigation to a
   // (possibly cleaned-up) worktree path still hits the parent's data.
@@ -3779,6 +3839,32 @@ function ReplaysPanel() {
   }, []);
 
   useEffect(() => {
+    if (sessions.length === 0) return;
+    let cancelled = false;
+    const scanRunning = scanStatus?.running === true;
+    const forceRefresh =
+      scanResultsRefreshRef.current.running !== scanRunning ||
+      scanResultsRefreshRef.current.usageBackfillKey !== usageBackfillKey;
+    scanResultsRefreshRef.current = { running: scanRunning, usageBackfillKey };
+    const loadScanResults = async (refresh = false) => {
+      const payload = await fetchScanResults(refresh);
+      if (cancelled || !payload?.results) return;
+      setScanResultsIndex(buildSessionScanIndex(payload.results));
+    };
+    void loadScanResults(forceRefresh);
+    const timer = window.setInterval(
+      () => {
+        void loadScanResults();
+      },
+      scanRunning || usageBackfillKey === "running" ? 5000 : 30000,
+    );
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [scanStatus?.running, usageBackfillKey, sessions.length]);
+
+  useEffect(() => {
     const timer = window.setInterval(() => setRefreshClockMs(Date.now()), 30_000);
     return () => window.clearInterval(timer);
   }, []);
@@ -3842,10 +3928,22 @@ function ReplaysPanel() {
     }
   };
 
+  const usageEnrichedSessions = useMemo(
+    () =>
+      sessions.map((session) => {
+        const scanData = findSessionScanData(session, scanResultsIndex);
+        return {
+          ...session,
+          projectIdentity: session.projectIdentity ?? scanData?.projectIdentity,
+          ...usageFacetValues(scanData),
+        };
+      }),
+    [scanResultsIndex, sessions],
+  );
   const archivedCount = sessions.filter((s) => archivedSlugs.has(s.slug)).length;
   const unarchivedSessions = showArchived
-    ? sessions
-    : sessions.filter((s) => !archivedSlugs.has(s.slug));
+    ? usageEnrichedSessions
+    : usageEnrichedSessions.filter((s) => !archivedSlugs.has(s.slug));
   const agentRunCount = new Set(
     unarchivedSessions
       .filter((s) => isAgentRunWorkspace(s.project, s.projectIdentity))
@@ -3863,7 +3961,7 @@ function ReplaysPanel() {
   const matchesRepoFilter = (s: SessionSummary) => matchesRepoFacet(s, selectedRepoSet);
   const matchesProjectFilter = (s: SessionSummary) =>
     matchesProjectFacet(s, selectedProjectKey, ALL_PROJECTS, rollupProject);
-  const matchesSearchFilter = (s: SessionSummary) => {
+  const matchesSearchFilter = (s: SessionSummary & ReturnType<typeof usageFacetValues>) => {
     if (!query) return true;
     return [
       s.title,
@@ -3876,26 +3974,67 @@ function ReplaysPanel() {
       s.model,
       s.firstMessage,
       ...(s.messages || []),
+      ...s.tools,
+      ...s.mcpServers,
+      ...s.mcpTools,
+      ...s.skills,
     ]
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(query));
   };
 
   const searchMatchedSessions = visibleSessions.filter(matchesSearchFilter);
-  const providerFacetSessions = searchMatchedSessions.filter(
+  const usageMatchedSessions = applyDashboardFacetFilters(searchMatchedSessions, {
+    selectedProviders: [],
+    selectedRepos: [],
+    selectedProjectKey: ALL_PROJECTS,
+    allProjectsKey: ALL_PROJECTS,
+    rollupProject,
+    selectedTools,
+    selectedMcpServers,
+    selectedMcpTools,
+    selectedSkills,
+  });
+  const providerFacetSessions = usageMatchedSessions.filter(
     (s) => matchesRepoFilter(s) && matchesProjectFilter(s),
   );
-  const repoFacetSessions = searchMatchedSessions.filter(
+  const repoFacetSessions = usageMatchedSessions.filter(
     (s) => matchesProviderFilter(s) && matchesProjectFilter(s),
   );
-  const projectFacetSessions = searchMatchedSessions.filter(
+  const projectFacetSessions = usageMatchedSessions.filter(
     (s) => matchesProviderFilter(s) && matchesRepoFilter(s),
+  );
+  const usageFacetSessions = searchMatchedSessions.filter(
+    (s) => matchesProviderFilter(s) && matchesRepoFilter(s) && matchesProjectFilter(s),
   );
 
   const providerEntries = sortedFacetEntries(
     facetCountMap(providerFacetSessions, (s) => s.provider),
   );
   const repoEntries = sortedFacetEntries(facetCountMap(repoFacetSessions, repoFilterValue));
+  const toolEntries = sortedFacetEntries(
+    multiFacetCountMap(usageFacetSessions, (session) => session.tools),
+  );
+  const mcpServerEntries = sortedFacetEntries(
+    multiFacetCountMap(usageFacetSessions, (session) => session.mcpServers),
+  );
+  const mcpToolEntries = sortedFacetEntries(
+    multiFacetCountMap(usageFacetSessions, (session) => session.mcpTools),
+  );
+  const skillEntries = sortedFacetEntries(
+    multiFacetCountMap(usageFacetSessions, (session) => session.skills),
+  );
+  const showMcpToolFacet = selectedMcpServers.length > 0 || selectedMcpTools.length > 0;
+  const mcpToolFacetLabel = (value: string) => {
+    const server = selectedMcpServers.find((s) => value.startsWith(`${s}/`));
+    return server ? value.slice(server.length + 1) : value;
+  };
+  const scopedMcpToolEntries =
+    selectedMcpServers.length > 0
+      ? mcpToolEntries.filter(([value]) =>
+          selectedMcpServers.some((server) => value.startsWith(`${server}/`)),
+        )
+      : mcpToolEntries;
 
   // Group by project, rolling up Claude agent worktrees under their parent.
   const byProject = new Map<string, SessionSummary[]>();
@@ -3920,12 +4059,20 @@ function ReplaysPanel() {
     selectedProjectKey,
     allProjectsKey: ALL_PROJECTS,
     rollupProject,
+    selectedTools,
+    selectedMcpServers,
+    selectedMcpTools,
+    selectedSkills,
   });
   const refreshAge = lastRefreshedAt ? formatCompactAge(lastRefreshedAt, refreshClockMs) : null;
   const hasActiveFilters =
     Boolean(filter) ||
     selectedProviders.length > 0 ||
     selectedRepos.length > 0 ||
+    selectedTools.length > 0 ||
+    selectedMcpServers.length > 0 ||
+    selectedMcpTools.length > 0 ||
+    selectedSkills.length > 0 ||
     selectedProjectKey !== ALL_PROJECTS;
   const [renderLimit, setRenderLimit] = useState(SESSION_RENDER_BATCH_SIZE);
   const providerFilterKey = selectedProviders.join("\0");
@@ -3934,13 +4081,28 @@ function ReplaysPanel() {
     filter,
     providerFilterKey,
     repoFilterKey,
+    selectedTools.join("\0"),
+    selectedMcpServers.join("\0"),
+    selectedMcpTools.join("\0"),
+    selectedSkills.join("\0"),
     selectedProjectKey,
     showArchived ? "archived" : "active",
     showAgentRuns ? "agent-runs" : "no-agent-runs",
   ].join("\0");
   useEffect(() => {
     setRenderLimit(SESSION_RENDER_BATCH_SIZE);
-  }, [filter, providerFilterKey, repoFilterKey, selectedProjectKey, showArchived, showAgentRuns]);
+  }, [
+    filter,
+    providerFilterKey,
+    repoFilterKey,
+    selectedTools,
+    selectedMcpServers,
+    selectedMcpTools,
+    selectedSkills,
+    selectedProjectKey,
+    showArchived,
+    showAgentRuns,
+  ]);
   const renderedReplays = filtered.slice(0, renderLimit);
   const remainingRenderCount = Math.max(0, filtered.length - renderedReplays.length);
   const showInitialLoading = loading && sessions.length === 0;
@@ -4022,6 +4184,52 @@ function ReplaysPanel() {
             labelFor={repoFilterLabel}
             max={8}
           />
+
+          <FacetSection
+            title="Tool"
+            entries={toolEntries}
+            selected={selectedTools}
+            onToggle={handleToolToggle}
+            labelFor={(value) => value}
+            max={12}
+            variant="pills"
+          />
+
+          <FacetSection
+            title="MCP server"
+            entries={mcpServerEntries}
+            selected={selectedMcpServers}
+            onToggle={handleMcpServerToggle}
+            labelFor={(value) => value}
+            max={12}
+            variant="pills"
+          />
+
+          {showMcpToolFacet && (
+            <FacetSection
+              title="MCP tool"
+              entries={scopedMcpToolEntries}
+              selected={selectedMcpTools}
+              onToggle={handleMcpToolToggle}
+              labelFor={mcpToolFacetLabel}
+              titleFor={(value) => value}
+              max={12}
+              nested
+              variant="pills"
+            />
+          )}
+
+          {skillEntries.length > 0 && (
+            <FacetSection
+              title="Skill"
+              entries={skillEntries}
+              selected={selectedSkills}
+              onToggle={handleSkillToggle}
+              labelFor={(value) => value}
+              max={12}
+              variant="pills"
+            />
+          )}
 
           <div className="space-y-1 border-t border-terminal-border-subtle pt-4">
             <FacetHeader title="Project path" count={projectEntries.length} />
@@ -4223,6 +4431,38 @@ function ReplaysPanel() {
                     onRemove={() => handleRepoToggle(repo)}
                   />
                 ))}
+                {selectedTools.map((tool) => (
+                  <ActiveFilterChip
+                    key={tool}
+                    label="Tool"
+                    value={tool}
+                    onRemove={() => handleToolToggle(tool)}
+                  />
+                ))}
+                {selectedMcpServers.map((server) => (
+                  <ActiveFilterChip
+                    key={server}
+                    label="MCP"
+                    value={server}
+                    onRemove={() => handleMcpServerToggle(server)}
+                  />
+                ))}
+                {selectedMcpTools.map((tool) => (
+                  <ActiveFilterChip
+                    key={tool}
+                    label="MCP tool"
+                    value={tool}
+                    onRemove={() => handleMcpToolToggle(tool)}
+                  />
+                ))}
+                {selectedSkills.map((skill) => (
+                  <ActiveFilterChip
+                    key={skill}
+                    label="Skill"
+                    value={skill}
+                    onRemove={() => handleSkillToggle(skill)}
+                  />
+                ))}
                 {selectedProjectKey !== ALL_PROJECTS && (
                   <ActiveFilterChip
                     label="Project"
@@ -4337,6 +4577,38 @@ function ReplaysPanel() {
                   label="Repo"
                   value={repoFilterLabel(repo)}
                   onRemove={() => handleRepoToggle(repo)}
+                />
+              ))}
+              {selectedTools.map((tool) => (
+                <ActiveFilterChip
+                  key={tool}
+                  label="Tool"
+                  value={tool}
+                  onRemove={() => handleToolToggle(tool)}
+                />
+              ))}
+              {selectedMcpServers.map((server) => (
+                <ActiveFilterChip
+                  key={server}
+                  label="MCP"
+                  value={server}
+                  onRemove={() => handleMcpServerToggle(server)}
+                />
+              ))}
+              {selectedMcpTools.map((tool) => (
+                <ActiveFilterChip
+                  key={tool}
+                  label="MCP tool"
+                  value={tool}
+                  onRemove={() => handleMcpToolToggle(tool)}
+                />
+              ))}
+              {selectedSkills.map((skill) => (
+                <ActiveFilterChip
+                  key={skill}
+                  label="Skill"
+                  value={skill}
+                  onRemove={() => handleSkillToggle(skill)}
                 />
               ))}
               {selectedProjectKey !== ALL_PROJECTS && (
