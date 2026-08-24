@@ -1,7 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { navigateTo } from "../components/dashboard-utils";
+import {
+  navigateTo,
+  normalizeMcpServerName,
+  normalizeMcpToolName,
+} from "../components/dashboard-utils";
+import type { InsightsRange } from "../engine/insights-rollup";
 
 export const ALL_PROJECTS = "__all__";
+export const INSIGHTS_RANGE_PARAM = "insightsRange";
+
+const INSIGHTS_RANGES = new Set<InsightsRange>(["7d", "30d", "90d", "all"]);
 
 export function getMultiFromUrl(param: string): string[] {
   return new URLSearchParams(window.location.search)
@@ -25,6 +33,10 @@ function getShowArchivedFromUrl(): boolean {
 function getShowAgentRunsFromUrl(): boolean {
   return new URLSearchParams(window.location.search).get("agentRuns") === "true";
 }
+export function getInsightsRangeFromUrl(): InsightsRange {
+  const value = new URLSearchParams(window.location.search).get(INSIGHTS_RANGE_PARAM);
+  return INSIGHTS_RANGES.has(value as InsightsRange) ? (value as InsightsRange) : "all";
+}
 
 function getProvidersFromUrl(): string[] {
   return getMultiFromUrl("provider");
@@ -39,11 +51,11 @@ function getToolsFromUrl(): string[] {
 }
 
 function getMcpServersFromUrl(): string[] {
-  return getMultiFromUrl("mcp");
+  return getMultiFromUrl("mcp").map(normalizeMcpServerName);
 }
 
 function getMcpToolsFromUrl(): string[] {
-  return getMultiFromUrl("mcpTool");
+  return getMultiFromUrl("mcpTool").map(normalizeMcpToolName);
 }
 
 function getSkillsFromUrl(): string[] {
@@ -56,6 +68,7 @@ export function usePanelFilters() {
   const [filter, setFilter] = useState(getFilterFromUrl);
   const [showArchived, setShowArchived] = useState(getShowArchivedFromUrl);
   const [showAgentRuns, setShowAgentRuns] = useState(getShowAgentRunsFromUrl);
+  const [insightsRange, setInsightsRange] = useState(getInsightsRangeFromUrl);
   const [selectedProviders, setSelectedProviders] = useState(getProvidersFromUrl);
   const [selectedRepos, setSelectedRepos] = useState(getReposFromUrl);
   const [selectedTools, setSelectedTools] = useState(getToolsFromUrl);
@@ -99,6 +112,7 @@ export function usePanelFilters() {
       setFilter(getFilterFromUrl());
       setShowArchived(getShowArchivedFromUrl());
       setShowAgentRuns(getShowAgentRunsFromUrl());
+      setInsightsRange(getInsightsRangeFromUrl());
       const providers = getProvidersFromUrl();
       const repos = getReposFromUrl();
       const tools = getToolsFromUrl();
@@ -202,6 +216,11 @@ export function usePanelFilters() {
     navigateTo({ agentRuns: next ? "true" : null }, { notify: false });
   };
 
+  const handleClearInsightsRange = () => {
+    setInsightsRange("all");
+    navigateTo({ [INSIGHTS_RANGE_PARAM]: null }, { notify: false });
+  };
+
   const handleClearAllFilters = () => {
     // Archive and agent-run visibility are display modes, not content facets,
     // so Clear all only resets the explorer dimensions shown as active chips.
@@ -219,6 +238,7 @@ export function usePanelFilters() {
     setSelectedMcpServers([]);
     setSelectedMcpTools([]);
     setSelectedSkills([]);
+    setInsightsRange("all");
     navigateTo(
       {
         project: null,
@@ -229,6 +249,7 @@ export function usePanelFilters() {
         mcp: null,
         mcpTool: null,
         skill: null,
+        [INSIGHTS_RANGE_PARAM]: null,
         replay: null,
       },
       { notify: false },
@@ -240,6 +261,7 @@ export function usePanelFilters() {
     filter,
     showArchived,
     showAgentRuns,
+    insightsRange,
     selectedProviders,
     selectedRepos,
     selectedTools,
@@ -258,6 +280,7 @@ export function usePanelFilters() {
     handleSkillToggle,
     handleToggleArchived,
     handleToggleAgentRuns,
+    handleClearInsightsRange,
     handleClearAllFilters,
   };
 }

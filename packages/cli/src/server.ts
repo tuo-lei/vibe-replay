@@ -2238,9 +2238,9 @@ export async function startServer(
     });
   });
 
-  // Compact per-session projection for exact 7d/30d/90d insight totals.
-  // Conversation content and tool inputs/results intentionally never leave the
-  // scanner here; the viewer only needs additive metrics and timestamps.
+  // Compact per-session projection for exact 7d/30d/90d insight totals and
+  // range-scoped secondary breakdowns. Conversation content and tool
+  // inputs/results intentionally never leave the scanner here.
   app.get("/api/insights/rollup", async (c) => {
     if (!scanState.hasSnapshot) {
       return c.json({ error: "No scan results available. Start a scan first." }, 503);
@@ -2253,7 +2253,7 @@ export async function startServer(
       const cachedReplays = await readFileCache<ReplaySummary[]>(replaysCacheKey);
       replays = cachedReplays?.data || [];
     }
-    return c.json(buildInsightsRollup(scanState.results, replays));
+    return c.json(buildInsightsRollup(scanState.results, replays, { includeDetails: true }));
   });
 
   app.get("/api/insights", async (c) => {

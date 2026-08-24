@@ -3,6 +3,7 @@ import { useOutsideClick } from "../hooks/useOutsideClick";
 import { ALL_PROJECTS, usePanelFilters } from "../hooks/usePanelFilters";
 import type { SessionSummary, SessionUsageSummary, SourceSession } from "../types";
 import DashboardHome from "./DashboardHome";
+import { isInInsightsRange, rangeSince as insightsRangeSince } from "../engine/insights-rollup";
 import {
   applyDashboardFacetFilters,
   matchesProjectFacet,
@@ -32,6 +33,8 @@ import {
   navigateToLive,
   nonDefaultBranch,
   normalizeTitleText,
+  normalizeMcpServerName,
+  normalizeMcpToolName,
   parseCachedList,
   projectName,
   providerDisplayName,
@@ -152,6 +155,14 @@ export interface SessionScanData {
   gitBranches?: string[];
   dataSource?: string;
   dataQualityNotes?: string[];
+}
+
+/** Use the scanner's session start when range filtering, with discovery as a fallback. */
+export function getSessionRangeTimestamp(
+  source: SourceSession,
+  scanData?: SessionScanData | null,
+): string | undefined {
+  return scanData?.startTime || source.timestamp;
 }
 
 interface RawJsonItem {
@@ -631,10 +642,10 @@ export function SessionDetailPopup({
             ))}
             {scanData?.mcpServersUsed?.map((server) => (
               <span
-                key={server}
+                key={normalizeMcpServerName(server)}
                 className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-purple-500/10 text-purple-400"
               >
-                {server}
+                {normalizeMcpServerName(server)}
               </span>
             ))}
             {s.replay?.replayOutdated && (
@@ -717,7 +728,10 @@ export function SessionDetailPopup({
                 <InfoRow label="Skills" value={scanData.skillsUsed.join(", ")} />
               )}
               {scanData?.mcpServersUsed && scanData.mcpServersUsed.length > 0 && (
-                <InfoRow label="MCP Servers" value={scanData.mcpServersUsed.join(", ")} />
+                <InfoRow
+                  label="MCP Servers"
+                  value={scanData.mcpServersUsed.map(normalizeMcpServerName).join(", ")}
+                />
               )}
               <InfoRow label="Started" value={`${formatDate(startedAt)} (${timeAgo(startedAt)})`} />
               {scanData?.endTime && <InfoRow label="Ended" value={formatDate(scanData.endTime)} />}
@@ -1562,8 +1576,8 @@ function multiFacetCountMap<T>(
 function usageFacetValues(scanData?: SessionScanData) {
   return {
     tools: Object.keys(scanData?.usageSummary?.tools || {}),
-    mcpServers: Object.keys(scanData?.usageSummary?.mcpServers || {}),
-    mcpTools: Object.keys(scanData?.usageSummary?.mcpTools || {}),
+    mcpServers: Object.keys(scanData?.usageSummary?.mcpServers || {}).map(normalizeMcpServerName),
+    mcpTools: Object.keys(scanData?.usageSummary?.mcpTools || {}).map(normalizeMcpToolName),
     skills: Object.keys(scanData?.usageSummary?.skills || {}),
   };
 }
@@ -1901,6 +1915,7 @@ function SessionsPanel() {
     filter,
     showArchived,
     showAgentRuns,
+    insightsRange,
     selectedProviders,
     selectedRepos,
     selectedTools,
@@ -1919,6 +1934,7 @@ function SessionsPanel() {
     handleSkillToggle,
     handleToggleArchived,
     handleToggleAgentRuns,
+    handleClearInsightsRange,
     handleClearAllFilters,
   } = usePanelFilters();
 
@@ -2200,17 +2216,35 @@ function SessionsPanel() {
     () => (showArchived ? sources : sources.filter((s) => !archivedSlugs.has(s.slug))),
     [archivedSlugs, showArchived, sources],
   );
+  const selectedRangeSince = insightsRangeSince(insightsRange);
+  const rangeUnarchivedSources = useMemo(
+    () =>
+      unarchivedSources.filter((source) =>
+        isInInsightsRange(
+          getSessionRangeTimestamp(source, scanResultsBySlug[source.slug]),
+          selectedRangeSince,
+        ),
+      ),
+    [scanResultsBySlug, selectedRangeSince, unarchivedSources],
+  );
   // One-off scratch workspaces are hidden by default: a machine that reviews
   // PRs or triages alerts on a schedule accumulates far more of them than real
   // projects, and each one is a single session the user never opened by hand.
   const agentRunCount = new Set(
-    unarchivedSources.filter((s) => isAgentRunWorkspace(s.project)).map((s) => s.project),
+    rangeUnarchivedSources.filter((s) => isAgentRunWorkspace(s.project)).map((s) => s.project),
   ).size;
   const visibleSources = useMemo(
     () =>
       showAgentRuns
-        ? unarchivedSources
-        : unarchivedSources.filter((s) => !isAgentRunWorkspace(s.project)),
+        ? rangeUnarchivedSources
+        : rangeUnarchivedSources.filter((s) => !isAgentRunWorkspace(s.project)),
+    [rangeUnarchivedSources, showAgentRuns],
+  );
+  const baseSourceCount = useMemo(
+    () =>
+      showAgentRuns
+        ? unarchivedSources.length
+        : unarchivedSources.filter((s) => !isAgentRunWorkspace(s.project)).length,
     [showAgentRuns, unarchivedSources],
   );
 
@@ -2370,7 +2404,8 @@ function SessionsPanel() {
     selectedMcpServers.length > 0 ||
     selectedMcpTools.length > 0 ||
     selectedSkills.length > 0 ||
-    selectedProjectKey !== ALL_PROJECTS;
+    selectedProjectKey !== ALL_PROJECTS ||
+    insightsRange !== "all";
   const [renderLimit, setRenderLimit] = useState(SESSION_RENDER_BATCH_SIZE);
   const providerFilterKey = selectedProviders.join("\0");
   const repoFilterKey = selectedRepos.join("\0");
@@ -2383,6 +2418,7 @@ function SessionsPanel() {
     selectedMcpTools.join("\0"),
     selectedSkills.join("\0"),
     selectedProjectKey,
+    insightsRange,
     showArchived ? "archived" : "active",
     showAgentRuns ? "agent-runs" : "no-agent-runs",
   ].join("\0");
@@ -2397,6 +2433,7 @@ function SessionsPanel() {
     selectedMcpTools,
     selectedSkills,
     selectedProjectKey,
+    insightsRange,
     showArchived,
     showAgentRuns,
   ]);
@@ -2781,12 +2818,12 @@ function SessionsPanel() {
                   <span className="text-xs font-mono text-terminal-dimmer shrink-0">
                     {hasActiveFilters
                       ? `${filtered.length.toLocaleString()} matching`
-                      : `${visibleSources.length.toLocaleString()} local sessions`}
+                      : `${baseSourceCount.toLocaleString()} local sessions`}
                   </span>
                 </div>
                 <div className="mt-0.5 text-xs font-mono text-terminal-dimmer">
                   {hasActiveFilters
-                    ? `Filtered from ${visibleSources.length.toLocaleString()} local sessions`
+                    ? `Filtered from ${baseSourceCount.toLocaleString()} local sessions`
                     : "Use sidebar facets or search to narrow the list"}
                   {showArchived && " · including archived"}
                 </div>
@@ -2812,6 +2849,13 @@ function SessionsPanel() {
                     label="Search"
                     value={filter}
                     onRemove={() => handleFilterChange("")}
+                  />
+                )}
+                {insightsRange !== "all" && (
+                  <ActiveFilterChip
+                    label="Range"
+                    value={insightsRange}
+                    onRemove={handleClearInsightsRange}
                   />
                 )}
                 {selectedProviders.map((provider) => (
@@ -2923,6 +2967,13 @@ function SessionsPanel() {
                   label="Search"
                   value={filter}
                   onRemove={() => handleFilterChange("")}
+                />
+              )}
+              {insightsRange !== "all" && (
+                <ActiveFilterChip
+                  label="Range"
+                  value={insightsRange}
+                  onRemove={handleClearInsightsRange}
                 />
               )}
               {selectedProviders.map((provider) => (
@@ -4483,6 +4534,7 @@ export default function Dashboard({
         archived: null,
         provider: null,
         repo: null,
+        insightsRange: null,
         replay: null,
       });
     };
@@ -4500,6 +4552,7 @@ export default function Dashboard({
       archived: null,
       provider: null,
       repo: null,
+      insightsRange: null,
       replay: null,
     });
   };

@@ -41,7 +41,8 @@ import { localDayKey, shortenPath } from "./utils.js";
 // v19: the usage index distinguishes sessions that were scanned and found to
 // have no usage from sessions whose rich usage scan was deferred. Cached v18
 // results cannot make that distinction.
-export const SCANNER_VERSION = 19;
+// v20: normalize placeholder MCP server names in cached usage summaries.
+export const SCANNER_VERSION = 20;
 
 // Keep per-invocation detail bounded in the durable insight store. The full
 // event set is still used to compute usageSummary below; only the retained
@@ -135,6 +136,11 @@ function stripCursorServerScope(server: string): string {
   const scopeIndex = server.indexOf("::mcpScope:");
   const base = scopeIndex > 0 ? server.slice(0, scopeIndex) : server;
   return base.startsWith("user-") ? base.slice("user-".length) : base;
+}
+
+function normalizeMcpServerName(server: string): string {
+  const normalized = server.trim();
+  return normalized === "" || normalized === "-" ? "Unknown" : normalized;
 }
 
 /** Cursor tools that manage MCP itself rather than call a server. */
@@ -267,7 +273,9 @@ function toolUsageEvent(
         attribution: "explicit" as const,
       }
     : parseMcpUsage(name, options.input);
-  const serverName = mcp && (options.mcpServerNames?.[mcp.server] || mcp.server);
+  const serverName = mcp
+    ? normalizeMcpServerName(options.mcpServerNames?.[mcp.server] || mcp.server)
+    : undefined;
   return {
     kind: "tool",
     name,
@@ -288,7 +296,7 @@ function summarizeUsage(
   mcpServersUsed?: Iterable<string>,
 ): SessionUsageSummary | undefined {
   const skills = skillsUsed ? [...skillsUsed] : [];
-  const mcpServers = mcpServersUsed ? [...mcpServersUsed] : [];
+  const mcpServers = mcpServersUsed ? [...mcpServersUsed].map(normalizeMcpServerName) : [];
   if (events.length === 0 && skills.length === 0 && mcpServers.length === 0) return undefined;
   const summary: SessionUsageSummary = {
     tools: {},
@@ -821,7 +829,9 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
       if (!model && obj.message.model && obj.message.model !== "<synthetic>") {
         model = obj.message.model;
       }
-      if (obj.attributionMcpServer) mcpServersUsed.add(obj.attributionMcpServer);
+      if (obj.attributionMcpServer) {
+        mcpServersUsed.add(normalizeMcpServerName(obj.attributionMcpServer));
+      }
       if (obj.attributionSkill) skillsUsed.add(obj.attributionSkill);
 
       // Tool results carry the outcome of an earlier tool_use block, which is
@@ -1355,7 +1365,9 @@ function buildScanResultFromParsed(
     });
   }
   const derivedMcpServers = new Set(
-    (parsed.mcpServersUsed || []).map((server) => parsed.mcpServerNames?.[server] || server),
+    (parsed.mcpServersUsed || []).map((server) =>
+      normalizeMcpServerName(parsed.mcpServerNames?.[server] || server),
+    ),
   );
   for (const event of usageEvents) {
     if (event.mcpServer) derivedMcpServers.add(event.mcpServer);

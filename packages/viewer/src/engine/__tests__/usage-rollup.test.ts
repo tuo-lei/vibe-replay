@@ -52,6 +52,30 @@ describe("rollupUsage", () => {
     expect(rollup.mcpTools).toEqual([{ name: "sourcegraph/search", calls: 2, sessions: 1 }]);
   });
 
+  it("normalizes placeholder MCP names from cached summaries", () => {
+    const rollup = rollupUsage([
+      makeSession("unknown", {
+        mcpServers: { "-": 2 },
+        mcpTools: { "-/search": 2 },
+      }),
+    ]);
+
+    expect(rollup.mcpServers).toEqual([{ name: "Unknown", calls: 2, sessions: 1 }]);
+    expect(rollup.mcpTools).toEqual([{ name: "Unknown/search", calls: 2, sessions: 1 }]);
+  });
+
+  it("counts a session once when legacy and normalized MCP names merge", () => {
+    const rollup = rollupUsage([
+      makeSession("mixed-names", {
+        mcpServers: { "-": 2, Unknown: 3 },
+        mcpTools: { "-/search": 2, "Unknown/search": 3 },
+      }),
+    ]);
+
+    expect(rollup.mcpServers).toEqual([{ name: "Unknown", calls: 5, sessions: 1 }]);
+    expect(rollup.mcpTools).toEqual([{ name: "Unknown/search", calls: 5, sessions: 1 }]);
+  });
+
   it("keeps only sessions inside the requested range", () => {
     const rollup = rollupUsage(
       [

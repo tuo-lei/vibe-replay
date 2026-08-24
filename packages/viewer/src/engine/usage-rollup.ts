@@ -1,4 +1,5 @@
 import type { SessionUsageSummary } from "@vibe-replay/types";
+import { normalizeMcpServerName, normalizeMcpToolName } from "../components/dashboard-utils";
 
 /** One scanned session's usage, as served by `/api/usage/rollup`. */
 export interface UsageRollupSession {
@@ -35,15 +36,24 @@ interface Accumulator {
   sessions: number;
 }
 
-function add(into: Map<string, Accumulator>, counts: Record<string, number>): void {
+function add(
+  into: Map<string, Accumulator>,
+  counts: Record<string, number>,
+  normalizeName: (name: string) => string = (name) => name,
+): void {
+  const normalizedCounts = new Map<string, number>();
   for (const [name, calls] of Object.entries(counts)) {
     if (calls <= 0) continue;
-    const entry = into.get(name);
+    const normalizedName = normalizeName(name);
+    normalizedCounts.set(normalizedName, (normalizedCounts.get(normalizedName) || 0) + calls);
+  }
+  for (const [normalizedName, calls] of normalizedCounts) {
+    const entry = into.get(normalizedName);
     if (entry) {
       entry.calls += calls;
       entry.sessions += 1;
     } else {
-      into.set(name, { calls, sessions: 1 });
+      into.set(normalizedName, { calls, sessions: 1 });
     }
   }
 }
@@ -110,8 +120,8 @@ export function rollupUsage(
     successCount += usage.successCount;
     errorCount += usage.errorCount;
     add(tools, usage.tools);
-    add(mcpServers, usage.mcpServers);
-    add(mcpTools, usage.mcpTools);
+    add(mcpServers, usage.mcpServers, normalizeMcpServerName);
+    add(mcpTools, usage.mcpTools, normalizeMcpToolName);
     add(skills, usage.skills);
   }
 
