@@ -46,7 +46,8 @@ import { localDayKey, shortenPath } from "./utils.js";
 // v20: normalize placeholder MCP server names in cached usage summaries.
 // v21: persist canonical project identity alongside scan results.
 // v22: refine Cursor SDK context-worktree classification and fallback keys.
-export const SCANNER_VERSION = 22;
+// v23: disambiguate Cursor SDK workflow display labels.
+export const SCANNER_VERSION = 23;
 
 // Keep per-invocation detail bounded in the durable insight store. The full
 // event set is still used to compute usageSummary below; only the retained

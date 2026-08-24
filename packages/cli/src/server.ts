@@ -597,13 +597,15 @@ export async function startServer(
   // v5 → v6: source records carry canonical project identity and corrected
   // Cursor SDK worktree paths.
   // v6 → v7: refine Cursor SDK context-worktree identity grouping.
-  const sourcesCacheKey = `dashboard-sources-v7-${cacheKeySuffix}`;
+  // v7 → v8: disambiguate Cursor SDK workflow display labels.
+  const sourcesCacheKey = `dashboard-sources-v8-${cacheKeySuffix}`;
   const replaysCacheKey = `dashboard-replays-v1-${cacheKeySuffix}`;
   // Keyed by scanner version too: a bump changes the shape of what a scan
   // extracts, so serving the previous run's results would show stale facets
   // until the next scan happened to finish.
   const scanResultsCacheKey = `dashboard-scan-results-v${SCANNER_VERSION}-${cacheKeySuffix}`;
-  const insightsCacheKey = `dashboard-insights-v4-${cacheKeySuffix}`;
+  // v4 → v5: invalidate persisted project labels after workflow disambiguation.
+  const insightsCacheKey = `dashboard-insights-v5-${cacheKeySuffix}`;
   const readSourcesCatalogCache = async (): Promise<NormalizedSourceSessionCatalogCache | null> =>
     normalizeSourceSessionCatalogCache(
       await readFileCache<SourceSessionCatalogCache | CachedSourceRecord[]>(sourcesCacheKey),
