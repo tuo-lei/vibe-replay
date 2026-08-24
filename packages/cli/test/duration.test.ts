@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { estimateActiveDuration } from "@vibe-replay/provider-core/duration";
+import {
+  buildTurnDurationIntervals,
+  estimateActiveDuration,
+  sumDurationIntervals,
+} from "@vibe-replay/provider-core/duration";
 
 describe("estimateActiveDuration", () => {
   it("returns undefined for empty array", () => {
@@ -75,5 +79,63 @@ describe("estimateActiveDuration", () => {
     expect(result).toBe(31 * 60 * 1000);
     // NOT 52 hours of wall clock time
     expect(result).toBeLessThan(60 * 60 * 1000); // under 1 hour
+  });
+});
+
+describe("buildTurnDurationIntervals", () => {
+  it("uses the last assistant event as the turn end", () => {
+    expect(
+      buildTurnDurationIntervals([
+        { role: "user", startMs: 0 },
+        { role: "assistant", endMs: 1_000 },
+        { role: "assistant", endMs: 4_000 },
+      ]),
+    ).toEqual([{ startMs: 0, endMs: 4_000 }]);
+  });
+
+  it("keeps missing or incomplete turns unavailable", () => {
+    expect(
+      buildTurnDurationIntervals([
+        { role: "user" },
+        { role: "assistant", endMs: 1_000 },
+        { role: "user", startMs: 2_000 },
+      ]),
+    ).toEqual([undefined, undefined]);
+  });
+
+  it("builds separate intervals for multiple user prompts", () => {
+    expect(
+      buildTurnDurationIntervals([
+        { role: "user", startMs: 0 },
+        { role: "assistant", endMs: 10_000 },
+        { role: "user", startMs: 5_000 },
+        { role: "assistant", endMs: 15_000 },
+      ]),
+    ).toEqual([
+      { startMs: 0, endMs: 10_000 },
+      { startMs: 5_000, endMs: 15_000 },
+    ]);
+  });
+});
+
+describe("sumDurationIntervals", () => {
+  it("merges overlapping intervals before summing", () => {
+    expect(
+      sumDurationIntervals([
+        { startMs: 0, endMs: 10_000 },
+        { startMs: 5_000, endMs: 15_000 },
+        { startMs: 20_000, endMs: 25_000 },
+      ]),
+    ).toBe(20_000);
+  });
+
+  it("ignores invalid and missing intervals", () => {
+    expect(
+      sumDurationIntervals([
+        undefined,
+        { startMs: 1_000, endMs: 1_000 },
+        { startMs: Number.NaN, endMs: 2_000 },
+      ]),
+    ).toBeUndefined();
   });
 });

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseCursorSession } from "../src/cursor/parser.js";
+import { extractCursorTimestamp } from "../src/cursor/sanitize.js";
 import { transformToReplay } from "./helpers/transform.js";
 import type { ContentBlock } from "@vibe-replay/provider-contract";
 
@@ -97,6 +98,15 @@ describe("Cursor parser", () => {
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }
+  });
+
+  it("rejects malformed Cursor timestamp wrappers", () => {
+    expect(
+      extractCursorTimestamp("<timestamp>Thursday, Feb 31, 2026, 4:43 PM (UTC-7)</timestamp>"),
+    ).toBeUndefined();
+    expect(
+      extractCursorTimestamp("<timestamp>Tuesday, Apr 28, 2026, 4:43 PM (UTC-99)</timestamp>"),
+    ).toBeUndefined();
   });
 
   it("extracts <image_files> into _user_images and removes image markers", async () => {
@@ -322,6 +332,86 @@ describe("Cursor parser — tool outputs", () => {
       expect(toolScenes).toHaveLength(1);
       expect(toolScenes[0].durationMs).toBe(2500);
       expect(toolScenes[0].resultTokens).toBeGreaterThan(0);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("derives turn and session duration from user and assistant timestamps", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-cursor-turn-duration-"));
+    const jsonlPath = join(tempDir, "turn-duration.jsonl");
+    await writeFile(
+      jsonlPath,
+      [
+        JSON.stringify({
+          role: "user",
+          message: {
+            content: [
+              {
+                type: "text",
+                text: "<timestamp>Thursday, Jan 1, 2026, 12:00 AM (UTC-7)</timestamp>\n<user_query>\nFirst prompt\n</user_query>",
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          role: "assistant",
+          timestamp: "2026-01-01T07:00:01.000Z",
+          message: {
+            content: [
+              {
+                type: "tool_use",
+                id: "toolu_duration",
+                name: "run_terminal_cmd",
+                input: { command: "pnpm test" },
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          role: "user",
+          timestamp: "2026-01-01T07:00:04.000Z",
+          message: {
+            content: [
+              { type: "tool_result", tool_use_id: "toolu_duration", content: "tests passed" },
+            ],
+          },
+        }),
+        JSON.stringify({
+          role: "assistant",
+          timestamp: "2026-01-01T07:00:07.000Z",
+          message: { content: [{ type: "text", text: "The tests pass." }] },
+        }),
+        JSON.stringify({
+          role: "user",
+          message: {
+            content: [
+              {
+                type: "text",
+                text: "<timestamp>Thursday, Jan 1, 2026, 12:00:08 AM (UTC-7)</timestamp>\n<user_query>\nSecond prompt\n</user_query>",
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          role: "assistant",
+          timestamp: "2026-01-01T07:00:10.000Z",
+          message: { content: [{ type: "text", text: "Done." }] },
+        }),
+      ].join("\n"),
+      "utf-8",
+    );
+
+    try {
+      const parsed = await parseCursorSession(jsonlPath);
+
+      expect(parsed.startTime).toBe("2026-01-01T07:00:00.000Z");
+      expect(parsed.endTime).toBe("2026-01-01T07:00:10.000Z");
+      expect(parsed.totalDurationMs).toBe(9_000);
+      expect(parsed.turnStats).toEqual([
+        { turnIndex: 0, durationMs: 7_000 },
+        { turnIndex: 1, durationMs: 2_000 },
+      ]);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

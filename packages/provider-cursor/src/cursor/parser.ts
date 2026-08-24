@@ -9,12 +9,17 @@ import {
   type SessionInfo,
 } from "@vibe-replay/provider-contract";
 import type { DataSourceInfo, ProviderParseResult } from "@vibe-replay/provider-contract";
-import type { Scene, SubAgent } from "@vibe-replay/types";
+import type { Scene, SubAgent, TurnStat } from "@vibe-replay/types";
 import {
   sanitizeCursorAssistantText,
+  extractCursorTimestamp,
   sanitizeCursorReasoningText,
   sanitizeCursorUserText,
 } from "./sanitize.js";
+import {
+  buildTurnDurationIntervals,
+  sumDurationIntervals,
+} from "@vibe-replay/provider-core/duration";
 import {
   applySdkEnrichmentToTurns,
   findSdkAgentById,
@@ -99,6 +104,7 @@ async function parseCursorSessionWithDependencies(
       if (transcriptPaths.length > 0) {
         const thinkingBefore = countThinkingBlocks(sqliteResult.turns);
         const userImagesBefore = countUserImages(sqliteResult.turns);
+        const timestampsBefore = countTurnTimestamps(sqliteResult.turns);
         const jsonlThinking = await parseCursorJsonl(
           transcriptPaths,
           [],
@@ -115,13 +121,16 @@ async function parseCursorSessionWithDependencies(
           sqliteResult.turns,
           jsonlThinking.turns,
         );
+        mergeJsonlTimingIntoCursorResult(sqliteResult, jsonlThinking);
         const thinkingAfter = countThinkingBlocks(sqliteResult.turns);
         const userImagesAfter = countUserImages(sqliteResult.turns);
+        const timestampsAfter = countTurnTimestamps(sqliteResult.turns);
         const supplementedThinkingBlocks = Math.max(0, thinkingAfter - thinkingBefore);
         const supplementedUserImages = Math.max(0, userImagesAfter - userImagesBefore);
+        const supplementedTimestamps = Math.max(0, timestampsAfter - timestampsBefore);
         sqliteResult.dataSourceInfo = withSupplement(
           sqliteResult.dataSourceInfo || defaultDataSourceInfo(sqliteResult.dataSource),
-          `cursor/projects/agent-transcripts/*.jsonl (thinking +${supplementedThinkingBlocks}, images +${supplementedUserImages})`,
+          `cursor/projects/agent-transcripts/*.jsonl (thinking +${supplementedThinkingBlocks}, images +${supplementedUserImages}${supplementedTimestamps > 0 ? `, timestamps +${supplementedTimestamps}` : ""})`,
         );
       }
       await attachCursorSubagents(sqliteResult, transcriptPaths, deps);
@@ -194,8 +203,13 @@ async function parseCursorSessionWithDependencies(
       if (enrichment.finishedAt && !jsonlResult.endTime) {
         jsonlResult.endTime = enrichment.finishedAt;
       }
-      if (enrichment.totalDurationMs && !jsonlResult.totalDurationMs) {
+      if (enrichment.totalDurationMs !== undefined) {
         jsonlResult.totalDurationMs = enrichment.totalDurationMs;
+        jsonlResult.turnStats = mergeSdkTurnStats(jsonlResult.turnStats, enrichment.turnStats);
+        jsonlResult.dataSourceInfo = withSupplement(
+          jsonlResult.dataSourceInfo || defaultDataSourceInfo(jsonlResult.dataSource),
+          "cursor-sdk index.db (union of run intervals)",
+        );
       }
       // SDK transcripts carry no usage of their own, so the index.db totals are
       // the only token accounting available for these sessions.
@@ -330,6 +344,67 @@ function withNote(info: DataSourceInfo | undefined, note: string): DataSourceInf
   return { ...info, notes };
 }
 
+interface CursorTurnTiming {
+  startTime?: string;
+  endTime?: string;
+  totalDurationMs?: number;
+  turnStats?: TurnStat[];
+}
+
+function buildCursorTurnTiming(turns: ParsedTurn[]): CursorTurnTiming {
+  const events = turns.map((turn) => ({
+    role: turn.role,
+    startMs: turn.role === "user" ? timestampMs(turn.timestamp) : undefined,
+    endMs: turn.role === "assistant" ? assistantTurnEndMs(turn) : undefined,
+  }));
+  const intervals = buildTurnDurationIntervals(events);
+  const hasDuration = intervals.some((interval) => interval !== undefined);
+  const turnStats = hasDuration
+    ? intervals.map((interval, turnIndex) => ({
+        turnIndex,
+        ...(interval ? { durationMs: interval.endMs - interval.startMs } : {}),
+      }))
+    : undefined;
+
+  const userTimestamps = turns
+    .filter((turn) => turn.role === "user")
+    .map((turn) => timestampMs(turn.timestamp))
+    .filter((timestamp): timestamp is number => timestamp !== undefined);
+  const endTimestamps = turns
+    .filter((turn) => turn.role === "assistant")
+    .map(assistantTurnEndMs)
+    .filter((timestamp): timestamp is number => timestamp !== undefined);
+
+  return {
+    ...(userTimestamps.length > 0
+      ? { startTime: new Date(Math.min(...userTimestamps)).toISOString() }
+      : {}),
+    ...(endTimestamps.length > 0
+      ? { endTime: new Date(Math.max(...endTimestamps)).toISOString() }
+      : {}),
+    ...(hasDuration ? { totalDurationMs: sumDurationIntervals(intervals) } : {}),
+    ...(turnStats ? { turnStats } : {}),
+  };
+}
+
+function assistantTurnEndMs(turn: ParsedTurn): number | undefined {
+  let latest = timestampMs(turn.timestamp);
+  for (const block of turn.blocks) {
+    if (block.type !== "tool_use") continue;
+    const resultTimestamp = timestampMs(block._resultTimestamp);
+    if (resultTimestamp !== undefined && (latest === undefined || resultTimestamp > latest)) {
+      latest = resultTimestamp;
+    }
+  }
+  return latest;
+}
+
+function timestampMs(timestamp: string | undefined): number | undefined {
+  if (!timestamp) return undefined;
+  const value = Date.parse(timestamp);
+  return Number.isFinite(value) ? value : undefined;
+}
+
 async function parseCursorJsonl(
   transcriptPaths: string[],
   explicitToolPaths: string[],
@@ -382,19 +457,23 @@ async function parseCursorJsonl(
       const textParts: string[] = [];
       const userImages: string[] = [];
       const imageFilePaths = new Set<string>();
+      let recordTimestamp = typeof obj.timestamp === "string" ? obj.timestamp : undefined;
       for (const block of contentBlocks) {
         if (block.type === "tool_result") {
           const toolUseId = typeof block.tool_use_id === "string" ? block.tool_use_id : "";
           if (toolUseId) {
             toolResults.set(toolUseId, {
               result: extractToolResultText(block),
-              timestamp: typeof obj.timestamp === "string" ? obj.timestamp : undefined,
+              timestamp: recordTimestamp,
             });
             if (block.is_error) toolErrors.set(toolUseId, true);
             const images = extractToolResultImages(block);
             if (images.length > 0) toolImages.set(toolUseId, images);
           }
         } else if (block.type === "text" && block.text) {
+          if (role === "user" && !recordTimestamp && typeof block.text === "string") {
+            recordTimestamp = extractCursorTimestamp(block.text);
+          }
           let text = stripUserQueryWrapper(block.text);
           if (role === "user" && deps.isSystemContextText(text)) continue;
           const extracted = extractImageFilePathsFromText(text);
@@ -437,7 +516,7 @@ async function parseCursorJsonl(
         if (blocks.length > 0) {
           allTurns.push({
             role,
-            ...(typeof obj.timestamp === "string" ? { timestamp: obj.timestamp } : {}),
+            ...(recordTimestamp ? { timestamp: recordTimestamp } : {}),
             blocks,
           });
         }
@@ -493,7 +572,7 @@ async function parseCursorJsonl(
       if (blocks.length > 0) {
         allTurns.push({
           role,
-          ...(typeof obj.timestamp === "string" ? { timestamp: obj.timestamp } : {}),
+          ...(recordTimestamp ? { timestamp: recordTimestamp } : {}),
           blocks,
         });
       }
@@ -509,6 +588,7 @@ async function parseCursorJsonl(
   const toolEvents = await loadToolEvents(toolPaths);
   attachToolResults(allTurns, toolResults, toolErrors, toolImages, deps);
   attachToolEvents(allTurns, toolEvents, deps);
+  const timing = buildCursorTurnTiming(allTurns);
 
   // Derive slug from session ID
   const slug = sessionId.slice(0, 8);
@@ -519,12 +599,22 @@ async function parseCursorJsonl(
   const firstText = firstBlock?.type === "text" ? firstBlock.text?.slice(0, 80) : undefined;
 
   const hasToolData = toolPaths.length > 0;
+  const dataSourceNotes: string[] = [];
+  if (duplicateTranscriptRecords > 0) {
+    dataSourceNotes.push(
+      `${duplicateTranscriptRecords} duplicate Cursor transcript records were omitted.`,
+    );
+  }
   return {
     sessionId,
     slug,
     title: firstText,
     cwd: "",
     turns: allTurns,
+    ...(timing.startTime ? { startTime: timing.startTime } : {}),
+    ...(timing.endTime ? { endTime: timing.endTime } : {}),
+    ...(timing.totalDurationMs !== undefined ? { totalDurationMs: timing.totalDurationMs } : {}),
+    ...(timing.turnStats ? { turnStats: timing.turnStats } : {}),
     dataSource: hasToolData ? "jsonl+tools" : "jsonl",
     dataSourceInfo: {
       primary: hasToolData ? "jsonl+tools" : "jsonl",
@@ -532,13 +622,7 @@ async function parseCursorJsonl(
         "cursor/projects/agent-transcripts/*.jsonl",
         ...(hasToolData ? ["cursor/projects/agent-tools/*.txt"] : []),
       ],
-      ...(duplicateTranscriptRecords > 0
-        ? {
-            notes: [
-              `${duplicateTranscriptRecords} duplicate Cursor transcript records were omitted.`,
-            ],
-          }
-        : {}),
+      ...(dataSourceNotes.length > 0 ? { notes: dataSourceNotes } : {}),
     },
     parseWarnings: parseWarnings.length > 0 ? parseWarnings : undefined,
   };
@@ -1009,6 +1093,105 @@ function countUserImages(turns: ParsedTurn[]): number {
   return count;
 }
 
+function countTurnTimestamps(turns: ParsedTurn[]): number {
+  return turns.filter((turn) => typeof turn.timestamp === "string" && turn.timestamp.length > 0)
+    .length;
+}
+
+function mergeJsonlTimingIntoCursorResult(
+  primary: ProviderParseResult,
+  enrichment: ProviderParseResult,
+): void {
+  const enrichmentStartMs = timestampMs(enrichment.startTime);
+  const primaryStartMs = timestampMs(primary.startTime);
+  if (
+    enrichment.startTime &&
+    enrichmentStartMs !== undefined &&
+    (primaryStartMs === undefined || enrichmentStartMs < primaryStartMs)
+  ) {
+    primary.startTime = enrichment.startTime;
+  }
+  const enrichmentEndMs = timestampMs(enrichment.endTime);
+  const primaryEndMs = timestampMs(primary.endTime);
+  if (
+    enrichment.endTime &&
+    enrichmentEndMs !== undefined &&
+    (primaryEndMs === undefined || enrichmentEndMs > primaryEndMs)
+  ) {
+    primary.endTime = enrichment.endTime;
+  }
+  if (enrichment.totalDurationMs === undefined) return;
+
+  const enrichmentDurations = new Map(
+    (enrichment.turnStats || [])
+      .filter((stat): stat is typeof stat & { durationMs: number } => stat.durationMs !== undefined)
+      .map((stat) => [stat.turnIndex, stat.durationMs]),
+  );
+  const primaryStats = primary.turnStats || [];
+  const mergedStats = [...primaryStats];
+  for (const stat of enrichment.turnStats || []) {
+    const current = mergedStats.find((candidate) => candidate.turnIndex === stat.turnIndex);
+    if (!current) {
+      mergedStats.push(stat);
+      continue;
+    }
+    const durationMs = enrichmentDurations.get(stat.turnIndex);
+    if (durationMs !== undefined) current.durationMs = durationMs;
+  }
+  mergedStats.sort((a, b) => a.turnIndex - b.turnIndex);
+  if (mergedStats.length > 0) primary.turnStats = mergedStats;
+
+  const fallbackDurationMs =
+    primaryStats.length > 0
+      ? primaryStats.reduce(
+          (sum, stat) =>
+            sum + (enrichmentDurations.has(stat.turnIndex) ? 0 : (stat.durationMs ?? 0)),
+          0,
+        )
+      : (primary.totalDurationMs ?? 0);
+  const mergedDurationMs = enrichment.totalDurationMs + fallbackDurationMs;
+  primary.totalDurationMs = mergedDurationMs > 0 ? mergedDurationMs : undefined;
+  primary.dataSourceInfo = replaceDurationNote(
+    primary.dataSourceInfo,
+    "Per-turn duration is inferred from Cursor transcript timestamps (user prompt to final assistant or tool result).",
+  );
+}
+
+function mergeSdkTurnStats(
+  primary: TurnStat[] | undefined,
+  sdk: TurnStat[] | undefined,
+): TurnStat[] | undefined {
+  if (!primary?.length) return sdk;
+  if (!sdk?.length) return primary;
+
+  const byIndex = new Map(primary.map((stat) => [stat.turnIndex, { ...stat }]));
+  for (const stat of sdk) {
+    const current = byIndex.get(stat.turnIndex);
+    byIndex.set(stat.turnIndex, {
+      ...current,
+      ...stat,
+      ...(current?.model && !stat.model ? { model: current.model } : {}),
+      ...(current?.tokenUsage && !stat.tokenUsage ? { tokenUsage: current.tokenUsage } : {}),
+      ...(current?.contextTokens !== undefined && stat.contextTokens === undefined
+        ? { contextTokens: current.contextTokens }
+        : {}),
+    });
+  }
+  return [...byIndex.values()].sort((a, b) => a.turnIndex - b.turnIndex);
+}
+
+function replaceDurationNote(
+  info: DataSourceInfo | undefined,
+  note: string,
+): DataSourceInfo | undefined {
+  if (!info) return undefined;
+  const notes = (info.notes || []).filter(
+    (existing) => !/duration/i.test(existing) || existing === note,
+  );
+  if (!notes.includes(note)) notes.push(note);
+  return { ...info, notes };
+}
+
 function extractToolResultText(block: Extract<ContentBlock, { type: "tool_result" }>): string {
   if (typeof block.content === "string") return block.content;
   if (!Array.isArray(block.content)) return "";
@@ -1051,6 +1234,7 @@ function attachToolResults(
         block.input = deps.mapToolArgs(block.name, block.input, result.result);
         const durationMs = durationBetween(turn.timestamp, result.timestamp);
         if (durationMs !== undefined) block._durationMs = durationMs;
+        if (result.timestamp) block._resultTimestamp = result.timestamp;
       }
       const images = toolImages.get(block.id);
       if (images?.length) block._images = images;
@@ -1142,11 +1326,41 @@ function mergeJsonlUserImagesIntoCursorTurns(
   return merged;
 }
 
+function mergeJsonlTimestampsIntoCursorTurns(
+  primaryTurns: ParsedTurn[],
+  jsonlTurns: ParsedTurn[],
+): ParsedTurn[] {
+  if (primaryTurns.length === 0 || jsonlTurns.length === 0) return primaryTurns;
+
+  const merged = primaryTurns.map((turn) => ({
+    ...turn,
+    blocks: [...turn.blocks],
+  }));
+
+  for (const role of ["user", "assistant"] as const) {
+    const primaryIndices = merged
+      .map((turn, index) => ({ turn, index }))
+      .filter(({ turn }) => turn.role === role)
+      .map(({ index }) => index);
+    const jsonlTurnsForRole = jsonlTurns.filter((turn) => turn.role === role);
+    const paired = Math.min(primaryIndices.length, jsonlTurnsForRole.length);
+
+    for (let i = 0; i < paired; i++) {
+      const target = merged[primaryIndices[i]];
+      const candidate = jsonlTurnsForRole[i];
+      if (!target.timestamp && candidate.timestamp) target.timestamp = candidate.timestamp;
+    }
+  }
+
+  return merged;
+}
+
 export function mergeJsonlSupplementsIntoCursorTurns(
   primaryTurns: ParsedTurn[],
   jsonlTurns: ParsedTurn[],
 ): ParsedTurn[] {
-  const withThinking = mergeJsonlThinkingIntoCursorTurns(primaryTurns, jsonlTurns);
+  const withTimestamps = mergeJsonlTimestampsIntoCursorTurns(primaryTurns, jsonlTurns);
+  const withThinking = mergeJsonlThinkingIntoCursorTurns(withTimestamps, jsonlTurns);
   return mergeJsonlUserImagesIntoCursorTurns(withThinking, jsonlTurns);
 }
 
@@ -1321,6 +1535,7 @@ function attachToolEvents(
       ...tool.input,
     };
     marker.block._result = tool.result;
+    if (tool.timestamp) marker.block._resultTimestamp = tool.timestamp;
     const durationMs = durationBetween(marker.turn.timestamp, tool.timestamp);
     if (durationMs !== undefined) marker.block._durationMs = durationMs;
     marker.block._isPendingMarker = undefined;
@@ -1354,6 +1569,7 @@ function attachToolEvents(
     // sidecar result when the later call is still unresolved.
     if (typeof block._result === "string") continue;
     block._result = tool.result;
+    if (tool.timestamp) block._resultTimestamp = tool.timestamp;
     block.input = { ...block.input, ...tool.input };
     try {
       block.input = deps.mapToolArgs(block.name, block.input, tool.result);
@@ -1395,6 +1611,7 @@ function toToolUseBlock(tool: ToolEvent): ContentBlock {
     name: tool.name,
     input: tool.input,
     _result: tool.result,
+    ...(tool.timestamp ? { _resultTimestamp: tool.timestamp } : {}),
   };
 }
 

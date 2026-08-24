@@ -4,7 +4,9 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { sumDurationIntervals, toDurationInterval } from "@vibe-replay/provider-core/duration";
 import type { ContentBlock, ParsedTurn, TokenUsage } from "@vibe-replay/provider-contract";
+import type { TurnStat } from "@vibe-replay/types";
 import { mapCursorToolName, mapToolArgs, sqlJsRows, sqlString } from "./sqlite-reader.js";
 
 /**
@@ -100,8 +102,10 @@ export interface SdkAgentEnrichment {
   startedAt?: string;
   /** Latest finished_at across runs. */
   finishedAt?: string;
-  /** Sum of per-run durations (ms). */
+  /** Union of per-run durations (ms), so parallel runs are counted once. */
   totalDurationMs?: number;
+  /** Per-turn duration union, indexed from the SDK run's 1-based turn number. */
+  turnStats?: TurnStat[];
   /** Most-recent model seen across runs. */
   latestModel?: string;
   /** Sum of per-run token usage. Absent on older SDK schemas. */
@@ -310,11 +314,11 @@ function finalizeEnrichment(
 ): SdkAgentEnrichment {
   let startedAt: string | undefined;
   let finishedAt: string | undefined;
-  let totalDurationMs = 0;
-  let totalDurationSeen = false;
   let latestModel: string | undefined;
   let tokenUsage: TokenUsage | undefined;
   const tokenUsageByModel: Record<string, TokenUsage> = {};
+  const runIntervals: Array<ReturnType<typeof toDurationInterval>> = [];
+  const intervalsByTurn = new Map<number, NonNullable<ReturnType<typeof toDurationInterval>>[]>();
 
   for (const run of runs) {
     if (run.tokenUsage) {
@@ -340,16 +344,29 @@ function finalizeEnrichment(
     }
     if (run.startedAt && (!startedAt || run.startedAt < startedAt)) startedAt = run.startedAt;
     if (run.finishedAt && (!finishedAt || run.finishedAt > finishedAt)) finishedAt = run.finishedAt;
-    if (run.startedAt && run.finishedAt) {
-      const startMs = Date.parse(run.startedAt);
-      const endMs = Date.parse(run.finishedAt);
-      if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs) {
-        totalDurationMs += endMs - startMs;
-        totalDurationSeen = true;
+    const interval = toDurationInterval(
+      run.startedAt ? eventTimeMs(run.startedAt) : undefined,
+      run.finishedAt ? eventTimeMs(run.finishedAt) : undefined,
+    );
+    if (interval) {
+      runIntervals.push(interval);
+      if (Number.isFinite(run.turnNumber)) {
+        const turnIndex = Math.max(0, Math.floor(run.turnNumber) - 1);
+        const turnIntervals = intervalsByTurn.get(turnIndex) || [];
+        turnIntervals.push(interval);
+        intervalsByTurn.set(turnIndex, turnIntervals);
       }
     }
     if (run.model) latestModel = run.model;
   }
+
+  const turnStats = [...intervalsByTurn.entries()]
+    .sort(([a], [b]) => a - b)
+    .flatMap(([turnIndex, intervals]) => {
+      const durationMs = sumDurationIntervals(intervals);
+      return durationMs === undefined ? [] : [{ turnIndex, durationMs }];
+    });
+  const totalDurationMs = sumDurationIntervals(runIntervals);
 
   return {
     agent,
@@ -357,7 +374,8 @@ function finalizeEnrichment(
     toolCallsByRun,
     startedAt,
     finishedAt,
-    totalDurationMs: totalDurationSeen ? totalDurationMs : undefined,
+    ...(totalDurationMs !== undefined ? { totalDurationMs } : {}),
+    ...(turnStats.length > 0 ? { turnStats } : {}),
     latestModel,
     ...(tokenUsage ? { tokenUsage } : {}),
     ...(Object.keys(tokenUsageByModel).length > 0 ? { tokenUsageByModel } : {}),

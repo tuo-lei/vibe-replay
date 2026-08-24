@@ -515,6 +515,58 @@ describe("cursor sqlite metrics helpers", () => {
     expect(metrics.usedWallClock).toBe(false);
   });
 
+  it("unions overlapping wall-clock turn intervals", () => {
+    const metrics = __testables.buildGlobalStateMetrics(
+      [
+        {
+          turn: {
+            role: "user",
+            blocks: [{ type: "text", text: "first prompt" }],
+          },
+          bubble: {
+            type: 1,
+            timingInfo: { clientStartTime: Date.parse("2026-01-01T00:00:00.000Z") },
+          },
+        },
+        {
+          turn: {
+            role: "assistant",
+            blocks: [{ type: "text", text: "first reply" }],
+          },
+          bubble: {
+            type: 2,
+            timingInfo: { clientEndTime: Date.parse("2026-01-01T00:00:10.000Z") },
+          },
+        },
+        {
+          turn: {
+            role: "user",
+            blocks: [{ type: "text", text: "second prompt" }],
+          },
+          bubble: {
+            type: 1,
+            timingInfo: { clientStartTime: Date.parse("2026-01-01T00:00:05.000Z") },
+          },
+        },
+        {
+          turn: {
+            role: "assistant",
+            blocks: [{ type: "text", text: "second reply" }],
+          },
+          bubble: {
+            type: 2,
+            timingInfo: { clientEndTime: Date.parse("2026-01-01T00:00:15.000Z") },
+          },
+        },
+      ],
+      undefined,
+    );
+
+    expect(metrics.turnStats?.map((stat) => stat.durationMs)).toEqual([10_000, 10_000]);
+    expect(metrics.totalDurationMs).toBe(15_000);
+    expect(metrics.usedWallClock).toBe(true);
+  });
+
   it("does not use clustered createdAt values as wall-clock durations", () => {
     const metrics = __testables.buildGlobalStateMetrics(
       [

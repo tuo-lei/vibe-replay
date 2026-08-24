@@ -710,6 +710,55 @@ describe("applySdkEnrichmentToTurns", () => {
   });
 });
 
+describe("Cursor SDK duration aggregation", () => {
+  it("unions overlapping runs and exposes per-turn durations", () => {
+    const agent: SdkAgent = {
+      agentId: "agent-overlap",
+      workspaceRef: "/tmp/ws",
+      status: "FINISHED",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:20.000Z",
+      dbPath: "/tmp/ws/sdk/index.db",
+    };
+    const enrichment = __testables.finalizeEnrichment(
+      agent,
+      [
+        {
+          runId: "run-1",
+          agentId: agent.agentId,
+          turnNumber: 1,
+          status: "FINISHED",
+          startedAt: "2026-01-01T00:00:00.000Z",
+          finishedAt: "2026-01-01T00:00:10.000Z",
+        },
+        {
+          runId: "run-2",
+          agentId: agent.agentId,
+          turnNumber: 2,
+          status: "FINISHED",
+          startedAt: "2026-01-01T00:00:05.000Z",
+          finishedAt: "2026-01-01T00:00:15.000Z",
+        },
+        {
+          runId: "run-3",
+          agentId: agent.agentId,
+          turnNumber: 2,
+          status: "FINISHED",
+          startedAt: "2026-01-01T00:00:12.000Z",
+          finishedAt: "2026-01-01T00:00:20.000Z",
+        },
+      ],
+      new Map(),
+    );
+
+    expect(enrichment.totalDurationMs).toBe(20_000);
+    expect(enrichment.turnStats).toEqual([
+      { turnIndex: 0, durationMs: 10_000 },
+      { turnIndex: 1, durationMs: 15_000 },
+    ]);
+  });
+});
+
 describe("loadSdkAgentEnrichment + listSdkIndexDbPaths (integration with synthetic db)", () => {
   let tempRoot: string;
   let dbPath: string;
