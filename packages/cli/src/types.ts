@@ -12,6 +12,8 @@ export type {
   Scene,
   SceneOverlay,
   SessionInsight,
+  SessionLocation,
+  SessionTranscriptStatus,
   SessionUsageSummary,
   SessionOverlays,
   SubAgent,

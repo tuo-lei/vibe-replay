@@ -49,6 +49,13 @@ function transform(parsed: ProviderParseResult): ReplaySession {
   return transformToReplay(parsed, "test-provider", "~/test");
 }
 
+function transformRemote(parsed: ProviderParseResult, remoteHome: string): ReplaySession {
+  return transformToReplay(parsed, "test-provider", `${remoteHome}/project`, {
+    remoteHome,
+    location: { kind: "ssh", id: "remote-test", label: "Remote test" },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // redactPath — replaces home directory with ~
 // ---------------------------------------------------------------------------
@@ -228,6 +235,129 @@ describe("path redaction", () => {
     const replay = transform(parsed);
     expect(replay.meta.cwd).not.toContain(HOME);
     expect(replay.meta.cwd).toBe("~/my-workspace");
+  });
+
+  it("redacts remote paths only in known path fields", () => {
+    const remoteHome = "/remote/home";
+    const parsed = makeParsed(
+      [
+        {
+          role: "user",
+          blocks: [{ type: "text", text: `Prompt mentions ${remoteHome}/docs` }],
+        },
+        {
+          role: "assistant",
+          blocks: [
+            {
+              type: "thinking",
+              thinking: `Thinking mentions ${remoteHome}/notes`,
+            },
+            {
+              type: "tool_use",
+              id: "read-remote",
+              name: "Read",
+              input: {
+                file_path: `${remoteHome}/project/src/index.ts`,
+                note: `Input prose mentions ${remoteHome}/input`,
+              },
+              _result: `Tool prose mentions ${remoteHome}/result`,
+            },
+            {
+              type: "tool_use",
+              id: "edit-remote",
+              name: "Edit",
+              input: {
+                file_path: `${remoteHome}/project/src/app.ts`,
+                old_string: `const path = "${remoteHome}/before";`,
+                new_string: `const path = "${remoteHome}/after";`,
+              },
+              _result: "updated",
+            },
+          ],
+        },
+      ],
+      {
+        trackedFiles: [`${remoteHome}/project/src/index.ts`],
+        contextFiles: [`${remoteHome}/project/AGENTS.md`],
+        cwd: `${remoteHome}/workspace`,
+        worktree: { path: `${remoteHome}/worktrees/feature`, branch: "feature" },
+        dataSourceInfo: {
+          primary: "jsonl",
+          sources: [`${remoteHome}/transcript.jsonl`],
+          notes: [`Read from ${remoteHome}/notes.txt`],
+        },
+      },
+    );
+
+    const replay = transformRemote(parsed, remoteHome);
+    const readScene = replay.scenes.find(
+      (scene) => scene.type === "tool-call" && scene.toolName === "Read",
+    ) as ToolCallScene;
+    const editScene = replay.scenes.find(
+      (scene) => scene.type === "tool-call" && scene.toolName === "Edit",
+    ) as ToolCallScene;
+
+    expect(replay.meta.cwd).toBe("~/workspace");
+    expect(replay.meta.project).toBe("~/project");
+    expect(replay.meta.worktree?.path).toBe("~/worktrees/feature");
+    expect(replay.meta.trackedFiles).toEqual(["~/project/src/index.ts"]);
+    expect(replay.meta.contextFiles).toEqual(["~/project/AGENTS.md"]);
+    expect(replay.meta.dataSourceInfo?.sources).toEqual(["~/transcript.jsonl"]);
+    expect(replay.meta.dataSourceInfo?.notes).toEqual(["Read from ~/notes.txt"]);
+    expect(replay.scenes.find((scene) => scene.type === "user-prompt")?.content).toContain(
+      remoteHome,
+    );
+    expect(replay.scenes.find((scene) => scene.type === "thinking")?.content).toContain(remoteHome);
+    expect(readScene.input?.file_path).toBe("~/project/src/index.ts");
+    expect(readScene.input?.note).toContain(remoteHome);
+    expect(readScene.result).toContain(remoteHome);
+    expect(editScene.diff?.filePath).toBe("~/project/src/app.ts");
+    expect(editScene.diff?.oldContent).toContain(remoteHome);
+    expect(editScene.diff?.newContent).toContain(remoteHome);
+  });
+
+  it("omits remote repository identifiers from publishable replay metadata", () => {
+    const replay = transformToReplay(
+      makeParsed([{ role: "user", blocks: [{ type: "text", text: "Inspect the project" }] }], {
+        gitRepo: "private-org/private-repo",
+      }),
+      "codex",
+      "~/project",
+      {
+        gitRepo: "private-org/fallback-repo",
+        location: { kind: "ssh", id: "remote-test", label: "Remote test" },
+      },
+    );
+
+    expect(replay.meta.gitRepo).toBeUndefined();
+  });
+
+  it("does not redact a remote home that is only a path prefix", () => {
+    const remoteHome = "/remote/home";
+    const parsed = makeParsed([
+      {
+        role: "assistant",
+        blocks: [
+          {
+            type: "tool_use",
+            id: "boundary",
+            name: "Read",
+            input: {
+              file_path: `${remoteHome}2/keep.ts`,
+              directory: `${remoteHome}/redact.ts`,
+            },
+          },
+        ],
+      },
+    ]);
+
+    const replay = transformRemote(parsed, remoteHome);
+    const scene = replay.scenes.find(
+      (candidate) => candidate.type === "tool-call",
+    ) as ToolCallScene;
+
+    expect(scene.input?.file_path).toBe(`${remoteHome}2/keep.ts`);
+    expect(scene.input?.directory).toBe("~/redact.ts");
   });
 
   it("redacts paths and secrets in data source metadata", () => {

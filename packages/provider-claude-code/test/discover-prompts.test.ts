@@ -101,4 +101,31 @@ describe("extractSessionInfo – multi-prompt extraction", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("can retain a readable transcript with no meaningful prompts for remote status display", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vibe-claude-no-prompts-"));
+    const path = join(dir, "metadata-only.jsonl");
+    await writeFile(
+      path,
+      `${JSON.stringify({
+        type: "system",
+        sessionId: "metadata-only-session",
+        cwd: "/tmp/project",
+        timestamp: "2026-01-01T00:00:00.000Z",
+      })}\n`,
+      "utf-8",
+    );
+    try {
+      const fileStat = await stat(path);
+      const info = await extractSessionInfo(path, fileStat.size, "/tmp/project", true);
+      expect(info).toMatchObject({
+        sessionId: "metadata-only-session",
+        transcriptStatus: "no-prompts",
+        firstPrompt: "",
+        promptCount: 0,
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

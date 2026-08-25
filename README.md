@@ -37,6 +37,25 @@ Launch with `npx vibe-replay -d` and see every Claude, Cursor, Codex, OpenCode, 
   <img src="docs/screenshots/dashboard.png" alt="Local dashboard — browse sessions, activity heatmap, project analytics" width="800" />
 </p>
 
+### Remote SSH sources
+
+The dashboard can also include JSONL sessions from any OpenSSH-compatible host. Add targets once to `~/.vibe-replay/config.json`:
+
+```json
+{
+  "remoteSources": [
+    {
+      "id": "remote-dev",
+      "label": "Remote dev",
+      "sshHost": "devbox",
+      "providers": ["codex", "claude-code", "pi"]
+    }
+  ]
+}
+```
+
+`sshHost` can be a normal hostname or an alias from `~/.ssh/config`, so existing keys, agents, `ProxyJump`, and `ProxyCommand` configuration continue to work. No private key or password belongs in this file. Remote Codex, Claude Code, and Pi JSONL files are copied into a per-target local cache and parsed by the same providers as local sessions; source cards show the configured location label. Codex titles match `/resume`: explicit names from `session_index.jsonl` take precedence over the read-only `state_5.sqlite` title. The live database and WAL are never copied. Hosts with Python `sqlite3` or the `sqlite3` CLI unavailable still use cached metadata. Sessions whose source is missing, unreadable, or contains no meaningful human prompt remain visible with an explicit status and cannot be generated into an empty replay. Remote repository identity is retained for local filtering but omitted from shareable replay data. Remote Live mode is intentionally unavailable. Remote sessions stay in local insights and are excluded from optional cloud insight sync.
+
 ### Watch the full replay
 
 Pick a session and step through every prompt, thinking block, tool call, and code diff with animated playback. Three view modes — All, Compact, and Custom.
@@ -126,6 +145,7 @@ curl -o ~/.claude/skills/replay/SKILL.md \
 - **Cross-platform** — runs on macOS, Linux, and Windows
 - **Single HTML file** — self-contained, works offline, and makes no automatic external requests. Remote image attachments load only after an explicit click
 - **Claude, Cursor, Codex, OpenCode, Hermes, and Pi** — all providers auto-discovered, including multi-file and resumed sessions
+- **Remote SSH sources** — optionally combine remote Codex, Claude Code, and Pi JSONL sessions with local sessions using standard OpenSSH configuration
 - **Local dashboard** — browse and search every session, filter by git repo, tool, MCP server/tool, or skill, expand a session for its own tool/MCP/skill counts, with activity heatmaps, per-project analytics, and a personal-insights view (including which tools and MCP servers you lean on) across all your coding
 - **Share & export** — GitHub Gist, animated SVG, GIF, markdown summary, or cloud upload. Secret redaction built in
 - **Sub-agent visualization** — see delegated tool calls and sub-agent trees rendered inline
@@ -176,7 +196,7 @@ The CLI auto-discovers sessions on your machine, parses conversation data from a
 
 - **Self-contained HTML** — generated replay files embed viewer assets inline and make no automatic external requests when opened from disk. Remote image URLs are blocked until you explicitly choose to load an individual image. (Gist/cloud-backed replays fetch data from GitHub or the vibe-replay API on load.)
 - **Secret redaction** — API keys, tokens, PEM keys, and sensitive paths are automatically detected and redacted before generation
-- **Local by default** — vibe-replay reads session files from your machine and generates a local HTML file. Data only leaves your machine when you explicitly publish (Gist or cloud upload), or if you log in — in which case aggregated session insights (counts, durations, costs — no conversation content) sync daily to the cloud
+- **Local by default** — vibe-replay reads session files from your machine and generates a local HTML file. Data only leaves your machine when you explicitly publish (Gist or cloud upload), or if you log in — in which case aggregated local session insights (counts, durations, costs — no conversation content) sync daily to the cloud. Remote SSH session aggregates stay local.
 - **No wrappers, no proxies** — vibe-replay does not modify, intercept, or wrap Claude Code or Cursor. It reads existing session logs after the fact
 
 ## Development

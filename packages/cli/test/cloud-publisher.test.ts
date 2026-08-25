@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,7 +10,8 @@ vi.mock("node:os", async () => {
   return { ...actual, homedir: () => mockAuthDir };
 });
 
-const { loadAuthToken, loadSavedCloudInfo } = await import("../src/publishers/cloud.js");
+const { loadAuthToken, loadSavedCloudInfo, publishCloudWithOverlays } =
+  await import("../src/publishers/cloud.js");
 
 describe("cloud publisher", () => {
   beforeEach(() => {
@@ -18,6 +19,7 @@ describe("cloud publisher", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     rmSync(mockAuthDir, { recursive: true, force: true });
   });
 
@@ -161,5 +163,57 @@ describe("cloud publisher", () => {
       const info = await loadSavedCloudInfo(dir);
       expect(info).toBeUndefined();
     });
+  });
+
+  it("strips SSH repository metadata even when no overlays exist", async () => {
+    const authPath = join(mockAuthDir, ".config", "vibe-replay", "auth.json");
+    writeFileSync(
+      authPath,
+      JSON.stringify({
+        accounts: {
+          "https://vibe-replay.com": {
+            token: "session-token",
+            user: { id: "u1", name: "Test User" },
+          },
+        },
+      }),
+    );
+    const outputDir = join(mockAuthDir, "remote-replay");
+    mkdirSync(outputDir, { recursive: true });
+    writeFileSync(
+      join(outputDir, "replay.json"),
+      JSON.stringify({
+        meta: {
+          sessionId: "session",
+          slug: "session",
+          provider: "codex",
+          location: { kind: "ssh", id: "remote-dev", label: "Remote dev" },
+          gitRepo: "private-org/private-repo",
+          startTime: "2026-08-25T00:00:00.000Z",
+          cwd: "~/project",
+          project: "~/project",
+          stats: { sceneCount: 1, userPrompts: 1, toolCalls: 0 },
+        },
+        scenes: [{ type: "user-prompt", content: "Inspect the project" }],
+      }),
+    );
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: "cloud-id",
+        url: "https://vibe-replay.com/r/cloud-id",
+        expiresAt: "2026-09-01T00:00:00.000Z",
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await publishCloudWithOverlays(outputDir);
+
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const body = JSON.parse(String(request.body));
+    expect(body.replay.meta.gitRepo).toBeUndefined();
+    expect(JSON.parse(readFileSync(join(outputDir, "replay.json"), "utf-8")).meta.gitRepo).toBe(
+      "private-org/private-repo",
+    );
   });
 });

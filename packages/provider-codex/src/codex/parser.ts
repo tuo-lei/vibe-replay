@@ -104,6 +104,7 @@ export function parseCodexLines(
       });
       continue;
     }
+    if (!obj || typeof obj !== "object") continue;
 
     if (obj.timestamp) {
       allTimestamps.push(obj.timestamp);
@@ -134,7 +135,7 @@ export function parseCodexLines(
 
     if (obj.type === "event_msg") {
       const p = obj.payload || {};
-      if (p.type === "thread_name_updated" && p.thread_name) {
+      if (p.type === "thread_name_updated" && p.thread_name && !sessionInfo?.title?.trim()) {
         title = p.thread_name;
         continue;
       }

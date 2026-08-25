@@ -1,4 +1,4 @@
-import type { ProjectIdentity } from "@vibe-replay/types";
+import type { ProjectIdentity, SessionLocation } from "@vibe-replay/types";
 
 export const NO_REPO_FILTER = "__no_repo__";
 
@@ -7,6 +7,7 @@ export interface DashboardFilterItem {
   gitRepo?: string;
   project: string;
   projectIdentity?: ProjectIdentity;
+  location?: SessionLocation;
   tools?: readonly string[];
   mcpServers?: readonly string[];
   mcpTools?: readonly string[];
@@ -32,11 +33,19 @@ export function matchesRepoFacet(
 }
 
 export function matchesProjectFacet(
-  s: Pick<DashboardFilterItem, "project" | "projectIdentity">,
+  s: Pick<DashboardFilterItem, "project" | "projectIdentity" | "location">,
   selectedProjectKey: string,
   allProjectsKey: string,
   rollupProject: (project: string) => string,
+  selectedLocation?: SessionLocation | "local",
 ): boolean {
+  if (selectedProjectKey !== allProjectsKey && selectedLocation !== undefined) {
+    const sameLocation =
+      selectedLocation === "local"
+        ? s.location?.kind !== "ssh"
+        : s.location?.kind === "ssh" && s.location.id === selectedLocation.id;
+    if (!sameLocation) return false;
+  }
   return (
     selectedProjectKey === allProjectsKey ||
     s.project === selectedProjectKey ||
@@ -75,6 +84,7 @@ export function applyDashboardFacetFilters<T extends DashboardFilterItem>(
     selectedProjectKey: string;
     allProjectsKey: string;
     rollupProject: (project: string) => string;
+    selectedLocation?: SessionLocation | "local";
     selectedTools?: readonly string[];
     selectedMcpServers?: readonly string[];
     selectedMcpTools?: readonly string[];
@@ -96,6 +106,7 @@ export function applyDashboardFacetFilters<T extends DashboardFilterItem>(
         options.selectedProjectKey,
         options.allProjectsKey,
         options.rollupProject,
+        options.selectedLocation,
       ) &&
       matchesUsageFacets(
         item,

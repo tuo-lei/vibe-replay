@@ -20,7 +20,7 @@ import { streamSSE } from "hono/streaming";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import open from "open";
 import { readGitRepo } from "@vibe-replay/provider-core/utils";
-import { classifyProject, projectIdentityKey } from "@vibe-replay/types";
+import { classifyProject } from "@vibe-replay/types";
 import { readFileCache, writeFileCache } from "./cache.js";
 import { cleanPromptText, previewPrompt } from "./clean-prompt.js";
 import { computeDaysUntilCleanup, getClaudeCodeCleanupPeriod } from "./cleanup-warning.js";
@@ -36,7 +36,7 @@ import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.j
 import { generateOutput, injectDataScript, loadViewerHtml } from "./generator.js";
 import { buildInsightsRollup } from "./insights-rollup.js";
 import { mergeInsights, readInsightsStore, writeInsightsStore } from "./insights.js";
-import { loadOverlays, sessionWithEffectiveContent } from "./overlays.js";
+import { loadOverlays, sessionForExternalOutput, sessionWithEffectiveContent } from "./overlays.js";
 import { parseClaudeCodeLines } from "./providers/claude-code/parser.js";
 import { parseCodexLines } from "./providers/codex/parser.js";
 import { parsePiLines } from "./providers/pi/parser.js";
@@ -55,6 +55,7 @@ import {
 } from "./publishers/gist.js";
 import { scanForSecrets } from "./scan.js";
 import { mergeSameSessions } from "./session-merge.js";
+import { getRemoteHome } from "./remote.js";
 import {
   type EnrichmentHints,
   enrichmentHintsFromBody,
@@ -92,18 +93,23 @@ import { registerSessionAssetRoutes } from "./server-routes/session-assets.js";
 import {
   buildInsightsSyncBatches,
   getErrorMessage,
+  hasReplayableContent,
   type GenerateRequestBody,
+  replayOutputSlug,
   requireSlug,
   resolveGenerateInputs,
   safeSlug,
+  safeTargetId,
 } from "./server-core.js";
 import {
   aggregateProjectInsights,
   aggregateUserInsights,
   type BackgroundScanState,
   type ProjectInsights,
+  projectInsightKey,
   readProjectMemory,
   runBackgroundScan,
+  type ProjectInsightLocation,
   type ScanInput,
   SCANNER_VERSION,
   type SessionScanResult,
@@ -143,7 +149,8 @@ async function scanSessionsFromDir(baseDir: string): Promise<ReplaySummary[]> {
     try {
       const raw = await readFile(replayPath, "utf-8");
       const session = JSON.parse(raw) as ReplaySession;
-      const annotationCount = (await loadAnnotations(baseDir, entry)).length;
+      const targetId = session.meta.location?.kind === "ssh" ? session.meta.location.id : undefined;
+      const annotationCount = (await loadAnnotations(baseDir, entry, targetId)).length;
 
       let gist: SavedGistInfo | undefined;
       try {
@@ -164,16 +171,19 @@ async function scanSessionsFromDir(baseDir: string): Promise<ReplaySummary[]> {
       const generatorVersion = session.meta.generator?.version;
       const replayOutdated = generatorVersion ? generatorVersion !== CLI_VERSION : false;
       let gitRepo = session.meta.gitRepo;
-      if (!gitRepo && session.meta.project) {
+      if (!gitRepo && session.meta.project && session.meta.location?.kind !== "ssh") {
         gitRepo = await readReplayGitRepo(session.meta.project);
       }
 
       results.push({
         slug: entry,
+        sourceSlug: session.meta.slug,
         baseDir,
         sessionId: session.meta.sessionId,
         title: session.meta.title,
         provider: session.meta.provider,
+        location: session.meta.location,
+        transcriptStatus: session.meta.transcriptStatus,
         model: session.meta.model,
         gitRepo,
         project: session.meta.project,
@@ -243,8 +253,10 @@ async function scanSessions(baseDir: string): Promise<ReplaySummary[]> {
   for (const dir of dirs) {
     const results = await scanSessionsFromDir(dir);
     for (const r of results) {
-      if (!seen.has(r.slug)) {
-        seen.add(r.slug);
+      const locationKey = r.location?.kind === "ssh" ? r.location.id : "local";
+      const replayKey = `${locationKey}\0${r.slug}`;
+      if (!seen.has(replayKey)) {
+        seen.add(replayKey);
         allResults.push(r);
       }
     }
@@ -255,7 +267,11 @@ async function scanSessions(baseDir: string): Promise<ReplaySummary[]> {
 }
 
 /** Load a session from disk by slug — checks primary dir then CWD fallback */
-async function loadSessionFromDisk(baseDir: string, slug: string): Promise<ReplaySession> {
+async function loadSessionFromDisk(
+  baseDir: string,
+  slug: string,
+  targetId?: string,
+): Promise<ReplaySession> {
   let replayPath = join(baseDir, slug, "replay.json");
   try {
     await stat(replayPath);
@@ -267,8 +283,13 @@ async function loadSessionFromDisk(baseDir: string, slug: string): Promise<Repla
   }
   const raw = await readFile(replayPath, "utf-8");
   const session = JSON.parse(raw) as ReplaySession;
+  const sessionTargetId =
+    session.meta.location?.kind === "ssh" ? session.meta.location.id : undefined;
+  if (sessionTargetId !== targetId) {
+    throw new Error("Session does not belong to the requested SSH source");
+  }
 
-  const annotations = await loadAnnotations(baseDir, slug);
+  const annotations = await loadAnnotations(baseDir, slug, targetId);
   if (annotations.length > 0) {
     session.annotations = annotations;
   }
@@ -360,41 +381,51 @@ function buildReplayMaps(replays: ReplaySummary[]): {
   const bySessionId = new Map<string, ReplaySummary>();
   const ambiguousSlugs = new Set<string>();
   for (const r of replays) {
-    const slugKey = providerSlugKey(r.provider, r.slug);
+    const targetId = r.location?.kind === "ssh" ? r.location.id : undefined;
+    const slugKey = providerSlugKey(r.provider, r.slug, targetId);
     if (bySlug.has(slugKey)) {
       ambiguousSlugs.add(slugKey);
     } else {
       bySlug.set(slugKey, r);
     }
-    if (r.sessionId) bySessionId.set(providerSessionKey(r.provider, r.sessionId), r);
+    if (r.sessionId) bySessionId.set(providerSessionKey(r.provider, r.sessionId, targetId), r);
   }
   return { bySlug, bySessionId, ambiguousSlugs };
 }
 
 function providerSlugCounts(
-  sessions: ReadonlyArray<Pick<SessionInfo, "provider" | "slug">>,
+  sessions: ReadonlyArray<Pick<SessionInfo, "provider" | "slug" | "location">>,
 ): Map<string, number> {
   const counts = new Map<string, number>();
   for (const session of sessions) {
-    const key = providerSlugKey(session.provider, session.slug);
+    const targetId = session.location?.kind === "ssh" ? session.location.id : undefined;
+    const key = providerSlugKey(session.provider, session.slug, targetId);
     counts.set(key, (counts.get(key) || 0) + 1);
   }
   return counts;
 }
 
 function findReplayForSource(
-  source: { provider: string; sessionId?: string; slug: string },
+  source: {
+    provider: string;
+    sessionId?: string;
+    slug: string;
+    location?: SessionInfo["location"];
+  },
   maps: ReturnType<typeof buildReplayMaps>,
   sourceSlugCounts: ReadonlyMap<string, number>,
 ): ReplaySummary | undefined {
   // Native session IDs are stable; always prefer them over the human-readable
   // slug, which can collide across Cursor sessions.
+  const targetId = source.location?.kind === "ssh" ? source.location.id : undefined;
   if (source.sessionId) {
-    const bySessionId = maps.bySessionId.get(providerSessionKey(source.provider, source.sessionId));
+    const bySessionId = maps.bySessionId.get(
+      providerSessionKey(source.provider, source.sessionId, targetId),
+    );
     if (bySessionId) return bySessionId;
   }
 
-  const slugKey = providerSlugKey(source.provider, source.slug);
+  const slugKey = providerSlugKey(source.provider, source.slug, targetId);
   if (maps.ambiguousSlugs.has(slugKey) || sourceSlugCounts.get(slugKey) !== 1) {
     return undefined;
   }
@@ -420,6 +451,9 @@ async function buildSourcesResult(
   const projectExistsMap = new Map<string, boolean>();
   const projectIsGitMap = new Map<string, boolean>();
   for (const p of uniqueProjects) {
+    if (!merged.some((session) => session.project === p && session.location?.kind !== "ssh")) {
+      continue;
+    }
     const resolved =
       p === "~" ? home : p.startsWith("~/") || p.startsWith("~\\") ? join(home, p.slice(2)) : p;
     try {
@@ -448,10 +482,11 @@ async function buildSourcesResult(
   const previousBySessionId = new Map<string, SourceSummaryRecord>();
   const previousByKey = new Map<string, SourceSummaryRecord>();
   for (const prev of previousSources) {
-    const key = sourceSessionKey(prev.provider, prev.project, prev.slug);
+    const targetId = prev.location?.kind === "ssh" ? prev.location.id : undefined;
+    const key = sourceSessionKey(prev.provider, prev.project, prev.slug, targetId);
     previousByKey.set(key, prev);
     if (typeof prev.sessionId === "string" && prev.sessionId) {
-      previousBySessionId.set(providerSessionKey(prev.provider, prev.sessionId), prev);
+      previousBySessionId.set(providerSessionKey(prev.provider, prev.sessionId, targetId), prev);
     }
   }
 
@@ -460,16 +495,20 @@ async function buildSourcesResult(
     const replay = findReplayForSource(s, replayMaps, sourceSlugCounts);
     const promptCount = s.promptCount ?? previous?.promptCount;
     const toolCallCount = s.toolCallCount ?? previous?.toolCallCount;
+    const gitRepo =
+      s.gitRepo ?? (typeof previous?.gitRepo === "string" ? previous.gitRepo : undefined);
     const projectIdentity =
       s.projectIdentity ||
       classifyProject(s.project, {
         provider: s.provider,
         hasSdk: s.hasSdk,
         sdkWorkspaceRef: s.workspacePath,
-        gitRepo: s.gitRepo,
+        gitRepo,
       });
     return {
       provider: s.provider,
+      location: s.location,
+      transcriptStatus: s.transcriptStatus,
       sessionId: s.sessionId,
       slug: s.slug,
       title: normalizeTitle(cleanPromptText(typeof s.title === "string" ? s.title : "")),
@@ -487,7 +526,7 @@ async function buildSourcesResult(
       hasSqlite: s.hasSqlite,
       hasSdk: s.hasSdk,
       gitBranch: s.gitBranch,
-      gitRepo: s.gitRepo,
+      gitRepo,
       model: s.model,
       durationMsEst: s.durationMsEst,
       editCountEst: s.editCountEst,
@@ -503,14 +542,18 @@ async function buildSourcesResult(
           ? computeDaysUntilCleanup(s.timestamp, cleanupPeriodDays)
           : undefined,
       existingReplay: replay ? (replay.slug as string) : null,
-      projectExists: projectExistsMap.get(s.project) ?? false,
-      isGitRepo: projectIsGitMap.get(s.project) ?? false,
+      projectExists:
+        s.location?.kind === "ssh" ? undefined : (projectExistsMap.get(s.project) ?? false),
+      isGitRepo: s.location?.kind === "ssh" ? undefined : (projectIsGitMap.get(s.project) ?? false),
       replay: replay
         ? {
             slug: replay.slug,
+            sourceSlug: replay.sourceSlug,
             sessionId: replay.sessionId,
             title: replay.title,
             provider: replay.provider,
+            location: replay.location,
+            transcriptStatus: replay.transcriptStatus,
             model: replay.model,
             gitRepo: replay.gitRepo,
             project: replay.project,
@@ -610,6 +653,7 @@ export async function startServer(
   opts?: {
     openDashboard?: boolean;
     openSlug?: string;
+    openTargetId?: string;
     openLive?: { provider: string; sessionId: string };
     externalViewerUrl?: string;
   },
@@ -634,7 +678,8 @@ export async function startServer(
   // Cursor SDK worktree paths.
   // v6 → v7: refine Cursor SDK context-worktree identity grouping.
   // v7 → v8: disambiguate Cursor SDK workflow display labels.
-  const sourcesCacheKey = `dashboard-sources-v8-${cacheKeySuffix}`;
+  // v8 → v9: Codex source titles now follow explicit session_index names.
+  const sourcesCacheKey = `dashboard-sources-v9-${cacheKeySuffix}`;
   const replaysCacheKey = `dashboard-replays-v1-${cacheKeySuffix}`;
   // Keyed by scanner version too: a bump changes the shape of what a scan
   // extracts, so serving the previous run's results would show stale facets
@@ -724,7 +769,10 @@ export async function startServer(
         const hasReplay = !!replay;
         if (
           hadReplay !== hasReplay ||
-          (hasReplay && (replay.slug !== s.existingReplay || replay.title !== s.replay?.title))
+          (hasReplay &&
+            (replay.slug !== s.existingReplay ||
+              replay.title !== s.replay?.title ||
+              replay.sourceSlug !== s.replay?.sourceSlug))
         ) {
           changed = true;
         }
@@ -734,9 +782,11 @@ export async function startServer(
           replay: replay
             ? {
                 slug: replay.slug,
+                sourceSlug: replay.sourceSlug,
                 sessionId: replay.sessionId,
                 title: replay.title,
                 provider: replay.provider,
+                location: replay.location,
                 model: replay.model,
                 project: replay.project,
                 startTime: replay.startTime,
@@ -773,6 +823,7 @@ export async function startServer(
     hints: EnrichmentHints;
   } | null = null;
   let lastDiscoveredMergedSessions: SessionInfo[] = [];
+  let latestSourceFailures: string[] | undefined;
 
   const enrichCursorStatsInBackground = (
     merged: SessionInfo[],
@@ -820,9 +871,10 @@ export async function startServer(
       const bySessionId = new Map<string, SourceSummaryRecord>();
       const byKey = new Map<string, SourceSummaryRecord>();
       for (const source of enrichedSources) {
-        byKey.set(sourceSessionKey(source.provider, source.project, source.slug), source);
+        const targetId = source.location?.kind === "ssh" ? source.location.id : undefined;
+        byKey.set(sourceSessionKey(source.provider, source.project, source.slug, targetId), source);
         if (typeof source.sessionId === "string" && source.sessionId) {
-          bySessionId.set(providerSessionKey(source.provider, source.sessionId), source);
+          bySessionId.set(providerSessionKey(source.provider, source.sessionId, targetId), source);
         }
       }
 
@@ -1108,22 +1160,47 @@ export async function startServer(
 
       // Project-level insights for each unique project
       const projects = new Map<string, ProjectInsights>();
-      const uniqueProjects = new Set(
-        results.map((result) => projectIdentityKey(result.project, result.projectIdentity)),
-      );
-      for (const project of uniqueProjects) {
-        const memory = isFilesystemProjectKey(project)
-          ? await readProjectMemory(project)
-          : undefined;
-        const pi = aggregateProjectInsights(project, results, memory || undefined);
-        projects.set(project, pi);
+      const uniqueProjects = new Map<
+        string,
+        {
+          project: string;
+          identity?: ProjectInsights["projectIdentity"];
+          location: ProjectInsightLocation;
+        }
+      >();
+      for (const result of results) {
+        const location: ProjectInsightLocation =
+          result.location?.kind === "ssh" ? result.location : "local";
+        const key = projectInsightKey(result.project, result.projectIdentity, location);
+        if (!uniqueProjects.has(key)) {
+          uniqueProjects.set(key, {
+            project: result.project,
+            identity: result.projectIdentity,
+            location,
+          });
+        }
+      }
+      for (const [key, entry] of uniqueProjects) {
+        const memoryProject =
+          entry.location === "local" ? entry.identity?.key || entry.project : entry.project;
+        const memory =
+          entry.location === "local" && isFilesystemProjectKey(memoryProject)
+            ? await readProjectMemory(memoryProject)
+            : undefined;
+        const pi = aggregateProjectInsights(
+          entry.project,
+          results,
+          memory || undefined,
+          entry.location,
+        );
+        projects.set(key, pi);
       }
 
       // Enrich topProjects with memoryFileCount
       for (const tp of user.topProjects) {
-        const pi =
-          projects.get(projectIdentityKey(tp.project, tp.projectIdentity)) ||
-          projects.get(tp.project);
+        const location: ProjectInsightLocation =
+          tp.location?.kind === "ssh" ? tp.location : "local";
+        const pi = projects.get(projectInsightKey(tp.project, tp.projectIdentity, location));
         if (pi?.memory) {
           tp.memoryFileCount = pi.memory.memoryFiles.length;
         }
@@ -1157,7 +1234,7 @@ export async function startServer(
     generation: number,
   ): Promise<void> => {
     const pending = scanInputs
-      .filter((input) => input.deferRichCursorParse && input.hasSqlite)
+      .filter((input) => input.deferRichCursorParse && (input.hasSqlite || input.hasSdk))
       .map((input) => ({ ...input, deferRichCursorParse: false }));
     if (pending.length === 0) return;
 
@@ -1188,10 +1265,24 @@ export async function startServer(
       if (superseded()) return;
 
       const byKey = new Map(
-        enriched.map((result) => [`${result.provider}:${result.sessionId}`, result]),
+        enriched.map((result) => [
+          providerSessionKey(
+            result.provider,
+            result.sessionId,
+            result.location?.kind === "ssh" ? result.location.id : undefined,
+          ),
+          result,
+        ]),
       );
       const merged = fastResults.map(
-        (result) => byKey.get(`${result.provider}:${result.sessionId}`) || result,
+        (result) =>
+          byKey.get(
+            providerSessionKey(
+              result.provider,
+              result.sessionId,
+              result.location?.kind === "ssh" ? result.location.id : undefined,
+            ),
+          ) || result,
       );
       scanState = {
         ...scanState,
@@ -1280,6 +1371,8 @@ export async function startServer(
           merged.map((s) => ({
             sessionId: s.sessionId,
             provider: s.provider,
+            location: s.location,
+            transcriptStatus: s.transcriptStatus,
             project: s.project,
             projectIdentity:
               s.projectIdentity || classifyProject(s.project, { provider: s.provider }),
@@ -1291,7 +1384,8 @@ export async function startServer(
             sourceLineCount: s.lineCount,
             workspacePath: s.workspacePath,
             hasSqlite: s.hasSqlite,
-            deferRichCursorParse: s.provider === "cursor" && !!s.hasSqlite,
+            hasSdk: s.hasSdk,
+            deferRichCursorParse: s.provider === "cursor" && !!(s.hasSqlite || s.hasSdk),
             timestamp: s.timestamp,
             title: s.title,
             firstPrompt: s.firstPrompt,
@@ -1300,6 +1394,7 @@ export async function startServer(
             discoveryEditCount: s.editCountEst,
             discoveryModel: s.model,
             discoveryDurationMs: s.durationMsEst,
+            remoteHome: getRemoteHome(s.location?.kind === "ssh" ? s.location.id : undefined),
           })),
           previousResults,
           hints,
@@ -1384,9 +1479,11 @@ export async function startServer(
   app.get("/api/session", async (c) => {
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetId = safeTargetId(c.req.query("targetId"));
+    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
     try {
-      const session = await loadSessionFromDisk(baseDir, result.slug);
-      return c.json(session);
+      const session = await loadSessionFromDisk(baseDir, result.slug, targetId);
+      return c.json(sessionForExternalOutput(session));
     } catch {
       return c.json({ error: `Session not found: ${result.slug}` }, 404);
     }
@@ -1402,6 +1499,7 @@ export async function startServer(
   app.get("/api/live", (c) => {
     const providerName = c.req.query("provider") || "";
     const sessionId = c.req.query("sessionId") || "";
+    const targetId = safeTargetId(c.req.query("targetId"));
 
     return streamSSE(c, async (stream) => {
       const sendError = async (message: string) => {
@@ -1410,6 +1508,14 @@ export async function startServer(
 
       if (!providerName || !sessionId) {
         await sendError("provider and sessionId query parameters are required");
+        return;
+      }
+      if (targetId === null) {
+        await sendError("invalid targetId");
+        return;
+      }
+      if (targetId !== undefined) {
+        await sendError("Live mode is unavailable for SSH sources");
         return;
       }
 
@@ -1853,6 +1959,8 @@ export async function startServer(
   const patchReplay = async (c: Context) => {
     const slug = safeSlug(c.req.param("slug"));
     if (!slug) return c.json({ error: "invalid slug" }, 400);
+    const targetId = safeTargetId(c.req.query("targetId"));
+    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
 
     let body: { title?: unknown };
     try {
@@ -1865,7 +1973,7 @@ export async function startServer(
     }
 
     try {
-      const target = await loadSessionFromDisk(baseDir, slug);
+      const target = await loadSessionFromDisk(baseDir, slug, targetId);
       target.meta.title = normalizeTitle(body.title);
 
       const targetDir = join(baseDir, slug);
@@ -1887,7 +1995,10 @@ export async function startServer(
   const deleteReplay = async (c: Context) => {
     const slug = safeSlug(c.req.param("slug"));
     if (!slug) return c.json({ error: "invalid slug" }, 400);
+    const targetId = safeTargetId(c.req.query("targetId"));
+    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
     try {
+      await loadSessionFromDisk(baseDir, slug, targetId);
       const { rm } = await import("node:fs/promises");
       await rm(join(baseDir, slug), { recursive: true });
       const updatedReplays = await refreshReplaysCache();
@@ -1907,12 +2018,15 @@ export async function startServer(
   const getCachedSourceSessions = async (c: Context) => {
     const cached = await readSourcesCatalogCache();
     const staleProviders = await getStaleSourceProviders(cached);
+    const failedProviders = latestSourceFailures ?? cached?.failedProviders ?? [];
+    const allStaleProviders = [...new Set([...staleProviders, ...failedProviders])];
     return c.json({
       sessions: cached?.sessions || [],
       cachedAt: cached?.cachedAt,
       discoveredAt: cached?.discoveredAt,
-      stale: staleProviders.length > 0,
-      staleProviders,
+      stale: allStaleProviders.length > 0,
+      staleProviders: allStaleProviders,
+      failedProviders,
     });
   };
 
@@ -1964,6 +2078,7 @@ export async function startServer(
   const getSourceSessions = async (c: Context) => {
     try {
       const discovery = await discoverProvidersSafely(getAllProviders());
+      latestSourceFailures = discovery.failedProviders;
       const merged = mergeSameSessions(discovery.sessions);
       lastDiscoveredMergedSessions = normalizeSessionProjectsForHome(merged, homedir());
       const previous = await readSourcesCatalogCache();
@@ -2011,6 +2126,7 @@ export async function startServer(
             });
           }
         });
+        latestSourceFailures = discovery.failedProviders;
 
         const merged = mergeSameSessions(discovery.sessions);
         lastDiscoveredMergedSessions = normalizeSessionProjectsForHome(merged, homedir());
@@ -2063,7 +2179,9 @@ export async function startServer(
 
       let discoveredSessions: SessionInfo[] = [];
       if (typeof body.sessionSlug === "string" && safeSlug(body.sessionSlug)) {
-        discoveredSessions = mergeSameSessions(await provider.discover());
+        discoveredSessions = mergeSameSessions(
+          (await discoverProvidersSafely([provider])).sessions,
+        );
       }
 
       const resolved = resolveGenerateInputs(body, discoveredSessions);
@@ -2081,7 +2199,11 @@ export async function startServer(
       const project = rawProject.startsWith(home)
         ? `~${rawProject.slice(home.length)}`
         : rawProject;
-      const gitRepo = resolved.value.sessionInfo?.gitRepo || (await readGitRepo(rawProject));
+      const gitRepo =
+        resolved.value.sessionInfo?.gitRepo ||
+        (resolved.value.sessionInfo?.location?.kind === "ssh"
+          ? undefined
+          : await readGitRepo(rawProject));
 
       const replay = transformToReplay(parsed, body.provider, project, {
         generator: {
@@ -2090,7 +2212,16 @@ export async function startServer(
           generatedAt: new Date().toISOString(),
         },
         gitRepo,
+        location: resolved.value.sessionInfo?.location,
+        remoteHome: getRemoteHome(
+          resolved.value.sessionInfo?.location?.kind === "ssh"
+            ? resolved.value.sessionInfo.location.id
+            : undefined,
+        ),
       });
+      if (!hasReplayableContent(replay)) {
+        return c.json({ error: "This session has no replayable user prompts" }, 422);
+      }
 
       if (typeof body.title === "string") {
         const normalizedCustomTitle = normalizeTitle(body.title);
@@ -2101,7 +2232,10 @@ export async function startServer(
 
       // Save replay
       const rawSlug = replay.meta.slug || replay.meta.sessionId.slice(0, 8);
-      const slug = rawSlug.replace(/[^a-zA-Z0-9_-]/g, "-");
+      const slug = replayOutputSlug(rawSlug, resolved.value.sessionInfo?.location, {
+        provider: body.provider,
+        sessionId: replay.meta.sessionId,
+      });
       const outputDir = join(baseDir, slug);
       await generateOutput(replay, outputDir);
       const updatedReplays = await refreshReplaysCache();
@@ -2133,22 +2267,9 @@ export async function startServer(
     const { readdir, readFile: readF } = await import("node:fs/promises");
     const results: Array<{ slug: string; status: string; scenes?: number }> = [];
 
-    // Discover all sessions across all providers
+    // Discover all sessions across all providers and configured SSH sources.
     const allProviders = getAllProviders();
-    const allSessions: SessionInfo[] = [];
-    for (const provider of allProviders) {
-      try {
-        const sessions = mergeSameSessions(await provider.discover());
-        allSessions.push(...sessions);
-      } catch (err) {
-        // One provider failing to discover must not abort discovery for the
-        // rest. Surfaced only under VIBE_REPLAY_DEBUG so the dashboard stays
-        // quiet by default but partial failures remain diagnosable.
-        if (process.env.VIBE_REPLAY_DEBUG) {
-          console.error(`[vibe-replay] ${provider.name} discovery failed:`, err);
-        }
-      }
-    }
+    const allSessions = mergeSameSessions((await discoverProvidersSafely(allProviders)).sessions);
 
     let entries: string[];
     try {
@@ -2173,11 +2294,29 @@ export async function startServer(
         }
 
         // Find source session by sessionId
-        const sessionInfo = allSessions.find(
-          (s) => s.provider === providerName && s.sessionId === sessionId,
-        );
+        const replayTargetId =
+          oldReplay.meta?.location?.kind === "ssh" && typeof oldReplay.meta.location.id === "string"
+            ? oldReplay.meta.location.id
+            : undefined;
+        const sessionInfo = allSessions.find((s) => {
+          const sessionTargetId = s.location?.kind === "ssh" ? s.location.id : undefined;
+          return (
+            s.provider === providerName &&
+            s.sessionId === sessionId &&
+            sessionTargetId === replayTargetId
+          );
+        });
         if (!sessionInfo || sessionInfo.filePaths.length === 0) {
-          results.push({ slug, status: "skipped: source not found" });
+          results.push({
+            slug,
+            status: sessionInfo?.transcriptStatus
+              ? `skipped: ${sessionInfo.transcriptStatus}`
+              : "skipped: source not found",
+          });
+          continue;
+        }
+        if (sessionInfo.transcriptStatus) {
+          results.push({ slug, status: `skipped: ${sessionInfo.transcriptStatus}` });
           continue;
         }
 
@@ -2202,7 +2341,16 @@ export async function startServer(
             generatedAt: new Date().toISOString(),
           },
           gitRepo: sessionInfo.gitRepo,
+          location: sessionInfo.location,
+          transcriptStatus: sessionInfo.transcriptStatus,
+          remoteHome: getRemoteHome(
+            sessionInfo.location?.kind === "ssh" ? sessionInfo.location.id : undefined,
+          ),
         });
+        if (!hasReplayableContent(replay)) {
+          results.push({ slug, status: "skipped: no replayable user prompts" });
+          continue;
+        }
 
         // Preserve custom title from old replay
         if (oldReplay.meta?.title) replay.meta.title = oldReplay.meta.title;
@@ -2270,16 +2418,24 @@ export async function startServer(
   app.get("/api/usage/events", async (c) => {
     const provider = c.req.query("provider");
     const sessionId = c.req.query("sessionId");
+    const targetId = safeTargetId(c.req.query("targetId"));
+    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
     if (!provider || !sessionId) {
       return c.json({ error: "provider and sessionId are required" }, 400);
     }
     const result = scanState.results.find(
-      (scan) => scan.provider === provider && scan.sessionId === sessionId,
+      (scan) =>
+        scan.provider === provider &&
+        scan.sessionId === sessionId &&
+        (targetId
+          ? scan.location?.kind === "ssh" && scan.location.id === targetId
+          : scan.location?.kind !== "ssh"),
     );
     if (!result) return c.json({ error: "Session usage not found" }, 404);
     return c.json({
       provider,
       sessionId,
+      ...(result.location ? { location: result.location } : {}),
       summary: result.usageSummary,
       events: result.usageEvents || [],
     });
@@ -2293,6 +2449,7 @@ export async function startServer(
       .map((scan) => ({
         provider: scan.provider,
         sessionId: scan.sessionId,
+        ...(scan.location ? { location: scan.location } : {}),
         project: scan.project,
         startTime: scan.startTime,
         usage: scan.usageSummary,
@@ -2327,8 +2484,18 @@ export async function startServer(
     const project = c.req.query("project");
 
     if (project) {
+      const targetId = safeTargetId(c.req.query("targetId"));
+      if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+      const location: ProjectInsightLocation = targetId
+        ? (scanState.results.find(
+            (scan) => scan.location?.kind === "ssh" && scan.location.id === targetId,
+          )?.location ?? { kind: "ssh", id: targetId, label: targetId })
+        : "local";
+      const cacheKey = projectInsightKey(project, undefined, location);
       // Project-level: cache hit → O(1), miss → compute on demand
-      const cached = insightsCache.projectInsights.get(project);
+      const cached =
+        insightsCache.projectInsights.get(cacheKey) ||
+        (location === "local" ? insightsCache.projectInsights.get(project) : undefined);
       if (cached) return c.json({ type: "project", insights: cached });
 
       // Fallback: compute on demand
@@ -2336,9 +2503,9 @@ export async function startServer(
       if (!scans.length) {
         return c.json({ error: "No scan results available. Start a scan first." }, 404);
       }
-      const memory = await readProjectMemory(project);
-      const insights = aggregateProjectInsights(project, scans, memory || undefined);
-      insightsCache.projectInsights.set(project, insights);
+      const memory = location === "local" ? await readProjectMemory(project) : undefined;
+      const insights = aggregateProjectInsights(project, scans, memory || undefined, location);
+      insightsCache.projectInsights.set(cacheKey, insights);
       return c.json({ type: "project", insights });
     }
 
@@ -2394,13 +2561,23 @@ export async function startServer(
   app.get("/api/memory", async (c) => {
     const project = c.req.query("project");
     if (!project) return c.json({ error: "project parameter required" }, 400);
+    const targetId = safeTargetId(c.req.query("targetId"));
+    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    if (targetId !== undefined) {
+      // Project memory is read from the local filesystem. Never let a remote
+      // project request accidentally read a same-named local project's memory.
+      return c.json({ memoryFiles: [], claudeMd: null });
+    }
 
     const memory = await readProjectMemory(project);
     if (!memory) return c.json({ memoryFiles: [], claudeMd: null });
     return c.json(memory);
   });
 
-  registerSessionAssetRoutes(app, { baseDir });
+  registerSessionAssetRoutes(app, {
+    baseDir,
+    loadSession: (slug, targetId) => loadSessionFromDisk(baseDir, slug, targetId),
+  });
 
   // GitHub CLI status
   app.get("/api/gh-status", (c) => {
@@ -2668,6 +2845,13 @@ export async function startServer(
   app.get("/api/gist-info", async (c) => {
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetId = safeTargetId(c.req.query("targetId"));
+    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    try {
+      await loadSessionFromDisk(baseDir, result.slug, targetId);
+    } catch {
+      return c.json({ error: "session not found" }, 404);
+    }
     const targetDir = join(baseDir, result.slug);
     const gist = await loadSavedGistInfo(targetDir);
     if (!gist) return c.json({ gist: null });
@@ -2678,6 +2862,13 @@ export async function startServer(
   app.delete("/api/gist-info", async (c) => {
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetId = safeTargetId(c.req.query("targetId"));
+    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    try {
+      await loadSessionFromDisk(baseDir, result.slug, targetId);
+    } catch {
+      return c.json({ error: "session not found" }, 404);
+    }
     const metaPath = join(baseDir, result.slug, ".vibe-replay-gist.json");
     await unlink(metaPath).catch(() => {});
     return c.json({ ok: true });
@@ -2687,6 +2878,13 @@ export async function startServer(
   app.get("/api/cloud-info", async (c) => {
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetId = safeTargetId(c.req.query("targetId"));
+    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    try {
+      await loadSessionFromDisk(baseDir, result.slug, targetId);
+    } catch {
+      return c.json({ error: "session not found" }, 404);
+    }
     const targetDir = join(baseDir, result.slug);
     const cloud = await loadSavedCloudInfo(targetDir);
     if (!cloud) return c.json({ cloud: null });
@@ -2697,6 +2895,13 @@ export async function startServer(
   app.post("/api/cloud-info", async (c) => {
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetId = safeTargetId(c.req.query("targetId"));
+    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    try {
+      await loadSessionFromDisk(baseDir, result.slug, targetId);
+    } catch {
+      return c.json({ error: "session not found" }, 404);
+    }
     const targetDir = join(baseDir, result.slug);
     const body = await c.req.json();
     if (!body.id || !body.url) return c.json({ error: "Missing id/url" }, 400);
@@ -2722,6 +2927,13 @@ export async function startServer(
   app.delete("/api/cloud-info", async (c) => {
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetId = safeTargetId(c.req.query("targetId"));
+    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
+    try {
+      await loadSessionFromDisk(baseDir, result.slug, targetId);
+    } catch {
+      return c.json({ error: "session not found" }, 404);
+    }
     const metaPath = join(baseDir, result.slug, ".vibe-replay-cloud.json");
     await unlink(metaPath).catch(() => {});
     return c.json({ ok: true });
@@ -2731,12 +2943,16 @@ export async function startServer(
   app.post("/api/publish/gist", async (c) => {
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetId = safeTargetId(c.req.query("targetId"));
+    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
     const targetDir = join(baseDir, result.slug);
 
     try {
-      const rawSession = await loadSessionFromDisk(baseDir, result.slug);
-      const overlaysData = await loadOverlays(baseDir, result.slug);
-      const targetSession = sessionWithEffectiveContent(rawSession, overlaysData);
+      const rawSession = await loadSessionFromDisk(baseDir, result.slug, targetId);
+      const overlaysData = await loadOverlays(baseDir, result.slug, targetId);
+      const targetSession = sessionForExternalOutput(
+        sessionWithEffectiveContent(rawSession, overlaysData),
+      );
 
       // Write effective content for gist, then restore the original replay.json
       const replayPath = join(targetDir, "replay.json");
@@ -2763,12 +2979,16 @@ export async function startServer(
   app.post("/api/publish/cloud", async (c) => {
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetId = safeTargetId(c.req.query("targetId"));
+    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
     const targetDir = join(baseDir, result.slug);
 
     try {
+      await loadSessionFromDisk(baseDir, result.slug, targetId);
       const body = await c.req.json().catch(() => ({}));
       const cloudResult = await publishCloudWithOverlays(targetDir, {
         visibility: body.visibility || "unlisted",
+        targetId: targetId || undefined,
       });
       return c.json(cloudResult);
     } catch (err) {
@@ -2780,12 +3000,16 @@ export async function startServer(
   app.post("/api/export/html", async (c) => {
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetId = safeTargetId(c.req.query("targetId"));
+    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
     const targetDir = join(baseDir, result.slug);
 
     try {
-      const rawSession = await loadSessionFromDisk(baseDir, result.slug);
-      const overlaysData = await loadOverlays(baseDir, result.slug);
-      const targetSession = sessionWithEffectiveContent(rawSession, overlaysData);
+      const rawSession = await loadSessionFromDisk(baseDir, result.slug, targetId);
+      const overlaysData = await loadOverlays(baseDir, result.slug, targetId);
+      const targetSession = sessionForExternalOutput(
+        sessionWithEffectiveContent(rawSession, overlaysData),
+      );
 
       // generateOutput writes replay.json — save/restore to avoid destructive overwrite
       const replayPath = join(targetDir, "replay.json");
@@ -2805,8 +3029,11 @@ export async function startServer(
   app.get("/api/export/github/status", async (c) => {
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetId = safeTargetId(c.req.query("targetId"));
+    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
     const targetDir = join(baseDir, result.slug);
     try {
+      await loadSessionFromDisk(baseDir, result.slug, targetId);
       const svgPath = join(targetDir, "session-preview.svg");
       const mdPath = join(targetDir, "github-summary.md");
       const gifPath = join(targetDir, "session-preview.gif");
@@ -2852,12 +3079,16 @@ export async function startServer(
   app.post("/api/export/github", async (c) => {
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetId = safeTargetId(c.req.query("targetId"));
+    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
     const targetDir = join(baseDir, result.slug);
 
     try {
-      const rawSession = await loadSessionFromDisk(baseDir, result.slug);
-      const overlaysData = await loadOverlays(baseDir, result.slug);
-      const targetSession = sessionWithEffectiveContent(rawSession, overlaysData);
+      const rawSession = await loadSessionFromDisk(baseDir, result.slug, targetId);
+      const overlaysData = await loadOverlays(baseDir, result.slug, targetId);
+      const targetSession = sessionForExternalOutput(
+        sessionWithEffectiveContent(rawSession, overlaysData),
+      );
 
       // Check for a previously published gist to use as replay URL
       const gist = await loadSavedGistInfo(targetDir);
@@ -2937,6 +3168,8 @@ export async function startServer(
   app.post("/api/feedback/generate", async (c) => {
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetId = safeTargetId(c.req.query("targetId"));
+    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
 
     try {
       const body: { toolName?: string } = await c.req
@@ -2960,7 +3193,7 @@ export async function startServer(
         );
       }
 
-      const targetSession = await loadSessionFromDisk(baseDir, result.slug);
+      const targetSession = await loadSessionFromDisk(baseDir, result.slug, targetId);
 
       const fallbackResult = await runWithFeedbackToolFallback(
         detected.tools,
@@ -2978,7 +3211,7 @@ export async function startServer(
 
       // Persist
       try {
-        await saveAnnotations(baseDir, result.slug, newAnnotations);
+        await saveAnnotations(baseDir, result.slug, newAnnotations, targetId);
       } catch {
         /* ignore */
       }
@@ -3015,6 +3248,8 @@ export async function startServer(
   app.post("/api/studio/translate", async (c) => {
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetId = safeTargetId(c.req.query("targetId"));
+    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
 
     try {
       const body: { toolName?: string; targetLang?: string; sourceLang?: string } = await c.req
@@ -3035,12 +3270,12 @@ export async function startServer(
         return c.json({ error: `Requested tool is not available: ${toolName}` }, 400);
       }
 
-      const targetSession = await loadSessionFromDisk(baseDir, result.slug);
+      const targetSession = await loadSessionFromDisk(baseDir, result.slug, targetId);
       const targetLang = typeof body.targetLang === "string" ? body.targetLang : "English";
       const sourceLang = typeof body.sourceLang === "string" ? body.sourceLang : undefined;
 
       // Load existing overlays BEFORE generation so we can chain operations
-      const existing = await loadOverlays(baseDir, result.slug);
+      const existing = await loadOverlays(baseDir, result.slug, targetId);
       // Remove translate overlays — we're replacing them. Keep others (tone etc.) for chaining.
       const nonTranslateOverlays = existing.overlays.filter((o) => o.source.type !== "translate");
       const chainBase: SessionOverlays = { version: 1, overlays: nonTranslateOverlays };
@@ -3060,7 +3295,7 @@ export async function startServer(
         version: 1,
         overlays: [...nonTranslateOverlays, ...translationResult.overlays],
       };
-      await saveOverlays(baseDir, result.slug, merged);
+      await saveOverlays(baseDir, result.slug, merged, targetId);
 
       return c.json({
         overlays: merged,
@@ -3078,6 +3313,8 @@ export async function startServer(
   app.post("/api/studio/tone", async (c) => {
     const result = requireSlug(c.req.query("slug"));
     if ("error" in result) return c.json({ error: result.error }, 400);
+    const targetId = safeTargetId(c.req.query("targetId"));
+    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
 
     try {
       const body: { toolName?: string; style?: string } = await c.req
@@ -3098,7 +3335,7 @@ export async function startServer(
         return c.json({ error: `Requested tool is not available: ${toolName}` }, 400);
       }
 
-      const targetSession = await loadSessionFromDisk(baseDir, result.slug);
+      const targetSession = await loadSessionFromDisk(baseDir, result.slug, targetId);
       const style =
         typeof body.style === "string" &&
         ["professional", "neutral", "friendly"].includes(body.style)
@@ -3106,7 +3343,7 @@ export async function startServer(
           : "professional";
 
       // Load existing overlays BEFORE generation so we can chain operations
-      const existing = await loadOverlays(baseDir, result.slug);
+      const existing = await loadOverlays(baseDir, result.slug, targetId);
       // Remove tone overlays — we're replacing them. Keep others (translate etc.) for chaining.
       const nonToneOverlays = existing.overlays.filter((o) => o.source.type !== "tone");
       const chainBase: SessionOverlays = { version: 1, overlays: nonToneOverlays };
@@ -3125,7 +3362,7 @@ export async function startServer(
         version: 1,
         overlays: [...nonToneOverlays, ...toneResult.overlays],
       };
-      await saveOverlays(baseDir, result.slug, merged);
+      await saveOverlays(baseDir, result.slug, merged, targetId);
 
       return c.json({
         overlays: merged,
@@ -3162,7 +3399,9 @@ export async function startServer(
       } else if (opts?.openDashboard) {
         browseUrl = `${viewerBase}/?view=dashboard`;
       } else if (opts?.openSlug) {
-        browseUrl = `${viewerBase}/?session=${encodeURIComponent(opts.openSlug)}`;
+        const qp = new URLSearchParams({ session: opts.openSlug });
+        if (opts.openTargetId) qp.set("targetId", opts.openTargetId);
+        browseUrl = `${viewerBase}/?${qp.toString()}`;
       } else {
         browseUrl = `${viewerBase}/?view=dashboard`;
       }

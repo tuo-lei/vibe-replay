@@ -1,5 +1,6 @@
 import type { Provider, SessionInfo } from "@vibe-replay/provider-contract";
 import { deduplicateSessionsByProvider } from "./providers/index.js";
+import { discoverConfiguredRemoteSessions } from "./remote.js";
 
 export interface SafeProviderDiscoveryResult {
   sessions: SessionInfo[];
@@ -17,6 +18,16 @@ export async function discoverProvidersSafely(
 ): Promise<SafeProviderDiscoveryResult> {
   const allSessions: SessionInfo[] = [];
   const failedProviders: string[] = [];
+  // SSH discovery is independent from local provider reads. Starting it now
+  // hides the connection latency behind Cursor/local filesystem discovery.
+  const remotePromise = discoverConfiguredRemoteSessions(
+    providers.map((provider) => provider.name),
+  ).catch((error) => {
+    if (process.env.VIBE_REPLAY_DEBUG) {
+      console.error("[vibe-replay] configured SSH discovery failed:", error);
+    }
+    return { sessions: [], failedTargets: ["unknown"] };
+  });
 
   for (const provider of providers) {
     let sessions: SessionInfo[];
@@ -34,6 +45,13 @@ export async function discoverProvidersSafely(
       await onSession?.(session);
     }
   }
+
+  const remote = await remotePromise;
+  for (const session of remote.sessions) {
+    allSessions.push(session);
+    await onSession?.(session);
+  }
+  failedProviders.push(...remote.failedTargets.map((targetId) => `ssh:${targetId}`));
 
   return {
     sessions: deduplicateSessionsByProvider(allSessions),

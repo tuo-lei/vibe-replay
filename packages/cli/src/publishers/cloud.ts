@@ -2,7 +2,11 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { loadOverlays, sessionWithEffectiveContent } from "../overlays.js";
+import {
+  loadOverlays,
+  sessionForExternalOutput,
+  sessionWithEffectiveContent,
+} from "../overlays.js";
 import type { ReplaySession } from "../types.js";
 
 const CLOUD_META_FILE = ".vibe-replay-cloud.json";
@@ -224,19 +228,15 @@ export async function publishCloud(
  */
 export async function publishCloudWithOverlays(
   outputDir: string,
-  opts?: { visibility?: "public" | "unlisted" | "private" },
+  opts?: { visibility?: "public" | "unlisted" | "private"; targetId?: string },
 ): Promise<CloudResult> {
   const slug = basename(outputDir);
   const baseDir = dirname(outputDir);
-  const overlays = await loadOverlays(baseDir, slug);
-  if (overlays.overlays.length === 0) {
-    return publishCloud(outputDir, opts);
-  }
-
+  const overlays = await loadOverlays(baseDir, slug, opts?.targetId);
   const replayPath = join(outputDir, "replay.json");
   const originalContent = await readFile(replayPath, "utf-8");
   const session = JSON.parse(originalContent) as ReplaySession;
-  const merged = sessionWithEffectiveContent(session, overlays);
+  const merged = sessionForExternalOutput(sessionWithEffectiveContent(session, overlays));
   await writeFile(replayPath, JSON.stringify(merged), "utf-8");
   try {
     return await publishCloud(outputDir, opts);

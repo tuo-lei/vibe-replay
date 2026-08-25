@@ -37,4 +37,39 @@ describe("buildSourceSessionCatalogCache", () => {
     ]);
     expect(catalog.providerStates?.pi).toEqual(previous.providerStates?.pi);
   });
+
+  it("persists target-scoped discovery failures for stale-cache notices", () => {
+    const catalog = buildSourceSessionCatalogCache(
+      [source("codex", "remote-session")],
+      "new",
+      null,
+      ["ssh:remote-dev"],
+    );
+
+    expect(catalog.failedProviders).toEqual(["ssh:remote-dev"]);
+  });
+
+  it("retains cached SSH sessions when that target fails discovery", () => {
+    const remote = {
+      ...source("codex", "remote-old"),
+      location: { kind: "ssh" as const, id: "remote-dev", label: "Remote dev" },
+    };
+    const previous: NormalizedSourceSessionCatalogCache = {
+      sessions: [remote],
+      cachedAt: "old",
+      discoveredAt: "old",
+      updatedAt: "old",
+      providerStates: {},
+      legacy: false,
+    };
+
+    const catalog = buildSourceSessionCatalogCache(
+      [source("cursor", "local-new")],
+      "new",
+      previous,
+      ["ssh:remote-dev"],
+    );
+
+    expect(catalog.sessions).toEqual([source("cursor", "local-new"), remote]);
+  });
 });

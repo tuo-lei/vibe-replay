@@ -182,6 +182,27 @@ describe("scanSession", () => {
     );
   });
 
+  it.each(["no-prompts", "unreadable"] as const)(
+    "does not use a metadata title as a prompt for %s sources",
+    async (transcriptStatus) => {
+      const result = await scanSession({
+        sessionId: `metadata-${transcriptStatus}`,
+        provider: "opencode",
+        project: "~/test/project",
+        slug: "metadata-only",
+        title: "State metadata title",
+        firstPrompt: "",
+        transcriptStatus,
+        filePaths: [],
+      });
+
+      expect(result.title).toBe("State metadata title");
+      expect(result.firstPrompt).toBe("");
+      expect(result.promptCount).toBe(0);
+      expect(result.transcriptStatus).toBe(transcriptStatus);
+    },
+  );
+
   it("extracts session metadata correctly", async () => {
     const result = await scanSession({
       sessionId: "test-session-1",
@@ -1073,6 +1094,49 @@ describe("scanSession", () => {
     expect(result.dataQualityNotes?.[0]).toContain("deferred");
   });
 
+  it("defers Cursor SDK enrichment during the fast background scan", async () => {
+    const result = await scanSession({
+      sessionId: "agent-sdk-session",
+      provider: "cursor",
+      project: "~/test/project",
+      slug: "agent-sdk",
+      filePaths: [join(tmpDir, "missing-sdk-transcript.jsonl")],
+      hasSqlite: false,
+      hasSdk: true,
+      deferRichCursorParse: true,
+      timestamp: "2026-03-20T10:00:00.000Z",
+      firstPrompt: "Build the dashboard.",
+      discoveryPromptCount: 2,
+      discoveryToolCallCount: 4,
+    });
+
+    expect(result).toMatchObject({
+      dataSource: "jsonl",
+      promptCount: 2,
+      toolCallCount: 4,
+      usageIndexed: false,
+    });
+    expect(result.dataQualityNotes?.[0]).toContain("deferred");
+  });
+
+  it("does not retain Cursor discovery prompt counts for unavailable transcripts", async () => {
+    const result = await scanSession({
+      sessionId: "cursor-unavailable",
+      provider: "cursor",
+      project: "~/test/project",
+      slug: "cursor-unavailable",
+      filePaths: [],
+      hasSqlite: true,
+      deferRichCursorParse: true,
+      transcriptStatus: "unreadable",
+      discoveryPromptCount: 12,
+      firstPrompt: "",
+    });
+
+    expect(result.promptCount).toBe(0);
+    expect(result.transcriptStatus).toBe("unreadable");
+  });
+
   it("preserves Cursor discovery summaries while rich parsing is deferred", async () => {
     const result = await scanSession({
       sessionId: "cursor-discovery-summary",
@@ -1270,6 +1334,68 @@ describe("aggregateProjectInsights", () => {
     expect(aFile!.sessionCount).toBe(2); // Appeared in both s1 and s2
   });
 
+  it("keeps branch and hot-file counts distinct by SSH location", () => {
+    const local = {
+      ...scans[0],
+      sessionId: "shared-session",
+      gitBranches: undefined,
+      filesModified: [{ file: "src/shared.ts", count: 1 }],
+      gitBranch: "shared",
+    };
+    const remote = {
+      ...local,
+      location: { kind: "ssh" as const, id: "remote-dev", label: "Remote dev" },
+    };
+    const insights = aggregateProjectInsights("~/Code/proj-a", [local, remote]);
+
+    expect(insights.branches.find((branch) => branch.branch === "shared")?.sessionIds).toEqual([
+      "shared-session",
+      "shared-session",
+    ]);
+    expect(insights.hotFiles.find((file) => file.file === "src/shared.ts")?.sessionCount).toBe(2);
+  });
+
+  it("keeps project totals isolated when a location scope is selected", () => {
+    const local = { ...scans[0], sessionId: "local-session" };
+    const remoteA = {
+      ...local,
+      sessionId: "remote-a-session",
+      location: { kind: "ssh" as const, id: "remote-a", label: "Remote A" },
+    };
+    const remoteB = {
+      ...local,
+      sessionId: "remote-b-session",
+      location: { kind: "ssh" as const, id: "remote-b", label: "Remote B" },
+    };
+
+    expect(
+      aggregateProjectInsights("~/Code/proj-a", [local, remoteA, remoteB], undefined, "local"),
+    ).toMatchObject({
+      sessionCount: 1,
+      totalPrompts: 10,
+    });
+    expect(
+      aggregateProjectInsights(
+        "~/Code/proj-a",
+        [local, remoteA, remoteB],
+        undefined,
+        remoteA.location,
+      ),
+    ).toMatchObject({
+      sessionCount: 1,
+      totalPrompts: 10,
+      location: remoteA.location,
+    });
+    expect(
+      aggregateProjectInsights(
+        "~/Code/proj-a",
+        [local, remoteA, remoteB],
+        undefined,
+        remoteB.location,
+      ).sessionCount,
+    ).toBe(1);
+  });
+
   it("counts sessions per day", () => {
     const insights = aggregateProjectInsights("~/Code/proj-a", scans);
 
@@ -1338,6 +1464,30 @@ describe("aggregateUserInsights", () => {
 
     expect(insights.topProjects).toHaveLength(2);
     expect(insights.topProjects[0].sessions).toBe(1);
+  });
+
+  it("counts identical project identities separately per location", () => {
+    const local = { ...scans[0], sessionId: "local-session" };
+    const remoteA = {
+      ...local,
+      sessionId: "remote-a-session",
+      location: { kind: "ssh" as const, id: "remote-a", label: "Remote A" },
+    };
+    const remoteB = {
+      ...local,
+      sessionId: "remote-b-session",
+      location: { kind: "ssh" as const, id: "remote-b", label: "Remote B" },
+    };
+    const insights = aggregateUserInsights([local, remoteA, remoteB]);
+
+    expect(insights.totalProjects).toBe(3);
+    expect(insights.topProjects).toHaveLength(3);
+    expect(insights.topProjects.filter((project) => project.location?.kind === "ssh")).toHaveLength(
+      2,
+    );
+    expect(
+      insights.topProjects.find((project) => project.location?.id === "remote-a")?.sessions,
+    ).toBe(1);
   });
 
   it("counts SDK automation by canonical project while retaining raw session paths", () => {

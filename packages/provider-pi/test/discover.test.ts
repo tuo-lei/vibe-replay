@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -74,6 +74,51 @@ describe("discoverPiSessions", () => {
       toolCallCount: 3,
       editCountEst: 1,
       model: "gpt-5.5",
+    });
+  });
+
+  it("can retain a readable transcript with no prompts for remote status display", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-pi-no-prompts-"));
+    tempDirs.push(root);
+    const projectDir = join(root, "--Users-test-project--");
+    await mkdir(projectDir, { recursive: true });
+    await writeFile(
+      join(projectDir, "2026-01-01T00-00-00-000Z_metadata-only.jsonl"),
+      `${JSON.stringify({
+        type: "session",
+        version: 3,
+        id: "pi-metadata-only",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        cwd: "/Users/test/project",
+      })}\n`,
+      "utf-8",
+    );
+
+    const sessions = await discoverPiSessions(root, false, true);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]).toMatchObject({
+      sessionId: "pi-metadata-only",
+      transcriptStatus: "no-prompts",
+      firstPrompt: "",
+      promptCount: 0,
+    });
+  });
+
+  it("uses file mtime for unreadable transcript fallback timestamps", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-pi-unreadable-"));
+    tempDirs.push(root);
+    const projectDir = join(root, "--Users-test-project--");
+    await mkdir(projectDir, { recursive: true });
+    const path = join(projectDir, "unreadable.jsonl");
+    const mtime = new Date("2026-01-02T03:04:05.000Z");
+    await writeFile(path, "{not-json}\n", "utf-8");
+    await utimes(path, mtime, mtime);
+
+    const sessions = await discoverPiSessions(root, false, true);
+    expect(sessions[0]).toMatchObject({
+      sessionId: "unreadable",
+      timestamp: mtime.toISOString(),
+      transcriptStatus: "unreadable",
     });
   });
 });

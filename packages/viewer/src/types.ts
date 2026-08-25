@@ -13,21 +13,32 @@ export type {
   SceneOverlay,
   SessionOverlays,
   SessionUsageSummary,
+  SessionLocation,
+  SessionTranscriptStatus,
   SubAgent,
   TokenUsage,
   TurnStat,
 } from "@vibe-replay/types";
 
 // Re-import for local use in this file
-import type { ProjectIdentity, ReplaySession } from "@vibe-replay/types";
+import type {
+  ProjectIdentity,
+  ReplaySession,
+  SessionLocation,
+  SessionTranscriptStatus,
+} from "@vibe-replay/types";
 
 // Viewer-only types below
 
 export interface SessionSummary {
   slug: string;
+  /** Provider/source slug before a remote output slug gets location-scoped. */
+  sourceSlug?: string;
   sessionId?: string;
   title?: string;
   provider: string;
+  location?: SessionLocation;
+  transcriptStatus?: SessionTranscriptStatus;
   model?: string;
   gitRepo?: string;
   project: string;
@@ -60,6 +71,8 @@ export interface SessionSummary {
 
 export interface SourceSession {
   provider: string;
+  location?: SessionLocation;
+  transcriptStatus?: SessionTranscriptStatus;
   /** Stable per-session id from the provider (e.g. Claude Code JSONL `sessionId`). */
   sessionId?: string;
   slug: string;

@@ -232,6 +232,36 @@ describe("rollupInsights", () => {
     expect(result.projects).toBe(1);
   });
 
+  it("keeps range project breakdowns separate by SSH location", () => {
+    const result = rollupInsightsBreakdown({
+      sessions: [
+        {
+          project: "~/code/shared",
+          startTime: "2026-08-20T12:00:00Z",
+          prompts: 1,
+          edits: 0,
+          toolCalls: 0,
+        },
+        {
+          project: "~/code/shared",
+          location: { kind: "ssh", id: "remote-a", label: "Remote A" },
+          startTime: "2026-08-20T13:00:00Z",
+          prompts: 2,
+          edits: 1,
+          toolCalls: 3,
+        },
+      ],
+      replays: [],
+    });
+
+    expect(result.projects).toHaveLength(2);
+    expect(result.projects.find((project) => !project.location)?.prompts).toBe(1);
+    expect(result.projects.find((project) => project.location?.id === "remote-a")).toMatchObject({
+      prompts: 2,
+      location: { kind: "ssh", id: "remote-a", label: "Remote A" },
+    });
+  });
+
   it("filters secondary breakdowns by the same session boundary", () => {
     const result = rollupInsightsBreakdown(
       {

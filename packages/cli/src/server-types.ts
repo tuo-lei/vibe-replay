@@ -4,7 +4,12 @@
  * dependency-free module so helpers don't need to import back from server.ts.
  */
 
-import type { ProjectIdentity, ReplaySession } from "./types.js";
+import type {
+  ProjectIdentity,
+  ReplaySession,
+  SessionLocation,
+  SessionTranscriptStatus,
+} from "./types.js";
 
 export interface SourceSummaryRecord {
   provider: string;
@@ -12,6 +17,8 @@ export interface SourceSummaryRecord {
   project: string;
   projectIdentity?: ProjectIdentity;
   sessionId?: string;
+  location?: SessionLocation;
+  transcriptStatus?: SessionTranscriptStatus;
   promptCount?: number;
   toolCallCount?: number;
   filePaths: string[];
@@ -31,10 +38,14 @@ export interface SourceSummaryRecord {
 /** Summary of a generated replay, returned by scanSessionsFromDir / scanSessions */
 export interface ReplaySummary {
   slug: string;
+  /** Provider/source slug before a remote output slug gets location-scoped. */
+  sourceSlug?: string;
   baseDir: string;
   sessionId: string;
   title?: string;
   provider: string;
+  location?: SessionLocation;
+  transcriptStatus?: SessionTranscriptStatus;
   model?: string;
   gitRepo?: string;
   project: string;
@@ -81,6 +92,7 @@ export interface SourceSessionCatalogCache {
   schemaVersion: 1;
   discoveredAt: string;
   updatedAt?: string;
+  failedProviders?: string[];
   providerStates?: Record<string, ProviderDiscoveryState>;
   sessions: CachedSourceRecord[];
 }
@@ -90,6 +102,7 @@ export interface NormalizedSourceSessionCatalogCache {
   cachedAt?: string;
   discoveredAt?: string;
   updatedAt?: string;
+  failedProviders?: string[];
   providerStates?: Record<string, ProviderDiscoveryState>;
   legacy?: boolean;
 }

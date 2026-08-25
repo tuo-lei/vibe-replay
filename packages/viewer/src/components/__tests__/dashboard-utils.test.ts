@@ -3,6 +3,7 @@ import { classifyProject } from "@vibe-replay/types";
 import {
   agentRunWorkspaceParent,
   agentWorktreeParent,
+  archiveSessionKey,
   cleanPrompt,
   dataSourceBadgeClass,
   fetchWithRetry,
@@ -18,14 +19,18 @@ import {
   providerBarClass,
   providerDisplayName,
   providerFamily,
+  replayArchiveKey,
   replaySuggestedTitle,
   rollupProject,
   rollupTopProjects,
+  sessionIdentityKey,
   sessionPromptPreview,
   shouldRefreshCachedList,
   shortCoworkSpaceId,
   sourceDisplayTitle,
   sourceSuggestedTitle,
+  transcriptStatusDescription,
+  transcriptStatusLabel,
   type TopProjectEntry,
 } from "../dashboard-utils";
 import type { SourceSession } from "../../types";
@@ -336,6 +341,27 @@ describe("rollupTopProjects", () => {
     expect(result.map((p) => p.project).sort()).toEqual(["~/Code/bar", "~/Code/foo"]);
   });
 
+  it("does not merge identical project paths across SSH locations", () => {
+    const result = rollupTopProjects([
+      makeProject({ project: "~/Code/shared", sessions: 2 }),
+      makeProject({
+        project: "~/Code/shared",
+        sessions: 3,
+        location: { kind: "ssh", id: "remote-a", label: "Remote A" },
+      }),
+      makeProject({
+        project: "~/Code/shared",
+        sessions: 4,
+        location: { kind: "ssh", id: "remote-b", label: "Remote B" },
+      }),
+    ]);
+
+    expect(result).toHaveLength(3);
+    expect(result.find((project) => !project.location)?.sessions).toBe(2);
+    expect(result.find((project) => project.location?.id === "remote-a")?.sessions).toBe(3);
+    expect(result.find((project) => project.location?.id === "remote-b")?.sessions).toBe(4);
+  });
+
   it("can preserve agent run workspaces for the explicit Projects toggle", () => {
     const result = rollupTopProjects(
       [
@@ -370,6 +396,53 @@ describe("rollupTopProjects", () => {
   });
 });
 
+describe("archive keys", () => {
+  it("keeps local and SSH sessions with the same slug separate", () => {
+    const remote = { kind: "ssh" as const, id: "remote-a", label: "Remote A" };
+
+    expect(archiveSessionKey("shared-slug")).toBe("shared-slug");
+    expect(archiveSessionKey("shared-slug", remote)).not.toBe("shared-slug");
+    expect(archiveSessionKey("shared-slug", remote)).toBe(
+      archiveSessionKey("shared-slug", { ...remote, label: "Different label" }),
+    );
+  });
+
+  it("maps a location-scoped replay directory back to its source slug", () => {
+    const remote = { kind: "ssh" as const, id: "remote-a", label: "Remote A" };
+    const replay = {
+      slug: "shared-slug--ssh-output-hash",
+      sourceSlug: "shared-slug",
+      location: remote,
+    };
+
+    expect(replayArchiveKey(replay)).toBe(archiveSessionKey("shared-slug", remote));
+    expect(replayArchiveKey({ ...replay, sourceSlug: undefined })).toBe(
+      archiveSessionKey(replay.slug, remote),
+    );
+  });
+});
+
+describe("session identity keys", () => {
+  it("maps a location-scoped replay slug back to its source slug", () => {
+    const location = { kind: "ssh" as const, id: "remote-a", label: "Remote A" };
+
+    expect(
+      sessionIdentityKey({
+        provider: "codex",
+        slug: "source-slug",
+        location,
+      }),
+    ).toBe(
+      sessionIdentityKey({
+        provider: "codex",
+        slug: "source-slug--ssh-output--id-session",
+        sourceSlug: "source-slug",
+        location,
+      }),
+    );
+  });
+});
+
 describe("cache response helpers", () => {
   it("accepts cached list payloads and normalizes missing cachedAt", () => {
     expect(parseCachedList<{ slug: string }>({ sessions: [{ slug: "a" }] })).toEqual({
@@ -378,6 +451,7 @@ describe("cache response helpers", () => {
       discoveredAt: undefined,
       stale: undefined,
       staleProviders: undefined,
+      failedProviders: undefined,
     });
     expect(
       parseCachedList({
@@ -386,6 +460,7 @@ describe("cache response helpers", () => {
         discoveredAt: "2026-05-01T00:00:01.000Z",
         stale: true,
         staleProviders: ["pi", 42],
+        failedProviders: ["ssh:remote-dev", null],
       }),
     ).toEqual({
       sessions: [],
@@ -393,6 +468,7 @@ describe("cache response helpers", () => {
       discoveredAt: "2026-05-01T00:00:01.000Z",
       stale: true,
       staleProviders: ["pi"],
+      failedProviders: ["ssh:remote-dev"],
     });
   });
 
@@ -508,6 +584,16 @@ describe("dashboard prompt and title helpers", () => {
       "Replay title",
     );
   });
+
+  it("keeps an explicit source title ahead of stale scan metadata", () => {
+    const source = makeSource({
+      provider: "codex",
+      title: "Renamed thread",
+      firstPrompt: "Original prompt text",
+    });
+
+    expect(sourceDisplayTitle(source, { title: "Old generated title" })).toBe("Renamed thread");
+  });
 });
 
 describe("formatDataSourceLabel", () => {
@@ -565,6 +651,15 @@ describe("dashboard badge helpers", () => {
     expect(shortCoworkSpaceId("space_abcdef123")).toBe("abcdef");
     expect(shortCoworkSpaceId("space-xyz987")).toBe("xyz987");
     expect(shortCoworkSpaceId("abc")).toBe("abc");
+  });
+
+  it("explains source transcripts that cannot produce a replay", () => {
+    expect(transcriptStatusLabel("no-prompts")).toBe("no replayable prompts");
+    expect(transcriptStatusDescription("no-prompts")).toContain("meaningful human prompt");
+    expect(transcriptStatusLabel("unreadable")).toBe("unreadable transcript");
+    expect(transcriptStatusDescription("unreadable")).toContain("unavailable");
+    expect(transcriptStatusLabel()).toBeUndefined();
+    expect(transcriptStatusDescription()).toBeUndefined();
   });
 });
 

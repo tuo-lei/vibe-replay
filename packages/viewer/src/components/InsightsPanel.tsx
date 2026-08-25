@@ -28,7 +28,7 @@ import {
   shortModelName,
 } from "./dashboard-utils";
 import { formatDuration } from "./StatsPanel";
-import type { ProjectIdentity } from "@vibe-replay/types";
+import type { ProjectIdentity, SessionLocation } from "@vibe-replay/types";
 
 // ─── Types (mirror the server scanner types) ────────────────────────
 
@@ -73,6 +73,7 @@ export interface TurnDurationHistogram {
 export interface ProjectInsights {
   project: string;
   projectIdentity?: ProjectIdentity;
+  location?: SessionLocation;
   sessionCount: number;
   totalDurationMs: number;
   totalCost: number;
@@ -113,6 +114,7 @@ interface UserInsights {
   topProjects: Array<{
     project: string;
     projectIdentity?: ProjectIdentity;
+    location?: SessionLocation;
     sessions: number;
     cost: number;
     prompts: number;
@@ -169,11 +171,15 @@ interface ScanInsightsContextValue {
   scanStatus: ScanStatus | null;
   userInsights: UserInsights | null;
   projectInsightsCache: Map<string, ProjectInsights>;
-  fetchProjectInsights: (project: string) => void;
+  fetchProjectInsights: (project: string, targetId?: string) => void;
   loading: boolean;
 }
 
 const ScanInsightsContext = createContext<ScanInsightsContextValue | null>(null);
+
+function projectInsightsCacheKey(project: string, targetId?: string): string {
+  return `${targetId ? `ssh:${targetId}` : "local"}\0${project}`;
+}
 
 export function useScanInsightsContext(): ScanInsightsContextValue {
   const ctx = useContext(ScanInsightsContext);
@@ -314,15 +320,17 @@ export function ScanInsightsProvider({ children }: { children: ReactNode }) {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchProjectInsights = useCallback(
-    (project: string) => {
+    (project: string, targetId?: string) => {
+      const cacheKey = projectInsightsCacheKey(project, targetId);
       // Skip if cached and not stale
-      if (projectInsightsCache.has(project) && !staleCacheRef.current) return;
+      if (projectInsightsCache.has(cacheKey) && !staleCacheRef.current) return;
       setLoading(true);
-      fetch(`/api/insights?project=${encodeURIComponent(project)}`)
+      const targetQuery = targetId ? `&targetId=${encodeURIComponent(targetId)}` : "";
+      fetch(`/api/insights?project=${encodeURIComponent(project)}${targetQuery}`)
         .then((resp) => (resp.ok ? resp.json() : null))
         .then((data) => {
           if (data?.type === "project") {
-            projectInsightsCache.set(project, data.insights as ProjectInsights);
+            projectInsightsCache.set(cacheKey, data.insights as ProjectInsights);
             forceUpdate((v) => v + 1);
           }
         })
@@ -762,13 +770,21 @@ export function UserInsightsPanel({ insights }: { insights: UserInsights }) {
                 {rolledTopProjects.map((p) => {
                   const name = projectDisplayName(p.project, p.projectIdentity);
                   return (
-                    <div key={p.project} className="flex items-center gap-2 text-xs">
+                    <div
+                      key={`${p.location?.kind === "ssh" ? `ssh:${p.location.id}` : "local"}\0${p.project}`}
+                      className="flex items-center gap-2 text-xs"
+                    >
                       <span
                         className="font-mono text-terminal-text truncate flex-1"
                         title={p.project}
                       >
                         {name}
                       </span>
+                      {p.location?.kind === "ssh" && (
+                        <span className="text-terminal-purple text-[10px] shrink-0">
+                          {p.location.label}
+                        </span>
+                      )}
                       <span className="text-terminal-dimmer tabular-nums shrink-0">
                         {p.sessions} session{p.sessions > 1 ? "s" : ""}
                       </span>

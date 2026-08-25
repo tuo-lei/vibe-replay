@@ -54,6 +54,11 @@ export function codexStripTwoPass(text: string): string {
 
 export function contentText(content: any): string {
   if (typeof content === "string") return content;
+  if (content && typeof content === "object" && !Array.isArray(content)) {
+    if (typeof content.text === "string") return content.text;
+    if (Array.isArray(content.content)) return contentText(content.content);
+    return "";
+  }
   if (!Array.isArray(content)) return "";
   return content
     .map((part) => {

@@ -23,6 +23,7 @@ import { TokenBreakdownChart, TurnDurationChart } from "./InsightCharts";
 import { type ProjectInsights, useScanInsightsContext } from "./InsightsPanel";
 import SessionRelationshipsView from "./SessionRelationshipsView";
 import { fmtNum, formatDuration } from "./StatsPanel";
+import type { SessionLocation } from "@vibe-replay/types";
 
 interface ProjectsPanelProps {
   onNavigate: (view: Tab) => void;
@@ -85,8 +86,18 @@ function MiniSparkline({
 interface SidebarProject {
   project: string;
   projectIdentity?: ProjectInsight["projectIdentity"];
+  location?: SessionLocation;
   sessions: number;
   lastActivity?: string;
+}
+
+function projectSelectionKey(project: Pick<ProjectInsight, "project" | "location">): string {
+  const locationKey = project.location?.kind === "ssh" ? `ssh:${project.location.id}` : "local";
+  return `${locationKey}\0${project.project}`;
+}
+
+function projectLocationLabel(location?: SessionLocation): string {
+  return location?.kind === "ssh" ? location.label : "local";
 }
 
 function ProjectSidebar({
@@ -132,25 +143,31 @@ function ProjectSidebar({
 
         {/* Per-project items */}
         {projects.map((p) => {
-          const isActive = selected === p.project;
+          const selectionKey = projectSelectionKey(p);
+          const isActive = selected === selectionKey;
           const label = projectDisplayName(p.project, p.projectIdentity);
           return (
             <button
-              key={p.project}
-              onClick={() => onSelect(p.project)}
+              key={selectionKey}
+              onClick={() => onSelect(selectionKey)}
               title={p.project}
               className={`w-full text-left px-3 py-2.5 rounded-lg transition-all duration-200 ease-material group ${
                 isActive ? "bg-terminal-green-subtle shadow-layer-sm" : "hover:bg-terminal-surface"
               }`}
             >
               <div className="flex items-center justify-between gap-1.5">
-                <span
-                  className={`text-xs font-sans truncate ${
-                    isActive ? "text-terminal-green font-medium" : "text-terminal-text"
-                  }`}
-                >
-                  {label}
-                </span>
+                <div className="min-w-0">
+                  <span
+                    className={`block text-xs font-sans truncate ${
+                      isActive ? "text-terminal-green font-medium" : "text-terminal-text"
+                    }`}
+                  >
+                    {label}
+                  </span>
+                  <span className="block mt-0.5 text-[9px] font-mono text-terminal-dimmer truncate">
+                    {projectLocationLabel(p.location)}
+                  </span>
+                </div>
                 <span
                   className={`tabular-nums px-1.5 py-0.5 rounded-md text-xs shrink-0 ${
                     isActive
@@ -199,6 +216,9 @@ function ProjectOverview({
           </div>
           <div className="text-[10px] font-mono text-terminal-dimmer truncate mt-0.5">
             {project}
+          </div>
+          <div className="mt-1 text-[10px] font-mono text-terminal-purple">
+            {projectLocationLabel(insight.location)}
           </div>
         </div>
         {insight.lastActivity && (
@@ -355,16 +375,20 @@ function ProjectsGrid({
     <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-3">
       {projects.map((p) => {
         const name = projectDisplayName(p.project, p.projectIdentity);
+        const selectionKey = projectSelectionKey(p);
         return (
           <button
-            key={p.project}
-            onClick={() => onProjectClick(p.project)}
+            key={selectionKey}
+            onClick={() => onProjectClick(selectionKey)}
             className="hover-lift group rounded-xl bg-terminal-surface p-4 text-left shadow-layer-sm transition-all duration-200 ease-material hover:bg-terminal-surface-hover"
           >
             <div className="flex items-start justify-between gap-2 mb-3">
               <div className="min-w-0">
                 <div className="text-sm font-sans font-medium text-terminal-text truncate group-hover:text-terminal-green transition-colors">
                   {name}
+                </div>
+                <div className="text-[9px] font-mono text-terminal-dimmer truncate mt-0.5">
+                  {projectLocationLabel(p.location)}
                 </div>
                 <div className="text-[10px] font-mono text-terminal-dimmer truncate mt-0.5">
                   {p.project}
@@ -440,7 +464,7 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
     fetchProjectInsights,
     loading: insightsLoading,
   } = useScanInsightsContext();
-  const [selectedProject, setSelectedProject] = useState<string>(ALL_PROJECTS);
+  const [selectedProjectKey, setSelectedProjectKey] = useState<string>(ALL_PROJECTS);
   const [mode, setMode] = useState<PanelMode>("overview");
   const [showAgentRuns, setShowAgentRuns] = useState(
     () => new URLSearchParams(window.location.search).get("agentRuns") === "true",
@@ -470,15 +494,33 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
   }, [userInsights, showAgentRuns]);
 
   const selectedInsight =
-    selectedProject === ALL_PROJECTS
+    selectedProjectKey === ALL_PROJECTS
       ? null
-      : (projects.find((p) => p.project === selectedProject) ?? null);
-  const detailedInsight =
-    selectedProject === ALL_PROJECTS ? undefined : projectInsightsCache.get(selectedProject);
+      : (projects.find((p) => projectSelectionKey(p) === selectedProjectKey) ?? null);
+  const selectedProject = selectedInsight?.project ?? "";
+  const selectedTargetId =
+    selectedInsight?.location?.kind === "ssh" ? selectedInsight.location.id : undefined;
+  const selectedLocation = selectedInsight?.location ?? "local";
+  const detailedInsight = selectedInsight
+    ? projectInsightsCache.get(
+        `${selectedTargetId ? `ssh:${selectedTargetId}` : "local"}\0${selectedInsight.project}`,
+      )
+    : undefined;
 
   useEffect(() => {
-    if (selectedProject !== ALL_PROJECTS) fetchProjectInsights(selectedProject);
-  }, [selectedProject, fetchProjectInsights, scanStatus?.finishedAt, scanStatus?.revision]);
+    if (!selectedInsight) return;
+    if (selectedTargetId) {
+      fetchProjectInsights(selectedInsight.project, selectedTargetId);
+    } else {
+      fetchProjectInsights(selectedInsight.project);
+    }
+  }, [
+    selectedInsight,
+    selectedTargetId,
+    fetchProjectInsights,
+    scanStatus?.finishedAt,
+    scanStatus?.revision,
+  ]);
 
   const isScanning = scanStatus?.running && scanStatus.total > 0;
 
@@ -506,19 +548,28 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
 
   const openSessionsForProject = (project: string) => {
     onNavigate("sessions");
-    setTimeout(() => navigateTo({ tab: "sessions", project }), 50);
+    setTimeout(
+      () =>
+        navigateTo({
+          tab: "sessions",
+          project,
+          targetId: selectedTargetId ?? null,
+        }),
+      50,
+    );
   };
 
   const sidebarProjects: SidebarProject[] = projects.map((p) => ({
     project: p.project,
     projectIdentity: p.projectIdentity,
+    location: p.location,
     sessions: p.sessions,
     lastActivity: p.lastActivity,
   }));
 
   // Single-project Overview already embeds the timeline; the standalone tab
   // is redundant and dropped. Hot Files stays as its own tab.
-  const isSingleProject = selectedProject !== ALL_PROJECTS;
+  const isSingleProject = selectedProjectKey !== ALL_PROJECTS;
   const visibleTabs = isSingleProject
     ? PROJECT_VIEW_TABS.filter((t) => t.id !== "timeline")
     : PROJECT_VIEW_TABS;
@@ -530,9 +581,9 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
       {/* ─── Left sidebar: project navigation ─── */}
       <ProjectSidebar
         projects={sidebarProjects}
-        selected={selectedProject}
-        onSelect={(project) => {
-          setSelectedProject(project);
+        selected={selectedProjectKey}
+        onSelect={(projectKey) => {
+          setSelectedProjectKey(projectKey);
           setMode("overview");
         }}
       />
@@ -543,16 +594,16 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
         <div className="md:hidden px-3 pt-3">
           <select
             aria-label="Select project"
-            value={selectedProject}
+            value={selectedProjectKey}
             onChange={(e) => {
-              setSelectedProject(e.target.value);
+              setSelectedProjectKey(e.target.value);
               setMode("overview");
             }}
             className="w-full bg-terminal-surface rounded-lg px-3 py-2.5 text-sm font-sans text-terminal-text outline-none shadow-layer-sm"
           >
             <option value={ALL_PROJECTS}>All projects ({projects.length})</option>
             {projects.map((p) => (
-              <option key={p.project} value={p.project}>
+              <option key={projectSelectionKey(p)} value={projectSelectionKey(p)}>
                 {projectDisplayName(p.project, p.projectIdentity)} ({p.sessions})
               </option>
             ))}
@@ -563,13 +614,10 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
         <div className="px-4 md:px-6 pt-5 pb-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
             <h2 className="text-sm font-sans font-semibold text-terminal-text truncate">
-              {selectedProject === ALL_PROJECTS
+              {selectedProjectKey === ALL_PROJECTS
                 ? "All Projects"
-                : projectDisplayName(
-                    selectedProject,
-                    projects.find((p) => p.project === selectedProject)?.projectIdentity,
-                  )}
-              {selectedProject === ALL_PROJECTS && (
+                : projectDisplayName(selectedProject ?? "", selectedInsight?.projectIdentity)}
+              {selectedProjectKey === ALL_PROJECTS && (
                 <span className="ml-2 text-terminal-dimmer font-normal">({projects.length})</span>
               )}
             </h2>
@@ -584,7 +632,7 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
                 onClick={() => {
                   const next = !showAgentRuns;
                   setShowAgentRuns(next);
-                  setSelectedProject(ALL_PROJECTS);
+                  setSelectedProjectKey(ALL_PROJECTS);
                   navigateTo({ agentRuns: next ? "true" : null }, { notify: false });
                 }}
                 className="mt-1 text-[10px] font-mono text-terminal-dimmer hover:text-terminal-text transition-colors"
@@ -617,25 +665,37 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
 
         {/* Tab content */}
         <div className="px-4 md:px-6 pb-6 space-y-4">
-          {activeMode === "overview" && selectedProject === ALL_PROJECTS && (
-            <ProjectsGrid projects={projects} onProjectClick={setSelectedProject} />
+          {activeMode === "overview" && selectedProjectKey === ALL_PROJECTS && (
+            <ProjectsGrid projects={projects} onProjectClick={setSelectedProjectKey} />
           )}
           {activeMode === "overview" && selectedInsight && (
             <>
               <ProjectOverview
-                project={selectedProject}
+                project={selectedInsight.project}
                 insight={selectedInsight}
-                onOpenSessions={() => openSessionsForProject(selectedProject)}
+                onOpenSessions={() => openSessionsForProject(selectedInsight.project)}
               />
               <ProjectPerformance insights={detailedInsight} loading={insightsLoading} />
-              <SessionRelationshipsView view="timeline" projectFilter={projectFilterArg} />
+              <SessionRelationshipsView
+                view="timeline"
+                projectFilter={projectFilterArg}
+                projectLocation={selectedLocation}
+              />
             </>
           )}
           {activeMode === "timeline" && (
-            <SessionRelationshipsView view="timeline" projectFilter={projectFilterArg} />
+            <SessionRelationshipsView
+              view="timeline"
+              projectFilter={projectFilterArg}
+              projectLocation={selectedLocation}
+            />
           )}
           {activeMode === "files" && (
-            <SessionRelationshipsView view="files" projectFilter={projectFilterArg} />
+            <SessionRelationshipsView
+              view="files"
+              projectFilter={projectFilterArg}
+              projectLocation={selectedLocation}
+            />
           )}
         </div>
       </div>

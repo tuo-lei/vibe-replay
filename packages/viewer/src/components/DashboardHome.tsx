@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatedValue } from "../hooks/useAnimatedNumber";
-import type { SessionSummary, SourceSession } from "../types";
+import type { SessionLocation, SessionSummary, SourceSession } from "../types";
 import { localDayKey } from "../utils/date";
 import { SessionDetailPopup } from "./Dashboard";
 import { ProviderBadge } from "./dashboard/DashboardShared";
 import {
   fetchWithRetry,
+  archiveSessionKey,
   formatCompactDuration,
   isCacheFresh,
   navigateTo,
@@ -13,12 +14,18 @@ import {
   parseCachedList,
   projectDisplayName,
   replaySuggestedTitle,
+  remoteSourceFailureIds,
   rollupTopProjects,
+  sameSessionLocation,
+  sessionIdentityKey,
   shouldRefreshCachedList,
   type SourcesEnrichmentStatus,
   type TopProjectEntry,
   sourceSuggestedTitle,
+  transcriptStatusDescription,
+  transcriptStatusLabel,
   timeAgo,
+  toggleArchiveSlug,
 } from "./dashboard-utils";
 import { ContributionHeatmap } from "./InsightsPage";
 import { useScanInsightsContext } from "./InsightsPanel";
@@ -48,6 +55,57 @@ interface InsightStats {
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
+function sessionLocationKey(location?: SessionLocation): string {
+  return location?.kind === "ssh" ? `ssh:${location.id}` : "local";
+}
+
+function sourceLocationBadge(location?: SessionLocation) {
+  const isRemote = location?.kind === "ssh";
+  return (
+    <span
+      className={`ui-pill-compact ${
+        isRemote
+          ? "bg-terminal-purple-subtle text-terminal-purple"
+          : "bg-terminal-surface-2 text-terminal-dimmer"
+      }`}
+      title={isRemote ? `SSH source: ${location.label}` : "Local source"}
+    >
+      {isRemote ? location.label : "local"}
+    </span>
+  );
+}
+
+function sourceTranscriptStatusBadge(status?: SourceSession["transcriptStatus"]) {
+  const label = transcriptStatusLabel(status);
+  if (!label) return null;
+  return (
+    <span
+      className={`ui-pill-compact ${
+        status === "unreadable"
+          ? "bg-terminal-red-subtle text-terminal-red"
+          : "bg-terminal-orange-subtle text-terminal-orange"
+      }`}
+      title={transcriptStatusDescription(status)}
+    >
+      {label}
+    </span>
+  );
+}
+
+function RemoteSourceFailureNotice({ failures }: { failures: string[] }) {
+  if (failures.length === 0) return null;
+  const labels = failures.map((failure) => failure.slice("ssh:".length));
+  return (
+    <div className="rounded-xl bg-terminal-red-subtle px-4 py-3 text-xs font-mono text-terminal-red shadow-layer-sm">
+      <div className="font-semibold">Remote SSH source unavailable</div>
+      <div className="mt-1 text-terminal-red/80">
+        {labels.join(", ")} — showing cached sessions when available. Check the SSH connection and
+        refresh.
+      </div>
+    </div>
+  );
+}
+
 // ─── Data Fetching ───────────────────────────────────────────────────
 
 function useDashboardData() {
@@ -57,6 +115,7 @@ function useDashboardData() {
   const [loadingSources, setLoadingSources] = useState(true);
   const [loadingReplays, setLoadingReplays] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [failedRemoteSources, setFailedRemoteSources] = useState<string[]>([]);
   const [, setScanProgress] = useState<number | null>(null);
   const [enrichmentStatus, setEnrichmentStatus] = useState<SourcesEnrichmentStatus | null>(null);
   const wasEnrichingRef = useRef(false);
@@ -84,6 +143,7 @@ function useDashboardData() {
 
       const cachedSources = parseCachedList<SourceSession>(sourcesRes);
       const cachedReplays = parseCachedList<SessionSummary>(replaysRes);
+      setFailedRemoteSources(remoteSourceFailureIds(sourcesRes));
 
       if (cachedSources?.sessions.length) setSources(cachedSources.sessions);
       if (cachedReplays?.sessions.length) setReplays(cachedReplays.sessions);
@@ -112,6 +172,7 @@ function useDashboardData() {
                   setScanProgress(msg.scanned);
                 } else if (msg.type === "complete") {
                   setSources(msg.sessions);
+                  setFailedRemoteSources(remoteSourceFailureIds(msg));
                   setScanProgress(null);
                   es.close();
                   resolve();
@@ -136,7 +197,10 @@ function useDashboardData() {
                   if (!r.ok) throw new Error("Failed to load sources");
                   return r.json();
                 })
-                .then((data: { sessions: SourceSession[] }) => setSources(data.sessions))
+                .then((data: { sessions: SourceSession[]; failedProviders?: unknown }) => {
+                  setSources(data.sessions);
+                  setFailedRemoteSources(remoteSourceFailureIds(data));
+                })
                 .catch((err) => {
                   if (!cachedSources?.sessions.length) {
                     setError(err instanceof Error ? err.message : "Failed to load sessions");
@@ -238,6 +302,7 @@ function useDashboardData() {
     loadingReplays,
     enrichmentStatus,
     error,
+    failedRemoteSources,
   };
 }
 
@@ -249,13 +314,13 @@ function computeInsights(sources: SourceSession[], replays: SessionSummary[]): I
   let totalDuration = 0;
 
   // Source-level counts from lightweight scan, fallback to replay stats
-  const srcBySlug = new Map(sources.map((s) => [s.slug, s]));
+  const srcByIdentity = new Map(sources.map((s) => [sessionIdentityKey(s), s]));
   for (const s of sources) {
     totalPrompts += s.promptCount ?? (s.prompts?.length || (s.firstPrompt ? 1 : 0));
     totalToolCalls += s.toolCallCount ?? 0;
   }
   for (const r of replays) {
-    const src = srcBySlug.get(r.slug);
+    const src = srcByIdentity.get(sessionIdentityKey(r));
     const replayToolCalls = r.stats.toolCalls || 0;
     if (!src) {
       totalPrompts += r.stats.userPrompts || 0;
@@ -272,8 +337,14 @@ function computeInsights(sources: SourceSession[], replays: SessionSummary[]): I
 
   // Projects
   const projects = new Set<string>();
-  for (const s of sources) projects.add(projectIdentityKey(s.project, s.projectIdentity));
-  for (const r of replays) projects.add(projectIdentityKey(r.project));
+  for (const s of sources) {
+    projects.add(
+      `${sessionLocationKey(s.location)}\0${projectIdentityKey(s.project, s.projectIdentity)}`,
+    );
+  }
+  for (const r of replays) {
+    projects.add(`${sessionLocationKey(r.location)}\0${projectIdentityKey(r.project)}`);
+  }
 
   // Home activity should reflect the latest discovered sessions immediately,
   // even while richer scan insights are still refreshing in the background.
@@ -331,18 +402,24 @@ function computeLocalTopProjects(
   replays: SessionSummary[],
 ): TopProjectEntry[] {
   const byProject = new Map<string, LocalProjectAccumulator>();
-  const replayBySlug = new Map(replays.map((replay) => [replay.slug, replay]));
-  const countedReplaySlugs = new Set<string>();
+  const replayByIdentity = new Map(replays.map((replay) => [sessionIdentityKey(replay), replay]));
+  const countedReplayIdentities = new Set<string>();
 
-  const entryFor = (project: string, projectIdentity?: SourceSession["projectIdentity"]) => {
-    const existing = byProject.get(project);
+  const entryFor = (
+    project: string,
+    projectIdentity?: SourceSession["projectIdentity"],
+    location?: SessionLocation,
+  ) => {
+    const key = `${sessionLocationKey(location)}\0${project}`;
+    const existing = byProject.get(key);
     if (existing) {
       existing.projectIdentity = mergeProjectIdentities(existing.projectIdentity, projectIdentity);
       return existing;
     }
     const created = createLocalProject(project);
     created.projectIdentity = projectIdentity;
-    byProject.set(project, created);
+    created.location = location;
+    byProject.set(key, created);
     return created;
   };
 
@@ -353,10 +430,10 @@ function computeLocalTopProjects(
   };
 
   for (const source of sources) {
-    const replay = replayBySlug.get(source.slug);
-    if (replay) countedReplaySlugs.add(replay.slug);
+    const replay = replayByIdentity.get(sessionIdentityKey(source));
+    if (replay) countedReplayIdentities.add(sessionIdentityKey(replay));
 
-    const entry = entryFor(source.project, source.projectIdentity);
+    const entry = entryFor(source.project, source.projectIdentity, source.location);
     entry.sessions += 1;
     entry.cost += replay?.stats.costEstimate ?? 0;
     entry.prompts +=
@@ -370,9 +447,9 @@ function computeLocalTopProjects(
   }
 
   for (const replay of replays) {
-    if (countedReplaySlugs.has(replay.slug)) continue;
+    if (countedReplayIdentities.has(sessionIdentityKey(replay))) continue;
 
-    const entry = entryFor(replay.project);
+    const entry = entryFor(replay.project, undefined, replay.location);
     entry.sessions += 1;
     entry.cost += replay.stats.costEstimate ?? 0;
     entry.prompts += replay.stats.userPrompts ?? 0;
@@ -457,17 +534,17 @@ function RecentSessionsList({
   onGenerate,
   onViewReplay,
   onSessionClick,
-  generatingSlug,
-  generateErrorSlug,
+  generatingSessionKey,
+  generateErrorSessionKey,
 }: {
   sessions: SourceSession[];
   isLoading: boolean;
   enrichmentStatus?: SourcesEnrichmentStatus | null;
   onGenerate: (source: SourceSession) => void;
-  onViewReplay: (slug: string) => void;
+  onViewReplay: (slug: string, location?: SessionLocation) => void;
   onSessionClick: (source: SourceSession) => void;
-  generatingSlug: string | null;
-  generateErrorSlug: string | null;
+  generatingSessionKey: string | null;
+  generateErrorSessionKey: string | null;
 }) {
   if (sessions.length === 0) {
     return (
@@ -481,8 +558,10 @@ function RecentSessionsList({
 
   const renderAction = (s: SourceSession, featured = false) => {
     const hasReplay = !!s.existingReplay;
-    const isGenerating = generatingSlug === s.slug;
-    const hasError = generateErrorSlug === s.slug;
+    const identity = sessionIdentityKey(s);
+    const isGenerating = generatingSessionKey === identity;
+    const hasError = generateErrorSessionKey === identity;
+    const transcriptStatus = s.transcriptStatus;
     const sizeClass = featured ? "h-8 px-3.5" : "h-7 px-3";
 
     if (hasReplay) {
@@ -490,7 +569,7 @@ function RecentSessionsList({
         <button
           onClick={(e) => {
             e.stopPropagation();
-            onViewReplay(s.existingReplay!);
+            onViewReplay(s.existingReplay!, s.location);
           }}
           className={`${sizeClass} text-xs font-sans font-semibold rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 flex items-center gap-1 shrink-0`}
         >
@@ -508,7 +587,8 @@ function RecentSessionsList({
           e.stopPropagation();
           onGenerate(s);
         }}
-        disabled={isGenerating}
+        disabled={isGenerating || !!transcriptStatus}
+        title={transcriptStatusDescription(transcriptStatus)}
         className={`${sizeClass} text-xs font-sans font-semibold rounded-md transition-all duration-200 disabled:opacity-50 flex items-center gap-1 shrink-0 ${
           hasError
             ? "bg-terminal-red-subtle text-terminal-red"
@@ -519,6 +599,8 @@ function RecentSessionsList({
           <span className="animate-pulse">{featured ? "Generating..." : "..."}</span>
         ) : hasError ? (
           "Failed"
+        ) : transcriptStatus ? (
+          "Unavailable"
         ) : (
           <>
             <svg
@@ -538,7 +620,7 @@ function RecentSessionsList({
     );
   };
 
-  const sessionKey = (s: SourceSession) => `${s.provider}-${s.project}-${s.slug}`;
+  const sessionKey = (s: SourceSession) => sessionIdentityKey(s);
   const primary =
     sessions.find((s) => !s.existingReplay && !isLikelyActiveSource(s)) ??
     sessions.find((s) => !s.existingReplay) ??
@@ -590,6 +672,8 @@ function RecentSessionsList({
               <span className="text-[10px] font-mono text-terminal-dimmer tabular-nums">
                 {timeAgo(primary.timestamp)}
               </span>
+              {sourceLocationBadge(primary.location)}
+              {sourceTranscriptStatusBadge(primary.transcriptStatus)}
               {primaryIsEnriching && <DataLevelBadge state={primaryDataState} active compact />}
             </div>
             <p className="mt-1 text-sm font-sans font-semibold text-terminal-text truncate">
@@ -638,6 +722,8 @@ function RecentSessionsList({
                   <p className="text-[11px] font-mono text-terminal-dimmer truncate">
                     {s.gitRepo || projectDisplayName(s.project, s.projectIdentity)}
                   </p>
+                  {sourceLocationBadge(s.location)}
+                  {sourceTranscriptStatusBadge(s.transcriptStatus)}
                   {isEnriching && <DataLevelBadge state={dataState} active compact />}
                 </div>
               </div>
@@ -662,7 +748,7 @@ function RecentReplaysList({
 }: {
   replays: SessionSummary[];
   isLoading: boolean;
-  onOpen: (slug: string) => void;
+  onOpen: (slug: string, location?: SessionLocation) => void;
 }) {
   if (replays.length === 0) {
     return (
@@ -676,8 +762,8 @@ function RecentReplaysList({
     <div className="space-y-1 flex-1 flex flex-col">
       {replays.map((r) => (
         <button
-          key={r.slug}
-          onClick={() => onOpen(r.slug)}
+          key={sessionIdentityKey(r)}
+          onClick={() => onOpen(r.slug, r.location)}
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-terminal-surface-hover transition-colors duration-200 text-left group"
         >
           <ProviderBadge provider={r.provider} />
@@ -686,6 +772,7 @@ function RecentReplaysList({
               {replaySuggestedTitle(r)}
             </p>
             <div className="flex items-center gap-2 mt-0.5">
+              {sourceLocationBadge(r.location)}
               <span className="text-[11px] font-mono text-terminal-dimmer">
                 {r.stats.userPrompts} prompts
               </span>
@@ -891,12 +978,15 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     loadingReplays,
     enrichmentStatus,
     error,
+    failedRemoteSources,
   } = useDashboardData();
   const insights = useMemo(() => computeInsights(sources, replays), [sources, replays]);
   const { userInsights } = useScanInsightsContext();
-  const [generatingSlug, setGeneratingSlug] = useState<string | null>(null);
-  const [generateErrorSlug, setGenerateErrorSlug] = useState<string | null>(null);
+  const [generatingSessionKey, setGeneratingSessionKey] = useState<string | null>(null);
+  const [generateErrorSessionKey, setGenerateErrorSessionKey] = useState<string | null>(null);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  const [selectedSessionKey, setSelectedSessionKey] = useState<string | null>(null);
+  const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());
   const [syncStatus, setSyncStatus] = useState<
     "idle" | "syncing" | "done" | "error" | "needsLogin" | "awaitingLogin"
   >("idle");
@@ -907,9 +997,34 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   const requestedEnrichmentSignatureRef = useRef("");
   const syncPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const syncPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const selectedSession = selectedSlug
-    ? (sources.find((s) => s.slug === selectedSlug) ?? null)
+  const legacySelectedSlugMatches = selectedSlug
+    ? sources.filter((source) => source.slug === selectedSlug)
+    : [];
+  const selectedSession = selectedSessionKey
+    ? (sources.find((s) => sessionIdentityKey(s) === selectedSessionKey) ?? null)
+    : legacySelectedSlugMatches.length === 1
+      ? legacySelectedSlugMatches[0]
+      : null;
+  const selectedArchiveKey = selectedSession
+    ? archiveSessionKey(selectedSession.slug, selectedSession.location)
     : null;
+  const selectedIsArchived = selectedArchiveKey ? archivedSlugs.has(selectedArchiveKey) : false;
+  useEffect(() => {
+    let mounted = true;
+    void fetch("/api/archived")
+      .then((response) => (response.ok ? response.json() : { slugs: [] }))
+      .then((data: { slugs?: unknown }) => {
+        if (!mounted) return;
+        const slugs = Array.isArray(data.slugs)
+          ? data.slugs.filter((slug): slug is string => typeof slug === "string")
+          : [];
+        setArchivedSlugs(new Set(slugs));
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, []);
   const localTopProjects = useMemo(
     () => computeLocalTopProjects(sources, replays),
     [sources, replays],
@@ -952,13 +1067,18 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     activityWindow === "today"
       ? now.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
       : `${activityStart.toLocaleDateString("en-US", { month: "short", day: "numeric" })}–${now.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
-  const handleOpenReplay = (slug: string) => {
-    navigateTo({ view: null, session: slug });
+  const handleOpenReplay = (slug: string, location?: SessionLocation) => {
+    navigateTo({
+      view: null,
+      session: slug,
+      targetId: location?.kind === "ssh" ? location.id : null,
+    });
   };
 
   const handleGenerate = async (source: SourceSession) => {
-    setGeneratingSlug(source.slug);
-    setGenerateErrorSlug(null);
+    const identity = sessionIdentityKey(source);
+    setGeneratingSessionKey(identity);
+    setGenerateErrorSessionKey(null);
     try {
       const title = sourceSuggestedTitle(source);
       const resp = await fetchWithRetry("/api/generate", {
@@ -966,6 +1086,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           provider: source.provider,
+          targetId: source.location?.kind === "ssh" ? source.location.id : undefined,
           filePaths: source.filePaths,
           toolPaths: source.toolPaths,
           title: normalizeTitleText(title) || undefined,
@@ -975,26 +1096,36 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || "Generation failed");
-      navigateTo({ view: null, session: data.slug });
+      navigateTo({
+        view: null,
+        session: data.slug,
+        targetId: source.location?.kind === "ssh" ? source.location.id : null,
+      });
     } catch (err) {
       console.error("Generate error:", err);
-      setGenerateErrorSlug(source.slug);
-      setTimeout(() => setGenerateErrorSlug((prev) => (prev === source.slug ? null : prev)), 2000);
+      setGenerateErrorSessionKey(identity);
+      setTimeout(
+        () => setGenerateErrorSessionKey((prev) => (prev === identity ? null : prev)),
+        2000,
+      );
     } finally {
-      setGeneratingSlug(null);
+      setGeneratingSessionKey(null);
     }
   };
 
   const submitGenerateFromPopup = async (source: SourceSession, title: string) => {
     setSelectedSlug(null);
-    setGeneratingSlug(source.slug);
-    setGenerateErrorSlug(null);
+    setSelectedSessionKey(null);
+    const identity = sessionIdentityKey(source);
+    setGeneratingSessionKey(identity);
+    setGenerateErrorSessionKey(null);
     try {
       const resp = await fetchWithRetry("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           provider: source.provider,
+          targetId: source.location?.kind === "ssh" ? source.location.id : undefined,
           filePaths: source.filePaths,
           toolPaths: source.toolPaths,
           title: normalizeTitleText(title) || undefined,
@@ -1004,18 +1135,27 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || "Generation failed");
-      navigateTo({ view: null, session: data.slug });
+      navigateTo({
+        view: null,
+        session: data.slug,
+        targetId: source.location?.kind === "ssh" ? source.location.id : null,
+      });
     } catch (err) {
       console.error("Generate error:", err);
-      setGenerateErrorSlug(source.slug);
-      setTimeout(() => setGenerateErrorSlug((prev) => (prev === source.slug ? null : prev)), 2000);
+      setGenerateErrorSessionKey(identity);
+      setTimeout(
+        () => setGenerateErrorSessionKey((prev) => (prev === identity ? null : prev)),
+        2000,
+      );
     } finally {
-      setGeneratingSlug(null);
+      setGeneratingSessionKey(null);
     }
   };
 
-  const handleTitleSave = async (slug: string, title: string) => {
-    const resp = await fetch(`/api/sessions/${encodeURIComponent(slug)}`, {
+  const handleTitleSave = async (slug: string, title: string, location?: SessionLocation) => {
+    const targetId = location?.kind === "ssh" ? location.id : undefined;
+    const query = targetId ? `?targetId=${encodeURIComponent(targetId)}` : "";
+    const resp = await fetch(`/api/sessions/${encodeURIComponent(slug)}${query}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title }),
@@ -1023,19 +1163,30 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     if (!resp.ok) throw new Error("Failed to update title");
     setSources((prev) =>
       prev.map((s) =>
-        s.slug === slug && s.replay
+        (s.slug === slug || s.existingReplay === slug || s.replay?.slug === slug) &&
+        sameSessionLocation(s.location, location) &&
+        s.replay
           ? { ...s, replay: { ...s.replay, title: title || undefined } }
           : s,
       ),
     );
   };
 
-  const handleDeleteReplay = async (slug: string) => {
+  const handleDeleteReplay = async (slug: string, location?: SessionLocation) => {
     try {
-      const resp = await fetch(`/api/sessions/${encodeURIComponent(slug)}`, { method: "DELETE" });
+      const targetId = location?.kind === "ssh" ? location.id : undefined;
+      const query = targetId ? `?targetId=${encodeURIComponent(targetId)}` : "";
+      const resp = await fetch(`/api/sessions/${encodeURIComponent(slug)}${query}`, {
+        method: "DELETE",
+      });
       if (!resp.ok) return;
       setSources((prev) =>
-        prev.map((s) => (s.slug === slug ? { ...s, replay: undefined, existingReplay: null } : s)),
+        prev.map((s) =>
+          (s.slug === slug || s.existingReplay === slug || s.replay?.slug === slug) &&
+          sameSessionLocation(s.location, location)
+            ? { ...s, replay: undefined, existingReplay: null }
+            : s,
+        ),
       );
     } catch {
       // ignore
@@ -1184,8 +1335,8 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
       <div className="flex-1 overflow-auto animate-in fade-in duration-500">
         <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 space-y-6">
           <SessionLoadingToast
-            title="Fetching local sessions"
-            description="Loading cached sessions first, then enriching recent Cursor details in place."
+            title="Fetching sessions"
+            description="Loading cached sessions first, then enriching recent details in place."
           />
           {/* Overview + activity skeleton */}
           <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm space-y-4">
@@ -1238,7 +1389,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     );
   }
 
-  if (error && sources.length === 0 && replays.length === 0) {
+  if (error && sources.length === 0 && replays.length === 0 && failedRemoteSources.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center space-y-2">
@@ -1251,6 +1402,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-6xl mx-auto px-4 md:px-6 py-5 space-y-5">
+        <RemoteSourceFailureNotice failures={failedRemoteSources} />
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(280px,0.72fr)_minmax(0,1.28fr)] lg:items-stretch">
           <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm flex flex-col">
             <div className="mb-3 flex min-h-7 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1423,9 +1575,12 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
                 enrichmentStatus={enrichmentStatus}
                 onGenerate={handleGenerate}
                 onViewReplay={handleOpenReplay}
-                onSessionClick={(s) => setSelectedSlug(s.slug)}
-                generatingSlug={generatingSlug}
-                generateErrorSlug={generateErrorSlug}
+                onSessionClick={(s) => {
+                  setSelectedSlug(s.slug);
+                  setSelectedSessionKey(sessionIdentityKey(s));
+                }}
+                generatingSessionKey={generatingSessionKey}
+                generateErrorSessionKey={generateErrorSessionKey}
               />
             </div>
             <button
@@ -1530,17 +1685,28 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
       {selectedSession && (
         <SessionDetailPopup
           session={selectedSession}
-          onClose={() => setSelectedSlug(null)}
-          onGenerate={submitGenerateFromPopup}
-          onViewReplay={(slug) => navigateTo({ view: null, session: slug })}
-          onArchive={(slug) => {
-            fetch(`/api/archive/${slug}`, { method: "POST" }).catch(() => {});
+          onClose={() => {
             setSelectedSlug(null);
+            setSelectedSessionKey(null);
+          }}
+          onGenerate={submitGenerateFromPopup}
+          onViewReplay={(slug, location) =>
+            navigateTo({
+              view: null,
+              session: slug,
+              targetId: location?.kind === "ssh" ? location.id : null,
+            })
+          }
+          onArchive={(slug, location) => {
+            void toggleArchiveSlug(slug, archivedSlugs, setArchivedSlugs, location).finally(() => {
+              setSelectedSlug(null);
+              setSelectedSessionKey(null);
+            });
           }}
           onTitleSave={handleTitleSave}
           onDeleteReplay={handleDeleteReplay}
-          isGenerating={generatingSlug === selectedSession.slug}
-          isArchived={false}
+          isGenerating={generatingSessionKey === sessionIdentityKey(selectedSession)}
+          isArchived={selectedIsArchived}
         />
       )}
 

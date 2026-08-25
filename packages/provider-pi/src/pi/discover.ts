@@ -16,8 +16,11 @@ interface PiSessionHeader {
   cwd?: string;
 }
 
-export async function discoverPiSessions(): Promise<SessionInfo[]> {
-  const sessionsRoot = getPiSessionsDir();
+export async function discoverPiSessions(
+  sessionsRoot = getPiSessionsDir(),
+  resolveGitRepo = true,
+  includeUnreplayable = false,
+): Promise<SessionInfo[]> {
   const sessions: SessionInfo[] = [];
 
   let projectDirs: string[];
@@ -45,7 +48,14 @@ export async function discoverPiSessions(): Promise<SessionInfo[]> {
       const fileStat = await stat(filePath).catch(() => null);
       if (!fileStat) continue;
 
-      const info = await extractPiSessionInfo(filePath, fileStat.size, projectDir);
+      const info = await extractPiSessionInfo(
+        filePath,
+        fileStat.size,
+        projectDir,
+        resolveGitRepo,
+        includeUnreplayable,
+        fileStat.mtime.toISOString(),
+      );
       if (info) sessions.push(info);
     }
   }
@@ -58,6 +68,9 @@ async function extractPiSessionInfo(
   filePath: string,
   fileSize: number,
   encodedProjectDir: string,
+  resolveGitRepo = true,
+  includeUnreplayable = false,
+  fileMtime?: string,
 ): Promise<SessionInfo | null> {
   let header: PiSessionHeader | undefined;
   let timestamp = "";
@@ -68,6 +81,8 @@ async function extractPiSessionInfo(
   let model: string | undefined;
   let title: string | undefined;
   const prompts: string[] = [];
+  let sawParseableRecord = false;
+  let readFailed = false;
 
   const input = createReadStream(filePath, { encoding: "utf-8" });
   const rl = createInterface({ input, crlfDelay: Number.POSITIVE_INFINITY });
@@ -84,13 +99,18 @@ async function extractPiSessionInfo(
       } catch {
         continue;
       }
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+      sawParseableRecord = true;
 
       if (typeof entry.timestamp === "string" && entry.timestamp) {
         timestamp = entry.timestamp;
       }
 
       if (!header) {
-        if (entry.type !== "session" || typeof entry.id !== "string") return null;
+        if (entry.type !== "session" || typeof entry.id !== "string") {
+          if (!includeUnreplayable) return null;
+          break;
+        }
         header = entry;
         if (typeof entry.timestamp === "string" && entry.timestamp) timestamp = entry.timestamp;
         continue;
@@ -133,38 +153,46 @@ async function extractPiSessionInfo(
       }
     }
   } catch {
-    return null;
+    readFailed = true;
+    if (!includeUnreplayable) return null;
   } finally {
     rl.close();
   }
 
-  if (!header || prompts.length === 0) return null;
+  const sessionId = header?.id || basename(filePath, ".jsonl");
+  if (!sessionId) return null;
 
-  const cwd = header.cwd || decodeProjectDir(encodedProjectDir);
-  const gitRepo = await readGitRepo(cwd);
+  const cwd = header?.cwd || decodeProjectDir(encodedProjectDir);
+  const gitRepo = resolveGitRepo ? await readGitRepo(cwd) : undefined;
   const slug = basename(filePath, ".jsonl").replace(/^\d{4}-\d{2}-\d{2}T[^_]+_/, "");
-  const fallbackTimestamp = timestamp || header.timestamp || new Date().toISOString();
+  const fallbackTimestamp =
+    timestamp || header?.timestamp || fileMtime || new Date(0).toISOString();
+  const unreadable = readFailed || !sawParseableRecord || !header;
+  if (!includeUnreplayable && (unreadable || prompts.length === 0)) return null;
 
   return {
     provider: "pi",
-    sessionId: header.id,
-    slug,
+    sessionId,
+    slug: slug || sessionId.slice(0, 8),
     title,
     project: cwd,
     cwd,
-    version: String(header.version || 1),
+    version: String(header?.version || 1),
     gitRepo,
     timestamp: fallbackTimestamp,
     lineCount,
     fileSize,
     filePath,
     filePaths: [filePath],
-    firstPrompt: prompts[0] || "(pi session)",
-    prompts,
-    promptCount,
+    firstPrompt: prompts[0] || "",
+    prompts: prompts.length > 0 ? prompts : undefined,
+    promptCount: unreadable ? 0 : promptCount,
     toolCallCount,
     model,
     editCountEst,
+    ...(unreadable || prompts.length === 0
+      ? { transcriptStatus: unreadable ? ("unreadable" as const) : ("no-prompts" as const) }
+      : {}),
   };
 }
 

@@ -1,6 +1,6 @@
 import type { ReplaySummary } from "./server-types.js";
 import type { SessionScanResult } from "./scanner.js";
-import type { ProjectIdentity } from "@vibe-replay/types";
+import type { ProjectIdentity, SessionLocation } from "@vibe-replay/types";
 
 export interface InsightsRollupSession {
   project: string;
@@ -13,6 +13,7 @@ export interface InsightsRollupSession {
   toolCalls: number;
   /** Included by the dashboard endpoint for range-scoped secondary charts. */
   provider?: string;
+  location?: SessionLocation;
   model?: string;
   tokenUsage?: {
     inputTokens: number;
@@ -26,6 +27,7 @@ export interface InsightsRollupSession {
 export interface InsightsRollupReplay {
   project: string;
   startTime?: string;
+  location?: SessionLocation;
 }
 
 export interface InsightsRollupPayload {
@@ -56,6 +58,7 @@ export function buildInsightsRollup(
         prompts: scan.promptCount,
         edits: scan.editCount,
         toolCalls: scan.toolCallCount,
+        location: scan.location,
       };
       if (includeDetails) {
         session.provider = scan.provider;
@@ -68,6 +71,7 @@ export function buildInsightsRollup(
     replays: replays.map((replay) => ({
       project: replay.project,
       startTime: replay.startTime,
+      location: replay.location,
     })),
   };
 }

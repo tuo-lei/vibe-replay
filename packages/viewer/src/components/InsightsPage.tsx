@@ -25,7 +25,7 @@ import {
 } from "../engine/insights-rollup";
 import { AnimatedValue } from "../hooks/useAnimatedNumber";
 import { getInsightsRangeFromUrl, INSIGHTS_RANGE_PARAM } from "../hooks/usePanelFilters";
-import type { SessionSummary, SourceSession } from "../types";
+import type { SessionLocation, SessionSummary, SourceSession } from "../types";
 import { localDayKey } from "../utils/date";
 import { DataQualityIndicator } from "./DataQualityIndicator";
 import { TokenBreakdownChart, TurnDurationChart } from "./InsightCharts";
@@ -39,6 +39,7 @@ import {
   providerBarClass,
   providerDisplayName,
   rollupTopProjects,
+  sessionIdentityKey,
   shortModelName,
 } from "./dashboard-utils";
 import { ScanFailureNotice, useScanInsightsContext } from "./InsightsPanel";
@@ -760,6 +761,7 @@ export function TopProjectsList({
   projects: Array<{
     project: string;
     projectIdentity?: SourceSession["projectIdentity"];
+    location?: SessionLocation;
     sessions: number;
     cost: number;
     prompts: number;
@@ -785,14 +787,24 @@ export function TopProjectsList({
             : projectLabels.get(p.project) || p.project;
         const pct = (p.sessions / maxSessions) * 100;
         return (
-          <div key={p.project} className="space-y-1">
+          <div
+            key={`${p.location?.kind === "ssh" ? `ssh:${p.location.id}` : "local"}\0${p.project}`}
+            className="space-y-1"
+          >
             <div className="flex items-center justify-between">
-              <span
-                className="text-xs font-sans font-medium text-terminal-text truncate max-w-[60%]"
-                title={p.project}
-              >
-                {name}
-              </span>
+              <div className="flex min-w-0 max-w-[60%] items-center gap-2">
+                <span
+                  className="text-xs font-sans font-medium text-terminal-text truncate"
+                  title={p.project}
+                >
+                  {name}
+                </span>
+                {p.location?.kind === "ssh" && (
+                  <span className="text-[10px] font-mono text-terminal-purple shrink-0">
+                    {p.location.label}
+                  </span>
+                )}
+              </div>
               <span className="text-[10px] font-mono text-terminal-dim tabular-nums">
                 {p.sessions} session{p.sessions !== 1 ? "s" : ""}
                 {p.cost > 0 && ` · ${formatCost(p.cost)}`}
@@ -1120,13 +1132,23 @@ function useHomePageCounts() {
     let totalPrompts = 0;
     let totalToolCalls = 0;
     let totalDuration = 0;
-    const srcBySlug = new Map(sources.map((s) => [s.slug, s]));
+    const srcByIdentity = new Map(sources.map((s) => [sessionIdentityKey(s), s]));
+    const srcBySlug = new Map(
+      sources.map((s) => [
+        `${s.location?.kind === "ssh" ? s.location.id : "local"}\0${s.provider}\0${s.slug}`,
+        s,
+      ]),
+    );
     for (const s of sources) {
       totalPrompts += s.promptCount ?? (s.prompts?.length || (s.firstPrompt ? 1 : 0));
       totalToolCalls += s.toolCallCount ?? 0;
     }
     for (const r of replays) {
-      const src = srcBySlug.get(r.slug);
+      const src =
+        srcByIdentity.get(sessionIdentityKey(r)) ||
+        srcBySlug.get(
+          `${r.location?.kind === "ssh" ? r.location.id : "local"}\0${r.provider}\0${r.sourceSlug || r.slug}`,
+        );
       const replayToolCalls = r.stats.toolCalls || 0;
       if (!src) {
         totalPrompts += r.stats.userPrompts || 0;

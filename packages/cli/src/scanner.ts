@@ -33,6 +33,8 @@ import type {
   ProjectIdentity,
   PrLink,
   SessionInfo,
+  SessionLocation,
+  SessionTranscriptStatus,
   SessionUsageSummary,
   TokenUsage,
   UsageEvent,
@@ -47,7 +49,13 @@ import { localDayKey, shortenPath } from "./utils.js";
 // v21: persist canonical project identity alongside scan results.
 // v22: refine Cursor SDK context-worktree classification and fallback keys.
 // v23: disambiguate Cursor SDK workflow display labels.
-export const SCANNER_VERSION = 23;
+// v24: persist session location so local and SSH scan results stay isolated.
+// v25: persist transcript availability so metadata-only sources do not look
+// like ordinary sessions that simply have not been scanned yet.
+export const SCANNER_VERSION = 25;
+// v26 briefly existed during development for a title-only change. Its result
+// shape is identical to v25, so accepting it avoids a second full local rescan.
+const COMPATIBLE_SCANNER_VERSIONS = new Set([SCANNER_VERSION, 26]);
 
 // Keep per-invocation detail bounded in the durable insight store. The full
 // event set is still used to compute usageSummary below; only the retained
@@ -59,6 +67,8 @@ const MAX_RETAINED_USAGE_EVENTS = 100;
 export interface SessionScanResult {
   sessionId: string;
   provider: string;
+  location?: SessionLocation;
+  transcriptStatus?: SessionTranscriptStatus;
   project: string;
   projectIdentity?: ProjectIdentity;
   slug: string;
@@ -360,6 +370,7 @@ export interface ScanCacheData {
 export interface ProjectInsights {
   project: string;
   projectIdentity?: ProjectIdentity;
+  location?: SessionLocation;
   sessionCount: number;
   totalDurationMs: number;
   totalCost: number;
@@ -416,6 +427,7 @@ export interface UserInsights {
   topProjects: Array<{
     project: string;
     projectIdentity?: ProjectIdentity;
+    location?: SessionLocation;
     sessions: number;
     cost: number;
     prompts: number;
@@ -515,6 +527,8 @@ function buildTurnDurationHistogram(durations: number[]): TurnDurationHistogram 
 export interface ScanInput {
   sessionId: string;
   provider: string;
+  location?: SessionLocation;
+  transcriptStatus?: SessionTranscriptStatus;
   project: string;
   projectIdentity?: ProjectIdentity;
   slug: string;
@@ -525,6 +539,7 @@ export interface ScanInput {
   sourceLineCount?: number;
   workspacePath?: string;
   hasSqlite?: boolean;
+  hasSdk?: boolean;
   deferRichCursorParse?: boolean;
   timestamp?: string;
   title?: string;
@@ -538,11 +553,26 @@ export interface ScanInput {
   discoveryDurationMs?: number;
   discoveryTokenUsage?: SessionScanResult["tokenUsage"];
   discoveryCostEstimate?: number;
+  /** Remote home prefix used to keep parsed file paths display-safe. */
+  remoteHome?: string;
 }
 
 /** Keep provider-native IDs isolated when caching cross-provider scan results. */
-export function scanCacheEntryKey(session: Pick<ScanInput, "provider" | "sessionId">): string {
-  return `${session.provider}::${session.sessionId}`;
+export function scanCacheEntryKey(
+  session: Pick<ScanInput, "provider" | "sessionId" | "location">,
+): string {
+  const targetId = session.location?.kind === "ssh" ? `${session.location.id}::` : "";
+  return `${targetId}${session.provider}::${session.sessionId}`;
+}
+
+function shortenSessionPath(path: string, input: Pick<ScanInput, "remoteHome">): string {
+  const shortened = shortenPath(path);
+  const remoteHome = input.remoteHome?.replace(/\/+$/, "");
+  if (!remoteHome) return shortened;
+  if (shortened === remoteHome) return "~";
+  return shortened.startsWith(`${remoteHome}/`)
+    ? `~${shortened.slice(remoteHome.length)}`
+    : shortened;
 }
 
 interface ScanProgress {
@@ -915,7 +945,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
               const fp = extractToolFilePath(block.input);
               if (fp) {
                 editCount++;
-                const short = shortenPath(fp);
+                const short = shortenSessionPath(fp, input);
                 fileEditCounts.set(short, (fileEditCounts.get(short) || 0) + 1);
               }
             }
@@ -966,7 +996,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
               const fp = extractToolFilePath(block.input);
               if (fp) {
                 editCount++;
-                const short = shortenPath(fp);
+                const short = shortenSessionPath(fp, input);
                 fileEditCounts.set(short, (fileEditCounts.get(short) || 0) + 1);
               }
             }
@@ -1044,6 +1074,8 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
   return {
     sessionId: input.sessionId,
     provider: input.provider,
+    location: input.location,
+    transcriptStatus: input.transcriptStatus,
     project: input.project,
     projectIdentity: input.projectIdentity,
     slug: input.slug,
@@ -1083,11 +1115,18 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
   };
 }
 
+function scanFallbackPrompt(input: ScanInput, placeholder = ""): string {
+  if (input.transcriptStatus) return "";
+  return input.firstPrompt || input.title || placeholder;
+}
+
 async function scanClaudeCoworkSession(input: ScanInput): Promise<SessionScanResult> {
   const sessionInfo: SessionInfo = {
     provider: "claude-cowork",
     sessionId: input.sessionId,
     slug: input.slug,
+    location: input.location,
+    transcriptStatus: input.transcriptStatus,
     title: input.title,
     project: input.project,
     cwd: input.project,
@@ -1097,7 +1136,7 @@ async function scanClaudeCoworkSession(input: ScanInput): Promise<SessionScanRes
     fileSize: input.sourceFileSize || 0,
     filePath: input.filePaths[0] || "",
     filePaths: input.filePaths,
-    firstPrompt: input.firstPrompt || input.title || "(Cowork session)",
+    firstPrompt: scanFallbackPrompt(input, "(Cowork session)"),
     model: input.discoveryModel,
   };
   const parsed = await parseClaudeCoworkSession(input.filePaths, sessionInfo);
@@ -1109,6 +1148,8 @@ async function scanCodexSession(input: ScanInput): Promise<SessionScanResult> {
     provider: "codex",
     sessionId: input.sessionId,
     slug: input.slug,
+    location: input.location,
+    transcriptStatus: input.transcriptStatus,
     title: input.title,
     project: input.project,
     cwd: input.workspacePath || input.project,
@@ -1118,7 +1159,7 @@ async function scanCodexSession(input: ScanInput): Promise<SessionScanResult> {
     fileSize: 0,
     filePath: input.filePaths[0] || "",
     filePaths: input.filePaths,
-    firstPrompt: input.firstPrompt || input.title || "",
+    firstPrompt: scanFallbackPrompt(input),
   };
 
   const parsed = await parseCodexSession(input.filePaths, sessionInfo);
@@ -1130,6 +1171,8 @@ async function scanPiSession(input: ScanInput): Promise<SessionScanResult> {
     provider: "pi",
     sessionId: input.sessionId,
     slug: input.slug,
+    location: input.location,
+    transcriptStatus: input.transcriptStatus,
     title: input.title,
     project: input.project,
     cwd: input.workspacePath || input.project,
@@ -1139,7 +1182,7 @@ async function scanPiSession(input: ScanInput): Promise<SessionScanResult> {
     fileSize: 0,
     filePath: input.filePaths[0] || "",
     filePaths: input.filePaths,
-    firstPrompt: input.firstPrompt || input.title || "(pi session)",
+    firstPrompt: scanFallbackPrompt(input, "(pi session)"),
   };
 
   const parsed = await parsePiSession(input.filePaths, sessionInfo);
@@ -1147,7 +1190,7 @@ async function scanPiSession(input: ScanInput): Promise<SessionScanResult> {
 }
 
 async function scanCursorSession(input: ScanInput): Promise<SessionScanResult> {
-  if (input.deferRichCursorParse && input.hasSqlite) {
+  if (input.deferRichCursorParse && (input.hasSqlite || input.hasSdk)) {
     return buildLightweightCursorScanResult(input);
   }
 
@@ -1155,6 +1198,8 @@ async function scanCursorSession(input: ScanInput): Promise<SessionScanResult> {
     provider: "cursor",
     sessionId: input.sessionId,
     slug: input.slug,
+    location: input.location,
+    transcriptStatus: input.transcriptStatus,
     title: input.title,
     project: input.project,
     cwd: input.workspacePath || input.project,
@@ -1167,7 +1212,8 @@ async function scanCursorSession(input: ScanInput): Promise<SessionScanResult> {
     ...(input.toolPaths?.length ? { toolPaths: input.toolPaths } : {}),
     ...(input.workspacePath ? { workspacePath: input.workspacePath } : {}),
     ...(input.hasSqlite !== undefined ? { hasSqlite: input.hasSqlite } : {}),
-    firstPrompt: input.firstPrompt || input.title || "(cursor session)",
+    ...(input.hasSdk !== undefined ? { hasSdk: input.hasSdk } : {}),
+    firstPrompt: scanFallbackPrompt(input, "(cursor session)"),
   };
 
   const parsed = await parseCursorSession(
@@ -1178,19 +1224,23 @@ async function scanCursorSession(input: ScanInput): Promise<SessionScanResult> {
 }
 
 function buildLightweightCursorScanResult(input: ScanInput): SessionScanResult {
-  const firstPrompt = input.firstPrompt || input.title;
+  const firstPrompt = scanFallbackPrompt(input);
   const hasPrompt = typeof firstPrompt === "string" && firstPrompt.trim().length > 0;
   const estimatedPromptCount = Math.max(
     hasPrompt ? 1 : 0,
     input.sourceLineCount ? Math.ceil(input.sourceLineCount / 2) : 0,
   );
   const sourceFilePath = input.sourceFilePath || "";
-  const dataSource: DataSource = sourceFilePath.includes("#composerData:")
-    ? "global-state"
-    : "sqlite";
+  const dataSource: DataSource = input.hasSdk
+    ? "jsonl"
+    : sourceFilePath.includes("#composerData:")
+      ? "global-state"
+      : "sqlite";
   return {
     sessionId: input.sessionId,
     provider: input.provider,
+    location: input.location,
+    transcriptStatus: input.transcriptStatus,
     project: input.project,
     projectIdentity: input.projectIdentity,
     slug: input.slug,
@@ -1199,7 +1249,7 @@ function buildLightweightCursorScanResult(input: ScanInput): SessionScanResult {
     startTime: input.timestamp,
     model: input.discoveryModel,
     durationMs: input.discoveryDurationMs,
-    promptCount: input.discoveryPromptCount ?? estimatedPromptCount,
+    promptCount: input.transcriptStatus ? 0 : (input.discoveryPromptCount ?? estimatedPromptCount),
     toolCallCount: input.discoveryToolCallCount ?? 0,
     editCount: input.discoveryEditCount ?? 0,
     filesModified: [],
@@ -1210,7 +1260,7 @@ function buildLightweightCursorScanResult(input: ScanInput): SessionScanResult {
     compactionCount: 0,
     dataSource,
     dataQualityNotes: [
-      "Cursor SQLite/global-state rich details are deferred during background insights scans; discovery summaries are used when available.",
+      "Cursor SQLite/SDK rich details are deferred during background insights scans; discovery summaries are used when available.",
       "Tool, MCP, and skill usage is not indexed for this session while rich details are deferred.",
     ],
     usageIndexed: false,
@@ -1218,17 +1268,19 @@ function buildLightweightCursorScanResult(input: ScanInput): SessionScanResult {
 }
 
 function buildLightweightOpencodeScanResult(input: ScanInput): SessionScanResult {
-  const firstPrompt = input.firstPrompt || input.title;
+  const firstPrompt = scanFallbackPrompt(input);
   return {
     sessionId: input.sessionId,
     provider: input.provider,
+    location: input.location,
+    transcriptStatus: input.transcriptStatus,
     project: input.project,
     projectIdentity: input.projectIdentity,
     slug: input.slug,
     title: input.title,
     firstPrompt,
     startTime: input.timestamp,
-    promptCount: input.discoveryPromptCount ?? (firstPrompt ? 1 : 0),
+    promptCount: input.transcriptStatus ? 0 : (input.discoveryPromptCount ?? (firstPrompt ? 1 : 0)),
     toolCallCount: input.discoveryToolCallCount ?? 0,
     editCount: input.discoveryEditCount ?? 0,
     filesModified: [],
@@ -1249,17 +1301,19 @@ function buildLightweightOpencodeScanResult(input: ScanInput): SessionScanResult
 }
 
 function buildLightweightHermesScanResult(input: ScanInput): SessionScanResult {
-  const firstPrompt = input.firstPrompt || input.title;
+  const firstPrompt = scanFallbackPrompt(input);
   return {
     sessionId: input.sessionId,
     provider: input.provider,
+    location: input.location,
+    transcriptStatus: input.transcriptStatus,
     project: input.project,
     projectIdentity: input.projectIdentity,
     slug: input.slug,
     title: input.title,
     firstPrompt,
     startTime: input.timestamp,
-    promptCount: input.discoveryPromptCount ?? (firstPrompt ? 1 : 0),
+    promptCount: input.transcriptStatus ? 0 : (input.discoveryPromptCount ?? (firstPrompt ? 1 : 0)),
     toolCallCount: input.discoveryToolCallCount ?? 0,
     editCount: input.discoveryEditCount ?? 0,
     filesModified: [],
@@ -1347,7 +1401,7 @@ function buildScanResultFromParsed(
           const saPath = extractToolFilePath(saScene.input);
           if (!saPath) continue;
           editCount++;
-          const short = shortenPath(saPath);
+          const short = shortenSessionPath(saPath, input);
           fileEditCounts.set(short, (fileEditCounts.get(short) || 0) + 1);
         }
       }
@@ -1358,7 +1412,7 @@ function buildScanResultFromParsed(
       if (rawPaths.length === 0) continue;
       editCount++;
       for (const rawPath of rawPaths) {
-        const short = shortenPath(rawPath);
+        const short = shortenSessionPath(rawPath, input);
         fileEditCounts.set(short, (fileEditCounts.get(short) || 0) + 1);
       }
     }
@@ -1367,7 +1421,9 @@ function buildScanResultFromParsed(
   const costEstimate = estimateParsedCost(parsed);
   const fallbackStart = parsed.startTime || input.timestamp;
   const durationMs = parsed.totalDurationMs;
-  const firstPrompt = firstUserPrompt(parsed.turns) || input.firstPrompt || parsed.title;
+  const firstPrompt = input.transcriptStatus
+    ? ""
+    : firstUserPrompt(parsed.turns) || input.firstPrompt || parsed.title;
   for (const skill of parsed.skillsUsed || []) {
     usageEvents.push({
       kind: "skill",
@@ -1389,6 +1445,8 @@ function buildScanResultFromParsed(
   return {
     sessionId: input.sessionId,
     provider: input.provider,
+    location: input.location,
+    transcriptStatus: input.transcriptStatus,
     project: input.project,
     projectIdentity: input.projectIdentity,
     slug: input.slug,
@@ -1486,8 +1544,8 @@ const SCAN_CONCURRENCY = 4;
 async function readScanCache(): Promise<ScanCacheData | null> {
   const cached = await readFileCache<ScanCacheData>(SCAN_CACHE_KEY);
   if (!cached) return null;
-  if (cached.data.scannerVersion !== SCANNER_VERSION) return null;
-  return cached.data;
+  if (!COMPATIBLE_SCANNER_VERSIONS.has(cached.data.scannerVersion)) return null;
+  return { ...cached.data, scannerVersion: SCANNER_VERSION };
 }
 
 async function writeScanCache(data: ScanCacheData): Promise<void> {
@@ -1665,6 +1723,28 @@ export async function runBackgroundScan(
 
 // ─── Aggregation ────────────────────────────────────────────────────
 
+export type ProjectInsightLocation = SessionLocation | "local";
+
+function sessionLocationKey(location?: SessionLocation): string {
+  return location?.kind === "ssh" ? `ssh:${location.id}` : "local";
+}
+
+/** Keep project insight aggregates separate for local and remote locations. */
+export function projectInsightKey(
+  project: string,
+  identity?: ProjectIdentity,
+  location?: SessionLocation | "local",
+): string {
+  const projectKey = projectIdentityKey(project, identity);
+  const locationKey =
+    location === undefined
+      ? undefined
+      : location === "local"
+        ? "local"
+        : sessionLocationKey(location);
+  return locationKey === undefined ? projectKey : `${locationKey}\0${projectKey}`;
+}
+
 function identityForScan(
   scan: Pick<SessionScanResult, "project" | "projectIdentity" | "provider">,
 ) {
@@ -1677,9 +1757,15 @@ function identityForScan(
 }
 
 function projectMatches(
-  scan: Pick<SessionScanResult, "project" | "projectIdentity" | "provider">,
+  scan: Pick<SessionScanResult, "project" | "projectIdentity" | "provider" | "location">,
   requestedProject: string,
+  location?: ProjectInsightLocation,
 ): boolean {
+  if (location !== undefined) {
+    const scanLocation = sessionLocationKey(scan.location);
+    const requestedLocation = location === "local" ? "local" : sessionLocationKey(location);
+    if (scanLocation !== requestedLocation) return false;
+  }
   return (
     scan.project === requestedProject ||
     projectIdentityKey(scan.project, identityForScan(scan)) === requestedProject
@@ -1690,8 +1776,9 @@ export function aggregateProjectInsights(
   project: string,
   scans: SessionScanResult[],
   memory?: ProjectMemory,
+  location?: ProjectInsightLocation,
 ): ProjectInsights {
-  const projectScans = scans.filter((s) => projectMatches(s, project));
+  const projectScans = scans.filter((s) => projectMatches(s, project, location));
   const projectIdentity =
     projectScans
       .map((scan) => identityForScan(scan))
@@ -1711,7 +1798,10 @@ export function aggregateProjectInsights(
   let totalCacheCreation = 0;
   const allTurnDurations: number[] = [];
   const models: Record<string, number> = {};
-  const branchMap = new Map<string, { sessionIds: string[]; prLinks: PrLink[] }>();
+  const branchMap = new Map<
+    string,
+    { sessionIds: string[]; sessionKeys: Set<string>; prLinks: PrLink[] }
+  >();
   const fileEditCounts = new Map<string, { edits: number; sessions: Set<string> }>();
   const sessionsPerDay: Record<string, number> = {};
   let first = "";
@@ -1740,9 +1830,15 @@ export function aggregateProjectInsights(
     // Branches
     const branches = s.gitBranches || (s.gitBranch ? [s.gitBranch] : []);
     for (const b of branches) {
-      if (!branchMap.has(b)) branchMap.set(b, { sessionIds: [], prLinks: [] });
+      if (!branchMap.has(b)) {
+        branchMap.set(b, { sessionIds: [], sessionKeys: new Set(), prLinks: [] });
+      }
       const entry = branchMap.get(b)!;
-      if (!entry.sessionIds.includes(s.sessionId)) entry.sessionIds.push(s.sessionId);
+      const sessionKey = scanCacheEntryKey(s);
+      if (!entry.sessionKeys.has(sessionKey)) {
+        entry.sessionKeys.add(sessionKey);
+        entry.sessionIds.push(s.sessionId);
+      }
     }
     if (s.prLinks) {
       for (const pr of s.prLinks) {
@@ -1763,7 +1859,7 @@ export function aggregateProjectInsights(
         fileEditCounts.set(fm.file, { edits: 0, sessions: new Set() });
       const entry = fileEditCounts.get(fm.file)!;
       entry.edits += fm.count;
-      entry.sessions.add(s.sessionId);
+      entry.sessions.add(scanCacheEntryKey(s));
     }
 
     // Time range
@@ -1801,6 +1897,7 @@ export function aggregateProjectInsights(
   return {
     project,
     projectIdentity,
+    ...(location && location !== "local" ? { location } : {}),
     sessionCount: projectScans.length,
     totalDurationMs,
     totalCost,
@@ -1849,7 +1946,9 @@ export function aggregateUserInsights(scans: SessionScanResult[]): UserInsights 
   const projectStats = new Map<
     string,
     {
+      project: string;
       projectIdentity?: ProjectIdentity;
+      location?: SessionLocation;
       sessions: number;
       cost: number;
       prompts: number;
@@ -1888,12 +1987,16 @@ export function aggregateUserInsights(scans: SessionScanResult[]): UserInsights 
     if (s.model) models[s.model] = (models[s.model] || 0) + 1;
 
     const identity = identityForScan(s);
+    const locationKey = sessionLocationKey(s.location);
+    const projectKey = `${locationKey}\0${s.project}`;
     // Keep one entry per raw workspace so the Projects page can optionally
     // reveal individual automated runs. Canonical project counts and the
     // default display rollup are derived from projectIdentity below.
-    if (!projectStats.has(s.project)) {
-      projectStats.set(s.project, {
+    if (!projectStats.has(projectKey)) {
+      projectStats.set(projectKey, {
+        project: s.project,
         projectIdentity: identity,
+        location: s.location,
         sessions: 0,
         cost: 0,
         prompts: 0,
@@ -1906,7 +2009,7 @@ export function aggregateUserInsights(scans: SessionScanResult[]): UserInsights 
         sessionsPerDay: {},
       });
     }
-    const ps = projectStats.get(s.project)!;
+    const ps = projectStats.get(projectKey)!;
     ps.projectIdentity = mergeProjectIdentities(ps.projectIdentity, identity);
     ps.sessions++;
     ps.cost += s.costEstimate || 0;
@@ -1934,9 +2037,10 @@ export function aggregateUserInsights(scans: SessionScanResult[]): UserInsights 
   }
 
   const topProjects = [...projectStats.entries()]
-    .map(([project, data]) => ({
-      project,
+    .map(([, data]) => ({
+      project: data.project,
       projectIdentity: data.projectIdentity,
+      location: data.location,
       sessions: data.sessions,
       cost: data.cost,
       prompts: data.prompts,
@@ -1952,7 +2056,7 @@ export function aggregateUserInsights(scans: SessionScanResult[]): UserInsights 
     .sort((a, b) => b.sessions - a.sessions);
 
   const uniqueProjects = new Set(
-    scans.map((s) => projectIdentityKey(s.project, identityForScan(s))),
+    scans.map((s) => projectInsightKey(s.project, identityForScan(s), s.location)),
   );
   const hasTokens = totalInputTokens + totalOutputTokens + totalCacheRead + totalCacheCreation > 0;
   const histogram = buildTurnDurationHistogram(allTurnDurations);

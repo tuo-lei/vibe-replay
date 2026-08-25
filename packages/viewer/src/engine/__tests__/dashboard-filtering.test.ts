@@ -115,4 +115,40 @@ describe("dashboard facet filtering", () => {
       ),
     ).toBe(true);
   });
+
+  it("keeps a selected project scoped to its location", () => {
+    const local = {
+      provider: "codex",
+      project: "/repo/shared",
+      slug: "local",
+      location: undefined,
+    };
+    const remoteA = {
+      ...local,
+      slug: "remote-a",
+      location: { kind: "ssh" as const, id: "remote-a", label: "Remote A" },
+    };
+    const remoteB = {
+      ...local,
+      slug: "remote-b",
+      location: { kind: "ssh" as const, id: "remote-b", label: "Remote B" },
+    };
+
+    expect(
+      applyDashboardFacetFilters([local, remoteA, remoteB], {
+        selectedProviders: [],
+        selectedRepos: [],
+        selectedProjectKey: "/repo/shared",
+        allProjectsKey: ALL_PROJECTS,
+        rollupProject: identityRollup,
+        selectedLocation: remoteA.location,
+      }).map((session) => session.slug),
+    ).toEqual(["remote-a"]);
+    expect(matchesProjectFacet(local, "/repo/shared", ALL_PROJECTS, identityRollup, "local")).toBe(
+      true,
+    );
+    expect(
+      matchesProjectFacet(remoteA, "/repo/shared", ALL_PROJECTS, identityRollup, "local"),
+    ).toBe(false);
+  });
 });

@@ -123,7 +123,11 @@ interface IndexDbHandle {
 
 let cachedAgentIndex: Map<string, SdkAgent> | null = null;
 let cachedAgentIndexAt = 0;
-const AGENT_INDEX_TTL_MS = 5_000;
+// Building this index opens every SDK workspace database. A five-second TTL
+// caused large background scans to rebuild the same machine-wide index several
+// times while iterating agents. One minute still keeps interactive discovery
+// fresh without multiplying that cost inside a single scan.
+const AGENT_INDEX_TTL_MS = 60_000;
 
 /**
  * Best-effort discovery of every SDK agent on this machine. Safe to call repeatedly —

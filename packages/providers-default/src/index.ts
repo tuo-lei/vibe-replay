@@ -61,14 +61,16 @@ export function getProvider(name: string): Provider | undefined {
 export function deduplicateSessionsByProvider(sessions: SessionInfo[]): SessionInfo[] {
   const seen = new Map<string, SessionInfo>();
   for (const session of sessions) {
-    const existing = seen.get(session.sessionId);
+    const scope = session.location?.kind === "ssh" ? `${session.location.id}::` : "";
+    const identity = `${scope}${session.sessionId}`;
+    const existing = seen.get(identity);
     if (!existing) {
-      seen.set(session.sessionId, session);
+      seen.set(identity, session);
     } else {
       const existingPrio = PROVIDER_PRIORITY.indexOf(existing.provider);
       const newPrio = PROVIDER_PRIORITY.indexOf(session.provider);
       if (newPrio !== -1 && (existingPrio === -1 || newPrio < existingPrio)) {
-        seen.set(session.sessionId, session);
+        seen.set(identity, session);
       }
     }
   }

@@ -5,8 +5,9 @@ import {
   isAutomatedProject,
   mergeProjectIdentities,
   projectIdentityKey,
+  sessionLocationHash,
 } from "@vibe-replay/types";
-import type { ProjectIdentity } from "@vibe-replay/types";
+import type { ProjectIdentity, SessionLocation, SessionTranscriptStatus } from "@vibe-replay/types";
 import type { SessionSummary, SourceSession } from "../types";
 import { safeStorageGet, safeStorageRemove, safeStorageSet } from "../utils/safe-storage";
 
@@ -18,6 +19,7 @@ export type CachedListResponse<T> = {
   discoveredAt?: string;
   stale?: boolean;
   staleProviders?: string[];
+  failedProviders?: string[];
 };
 
 export interface SourcesEnrichmentStatus {
@@ -28,6 +30,40 @@ export interface SourcesEnrichmentStatus {
   startedAt?: string;
   finishedAt?: string;
   message?: string;
+}
+
+export function sessionIdentityKey(
+  session: Pick<SessionSummary, "provider" | "sessionId" | "slug" | "location"> & {
+    sourceSlug?: string;
+  },
+): string {
+  const locationKey = session.location?.kind === "ssh" ? `ssh:${session.location.id}` : "local";
+  return `${locationKey}\0${session.provider}\0${session.sessionId || session.sourceSlug || session.slug}`;
+}
+
+export function transcriptStatusLabel(status?: SessionTranscriptStatus): string | undefined {
+  if (status === "no-prompts") return "no replayable prompts";
+  if (status === "unreadable") return "unreadable transcript";
+  return undefined;
+}
+
+export function remoteSourceFailureIds(value: unknown): string[] {
+  if (!value || typeof value !== "object") return [];
+  const failures = (value as { failedProviders?: unknown }).failedProviders;
+  if (!Array.isArray(failures)) return [];
+  return failures.filter(
+    (failure): failure is string => typeof failure === "string" && failure.startsWith("ssh:"),
+  );
+}
+
+export function transcriptStatusDescription(status?: SessionTranscriptStatus): string | undefined {
+  if (status === "no-prompts") {
+    return "The source is readable, but it does not contain a meaningful human prompt to replay.";
+  }
+  if (status === "unreadable") {
+    return "The source transcript is unavailable, damaged, or could not be read reliably.";
+  }
+  return undefined;
 }
 
 // ─── Cache helpers ───────────────────────────────────────────────────
@@ -42,6 +78,7 @@ export function parseCachedList<T>(payload: unknown): CachedListResponse<T> | nu
     discoveredAt?: unknown;
     stale?: unknown;
     staleProviders?: unknown;
+    failedProviders?: unknown;
   };
   if (!Array.isArray(obj.sessions)) return null;
   return {
@@ -51,6 +88,9 @@ export function parseCachedList<T>(payload: unknown): CachedListResponse<T> | nu
     stale: typeof obj.stale === "boolean" ? obj.stale : undefined,
     staleProviders: Array.isArray(obj.staleProviders)
       ? obj.staleProviders.filter((provider): provider is string => typeof provider === "string")
+      : undefined,
+    failedProviders: Array.isArray(obj.failedProviders)
+      ? obj.failedProviders.filter((provider): provider is string => typeof provider === "string")
       : undefined,
   };
 }
@@ -349,9 +389,11 @@ export function sourceDisplayTitle(
     title?: string;
   } | null,
 ): string {
+  const sourceTitle = normalizeTitleText(cleanPrompt(s.title || ""));
   const promptTitle = sourcePromptTitle(s);
   const replayTitle = normalizeTitleText(s.replay?.title);
   const scanTitle = normalizeTitleText(cleanPrompt(scanData?.title || ""));
+  if (sourceTitle) return sourceTitle;
   if (scanTitle) return scanTitle;
   if (promptTitle && promptTitle !== s.slug) return promptTitle;
   if (replayTitle) return replayTitle;
@@ -414,6 +456,9 @@ export function navigateTo(
   // 3. If we are going back to dashboard, restored saved state if URL is empty
   const goingToDashboard = params.view === "dashboard" || (params.session === null && !params.view);
   if (goingToDashboard) {
+    // Remove the session viewer's target before restoring the dashboard state;
+    // a project-scoped dashboard state may put its target back below.
+    url.searchParams.delete("targetId");
     const saved = safeStorageGet(sessionStorage, "vibe_dashboard_state");
     if (saved) {
       try {
@@ -464,6 +509,7 @@ export function navigateTo(
 export const DASHBOARD_PARAMS = [
   "tab",
   "project",
+  "targetId",
   "q",
   "archived",
   "provider",
@@ -610,33 +656,58 @@ export function dataSourceBadgeClass(
 
 // ─── Archive helpers ────────────────────────────────────────────────
 
+/** Compare locations by stable target identity; omitted/local locations are equivalent. */
+export function sameSessionLocation(left?: SessionLocation, right?: SessionLocation): boolean {
+  const leftTargetId = left?.kind === "ssh" ? left.id : undefined;
+  const rightTargetId = right?.kind === "ssh" ? right.id : undefined;
+  return leftTargetId === rightTargetId;
+}
+
+/** Keep archive markers distinct when local and SSH sessions share a slug. */
+export function archiveSessionKey(slug: string, location?: SessionLocation): string {
+  return location?.kind === "ssh" ? `${slug}--ssh-${sessionLocationHash(location.id)}` : slug;
+}
+
+/** Prefer a replay's provider slug when its output directory is location-scoped. */
+export function replayArchiveKey(
+  replay: Pick<SessionSummary, "slug" | "sourceSlug" | "location">,
+): string {
+  return archiveSessionKey(replay.sourceSlug || replay.slug, replay.location);
+}
+
 /** Optimistic archive toggle with rollback on failure. */
 export async function toggleArchiveSlug(
   slug: string,
   archivedSlugs: Set<string>,
   setArchivedSlugs: React.Dispatch<React.SetStateAction<Set<string>>>,
+  location?: SessionLocation,
 ): Promise<void> {
-  const isArchived = archivedSlugs.has(slug);
+  const archiveKey = archiveSessionKey(slug, location);
+  const targetId = location?.kind === "ssh" ? location.id : undefined;
+  const query = targetId ? `?targetId=${encodeURIComponent(targetId)}` : "";
+  const isArchived = archivedSlugs.has(archiveKey);
   setArchivedSlugs((prev) => {
     const next = new Set(prev);
     if (isArchived) {
-      next.delete(slug);
+      next.delete(archiveKey);
     } else {
-      next.add(slug);
+      next.add(archiveKey);
     }
     return next;
   });
   try {
-    const resp = await fetch(`/api/archive/${slug}`, { method: isArchived ? "DELETE" : "POST" });
+    const resp = await fetch(`/api/archive/${encodeURIComponent(slug)}${query}`, {
+      method: isArchived ? "DELETE" : "POST",
+    });
     if (!resp.ok) throw new Error("Archive toggle failed");
   } catch (err) {
     console.error("Archive toggle failed:", getErrorMessage(err));
     setArchivedSlugs((prev) => {
       const next = new Set(prev);
       if (isArchived) {
-        next.add(slug);
+        next.add(archiveKey);
       } else {
-        next.delete(slug);
+        next.delete(archiveKey);
       }
       return next;
     });
@@ -820,6 +891,7 @@ export function projectDisplayName(project: string, identity?: ProjectIdentity):
 export interface TopProjectEntry {
   project: string;
   projectIdentity?: ProjectIdentity;
+  location?: SessionLocation;
   sessions: number;
   cost: number;
   prompts: number;
@@ -851,10 +923,12 @@ export function rollupTopProjects(
   const rollupAgentRuns = options.rollupAgentRuns !== false;
 
   for (const p of projects) {
-    const key =
+    const parentProject =
       agentWorktreeParent(p.project) ??
       (rollupAgentRuns ? rollupProject(p.project, p.projectIdentity) : null) ??
       p.project;
+    const locationKey = p.location?.kind === "ssh" ? `ssh:${p.location.id}` : "local";
+    const key = `${locationKey}\0${parentProject}`;
     const existing = byParent.get(key);
     if (existing) {
       existing.sessions += p.sessions;
@@ -879,7 +953,7 @@ export function rollupTopProjects(
     } else {
       byParent.set(key, {
         ...p,
-        project: key,
+        project: parentProject,
         projectIdentity:
           key === p.project
             ? p.projectIdentity

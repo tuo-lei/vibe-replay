@@ -16,7 +16,7 @@ import {
 import { generateGitHubGif } from "./formatters/gif.js";
 import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.js";
 import { generateOutput } from "./generator.js";
-import { deduplicateSessionsByProvider, getAllProviders, getProvider } from "./providers/index.js";
+import { getAllProviders, getProvider } from "./providers/index.js";
 import {
   DEFAULT_API_URL,
   getAuthFilePath,
@@ -34,6 +34,9 @@ import {
 import { publishLocal } from "./publishers/local.js";
 import { scanForSecrets } from "./scan.js";
 import { mergeSameSessions } from "./session-merge.js";
+import { discoverProvidersSafely } from "./provider-discovery.js";
+import { getRemoteHome, hydrateCachedRemoteHomes } from "./remote.js";
+import { hasReplayableContent, replayOutputSlug } from "./server-core.js";
 import { startDashboard, startServer } from "./server.js";
 import { formatSessionQueryText, queryLocalSessions } from "./session-query.js";
 import { transformToReplay } from "./transform.js";
@@ -140,7 +143,8 @@ function getDevViewerOpts(): { externalViewerUrl: string } | undefined {
 // must be thrown out so the next discovery sweep writes a correct one.
 // v3 → v4: Cursor project paths decode differently, so cached entries would
 // keep showing the old exploded paths in the picker.
-const SESSION_DISCOVERY_CACHE_KEY = "session-discovery-v4";
+// v4 → v5: Codex explicit session_index names supersede generated titles.
+const SESSION_DISCOVERY_CACHE_KEY = "session-discovery-v5";
 
 function normalizePromptTitle(value?: string): string {
   return normalizeTitle(cleanPromptText(value || "")) || "";
@@ -224,24 +228,8 @@ function printParseWarnings(warnings?: ParseWarning[]): void {
 }
 
 async function discoverAllSessions(): Promise<SessionInfo[]> {
-  const providers = getAllProviders();
-  const allSessions: SessionInfo[] = [];
-  for (const provider of providers) {
-    try {
-      const sessions = await provider.discover();
-      allSessions.push(...sessions);
-    } catch (err) {
-      // A provider whose on-disk format drifted (e.g. an upstream SQLite schema
-      // change) must not take down discovery for every other provider.
-      if (process.env.VIBE_REPLAY_DEBUG) {
-        console.error(`[vibe-replay] ${provider.name} discovery failed:`, err);
-      }
-    }
-  }
-
-  const deduped = deduplicateSessionsByProvider(allSessions);
-  deduped.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-  return deduped;
+  const discovery = await discoverProvidersSafely(getAllProviders());
+  return discovery.sessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 }
 
 program
@@ -494,8 +482,12 @@ program
         }
       }
 
-      const info = displayedSessions.find((s) => s.filePath === chosen);
+      const mergedDisplayedSessions = mergeSameSessions(displayedSessions);
+      const info = mergedDisplayedSessions.find((s) => sessionChoiceKey(s) === chosen);
       sessionInfo = info;
+      if (sessionInfo?.location?.kind === "ssh") {
+        await hydrateCachedRemoteHomes();
+      }
       const sourcePaths = info
         ? info.filePaths.length > 0
           ? info.filePaths
@@ -517,6 +509,13 @@ program
     let parsed: Awaited<ReturnType<typeof provider.parse>>;
     let replay: ReturnType<typeof transformToReplay>;
     try {
+      if (sessionInfo?.transcriptStatus) {
+        throw new Error(
+          sessionInfo.transcriptStatus === "no-prompts"
+            ? "This session has no replayable user prompts"
+            : "This session transcript is unavailable or unreadable",
+        );
+      }
       parsed = await provider.parse(sessionPaths, sessionInfo);
       spinner.text = "Transforming to replay...";
 
@@ -524,7 +523,9 @@ program
       const project = rawProject.startsWith(home)
         ? `~${rawProject.slice(home.length)}`
         : rawProject;
-      const gitRepo = sessionInfo?.gitRepo || (await readGitRepo(rawProject));
+      const gitRepo =
+        sessionInfo?.gitRepo ||
+        (sessionInfo?.location?.kind === "ssh" ? undefined : await readGitRepo(rawProject));
       replay = transformToReplay(parsed, providerName, project, {
         generator: {
           name: "vibe-replay",
@@ -532,7 +533,15 @@ program
           generatedAt: new Date().toISOString(),
         },
         gitRepo,
+        location: sessionInfo?.location,
+        transcriptStatus: sessionInfo?.transcriptStatus,
+        remoteHome: getRemoteHome(
+          sessionInfo?.location?.kind === "ssh" ? sessionInfo.location.id : undefined,
+        ),
       });
+      if (!hasReplayableContent(replay)) {
+        throw new Error("This session has no replayable user prompts");
+      }
 
       const thinkingStr = replay.meta.stats.thinkingBlocks
         ? `, ${replay.meta.stats.thinkingBlocks} thinking`
@@ -570,7 +579,10 @@ program
     // Common output path
     const { join } = await import("node:path");
     const rawSlug = replay.meta.slug || replay.meta.sessionId.slice(0, 8);
-    const slug = rawSlug.replace(/[^a-zA-Z0-9_-]/g, "-");
+    const slug = replayOutputSlug(rawSlug, sessionInfo?.location, {
+      provider: providerName,
+      sessionId: replay.meta.sessionId,
+    });
     const outputDir = join(home, ".vibe-replay", slug);
 
     const genSpinner = ora("Generating replay...").start();
@@ -682,6 +694,7 @@ program
     } else if (target === "editor") {
       await startServer(join(home, ".vibe-replay"), {
         openSlug: slug,
+        openTargetId: sessionInfo?.location?.kind === "ssh" ? sessionInfo.location.id : undefined,
         ...getDevViewerOpts(),
       });
       return; // startServer blocks until Ctrl+C
@@ -822,7 +835,7 @@ program
   .option("--dedupe", "Collapse near-duplicate sessions with the same long prompt/title")
   .option("--json", "Print machine-readable JSON")
   .action(async (opts: SessionsCommandOptions, command: Command) => {
-    const discoverSpinner = opts.json ? undefined : ora("Discovering local sessions...").start();
+    const discoverSpinner = opts.json ? undefined : ora("Discovering sessions...").start();
     try {
       const queryOptions = normalizeSessionsCommandOptions(opts, command);
       const sessions = mergeSameSessions(await discoverAllSessions());
@@ -1306,6 +1319,8 @@ function formatSessionChoices(sessions: SessionInfo[], cleanupPeriodDays?: numbe
       const prompt = s.firstPrompt.replace(/\n/g, " ").slice(0, 50);
 
       const providerBadge = formatProviderBadge(s.provider);
+      const locationBadge =
+        s.location?.kind === "ssh" ? chalk.magenta(`ssh:${s.location.label}`) : chalk.dim("local");
 
       const titleStr = s.title ? chalk.white(` "${s.title}"`) : "";
 
@@ -1324,6 +1339,7 @@ function formatSessionChoices(sessions: SessionInfo[], cleanupPeriodDays?: numbe
 
       const line = [
         providerBadge,
+        locationBadge,
         chalk.dim(`[${timeStr}]`),
         chalk.cyan(s.slug) + sqliteBadge + expiryBadge,
         titleStr,
@@ -1335,9 +1351,19 @@ function formatSessionChoices(sessions: SessionInfo[], cleanupPeriodDays?: numbe
         ),
       ].join(" ");
 
-      choices.push({ name: line, value: s.filePath });
+      choices.push({ name: line, value: sessionChoiceKey(s) });
     }
   }
 
   return choices;
+}
+
+function sessionChoiceKey(session: SessionInfo): string {
+  const location = session.location?.kind === "ssh" ? session.location.id : "local";
+  const identity = [
+    session.sessionId || session.filePath || "unknown",
+    session.project,
+    session.slug,
+  ].join("\0");
+  return `session:${location}\0${session.provider}\0${identity}`;
 }
