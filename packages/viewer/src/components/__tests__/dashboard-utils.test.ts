@@ -23,6 +23,7 @@ import {
   replaySuggestedTitle,
   rollupProject,
   rollupTopProjects,
+  sessionIdentityKey,
   sessionPromptPreview,
   shouldRefreshCachedList,
   shortCoworkSpaceId,
@@ -421,6 +422,27 @@ describe("archive keys", () => {
   });
 });
 
+describe("session identity keys", () => {
+  it("maps a location-scoped replay slug back to its source slug", () => {
+    const location = { kind: "ssh" as const, id: "remote-a", label: "Remote A" };
+
+    expect(
+      sessionIdentityKey({
+        provider: "codex",
+        slug: "source-slug",
+        location,
+      }),
+    ).toBe(
+      sessionIdentityKey({
+        provider: "codex",
+        slug: "source-slug--ssh-output--id-session",
+        sourceSlug: "source-slug",
+        location,
+      }),
+    );
+  });
+});
+
 describe("cache response helpers", () => {
   it("accepts cached list payloads and normalizes missing cachedAt", () => {
     expect(parseCachedList<{ slug: string }>({ sessions: [{ slug: "a" }] })).toEqual({
@@ -429,6 +451,7 @@ describe("cache response helpers", () => {
       discoveredAt: undefined,
       stale: undefined,
       staleProviders: undefined,
+      failedProviders: undefined,
     });
     expect(
       parseCachedList({
@@ -437,6 +460,7 @@ describe("cache response helpers", () => {
         discoveredAt: "2026-05-01T00:00:01.000Z",
         stale: true,
         staleProviders: ["pi", 42],
+        failedProviders: ["ssh:remote-dev", null],
       }),
     ).toEqual({
       sessions: [],
@@ -444,6 +468,7 @@ describe("cache response helpers", () => {
       discoveredAt: "2026-05-01T00:00:01.000Z",
       stale: true,
       staleProviders: ["pi"],
+      failedProviders: ["ssh:remote-dev"],
     });
   });
 

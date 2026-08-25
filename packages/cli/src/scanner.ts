@@ -1227,8 +1227,8 @@ function buildLightweightCursorScanResult(input: ScanInput): SessionScanResult {
   const firstPrompt = scanFallbackPrompt(input);
   const hasPrompt = typeof firstPrompt === "string" && firstPrompt.trim().length > 0;
   const estimatedPromptCount = Math.max(
-    input.transcriptStatus ? 0 : hasPrompt ? 1 : 0,
-    input.transcriptStatus ? 0 : input.sourceLineCount ? Math.ceil(input.sourceLineCount / 2) : 0,
+    hasPrompt ? 1 : 0,
+    input.sourceLineCount ? Math.ceil(input.sourceLineCount / 2) : 0,
   );
   const sourceFilePath = input.sourceFilePath || "";
   const dataSource: DataSource = input.hasSdk
@@ -1249,7 +1249,7 @@ function buildLightweightCursorScanResult(input: ScanInput): SessionScanResult {
     startTime: input.timestamp,
     model: input.discoveryModel,
     durationMs: input.discoveryDurationMs,
-    promptCount: input.discoveryPromptCount ?? estimatedPromptCount,
+    promptCount: input.transcriptStatus ? 0 : (input.discoveryPromptCount ?? estimatedPromptCount),
     toolCallCount: input.discoveryToolCallCount ?? 0,
     editCount: input.discoveryEditCount ?? 0,
     filesModified: [],

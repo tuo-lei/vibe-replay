@@ -149,7 +149,6 @@ async function scanSessionsFromDir(baseDir: string): Promise<ReplaySummary[]> {
     try {
       const raw = await readFile(replayPath, "utf-8");
       const session = JSON.parse(raw) as ReplaySession;
-      if (!hasReplayableContent(session)) continue;
       const targetId = session.meta.location?.kind === "ssh" ? session.meta.location.id : undefined;
       const annotationCount = (await loadAnnotations(baseDir, entry, targetId)).length;
 
@@ -284,9 +283,6 @@ async function loadSessionFromDisk(
   }
   const raw = await readFile(replayPath, "utf-8");
   const session = JSON.parse(raw) as ReplaySession;
-  if (!hasReplayableContent(session)) {
-    throw new Error("Session has no replayable user prompts");
-  }
   const sessionTargetId =
     session.meta.location?.kind === "ssh" ? session.meta.location.id : undefined;
   if (sessionTargetId !== targetId) {

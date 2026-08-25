@@ -813,9 +813,11 @@ function unavailableRemoteSessions(
   index: RemoteIndex,
   cachedSessions: SessionInfo[],
   codexMetadata: ReadonlyMap<string, CodexSessionMetadata>,
+  cacheRoot: string,
 ): SessionInfo[] {
   const sessions = [...cachedSessions];
   const knownIds = new Set(sessions.map((session) => `${session.provider}::${session.sessionId}`));
+  const knownPaths = new Set(sessions.flatMap((session) => session.filePaths));
   const add = (session: SessionInfo): void => {
     const key = `${session.provider}::${session.sessionId}`;
     if (knownIds.has(key)) return;
@@ -835,6 +837,8 @@ function unavailableRemoteSessions(
   }
   for (const file of index.files) {
     if (!isRemoteTranscriptFile(file)) continue;
+    const localPath = localPathForRemoteFile(cacheRoot, file.relativePath);
+    if (localPath && knownPaths.has(localPath)) continue;
     const metadata =
       file.provider === "codex"
         ? [...codexMetadata.values()].find((entry) => entry.rolloutPath === file.remotePath)
@@ -1650,6 +1654,7 @@ async function discoverRemoteTargetUnlocked(
           },
           cachedSessions,
           currentCodexMetadata.entries,
+          cacheRoot,
         )
       : cachedSessions;
     return {

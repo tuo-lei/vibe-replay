@@ -39,6 +39,7 @@ import {
   providerBarClass,
   providerDisplayName,
   rollupTopProjects,
+  sessionIdentityKey,
   shortModelName,
 } from "./dashboard-utils";
 import { ScanFailureNotice, useScanInsightsContext } from "./InsightsPanel";
@@ -102,13 +103,6 @@ function rangeDays(range: TimeRange): number {
   if (range === "30d") return 30;
   if (range === "90d") return 90;
   return 0; // all
-}
-
-function sessionIdentityKey(
-  session: Pick<SessionSummary | SourceSession, "provider" | "sessionId" | "slug" | "location">,
-): string {
-  const locationKey = session.location?.kind === "ssh" ? session.location.id : "local";
-  return `${locationKey}\0${session.provider}\0${session.sessionId || session.slug}`;
 }
 
 /** Start of the selected range as an instant, or undefined for "all". */
@@ -1153,7 +1147,7 @@ function useHomePageCounts() {
       const src =
         srcByIdentity.get(sessionIdentityKey(r)) ||
         srcBySlug.get(
-          `${r.location?.kind === "ssh" ? r.location.id : "local"}\0${r.provider}\0${r.slug}`,
+          `${r.location?.kind === "ssh" ? r.location.id : "local"}\0${r.provider}\0${r.sourceSlug || r.slug}`,
         );
       const replayToolCalls = r.stats.toolCalls || 0;
       if (!src) {

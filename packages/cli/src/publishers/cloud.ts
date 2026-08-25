@@ -233,10 +233,6 @@ export async function publishCloudWithOverlays(
   const slug = basename(outputDir);
   const baseDir = dirname(outputDir);
   const overlays = await loadOverlays(baseDir, slug, opts?.targetId);
-  if (overlays.overlays.length === 0) {
-    return publishCloud(outputDir, opts);
-  }
-
   const replayPath = join(outputDir, "replay.json");
   const originalContent = await readFile(replayPath, "utf-8");
   const session = JSON.parse(originalContent) as ReplaySession;

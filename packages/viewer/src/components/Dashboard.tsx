@@ -51,6 +51,7 @@ import {
   replaySuggestedTitle,
   rollupProject,
   sameSessionLocation,
+  sessionIdentityKey,
   sessionPromptPreview,
   shouldRefreshCachedList,
   type SourcesEnrichmentStatus,
@@ -1914,13 +1915,6 @@ function RemoteSourceFailureNotice({ failures }: { failures: string[] }) {
       </div>
     </div>
   );
-}
-
-function sessionIdentityKey(
-  session: Pick<SourceSession, "provider" | "sessionId" | "slug" | "location">,
-): string {
-  const locationKey = session.location?.kind === "ssh" ? session.location.id : "local";
-  return `${locationKey}\0${session.provider}\0${session.sessionId || session.slug}`;
 }
 
 function sourceArchiveKey(source: SourceSession): string {

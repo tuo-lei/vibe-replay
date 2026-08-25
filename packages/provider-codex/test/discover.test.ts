@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +13,10 @@ import {
   type CodexSessionMetadata,
 } from "../src/codex/discover.js";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
+
+const HAS_SQLITE3_CLI =
+  process.platform !== "win32" &&
+  spawnSync("sqlite3", ["--version"], { stdio: "ignore" }).status === 0;
 
 function session(overrides: Partial<SessionInfo> = {}): SessionInfo {
   return {
@@ -410,17 +414,19 @@ describe("Codex state metadata discovery", () => {
 });
 
 describe("Codex remote metadata script", () => {
-  it("falls back to a schema-aware sqlite3 CLI query when Python is unavailable", async () => {
-    const root = await mkdtemp(join(tmpdir(), "vibe-replay-codex-remote-"));
-    try {
-      const fakeBin = join(root, "bin");
-      await mkdir(fakeBin, { recursive: true });
-      await writeFile(join(fakeBin, "python3"), "#!/bin/sh\nexit 127\n", "utf-8");
-      await chmod(join(fakeBin, "python3"), 0o755);
-      const { default: SQL } = await import("sql.js");
-      const db = await SQL();
-      const database = new db.Database();
-      database.run(`
+  it.skipIf(!HAS_SQLITE3_CLI)(
+    "falls back to a schema-aware sqlite3 CLI query when Python is unavailable",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "vibe-replay-codex-remote-"));
+      try {
+        const fakeBin = join(root, "bin");
+        await mkdir(fakeBin, { recursive: true });
+        await writeFile(join(fakeBin, "python3"), "#!/bin/sh\nexit 127\n", "utf-8");
+        await chmod(join(fakeBin, "python3"), 0o755);
+        const { default: SQL } = await import("sql.js");
+        const db = await SQL();
+        const database = new db.Database();
+        database.run(`
         CREATE TABLE threads (
           id TEXT NOT NULL,
           title TEXT,
@@ -429,27 +435,28 @@ describe("Codex remote metadata script", () => {
         INSERT INTO threads (id, title, updated_at)
         VALUES ('cli-fallback', 'CLI fallback title', '2026-08-24T10:00:00.000Z');
       `);
-      await writeFile(join(root, "state_5.sqlite"), Buffer.from(database.export()));
-      database.close();
+        await writeFile(join(root, "state_5.sqlite"), Buffer.from(database.export()));
+        database.close();
 
-      const output = await runShellScript(CODEX_REMOTE_METADATA_SCRIPT, {
-        HOME: root,
-        CODEX_HOME: root,
-        CODEX_SQLITE_HOME: "",
-        PATH: `${fakeBin}:/usr/bin:/bin`,
-      });
-      expect(output.code).toBe(0);
-      const parsed = parseCodexRemoteMetadata(Buffer.from(output.stdout));
-      expect(parsed.available).toBe(true);
-      expect(parsed.entries.get("cli-fallback")).toMatchObject({
-        sessionId: "cli-fallback",
-        title: "CLI fallback title",
-        updatedAt: "2026-08-24T10:00:00.000Z",
-      });
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
+        const output = await runShellScript(CODEX_REMOTE_METADATA_SCRIPT, {
+          HOME: root,
+          CODEX_HOME: root,
+          CODEX_SQLITE_HOME: "",
+          PATH: `${fakeBin}:/usr/bin:/bin`,
+        });
+        expect(output.code).toBe(0);
+        const parsed = parseCodexRemoteMetadata(Buffer.from(output.stdout));
+        expect(parsed.available).toBe(true);
+        expect(parsed.entries.get("cli-fallback")).toMatchObject({
+          sessionId: "cli-fallback",
+          title: "CLI fallback title",
+          updatedAt: "2026-08-24T10:00:00.000Z",
+        });
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 function runShellScript(

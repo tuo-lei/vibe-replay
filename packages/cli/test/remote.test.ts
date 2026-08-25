@@ -345,7 +345,7 @@ describe("remote metadata protocols", () => {
   });
 });
 
-describe("configured remote discovery", () => {
+describe.skipIf(process.platform === "win32")("configured remote discovery", () => {
   it("uses OpenSSH transport, materializes JSONL, and refreshes changed files", async () => {
     const root = await mkdtemp(join(tmpdir(), "vibe-remote-test-"));
     temporaryRoots.push(root);
@@ -389,6 +389,7 @@ case "$1" in
         fi
         file="$FAKE_REMOTE_ROOT/.codex/sessions/rollout-fake.jsonl"
         size=$(wc -c < "$file" | tr -d '[:space:]')
+        printf 'protocol\t2\n'
         printf 'home\t/remote/home\n'
         printf 'file\tcodex\t/remote/home/.codex/sessions/rollout-fake.jsonl\t.codex/sessions/rollout-fake.jsonl\t%s\t1700000000\n' "$size"
         if [ "$FAKE_INCLUDE_NO_PROMPT" = "yes" ]; then
@@ -396,6 +397,7 @@ case "$1" in
           no_size=$(wc -c < "$no_prompt" | tr -d '[:space:]')
           printf 'file\tcodex\t/remote/home/.codex/sessions/rollout-no-prompts.jsonl\t.codex/sessions/rollout-no-prompts.jsonl\t%s\t1700000000\n' "$no_size"
         fi
+        printf 'complete\n'
         ;;
     esac
     ;;
@@ -544,6 +546,9 @@ esac
     expect(oversized.sessions[0]?.firstPrompt).toBe(
       "Please inspect the remote project through the fallback path now",
     );
+    expect(
+      oversized.sessions.some((session) => session.sessionId.includes("rollout-fake.jsonl")),
+    ).toBe(false);
     await writeFile(
       join(remoteSessionDir, "rollout-fake.jsonl"),
       codexRollout("Please inspect the remote project through the fallback path now"),

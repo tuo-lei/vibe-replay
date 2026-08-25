@@ -88,6 +88,7 @@ const REMOTE_PATH_FIELDS = new Set([
   "contextFiles",
   "toolPaths",
   "command",
+  "directory",
 ]);
 
 function isPathField(key: string): boolean {

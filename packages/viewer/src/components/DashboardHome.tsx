@@ -17,6 +17,7 @@ import {
   remoteSourceFailureIds,
   rollupTopProjects,
   sameSessionLocation,
+  sessionIdentityKey,
   shouldRefreshCachedList,
   type SourcesEnrichmentStatus,
   type TopProjectEntry,
@@ -56,12 +57,6 @@ interface InsightStats {
 
 function sessionLocationKey(location?: SessionLocation): string {
   return location?.kind === "ssh" ? `ssh:${location.id}` : "local";
-}
-
-function sessionIdentityKey(
-  session: Pick<SessionSummary | SourceSession, "provider" | "sessionId" | "slug" | "location">,
-): string {
-  return `${sessionLocationKey(session.location)}\0${session.provider}\0${session.sessionId || session.slug}`;
 }
 
 function sourceLocationBadge(location?: SessionLocation) {

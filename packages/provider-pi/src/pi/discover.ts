@@ -54,6 +54,7 @@ export async function discoverPiSessions(
         projectDir,
         resolveGitRepo,
         includeUnreplayable,
+        fileStat.mtime.toISOString(),
       );
       if (info) sessions.push(info);
     }
@@ -69,6 +70,7 @@ async function extractPiSessionInfo(
   encodedProjectDir: string,
   resolveGitRepo = true,
   includeUnreplayable = false,
+  fileMtime?: string,
 ): Promise<SessionInfo | null> {
   let header: PiSessionHeader | undefined;
   let timestamp = "";
@@ -163,7 +165,8 @@ async function extractPiSessionInfo(
   const cwd = header?.cwd || decodeProjectDir(encodedProjectDir);
   const gitRepo = resolveGitRepo ? await readGitRepo(cwd) : undefined;
   const slug = basename(filePath, ".jsonl").replace(/^\d{4}-\d{2}-\d{2}T[^_]+_/, "");
-  const fallbackTimestamp = timestamp || header?.timestamp || new Date().toISOString();
+  const fallbackTimestamp =
+    timestamp || header?.timestamp || fileMtime || new Date(0).toISOString();
   const unreadable = readFailed || !sawParseableRecord || !header;
   if (!includeUnreplayable && (unreadable || prompts.length === 0)) return null;
 

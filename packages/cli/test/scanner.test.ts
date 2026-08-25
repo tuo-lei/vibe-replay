@@ -1119,6 +1119,24 @@ describe("scanSession", () => {
     expect(result.dataQualityNotes?.[0]).toContain("deferred");
   });
 
+  it("does not retain Cursor discovery prompt counts for unavailable transcripts", async () => {
+    const result = await scanSession({
+      sessionId: "cursor-unavailable",
+      provider: "cursor",
+      project: "~/test/project",
+      slug: "cursor-unavailable",
+      filePaths: [],
+      hasSqlite: true,
+      deferRichCursorParse: true,
+      transcriptStatus: "unreadable",
+      discoveryPromptCount: 12,
+      firstPrompt: "",
+    });
+
+    expect(result.promptCount).toBe(0);
+    expect(result.transcriptStatus).toBe("unreadable");
+  });
+
   it("preserves Cursor discovery summaries while rich parsing is deferred", async () => {
     const result = await scanSession({
       sessionId: "cursor-discovery-summary",

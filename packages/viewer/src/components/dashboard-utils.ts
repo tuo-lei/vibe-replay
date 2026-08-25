@@ -32,6 +32,15 @@ export interface SourcesEnrichmentStatus {
   message?: string;
 }
 
+export function sessionIdentityKey(
+  session: Pick<SessionSummary, "provider" | "sessionId" | "slug" | "location"> & {
+    sourceSlug?: string;
+  },
+): string {
+  const locationKey = session.location?.kind === "ssh" ? `ssh:${session.location.id}` : "local";
+  return `${locationKey}\0${session.provider}\0${session.sessionId || session.sourceSlug || session.slug}`;
+}
+
 export function transcriptStatusLabel(status?: SessionTranscriptStatus): string | undefined {
   if (status === "no-prompts") return "no replayable prompts";
   if (status === "unreadable") return "unreadable transcript";
@@ -69,6 +78,7 @@ export function parseCachedList<T>(payload: unknown): CachedListResponse<T> | nu
     discoveredAt?: unknown;
     stale?: unknown;
     staleProviders?: unknown;
+    failedProviders?: unknown;
   };
   if (!Array.isArray(obj.sessions)) return null;
   return {
@@ -78,6 +88,9 @@ export function parseCachedList<T>(payload: unknown): CachedListResponse<T> | nu
     stale: typeof obj.stale === "boolean" ? obj.stale : undefined,
     staleProviders: Array.isArray(obj.staleProviders)
       ? obj.staleProviders.filter((provider): provider is string => typeof provider === "string")
+      : undefined,
+    failedProviders: Array.isArray(obj.failedProviders)
+      ? obj.failedProviders.filter((provider): provider is string => typeof provider === "string")
       : undefined,
   };
 }

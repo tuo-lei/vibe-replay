@@ -357,7 +357,7 @@ describe("path redaction", () => {
     ) as ToolCallScene;
 
     expect(scene.input?.file_path).toBe(`${remoteHome}2/keep.ts`);
-    expect(scene.input?.directory).toBe(`${remoteHome}/redact.ts`);
+    expect(scene.input?.directory).toBe("~/redact.ts");
   });
 
   it("redacts paths and secrets in data source metadata", () => {
