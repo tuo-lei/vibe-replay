@@ -2,7 +2,12 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadAnnotations, saveAnnotations, saveOverlays } from "../src/server-persistence.js";
+import {
+  loadAnnotations,
+  saveAnnotations,
+  saveOverlays,
+  scopedSessionSlug,
+} from "../src/server-persistence.js";
 import type { Annotation, SessionOverlays } from "../src/types.js";
 
 const originalCwd = process.cwd();
@@ -68,6 +73,24 @@ describe("server persistence", () => {
     await expect(
       readFile(join(baseDir, "session-a", "annotations.json"), "utf-8").then(JSON.parse),
     ).resolves.toEqual([annotation]);
+  });
+
+  it("keeps identity-scoped SSH replay assets in the replay directory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-server-persistence-"));
+    roots.push(root);
+    const baseDir = join(root, "primary");
+    const targetId = "remote-dev";
+    const locationScoped = scopedSessionSlug("session-a", targetId);
+    const replaySlug = `${locationScoped}--id-0123456789`;
+    const annotation = makeAnnotation();
+
+    expect(scopedSessionSlug(replaySlug, targetId)).toBe(replaySlug);
+    await saveAnnotations(baseDir, replaySlug, [annotation], targetId);
+
+    await expect(
+      readFile(join(baseDir, replaySlug, "annotations.json"), "utf-8").then(JSON.parse),
+    ).resolves.toEqual([annotation]);
+    await expect(loadAnnotations(baseDir, replaySlug, targetId)).resolves.toEqual([annotation]);
   });
 
   it("creates the slug directory before saving overlays", async () => {

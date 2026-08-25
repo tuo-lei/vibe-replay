@@ -6,7 +6,7 @@ import type { Annotation, SessionOverlays } from "./types.js";
 export function scopedSessionSlug(slug: string, targetId?: string): string {
   if (!targetId) return slug;
   const suffix = `--ssh-${createHash("sha1").update(targetId).digest("hex").slice(0, 10)}`;
-  return slug.endsWith(suffix) ? slug : `${slug}${suffix}`;
+  return slug.endsWith(suffix) || slug.includes(`${suffix}--id-`) ? slug : `${slug}${suffix}`;
 }
 
 function sessionDirs(baseDir: string, slug: string, targetId?: string): string[] {
