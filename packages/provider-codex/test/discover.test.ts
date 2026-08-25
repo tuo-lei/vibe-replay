@@ -14,9 +14,13 @@ import {
 } from "../src/codex/discover.js";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
 
+const SQLITE3_TEST_PATH = "/usr/bin:/bin";
 const HAS_SQLITE3_CLI =
   process.platform !== "win32" &&
-  spawnSync("sqlite3", ["--version"], { stdio: "ignore" }).status === 0;
+  spawnSync("sqlite3", ["--version"], {
+    stdio: "ignore",
+    env: { ...process.env, PATH: SQLITE3_TEST_PATH },
+  }).status === 0;
 
 function session(overrides: Partial<SessionInfo> = {}): SessionInfo {
   return {
@@ -442,7 +446,7 @@ describe("Codex remote metadata script", () => {
           HOME: root,
           CODEX_HOME: root,
           CODEX_SQLITE_HOME: "",
-          PATH: `${fakeBin}:/usr/bin:/bin`,
+          PATH: `${fakeBin}:${SQLITE3_TEST_PATH}`,
         });
         expect(output.code).toBe(0);
         const parsed = parseCodexRemoteMetadata(Buffer.from(output.stdout));
