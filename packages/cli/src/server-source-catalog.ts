@@ -48,6 +48,11 @@ export function normalizeSourceSessionCatalogCache(
       cachedAt: cached.updatedAt,
       discoveredAt: cached.data.discoveredAt || cached.updatedAt,
       updatedAt: cached.data.updatedAt || cached.updatedAt,
+      failedProviders: Array.isArray(cached.data.failedProviders)
+        ? cached.data.failedProviders.filter(
+            (provider): provider is string => typeof provider === "string",
+          )
+        : undefined,
       providerStates: cached.data.providerStates,
       legacy: false,
     };
@@ -87,12 +92,22 @@ export function buildSourceSessionCatalogCache(
   const mergedSessions = [...sessions];
   const seen = new Set(
     sessions.map((session) =>
-      providerSessionKey(session.provider, session.sessionId || session.slug),
+      providerSessionKey(
+        session.provider,
+        session.sessionId || session.slug,
+        session.location?.kind === "ssh" ? session.location.id : undefined,
+      ),
     ),
   );
   for (const session of previous?.sessions || []) {
-    if (!failed.has(session.provider)) continue;
-    const key = providerSessionKey(session.provider, session.sessionId || session.slug);
+    const targetFailure =
+      session.location?.kind === "ssh" && failed.has(`ssh:${session.location.id}`);
+    if (!failed.has(session.provider) && !targetFailure) continue;
+    const key = providerSessionKey(
+      session.provider,
+      session.sessionId || session.slug,
+      session.location?.kind === "ssh" ? session.location.id : undefined,
+    );
     if (seen.has(key)) continue;
     seen.add(key);
     mergedSessions.push(session);
@@ -105,6 +120,7 @@ export function buildSourceSessionCatalogCache(
     schemaVersion: 1,
     discoveredAt,
     updatedAt: discoveredAt,
+    failedProviders: [...new Set(failedProviders)],
     providerStates,
     sessions: mergedSessions as CachedSourceRecord[],
   };
@@ -125,7 +141,7 @@ export async function probeSourceRecordsFreshness(
 
   const paths = new Set(
     sources
-      .filter((source) => source.provider === provider)
+      .filter((source) => source.provider === provider && source.location?.kind !== "ssh")
       .flatMap((source) => source.filePaths || [])
       .filter(
         (filePath): filePath is string => typeof filePath === "string" && filePath.length > 0,
@@ -154,19 +170,21 @@ export function mergeSourceCatalogSessionUpdates(
   const bySessionId = new Map<string, CachedSourceRecord>();
   const byKey = new Map<string, CachedSourceRecord>();
   for (const update of updates) {
-    byKey.set(sourceSessionKey(update.provider, update.project, update.slug), update);
+    const targetId = update.location?.kind === "ssh" ? update.location.id : undefined;
+    byKey.set(sourceSessionKey(update.provider, update.project, update.slug, targetId), update);
     if (typeof update.sessionId === "string" && update.sessionId) {
-      bySessionId.set(providerSessionKey(update.provider, update.sessionId), update);
+      bySessionId.set(providerSessionKey(update.provider, update.sessionId, targetId), update);
     }
   }
 
   return current.map((session) => {
+    const targetId = session.location?.kind === "ssh" ? session.location.id : undefined;
     const byId = session.sessionId
-      ? bySessionId.get(providerSessionKey(session.provider, session.sessionId))
+      ? bySessionId.get(providerSessionKey(session.provider, session.sessionId, targetId))
       : undefined;
     const update =
       (byId?.provider === session.provider ? byId : undefined) ??
-      byKey.get(sourceSessionKey(session.provider, session.project, session.slug));
+      byKey.get(sourceSessionKey(session.provider, session.project, session.slug, targetId));
     return update ? { ...session, ...update } : session;
   });
 }
@@ -180,6 +198,7 @@ export function updateSourceSessionCatalogSessions(
     schemaVersion: 1,
     discoveredAt: catalog.discoveredAt || catalog.cachedAt || updatedAt,
     updatedAt,
+    failedProviders: catalog.failedProviders,
     providerStates: catalog.providerStates,
     sessions,
   };

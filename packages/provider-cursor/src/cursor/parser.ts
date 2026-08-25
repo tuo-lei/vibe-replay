@@ -85,7 +85,13 @@ async function parseCursorSessionWithDependencies(
   let sqliteAttempted = false;
 
   // Try SQLite first if session info is available
-  const sqliteSessionId = sessionInfo?.sessionId || inferredSqliteSession?.sessionId;
+  // Discovery explicitly marks transcript-only sessions. Probing every one of
+  // them against Cursor's SQLite stores adds ~80–100ms per session and rebuilds
+  // indexes that cannot contain the session.
+  const sqliteSessionId =
+    sessionInfo?.hasSqlite === false
+      ? inferredSqliteSession?.sessionId
+      : sessionInfo?.sessionId || inferredSqliteSession?.sessionId;
   if (sqliteSessionId) {
     sqliteAttempted = true;
     let sqliteResult: ProviderParseResult | null = null;

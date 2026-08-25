@@ -5,12 +5,15 @@ import type {
   ParseWarning,
   ProjectIdentity,
   PrLink,
+  SessionLocation,
+  SessionTranscriptStatus,
   SubAgent,
   TokenUsage,
   TurnStat,
 } from "@vibe-replay/types";
 
-export type { DataSource, DataSourceInfo, TokenUsage };
+export type { DataSource, DataSourceInfo, SessionLocation, TokenUsage };
+export type { SessionTranscriptStatus };
 
 /** Stable provider API version for the current in-repo provider contract. */
 export const PROVIDER_API_VERSION = 1;
@@ -39,6 +42,9 @@ export interface SessionInfo {
   slug: string;
   title?: string;
   project: string; // decoded project path (e.g. "~/Code/my-project")
+  location?: SessionLocation;
+  /** Why a source lacks a normal replay prompt, when discovery can explain it. */
+  transcriptStatus?: SessionTranscriptStatus;
   cwd: string;
   version: string;
   gitBranch?: string;

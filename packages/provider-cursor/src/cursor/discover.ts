@@ -18,9 +18,24 @@ const TRANSCRIPT_INFO_CONCURRENCY = 6;
 const ENTRY_STAT_CONCURRENCY = 32;
 const decodedProjectDirCache = new Map<string, Promise<string>>();
 const sdkWorkspaceRepoCache = new Map<string, Promise<string | undefined>>();
+let cursorDiscoveryInFlight: Promise<SessionInfo[]> | null = null;
 
-export async function discoverCursorSessions(): Promise<SessionInfo[]> {
+/** Coalesce dashboard/source scans that request the same local catalog concurrently. */
+export function discoverCursorSessions(): Promise<SessionInfo[]> {
+  if (cursorDiscoveryInFlight) return cursorDiscoveryInFlight;
+  const current = discoverCursorSessionsOnce();
+  const tracked = current.finally(() => {
+    if (cursorDiscoveryInFlight === tracked) cursorDiscoveryInFlight = null;
+  });
+  cursorDiscoveryInFlight = tracked;
+  return tracked;
+}
+
+async function discoverCursorSessionsOnce(): Promise<SessionInfo[]> {
   const sessions: SessionInfo[] = [];
+  // SDK databases are independent from IDE transcript/store discovery. Start
+  // their machine-wide index in parallel instead of paying both costs serially.
+  const sdkAgentsPromise = discoverSdkAgents().catch(() => [] as SdkAgent[]);
 
   let projectDirs: string[];
   try {
@@ -61,7 +76,7 @@ export async function discoverCursorSessions(): Promise<SessionInfo[]> {
   // Cursor SDK sessions live alongside Cursor IDE chats but in their own SQLite
   // store. Mark transcripts that also have an SDK record so the parser can enrich
   // them with structured tool results, run timing, and per-turn model.
-  await enrichWithSdkAgents(sessions);
+  await enrichWithSdkAgents(sessions, await sdkAgentsPromise);
 
   sessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   return sessions;
@@ -156,13 +171,7 @@ async function discoverProjectSessions(projDir: string): Promise<SessionInfo[]> 
   return infos.filter((info): info is SessionInfo => info !== null);
 }
 
-async function enrichWithSdkAgents(sessions: SessionInfo[]): Promise<void> {
-  let sdkAgents: SdkAgent[] = [];
-  try {
-    sdkAgents = await discoverSdkAgents();
-  } catch {
-    return;
-  }
+async function enrichWithSdkAgents(sessions: SessionInfo[], sdkAgents: SdkAgent[]): Promise<void> {
   if (sdkAgents.length === 0) return;
 
   const sessionsByAgentId = new Map<string, SessionInfo>();

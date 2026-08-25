@@ -7,7 +7,7 @@ import {
   removeAnnotation,
   updateAnnotation,
 } from "../engine";
-import type { Annotation, ReplaySession } from "../types";
+import type { Annotation, ReplaySession, SessionLocation } from "../types";
 import { apiUrl } from "../utils/api";
 import type { ViewerMode } from "./useSessionLoader";
 
@@ -82,8 +82,13 @@ export function legacyAnnotationStorageKey(sessionId: string): string {
   return LEGACY_LS_PREFIX + sessionId;
 }
 
-export function annotationStorageKey(provider: string, sessionId: string): string {
-  return `${SCOPED_LS_PREFIX}${encodeURIComponent(provider)}:${encodeURIComponent(sessionId)}`;
+export function annotationStorageKey(
+  provider: string,
+  sessionId: string,
+  location?: SessionLocation,
+): string {
+  const locationScope = location?.kind === "ssh" ? `:ssh:${encodeURIComponent(location.id)}` : "";
+  return `${SCOPED_LS_PREFIX}${encodeURIComponent(provider)}${locationScope}:${encodeURIComponent(sessionId)}`;
 }
 
 function loadAnnotationDraft(session: ReplaySession, isEditor: boolean): Annotation[] {
@@ -92,8 +97,12 @@ function loadAnnotationDraft(session: ReplaySession, isEditor: boolean): Annotat
   let drafts: Array<string | null>;
   try {
     drafts = [
-      localStorage.getItem(annotationStorageKey(session.meta.provider, session.meta.sessionId)),
-      localStorage.getItem(legacyAnnotationStorageKey(session.meta.sessionId)),
+      localStorage.getItem(
+        annotationStorageKey(session.meta.provider, session.meta.sessionId, session.meta.location),
+      ),
+      ...(session.meta.location?.kind === "ssh"
+        ? []
+        : [localStorage.getItem(legacyAnnotationStorageKey(session.meta.sessionId))]),
     ];
   } catch {
     return embedded;
@@ -116,8 +125,10 @@ export function useAnnotations(
 ): AnnotationActions {
   const sessionId = session.meta.sessionId;
   const provider = session.meta.provider;
+  const location = session.meta.location;
   const isEditor = mode === "editor";
-  const storageIdentity = `${isEditor ? "editor" : "local"}::${provider}::${sessionId}`;
+  const locationIdentity = location?.kind === "ssh" ? `ssh::${location.id}` : "local";
+  const storageIdentity = `${isEditor ? "editor" : "local"}::${locationIdentity}::${provider}::${sessionId}`;
 
   // Save HTML only works from self-contained production builds (data embedded inline)
   // or in editor mode (server generates it).
@@ -175,12 +186,17 @@ export function useAnnotations(
     }
     // Non-editor: save to localStorage
     try {
-      localStorage.setItem(annotationStorageKey(provider, sessionId), JSON.stringify(annotations));
-      localStorage.removeItem(legacyAnnotationStorageKey(sessionId));
+      localStorage.setItem(
+        annotationStorageKey(provider, sessionId, location),
+        JSON.stringify(annotations),
+      );
+      if (location?.kind !== "ssh") {
+        localStorage.removeItem(legacyAnnotationStorageKey(sessionId));
+      }
     } catch {
       /* quota exceeded — silent */
     }
-  }, [annotations, provider, sessionId, storageIdentity, isEditor]);
+  }, [annotations, location, provider, sessionId, storageIdentity, isEditor]);
 
   const annotatedScenes = useMemo(() => computeAnnotatedScenes(annotations), [annotations]);
 
@@ -258,12 +274,14 @@ export function useAnnotations(
 
     setSavedSnapshot(annotations);
     try {
-      localStorage.removeItem(annotationStorageKey(provider, sessionId));
-      localStorage.removeItem(legacyAnnotationStorageKey(sessionId));
+      localStorage.removeItem(annotationStorageKey(provider, sessionId, location));
+      if (location?.kind !== "ssh") {
+        localStorage.removeItem(legacyAnnotationStorageKey(sessionId));
+      }
     } catch {
       /* ignore */
     }
-  }, [session, annotations, provider, sessionId, isEditor]);
+  }, [session, annotations, location, provider, sessionId, isEditor]);
 
   const downloadJson = useCallback(() => {
     const updatedSession: ReplaySession = { ...session, annotations };
@@ -280,12 +298,14 @@ export function useAnnotations(
 
     setSavedSnapshot(annotations);
     try {
-      localStorage.removeItem(annotationStorageKey(provider, sessionId));
-      localStorage.removeItem(legacyAnnotationStorageKey(sessionId));
+      localStorage.removeItem(annotationStorageKey(provider, sessionId, location));
+      if (location?.kind !== "ssh") {
+        localStorage.removeItem(legacyAnnotationStorageKey(sessionId));
+      }
     } catch {
       /* ignore */
     }
-  }, [session, annotations, provider, sessionId]);
+  }, [session, annotations, location, provider, sessionId]);
 
   // Editor mode: server-side gist publishing
   const [gistPublishing, setGistPublishing] = useState(false);

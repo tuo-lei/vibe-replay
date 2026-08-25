@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { describe, expect, it } from "vitest";
-import { resolveGenerateInputs } from "../src/server.js";
+import { hasReplayableContent, resolveGenerateInputs, safeTargetId } from "../src/server-core.js";
 import type { SessionInfo } from "../src/types.js";
 
 function makeSession(overrides: Partial<SessionInfo> = {}): SessionInfo {
@@ -234,5 +234,141 @@ describe("resolveGenerateInputs", () => {
     );
     expect(resolved.ok).toBe(false);
     expect(resolved.ok === false && resolved.error).toContain("filePaths is required");
+  });
+
+  it("matches the requested local or SSH location when slugs collide", () => {
+    const local = makeSession({
+      provider: "codex",
+      sessionId: "shared-session",
+      slug: "shared-slug",
+      filePaths: ["/local/session.jsonl"],
+      toolPaths: [],
+    });
+    const remote = makeSession({
+      provider: "codex",
+      sessionId: "shared-session",
+      slug: "shared-slug",
+      filePaths: ["/cache/remote/session.jsonl"],
+      toolPaths: [],
+      location: { kind: "ssh", id: "remote-a", label: "Remote A" },
+    });
+
+    const localResult = resolveGenerateInputs(
+      { provider: "codex", filePaths: [], sessionSlug: "shared-slug" },
+      [remote, local],
+    );
+    expect(localResult.ok && localResult.value.sessionInfo?.location).toBeUndefined();
+    expect(localResult.ok && localResult.value.paths).toEqual(["/local/session.jsonl"]);
+
+    const remoteResult = resolveGenerateInputs(
+      {
+        provider: "codex",
+        filePaths: [],
+        sessionSlug: "shared-slug",
+        targetId: "remote-a",
+      },
+      [local, remote],
+    );
+    expect(remoteResult.ok && remoteResult.value.sessionInfo?.location).toEqual(remote.location);
+    expect(remoteResult.ok && remoteResult.value.paths).toEqual(["/cache/remote/session.jsonl"]);
+  });
+
+  it.each(["no-prompts", "unreadable"] as const)(
+    "rejects a %s transcript before attempting generation",
+    (transcriptStatus) => {
+      const resolved = resolveGenerateInputs(
+        {
+          provider: "codex",
+          filePaths: [],
+          sessionSlug: "metadata-only",
+        },
+        [
+          makeSession({
+            provider: "codex",
+            sessionId: "metadata-only",
+            slug: "metadata-only",
+            filePaths: [],
+            toolPaths: [],
+            firstPrompt: "",
+            transcriptStatus,
+          }),
+        ],
+      );
+
+      expect(resolved.ok).toBe(false);
+      expect(resolved.ok === false && resolved.error).toBe(
+        transcriptStatus === "no-prompts"
+          ? "This session has no replayable user prompts"
+          : "This session transcript is unavailable or unreadable",
+      );
+    },
+  );
+
+  it("does not allow explicit paths from another session for SSH generation", () => {
+    const resolved = resolveGenerateInputs(
+      {
+        provider: "codex",
+        filePaths: ["/local/session.jsonl"],
+        sessionSlug: "shared-slug",
+        targetId: "remote-a",
+      },
+      [
+        makeSession({
+          provider: "codex",
+          sessionId: "remote-session",
+          slug: "shared-slug",
+          filePaths: ["/cache/remote/session.jsonl"],
+          toolPaths: [],
+          location: { kind: "ssh", id: "remote-a", label: "Remote A" },
+        }),
+      ],
+    );
+
+    expect(resolved).toEqual({
+      ok: false,
+      error: "Requested paths do not belong to the selected SSH source session",
+    });
+  });
+});
+
+describe("safeTargetId", () => {
+  it("distinguishes omitted targets from invalid and valid source ids", () => {
+    expect(safeTargetId(undefined)).toBeUndefined();
+    expect(safeTargetId("")).toBeUndefined();
+    expect(safeTargetId(" remote-dev ")).toBe("remote-dev");
+    expect(safeTargetId("remote/dev")).toBeNull();
+    expect(safeTargetId("-oProxyCommand=bad")).toBeNull();
+  });
+
+  it("reserves the local namespace", () => {
+    expect(safeTargetId("local")).toBeNull();
+  });
+});
+
+describe("hasReplayableContent", () => {
+  const meta = {
+    sessionId: "session",
+    slug: "session",
+    provider: "codex",
+    startTime: "2026-01-01T00:00:00.000Z",
+    cwd: "/tmp/project",
+    project: "/tmp/project",
+    stats: { sceneCount: 0, userPrompts: 0, toolCalls: 0 },
+  };
+
+  it("requires a real user-prompt scene", () => {
+    expect(hasReplayableContent({ meta, scenes: [] })).toBe(false);
+    expect(
+      hasReplayableContent({
+        meta,
+        scenes: [{ type: "context-injection", content: "metadata", injectionType: "other" }],
+      }),
+    ).toBe(false);
+    expect(
+      hasReplayableContent({
+        meta,
+        scenes: [{ type: "user-prompt", content: "Please inspect the project" }],
+      }),
+    ).toBe(true);
   });
 });

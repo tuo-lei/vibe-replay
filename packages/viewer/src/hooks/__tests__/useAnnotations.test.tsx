@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { Annotation, ReplaySession } from "../../types";
+import type { Annotation, ReplaySession, SessionLocation } from "../../types";
 import {
   annotationStorageKey,
   legacyAnnotationStorageKey,
   useAnnotations,
 } from "../useAnnotations";
 
-function session(provider: string, sceneCount = 30): ReplaySession {
+function session(provider: string, sceneCount = 30, location?: SessionLocation): ReplaySession {
   const scenes: ReplaySession["scenes"] = Array.from({ length: sceneCount }, (_, index) => ({
     type: "user-prompt",
     content: `Prompt ${index}`,
@@ -21,6 +21,7 @@ function session(provider: string, sceneCount = 30): ReplaySession {
       startTime: "2026-01-01T00:00:00.000Z",
       cwd: "~/project",
       project: "~/project",
+      ...(location ? { location } : {}),
       stats: { sceneCount, userPrompts: sceneCount, toolCalls: 0 },
     },
     scenes,
@@ -47,6 +48,26 @@ describe("useAnnotations storage identity", () => {
     );
     expect(annotationStorageKey("claude-code", "shared-session")).not.toBe(
       legacyAnnotationStorageKey("claude-code:shared-session"),
+    );
+    expect(annotationStorageKey("codex", "shared-session")).not.toBe(
+      annotationStorageKey("codex", "shared-session", {
+        kind: "ssh",
+        id: "remote-a",
+        label: "Remote A",
+      }),
+    );
+    expect(
+      annotationStorageKey("codex", "shared-session", {
+        kind: "ssh",
+        id: "remote-a",
+        label: "Remote A",
+      }),
+    ).not.toBe(
+      annotationStorageKey("codex", "shared-session", {
+        kind: "ssh",
+        id: "remote-b",
+        label: "Remote B",
+      }),
     );
   });
 
@@ -75,6 +96,53 @@ describe("useAnnotations storage identity", () => {
 
     const { result } = renderHook(() => useAnnotations(replay, "embedded"));
     expect(result.current.annotations).toEqual([]);
+  });
+
+  it("does not load local drafts into an SSH session with the same provider and ID", async () => {
+    const remote = {
+      kind: "ssh" as const,
+      id: "remote-a",
+      label: "Remote A",
+    };
+    const remoteAnnotation = { ...annotation, id: "remote-note", body: "Remote note" };
+    localStorage.setItem(
+      annotationStorageKey("codex", "shared-session"),
+      JSON.stringify([annotation]),
+    );
+    localStorage.setItem(
+      annotationStorageKey("codex", "shared-session", remote),
+      JSON.stringify([remoteAnnotation]),
+    );
+
+    const { result, rerender } = renderHook(
+      ({ location }: { location?: SessionLocation }) =>
+        useAnnotations(session("codex", 30, location), "embedded"),
+      { initialProps: { location: undefined as SessionLocation | undefined } },
+    );
+    expect(result.current.annotations).toEqual([annotation]);
+
+    rerender({ location: remote });
+    await waitFor(() => expect(result.current.annotations).toEqual([remoteAnnotation]));
+  });
+
+  it("migrates the legacy key only for local sessions", async () => {
+    const remote = { kind: "ssh" as const, id: "remote-a", label: "Remote A" };
+    localStorage.setItem(
+      legacyAnnotationStorageKey("shared-session"),
+      JSON.stringify([annotation]),
+    );
+
+    const { result } = renderHook(() => useAnnotations(session("codex", 30, remote), "embedded"));
+
+    expect(result.current.annotations).toEqual([]);
+    await waitFor(() => {
+      expect(localStorage.getItem(annotationStorageKey("codex", "shared-session", remote))).toBe(
+        "[]",
+      );
+    });
+    expect(localStorage.getItem(legacyAnnotationStorageKey("shared-session"))).toEqual(
+      JSON.stringify([annotation]),
+    );
   });
 
   it.each([30, 500])(

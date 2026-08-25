@@ -13,7 +13,7 @@ import {
   SCAN_INPUT_SCORE_WEIGHTS,
 } from "./constants.js";
 import type { ScanInput, SessionScanResult } from "./scanner.js";
-import type { SessionInfo } from "./types.js";
+import type { SessionInfo, SessionLocation } from "./types.js";
 
 export interface EnrichmentHints {
   sessionIds?: string[];
@@ -36,6 +36,7 @@ export interface EnrichmentSourceRecord {
   slug: string;
   project: string;
   sessionId?: string;
+  location?: SessionLocation;
   promptCount?: number;
   toolCallCount?: number;
   filePaths: string[];
@@ -43,29 +44,39 @@ export interface EnrichmentSourceRecord {
   [key: string]: unknown;
 }
 
-export function sourceSessionKey(provider: string, project: string, slug: string): string {
-  return `${provider}::${project}::${slug}`;
+export function sourceSessionKey(
+  provider: string,
+  project: string,
+  slug: string,
+  targetId?: string,
+): string {
+  return `${targetId ? `${targetId}::` : ""}${provider}::${project}::${slug}`;
 }
 
-export function providerSessionKey(provider: string, sessionId: string): string {
-  return `${provider}::${sessionId}`;
+export function providerSessionKey(provider: string, sessionId: string, targetId?: string): string {
+  return `${targetId ? `${targetId}::` : ""}${provider}::${sessionId}`;
 }
 
-export function providerSlugKey(provider: string, slug: string): string {
-  return `${provider}::${slug}`;
+export function providerSlugKey(provider: string, slug: string, targetId?: string): string {
+  return `${targetId ? `${targetId}::` : ""}${provider}::${slug}`;
+}
+
+function targetIdOf(value: { location?: SessionLocation } | undefined): string | undefined {
+  return value?.location?.kind === "ssh" ? value.location.id : undefined;
 }
 
 export function pickSourceRecordForSession<T extends EnrichmentSourceRecord>(
-  session: Pick<SessionInfo, "provider" | "sessionId" | "project" | "slug">,
+  session: Pick<SessionInfo, "provider" | "sessionId" | "project" | "slug" | "location">,
   bySessionId: Map<string, T>,
   byKey: Map<string, T>,
 ): T | undefined {
+  const targetId = targetIdOf(session);
   const byIdMatch =
-    bySessionId.get(providerSessionKey(session.provider, session.sessionId)) ??
-    bySessionId.get(session.sessionId);
+    bySessionId.get(providerSessionKey(session.provider, session.sessionId, targetId)) ??
+    (targetId ? undefined : bySessionId.get(session.sessionId));
   return (
     (byIdMatch?.provider === session.provider ? byIdMatch : undefined) ??
-    byKey.get(sourceSessionKey(session.provider, session.project, session.slug))
+    byKey.get(sourceSessionKey(session.provider, session.project, session.slug, targetId))
   );
 }
 
@@ -82,8 +93,15 @@ export function selectCursorEnrichmentCandidates(
   const mergedBySessionId = new Map<string, SessionInfo>();
   const mergedByKey = new Map<string, SessionInfo>();
   for (const session of merged) {
-    mergedBySessionId.set(providerSessionKey(session.provider, session.sessionId), session);
-    mergedByKey.set(sourceSessionKey(session.provider, session.project, session.slug), session);
+    const targetId = targetIdOf(session);
+    mergedBySessionId.set(
+      providerSessionKey(session.provider, session.sessionId, targetId),
+      session,
+    );
+    mergedByKey.set(
+      sourceSessionKey(session.provider, session.project, session.slug, targetId),
+      session,
+    );
   }
 
   return baseSources
@@ -104,9 +122,11 @@ export function selectCursorEnrichmentCandidates(
     )
     .map((s) => {
       const byId = s.sessionId
-        ? mergedBySessionId.get(providerSessionKey(s.provider, s.sessionId))
+        ? mergedBySessionId.get(providerSessionKey(s.provider, s.sessionId, targetIdOf(s)))
         : undefined;
-      return byId || mergedByKey.get(sourceSessionKey(s.provider, s.project, s.slug));
+      return (
+        byId || mergedByKey.get(sourceSessionKey(s.provider, s.project, s.slug, targetIdOf(s)))
+      );
     })
     .filter((s): s is SessionInfo => Boolean(s))
     .sort((a, b) => {
@@ -165,10 +185,22 @@ function enrichmentPriorityScore(
 
 export function prioritizeScanInputs(
   inputs: ScanInput[],
-  previousResults: Array<Pick<SessionScanResult, "sessionId">>,
+  previousResults: Array<
+    Pick<SessionScanResult, "sessionId"> & Partial<Pick<SessionScanResult, "provider" | "location">>
+  >,
   hints: EnrichmentHints = {},
 ): ScanInput[] {
-  const previousSessionIds = new Set(previousResults.map((result) => result.sessionId));
+  const previousSessionIds = new Set(
+    previousResults.map((result) =>
+      result.provider
+        ? providerSessionKey(
+            result.provider,
+            result.sessionId,
+            result.location?.kind === "ssh" ? result.location.id : undefined,
+          )
+        : result.sessionId,
+    ),
+  );
   const preferredSessionIds = new Set(hints.sessionIds || []);
   const preferredSlugs = new Set(hints.slugs || []);
   const preferredProjects = new Set(hints.projects || []);
@@ -210,14 +242,26 @@ export function preserveFailedProviderScanResults(
 
   const failed = new Set(failedProviders);
   const seen = new Set(
-    currentResults.map((result) => providerSessionKey(result.provider, result.sessionId)),
+    currentResults.map((result) =>
+      providerSessionKey(
+        result.provider,
+        result.sessionId,
+        result.location?.kind === "ssh" ? result.location.id : undefined,
+      ),
+    ),
   );
   const staleResults: SessionScanResult[] = [];
 
   for (const previous of previousResults) {
-    if (!failed.has(previous.provider)) continue;
+    const targetFailure =
+      previous.location?.kind === "ssh" && failed.has(`ssh:${previous.location.id}`);
+    if (!failed.has(previous.provider) && !targetFailure) continue;
 
-    const key = providerSessionKey(previous.provider, previous.sessionId);
+    const key = providerSessionKey(
+      previous.provider,
+      previous.sessionId,
+      previous.location?.kind === "ssh" ? previous.location.id : undefined,
+    );
     if (seen.has(key)) continue;
     seen.add(key);
 
@@ -245,7 +289,16 @@ function scanInputPriorityScore(
     { sessionIds: preferredSessionIds, slugs: preferredSlugs, projects: preferredProjects },
     SCAN_INPUT_SCORE_WEIGHTS,
   );
-  if (!previousSessionIds.has(input.sessionId))
+  if (
+    !previousSessionIds.has(
+      providerSessionKey(
+        input.provider,
+        input.sessionId,
+        input.location?.kind === "ssh" ? input.location.id : undefined,
+      ),
+    ) &&
+    !previousSessionIds.has(input.sessionId)
+  )
     score += SCAN_INPUT_SCORE_WEIGHTS.notPreviouslyScanned;
   return score;
 }

@@ -23,6 +23,10 @@
     "./constants": {
       "types": "./src/codex/constants.ts",
       "import": "./src/codex/constants.ts"
+    },
+    "./remote": {
+      "types": "./src/codex/remote.ts",
+      "import": "./src/codex/remote.ts"
     }
   },
   "scripts": {

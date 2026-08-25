@@ -24,6 +24,10 @@ function multiParam(values: readonly string[]): readonly string[] | null {
 function getProjectFromUrl(): string {
   return new URLSearchParams(window.location.search).get("project") || ALL_PROJECTS;
 }
+function getTargetIdFromUrl(): string | undefined {
+  const value = new URLSearchParams(window.location.search).get("targetId");
+  return value || undefined;
+}
 function getFilterFromUrl(): string {
   return new URLSearchParams(window.location.search).get("q") || "";
 }
@@ -65,6 +69,7 @@ function getSkillsFromUrl(): string[] {
 /** Shared URL-synced filter state used by SessionsPanel and ReplaysPanel. */
 export function usePanelFilters() {
   const [selectedProject, setSelectedProject] = useState(getProjectFromUrl);
+  const [selectedTargetId, setSelectedTargetId] = useState(getTargetIdFromUrl);
   const [filter, setFilter] = useState(getFilterFromUrl);
   const [showArchived, setShowArchived] = useState(getShowArchivedFromUrl);
   const [showAgentRuns, setShowAgentRuns] = useState(getShowAgentRunsFromUrl);
@@ -109,6 +114,7 @@ export function usePanelFilters() {
   useEffect(() => {
     const handler = () => {
       setSelectedProject(getProjectFromUrl());
+      setSelectedTargetId(getTargetIdFromUrl());
       setFilter(getFilterFromUrl());
       setShowArchived(getShowArchivedFromUrl());
       setShowAgentRuns(getShowAgentRunsFromUrl());
@@ -136,9 +142,16 @@ export function usePanelFilters() {
     return () => window.removeEventListener("popstate", handler);
   }, []);
 
-  const handleProjectChange = (project: string) => {
+  const handleProjectChange = (project: string, targetId?: string) => {
     setSelectedProject(project);
-    navigateTo({ project: project === ALL_PROJECTS ? null : project }, { notify: false });
+    setSelectedTargetId(project === ALL_PROJECTS ? undefined : targetId);
+    navigateTo(
+      {
+        project: project === ALL_PROJECTS ? null : project,
+        targetId: project === ALL_PROJECTS || !targetId ? null : targetId,
+      },
+      { notify: false },
+    );
   };
 
   const handleFilterChange = (val: string) => {
@@ -225,6 +238,7 @@ export function usePanelFilters() {
     // Archive and agent-run visibility are display modes, not content facets,
     // so Clear all only resets the explorer dimensions shown as active chips.
     setSelectedProject(ALL_PROJECTS);
+    setSelectedTargetId(undefined);
     setFilter("");
     selectedProvidersRef.current = [];
     selectedReposRef.current = [];
@@ -242,6 +256,7 @@ export function usePanelFilters() {
     navigateTo(
       {
         project: null,
+        targetId: null,
         q: null,
         provider: null,
         repo: null,
@@ -258,6 +273,7 @@ export function usePanelFilters() {
 
   return {
     selectedProject,
+    selectedTargetId,
     filter,
     showArchived,
     showAgentRuns,

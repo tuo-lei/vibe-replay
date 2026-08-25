@@ -104,6 +104,8 @@ export function scanResultToInsight(scan: SessionScanResult): SessionInsight {
     sessionId: scan.sessionId,
     slug: scan.slug,
     provider: scan.provider,
+    location: scan.location,
+    transcriptStatus: scan.transcriptStatus,
     title: scan.title,
     project: scan.project,
     projectIdentity: scan.projectIdentity,
@@ -143,8 +145,8 @@ export function scanResultToInsight(scan: SessionScanResult): SessionInsight {
 // Merge — upsert by provider + sessionId, never delete
 // ---------------------------------------------------------------------------
 
-function insightKey(provider: string, sessionId: string): string {
-  return `${provider}::${sessionId}`;
+function insightKey(provider: string, sessionId: string, targetId?: string): string {
+  return `${targetId ? `${targetId}::` : ""}${provider}::${sessionId}`;
 }
 
 /**
@@ -159,11 +161,13 @@ export function mergeInsights(
 ): InsightsStore {
   const byId = new Map<string, SessionInsight>();
   for (const existing of store.sessions) {
-    byId.set(insightKey(existing.provider, existing.sessionId), existing);
+    const targetId = existing.location?.kind === "ssh" ? existing.location.id : undefined;
+    byId.set(insightKey(existing.provider, existing.sessionId, targetId), existing);
   }
 
   for (const scan of scanResults) {
-    const key = insightKey(scan.provider, scan.sessionId);
+    const targetId = scan.location?.kind === "ssh" ? scan.location.id : undefined;
+    const key = insightKey(scan.provider, scan.sessionId, targetId);
     const existing = byId.get(key);
     if (existing) {
       // Update with fresh scan data but preserve original provenance
@@ -237,6 +241,10 @@ export function aggregateDailyInsights(store: InsightsStore): {
   >();
 
   for (const s of store.sessions) {
+    // SSH sessions remain in the local insights store for dashboard analytics,
+    // but their project/provider aggregates must not leave the machine through
+    // the optional cloud sync.
+    if (s.location?.kind === "ssh") continue;
     const date = localDayKey(s.startTime);
     if (!date) continue;
 

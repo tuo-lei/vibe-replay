@@ -1,5 +1,6 @@
 import { cleanPromptText, previewPrompt } from "./clean-prompt.js";
 import { scanSession, type ScanInput, type SessionScanResult } from "./scanner.js";
+import { getRemoteHome } from "./remote.js";
 import type { SessionInfo } from "./types.js";
 import { shortenPath } from "./utils.js";
 
@@ -16,6 +17,8 @@ export interface SessionQueryOptions {
 
 export interface SessionQueryMatch {
   provider: string;
+  location?: SessionInfo["location"];
+  transcriptStatus?: SessionInfo["transcriptStatus"];
   sessionId: string;
   slug: string;
   title?: string;
@@ -151,6 +154,8 @@ export function scanInputFromSession(session: SessionInfo): ScanInput {
   return {
     sessionId: session.sessionId,
     provider: session.provider,
+    ...(session.location ? { location: session.location } : {}),
+    ...(session.transcriptStatus ? { transcriptStatus: session.transcriptStatus } : {}),
     project: shortenPath(session.project),
     slug: session.slug,
     filePaths: session.filePaths,
@@ -168,6 +173,7 @@ export function scanInputFromSession(session: SessionInfo): ScanInput {
     discoveryEditCount: session.editCountEst,
     discoveryModel: session.model,
     discoveryDurationMs: session.durationMsEst,
+    remoteHome: getRemoteHome(session.location?.kind === "ssh" ? session.location.id : undefined),
   };
 }
 
@@ -179,7 +185,7 @@ export function formatSessionQueryText(matches: SessionQueryMatch[]): string {
       const title = match.title || previewPrompt(match.firstPrompt) || match.slug;
       const lines = [
         `${index + 1}. ${title}`,
-        `   ${match.provider} | ${match.timestamp} | ${match.project}`,
+        `   ${match.provider} | ${match.location?.kind === "ssh" ? match.location.label : "local"} | ${match.timestamp} | ${match.project}`,
         `   session: ${match.sessionId}`,
         `   file: ${match.filePath}`,
       ];
@@ -217,6 +223,8 @@ function sessionInfoToMatch(
   const query = precomputedScore || scoreSession(session, terms);
   return {
     provider: session.provider,
+    location: session.location,
+    transcriptStatus: session.transcriptStatus,
     sessionId: session.sessionId,
     slug: session.slug,
     title: cleanPromptText(session.title || "") || undefined,

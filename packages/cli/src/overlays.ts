@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { scopedSessionSlug } from "./server-persistence.js";
 import type { ReplaySession, SessionOverlays } from "./types.js";
 
 const EMPTY_OVERLAYS: SessionOverlays = { version: 1, overlays: [] };
@@ -8,8 +9,14 @@ const EMPTY_OVERLAYS: SessionOverlays = { version: 1, overlays: [] };
  * Load overlays.json for a session, falling back to ./vibe-replay/<slug> for
  * legacy layouts. Returns EMPTY_OVERLAYS when no file is found.
  */
-export async function loadOverlays(baseDir: string, slug: string): Promise<SessionOverlays> {
-  const dirs = [join(baseDir, slug), resolve("./vibe-replay", slug)];
+export async function loadOverlays(
+  baseDir: string,
+  slug: string,
+  targetId?: string,
+): Promise<SessionOverlays> {
+  const dirs = targetId
+    ? [join(baseDir, scopedSessionSlug(slug, targetId))]
+    : [join(baseDir, slug), resolve("./vibe-replay", slug)];
   for (const dir of dirs) {
     try {
       const raw = await readFile(join(dir, "overlays.json"), "utf-8");
@@ -53,4 +60,12 @@ export function sessionWithEffectiveContent(
       return scene;
     }),
   };
+}
+
+/** Remove local-only SSH metadata before any share or export operation. */
+export function sessionForExternalOutput(session: ReplaySession): ReplaySession {
+  if (session.meta.location?.kind !== "ssh" || !session.meta.gitRepo) return session;
+  const meta = { ...session.meta };
+  delete meta.gitRepo;
+  return { ...session, meta };
 }

@@ -3,6 +3,7 @@ import { classifyProject } from "@vibe-replay/types";
 import {
   agentRunWorkspaceParent,
   agentWorktreeParent,
+  archiveSessionKey,
   cleanPrompt,
   dataSourceBadgeClass,
   fetchWithRetry,
@@ -18,6 +19,7 @@ import {
   providerBarClass,
   providerDisplayName,
   providerFamily,
+  replayArchiveKey,
   replaySuggestedTitle,
   rollupProject,
   rollupTopProjects,
@@ -26,6 +28,8 @@ import {
   shortCoworkSpaceId,
   sourceDisplayTitle,
   sourceSuggestedTitle,
+  transcriptStatusDescription,
+  transcriptStatusLabel,
   type TopProjectEntry,
 } from "../dashboard-utils";
 import type { SourceSession } from "../../types";
@@ -336,6 +340,27 @@ describe("rollupTopProjects", () => {
     expect(result.map((p) => p.project).sort()).toEqual(["~/Code/bar", "~/Code/foo"]);
   });
 
+  it("does not merge identical project paths across SSH locations", () => {
+    const result = rollupTopProjects([
+      makeProject({ project: "~/Code/shared", sessions: 2 }),
+      makeProject({
+        project: "~/Code/shared",
+        sessions: 3,
+        location: { kind: "ssh", id: "remote-a", label: "Remote A" },
+      }),
+      makeProject({
+        project: "~/Code/shared",
+        sessions: 4,
+        location: { kind: "ssh", id: "remote-b", label: "Remote B" },
+      }),
+    ]);
+
+    expect(result).toHaveLength(3);
+    expect(result.find((project) => !project.location)?.sessions).toBe(2);
+    expect(result.find((project) => project.location?.id === "remote-a")?.sessions).toBe(3);
+    expect(result.find((project) => project.location?.id === "remote-b")?.sessions).toBe(4);
+  });
+
   it("can preserve agent run workspaces for the explicit Projects toggle", () => {
     const result = rollupTopProjects(
       [
@@ -367,6 +392,32 @@ describe("rollupTopProjects", () => {
     rollupTopProjects([parent, worktree]);
     expect(parent.sessions).toBe(1);
     expect(parent.sessionsPerDay).toEqual({ "2026-04-01": 1 });
+  });
+});
+
+describe("archive keys", () => {
+  it("keeps local and SSH sessions with the same slug separate", () => {
+    const remote = { kind: "ssh" as const, id: "remote-a", label: "Remote A" };
+
+    expect(archiveSessionKey("shared-slug")).toBe("shared-slug");
+    expect(archiveSessionKey("shared-slug", remote)).not.toBe("shared-slug");
+    expect(archiveSessionKey("shared-slug", remote)).toBe(
+      archiveSessionKey("shared-slug", { ...remote, label: "Different label" }),
+    );
+  });
+
+  it("maps a location-scoped replay directory back to its source slug", () => {
+    const remote = { kind: "ssh" as const, id: "remote-a", label: "Remote A" };
+    const replay = {
+      slug: "shared-slug--ssh-output-hash",
+      sourceSlug: "shared-slug",
+      location: remote,
+    };
+
+    expect(replayArchiveKey(replay)).toBe(archiveSessionKey("shared-slug", remote));
+    expect(replayArchiveKey({ ...replay, sourceSlug: undefined })).toBe(
+      archiveSessionKey(replay.slug, remote),
+    );
   });
 });
 
@@ -508,6 +559,16 @@ describe("dashboard prompt and title helpers", () => {
       "Replay title",
     );
   });
+
+  it("keeps an explicit source title ahead of stale scan metadata", () => {
+    const source = makeSource({
+      provider: "codex",
+      title: "Renamed thread",
+      firstPrompt: "Original prompt text",
+    });
+
+    expect(sourceDisplayTitle(source, { title: "Old generated title" })).toBe("Renamed thread");
+  });
 });
 
 describe("formatDataSourceLabel", () => {
@@ -565,6 +626,15 @@ describe("dashboard badge helpers", () => {
     expect(shortCoworkSpaceId("space_abcdef123")).toBe("abcdef");
     expect(shortCoworkSpaceId("space-xyz987")).toBe("xyz987");
     expect(shortCoworkSpaceId("abc")).toBe("abc");
+  });
+
+  it("explains source transcripts that cannot produce a replay", () => {
+    expect(transcriptStatusLabel("no-prompts")).toBe("no replayable prompts");
+    expect(transcriptStatusDescription("no-prompts")).toContain("meaningful human prompt");
+    expect(transcriptStatusLabel("unreadable")).toBe("unreadable transcript");
+    expect(transcriptStatusDescription("unreadable")).toContain("unavailable");
+    expect(transcriptStatusLabel()).toBeUndefined();
+    expect(transcriptStatusDescription()).toBeUndefined();
   });
 });
 

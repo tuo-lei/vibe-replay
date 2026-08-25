@@ -1290,37 +1290,47 @@ export async function discoverSqliteOnlySessions(
   const sessions: SessionInfo[] = [];
   const storeDbIndex = await getStoreDbIndex(forceRefreshStoreDbIndex);
   const hashToProject = buildHashToProjectMap(decodedWorkspacePaths);
+  const candidates = [...storeDbIndex.values()].filter(
+    (entry) => !knownSessionIds.has(entry.sessionId),
+  );
+  const metadataConcurrency = 8;
 
-  for (const entry of storeDbIndex.values()) {
-    if (knownSessionIds.has(entry.sessionId)) continue;
+  for (let offset = 0; offset < candidates.length; offset += metadataConcurrency) {
+    const batch = candidates.slice(offset, offset + metadataConcurrency);
+    const previews = await Promise.all(
+      batch.map(async (entry) => ({
+        entry,
+        metaPreview: await readStoreDbMeta(entry.dbPath),
+      })),
+    );
+    for (const { entry, metaPreview } of previews) {
+      if (!metaPreview?.hasReplayableRoot) continue;
+      const meta = metaPreview.meta;
 
-    const metaPreview = await readStoreDbMeta(entry.dbPath);
-    if (!metaPreview?.hasReplayableRoot) continue;
-    const meta = metaPreview.meta;
+      const project = hashToProject.get(entry.workspaceHash) || "";
+      const firstPrompt = meta.name || "(sqlite-only session)";
+      const timestamp = meta.createdAt
+        ? new Date(meta.createdAt).toISOString()
+        : new Date(entry.mtimeMs).toISOString();
 
-    const project = hashToProject.get(entry.workspaceHash) || "";
-    const firstPrompt = meta.name || "(sqlite-only session)";
-    const timestamp = meta.createdAt
-      ? new Date(meta.createdAt).toISOString()
-      : new Date(entry.mtimeMs).toISOString();
-
-    sessions.push({
-      provider: "cursor",
-      sessionId: entry.sessionId,
-      slug: entry.sessionId.slice(0, 8),
-      title: meta.name,
-      project: shortenPath(project),
-      cwd: project,
-      version: "",
-      timestamp,
-      lineCount: 0,
-      fileSize: entry.size,
-      filePath: entry.dbPath,
-      filePaths: [],
-      workspacePath: project,
-      hasSqlite: true,
-      firstPrompt,
-    });
+      sessions.push({
+        provider: "cursor",
+        sessionId: entry.sessionId,
+        slug: entry.sessionId.slice(0, 8),
+        title: meta.name,
+        project: shortenPath(project),
+        cwd: project,
+        version: "",
+        timestamp,
+        lineCount: 0,
+        fileSize: entry.size,
+        filePath: entry.dbPath,
+        filePaths: [],
+        workspacePath: project,
+        hasSqlite: true,
+        firstPrompt,
+      });
+    }
   }
 
   return sessions;

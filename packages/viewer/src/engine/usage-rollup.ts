@@ -1,10 +1,11 @@
-import type { SessionUsageSummary } from "@vibe-replay/types";
+import type { SessionLocation, SessionUsageSummary } from "@vibe-replay/types";
 import { normalizeMcpServerName, normalizeMcpToolName } from "../components/dashboard-utils";
 
 /** One scanned session's usage, as served by `/api/usage/rollup`. */
 export interface UsageRollupSession {
   provider: string;
   sessionId: string;
+  location?: SessionLocation;
   project?: string;
   startTime?: string;
   usage: SessionUsageSummary;

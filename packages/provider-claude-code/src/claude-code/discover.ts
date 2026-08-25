@@ -1,7 +1,7 @@
 import { createReadStream } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { createInterface } from "node:readline";
 import { cleanPromptText, isSystemGeneratedMessage } from "@vibe-replay/provider-core/clean-prompt";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
@@ -9,18 +9,22 @@ import { readGitRepo, shortenPath, TOOL_USE_RE } from "@vibe-replay/provider-cor
 
 const CLAUDE_DIR = join(homedir(), ".claude", "projects");
 
-export async function discoverClaudeCodeSessions(): Promise<SessionInfo[]> {
+export async function discoverClaudeCodeSessions(
+  projectsDir = CLAUDE_DIR,
+  resolveGitRepo = true,
+  includeUnreplayable = false,
+): Promise<SessionInfo[]> {
   const sessions: SessionInfo[] = [];
 
   let projectDirs: string[];
   try {
-    projectDirs = await readdir(CLAUDE_DIR);
+    projectDirs = await readdir(projectsDir);
   } catch {
     return sessions;
   }
 
   for (const projDir of projectDirs) {
-    const projPath = join(CLAUDE_DIR, projDir);
+    const projPath = join(projectsDir, projDir);
     const projStat = await stat(projPath).catch(() => null);
     if (!projStat?.isDirectory()) continue;
 
@@ -45,10 +49,10 @@ export async function discoverClaudeCodeSessions(): Promise<SessionInfo[]> {
       const fileStat = await stat(filePath).catch(() => null);
       if (!fileStat) continue;
 
-      const info = await extractSessionInfo(filePath, fileStat.size, project);
+      const info = await extractSessionInfo(filePath, fileStat.size, project, includeUnreplayable);
       if (info) {
         if (!gitRepoResolved && info.cwd) {
-          gitRepo = await readGitRepo(info.cwd);
+          gitRepo = resolveGitRepo ? await readGitRepo(info.cwd) : undefined;
           gitRepoResolved = true;
         }
         info.gitRepo = gitRepo;
@@ -86,6 +90,7 @@ export async function extractSessionInfo(
   filePath: string,
   fileSize: number,
   project: string,
+  includeUnreplayable = false,
 ): Promise<SessionInfo | null> {
   let sessionId = "";
   let slug = "";
@@ -109,6 +114,8 @@ export async function extractSessionInfo(
   let durationMsEst = 0;
   let hasPR = false;
   let model: string | undefined;
+  let sawParseableRecord = false;
+  let readFailed = false;
 
   // Ring buffer of the most recent non-empty lines. Used in two reverse-scan
   // fallbacks after streaming completes: `custom-title` records written late
@@ -161,6 +168,8 @@ export async function extractSessionInfo(
       if (lineCount <= PROMPT_SCAN_LINES) {
         try {
           const obj = JSON.parse(line);
+          if (!obj || typeof obj !== "object" || Array.isArray(obj)) continue;
+          sawParseableRecord = true;
 
           if (lineCount <= METADATA_SCAN_LINES) {
             if (!sessionId && obj.sessionId) sessionId = obj.sessionId;
@@ -201,12 +210,19 @@ export async function extractSessionInfo(
       if (tail.length > TAIL_BUFFER_LINES) tail.shift();
     }
   } catch {
-    return null;
+    readFailed = true;
+    if (!includeUnreplayable) return null;
   } finally {
     rl?.close();
   }
 
-  if (!sessionId || prompts.length === 0) return null;
+  if (!sessionId) {
+    sessionId = basename(filePath, ".jsonl");
+  }
+  if (!sessionId) return null;
+
+  const unreadable = readFailed || !sawParseableRecord;
+  if (!includeUnreplayable && (unreadable || prompts.length === 0)) return null;
 
   // Fallback title: `custom-title` is often written at session end, beyond the
   // front-loaded metadata scan. Reverse-scan the tail ring buffer.
@@ -262,13 +278,16 @@ export async function extractSessionInfo(
     fileSize,
     filePath,
     filePaths: [filePath],
-    firstPrompt: prompts[0],
-    prompts,
-    promptCount,
+    firstPrompt: prompts[0] || "",
+    prompts: prompts.length > 0 ? prompts : undefined,
+    promptCount: unreadable ? 0 : promptCount,
     toolCallCount,
     model,
     durationMsEst: durationMsEst || undefined,
     editCountEst: editCountEst || undefined,
     hasPR: hasPR || undefined,
+    ...(unreadable || prompts.length === 0
+      ? { transcriptStatus: unreadable ? ("unreadable" as const) : ("no-prompts" as const) }
+      : {}),
   };
 }

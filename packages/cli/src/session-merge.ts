@@ -3,10 +3,11 @@ import type { SessionInfo } from "./types.js";
 const RESUMABLE_PROVIDERS = new Set(["claude-code", "claude-desktop"]);
 
 function logicalSessionKey(session: SessionInfo): string {
+  const locationScope = session.location?.kind === "ssh" ? `${session.location.id}::` : "";
   if (RESUMABLE_PROVIDERS.has(session.provider)) {
-    return `${session.provider}::${session.project}::${session.slug}`;
+    return `${locationScope}${session.provider}::${session.project}::${session.slug}`;
   }
-  return `${session.provider}::${session.sessionId || session.filePath}`;
+  return `${locationScope}${session.provider}::${session.sessionId || session.filePath}`;
 }
 
 /** Merge only provider formats that intentionally split one logical session across resume files. */
@@ -40,6 +41,11 @@ export function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
     const toolCallCount = group.some((session) => session.toolCallCount != null)
       ? group.reduce((sum, session) => sum + (session.toolCallCount || 0), 0)
       : undefined;
+    const transcriptStatus = group.some((session) => !session.transcriptStatus)
+      ? undefined
+      : group.some((session) => session.transcriptStatus === "no-prompts")
+        ? "no-prompts"
+        : "unreadable";
 
     result.push({
       ...latest,
@@ -49,6 +55,7 @@ export function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
       toolPaths: [...new Set(group.flatMap((session) => session.toolPaths || []))],
       promptCount,
       toolCallCount,
+      transcriptStatus,
     });
   }
 

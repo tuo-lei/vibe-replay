@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useOutsideClick } from "../hooks/useOutsideClick";
 import { ALL_PROJECTS, usePanelFilters } from "../hooks/usePanelFilters";
-import type { SessionSummary, SessionUsageSummary, SourceSession } from "../types";
+import type {
+  SessionLocation,
+  SessionSummary,
+  SessionTranscriptStatus,
+  SessionUsageSummary,
+  SourceSession,
+} from "../types";
 import DashboardHome from "./DashboardHome";
 import { isInInsightsRange, rangeSince as insightsRangeSince } from "../engine/insights-rollup";
 import {
@@ -27,6 +33,7 @@ import {
   fetchWithRetry,
   getErrorMessage,
   getFriendlyErrorMessage,
+  archiveSessionKey,
   isAgentRunWorkspace,
   isCacheFresh,
   navigateTo,
@@ -39,8 +46,11 @@ import {
   projectDisplayName,
   projectName,
   providerDisplayName,
+  remoteSourceFailureIds,
+  replayArchiveKey,
   replaySuggestedTitle,
   rollupProject,
+  sameSessionLocation,
   sessionPromptPreview,
   shouldRefreshCachedList,
   type SourcesEnrichmentStatus,
@@ -48,6 +58,8 @@ import {
   shortCoworkSpaceId,
   sourceDisplayTitle,
   sourceSuggestedTitle,
+  transcriptStatusDescription,
+  transcriptStatusLabel,
   TITLE_MAX_CHARS,
   timeAgo,
   toggleArchiveSlug,
@@ -127,6 +139,8 @@ function fetchScanResults(forceRefresh = false): Promise<ScanResultsPayload | nu
 export interface SessionScanData {
   sessionId?: string;
   provider?: string;
+  location?: SessionLocation;
+  transcriptStatus?: SessionTranscriptStatus;
   project?: string;
   title?: string;
   firstPrompt?: string;
@@ -167,8 +181,9 @@ export interface SessionScanIndex {
   bySlug: Map<string, SessionScanData[]>;
 }
 
-function scanLookupKey(provider: string, value: string): string {
-  return `${provider}\0${value}`;
+function scanLookupKey(provider: string, value: string, location?: SessionLocation): string {
+  const targetId = location?.kind === "ssh" ? `${location.id}\0` : "";
+  return `${targetId}${provider}\0${value}`;
 }
 
 export function buildSessionScanIndex(results: readonly SessionScanData[]): SessionScanIndex {
@@ -176,10 +191,10 @@ export function buildSessionScanIndex(results: readonly SessionScanData[]): Sess
   const bySlug = new Map<string, SessionScanData[]>();
   for (const result of results) {
     if (result.provider && result.sessionId) {
-      bySessionId.set(scanLookupKey(result.provider, result.sessionId), result);
+      bySessionId.set(scanLookupKey(result.provider, result.sessionId, result.location), result);
     }
     if (result.provider && result.slug) {
-      const key = scanLookupKey(result.provider, result.slug);
+      const key = scanLookupKey(result.provider, result.slug, result.location);
       const candidates = bySlug.get(key) || [];
       candidates.push(result);
       bySlug.set(key, candidates);
@@ -189,14 +204,18 @@ export function buildSessionScanIndex(results: readonly SessionScanData[]): Sess
 }
 
 export function findSessionScanData(
-  session: Pick<SessionSummary, "provider" | "sessionId" | "slug">,
+  session: Pick<SessionSummary, "provider" | "sessionId" | "slug" | "location">,
   index: SessionScanIndex,
 ): SessionScanData | undefined {
   if (session.sessionId) {
-    const exact = index.bySessionId.get(scanLookupKey(session.provider, session.sessionId));
+    const exact = index.bySessionId.get(
+      scanLookupKey(session.provider, session.sessionId, session.location),
+    );
     if (exact) return exact;
   }
-  const candidates = index.bySlug.get(scanLookupKey(session.provider, session.slug));
+  const candidates = index.bySlug.get(
+    scanLookupKey(session.provider, session.slug, session.location),
+  );
   return candidates?.length === 1 ? candidates[0] : undefined;
 }
 
@@ -209,15 +228,21 @@ export function getSessionRangeTimestamp(
 }
 
 export function shouldIncludeSessionForProject(
-  session: Pick<SourceSession, "project" | "projectIdentity">,
+  session: Pick<SourceSession, "project" | "projectIdentity" | "location">,
   selectedProjectKey: string,
   showAgentRuns: boolean,
+  selectedLocation?: SessionLocation | "local",
 ): boolean {
+  if (
+    !showAgentRuns &&
+    selectedProjectKey === ALL_PROJECTS &&
+    isAgentRunWorkspace(session.project, session.projectIdentity)
+  ) {
+    return false;
+  }
   return (
-    showAgentRuns ||
-    !isAgentRunWorkspace(session.project, session.projectIdentity) ||
-    (selectedProjectKey !== ALL_PROJECTS &&
-      matchesProjectFacet(session, selectedProjectKey, ALL_PROJECTS, rollupProject))
+    selectedProjectKey === ALL_PROJECTS ||
+    matchesProjectFacet(session, selectedProjectKey, ALL_PROJECTS, rollupProject, selectedLocation)
   );
 }
 
@@ -227,6 +252,7 @@ interface RawJsonItem {
   description: string;
   data?: unknown;
   fetchReplaySlug?: string;
+  targetId?: string;
 }
 
 function sourceRawJsonItems(
@@ -252,6 +278,7 @@ function sourceRawJsonItems(
             label: "Replay",
             description: "Full generated replay.json for this source session.",
             fetchReplaySlug: replaySlug,
+            targetId: source.location?.kind === "ssh" ? source.location.id : undefined,
           },
         ]
       : []),
@@ -271,6 +298,7 @@ function replayRawJsonItems(summary: SessionSummary): RawJsonItem[] {
       label: "Replay",
       description: "Full generated replay.json including scenes, metadata, and annotations.",
       fetchReplaySlug: summary.slug,
+      targetId: summary.location?.kind === "ssh" ? summary.location.id : undefined,
     },
   ];
 }
@@ -357,11 +385,13 @@ function RawJsonModal({
   useEffect(() => {
     const itemId = activeItem?.id;
     const fetchReplaySlug = activeItem?.fetchReplaySlug;
+    const targetId = activeItem?.targetId;
     if (!itemId || !fetchReplaySlug || activeItemDataLoaded) return;
     let cancelled = false;
     setLoadingId(itemId);
     setRemoteErrors((prev) => ({ ...prev, [itemId]: "" }));
-    fetch(`/api/session?slug=${encodeURIComponent(fetchReplaySlug)}`)
+    const targetQuery = targetId ? `&targetId=${encodeURIComponent(targetId)}` : "";
+    fetch(`/api/session?slug=${encodeURIComponent(fetchReplaySlug)}${targetQuery}`)
       .then(async (resp) => {
         const data = await resp.json().catch(() => null);
         if (!resp.ok) throw new Error(data?.error || "Failed to load replay JSON");
@@ -381,7 +411,13 @@ function RawJsonModal({
     return () => {
       cancelled = true;
     };
-  }, [activeItem?.id, activeItem?.fetchReplaySlug, activeItemDataLoaded, retryNonce]);
+  }, [
+    activeItem?.id,
+    activeItem?.fetchReplaySlug,
+    activeItem?.targetId,
+    activeItemDataLoaded,
+    retryNonce,
+  ]);
 
   const copyJson = async () => {
     if (!jsonText) return;
@@ -536,10 +572,10 @@ export function SessionDetailPopup({
   scanData?: SessionScanData | null;
   onClose: () => void;
   onGenerate: (session: SourceSession, title: string) => void;
-  onViewReplay: (slug: string) => void;
-  onArchive: (slug: string) => void;
-  onTitleSave: (slug: string, title: string) => Promise<void>;
-  onDeleteReplay: (slug: string) => void;
+  onViewReplay: (slug: string, location?: SessionLocation) => void;
+  onArchive: (slug: string, location?: SessionLocation) => void;
+  onTitleSave: (slug: string, title: string, location?: SessionLocation) => Promise<void>;
+  onDeleteReplay: (slug: string, location?: SessionLocation) => void;
   onRawData?: (session: SourceSession, scanData: SessionScanData | null) => void;
   isGenerating: boolean;
   isArchived: boolean;
@@ -584,14 +620,20 @@ export function SessionDetailPopup({
     setScanLoading(true);
     fetchScanResults().then((payload) => {
       if (cancelled) return;
-      const match = payload?.results?.find((r) => r.slug === s.slug);
+      const match = payload?.results?.find(
+        (r) =>
+          r.provider === s.provider &&
+          r.slug === s.slug &&
+          scanLookupKey(r.provider, r.slug || "", r.location) ===
+            scanLookupKey(s.provider, s.slug, s.location),
+      );
       if (match) setScanData(match);
       setScanLoading(false);
     });
     return () => {
       cancelled = true;
     };
-  }, [initialScanData, s.slug]);
+  }, [initialScanData, s.location, s.provider, s.slug]);
 
   useEffect(() => {
     setTitleValue((current) => {
@@ -618,6 +660,9 @@ export function SessionDetailPopup({
   const dataQualityNotes = scanData?.dataQualityNotes || [];
   const dataState = sessionDataState(s, scanData);
   const dataPipelineActive = scanLoading && !hasRichScanMetrics(scanData);
+  const transcriptStatus = s.transcriptStatus || scanData?.transcriptStatus;
+  const transcriptStatusText = transcriptStatusLabel(transcriptStatus);
+  const transcriptStatusHelp = transcriptStatusDescription(transcriptStatus);
 
   // Use scan data when available, fall back to discovery estimates
   const promptCount = scanData?.promptCount ?? s.promptCount;
@@ -636,13 +681,14 @@ export function SessionDetailPopup({
     if (normalized === normalizeTitleText(s.replay.title || suggested)) return;
     setSavingTitle(true);
     try {
-      await onTitleSave(s.slug, normalized);
+      await onTitleSave(s.existingReplay || s.slug, normalized, s.location);
     } finally {
       setSavingTitle(false);
     }
   };
 
   const handleGenerate = () => {
+    if (transcriptStatus) return;
     onGenerate(s, titleValue);
   };
 
@@ -665,6 +711,19 @@ export function SessionDetailPopup({
         <div className="flex items-center justify-between px-7 pt-5 pb-3">
           <div className="flex items-center gap-2">
             <ProviderBadge provider={s.provider} />
+            <SessionLocationBadge location={s.location} />
+            {transcriptStatusText && (
+              <span
+                className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full ${
+                  transcriptStatus === "unreadable"
+                    ? "bg-terminal-red-subtle text-terminal-red"
+                    : "bg-terminal-orange-subtle text-terminal-orange"
+                }`}
+                title={transcriptStatusHelp}
+              >
+                {transcriptStatusText}
+              </span>
+            )}
             <DataLevelBadge state={dataState} compact />
             {model && (
               <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-terminal-surface-2 text-terminal-dimmer">
@@ -759,12 +818,24 @@ export function SessionDetailPopup({
                     else handleGenerate();
                   }
                 }}
+                readOnly={!!transcriptStatus}
                 rows={2}
                 className="w-full bg-terminal-surface rounded-xl px-5 py-4 text-lg font-mono text-terminal-text placeholder:text-terminal-dimmer outline-none ring-1 ring-terminal-border-subtle focus:ring-terminal-green/40 transition-shadow duration-200 resize-none leading-relaxed"
                 placeholder={suggested}
                 maxLength={TITLE_MAX_CHARS}
               />
             </form>
+            {transcriptStatusHelp && (
+              <div
+                className={`mt-2 rounded-lg px-3 py-2 text-xs font-mono ${
+                  transcriptStatus === "unreadable"
+                    ? "bg-terminal-red-subtle text-terminal-red"
+                    : "bg-terminal-orange-subtle text-terminal-orange"
+                }`}
+              >
+                {transcriptStatusHelp} Generation is unavailable for this source.
+              </div>
+            )}
           </div>
 
           {/* Two-column layout: info + stats */}
@@ -1017,7 +1088,7 @@ export function SessionDetailPopup({
             )}
             <button
               onClick={() => {
-                onArchive(s.slug);
+                onArchive(s.slug, s.location);
                 onClose();
               }}
               className="h-9 px-3 text-xs font-sans rounded-lg text-terminal-dim hover:text-terminal-text hover:bg-terminal-surface-hover transition-colors flex items-center gap-1.5"
@@ -1037,7 +1108,7 @@ export function SessionDetailPopup({
             {s.replay && (
               <button
                 onClick={() => {
-                  onDeleteReplay(s.slug);
+                  onDeleteReplay(s.existingReplay || s.slug, s.location);
                   onClose();
                 }}
                 className="h-9 px-3 text-xs font-sans rounded-lg text-terminal-red/70 hover:text-terminal-red hover:bg-terminal-red-subtle transition-colors flex items-center gap-1.5"
@@ -1057,7 +1128,7 @@ export function SessionDetailPopup({
             )}
           </div>
           <div className="flex items-center gap-2">
-            {s.sessionId && (
+            {s.sessionId && s.location?.kind !== "ssh" && (
               <button
                 onClick={() => navigateToLive(s.provider, s.sessionId!)}
                 title="Stream this source session as the provider writes new turns"
@@ -1074,7 +1145,8 @@ export function SessionDetailPopup({
               <>
                 <button
                   onClick={() => onGenerate(s, titleValue)}
-                  disabled={isGenerating}
+                  disabled={isGenerating || !!transcriptStatus}
+                  title={transcriptStatusHelp}
                   className="h-11 px-5 text-sm font-sans font-semibold rounded-xl bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200 flex items-center gap-2 disabled:opacity-50"
                 >
                   {isGenerating ? (
@@ -1101,7 +1173,7 @@ export function SessionDetailPopup({
                   )}
                 </button>
                 <button
-                  onClick={() => onViewReplay(s.existingReplay!)}
+                  onClick={() => onViewReplay(s.existingReplay!, s.location)}
                   className="h-11 px-6 text-sm font-sans font-bold rounded-xl bg-terminal-green text-terminal-bg hover:brightness-110 transition-all duration-200 flex items-center gap-2"
                 >
                   <svg
@@ -1121,7 +1193,8 @@ export function SessionDetailPopup({
             {!s.replay && (
               <button
                 onClick={handleGenerate}
-                disabled={isGenerating}
+                disabled={isGenerating || !!transcriptStatus}
+                title={transcriptStatusHelp}
                 className="h-12 px-8 text-sm font-sans font-bold rounded-xl bg-terminal-green text-terminal-bg hover:brightness-110 transition-all duration-200 flex items-center gap-2 shadow-lg shadow-terminal-green/20 disabled:opacity-50"
               >
                 {isGenerating ? (
@@ -1167,7 +1240,7 @@ function ReplayCard({
   summary: SessionSummary;
   onOpen: () => void;
   onShare?: () => void;
-  onTitleSave?: (slug: string, title: string) => Promise<void>;
+  onTitleSave?: (slug: string, title: string, location?: SessionLocation) => Promise<void>;
   onDelete?: () => void;
   onRegenerate?: () => void;
   onArchive?: () => void;
@@ -1233,6 +1306,7 @@ function ReplayCard({
           <span className="mt-0.5">
             <ProviderBadge provider={s.provider} title={providerTooltip} />
           </span>
+          <SessionLocationBadge location={s.location} />
           {onTitleSave ? (
             <div
               className="min-w-0 flex-1"
@@ -1244,7 +1318,7 @@ function ReplayCard({
                 slug={s.slug}
                 title={s.title}
                 fallbackTitle={displayTitle}
-                onSave={onTitleSave}
+                onSave={(slug, title) => onTitleSave(slug, title, s.location)}
                 hideSlug
               />
             </div>
@@ -1811,6 +1885,48 @@ function FacetSection({
 // re-created on every render (avoids remount churn + no-unstable-nested-components).
 const facetProviderLeading = (provider: string) => <ProviderBadge provider={provider} compact />;
 
+function SessionLocationBadge({ location }: { location?: SessionLocation }) {
+  const isRemote = location?.kind === "ssh";
+  const label = isRemote ? location.label : "local";
+  return (
+    <span
+      className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full ${
+        isRemote
+          ? "bg-terminal-purple-subtle text-terminal-purple"
+          : "bg-terminal-surface-2 text-terminal-dimmer"
+      }`}
+      title={isRemote ? `SSH source: ${location.label}` : "Local source"}
+    >
+      {label}
+    </span>
+  );
+}
+
+function RemoteSourceFailureNotice({ failures }: { failures: string[] }) {
+  if (failures.length === 0) return null;
+  const labels = failures.map((failure) => failure.slice("ssh:".length));
+  return (
+    <div className="mx-4 mb-2 rounded-lg bg-terminal-red-subtle px-3 py-2.5 text-xs font-mono text-terminal-red shadow-layer-sm">
+      <div className="font-semibold">Remote SSH source unavailable</div>
+      <div className="mt-1 text-terminal-red/80">
+        {labels.join(", ")} — showing cached sessions when available. Check the SSH connection and
+        refresh.
+      </div>
+    </div>
+  );
+}
+
+function sessionIdentityKey(
+  session: Pick<SourceSession, "provider" | "sessionId" | "slug" | "location">,
+): string {
+  const locationKey = session.location?.kind === "ssh" ? session.location.id : "local";
+  return `${locationKey}\0${session.provider}\0${session.sessionId || session.slug}`;
+}
+
+function sourceArchiveKey(source: SourceSession): string {
+  return archiveSessionKey(source.slug, source.location);
+}
+
 function UsageChip({
   entry,
   selected,
@@ -1966,6 +2082,7 @@ function SessionsPanel() {
   const [cleanupPeriodDays, setCleanupPeriodDays] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [failedRemoteSources, setFailedRemoteSources] = useState<string[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [staleCachedAt, setStaleCachedAt] = useState<string | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -1974,6 +2091,7 @@ function SessionsPanel() {
   const [projectsExpanded, setProjectsExpanded] = useState(false);
   const {
     selectedProject,
+    selectedTargetId,
     filter,
     showArchived,
     showAgentRuns,
@@ -2011,10 +2129,18 @@ function SessionsPanel() {
   // Roll worktree paths up to the parent project so URL navigation to a
   // (possibly cleaned-up) worktree path still hits the parent's data.
   const selectedProjectKey = rollupProject(selectedProject);
+  const selectedLocation = useMemo<SessionLocation | "local">(
+    () =>
+      selectedTargetId !== undefined
+        ? { kind: "ssh", id: selectedTargetId, label: selectedTargetId }
+        : "local",
+    [selectedTargetId],
+  );
 
-  const [generatingSlug, setGeneratingSlug] = useState<string | null>(null);
+  const [generatingSessionKey, setGeneratingSessionKey] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  const [selectedSessionKey, setSelectedSessionKey] = useState<string | null>(null);
   const [rawSourceTarget, setRawSourceTarget] = useState<{
     source: SourceSession;
     scanData: SessionScanData | null;
@@ -2034,20 +2160,57 @@ function SessionsPanel() {
       const selected = params.get("selected");
       if (!selected) return;
       setSelectedSlug(selected);
+      const provider = params.get("selectedProvider");
+      const sessionId = params.get("selectedSessionId") || undefined;
+      const targetId = params.get("selectedTargetId");
+      setSelectedSessionKey(
+        provider
+          ? sessionIdentityKey({
+              provider,
+              sessionId,
+              slug: selected,
+              location: targetId ? { kind: "ssh", id: targetId, label: targetId } : undefined,
+            })
+          : null,
+      );
       const url = new URL(window.location.href);
       url.searchParams.delete("selected");
+      url.searchParams.delete("selectedProvider");
+      url.searchParams.delete("selectedSessionId");
+      url.searchParams.delete("selectedTargetId");
       window.history.replaceState(null, "", url);
     };
     consumeUrl();
     const handler = (e: Event) => {
-      const slug = (e as CustomEvent<{ slug: string }>).detail?.slug;
+      const detail = (
+        e as CustomEvent<{
+          slug: string;
+          provider?: string;
+          sessionId?: string;
+          location?: SessionLocation;
+        }>
+      ).detail;
+      const slug = detail?.slug;
       if (!slug) return;
       setSelectedSlug(slug);
+      setSelectedSessionKey(
+        detail.provider
+          ? sessionIdentityKey({
+              provider: detail.provider,
+              sessionId: detail.sessionId,
+              slug,
+              location: detail.location,
+            })
+          : null,
+      );
       // Dashboard's root handler also writes `?selected=slug` for the
       // cold-mount path. Strip it here so a tab round-trip after dismissing
       // the popup doesn't reopen it on remount.
       const url = new URL(window.location.href);
       url.searchParams.delete("selected");
+      url.searchParams.delete("selectedProvider");
+      url.searchParams.delete("selectedSessionId");
+      url.searchParams.delete("selectedTargetId");
       window.history.replaceState(null, "", url);
     };
     window.addEventListener("vibe-open-session", handler);
@@ -2058,9 +2221,19 @@ function SessionsPanel() {
   const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());
   const [enrichmentStatus, setEnrichmentStatus] = useState<SourcesEnrichmentStatus | null>(null);
   const hasCursorSources = sources.some((source) => source.provider === "cursor");
-  const selectedSession = selectedSlug
-    ? (sources.find((s) => s.slug === selectedSlug) ?? null)
-    : null;
+  const legacySelectedSlugMatches = selectedSlug
+    ? sources.filter((source) => source.slug === selectedSlug)
+    : [];
+  const selectedSession = selectedSessionKey
+    ? (sources.find((s) => sessionIdentityKey(s) === selectedSessionKey) ?? null)
+    : legacySelectedSlugMatches.length === 1
+      ? legacySelectedSlugMatches[0]
+      : null;
+
+  const selectSession = (session: SourceSession) => {
+    setSelectedSlug(session.slug);
+    setSelectedSessionKey(sessionIdentityKey(session));
+  };
 
   const loadSources = useCallback(async (opts?: { forceRefresh?: boolean }) => {
     setLoading(true);
@@ -2078,6 +2251,7 @@ function SessionsPanel() {
     const cached = await fetch("/api/sources/cached")
       .then((r) => (r.ok ? r.json() : null))
       .catch(() => null);
+    setFailedRemoteSources(remoteSourceFailureIds(cached));
     const cachedData = parseCachedList<SourceSession>(cached);
     const shouldSkipRefresh = !opts?.forceRefresh && !shouldRefreshCachedList(cachedData);
     if (cachedData && cachedData.sessions.length > 0) {
@@ -2101,8 +2275,10 @@ function SessionsPanel() {
       const fresh = (await freshResp.json()) as {
         sessions: SourceSession[];
         cleanupPeriodDays?: number;
+        failedProviders?: unknown;
       };
       setSources(fresh.sessions);
+      setFailedRemoteSources(remoteSourceFailureIds(fresh));
       if (fresh.cleanupPeriodDays != null) setCleanupPeriodDays(fresh.cleanupPeriodDays);
       setLastRefreshedAt(new Date().toISOString());
       setStaleCachedAt(null);
@@ -2118,7 +2294,8 @@ function SessionsPanel() {
     }
   }, []);
 
-  const toggleArchive = (slug: string) => toggleArchiveSlug(slug, archivedSlugs, setArchivedSlugs);
+  const toggleArchive = (slug: string, location?: SessionLocation) =>
+    toggleArchiveSlug(slug, archivedSlugs, setArchivedSlugs, location);
 
   const openRawSourceJson = (source: SourceSession, scanData?: SessionScanData | null) => {
     setRawSourceTarget({
@@ -2208,8 +2385,10 @@ function SessionsPanel() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const handleTitleSave = async (slug: string, title: string) => {
-    const resp = await fetch(`/api/sessions/${encodeURIComponent(slug)}`, {
+  const handleTitleSave = async (slug: string, title: string, location?: SessionLocation) => {
+    const targetId = location?.kind === "ssh" ? location.id : undefined;
+    const query = targetId ? `?targetId=${encodeURIComponent(targetId)}` : "";
+    const resp = await fetch(`/api/sessions/${encodeURIComponent(slug)}${query}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title }),
@@ -2218,7 +2397,9 @@ function SessionsPanel() {
     // Update the replay summary inside sources so the UI reflects the change
     setSources((prev) =>
       prev.map((s) =>
-        s.slug === slug && s.replay
+        (s.slug === slug || s.existingReplay === slug || s.replay?.slug === slug) &&
+        sameSessionLocation(s.location, location) &&
+        s.replay
           ? { ...s, replay: { ...s.replay, title: title || undefined } }
           : s,
       ),
@@ -2226,8 +2407,15 @@ function SessionsPanel() {
   };
 
   const submitGenerate = async (source: SourceSession, title: string) => {
+    if (source.transcriptStatus) {
+      setGenerateError(
+        transcriptStatusDescription(source.transcriptStatus) || "Replay unavailable",
+      );
+      return;
+    }
     setSelectedSlug(null);
-    setGeneratingSlug(source.slug);
+    setSelectedSessionKey(null);
+    setGeneratingSessionKey(sessionIdentityKey(source));
     setGenerateError(null);
 
     try {
@@ -2239,6 +2427,7 @@ function SessionsPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           provider: source.provider,
+          targetId: source.location?.kind === "ssh" ? source.location.id : undefined,
           filePaths: source.filePaths,
           toolPaths: source.toolPaths,
           title: normalizeTitleText(title) || undefined,
@@ -2248,23 +2437,34 @@ function SessionsPanel() {
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || "Generation failed");
-      navigateTo({ view: null, session: data.slug });
+      navigateTo({
+        view: null,
+        session: data.slug,
+        targetId: source.location?.kind === "ssh" ? source.location.id : null,
+      });
     } catch (err) {
       setGenerateError(getFriendlyErrorMessage(err));
     } finally {
-      setGeneratingSlug(null);
+      setGeneratingSessionKey(null);
     }
   };
 
-  const handleDeleteReplay = async (slug: string) => {
+  const handleDeleteReplay = async (slug: string, location?: SessionLocation) => {
     try {
-      const resp = await fetch(`/api/sessions/${encodeURIComponent(slug)}`, {
+      const targetId = location?.kind === "ssh" ? location.id : undefined;
+      const query = targetId ? `?targetId=${encodeURIComponent(targetId)}` : "";
+      const resp = await fetch(`/api/sessions/${encodeURIComponent(slug)}${query}`, {
         method: "DELETE",
       });
       if (!resp.ok) return;
       // Remove the replay from the source so the card switches to "Generate"
       setSources((prev) =>
-        prev.map((s) => (s.slug === slug ? { ...s, replay: undefined, existingReplay: null } : s)),
+        prev.map((s) =>
+          (s.slug === slug || s.existingReplay === slug || s.replay?.slug === slug) &&
+          sameSessionLocation(s.location, location)
+            ? { ...s, replay: undefined, existingReplay: null }
+            : s,
+        ),
       );
     } catch {
       // ignore
@@ -2272,9 +2472,9 @@ function SessionsPanel() {
   };
 
   // Visible sessions (excluding archived unless toggled)
-  const archivedCount = sources.filter((s) => archivedSlugs.has(s.slug)).length;
+  const archivedCount = sources.filter((s) => archivedSlugs.has(sourceArchiveKey(s))).length;
   const unarchivedSources = useMemo(
-    () => (showArchived ? sources : sources.filter((s) => !archivedSlugs.has(s.slug))),
+    () => (showArchived ? sources : sources.filter((s) => !archivedSlugs.has(sourceArchiveKey(s)))),
     [archivedSlugs, showArchived, sources],
   );
   const selectedRangeSince = insightsRangeSince(insightsRange);
@@ -2299,16 +2499,16 @@ function SessionsPanel() {
   const visibleSources = useMemo(
     () =>
       rangeUnarchivedSources.filter((s) =>
-        shouldIncludeSessionForProject(s, selectedProjectKey, showAgentRuns),
+        shouldIncludeSessionForProject(s, selectedProjectKey, showAgentRuns, selectedLocation),
       ),
-    [rangeUnarchivedSources, selectedProjectKey, showAgentRuns],
+    [rangeUnarchivedSources, selectedLocation, selectedProjectKey, showAgentRuns],
   );
   const baseSourceCount = useMemo(
     () =>
       unarchivedSources.filter((s) =>
-        shouldIncludeSessionForProject(s, selectedProjectKey, showAgentRuns),
+        shouldIncludeSessionForProject(s, selectedProjectKey, showAgentRuns, selectedLocation),
       ).length,
-    [selectedProjectKey, showAgentRuns, unarchivedSources],
+    [selectedLocation, selectedProjectKey, showAgentRuns, unarchivedSources],
   );
 
   const selectedProviderSet = new Set(selectedProviders);
@@ -2318,7 +2518,7 @@ function SessionsPanel() {
   const matchesProviderFilter = (s: SourceSession) => matchesProviderFacet(s, selectedProviderSet);
   const matchesRepoFilter = (s: SourceSession) => matchesRepoFacet(s, selectedRepoSet);
   const matchesProjectFilter = (s: SourceSession) =>
-    matchesProjectFacet(s, selectedProjectKey, ALL_PROJECTS, rollupProject);
+    matchesProjectFacet(s, selectedProjectKey, ALL_PROJECTS, rollupProject, selectedLocation);
   const searchMatchedSources = useMemo(
     () =>
       visibleSources.filter((s) => {
@@ -2417,20 +2617,33 @@ function SessionsPanel() {
   // their parent project so the sidebar isn't drowned by sandbox dirs. The
   // per-session WORKTREE pill in the right pane already conveys which sessions
   // ran in a sandbox, so we don't surface a parent-level count here.
-  const byProject = new Map<string, SourceSession[]>();
+  const byProject = new Map<
+    string,
+    { project: string; location?: SessionLocation; sessions: SourceSession[] }
+  >();
   for (const s of projectFacetSources) {
-    const key = rollupProject(s.project, s.projectIdentity);
-    if (!byProject.has(key)) byProject.set(key, []);
-    byProject.get(key)?.push(s);
+    const project = rollupProject(s.project, s.projectIdentity);
+    const locationKey = s.location?.kind === "ssh" ? `ssh:${s.location.id}` : "local";
+    const key = `${locationKey}\0${project}`;
+    const group = byProject.get(key);
+    if (group) {
+      group.sessions.push(s);
+    } else {
+      byProject.set(key, { project, location: s.location, sessions: [s] });
+    }
   }
   const projectEntries = [...byProject.entries()].sort((a, b) => {
-    const aTime = a[1][0]?.timestamp || "";
-    const bTime = b[1][0]?.timestamp || "";
+    const aTime = a[1].sessions[0]?.timestamp || "";
+    const bTime = b[1].sessions[0]?.timestamp || "";
     return bTime.localeCompare(aTime);
   });
 
   // Compute disambiguated labels for projects
-  const projectLabels = computeProjectLabels(projectEntries.map(([p]) => p));
+  const projectLabels = computeProjectLabels(projectEntries.map(([, group]) => group.project));
+  const selectedProjectEntryKey =
+    selectedProjectKey === ALL_PROJECTS
+      ? ""
+      : `${selectedTargetId ? `ssh:${selectedTargetId}` : "local"}\0${selectedProjectKey}`;
 
   // Hundreds of projects would otherwise bury every facet below this one.
   // The selected project stays visible even when it ranks past the cutoff.
@@ -2441,7 +2654,7 @@ function SessionsPanel() {
         .concat(
           projectEntries
             .slice(PROJECT_FACET_MAX)
-            .filter(([project]) => project === selectedProjectKey),
+            .filter(([projectKey]) => projectKey === selectedProjectEntryKey),
         );
 
   // Final list applies every selected facet directly. The facet-specific
@@ -2452,6 +2665,7 @@ function SessionsPanel() {
     selectedProjectKey,
     allProjectsKey: ALL_PROJECTS,
     rollupProject,
+    selectedLocation,
     selectedTools,
     selectedMcpServers,
     selectedMcpTools,
@@ -2481,6 +2695,7 @@ function SessionsPanel() {
     selectedMcpTools.join("\0"),
     selectedSkills.join("\0"),
     selectedProjectKey,
+    selectedTargetId || "",
     insightsRange,
     showArchived ? "archived" : "active",
     showAgentRuns ? "agent-runs" : "no-agent-runs",
@@ -2496,6 +2711,7 @@ function SessionsPanel() {
     selectedMcpTools,
     selectedSkills,
     selectedProjectKey,
+    selectedTargetId,
     insightsRange,
     showArchived,
     showAgentRuns,
@@ -2536,7 +2752,9 @@ function SessionsPanel() {
   const EXPIRY_WARN_DAYS = 7;
   const expiringSessions = sources.filter(
     (s) =>
-      s.expiresInDays != null && s.expiresInDays <= EXPIRY_WARN_DAYS && !archivedSlugs.has(s.slug),
+      s.expiresInDays != null &&
+      s.expiresInDays <= EXPIRY_WARN_DAYS &&
+      !archivedSlugs.has(sourceArchiveKey(s)),
   );
   const soonestExpiry = expiringSessions.reduce(
     (min, s) => Math.min(min, s.expiresInDays ?? Infinity),
@@ -2652,18 +2870,24 @@ function SessionsPanel() {
             <div
               className={projectsExpanded ? "max-h-[30rem] overflow-y-auto space-y-1" : "space-y-1"}
             >
-              {visibleProjectEntries.map(([project, sessions]) => {
+              {visibleProjectEntries.map(([projectKey, group]) => {
+                const { project, location, sessions } = group;
                 const replayCount = sessions.filter((s) => s.existingReplay).length;
-                const isActive = selectedProjectKey === project;
+                const isActive = selectedProjectEntryKey === projectKey;
                 const label = projectFilterLabel(project, projectLabels);
+                const targetId = location?.kind === "ssh" ? location.id : undefined;
                 // After worktree rollup, sessions[0] may be from a deleted worktree;
                 // treat the parent as existing if any session reports it exists.
                 const exists = sessions.some((s) => s.projectExists !== false);
                 const isGit = sessions.some((s) => s.isGitRepo || s.gitBranch || s.gitRepo);
                 return (
                   <button
-                    key={project}
-                    onClick={() => handleProjectChange(isActive ? ALL_PROJECTS : project)}
+                    key={projectKey}
+                    onClick={() =>
+                      isActive
+                        ? handleProjectChange(ALL_PROJECTS)
+                        : handleProjectChange(project, targetId)
+                    }
                     title={project}
                     className={`w-full text-left px-3 py-2.5 rounded-lg transition-all duration-200 ease-material group ${
                       isActive
@@ -2697,6 +2921,11 @@ function SessionsPanel() {
                         )}
                         {label}
                       </span>
+                      {location?.kind === "ssh" && (
+                        <span className="text-[9px] font-mono text-terminal-purple truncate">
+                          {location.label}
+                        </span>
+                      )}
                       <span
                         className={`tabular-nums px-1.5 py-0.5 rounded-md text-xs shrink-0 ${
                           isActive
@@ -2855,14 +3084,20 @@ function SessionsPanel() {
             ))}
           </select>
           <select
-            value={selectedProject}
-            onChange={(e) => handleProjectChange(e.target.value)}
+            value={selectedProjectEntryKey || ALL_PROJECTS}
+            onChange={(e) => {
+              const selected = projectEntries.find(([key]) => key === e.target.value)?.[1];
+              handleProjectChange(
+                selected?.project || ALL_PROJECTS,
+                selected?.location?.kind === "ssh" ? selected.location.id : undefined,
+              );
+            }}
             className="w-full bg-terminal-surface rounded-lg px-3 py-2.5 text-sm font-sans text-terminal-text outline-none shadow-layer-sm"
           >
             <option value={ALL_PROJECTS}>All projects ({projectFacetSources.length})</option>
-            {projectEntries.map(([project, sessions]) => (
-              <option key={project} value={project}>
-                {projectFilterLabel(project, projectLabels)} ({sessions.length})
+            {projectEntries.map(([projectKey, group]) => (
+              <option key={projectKey} value={projectKey}>
+                {projectFilterLabel(group.project, projectLabels)} ({group.sessions.length})
               </option>
             ))}
           </select>
@@ -2881,12 +3116,12 @@ function SessionsPanel() {
                   <span className="text-xs font-mono text-terminal-dimmer shrink-0">
                     {hasActiveFilters
                       ? `${filtered.length.toLocaleString()} matching`
-                      : `${baseSourceCount.toLocaleString()} local sessions`}
+                      : `${baseSourceCount.toLocaleString()} sessions`}
                   </span>
                 </div>
                 <div className="mt-0.5 text-xs font-mono text-terminal-dimmer">
                   {hasActiveFilters
-                    ? `Filtered from ${baseSourceCount.toLocaleString()} local sessions`
+                    ? `Filtered from ${baseSourceCount.toLocaleString()} sessions`
                     : "Use sidebar facets or search to narrow the list"}
                   {showArchived && " · including archived"}
                 </div>
@@ -3106,8 +3341,8 @@ function SessionsPanel() {
 
         {showInitialLoading ? (
           <SessionLoadingToast
-            title="Fetching local sessions"
-            description="Reading cached session lists first, then refreshing local providers in the background."
+            title="Fetching sessions"
+            description="Reading cached session lists first, then refreshing configured sources in the background."
           />
         ) : refreshing ? (
           <SessionLoadingToast
@@ -3138,6 +3373,7 @@ function SessionsPanel() {
             </button>
           </div>
         )}
+        <RemoteSourceFailureNotice failures={failedRemoteSources} />
 
         {/* Error toast */}
         {generateError && (
@@ -3181,9 +3417,7 @@ function SessionsPanel() {
             </div>
           ) : filtered.length === 0 ? (
             <div className="text-center py-12 text-terminal-dim font-mono text-sm">
-              {hasActiveFilters
-                ? "No sessions match the current filters"
-                : "No local sessions found"}
+              {hasActiveFilters ? "No sessions match the current filters" : "No sessions found"}
             </div>
           ) : (
             <div key={listFilterKey} className="space-y-2.5 px-4 py-3">
@@ -3204,6 +3438,9 @@ function SessionsPanel() {
                 const displayEditCount = scanData?.editCount ?? s.editCountEst;
                 const displayModel = scanData?.model || s.model;
                 const displayCost = scanData?.costEstimate ?? s.replay?.stats.costEstimate;
+                const transcriptStatus = s.transcriptStatus || scanData?.transcriptStatus;
+                const transcriptStatusText = transcriptStatusLabel(transcriptStatus);
+                const transcriptStatusHelp = transcriptStatusDescription(transcriptStatus);
                 const dataSourceLabel = formatDataSourceLabel(
                   s.hasSqlite,
                   scanData?.dataSource,
@@ -3216,8 +3453,8 @@ function SessionsPanel() {
                 const dataState = sessionDataState(s, scanData);
                 const scannedAtLabel =
                   scanData && scanFinishedAt ? formatCompactAge(scanFinishedAt) : null;
-                const isArchived = archivedSlugs.has(s.slug);
                 const replaySlug = s.existingReplay || s.replay?.slug;
+                const isArchived = archivedSlugs.has(sourceArchiveKey(s));
                 const projectLabel =
                   projectLabels.get(rolledProject) ||
                   projectLabels.get(s.project) ||
@@ -3259,10 +3496,15 @@ function SessionsPanel() {
                   : "Estimated cost";
                 return (
                   <div
-                    key={`${s.provider}-${s.slug}`}
+                    key={sessionIdentityKey(s)}
                     onClick={() => {
-                      if (replaySlug) navigateTo({ view: null, session: replaySlug });
-                      else setSelectedSlug(s.slug);
+                      if (replaySlug) {
+                        navigateTo({
+                          view: null,
+                          session: replaySlug,
+                          targetId: s.location?.kind === "ssh" ? s.location.id : null,
+                        });
+                      } else selectSession(s);
                     }}
                     // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- card contains nested controls; cannot use a real <button>
                     role="button"
@@ -3270,8 +3512,13 @@ function SessionsPanel() {
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === " ") {
                         e.preventDefault();
-                        if (replaySlug) navigateTo({ view: null, session: replaySlug });
-                        else setSelectedSlug(s.slug);
+                        if (replaySlug) {
+                          navigateTo({
+                            view: null,
+                            session: replaySlug,
+                            targetId: s.location?.kind === "ssh" ? s.location.id : null,
+                          });
+                        } else selectSession(s);
                       }
                     }}
                     className={`bg-terminal-surface rounded-xl px-5 py-4 hover:bg-terminal-surface-hover transition-all duration-300 ease-material space-y-3 shadow-layer-sm cursor-pointer hover-lift ${
@@ -3284,6 +3531,19 @@ function SessionsPanel() {
                         <span className="mt-0.5">
                           <ProviderBadge provider={s.provider} title={providerTooltip} />
                         </span>
+                        <SessionLocationBadge location={s.location} />
+                        {transcriptStatusText && (
+                          <span
+                            className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full ${
+                              transcriptStatus === "unreadable"
+                                ? "bg-terminal-red-subtle text-terminal-red"
+                                : "bg-terminal-orange-subtle text-terminal-orange"
+                            }`}
+                            title={transcriptStatusHelp}
+                          >
+                            {transcriptStatusText}
+                          </span>
+                        )}
                         <span className="text-sm font-sans font-semibold text-terminal-text leading-snug line-clamp-2">
                           {sessionTitle}
                         </span>
@@ -3293,8 +3553,12 @@ function SessionsPanel() {
                           {s.slug} · {timeAgo(s.timestamp)}
                         </span>
                         <SessionMoreMenu
-                          onArchive={() => toggleArchive(s.slug)}
-                          onDelete={replaySlug ? () => handleDeleteReplay(s.slug) : undefined}
+                          onArchive={() => toggleArchive(s.slug, s.location)}
+                          onDelete={
+                            replaySlug
+                              ? () => handleDeleteReplay(replaySlug, s.location)
+                              : undefined
+                          }
                           onRawData={() => openRawSourceJson(s, scanData || null)}
                           isArchived={isArchived}
                         />
@@ -3584,7 +3848,7 @@ function SessionsPanel() {
                         )}
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
-                        {s.sessionId && isRecentSession && (
+                        {s.sessionId && s.location?.kind !== "ssh" && isRecentSession && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -3605,7 +3869,12 @@ function SessionsPanel() {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                navigateTo({ view: null, session: replaySlug, v: "export" });
+                                navigateTo({
+                                  view: null,
+                                  session: replaySlug,
+                                  targetId: s.location?.kind === "ssh" ? s.location.id : null,
+                                  v: "export",
+                                });
                               }}
                               className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis transition-all duration-200 ease-material"
                             >
@@ -3614,17 +3883,28 @@ function SessionsPanel() {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setSelectedSlug(s.slug);
+                                selectSession(s);
                               }}
-                              disabled={generatingSlug === s.slug}
+                              disabled={
+                                generatingSessionKey === sessionIdentityKey(s) || !!transcriptStatus
+                              }
+                              title={transcriptStatusHelp}
                               className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200 ease-material disabled:opacity-50"
                             >
-                              {generatingSlug === s.slug ? "..." : "Redo"}
+                              {generatingSessionKey === sessionIdentityKey(s)
+                                ? "..."
+                                : transcriptStatus
+                                  ? "Unavailable"
+                                  : "Redo"}
                             </button>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                navigateTo({ view: null, session: replaySlug });
+                                navigateTo({
+                                  view: null,
+                                  session: replaySlug,
+                                  targetId: s.location?.kind === "ssh" ? s.location.id : null,
+                                });
                               }}
                               className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-green-subtle text-terminal-green hover:bg-terminal-green-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1"
                             >
@@ -3638,13 +3918,18 @@ function SessionsPanel() {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setSelectedSlug(s.slug);
+                              selectSession(s);
                             }}
-                            disabled={generatingSlug === s.slug}
+                            disabled={
+                              generatingSessionKey === sessionIdentityKey(s) || !!transcriptStatus
+                            }
+                            title={transcriptStatusHelp}
                             className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1 disabled:opacity-50"
                           >
-                            {generatingSlug === s.slug ? (
+                            {generatingSessionKey === sessionIdentityKey(s) ? (
                               <span className="animate-pulse">Generating...</span>
+                            ) : transcriptStatus ? (
+                              "Unavailable"
                             ) : (
                               <>
                                 <svg
@@ -3688,17 +3973,26 @@ function SessionsPanel() {
           <SessionDetailPopup
             session={selectedSession}
             scanData={findSessionScanData(selectedSession, scanResultsIndex) || null}
-            onClose={() => setSelectedSlug(null)}
+            onClose={() => {
+              setSelectedSlug(null);
+              setSelectedSessionKey(null);
+            }}
             onGenerate={submitGenerate}
-            onViewReplay={(slug) => navigateTo({ view: null, session: slug })}
+            onViewReplay={(slug, location) =>
+              navigateTo({
+                view: null,
+                session: slug,
+                targetId: location?.kind === "ssh" ? location.id : null,
+              })
+            }
             onArchive={(slug) => {
-              toggleArchive(slug);
+              toggleArchive(slug, selectedSession.location);
             }}
             onTitleSave={handleTitleSave}
             onDeleteReplay={handleDeleteReplay}
             onRawData={openRawSourceJson}
-            isGenerating={generatingSlug === selectedSession.slug}
-            isArchived={archivedSlugs.has(selectedSession.slug)}
+            isGenerating={generatingSessionKey === sessionIdentityKey(selectedSession)}
+            isArchived={archivedSlugs.has(sourceArchiveKey(selectedSession))}
           />
         )}
         {rawSourceTarget && (
@@ -3729,11 +4023,12 @@ function ReplaysPanel() {
   const [refreshClockMs, setRefreshClockMs] = useState(() => Date.now());
   const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [regeneratingSlug, setRegeneratingSlug] = useState<string | null>(null);
+  const [regeneratingSessionKey, setRegeneratingSessionKey] = useState<string | null>(null);
   const [rawReplayTarget, setRawReplayTarget] = useState<SessionSummary | null>(null);
 
   const {
     selectedProject,
+    selectedTargetId,
     filter,
     showArchived,
     showAgentRuns,
@@ -3768,6 +4063,17 @@ function ReplaysPanel() {
   // Roll worktree paths up to the parent project so URL navigation to a
   // (possibly cleaned-up) worktree path still hits the parent's data.
   const selectedProjectKey = rollupProject(selectedProject);
+  const selectedLocation = useMemo<SessionLocation | "local">(
+    () =>
+      selectedTargetId !== undefined
+        ? { kind: "ssh", id: selectedTargetId, label: selectedTargetId }
+        : "local",
+    [selectedTargetId],
+  );
+  const selectedProjectEntryKey =
+    selectedProjectKey === ALL_PROJECTS
+      ? ""
+      : `${selectedTargetId ? `ssh:${selectedTargetId}` : "local"}\0${selectedProjectKey}`;
 
   useEffect(() => {
     let mounted = true;
@@ -3869,28 +4175,41 @@ function ReplaysPanel() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const toggleArchive = (slug: string) => toggleArchiveSlug(slug, archivedSlugs, setArchivedSlugs);
+  const toggleArchive = (slug: string, location?: SessionLocation) =>
+    toggleArchiveSlug(slug, archivedSlugs, setArchivedSlugs, location);
 
-  const handleTitleSave = async (slug: string, title: string) => {
-    const resp = await fetch(`/api/sessions/${encodeURIComponent(slug)}`, {
+  const handleTitleSave = async (slug: string, title: string, location?: SessionLocation) => {
+    const targetId = location?.kind === "ssh" ? location.id : undefined;
+    const query = targetId ? `?targetId=${encodeURIComponent(targetId)}` : "";
+    const resp = await fetch(`/api/sessions/${encodeURIComponent(slug)}${query}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title }),
     });
     if (!resp.ok) throw new Error("Failed to update title");
     setSessions((prev) =>
-      prev.map((s) => (s.slug === slug ? { ...s, title: title || undefined } : s)),
+      prev.map((s) =>
+        s.slug === slug && sameSessionLocation(s.location, location)
+          ? { ...s, title: title || undefined }
+          : s,
+      ),
     );
   };
 
-  const handleOpen = (slug: string) => {
-    navigateTo({ view: null, session: slug });
+  const handleOpen = (slug: string, location?: SessionLocation) => {
+    navigateTo({
+      view: null,
+      session: slug,
+      targetId: location?.kind === "ssh" ? location.id : null,
+    });
   };
 
-  const confirmDelete = async (slug: string) => {
+  const confirmDelete = async (slug: string, location?: SessionLocation) => {
     setDeleteError(null);
     try {
-      const resp = await fetch(`/api/sessions/${encodeURIComponent(slug)}`, {
+      const targetId = location?.kind === "ssh" ? location.id : undefined;
+      const query = targetId ? `?targetId=${encodeURIComponent(targetId)}` : "";
+      const resp = await fetch(`/api/sessions/${encodeURIComponent(slug)}${query}`, {
         method: "DELETE",
       });
       if (!resp.ok) {
@@ -3898,21 +4217,25 @@ function ReplaysPanel() {
         setDeleteError(data.error || "Failed to delete session");
         return;
       }
-      setSessions((prev) => prev.filter((s) => s.slug !== slug));
+      setSessions((prev) =>
+        prev.filter((s) => !(s.slug === slug && sameSessionLocation(s.location, location))),
+      );
     } catch {
       setDeleteError("Failed to delete session");
     }
   };
 
   const handleRegenerate = async (s: SessionSummary) => {
-    setRegeneratingSlug(s.slug);
+    const sessionKey = sessionIdentityKey(s);
+    setRegeneratingSessionKey(sessionKey);
     try {
       const resp = await fetchWithRetry("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           provider: s.provider,
-          sessionSlug: s.slug,
+          targetId: s.location?.kind === "ssh" ? s.location.id : undefined,
+          sessionSlug: s.sourceSlug || s.slug,
           sessionProject: s.project,
           sessionId: s.sessionId || undefined,
           title: s.title || undefined,
@@ -3920,11 +4243,15 @@ function ReplaysPanel() {
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || "Regeneration failed");
-      navigateTo({ view: null, session: data.slug });
+      navigateTo({
+        view: null,
+        session: data.slug,
+        targetId: s.location?.kind === "ssh" ? s.location.id : null,
+      });
     } catch (err) {
       console.error("Regenerate error:", getErrorMessage(err));
     } finally {
-      setRegeneratingSlug(null);
+      setRegeneratingSessionKey(null);
     }
   };
 
@@ -3940,17 +4267,17 @@ function ReplaysPanel() {
       }),
     [scanResultsIndex, sessions],
   );
-  const archivedCount = sessions.filter((s) => archivedSlugs.has(s.slug)).length;
+  const archivedCount = sessions.filter((s) => archivedSlugs.has(replayArchiveKey(s))).length;
   const unarchivedSessions = showArchived
     ? usageEnrichedSessions
-    : usageEnrichedSessions.filter((s) => !archivedSlugs.has(s.slug));
+    : usageEnrichedSessions.filter((s) => !archivedSlugs.has(replayArchiveKey(s)));
   const agentRunCount = new Set(
     unarchivedSessions
       .filter((s) => isAgentRunWorkspace(s.project, s.projectIdentity))
       .map((s) => s.project),
   ).size;
   const visibleSessions = unarchivedSessions.filter((s) =>
-    shouldIncludeSessionForProject(s, selectedProjectKey, showAgentRuns),
+    shouldIncludeSessionForProject(s, selectedProjectKey, showAgentRuns, selectedLocation),
   );
 
   const selectedProviderSet = new Set(selectedProviders);
@@ -3960,7 +4287,7 @@ function ReplaysPanel() {
   const matchesProviderFilter = (s: SessionSummary) => matchesProviderFacet(s, selectedProviderSet);
   const matchesRepoFilter = (s: SessionSummary) => matchesRepoFacet(s, selectedRepoSet);
   const matchesProjectFilter = (s: SessionSummary) =>
-    matchesProjectFacet(s, selectedProjectKey, ALL_PROJECTS, rollupProject);
+    matchesProjectFacet(s, selectedProjectKey, ALL_PROJECTS, rollupProject, selectedLocation);
   const matchesSearchFilter = (s: SessionSummary & ReturnType<typeof usageFacetValues>) => {
     if (!query) return true;
     return [
@@ -4037,19 +4364,28 @@ function ReplaysPanel() {
       : mcpToolEntries;
 
   // Group by project, rolling up Claude agent worktrees under their parent.
-  const byProject = new Map<string, SessionSummary[]>();
+  const byProject = new Map<
+    string,
+    { project: string; location?: SessionLocation; sessions: SessionSummary[] }
+  >();
   for (const s of projectFacetSessions) {
-    const key = rollupProject(s.project, s.projectIdentity);
-    if (!byProject.has(key)) byProject.set(key, []);
-    byProject.get(key)?.push(s);
+    const project = rollupProject(s.project, s.projectIdentity);
+    const locationKey = s.location?.kind === "ssh" ? `ssh:${s.location.id}` : "local";
+    const key = `${locationKey}\0${project}`;
+    const group = byProject.get(key);
+    if (group) {
+      group.sessions.push(s);
+    } else {
+      byProject.set(key, { project, location: s.location, sessions: [s] });
+    }
   }
   const projectEntries = [...byProject.entries()].sort((a, b) => {
-    const aTime = a[1][0]?.startTime || "";
-    const bTime = b[1][0]?.startTime || "";
+    const aTime = a[1].sessions[0]?.startTime || "";
+    const bTime = b[1].sessions[0]?.startTime || "";
     return bTime.localeCompare(aTime);
   });
 
-  const projectLabels = computeProjectLabels(projectEntries.map(([p]) => p));
+  const projectLabels = computeProjectLabels(projectEntries.map(([, group]) => group.project));
 
   // Final list applies every selected facet directly. The facet-specific
   // intermediate arrays above are only for sidebar counts.
@@ -4059,6 +4395,7 @@ function ReplaysPanel() {
     selectedProjectKey,
     allProjectsKey: ALL_PROJECTS,
     rollupProject,
+    selectedLocation,
     selectedTools,
     selectedMcpServers,
     selectedMcpTools,
@@ -4086,6 +4423,7 @@ function ReplaysPanel() {
     selectedMcpTools.join("\0"),
     selectedSkills.join("\0"),
     selectedProjectKey,
+    selectedTargetId || "",
     showArchived ? "archived" : "active",
     showAgentRuns ? "agent-runs" : "no-agent-runs",
   ].join("\0");
@@ -4100,6 +4438,7 @@ function ReplaysPanel() {
     selectedMcpTools,
     selectedSkills,
     selectedProjectKey,
+    selectedTargetId,
     showArchived,
     showAgentRuns,
   ]);
@@ -4233,14 +4572,20 @@ function ReplaysPanel() {
 
           <div className="space-y-1 border-t border-terminal-border-subtle pt-4">
             <FacetHeader title="Project path" count={projectEntries.length} />
-            {projectEntries.map(([project, replays]) => {
-              const isActive = selectedProjectKey === project;
+            {projectEntries.map(([projectKey, group]) => {
+              const { project, location, sessions: replays } = group;
+              const isActive = selectedProjectEntryKey === projectKey;
               const label = projectFilterLabel(project, projectLabels);
               const publishedCount = replays.filter((s) => s.gist?.gistId).length;
+              const targetId = location?.kind === "ssh" ? location.id : undefined;
               return (
                 <button
-                  key={project}
-                  onClick={() => handleProjectChange(isActive ? ALL_PROJECTS : project)}
+                  key={projectKey}
+                  onClick={() =>
+                    isActive
+                      ? handleProjectChange(ALL_PROJECTS)
+                      : handleProjectChange(project, targetId)
+                  }
                   title={project}
                   className={`w-full text-left px-3 py-2.5 rounded-lg transition-all duration-200 ease-material group ${
                     isActive
@@ -4258,6 +4603,11 @@ function ReplaysPanel() {
                     >
                       {label}
                     </span>
+                    {location?.kind === "ssh" && (
+                      <span className="text-[9px] font-mono text-terminal-purple truncate">
+                        {location.label}
+                      </span>
+                    )}
                     <span
                       className={`tabular-nums px-1.5 py-0.5 rounded-md text-xs shrink-0 ${
                         isActive
@@ -4357,14 +4707,20 @@ function ReplaysPanel() {
             ))}
           </select>
           <select
-            value={selectedProject}
-            onChange={(e) => handleProjectChange(e.target.value)}
+            value={selectedProjectEntryKey || ALL_PROJECTS}
+            onChange={(e) => {
+              const selected = projectEntries.find(([key]) => key === e.target.value)?.[1];
+              handleProjectChange(
+                selected?.project || ALL_PROJECTS,
+                selected?.location?.kind === "ssh" ? selected.location.id : undefined,
+              );
+            }}
             className="w-full bg-terminal-surface rounded-lg px-3 py-2.5 text-sm font-sans text-terminal-text outline-none shadow-layer-sm"
           >
             <option value={ALL_PROJECTS}>All projects ({projectFacetSessions.length})</option>
-            {projectEntries.map(([project, replays]) => (
-              <option key={project} value={project}>
-                {projectFilterLabel(project, projectLabels)} ({replays.length})
+            {projectEntries.map(([projectKey, group]) => (
+              <option key={projectKey} value={projectKey}>
+                {projectFilterLabel(group.project, projectLabels)} ({group.sessions.length})
               </option>
             ))}
           </select>
@@ -4382,12 +4738,12 @@ function ReplaysPanel() {
                   <span className="text-xs font-mono text-terminal-dimmer shrink-0">
                     {hasActiveFilters
                       ? `${filtered.length.toLocaleString()} matching`
-                      : `${visibleSessions.length.toLocaleString()} local replays`}
+                      : `${visibleSessions.length.toLocaleString()} replays`}
                   </span>
                 </div>
                 <div className="mt-0.5 text-xs font-mono text-terminal-dimmer">
                   {hasActiveFilters
-                    ? `Filtered from ${visibleSessions.length.toLocaleString()} local replays`
+                    ? `Filtered from ${visibleSessions.length.toLocaleString()} replays`
                     : "Use sidebar facets or search to narrow the list"}
                   {showArchived && " · including archived"}
                 </div>
@@ -4672,24 +5028,31 @@ function ReplaysPanel() {
             </div>
           ) : filtered.length === 0 ? (
             <div className="text-center py-12 text-terminal-dim font-mono text-sm">
-              {hasActiveFilters ? "No replays match the current filters" : "No local replays found"}
+              {hasActiveFilters ? "No replays match the current filters" : "No replays found"}
             </div>
           ) : (
             <div key={listFilterKey} className="space-y-2.5 px-4 py-3">
               {renderedReplays.map((s) => {
-                const isArchived = archivedSlugs.has(s.slug);
+                const isArchived = archivedSlugs.has(replayArchiveKey(s));
                 return (
                   <ReplayCard
-                    key={s.slug}
+                    key={sessionIdentityKey(s)}
                     summary={s}
-                    onOpen={() => handleOpen(s.slug)}
-                    onShare={() => navigateTo({ view: null, session: s.slug, v: "export" })}
+                    onOpen={() => handleOpen(s.slug, s.location)}
+                    onShare={() =>
+                      navigateTo({
+                        view: null,
+                        session: s.slug,
+                        targetId: s.location?.kind === "ssh" ? s.location.id : null,
+                        v: "export",
+                      })
+                    }
                     onTitleSave={handleTitleSave}
-                    onDelete={() => confirmDelete(s.slug)}
+                    onDelete={() => confirmDelete(s.slug, s.location)}
                     onRegenerate={() => handleRegenerate(s)}
-                    onArchive={() => toggleArchive(s.slug)}
+                    onArchive={() => toggleArchive(s.sourceSlug || s.slug, s.location)}
                     onRawData={() => setRawReplayTarget(s)}
-                    isRegenerating={regeneratingSlug === s.slug}
+                    isRegenerating={regeneratingSessionKey === sessionIdentityKey(s)}
                     isArchived={isArchived}
                   />
                 );
@@ -4818,12 +5181,29 @@ export default function Dashboard({
   // replay" cases uniformly.
   useEffect(() => {
     const handler = (e: Event) => {
-      const slug = (e as CustomEvent<{ slug: string }>).detail?.slug;
+      const detail = (
+        e as CustomEvent<{
+          slug: string;
+          provider?: string;
+          sessionId?: string;
+          location?: SessionLocation;
+        }>
+      ).detail;
+      const slug = detail?.slug;
       if (!slug) return;
+      const currentTab = new URLSearchParams(window.location.search).get("tab");
       setTab("sessions");
+      // SessionsPanel receives the same event when it is already mounted and
+      // can select the exact location directly. Only route through the URL
+      // when switching tabs, so the child handler cannot be left with a stale
+      // `selected` query after the event.
+      if (currentTab === "sessions") return;
       navigateTo({
         tab: "sessions",
         selected: slug,
+        selectedProvider: detail.provider || null,
+        selectedSessionId: detail.sessionId || null,
+        selectedTargetId: detail.location?.kind === "ssh" ? detail.location.id : null,
         project: null,
         q: null,
         archived: null,
@@ -4849,6 +5229,10 @@ export default function Dashboard({
       repo: null,
       insightsRange: null,
       replay: null,
+      selected: null,
+      selectedProvider: null,
+      selectedSessionId: null,
+      selectedTargetId: null,
     });
   };
 

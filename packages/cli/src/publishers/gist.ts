@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { sessionForExternalOutput } from "../overlays.js";
+import type { ReplaySession } from "../types.js";
 import { getApiUrl, getSessionCookieName, loadAuthToken } from "./cloud.js";
 
 const GIST_META_FILE = ".vibe-replay-gist.json";
@@ -44,7 +46,8 @@ export async function publishGist(
   }
 
   const jsonPath = join(outputDir, "replay.json");
-  const content = await readFile(jsonPath, "utf-8");
+  const rawContent = await readFile(jsonPath, "utf-8");
+  const content = JSON.stringify(sessionForExternalOutput(JSON.parse(rawContent) as ReplaySession));
   const overwrite = opts?.overwrite;
   const filename = overwrite?.filename || `${sanitizeFilename(title)}.json`;
   const description = `vibe-replay: ${title}`;

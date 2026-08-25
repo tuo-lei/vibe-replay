@@ -625,6 +625,35 @@ describe("Codex parser", () => {
     });
   });
 
+  it("keeps the /resume title supplied by state metadata over JSONL updates", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-04-26T10:05:00.000Z",
+          type: "event_msg",
+          payload: { type: "thread_name_updated", thread_name: "Transcript title" },
+        },
+      ].map((line) => JSON.stringify(line)),
+      {
+        provider: "codex",
+        sessionId: "codex-session-state-title",
+        slug: "codex-session",
+        title: "State database title",
+        project: "/Users/test/project",
+        cwd: "/Users/test/project",
+        version: "0.1.0",
+        timestamp: "2026-04-26T10:05:00.000Z",
+        lineCount: 1,
+        fileSize: 1,
+        filePath: "/tmp/codex.jsonl",
+        filePaths: ["/tmp/codex.jsonl"],
+        firstPrompt: "Inspect the project",
+      },
+    );
+
+    expect(result.title).toBe("State database title");
+  });
+
   it("merges Codex web_search_call with matching web_search_end events", () => {
     const result = parseCodexLines(
       [
@@ -1171,5 +1200,44 @@ describe("Codex parser", () => {
       _isError: true,
       _result: "permission denied",
     });
+  });
+});
+
+describe("Codex response item compatibility", () => {
+  it("parses user content variants without aborting on non-object JSONL records", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-08-24T10:00:00.000Z",
+          type: "session_meta",
+          payload: { id: "codex-response-variants", cwd: "/tmp/project" },
+        },
+        null,
+        {
+          timestamp: "2026-08-24T10:00:01.000Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "user",
+            content: "String content prompt",
+          },
+        },
+        {
+          timestamp: "2026-08-24T10:00:02.000Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "user",
+            content: { text: "Object content prompt" },
+          },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    expect(
+      result.turns
+        .filter((turn) => turn.role === "user")
+        .map((turn) => turn.blocks.find((block) => block.type === "text")?.text),
+    ).toEqual(["String content prompt", "Object content prompt"]);
   });
 });

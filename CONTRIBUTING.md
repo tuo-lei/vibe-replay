@@ -56,6 +56,21 @@ Session files (JSONL / SQLite)
   → output                       vibe-replay/<slug>/index.html + replay.json
 ```
 
+Configured SSH sources add a transport step before the same provider flow:
+`packages/cli/src/remote.ts` uses the system OpenSSH client to list and
+materialize remote Codex, Claude Code, or Pi JSONL files in a per-target cache
+with manifest-sized transfer limits.
+Provider names and `DataSource` values remain independent from the session's
+`SessionLocation`. Codex `/resume` titles prefer explicit names from
+`session_index.jsonl`, then fall back to `state_5.sqlite` through a read-only
+Python `sqlite3` query or schema-aware `sqlite3` CLI fallback; the live database
+and WAL are never copied. A metadata-only or unreadable source is
+retained in the catalog with `no-prompts` or `unreadable` status and is not
+eligible for generation. Remote git repository identity supports local filters
+but is removed from share and export payloads. Remote sessions can feed local dashboard insights,
+but are excluded from the optional cloud insight aggregate sync. Remote Live
+mode is deliberately disabled.
+
 ### Dashboard terminology and caches
 
 The dashboard uses product terminology that distinguishes original AI sessions from generated replays:

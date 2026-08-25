@@ -155,6 +155,32 @@ export interface DataSourceInfo {
   notes?: string[];
 }
 
+/** Where a source session was discovered. */
+export interface SessionLocation {
+  kind: "local" | "ssh";
+  /** Stable user-configured id for the source location. */
+  id: string;
+  /** Safe display label; never needs to contain a hostname. */
+  label: string;
+}
+
+/** Stable opaque suffix for filesystem keys scoped to one remote location. */
+export function sessionLocationHash(targetId: string): string {
+  let first = 0x811c9dc5;
+  let second = 0x9e3779b9;
+  for (const character of targetId) {
+    const codePoint = character.codePointAt(0) || 0;
+    first = Math.imul(first ^ codePoint, 0x01000193);
+    second = Math.imul(second ^ codePoint, 0x85ebca6b);
+  }
+  return `${(first >>> 0).toString(16).padStart(8, "0")}${(second >>> 0)
+    .toString(16)
+    .padStart(8, "0")}`;
+}
+
+/** Explains why a discovered source may not have a normal user prompt. */
+export type SessionTranscriptStatus = "no-prompts" | "unreadable";
+
 // ---------------------------------------------------------------------------
 // Scene Overlay System — non-destructive modifications for AI Studio
 // ---------------------------------------------------------------------------
@@ -237,6 +263,8 @@ export interface SessionInsight {
   sessionId: string;
   slug: string;
   provider: string;
+  location?: SessionLocation;
+  transcriptStatus?: SessionTranscriptStatus;
 
   // Metadata
   title?: string;
@@ -306,6 +334,8 @@ export interface InsightsStore {
 export interface SessionScanWireData {
   sessionId: string;
   provider: string;
+  location?: SessionLocation;
+  transcriptStatus?: SessionTranscriptStatus;
   project: string;
   projectIdentity?: ProjectIdentity;
   slug: string;
@@ -339,6 +369,8 @@ export interface ReplaySession {
     slug: string;
     title?: string;
     provider: string;
+    location?: SessionLocation;
+    transcriptStatus?: SessionTranscriptStatus;
     dataSource?: DataSource;
     dataSourceInfo?: DataSourceInfo;
     startTime: string;

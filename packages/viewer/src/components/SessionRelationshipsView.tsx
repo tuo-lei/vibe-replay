@@ -18,6 +18,7 @@ import {
   providerBadgeLabel,
   rollupProject,
 } from "./dashboard-utils";
+import type { SessionLocation } from "@vibe-replay/types";
 
 // ─── Shared helpers ──────────────────────────────────────────────────
 
@@ -58,10 +59,18 @@ function sessionHasEstimatedTime(s: ScanResultSession): boolean {
 
 function sessionBadges(s: ScanResultSession): string[] {
   const badges = [providerBadgeLabel(s.provider)];
+  badges.push(s.location?.kind === "ssh" ? s.location.label : "local");
   const source = s.dataSource ? formatDataSourceLabel(false, s.dataSource) : "";
   if (source) badges.push(source);
   if (sessionHasEstimatedTime(s)) badges.push("estimated time");
   return badges;
+}
+
+function sessionIdentityKey(
+  session: Pick<ScanResultSession, "provider" | "sessionId" | "slug" | "location">,
+): string {
+  const locationKey = session.location?.kind === "ssh" ? session.location.id : "local";
+  return `${locationKey}\0${session.provider}\0${session.sessionId || session.slug}`;
 }
 
 /**
@@ -71,8 +80,19 @@ function sessionBadges(s: ScanResultSession): string[] {
  * can open the popup uniformly for both "open replay" and "generate replay"
  * cases.
  */
-function openSessionPopup(slug: string) {
-  window.dispatchEvent(new CustomEvent("vibe-open-session", { detail: { slug } }));
+function openSessionPopup(
+  session: Pick<ScanResultSession, "slug" | "provider" | "sessionId" | "location">,
+) {
+  window.dispatchEvent(
+    new CustomEvent("vibe-open-session", {
+      detail: {
+        slug: session.slug,
+        provider: session.provider,
+        sessionId: session.sessionId,
+        location: session.location,
+      },
+    }),
+  );
 }
 
 function rangeEmptyLabel(range: TimelineRange): string {
@@ -129,7 +149,9 @@ function colorFor(idx: number) {
 // ─── Group sessions by project ───────────────────────────────────────
 
 interface ProjectGroup {
+  key: string;
   project: string;
+  location?: ScanResultSession["location"];
   sessions: ScanResultSession[];
   totalDurationMs: number;
   totalCost: number;
@@ -143,14 +165,21 @@ function groupByProject(
 ): ProjectGroup[] {
   const map = new Map<string, ScanResultSession[]>();
   for (const s of sessions) {
-    const key = options.collapseWorktrees ? rollupProject(s.project, s.projectIdentity) : s.project;
+    const project = options.collapseWorktrees
+      ? rollupProject(s.project, s.projectIdentity)
+      : s.project;
+    const locationKey = s.location?.kind === "ssh" ? `ssh:${s.location.id}` : "local";
+    const key = `${locationKey}\0${project}`;
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(s);
   }
 
   const groups: ProjectGroup[] = [];
   let idx = 0;
-  for (const [project, sess] of map) {
+  for (const [key, sess] of map) {
+    const project = options.collapseWorktrees
+      ? rollupProject(sess[0]?.project || "", sess[0]?.projectIdentity)
+      : sess[0]?.project || "";
     const sorted = [...sess].sort((a, b) => {
       const aStart = a.startTime ? new Date(a.startTime).getTime() : 0;
       const bStart = b.startTime ? new Date(b.startTime).getTime() : 0;
@@ -169,7 +198,9 @@ function groupByProject(
       }
     }
     groups.push({
+      key,
       project,
+      location: sorted[0]?.location,
       sessions: sorted,
       totalDurationMs,
       totalCost,
@@ -226,7 +257,9 @@ interface TimelineSession {
 }
 
 interface TimelineProject {
+  key: string;
   project: string;
+  location?: ScanResultSession["location"];
   sessions: TimelineSession[];
   laneCount: number;
   /** Per-lane height in px — each lane sizes to its tallest bar. */
@@ -305,7 +338,7 @@ function packTimelineLanes(
       laneEnds[placed] = s.endMs;
     }
 
-    laneAssignments.set(s.original.sessionId, placed);
+    laneAssignments.set(sessionIdentityKey(s.original), placed);
   }
 
   return { laneAssignments, laneCount: laneEnds.length, dropped };
@@ -438,12 +471,12 @@ function buildTimeline(
 
     const { laneAssignments, laneCount, dropped } = packTimelineLanes(
       intervals,
-      expandedProjects.has(g.project),
+      expandedProjects.has(g.key),
     );
 
     const tSessions: TimelineSession[] = [];
     for (const it of intervals) {
-      const lane = laneAssignments.get(it.original.sessionId);
+      const lane = laneAssignments.get(sessionIdentityKey(it.original));
       if (lane == null) continue; // dropped due to lane cap
       // Clip to viewport on the left so a bar starting before the window
       // begins at 0% (no mid-string truncation).
@@ -495,7 +528,9 @@ function buildTimeline(
       }
 
       projects.push({
+        key: g.key,
         project: g.project,
+        location: g.location,
         sessions: tSessions,
         laneCount,
         laneHeightsPx,
@@ -678,7 +713,7 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                 const rowHeight = p.totalRowHeightPx;
                 const accentColor = color.solid;
                 return (
-                  <div key={p.project} className="flex items-stretch rounded-xl group">
+                  <div key={p.key} className="flex items-stretch rounded-xl group">
                     {/* Project label */}
                     <div
                       className="flex flex-col justify-center shrink-0 py-1 pr-3 overflow-hidden"
@@ -689,20 +724,21 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                       </div>
                       <div className="text-[9px] font-mono text-terminal-dimmer truncate">
                         {p.sessions.length} {plural(p.sessions.length, "session")}
+                        {p.location?.kind === "ssh" && ` · ${p.location.label}`}
                         {p.hiddenInLanesCount > 0 && (
                           <button
                             type="button"
-                            onClick={() => toggleExpanded(p.project)}
+                            onClick={() => toggleExpanded(p.key)}
                             className="ml-1 text-terminal-orange hover:underline cursor-pointer"
                             title={`Show the ${p.hiddenInLanesCount} session(s) hidden by the lane cap`}
                           >
                             · +{p.hiddenInLanesCount} hidden ▸
                           </button>
                         )}
-                        {expandedProjects.has(p.project) && (
+                        {expandedProjects.has(p.key) && (
                           <button
                             type="button"
-                            onClick={() => toggleExpanded(p.project)}
+                            onClick={() => toggleExpanded(p.key)}
                             className="ml-1 text-terminal-purple hover:underline cursor-pointer"
                             title="Restore the lane cap"
                           >
@@ -746,7 +782,7 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                         return (
                           <button
                             type="button"
-                            key={ts.session.sessionId}
+                            key={sessionIdentityKey(ts.session)}
                             className="absolute overflow-hidden rounded-md text-left shadow-layer-sm transition-all duration-200 ease-material hover:z-10 hover:shadow-layer-md"
                             style={{
                               ...(ts.rightAnchored
@@ -765,7 +801,7 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                               backgroundColor: hexToRgba(accentColor, ts.fillAlpha),
                             }}
                             aria-label={`Open ${sessionTitle(ts.session)}`}
-                            onClick={() => openSessionPopup(ts.session.slug)}
+                            onClick={() => openSessionPopup(ts.session)}
                             onMouseEnter={(e) => {
                               setTooltip({
                                 session: ts.session,
@@ -902,7 +938,9 @@ interface FileCluster {
 }
 
 interface ProjectFileGroup {
+  key: string;
   project: string;
+  location?: ScanResultSession["location"];
   projectIdentity?: ScanResultSession["projectIdentity"];
   colorIdx: number;
   files: FileCluster[];
@@ -938,7 +976,9 @@ function buildProjectFileGroups(groups: ProjectGroup[]): ProjectFileGroup[] {
 
     const files: FileCluster[] = [];
     for (const [file, sessions] of fileMap) {
-      const uniqueSessions = [...new Map(sessions.map((s) => [s.session.sessionId, s])).values()];
+      const uniqueSessions = [
+        ...new Map(sessions.map((s) => [sessionIdentityKey(s.session), s])).values(),
+      ];
       const totalEdits = uniqueSessions.reduce((sum, s) => sum + s.editCount, 0);
       if (uniqueSessions.length < 2 && totalEdits < 3) continue;
       files.push({
@@ -952,7 +992,9 @@ function buildProjectFileGroups(groups: ProjectGroup[]): ProjectFileGroup[] {
     if (files.length === 0) continue;
     files.sort((a, b) => b.totalEdits - a.totalEdits || b.sessions.length - a.sessions.length);
     projectFileGroups.push({
+      key: g.key,
       project: g.project,
+      location: g.location,
       projectIdentity: g.sessions[0]?.projectIdentity,
       colorIdx: g.colorIdx,
       files,
@@ -984,8 +1026,8 @@ function FileConnectionsView({
       setSelectedFile(null);
       return;
     }
-    if (!selectedProject || !projectFileGroups.some((g) => g.project === selectedProject)) {
-      setSelectedProject(projectFileGroups[0].project);
+    if (!selectedProject || !projectFileGroups.some((g) => g.key === selectedProject)) {
+      setSelectedProject(projectFileGroups[0].key);
       setSelectedFile(null);
     }
   }, [projectFileGroups, selectedProject]);
@@ -1002,7 +1044,7 @@ function FileConnectionsView({
   }
 
   const selectedProjectGroup =
-    projectFileGroups.find((g) => g.project === selectedProject) ?? projectFileGroups[0];
+    projectFileGroups.find((g) => g.key === selectedProject) ?? projectFileGroups[0];
   const selected = selectedFile
     ? selectedProjectGroup.files.find((c) => c.file === selectedFile)
     : null;
@@ -1021,12 +1063,12 @@ function FileConnectionsView({
             </div>
           </div>
           {projectFileGroups.map((group) => {
-            const isSelected = selectedProjectGroup.project === group.project;
+            const isSelected = selectedProjectGroup.key === group.key;
             return (
               <button
-                key={group.project}
+                key={group.key}
                 onClick={() => {
-                  setSelectedProject(group.project);
+                  setSelectedProject(group.key);
                   setSelectedFile(null);
                 }}
                 className={`w-full rounded-lg border px-3 py-2.5 text-left transition-all duration-200 ease-material ${
@@ -1038,6 +1080,11 @@ function FileConnectionsView({
                 <div className="truncate text-xs font-sans font-semibold">
                   {projectDisplayName(group.project, group.projectIdentity)}
                 </div>
+                {group.location?.kind === "ssh" && (
+                  <div className="mt-0.5 truncate text-[10px] font-mono text-terminal-purple">
+                    {group.location.label}
+                  </div>
+                )}
                 <div className="mt-0.5 truncate text-[10px] font-mono text-terminal-dimmer">
                   {group.project}
                 </div>
@@ -1064,6 +1111,11 @@ function FileConnectionsView({
                 selectedProjectGroup.projectIdentity,
               )}
             </div>
+            {selectedProjectGroup.location?.kind === "ssh" && (
+              <div className="mt-0.5 text-[10px] font-mono text-terminal-purple">
+                {selectedProjectGroup.location.label}
+              </div>
+            )}
             <div className="mt-0.5 truncate text-xs font-mono text-terminal-dimmer">
               {selectedProjectGroup.project}
             </div>
@@ -1139,8 +1191,8 @@ function FileConnectionsView({
                     return (
                       <button
                         type="button"
-                        key={s.session.sessionId}
-                        onClick={() => openSessionPopup(s.session.slug)}
+                        key={sessionIdentityKey(s.session)}
+                        onClick={() => openSessionPopup(s.session)}
                         className="flex w-full flex-col gap-2 rounded-xl bg-terminal-bg/45 p-3 text-left shadow-layer-sm transition-all duration-200 ease-material hover:bg-terminal-surface-hover hover:shadow-layer-md sm:flex-row sm:items-start sm:gap-3"
                       >
                         <div
@@ -1187,11 +1239,13 @@ interface SessionRelationshipsViewProps {
    * Hot Files project list collapses to a single row when filter is active.
    */
   projectFilter?: string;
+  projectLocation?: SessionLocation | "local";
 }
 
 export default function SessionRelationshipsView({
   view,
   projectFilter,
+  projectLocation,
 }: SessionRelationshipsViewProps) {
   const { sessions, loading, error } = useRelationshipData();
 
@@ -1200,9 +1254,11 @@ export default function SessionRelationshipsView({
   const filteredSessions = useMemo(
     () =>
       projectFilter
-        ? sessions.filter((s) => matchesProjectFacet(s, projectFilter, "__all__", rollupProject))
+        ? sessions.filter((s) =>
+            matchesProjectFacet(s, projectFilter, "__all__", rollupProject, projectLocation),
+          )
         : sessions,
-    [sessions, projectFilter],
+    [sessions, projectFilter, projectLocation],
   );
   const groups = useMemo(
     () => groupByProject(filteredSessions, { collapseWorktrees: true }),

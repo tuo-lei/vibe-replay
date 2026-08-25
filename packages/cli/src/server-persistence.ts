@@ -1,11 +1,26 @@
+import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { Annotation, SessionOverlays } from "./types.js";
 
+export function scopedSessionSlug(slug: string, targetId?: string): string {
+  if (!targetId) return slug;
+  const suffix = `--ssh-${createHash("sha1").update(targetId).digest("hex").slice(0, 10)}`;
+  return slug.endsWith(suffix) ? slug : `${slug}${suffix}`;
+}
+
+function sessionDirs(baseDir: string, slug: string, targetId?: string): string[] {
+  if (targetId) return [join(baseDir, scopedSessionSlug(slug, targetId))];
+  return [join(baseDir, slug), resolve("./vibe-replay", slug)];
+}
+
 /** Load annotations from disk for a given slug */
-export async function loadAnnotations(baseDir: string, slug: string): Promise<Annotation[]> {
-  const dirs = [join(baseDir, slug), resolve("./vibe-replay", slug)];
-  for (const dir of dirs) {
+export async function loadAnnotations(
+  baseDir: string,
+  slug: string,
+  targetId?: string,
+): Promise<Annotation[]> {
+  for (const dir of sessionDirs(baseDir, slug, targetId)) {
     try {
       const raw = await readFile(join(dir, "annotations.json"), "utf-8");
       const anns = JSON.parse(raw) as Annotation[];
@@ -23,9 +38,11 @@ export async function saveAnnotations(
   baseDir: string,
   slug: string,
   annotations: Annotation[],
+  targetId?: string,
 ): Promise<void> {
-  await mkdir(join(baseDir, slug), { recursive: true });
-  const annPath = join(baseDir, slug, "annotations.json");
+  const dir = join(baseDir, scopedSessionSlug(slug, targetId));
+  await mkdir(dir, { recursive: true });
+  const annPath = join(dir, "annotations.json");
   await writeFile(annPath, JSON.stringify(annotations, null, 2), "utf-8");
 }
 
@@ -34,8 +51,10 @@ export async function saveOverlays(
   baseDir: string,
   slug: string,
   overlays: SessionOverlays,
+  targetId?: string,
 ): Promise<void> {
-  await mkdir(join(baseDir, slug), { recursive: true });
-  const overlayPath = join(baseDir, slug, "overlays.json");
+  const dir = join(baseDir, scopedSessionSlug(slug, targetId));
+  await mkdir(dir, { recursive: true });
+  const overlayPath = join(dir, "overlays.json");
   await writeFile(overlayPath, JSON.stringify(overlays, null, 2), "utf-8");
 }

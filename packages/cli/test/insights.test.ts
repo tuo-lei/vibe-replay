@@ -217,6 +217,16 @@ describe("aggregateDailyInsights", () => {
           startTime: may2Morning,
           promptCount: 1,
         }),
+        makeInsight({
+          sessionId: "remote-session",
+          project: "~/remote/project",
+          provider: "codex",
+          location: { kind: "ssh", id: "remote-dev", label: "Remote dev" },
+          startTime: may1Noon,
+          promptCount: 99,
+          toolCallCount: 99,
+          costEstimate: 99,
+        }),
         makeInsight({ sessionId: "missing-time", startTime: undefined }),
       ]),
     );

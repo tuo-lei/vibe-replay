@@ -121,6 +121,38 @@ describe("parseCursorSession", () => {
     expect(mockedParseCursorSqlite).not.toHaveBeenCalled();
   });
 
+  it("skips SQLite probing for sessions discovered as transcript-only", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "cursor-parser-jsonl-only-"));
+    tempDirs.push(dir);
+    const transcript = join(dir, "session.jsonl");
+    await writeFile(
+      transcript,
+      JSON.stringify({
+        role: "user",
+        message: { content: [{ type: "text", text: "<user_query>build tests</user_query>" }] },
+      }),
+    );
+
+    const parsed = await parseCursorSession(transcript, {
+      provider: "cursor",
+      sessionId: "jsonl-only-session",
+      slug: "jsonl-on",
+      project: "/repo",
+      cwd: "/repo",
+      version: "",
+      timestamp: new Date().toISOString(),
+      lineCount: 1,
+      fileSize: 1,
+      filePath: transcript,
+      filePaths: [transcript],
+      hasSqlite: false,
+      firstPrompt: "build tests",
+    });
+
+    expect(parsed.dataSource).toBe("jsonl");
+    expect(mockedParseCursorSqlite).not.toHaveBeenCalled();
+  });
+
   it("falls back to JSONL when sqlite parsing throws", async () => {
     mockedParseCursorSqlite.mockRejectedValueOnce(new Error("no such table: meta"));
 

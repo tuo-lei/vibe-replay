@@ -76,4 +76,31 @@ describe("discoverPiSessions", () => {
       model: "gpt-5.5",
     });
   });
+
+  it("can retain a readable transcript with no prompts for remote status display", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-pi-no-prompts-"));
+    tempDirs.push(root);
+    const projectDir = join(root, "--Users-test-project--");
+    await mkdir(projectDir, { recursive: true });
+    await writeFile(
+      join(projectDir, "2026-01-01T00-00-00-000Z_metadata-only.jsonl"),
+      `${JSON.stringify({
+        type: "session",
+        version: 3,
+        id: "pi-metadata-only",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        cwd: "/Users/test/project",
+      })}\n`,
+      "utf-8",
+    );
+
+    const sessions = await discoverPiSessions(root, false, true);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]).toMatchObject({
+      sessionId: "pi-metadata-only",
+      transcriptStatus: "no-prompts",
+      firstPrompt: "",
+      promptCount: 0,
+    });
+  });
 });

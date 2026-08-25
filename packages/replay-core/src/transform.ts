@@ -4,7 +4,15 @@ import { estimateCostIfKnown, estimateCostSimpleIfKnown, getModelContextLimit } 
 import { normalizeSubAgentType, type ProviderParseResult } from "@vibe-replay/provider-contract";
 import { compactWarningSample } from "@vibe-replay/provider-contract/warnings";
 import type { ContentBlock } from "@vibe-replay/provider-contract";
-import type { DataSourceInfo, FileDiff, ReplaySession, Scene, SubAgent } from "@vibe-replay/types";
+import type {
+  DataSourceInfo,
+  FileDiff,
+  ReplaySession,
+  Scene,
+  SessionLocation,
+  SessionTranscriptStatus,
+  SubAgent,
+} from "@vibe-replay/types";
 import { REPLAY_SCHEMA_VERSION } from "@vibe-replay/types";
 import { estimateTokens } from "./utils/tokenEstimate.js";
 
@@ -30,6 +38,133 @@ function redactFilePath(s: string): string {
   return process.platform === "win32" ? redacted.replaceAll("\\", "/") : redacted;
 }
 
+function replaceRemoteHomeInText(value: string, remoteHome: string): string {
+  const home = remoteHome.replace(/\/+$/, "");
+  if (!home) return value;
+  if (value === home) return "~";
+
+  let result = "";
+  let cursor = 0;
+  while (cursor < value.length) {
+    const matchIndex = value.indexOf(home, cursor);
+    if (matchIndex < 0) {
+      result += value.slice(cursor);
+      break;
+    }
+    const before = matchIndex === 0 ? "" : value[matchIndex - 1];
+    const afterIndex = matchIndex + home.length;
+    const after = value[afterIndex];
+    const hasPathBoundary =
+      (matchIndex === 0 || !/[A-Za-z0-9._-]/.test(before)) &&
+      (afterIndex === value.length || after === "/");
+    if (!hasPathBoundary) {
+      result += value.slice(cursor, afterIndex);
+      cursor = afterIndex;
+      continue;
+    }
+    result += value.slice(cursor, matchIndex);
+    result += "~";
+    cursor = afterIndex;
+  }
+  return result;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+const REMOTE_PATH_FIELDS = new Set([
+  "cwd",
+  "project",
+  "path",
+  "file_path",
+  "filePath",
+  "filePaths",
+  "filepath",
+  "working_directory",
+  "workingDirectory",
+  "worktree",
+  "trackedFiles",
+  "contextFiles",
+  "toolPaths",
+  "command",
+]);
+
+function isPathField(key: string): boolean {
+  return REMOTE_PATH_FIELDS.has(key);
+}
+
+function redactRemotePathFields(value: unknown, remoteHome: string, parentKey = ""): unknown {
+  if (typeof value === "string") {
+    return isPathField(parentKey) ? replaceRemoteHomeInText(value, remoteHome) : value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => redactRemotePathFields(item, remoteHome, parentKey));
+  }
+  if (!isRecord(value)) return value;
+  for (const [key, child] of Object.entries(value)) {
+    value[key] = redactRemotePathFields(child, remoteHome, key);
+  }
+  return value;
+}
+
+function redactRemoteReplayScene(scene: unknown, remoteHome: string): void {
+  if (!isRecord(scene) || scene.type !== "tool-call") return;
+  if (isRecord(scene.input)) {
+    scene.input = redactRemotePathFields(scene.input, remoteHome);
+  }
+  if (isRecord(scene.bashOutput)) {
+    if (typeof scene.bashOutput.command === "string") {
+      scene.bashOutput.command = replaceRemoteHomeInText(scene.bashOutput.command, remoteHome);
+    }
+  }
+  if (isRecord(scene.diff)) {
+    scene.diff = redactRemotePathFields(scene.diff, remoteHome);
+  }
+  if (Array.isArray(scene.diffs)) {
+    scene.diffs = scene.diffs.map((diff) => redactRemotePathFields(diff, remoteHome));
+  }
+  if (isRecord(scene.subAgent) && Array.isArray(scene.subAgent.scenes)) {
+    for (const child of scene.subAgent.scenes) {
+      redactRemoteReplayScene(child, remoteHome);
+    }
+  }
+}
+
+function redactRemoteReplayPaths(replay: ReplaySession, remoteHome: string): void {
+  const meta = replay.meta as Record<string, unknown>;
+  // Recurse through metadata so nested structures such as worktree.path and
+  // provider-specific file path arrays receive the same path-only treatment.
+  redactRemotePathFields(meta, remoteHome);
+  if (isRecord(meta.dataSourceInfo)) {
+    for (const key of ["sources", "supplements"] as const) {
+      if (Array.isArray(meta.dataSourceInfo[key])) {
+        meta.dataSourceInfo[key] = meta.dataSourceInfo[key].map((path) =>
+          typeof path === "string" ? replaceRemoteHomeInText(path, remoteHome) : path,
+        );
+      }
+    }
+    if (Array.isArray(meta.dataSourceInfo.notes)) {
+      meta.dataSourceInfo.notes = meta.dataSourceInfo.notes.map((note) =>
+        typeof note === "string" ? replaceRemoteHomeInText(note, remoteHome) : note,
+      );
+    }
+  }
+  if (Array.isArray(meta.parseWarnings)) {
+    for (const warning of meta.parseWarnings) {
+      if (!isRecord(warning)) continue;
+      for (const key of ["source", "sample"] as const) {
+        if (typeof warning[key] === "string") {
+          warning[key] = replaceRemoteHomeInText(warning[key], remoteHome);
+        }
+      }
+    }
+  }
+  for (const scene of replay.scenes) {
+    redactRemoteReplayScene(scene, remoteHome);
+  }
+}
+
 export function transformToReplay(
   parsed: ProviderParseResult,
   provider: string,
@@ -37,6 +172,9 @@ export function transformToReplay(
   options?: {
     generator?: ReplaySession["meta"]["generator"];
     gitRepo?: string;
+    location?: SessionLocation;
+    transcriptStatus?: SessionTranscriptStatus;
+    remoteHome?: string;
   },
 ): ReplaySession {
   const scenes: Scene[] = [];
@@ -175,13 +313,15 @@ export function transformToReplay(
     new Date().toISOString();
   const endTime = parsed.endTime || turnTimestampBounds.endTime;
 
-  return {
+  const replay: ReplaySession = {
     schemaVersion: REPLAY_SCHEMA_VERSION,
     meta: {
       sessionId: parsed.sessionId,
       slug: parsed.slug,
       title: parsed.title,
       provider,
+      ...(options?.location ? { location: options.location } : {}),
+      ...(options?.transcriptStatus ? { transcriptStatus: options.transcriptStatus } : {}),
       dataSource: parsed.dataSource,
       dataSourceInfo: redactDataSourceInfo(parsed.dataSourceInfo),
       startTime,
@@ -213,7 +353,9 @@ export function transformToReplay(
           : {}),
       ...(parsed.gitBranch ? { gitBranch: parsed.gitBranch } : {}),
       // Provider metadata wins over caller fallback when both are present.
-      ...(parsed.gitRepo || options?.gitRepo
+      // SSH repository identifiers remain available to local dashboard filters,
+      // but must not travel inside a replay that can be published externally.
+      ...(options?.location?.kind !== "ssh" && (parsed.gitRepo || options?.gitRepo)
         ? { gitRepo: parsed.gitRepo || options?.gitRepo }
         : {}),
       ...(parsed.gitBranches ? { gitBranches: parsed.gitBranches } : {}),
@@ -251,6 +393,11 @@ export function transformToReplay(
     },
     scenes,
   };
+
+  if (options?.remoteHome) {
+    redactRemoteReplayPaths(replay, options.remoteHome);
+  }
+  return replay;
 }
 
 function buildFileDiffs(toolName: string, input: Record<string, any>): FileDiff[] {

@@ -330,7 +330,12 @@ async function loadSession(): Promise<LoadResult | "dashboard"> {
     // Load a specific session by slug (from dashboard navigation)
     const slug = params.get("session");
     if (slug) {
-      const resp = await fetch(`/api/session?slug=${encodeURIComponent(slug)}`);
+      const targetId = params.get("targetId");
+      if (targetId && !/^[a-zA-Z0-9_.-]{1,64}$/.test(targetId)) {
+        throw new Error("Invalid SSH source id");
+      }
+      const targetQuery = targetId ? `&targetId=${encodeURIComponent(targetId)}` : "";
+      const resp = await fetch(`/api/session?slug=${encodeURIComponent(slug)}${targetQuery}`);
       if (!resp.ok) throw new Error(`Session not found: ${slug}`);
       const session = parseReplaySession(await resp.json());
       return { session, mode: "editor" };
