@@ -3,6 +3,7 @@ import {
   applyDashboardFacetFilters,
   matchesProjectFacet,
   mergeCompactionCounts,
+  replayCompactionCount,
 } from "../dashboard-filtering";
 
 const ALL_PROJECTS = "__all__";
@@ -108,6 +109,12 @@ describe("dashboard facet filtering", () => {
     expect(mergeCompactionCounts(0, 2)).toBe(2);
     expect(mergeCompactionCounts(3, 2)).toBe(3);
     expect(mergeCompactionCounts(undefined, undefined)).toBe(0);
+  });
+
+  it("keeps replay snapshot compactions authoritative over the current source scan", () => {
+    expect(replayCompactionCount(0, 2)).toBe(0);
+    expect(replayCompactionCount(1, 2)).toBe(1);
+    expect(replayCompactionCount(undefined, 2)).toBe(2);
   });
 
   it("matches both canonical projects and explicitly shown run workspaces", () => {

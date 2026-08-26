@@ -18,6 +18,7 @@ import {
   matchesRepoFacet,
   mergeCompactionCounts,
   NO_REPO_FILTER,
+  replayCompactionCount,
   repoFilterValue,
 } from "../engine/dashboard-filtering";
 import { summarizeSessionUsage, type UsageEntry } from "../engine/session-usage";
@@ -4333,9 +4334,9 @@ function ReplaysPanel() {
         return {
           ...session,
           projectIdentity: session.projectIdentity ?? scanData?.projectIdentity,
-          compactionCount: mergeCompactionCounts(
-            scanData?.compactionCount,
+          compactionCount: replayCompactionCount(
             session.compactionCount,
+            scanData?.compactionCount,
           ),
           ...usageFacetValues(scanData),
         };

@@ -88,6 +88,13 @@ export function mergeCompactionCounts(...counts: Array<number | undefined>): num
   return Math.max(0, ...counts.map((count) => count ?? 0));
 }
 
+export function replayCompactionCount(
+  replayCount: number | undefined,
+  scanCount: number | undefined,
+): number {
+  return replayCount ?? scanCount ?? 0;
+}
+
 export function applyDashboardFacetFilters<T extends DashboardFilterItem>(
   items: T[],
   options: {
