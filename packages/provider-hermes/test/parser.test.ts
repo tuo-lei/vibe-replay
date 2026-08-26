@@ -457,6 +457,44 @@ describe("hermes parser", () => {
     }
   });
 
+  it("records compaction metadata from summary-only rows", async () => {
+    const db = await buildHermesDb({
+      sessions: [baseSession],
+      messages: [
+        {
+          id: 1,
+          sessionId: baseSession.id,
+          role: "user",
+          content: "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted.",
+          timestamp: 1_800_000_001,
+        },
+        {
+          id: 2,
+          sessionId: baseSession.id,
+          role: "user",
+          content: "[CONTEXT COMPACTION — REFERENCE ONLY] More turns were compacted.",
+          timestamp: 1_800_000_002,
+        },
+      ],
+    });
+
+    try {
+      const result = parseSessionFromDb(db, baseSession.id);
+      expect(result.compactions).toEqual([
+        {
+          timestamp: "2027-01-15T08:00:01.000Z",
+          trigger: "hermes-compaction-summary",
+        },
+        {
+          timestamp: "2027-01-15T08:00:02.000Z",
+          trigger: "hermes-compaction-summary",
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("counts truncated responses and collects skill names", async () => {
     const db = await buildHermesDb({
       sessions: [baseSession],
