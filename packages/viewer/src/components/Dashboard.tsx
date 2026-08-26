@@ -1280,6 +1280,7 @@ function ReplayCard({
     .join(" · ");
   const shared = !!(s.cloud || s.gist);
   const tooBig = s.replaySize != null && s.replaySize > 10 * 1024 * 1024;
+  const compactionCount = s.compactionCount ?? 0;
   const costTitle = s.stats.tokenUsage
     ? `${formatTokens(s.stats.tokenUsage.cacheReadTokens)} cache read · ${formatTokens(
         s.stats.tokenUsage.cacheCreationTokens,
@@ -1519,12 +1520,12 @@ function ReplayCard({
             {formatCost(s.stats.costEstimate)}
           </span>
         )}
-        {s.compactionCount > 0 && (
+        {compactionCount > 0 && (
           <span
             className="text-terminal-orange"
-            title={`${s.compactionCount} context compaction${s.compactionCount !== 1 ? "s" : ""}`}
+            title={`${compactionCount} context compaction${compactionCount !== 1 ? "s" : ""}`}
           >
-            {s.compactionCount} compact{s.compactionCount !== 1 ? "s" : ""}
+            {compactionCount} compact{compactionCount !== 1 ? "s" : ""}
           </span>
         )}
         {s.hasAnnotations && (
@@ -4429,7 +4430,7 @@ function ReplaysPanel() {
     multiFacetCountMap(usageFacetSessions, (session) => session.skills),
   );
   const compactedSessionCount = compactionFacetSessions.filter(
-    (session) => session.compactionCount > 0,
+    (session) => (session.compactionCount ?? 0) > 0,
   ).length;
   const showMcpToolFacet = selectedMcpServers.length > 0 || selectedMcpTools.length > 0;
   const mcpToolFacetLabel = (value: string) => {

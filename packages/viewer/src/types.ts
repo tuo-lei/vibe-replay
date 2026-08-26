@@ -46,6 +46,7 @@ export interface SessionSummary {
   startTime: string;
   endTime?: string;
   stats: ReplaySession["meta"]["stats"];
+  compactionCount?: number;
   hasAnnotations: boolean;
   annotationCount: number;
   firstMessage?: string;
