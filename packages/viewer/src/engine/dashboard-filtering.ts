@@ -84,6 +84,10 @@ export function matchesCompactionFacet(
   return !compactionsOnly || (item.compactionCount ?? 0) > 0;
 }
 
+export function mergeCompactionCounts(...counts: Array<number | undefined>): number {
+  return Math.max(0, ...counts.map((count) => count ?? 0));
+}
+
 export function applyDashboardFacetFilters<T extends DashboardFilterItem>(
   items: T[],
   options: {

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { applyDashboardFacetFilters, matchesProjectFacet } from "../dashboard-filtering";
+import {
+  applyDashboardFacetFilters,
+  matchesProjectFacet,
+  mergeCompactionCounts,
+} from "../dashboard-filtering";
 
 const ALL_PROJECTS = "__all__";
 const identityRollup = (project: string) => project;
@@ -98,6 +102,12 @@ describe("dashboard facet filtering", () => {
     );
 
     expect(filtered.map((session) => session.slug)).toEqual(["cursor-1"]);
+  });
+
+  it("keeps newer discovery compactions when a cached scan still reports zero", () => {
+    expect(mergeCompactionCounts(0, 2)).toBe(2);
+    expect(mergeCompactionCounts(3, 2)).toBe(3);
+    expect(mergeCompactionCounts(undefined, undefined)).toBe(0);
   });
 
   it("matches both canonical projects and explicitly shown run workspaces", () => {

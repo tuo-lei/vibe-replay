@@ -16,6 +16,7 @@ import {
   matchesProjectFacet,
   matchesProviderFacet,
   matchesRepoFacet,
+  mergeCompactionCounts,
   NO_REPO_FILTER,
   repoFilterValue,
 } from "../engine/dashboard-filtering";
@@ -2563,7 +2564,7 @@ function SessionsPanel() {
         const scanData = findSessionScanData(source, scanResultsIndex);
         return {
           ...source,
-          compactionCount: scanData?.compactionCount ?? source.compactionCount,
+          compactionCount: mergeCompactionCounts(scanData?.compactionCount, source.compactionCount),
           ...usageFacetValues(scanData),
         };
       }),
@@ -4329,7 +4330,10 @@ function ReplaysPanel() {
         return {
           ...session,
           projectIdentity: session.projectIdentity ?? scanData?.projectIdentity,
-          compactionCount: scanData?.compactionCount ?? session.compactionCount,
+          compactionCount: mergeCompactionCounts(
+            scanData?.compactionCount,
+            session.compactionCount,
+          ),
           ...usageFacetValues(scanData),
         };
       }),

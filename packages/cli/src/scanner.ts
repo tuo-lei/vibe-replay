@@ -1597,7 +1597,11 @@ async function getScanCacheMeta(session: ScanInput): Promise<{
   }
 
   const meta = await getFileMeta([...new Set(paths)]);
-  if (session.provider === "cursor" && session.hasSqlite) {
+  if (session.hasSqlite) {
+    // Marker paths (`db#session:id`) cannot be stat'ed directly. Use the
+    // discovery timestamp as per-session freshness so new SQLite activity
+    // invalidates only the affected cached scan instead of reopening every
+    // session whenever the shared database changes.
     const sessionTimestampMs = session.timestamp ? Date.parse(session.timestamp) : NaN;
     if (Number.isFinite(sessionTimestampMs) && sessionTimestampMs > meta.mtimeMs) {
       meta.mtimeMs = sessionTimestampMs;
