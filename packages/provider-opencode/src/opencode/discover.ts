@@ -128,6 +128,12 @@ function buildSessionStats(db: Database): Map<string, SessionStats> {
       JOIN message m ON m.id = p.message_id
       WHERE json_extract(m.data, '$.role') = 'user'
         AND json_extract(p.data, '$.type') = 'text'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM part compact
+          WHERE compact.message_id = m.id
+            AND json_extract(compact.data, '$.type') = 'compaction'
+        )
       GROUP BY m.session_id
     `,
   );
@@ -224,6 +230,12 @@ function firstUserPrompts(db: Database): Map<string, string> {
       JOIN message m ON m.id = p.message_id
       WHERE json_extract(m.data, '$.role') = 'user'
         AND json_extract(p.data, '$.type') = 'text'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM part compact
+          WHERE compact.message_id = m.id
+            AND json_extract(compact.data, '$.type') = 'compaction'
+        )
       ORDER BY m.session_id ASC, m.time_created ASC
     `,
   );
