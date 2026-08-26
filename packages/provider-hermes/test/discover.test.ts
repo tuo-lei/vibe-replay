@@ -127,6 +127,104 @@ describe("hermes discover", () => {
     }
   });
 
+  it("indexes each context-compaction boundary during discovery", async () => {
+    const db = await buildHermesDb({
+      sessions: [
+        {
+          id: "20260806_090000_cmpct2",
+          cwd: "/Users/test/project",
+          startedAt: 1_800_000_000,
+          lastActivityAt: 1_800_000_010,
+        },
+      ],
+      messages: [
+        {
+          id: 1,
+          sessionId: "20260806_090000_cmpct2",
+          role: "user",
+          content: "first prompt",
+          compacted: 1,
+          timestamp: 1_800_000_001,
+        },
+        {
+          id: 2,
+          sessionId: "20260806_090000_cmpct2",
+          role: "assistant",
+          content: "first answer",
+          compacted: 1,
+          timestamp: 1_800_000_002,
+        },
+        {
+          id: 3,
+          sessionId: "20260806_090000_cmpct2",
+          role: "user",
+          content: "[CONTEXT COMPACTION — REFERENCE ONLY] First summary.",
+          timestamp: 1_800_000_003,
+        },
+        {
+          id: 4,
+          sessionId: "20260806_090000_cmpct2",
+          role: "user",
+          content: "second prompt",
+          compacted: 1,
+          timestamp: 1_800_000_004,
+        },
+        {
+          id: 5,
+          sessionId: "20260806_090000_cmpct2",
+          role: "user",
+          content: "[CONTEXT COMPACTION — REFERENCE ONLY] Second summary.",
+          timestamp: 1_800_000_005,
+        },
+      ],
+    });
+
+    try {
+      const sessions = listSessionsFromDb(db);
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].compactionCount).toBe(2);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("indexes summary markers from Hermes stores without a compacted column", async () => {
+    const db = await buildHermesDb({
+      sessions: [
+        {
+          id: "20260806_090000_legacy",
+          cwd: "/Users/test/project",
+          startedAt: 1_800_000_000,
+        },
+      ],
+      messages: [
+        {
+          id: 1,
+          sessionId: "20260806_090000_legacy",
+          role: "user",
+          content: "first prompt",
+          timestamp: 1_800_000_001,
+        },
+        {
+          id: 2,
+          sessionId: "20260806_090000_legacy",
+          role: "user",
+          content: "[CONTEXT COMPACTION — REFERENCE ONLY] Legacy summary.",
+          timestamp: 1_800_000_002,
+        },
+      ],
+    });
+    db.run("ALTER TABLE messages DROP COLUMN compacted");
+
+    try {
+      const sessions = listSessionsFromDb(db);
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].compactionCount).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
   it("maps pinned sessions to isStarred", async () => {
     const db = await buildHermesDb({
       sessions: [

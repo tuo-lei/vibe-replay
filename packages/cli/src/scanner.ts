@@ -53,7 +53,8 @@ import { localDayKey, shortenPath } from "./utils.js";
 // v25: persist transcript availability so metadata-only sources do not look
 // like ordinary sessions that simply have not been scanned yet.
 // v27: normalize end times, ignore zero Pi usage, and use active OpenCode duration.
-export const SCANNER_VERSION = 27;
+// v28: carry discovery-indexed compaction counts through lightweight SQLite scans.
+export const SCANNER_VERSION = 28;
 
 // Keep per-invocation detail bounded in the durable insight store. The full
 // event set is still used to compute usageSummary below; only the retained
@@ -547,6 +548,7 @@ export interface ScanInput {
   discoveryPromptCount?: number;
   discoveryToolCallCount?: number;
   discoveryEditCount?: number;
+  discoveryCompactionCount?: number;
   discoveryModel?: string;
   discoveryDurationMs?: number;
   discoveryTokenUsage?: SessionScanResult["tokenUsage"];
@@ -1059,6 +1061,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
     promptCount ||= input.discoveryPromptCount || 0;
     toolCallCount ||= input.discoveryToolCallCount || 0;
     editCount ||= input.discoveryEditCount || 0;
+    compactionCount ||= input.discoveryCompactionCount || 0;
     model ||= input.discoveryModel;
     durationMs ||= input.discoveryDurationMs;
   }
@@ -1272,7 +1275,7 @@ function buildLightweightCursorScanResult(input: ScanInput): SessionScanResult {
     costEstimate: input.discoveryCostEstimate,
     subAgentCount: 0,
     apiErrorCount: 0,
-    compactionCount: 0,
+    compactionCount: input.discoveryCompactionCount ?? 0,
     dataSource,
     dataQualityNotes: [
       "Cursor SQLite/SDK rich details are deferred during background insights scans; discovery summaries are used when available.",
@@ -1305,7 +1308,7 @@ function buildLightweightOpencodeScanResult(input: ScanInput): SessionScanResult
     costEstimate: input.discoveryCostEstimate,
     subAgentCount: 0,
     apiErrorCount: 0,
-    compactionCount: 0,
+    compactionCount: input.discoveryCompactionCount ?? 0,
     dataSource: "sqlite",
     dataQualityNotes: [
       "OpenCode details are read from its SQLite database; rich per-file edit counts are resolved when a replay is generated.",
@@ -1338,7 +1341,7 @@ function buildLightweightHermesScanResult(input: ScanInput): SessionScanResult {
     costEstimate: input.discoveryCostEstimate,
     subAgentCount: 0,
     apiErrorCount: 0,
-    compactionCount: 0,
+    compactionCount: input.discoveryCompactionCount ?? 0,
     dataSource: "sqlite",
     dataQualityNotes: [
       "Hermes details are read from its SQLite database (~/.hermes/state.db); rich per-file edit counts are resolved when a replay is generated.",
@@ -1594,7 +1597,11 @@ async function getScanCacheMeta(session: ScanInput): Promise<{
   }
 
   const meta = await getFileMeta([...new Set(paths)]);
-  if (session.provider === "cursor" && session.hasSqlite) {
+  if (session.hasSqlite) {
+    // Marker paths (`db#session:id`) cannot be stat'ed directly. Use the
+    // discovery timestamp as per-session freshness so new SQLite activity
+    // invalidates only the affected cached scan instead of reopening every
+    // session whenever the shared database changes.
     const sessionTimestampMs = session.timestamp ? Date.parse(session.timestamp) : NaN;
     if (Number.isFinite(sessionTimestampMs) && sessionTimestampMs > meta.mtimeMs) {
       meta.mtimeMs = sessionTimestampMs;

@@ -12,9 +12,11 @@ import DashboardHome from "./DashboardHome";
 import { isInInsightsRange, rangeSince as insightsRangeSince } from "../engine/insights-rollup";
 import {
   applyDashboardFacetFilters,
+  matchesCompactionFacet,
   matchesProjectFacet,
   matchesProviderFacet,
   matchesRepoFacet,
+  mergeCompactionCounts,
   NO_REPO_FILTER,
   repoFilterValue,
 } from "../engine/dashboard-filtering";
@@ -1279,6 +1281,7 @@ function ReplayCard({
     .join(" · ");
   const shared = !!(s.cloud || s.gist);
   const tooBig = s.replaySize != null && s.replaySize > 10 * 1024 * 1024;
+  const compactionCount = s.compactionCount ?? 0;
   const costTitle = s.stats.tokenUsage
     ? `${formatTokens(s.stats.tokenUsage.cacheReadTokens)} cache read · ${formatTokens(
         s.stats.tokenUsage.cacheCreationTokens,
@@ -1516,6 +1519,14 @@ function ReplayCard({
         {!!s.stats.costEstimate && (
           <span className="text-terminal-green" title={costTitle}>
             {formatCost(s.stats.costEstimate)}
+          </span>
+        )}
+        {compactionCount > 0 && (
+          <span
+            className="text-terminal-orange"
+            title={`${compactionCount} context compaction${compactionCount !== 1 ? "s" : ""}`}
+          >
+            {compactionCount} compact{compactionCount !== 1 ? "s" : ""}
           </span>
         )}
         {s.hasAnnotations && (
@@ -2089,6 +2100,7 @@ function SessionsPanel() {
     filter,
     showArchived,
     showAgentRuns,
+    compactionsOnly,
     insightsRange,
     selectedProviders,
     selectedRepos,
@@ -2108,6 +2120,7 @@ function SessionsPanel() {
     handleSkillToggle,
     handleToggleArchived,
     handleToggleAgentRuns,
+    handleToggleCompactionsOnly,
     handleClearInsightsRange,
     handleClearAllFilters,
   } = usePanelFilters();
@@ -2547,10 +2560,14 @@ function SessionsPanel() {
   );
   const usageEnrichedSources = useMemo(
     () =>
-      searchMatchedSources.map((source) => ({
-        ...source,
-        ...usageFacetValues(findSessionScanData(source, scanResultsIndex)),
-      })),
+      searchMatchedSources.map((source) => {
+        const scanData = findSessionScanData(source, scanResultsIndex);
+        return {
+          ...source,
+          compactionCount: mergeCompactionCounts(scanData?.compactionCount, source.compactionCount),
+          ...usageFacetValues(scanData),
+        };
+      }),
     [scanResultsIndex, searchMatchedSources],
   );
   const usageMatchedSources = applyDashboardFacetFilters(usageEnrichedSources, {
@@ -2564,16 +2581,26 @@ function SessionsPanel() {
     selectedMcpTools,
     selectedSkills,
   });
-  const providerFacetSources = usageMatchedSources.filter(
+  const compactionMatchedSources = usageMatchedSources.filter((source) =>
+    matchesCompactionFacet(source, compactionsOnly),
+  );
+  const providerFacetSources = compactionMatchedSources.filter(
     (s) => matchesRepoFilter(s) && matchesProjectFilter(s),
   );
-  const repoFacetSources = usageMatchedSources.filter(
+  const repoFacetSources = compactionMatchedSources.filter(
     (s) => matchesProviderFilter(s) && matchesProjectFilter(s),
   );
-  const projectFacetSources = usageMatchedSources.filter(
+  const projectFacetSources = compactionMatchedSources.filter(
     (s) => matchesProviderFilter(s) && matchesRepoFilter(s),
   );
   const usageFacetSources = usageEnrichedSources.filter(
+    (s) =>
+      matchesProviderFilter(s) &&
+      matchesRepoFilter(s) &&
+      matchesProjectFilter(s) &&
+      matchesCompactionFacet(s, compactionsOnly),
+  );
+  const compactionFacetSources = usageMatchedSources.filter(
     (s) => matchesProviderFilter(s) && matchesRepoFilter(s) && matchesProjectFilter(s),
   );
 
@@ -2593,6 +2620,9 @@ function SessionsPanel() {
   const skillEntries = sortedFacetEntries(
     multiFacetCountMap(usageFacetSources, (source) => source.skills),
   );
+  const compactedSessionCount = compactionFacetSources.filter(
+    (source) => (source.compactionCount ?? 0) > 0,
+  ).length;
 
   const showMcpToolFacet = selectedMcpServers.length > 0 || selectedMcpTools.length > 0;
   // Under a selected server the `server/` prefix is the same on every row.
@@ -2664,6 +2694,7 @@ function SessionsPanel() {
     selectedMcpServers,
     selectedMcpTools,
     selectedSkills,
+    compactionsOnly,
   });
   const refreshAge = lastRefreshedAt ? formatCompactAge(lastRefreshedAt, refreshClockMs) : null;
   const priorityEnrichmentSlugs = new Set(filtered.slice(0, 25).map((session) => session.slug));
@@ -2675,6 +2706,7 @@ function SessionsPanel() {
     selectedMcpServers.length > 0 ||
     selectedMcpTools.length > 0 ||
     selectedSkills.length > 0 ||
+    compactionsOnly ||
     selectedProjectKey !== ALL_PROJECTS ||
     insightsRange !== "all";
   const [renderLimit, setRenderLimit] = useState(SESSION_RENDER_BATCH_SIZE);
@@ -2688,6 +2720,7 @@ function SessionsPanel() {
     selectedMcpServers.join("\0"),
     selectedMcpTools.join("\0"),
     selectedSkills.join("\0"),
+    compactionsOnly ? "compacted" : "all-compactions",
     selectedProjectKey,
     selectedTargetId || "",
     insightsRange,
@@ -2704,6 +2737,7 @@ function SessionsPanel() {
     selectedMcpServers,
     selectedMcpTools,
     selectedSkills,
+    compactionsOnly,
     selectedProjectKey,
     selectedTargetId,
     insightsRange,
@@ -2854,6 +2888,14 @@ function SessionsPanel() {
             onToggle={handleRepoToggle}
             labelFor={repoFilterLabel}
             max={8}
+          />
+
+          <FacetSection
+            title="Session signal"
+            entries={[["compacted", compactedSessionCount]]}
+            selected={compactionsOnly ? ["compacted"] : []}
+            onToggle={handleToggleCompactionsOnly}
+            labelFor={() => "Compacted"}
           />
 
           <div className="space-y-1 border-t border-terminal-border-subtle pt-4">
@@ -3095,6 +3137,17 @@ function SessionsPanel() {
               </option>
             ))}
           </select>
+          <button
+            aria-pressed={compactionsOnly}
+            onClick={handleToggleCompactionsOnly}
+            className={`w-full rounded-lg px-3 py-2.5 text-left text-sm font-sans shadow-layer-sm transition-colors ${
+              compactionsOnly
+                ? "bg-terminal-orange-subtle text-terminal-orange"
+                : "bg-terminal-surface text-terminal-dim"
+            }`}
+          >
+            Compacted sessions ({compactedSessionCount})
+          </button>
         </div>
 
         {/* Insights header + search */}
@@ -3166,6 +3219,13 @@ function SessionsPanel() {
                     onRemove={() => handleRepoToggle(repo)}
                   />
                 ))}
+                {compactionsOnly && (
+                  <ActiveFilterChip
+                    label="Signal"
+                    value="Compacted"
+                    onRemove={handleToggleCompactionsOnly}
+                  />
+                )}
                 {selectedTools.map((tool) => (
                   <ActiveFilterChip
                     key={tool}
@@ -3284,6 +3344,13 @@ function SessionsPanel() {
                   onRemove={() => handleRepoToggle(repo)}
                 />
               ))}
+              {compactionsOnly && (
+                <ActiveFilterChip
+                  label="Signal"
+                  value="Compacted"
+                  onRemove={handleToggleCompactionsOnly}
+                />
+              )}
               {selectedTools.map((tool) => (
                 <ActiveFilterChip
                   key={tool}
@@ -3470,7 +3537,10 @@ function SessionsPanel() {
                 const isRecentSession =
                   Date.now() - new Date(s.timestamp).getTime() < LIVE_RECENT_MS;
                 const errorCount = scanData?.apiErrorCount ?? 0;
-                const compactionCount = scanData?.compactionCount ?? 0;
+                const compactionCount = mergeCompactionCounts(
+                  scanData?.compactionCount,
+                  s.compactionCount,
+                );
                 // "clean" is only meaningful once scanned (scanData present).
                 const cleanRun = !!scanData && errorCount === 0;
                 const providerTooltip = [
@@ -3731,11 +3801,16 @@ function SessionsPanel() {
                           {formatCost(displayCost)}
                         </span>
                       )}
-                      {cleanRun ? (
+                      {compactionCount > 0 && (
                         <span
-                          className="text-terminal-green"
-                          title={`No API errors${compactionCount === 0 ? " · no compactions" : ` · ${compactionCount} compaction(s)`}`}
+                          className="text-terminal-orange"
+                          title={`${compactionCount} context compaction${compactionCount !== 1 ? "s" : ""}`}
                         >
+                          {compactionCount} compact{compactionCount !== 1 ? "s" : ""}
+                        </span>
+                      )}
+                      {cleanRun ? (
+                        <span className="text-terminal-green" title="No API errors">
                           ✓ no errors
                         </span>
                       ) : (
@@ -4026,6 +4101,7 @@ function ReplaysPanel() {
     filter,
     showArchived,
     showAgentRuns,
+    compactionsOnly,
     selectedProviders,
     selectedRepos,
     selectedTools,
@@ -4044,6 +4120,7 @@ function ReplaysPanel() {
     handleSkillToggle,
     handleToggleArchived,
     handleToggleAgentRuns,
+    handleToggleCompactionsOnly,
     handleClearAllFilters,
   } = usePanelFilters();
   const { scanStatus } = useScanInsightsContext();
@@ -4256,6 +4333,10 @@ function ReplaysPanel() {
         return {
           ...session,
           projectIdentity: session.projectIdentity ?? scanData?.projectIdentity,
+          compactionCount: mergeCompactionCounts(
+            scanData?.compactionCount,
+            session.compactionCount,
+          ),
           ...usageFacetValues(scanData),
         };
       }),
@@ -4316,16 +4397,26 @@ function ReplaysPanel() {
     selectedMcpTools,
     selectedSkills,
   });
-  const providerFacetSessions = usageMatchedSessions.filter(
+  const compactionMatchedSessions = usageMatchedSessions.filter((session) =>
+    matchesCompactionFacet(session, compactionsOnly),
+  );
+  const providerFacetSessions = compactionMatchedSessions.filter(
     (s) => matchesRepoFilter(s) && matchesProjectFilter(s),
   );
-  const repoFacetSessions = usageMatchedSessions.filter(
+  const repoFacetSessions = compactionMatchedSessions.filter(
     (s) => matchesProviderFilter(s) && matchesProjectFilter(s),
   );
-  const projectFacetSessions = usageMatchedSessions.filter(
+  const projectFacetSessions = compactionMatchedSessions.filter(
     (s) => matchesProviderFilter(s) && matchesRepoFilter(s),
   );
   const usageFacetSessions = searchMatchedSessions.filter(
+    (s) =>
+      matchesProviderFilter(s) &&
+      matchesRepoFilter(s) &&
+      matchesProjectFilter(s) &&
+      matchesCompactionFacet(s, compactionsOnly),
+  );
+  const compactionFacetSessions = usageMatchedSessions.filter(
     (s) => matchesProviderFilter(s) && matchesRepoFilter(s) && matchesProjectFilter(s),
   );
 
@@ -4345,6 +4436,9 @@ function ReplaysPanel() {
   const skillEntries = sortedFacetEntries(
     multiFacetCountMap(usageFacetSessions, (session) => session.skills),
   );
+  const compactedSessionCount = compactionFacetSessions.filter(
+    (session) => (session.compactionCount ?? 0) > 0,
+  ).length;
   const showMcpToolFacet = selectedMcpServers.length > 0 || selectedMcpTools.length > 0;
   const mcpToolFacetLabel = (value: string) => {
     const server = selectedMcpServers.find((s) => value.startsWith(`${s}/`));
@@ -4394,6 +4488,7 @@ function ReplaysPanel() {
     selectedMcpServers,
     selectedMcpTools,
     selectedSkills,
+    compactionsOnly,
   });
   const refreshAge = lastRefreshedAt ? formatCompactAge(lastRefreshedAt, refreshClockMs) : null;
   const hasActiveFilters =
@@ -4404,6 +4499,7 @@ function ReplaysPanel() {
     selectedMcpServers.length > 0 ||
     selectedMcpTools.length > 0 ||
     selectedSkills.length > 0 ||
+    compactionsOnly ||
     selectedProjectKey !== ALL_PROJECTS;
   const [renderLimit, setRenderLimit] = useState(SESSION_RENDER_BATCH_SIZE);
   const providerFilterKey = selectedProviders.join("\0");
@@ -4416,6 +4512,7 @@ function ReplaysPanel() {
     selectedMcpServers.join("\0"),
     selectedMcpTools.join("\0"),
     selectedSkills.join("\0"),
+    compactionsOnly ? "compacted" : "all-compactions",
     selectedProjectKey,
     selectedTargetId || "",
     showArchived ? "archived" : "active",
@@ -4431,6 +4528,7 @@ function ReplaysPanel() {
     selectedMcpServers,
     selectedMcpTools,
     selectedSkills,
+    compactionsOnly,
     selectedProjectKey,
     selectedTargetId,
     showArchived,
@@ -4516,6 +4614,14 @@ function ReplaysPanel() {
             onToggle={handleRepoToggle}
             labelFor={repoFilterLabel}
             max={8}
+          />
+
+          <FacetSection
+            title="Session signal"
+            entries={[["compacted", compactedSessionCount]]}
+            selected={compactionsOnly ? ["compacted"] : []}
+            onToggle={handleToggleCompactionsOnly}
+            labelFor={() => "Compacted"}
           />
 
           <FacetSection
@@ -4718,6 +4824,17 @@ function ReplaysPanel() {
               </option>
             ))}
           </select>
+          <button
+            aria-pressed={compactionsOnly}
+            onClick={handleToggleCompactionsOnly}
+            className={`w-full rounded-lg px-3 py-2.5 text-left text-sm font-sans shadow-layer-sm transition-colors ${
+              compactionsOnly
+                ? "bg-terminal-orange-subtle text-terminal-orange"
+                : "bg-terminal-surface text-terminal-dim"
+            }`}
+          >
+            Compacted replays ({compactedSessionCount})
+          </button>
         </div>
 
         {/* Header + search */}
@@ -4781,6 +4898,13 @@ function ReplaysPanel() {
                     onRemove={() => handleRepoToggle(repo)}
                   />
                 ))}
+                {compactionsOnly && (
+                  <ActiveFilterChip
+                    label="Signal"
+                    value="Compacted"
+                    onRemove={handleToggleCompactionsOnly}
+                  />
+                )}
                 {selectedTools.map((tool) => (
                   <ActiveFilterChip
                     key={tool}
@@ -4929,6 +5053,13 @@ function ReplaysPanel() {
                   onRemove={() => handleRepoToggle(repo)}
                 />
               ))}
+              {compactionsOnly && (
+                <ActiveFilterChip
+                  label="Signal"
+                  value="Compacted"
+                  onRemove={handleToggleCompactionsOnly}
+                />
+              )}
               {selectedTools.map((tool) => (
                 <ActiveFilterChip
                   key={tool}

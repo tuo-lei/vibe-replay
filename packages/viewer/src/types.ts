@@ -46,6 +46,7 @@ export interface SessionSummary {
   startTime: string;
   endTime?: string;
   stats: ReplaySession["meta"]["stats"];
+  compactionCount?: number;
   hasAnnotations: boolean;
   annotationCount: number;
   firstMessage?: string;
@@ -100,6 +101,7 @@ export interface SourceSession {
   model?: string;
   durationMsEst?: number;
   editCountEst?: number;
+  compactionCount?: number;
   hasPR?: boolean;
   isStarred?: boolean;
   spaceId?: string;

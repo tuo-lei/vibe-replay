@@ -171,6 +171,7 @@ export function scanInputFromSession(session: SessionInfo): ScanInput {
     discoveryPromptCount: session.promptCount,
     discoveryToolCallCount: session.toolCallCount,
     discoveryEditCount: session.editCountEst,
+    discoveryCompactionCount: session.compactionCount,
     discoveryModel: session.model,
     discoveryDurationMs: session.durationMsEst,
     remoteHome: getRemoteHome(session.location?.kind === "ssh" ? session.location.id : undefined),

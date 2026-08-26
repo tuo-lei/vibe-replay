@@ -52,6 +52,7 @@ export interface ReplaySummary {
   startTime: string;
   endTime?: string;
   stats: ReplaySession["meta"]["stats"];
+  compactionCount?: number;
   replaySize: number;
   generatorVersion?: string;
   replayOutdated: boolean;

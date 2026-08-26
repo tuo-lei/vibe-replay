@@ -12,6 +12,7 @@ export interface DashboardFilterItem {
   mcpServers?: readonly string[];
   mcpTools?: readonly string[];
   skills?: readonly string[];
+  compactionCount?: number;
 }
 
 export function repoFilterValue(s: Pick<DashboardFilterItem, "gitRepo">): string {
@@ -76,6 +77,17 @@ export function matchesUsageFacets(
   );
 }
 
+export function matchesCompactionFacet(
+  item: Pick<DashboardFilterItem, "compactionCount">,
+  compactionsOnly: boolean,
+): boolean {
+  return !compactionsOnly || (item.compactionCount ?? 0) > 0;
+}
+
+export function mergeCompactionCounts(...counts: Array<number | undefined>): number {
+  return Math.max(0, ...counts.map((count) => count ?? 0));
+}
+
 export function applyDashboardFacetFilters<T extends DashboardFilterItem>(
   items: T[],
   options: {
@@ -89,6 +101,7 @@ export function applyDashboardFacetFilters<T extends DashboardFilterItem>(
     selectedMcpServers?: readonly string[];
     selectedMcpTools?: readonly string[];
     selectedSkills?: readonly string[];
+    compactionsOnly?: boolean;
   },
 ): T[] {
   const selectedProviderSet = new Set(options.selectedProviders);
@@ -114,6 +127,7 @@ export function applyDashboardFacetFilters<T extends DashboardFilterItem>(
         selectedMcpServerSet,
         selectedMcpToolSet,
         selectedSkillSet,
-      ),
+      ) &&
+      matchesCompactionFacet(item, options.compactionsOnly ?? false),
   );
 }

@@ -110,6 +110,7 @@ interface SessionStats {
   promptCount: number;
   toolCallCount: number;
   editCountEst: number;
+  compactionCount: number;
   firstPrompt: string;
   durationMs?: number;
 }
@@ -149,6 +150,15 @@ function buildSessionStats(db: Database): Map<string, SessionStats> {
       GROUP BY session_id
     `,
   );
+  const compactionCounts = countBySession(
+    db,
+    `
+      SELECT session_id, count(*) AS c
+      FROM part
+      WHERE json_extract(data, '$.type') = 'compaction'
+      GROUP BY session_id
+    `,
+  );
   const firstPrompts = firstUserPrompts(db);
   const durations = activeDurationsBySession(db);
 
@@ -161,6 +171,7 @@ function buildSessionStats(db: Database): Map<string, SessionStats> {
       promptCount: promptCounts.get(sessionId) ?? 0,
       toolCallCount: toolCounts.get(sessionId) ?? 0,
       editCountEst: editToolCounts.get(sessionId) ?? 0,
+      compactionCount: compactionCounts.get(sessionId) ?? 0,
       firstPrompt: firstPrompts.get(sessionId) ?? "",
       durationMs: durations.get(sessionId),
     });
@@ -265,6 +276,7 @@ function sessionInfoFromRow(row: OpencodeSessionRow, stats: SessionStats): Sessi
     model,
     durationMsEst: stats.durationMs,
     editCountEst: stats.editCountEst,
+    compactionCount: stats.compactionCount,
   };
 }
 
