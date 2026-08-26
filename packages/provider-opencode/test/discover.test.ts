@@ -139,4 +139,41 @@ describe("opencode discover", () => {
       db.close();
     }
   });
+
+  it("excludes synthetic compaction text from prompt discovery", async () => {
+    const db = await buildOpencodeDb({
+      session: [{ id: "ses_compaction_text", slug: "compaction-text" }],
+      messages: [
+        {
+          id: "mct1",
+          sessionId: "ses_compaction_text",
+          role: "user",
+          timeCreated: 1_800_000_010_000,
+          parts: [
+            { type: "compaction", auto: true },
+            { type: "text", text: "Synthetic context summary" },
+          ],
+        },
+        {
+          id: "mct2",
+          sessionId: "ses_compaction_text",
+          role: "user",
+          timeCreated: 1_800_000_020_000,
+          parts: [{ type: "text", text: "Continue the real task" }],
+        },
+      ],
+    });
+
+    try {
+      const sessions = listSessionsFromDb(db);
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0]).toMatchObject({
+        firstPrompt: "Continue the real task",
+        promptCount: 1,
+        compactionCount: 1,
+      });
+    } finally {
+      db.close();
+    }
+  });
 });
