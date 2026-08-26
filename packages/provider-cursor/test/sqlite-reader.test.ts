@@ -610,6 +610,12 @@ describe("cursor sqlite metrics helpers", () => {
     ).toBe("2026-04-28T20:25:48.085Z");
   });
 
+  it("keeps global-state start time at least as early as turn timestamps", () => {
+    expect(
+      __testables.minIsoTimestamp(["2026-04-28T20:25:48.109Z", "2026-04-28T20:24:48.085Z"]),
+    ).toBe("2026-04-28T20:24:48.085Z");
+  });
+
   it("extracts new Cursor composerData sidecar metadata", () => {
     expect(
       __testables.cursorComposerSidecarMetadata({

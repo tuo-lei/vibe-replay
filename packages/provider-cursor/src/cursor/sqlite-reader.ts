@@ -913,6 +913,18 @@ function maxIsoTimestamp(values: Array<unknown>): string | undefined {
   return maxMs === undefined ? undefined : new Date(maxMs).toISOString();
 }
 
+function minIsoTimestamp(values: Array<unknown>): string | undefined {
+  let minMs: number | undefined;
+  for (const value of values) {
+    const iso = toIsoTimestamp(value);
+    if (!iso) continue;
+    const ms = Date.parse(iso);
+    if (!Number.isFinite(ms)) continue;
+    if (minMs === undefined || ms < minMs) minMs = ms;
+  }
+  return minMs === undefined ? undefined : new Date(minMs).toISOString();
+}
+
 function bubbleTimestamp(bubble: Record<string, any>): string | undefined {
   const timingInfo =
     bubble.timingInfo && typeof bubble.timingInfo === "object"
@@ -3184,11 +3196,12 @@ async function parseCursorGlobalStateDb(
     );
     const requestContexts = await loadCursorRequestContexts(resolvedGlobalStateDb, sessionId);
 
-    const startTime = toIsoTimestamp(composer.createdAt);
+    const turnTimestamps = turns.map((turn) => turn.timestamp).filter(Boolean);
+    const startTime = minIsoTimestamp([composer.createdAt, ...turnTimestamps]);
     const endTime = maxIsoTimestamp([
       composer.lastUpdatedAt,
       composer.conversationCheckpointLastUpdatedAt,
-      ...turns.map((turn) => turn.timestamp).filter(Boolean),
+      ...turnTimestamps,
     ]);
     const sessionTokenUsage = tokenUsageFromCursorTokenCount(composer.tokenCount);
     const metrics = buildGlobalStateMetrics(entries, modelName, sessionTokenUsage);
@@ -3485,6 +3498,7 @@ export const __testables = {
   mapCursorToolName,
   mapToolArgs,
   maxIsoTimestamp,
+  minIsoTimestamp,
   mergeCursorParseResults,
   messagesToTurns,
   mergeTurnStats,

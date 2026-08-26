@@ -1,6 +1,7 @@
 /// <reference path="../sql-js.d.ts" />
 import type { Database } from "sql.js";
 import { cleanPromptText } from "@vibe-replay/provider-core/clean-prompt";
+import { estimateActiveDuration } from "@vibe-replay/provider-core/duration";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
 import { shortenPath } from "@vibe-replay/provider-core/utils";
 import { openOpencodeDb, opencodeDataDir, opencodeDbPath } from "./sqlite.js";
@@ -110,6 +111,7 @@ interface SessionStats {
   toolCallCount: number;
   editCountEst: number;
   firstPrompt: string;
+  durationMs?: number;
 }
 
 function buildSessionStats(db: Database): Map<string, SessionStats> {
@@ -148,6 +150,7 @@ function buildSessionStats(db: Database): Map<string, SessionStats> {
     `,
   );
   const firstPrompts = firstUserPrompts(db);
+  const durations = activeDurationsBySession(db);
 
   const map = new Map<string, SessionStats>();
   for (const row of messageCounts) {
@@ -159,9 +162,33 @@ function buildSessionStats(db: Database): Map<string, SessionStats> {
       toolCallCount: toolCounts.get(sessionId) ?? 0,
       editCountEst: editToolCounts.get(sessionId) ?? 0,
       firstPrompt: firstPrompts.get(sessionId) ?? "",
+      durationMs: durations.get(sessionId),
     });
   }
   return map;
+}
+
+/** Estimate active time from message activity, capping long idle gaps. */
+function activeDurationsBySession(db: Database): Map<string, number> {
+  const timestamps = new Map<string, string[]>();
+  for (const row of rowValues(
+    db,
+    `SELECT session_id, time_created FROM message ORDER BY session_id ASC, time_created ASC`,
+  )) {
+    const sessionId = String(row.session_id ?? "");
+    const timestamp = toIsoMs(Number(row.time_created));
+    if (!sessionId || !timestamp) continue;
+    const values = timestamps.get(sessionId) || [];
+    values.push(timestamp);
+    timestamps.set(sessionId, values);
+  }
+
+  const durations = new Map<string, number>();
+  for (const [sessionId, values] of timestamps) {
+    const durationMs = estimateActiveDuration(values);
+    if (durationMs !== undefined) durations.set(sessionId, durationMs);
+  }
+  return durations;
 }
 
 /** Map session_id → aggregate count for a `GROUP BY session_id` query. */
@@ -236,10 +263,7 @@ function sessionInfoFromRow(row: OpencodeSessionRow, stats: SessionStats): Sessi
     promptCount: stats.promptCount,
     toolCallCount: stats.toolCallCount,
     model,
-    durationMsEst:
-      row.time_created > 0 && row.time_updated > row.time_created
-        ? row.time_updated - row.time_created
-        : undefined,
+    durationMsEst: stats.durationMs,
     editCountEst: stats.editCountEst,
   };
 }

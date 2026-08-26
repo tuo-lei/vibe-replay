@@ -28,6 +28,16 @@ describe("getModelPricing — model family detection", () => {
     expect(p.outputRate).toBe(25);
   });
 
+  it("returns current Opus pricing for Opus 4.8 and Opus 5", () => {
+    expect(getKnownModelPricing("claude-opus-4-8")).toMatchObject({
+      inputRate: 5,
+      outputRate: 25,
+      cacheCreateRate: 6.25,
+      cacheReadRate: 0.5,
+    });
+    expect(getKnownModelPricing("claude-opus-5")).toEqual(getKnownModelPricing("claude-opus-4-8"));
+  });
+
   it("returns legacy Opus pricing for opus-4-20250514 (4.1)", () => {
     const p = getModelPricing("claude-opus-4-20250514");
     expect(p.inputRate).toBe(15);
@@ -70,6 +80,24 @@ describe("getModelPricing — model family detection", () => {
     expect(p.cacheReadRate).toBe(0.5);
   });
 
+  it("returns GPT-5.6 family pricing for effort-suffixed model IDs", () => {
+    expect(getKnownModelPricing("gpt-5.6")).toEqual(getKnownModelPricing("gpt-5.6-sol"));
+    expect(getKnownModelPricing("gpt-5.6-sol-xhigh")).toMatchObject({
+      inputRate: 4,
+      outputRate: 20,
+      cacheCreateRate: 5,
+      cacheReadRate: 0.4,
+    });
+    expect(getKnownModelPricing("gpt-5.6-terra-medium")).toMatchObject({
+      inputRate: 2,
+      outputRate: 12,
+    });
+    expect(getKnownModelPricing("gpt-5.6-luna")).toMatchObject({
+      inputRate: 0.2,
+      outputRate: 1.2,
+    });
+  });
+
   it("returns GPT-5.4 pricing for Codex model IDs", () => {
     const p = getModelPricing("gpt-5.4-high");
     expect(p.inputRate).toBe(2.5);
@@ -106,17 +134,16 @@ describe("getModelPricing — model family detection", () => {
 
   it("distinguishes unknown pricing without changing the legacy fallback", () => {
     expect(getKnownModelPricing("some-unknown-model")).toBeUndefined();
-    expect(getKnownModelPricing("claude-opus-4-8")).toBeUndefined();
     expect(getKnownModelPricing("claude-opus-4-10")).toBeUndefined();
     expect(getKnownModelPricing("claude-sonnet-4-8")).toBeUndefined();
     expect(getKnownModelPricing("claude-haiku-4-8")).toBeUndefined();
-    expect(getKnownModelPricing("claude-opus-5")).toBeUndefined();
     expect(getKnownModelPricing("claude-sonnet-5")).toBeUndefined();
     expect(getKnownModelPricing("claude-haiku-5")).toBeUndefined();
-    for (const family of ["opus", "sonnet", "haiku"]) {
+    for (const family of ["sonnet", "haiku"]) {
       expect(getKnownModelPricing(`claude-${family}-4-60`)).toBeUndefined();
       expect(getKnownModelPricing(`claude-4-8-${family}`)).toBeUndefined();
     }
+    expect(getKnownModelPricing("claude-opus-4-60")).toBeUndefined();
     expect(getKnownModelPricing("claude-opus-4-100")).toBeUndefined();
     expect(getKnownModelPricing("claude-4-600-haiku")).toBeUndefined();
     expect(getKnownModelPricing("claude-4-1-sonnet")).toBe(
@@ -135,6 +162,7 @@ describe("getModelPricing — model family detection", () => {
 describe("getModelContextLimit", () => {
   it("returns GPT-5.x public pricing threshold as fallback context limit", () => {
     expect(getModelContextLimit("gpt-5.5")).toBe(270_000);
+    expect(getModelContextLimit("gpt-5.6-sol")).toBe(1_050_000);
     expect(getModelContextLimit("gpt-5.4-high")).toBe(270_000);
     expect(getModelContextLimit("gpt-5.4-mini")).toBe(270_000);
   });

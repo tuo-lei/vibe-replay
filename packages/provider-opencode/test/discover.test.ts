@@ -84,7 +84,7 @@ describe("opencode discover", () => {
         hasSqlite: true,
       });
       expect(main?.filePath).toContain("#session:ses_main");
-      expect(main?.durationMsEst).toBe(100_000);
+      expect(main?.durationMsEst).toBe(20_000);
     } finally {
       db.close();
     }

@@ -280,13 +280,15 @@ export function parsePiLines(
           model = model || msgModel;
           currentModel = msgModel;
         }
-        if (message.usage && entry.id) {
+        if (message.usage && entry.id && hasValidUsageValues(message.usage)) {
           const usage = normalizeUsage(message.usage);
-          usageByMessageId.set(entry.id, {
-            usage,
-            model: msgModel,
-            contextTokens: usage.inputTokens + usage.cacheCreationTokens + usage.cacheReadTokens,
-          });
+          if (tokenUsageTotal(usage) > 0) {
+            usageByMessageId.set(entry.id, {
+              usage,
+              model: msgModel,
+              contextTokens: usage.inputTokens + usage.cacheCreationTokens + usage.cacheReadTokens,
+            });
+          }
         }
         turns.push({
           role: "assistant",
@@ -657,12 +659,7 @@ function collectSummaryUsage(
   const rawUsage = usage as PiUsage;
   if (!hasValidUsageValues(rawUsage)) return;
   const normalized = normalizeUsage(rawUsage);
-  const total =
-    normalized.inputTokens +
-    normalized.outputTokens +
-    normalized.cacheCreationTokens +
-    normalized.cacheReadTokens;
-  if (total === 0) return;
+  if (tokenUsageTotal(normalized) === 0) return;
   target.push({ usage: normalized, ...(model ? { model } : {}) });
 }
 
@@ -677,6 +674,10 @@ function normalizeUsage(usage: PiUsage): TokenUsage {
 
 function tokenCount(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+function tokenUsageTotal(usage: TokenUsage): number {
+  return usage.inputTokens + usage.outputTokens + usage.cacheCreationTokens + usage.cacheReadTokens;
 }
 
 function hasValidUsageValues(usage: PiUsage): boolean {
