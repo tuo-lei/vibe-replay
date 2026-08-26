@@ -80,6 +80,26 @@ describe("dashboard facet filtering", () => {
     expect(filtered.map((session) => session.slug)).toEqual(["cursor-1"]);
   });
 
+  it("filters to sessions with indexed compactions", () => {
+    const filtered = applyDashboardFacetFilters(
+      [
+        { ...sessions[0], compactionCount: 2 },
+        { ...sessions[1], compactionCount: 0 },
+        { ...sessions[2], compactionCount: undefined },
+      ],
+      {
+        selectedProviders: [],
+        selectedRepos: [],
+        selectedProjectKey: ALL_PROJECTS,
+        allProjectsKey: ALL_PROJECTS,
+        rollupProject: identityRollup,
+        compactionsOnly: true,
+      },
+    );
+
+    expect(filtered.map((session) => session.slug)).toEqual(["cursor-1"]);
+  });
+
   it("matches both canonical projects and explicitly shown run workspaces", () => {
     const parent = "~/code/example";
     const runWorkspace = `${parent}/run-abcdef123456`;

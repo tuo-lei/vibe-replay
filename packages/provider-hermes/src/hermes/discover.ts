@@ -110,6 +110,7 @@ interface SessionStats {
   promptCount: number;
   toolCallCount: number;
   editCountEst: number;
+  compactionCount: number;
   firstPrompt: string;
 }
 
@@ -145,6 +146,7 @@ function buildSessionStats(db: Database, rows: HermesSessionRow[]): Map<string, 
       GROUP BY session_id
     `,
   );
+  const compactionCounts = compactionCountsBySession(db);
   const firstPrompts = firstUserPrompts(db);
 
   const map = new Map<string, SessionStats>();
@@ -155,10 +157,72 @@ function buildSessionStats(db: Database, rows: HermesSessionRow[]): Map<string, 
       promptCount: promptCounts.get(row.id) ?? 0,
       toolCallCount: Number(row.tool_call_count ?? 0),
       editCountEst: editToolCounts.get(row.id) ?? 0,
+      compactionCount: compactionCounts.get(row.id) ?? 0,
       firstPrompt: firstPrompts.get(row.id) ?? "",
     });
   }
   return map;
+}
+
+/**
+ * Hermes exposes compaction through both compacted transcript runs and injected
+ * summary rows. Count run boundaries to match the parser, while retaining the
+ * marker count as a fallback for stores that only have summary rows.
+ */
+function compactionCountsBySession(db: Database): Map<string, number> {
+  const states = new Map<
+    string,
+    { previousCompacted: boolean; compactedRuns: number; summaryMarkers: number }
+  >();
+  let rows: ReturnType<typeof rowValues>;
+  try {
+    rows = rowValues(
+      db,
+      `
+        SELECT session_id, role, content, compacted
+        FROM messages
+        ORDER BY session_id ASC, timestamp ASC, id ASC
+      `,
+    );
+  } catch {
+    // Older stores may predate the compacted column but can still contain
+    // summary marker rows, which remain enough to identify compacted sessions.
+    rows = rowValues(
+      db,
+      `
+        SELECT session_id, role, content, 0 AS compacted
+        FROM messages
+        ORDER BY session_id ASC, timestamp ASC, id ASC
+      `,
+    );
+  }
+  for (const row of rows) {
+    const sessionId = String(row.session_id ?? "");
+    if (!sessionId) continue;
+    const state = states.get(sessionId) || {
+      previousCompacted: false,
+      compactedRuns: 0,
+      summaryMarkers: 0,
+    };
+    const isCompacted = Number(row.compacted) === 1;
+    if (isCompacted && !state.previousCompacted) state.compactedRuns++;
+    state.previousCompacted = isCompacted;
+    if (
+      row.role === "user" &&
+      typeof row.content === "string" &&
+      row.content.trim().startsWith("[CONTEXT COMPACTION")
+    ) {
+      state.summaryMarkers++;
+    }
+    states.set(sessionId, state);
+  }
+
+  return new Map(
+    [...states].map(([sessionId, state]) => [
+      sessionId,
+      Math.max(state.compactedRuns, state.summaryMarkers),
+    ]),
+  );
 }
 
 /** Map session_id → aggregate count for a `GROUP BY session_id` query. */
@@ -239,6 +303,7 @@ function sessionInfoFromRow(
         ? toMillis(lastActivity) - toMillis(row.started_at)
         : undefined,
     editCountEst: stats.editCountEst,
+    compactionCount: stats.compactionCount,
     isStarred: row.pinned === 1,
   };
 }

@@ -1212,6 +1212,22 @@ describe("scanSession", () => {
     });
   });
 
+  it("preserves discovery compaction counts in lightweight SQLite scans", async () => {
+    const result = await scanSession({
+      sessionId: "opencode-compacted",
+      provider: "opencode",
+      project: "~/test/project",
+      slug: "opencode-compacted",
+      filePaths: [],
+      hasSqlite: true,
+      timestamp: "2026-03-20T10:00:00.000Z",
+      firstPrompt: "Continue after compaction.",
+      discoveryCompactionCount: 2,
+    });
+
+    expect(result.compactionCount).toBe(2);
+  });
+
   it("marks Pi rich-parser fallback as partial and preserves discovery counts", async () => {
     const missingPath = join(tmpDir, "missing-pi-session.jsonl");
     const result = await scanSession({

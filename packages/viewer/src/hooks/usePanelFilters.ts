@@ -37,6 +37,9 @@ function getShowArchivedFromUrl(): boolean {
 function getShowAgentRunsFromUrl(): boolean {
   return new URLSearchParams(window.location.search).get("agentRuns") === "true";
 }
+function getCompactionsOnlyFromUrl(): boolean {
+  return new URLSearchParams(window.location.search).get("compacted") === "true";
+}
 export function getInsightsRangeFromUrl(): InsightsRange {
   const value = new URLSearchParams(window.location.search).get(INSIGHTS_RANGE_PARAM);
   return INSIGHTS_RANGES.has(value as InsightsRange) ? (value as InsightsRange) : "all";
@@ -73,6 +76,7 @@ export function usePanelFilters() {
   const [filter, setFilter] = useState(getFilterFromUrl);
   const [showArchived, setShowArchived] = useState(getShowArchivedFromUrl);
   const [showAgentRuns, setShowAgentRuns] = useState(getShowAgentRunsFromUrl);
+  const [compactionsOnly, setCompactionsOnly] = useState(getCompactionsOnlyFromUrl);
   const [insightsRange, setInsightsRange] = useState(getInsightsRangeFromUrl);
   const [selectedProviders, setSelectedProviders] = useState(getProvidersFromUrl);
   const [selectedRepos, setSelectedRepos] = useState(getReposFromUrl);
@@ -118,6 +122,7 @@ export function usePanelFilters() {
       setFilter(getFilterFromUrl());
       setShowArchived(getShowArchivedFromUrl());
       setShowAgentRuns(getShowAgentRunsFromUrl());
+      setCompactionsOnly(getCompactionsOnlyFromUrl());
       setInsightsRange(getInsightsRangeFromUrl());
       const providers = getProvidersFromUrl();
       const repos = getReposFromUrl();
@@ -229,6 +234,12 @@ export function usePanelFilters() {
     navigateTo({ agentRuns: next ? "true" : null }, { notify: false });
   };
 
+  const handleToggleCompactionsOnly = () => {
+    const next = !getCompactionsOnlyFromUrl();
+    setCompactionsOnly(next);
+    navigateTo({ compacted: next ? "true" : null }, { notify: false });
+  };
+
   const handleClearInsightsRange = () => {
     setInsightsRange("all");
     navigateTo({ [INSIGHTS_RANGE_PARAM]: null }, { notify: false });
@@ -252,6 +263,7 @@ export function usePanelFilters() {
     setSelectedMcpServers([]);
     setSelectedMcpTools([]);
     setSelectedSkills([]);
+    setCompactionsOnly(false);
     setInsightsRange("all");
     navigateTo(
       {
@@ -264,6 +276,7 @@ export function usePanelFilters() {
         mcp: null,
         mcpTool: null,
         skill: null,
+        compacted: null,
         [INSIGHTS_RANGE_PARAM]: null,
         replay: null,
       },
@@ -277,6 +290,7 @@ export function usePanelFilters() {
     filter,
     showArchived,
     showAgentRuns,
+    compactionsOnly,
     insightsRange,
     selectedProviders,
     selectedRepos,
@@ -296,6 +310,7 @@ export function usePanelFilters() {
     handleSkillToggle,
     handleToggleArchived,
     handleToggleAgentRuns,
+    handleToggleCompactionsOnly,
     handleClearInsightsRange,
     handleClearAllFilters,
   };

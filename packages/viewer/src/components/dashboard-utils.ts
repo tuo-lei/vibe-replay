@@ -518,6 +518,7 @@ export const DASHBOARD_PARAMS = [
   "mcp",
   "mcpTool",
   "skill",
+  "compacted",
   "agentRuns",
   "insightsRange",
   "replay",

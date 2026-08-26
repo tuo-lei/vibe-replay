@@ -100,6 +100,7 @@ export interface SourceSession {
   model?: string;
   durationMsEst?: number;
   editCountEst?: number;
+  compactionCount?: number;
   hasPR?: boolean;
   isStarred?: boolean;
   spaceId?: string;

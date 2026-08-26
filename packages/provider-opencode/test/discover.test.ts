@@ -111,4 +111,32 @@ describe("opencode discover", () => {
       db.close();
     }
   });
+
+  it("indexes context compactions during discovery", async () => {
+    const db = await buildOpencodeDb({
+      session: [{ id: "ses_compacted", slug: "compacted", directory: "/Users/test/project" }],
+      messages: [
+        {
+          id: "mc1",
+          sessionId: "ses_compacted",
+          role: "user",
+          parts: [{ type: "text", text: "Start a long task" }],
+        },
+        {
+          id: "mc2",
+          sessionId: "ses_compacted",
+          role: "user",
+          parts: [{ type: "compaction", auto: true }],
+        },
+      ],
+    });
+
+    try {
+      const sessions = listSessionsFromDb(db);
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].compactionCount).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
 });
