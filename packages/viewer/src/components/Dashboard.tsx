@@ -3537,7 +3537,10 @@ function SessionsPanel() {
                 const isRecentSession =
                   Date.now() - new Date(s.timestamp).getTime() < LIVE_RECENT_MS;
                 const errorCount = scanData?.apiErrorCount ?? 0;
-                const compactionCount = scanData?.compactionCount ?? s.compactionCount ?? 0;
+                const compactionCount = mergeCompactionCounts(
+                  scanData?.compactionCount,
+                  s.compactionCount,
+                );
                 // "clean" is only meaningful once scanned (scanData present).
                 const cleanRun = !!scanData && errorCount === 0;
                 const providerTooltip = [
