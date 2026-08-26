@@ -4334,10 +4334,7 @@ function ReplaysPanel() {
         return {
           ...session,
           projectIdentity: session.projectIdentity ?? scanData?.projectIdentity,
-          compactionCount: replayCompactionCount(
-            session.compactionCount,
-            scanData?.compactionCount,
-          ),
+          compactionCount: replayCompactionCount(session.compactionCount),
           ...usageFacetValues(scanData),
         };
       }),

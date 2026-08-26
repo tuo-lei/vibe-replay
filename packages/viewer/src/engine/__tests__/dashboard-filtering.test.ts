@@ -112,9 +112,9 @@ describe("dashboard facet filtering", () => {
   });
 
   it("keeps replay snapshot compactions authoritative over the current source scan", () => {
-    expect(replayCompactionCount(0, 2)).toBe(0);
-    expect(replayCompactionCount(1, 2)).toBe(1);
-    expect(replayCompactionCount(undefined, 2)).toBe(2);
+    expect(replayCompactionCount(0)).toBe(0);
+    expect(replayCompactionCount(1)).toBe(1);
+    expect(replayCompactionCount(undefined)).toBe(0);
   });
 
   it("matches both canonical projects and explicitly shown run workspaces", () => {
