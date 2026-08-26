@@ -21,6 +21,7 @@ pnpm dev              # Viewer (Vite HMR) + CLI (tsx watch, auto-restart)
 pnpm dev:dashboard    # Same as above, opens dashboard directly
 pnpm dev:website      # Website (Astro HMR) + Viewer (Vite HMR)
 pnpm test             # Run tests
+pnpm verify           # Sequential pre-PR validation
 pnpm start            # Full build + run (simulates real user flow)
 ```
 
@@ -202,10 +203,12 @@ The viewer is built once, then the CLI embeds it. The final HTML output is the v
 ## Submitting changes
 
 1. Fork the repo and create a branch from `main`
-2. Make your changes and run `pnpm test`
-3. Run `pnpm build` to verify the full build works
-4. Test with both small (~30 scenes) and large (~500 scenes) sessions
+2. Make your changes and run `pnpm verify`
+3. Run `pnpm test:e2e` when the change affects generated HTML, the editor server, CLI flows, or auth
+4. Test viewer behavior with both small (~30 scenes) and large (~500 scenes) sessions when relevant
 5. Open a pull request against `main`
+
+`pnpm verify` runs lint, strict TypeScript checks, unit tests, Cloudflare tests, and the production build sequentially. Keep these stages sequential locally: running the full suites concurrently can starve timing-sensitive integration tests.
 
 Please don't bump versions or publish — releases are handled by maintainers.
 

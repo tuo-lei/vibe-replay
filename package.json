@@ -22,6 +22,7 @@
     "lint": "oxlint --fix packages/ website/src cloudflare/src && oxfmt packages/ website/src cloudflare/src",
     "lint:check": "oxlint packages/ website/src cloudflare/src && oxfmt --check packages/ website/src cloudflare/src",
     "typecheck": "tsc --noEmit -p packages/types/tsconfig.json && tsc --noEmit -p packages/provider-contract/tsconfig.json && tsc --noEmit -p packages/provider-core/tsconfig.json && tsc --noEmit -p packages/provider-claude-code/tsconfig.json && tsc --noEmit -p packages/provider-codex/tsconfig.json && tsc --noEmit -p packages/provider-cursor/tsconfig.json && tsc --noEmit -p packages/provider-hermes/tsconfig.json && tsc --noEmit -p packages/provider-opencode/tsconfig.json && tsc --noEmit -p packages/provider-pi/tsconfig.json && tsc --noEmit -p packages/providers-default/tsconfig.json && tsc --noEmit -p packages/replay-core/tsconfig.json && tsc --noEmit -p packages/cli/tsconfig.json && tsc --noEmit -p packages/viewer/tsconfig.json && tsc --noEmit -p cloudflare/tsconfig.json && pnpm --filter @vibe-replay/website check",
+    "verify": "pnpm lint:check && pnpm typecheck && pnpm test && pnpm test:cloudflare && pnpm build",
     "fmt": "oxfmt packages/ website/src cloudflare/src",
     "prepare": "lefthook install"
   },
