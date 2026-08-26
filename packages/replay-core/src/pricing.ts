@@ -15,6 +15,24 @@ interface ModelPricing {
 // - Claude: LiteLLM model pricing data (used by ccusage).
 // - GPT-5.x: OpenAI API pricing page (standard rates for context lengths under 270K).
 const MODEL_PRICING: Record<string, ModelPricing> = {
+  "gpt-5.6-sol": {
+    inputRate: 4,
+    outputRate: 20,
+    cacheCreateRate: 5,
+    cacheReadRate: 0.4,
+  },
+  "gpt-5.6-terra": {
+    inputRate: 2,
+    outputRate: 12,
+    cacheCreateRate: 2.5,
+    cacheReadRate: 0.2,
+  },
+  "gpt-5.6-luna": {
+    inputRate: 0.2,
+    outputRate: 1.2,
+    cacheCreateRate: 0.25,
+    cacheReadRate: 0.02,
+  },
   "gpt-5.5": {
     inputRate: 5,
     outputRate: 30,
@@ -33,7 +51,7 @@ const MODEL_PRICING: Record<string, ModelPricing> = {
     cacheCreateRate: 0.75,
     cacheReadRate: 0.075,
   },
-  // Opus 4.6/4.5
+  // Opus 5 and 4.8–4.5
   "opus-4-new": {
     inputRate: 5,
     outputRate: 25,
@@ -98,15 +116,25 @@ export function getModelPricing(model: string): ModelPricing {
 export function getKnownModelPricing(model: string): ModelPricing | undefined {
   const lower = model.toLowerCase();
   // GPT-5.x prices from OpenAI's public API pricing table.
+  if (lower.includes("gpt-5.6-sol")) return MODEL_PRICING["gpt-5.6-sol"];
+  if (lower.includes("gpt-5.6-terra")) return MODEL_PRICING["gpt-5.6-terra"];
+  if (lower.includes("gpt-5.6-luna")) return MODEL_PRICING["gpt-5.6-luna"];
   // Check mini before gpt-5.4 so "gpt-5.4-mini" is not shadowed.
   if (lower.includes("gpt-5.4-mini")) return MODEL_PRICING["gpt-5.4-mini"];
   if (lower.includes("gpt-5.5")) return MODEL_PRICING["gpt-5.5"];
   if (lower.includes("gpt-5.4")) return MODEL_PRICING["gpt-5.4"];
-  // Opus: 4.6/4.5 → new pricing, 4.1 and earlier → legacy
+  // Opus: 5 and 4.8–4.5 → current pricing, 4.1 and earlier → legacy
   const opusVersion = parseClaudeVersion(lower, "opus");
-  if (isUnsupportedClaudeVersion(opusVersion)) return undefined;
-  if (opusVersion?.major === 4 && (opusVersion.minor === 5 || opusVersion.minor === 6))
+  if (
+    opusVersion?.major === 5 ||
+    (opusVersion?.major === 4 &&
+      opusVersion.minor !== undefined &&
+      opusVersion.minor >= 5 &&
+      opusVersion.minor <= 8)
+  ) {
     return MODEL_PRICING["opus-4-new"];
+  }
+  if (isUnsupportedClaudeVersion(opusVersion)) return undefined;
   if (lower.includes("opus")) return MODEL_PRICING.opus;
   // Sonnet: 4.6/4.5 → new pricing, Sonnet 4 → explicit, earlier → standard
   const sonnetVersion = parseClaudeVersion(lower, "sonnet");
@@ -155,6 +183,7 @@ function isUnsupportedClaudeVersion(version: ClaudeVersion | undefined): boolean
 
 // Non-Claude context window limits. Claude models are handled by name detection below.
 const MODEL_CONTEXT_LIMITS: Record<string, number> = {
+  "gpt-5.6": 272_000,
   "gpt-5.5": 270_000,
   "gpt-5.4-mini": 270_000,
   "gpt-5.4": 270_000,

@@ -863,6 +863,39 @@ describe("scanSession", () => {
     expect(result.durationMs).toBe(9000);
   });
 
+  it("extends endTime when active duration outlasts the final event timestamp", async () => {
+    const path = join(tmpDir, "duration-after-final-event.jsonl");
+    await writeFile(
+      path,
+      [
+        makeLine({
+          type: "user",
+          timestamp: "2025-03-20T10:00:00.000Z",
+          message: { role: "user", content: "Run a timed task" },
+        }),
+        makeLine({
+          type: "system",
+          subtype: "turn_duration",
+          timestamp: "2025-03-20T10:00:01.000Z",
+          durationMs: 10_000,
+        }),
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "duration-after-final-event",
+      provider: "claude-code",
+      project: "~/project",
+      slug: "duration-after-final-event",
+      filePaths: [path],
+    });
+
+    expect(result.startTime).toBe("2025-03-20T10:00:00.000Z");
+    expect(result.durationMs).toBe(10_000);
+    expect(result.endTime).toBe("2025-03-20T10:00:10.000Z");
+  });
+
   it("counts synthetic assistant API error messages", async () => {
     const path = join(tmpDir, "api-error-message.jsonl");
     await writeFile(
@@ -1203,6 +1236,41 @@ describe("scanSession", () => {
     expect(result.dataQualityNotes).toContain(
       "Partial Pi scan: the rich parser failed, so available generic and discovery metadata was used.",
     );
+  });
+
+  it("normalizes parsed duration from the discovery start fallback", async () => {
+    const path = join(tmpDir, "codex-duration-without-timestamps.jsonl");
+    await writeFile(
+      path,
+      [
+        makeLine({
+          type: "session_meta",
+          payload: { id: "codex-duration-fallback", cwd: "/tmp/project" },
+        }),
+        makeLine({
+          type: "event_msg",
+          payload: { type: "user_message", message: "Run the task" },
+        }),
+        makeLine({
+          type: "event_msg",
+          payload: { type: "task_complete", duration_ms: 15_000 },
+        }),
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "codex-duration-fallback",
+      provider: "codex",
+      project: "~/project",
+      slug: "codex-duration-fallback",
+      filePaths: [path],
+      timestamp: "2026-01-01T00:00:00.000Z",
+    });
+
+    expect(result.startTime).toBe("2026-01-01T00:00:00.000Z");
+    expect(result.durationMs).toBe(15_000);
+    expect(result.endTime).toBe("2026-01-01T00:00:15.000Z");
   });
 
   it("recognizes multi-word provider names in partial scan notes", () => {
@@ -1585,6 +1653,30 @@ describe("aggregateUserInsights", () => {
     );
     expect(insights.dataQuality?.notes).toContain(
       "2/2 Cursor sessions do not include per-turn stats.",
+    );
+  });
+
+  it("reports when aggregate cost is only a priced lower bound", () => {
+    const tokenUsage = {
+      inputTokens: 100,
+      outputTokens: 20,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+    };
+    const insights = aggregateUserInsights([
+      { ...scans[0], sessionId: "priced", tokenUsage, costEstimate: 0.01 },
+      {
+        ...scans[0],
+        sessionId: "unknown-price",
+        model: "future-model",
+        tokenUsage,
+        costEstimate: undefined,
+      },
+    ]);
+
+    expect(insights.totalCost).toBe(0.01);
+    expect(insights.dataQuality?.notes).toContain(
+      "1/2 sessions with token usage have unknown model pricing or attribution, so displayed cost is a partial lower bound.",
     );
   });
 

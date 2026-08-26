@@ -52,10 +52,8 @@ import { localDayKey, shortenPath } from "./utils.js";
 // v24: persist session location so local and SSH scan results stay isolated.
 // v25: persist transcript availability so metadata-only sources do not look
 // like ordinary sessions that simply have not been scanned yet.
-export const SCANNER_VERSION = 25;
-// v26 briefly existed during development for a title-only change. Its result
-// shape is identical to v25, so accepting it avoids a second full local rescan.
-const COMPATIBLE_SCANNER_VERSIONS = new Set([SCANNER_VERSION, 26]);
+// v27: normalize end times, ignore zero Pi usage, and use active OpenCode duration.
+export const SCANNER_VERSION = 27;
 
 // Keep per-invocation detail bounded in the durable insight store. The full
 // event set is still used to compute usageSummary below; only the retained
@@ -1064,6 +1062,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
     model ||= input.discoveryModel;
     durationMs ||= input.discoveryDurationMs;
   }
+  const normalizedEndTime = ensureEndCoversDuration(startTime, endTime, durationMs);
   const qualityNotes = [...(costDataQualityNotes(undefined, tokenUsage, costEstimate) || [])];
   if (richFallbackProvider) {
     qualityNotes.push(
@@ -1082,7 +1081,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
     title,
     firstPrompt,
     startTime,
-    endTime,
+    endTime: normalizedEndTime,
     durationMs,
     gitBranch,
     gitBranches: gitBranches.length > 1 ? gitBranches : undefined,
@@ -1118,6 +1117,22 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
 function scanFallbackPrompt(input: ScanInput, placeholder = ""): string {
   if (input.transcriptStatus) return "";
   return input.firstPrompt || input.title || placeholder;
+}
+
+/** Keep persisted timing internally consistent without discarding active-time evidence. */
+function ensureEndCoversDuration(
+  startTime: string | undefined,
+  endTime: string | undefined,
+  durationMs: number | undefined,
+): string | undefined {
+  if (!startTime) return endTime;
+  const startMs = Date.parse(startTime);
+  if (!Number.isFinite(startMs)) return endTime;
+  const minimumEndMs = startMs + Math.max(0, durationMs || 0);
+  const endMs = endTime ? Date.parse(endTime) : Number.NaN;
+  return Number.isFinite(endMs) && endMs >= minimumEndMs
+    ? endTime
+    : new Date(minimumEndMs).toISOString();
 }
 
 async function scanClaudeCoworkSession(input: ScanInput): Promise<SessionScanResult> {
@@ -1421,6 +1436,7 @@ function buildScanResultFromParsed(
   const costEstimate = estimateParsedCost(parsed);
   const fallbackStart = parsed.startTime || input.timestamp;
   const durationMs = parsed.totalDurationMs;
+  const normalizedEndTime = ensureEndCoversDuration(fallbackStart, parsed.endTime, durationMs);
   const firstPrompt = input.transcriptStatus
     ? ""
     : firstUserPrompt(parsed.turns) || input.firstPrompt || parsed.title;
@@ -1453,7 +1469,7 @@ function buildScanResultFromParsed(
     title: parsed.title || input.title,
     firstPrompt,
     startTime: fallbackStart,
-    endTime: parsed.endTime,
+    endTime: normalizedEndTime,
     durationMs,
     gitBranch: parsed.gitBranch,
     gitBranches: parsed.gitBranches,
@@ -1544,8 +1560,8 @@ const SCAN_CONCURRENCY = 4;
 async function readScanCache(): Promise<ScanCacheData | null> {
   const cached = await readFileCache<ScanCacheData>(SCAN_CACHE_KEY);
   if (!cached) return null;
-  if (!COMPATIBLE_SCANNER_VERSIONS.has(cached.data.scannerVersion)) return null;
-  return { ...cached.data, scannerVersion: SCANNER_VERSION };
+  if (cached.data.scannerVersion !== SCANNER_VERSION) return null;
+  return cached.data;
 }
 
 async function writeScanCache(data: ScanCacheData): Promise<void> {
@@ -2094,8 +2110,6 @@ export function aggregateUserInsights(scans: SessionScanResult[]): UserInsights 
 
 function buildAggregateDataQuality(scans: SessionScanResult[]): { notes: string[] } | undefined {
   const cursorScans = scans.filter((s) => s.provider === "cursor");
-  if (cursorScans.length === 0) return undefined;
-
   const total = cursorScans.length;
   const estimatedDurationCount = cursorScans.filter((s) =>
     s.dataQualityNotes?.some((note) => /duration.*estimated|estimated.*duration/i.test(note)),
@@ -2103,25 +2117,32 @@ function buildAggregateDataQuality(scans: SessionScanResult[]): { notes: string[
   const missingDurationCount = cursorScans.filter((s) => !s.durationMs).length;
   const missingTokenCount = cursorScans.filter((s) => !s.tokenUsage).length;
   const missingTurnStatsCount = cursorScans.filter((s) => !s.turnStatCount).length;
+  const sessionsWithTokens = scans.filter((s) => s.tokenUsage);
+  const missingCostCount = sessionsWithTokens.filter((s) => s.costEstimate === undefined).length;
 
   const notes: string[] = [];
-  if (estimatedDurationCount > 0) {
+  if (total > 0 && estimatedDurationCount > 0) {
     notes.push(
       `${estimatedDurationCount}/${total} Cursor sessions use best-effort duration estimates.`,
     );
   }
-  if (missingDurationCount > 0) {
+  if (total > 0 && missingDurationCount > 0) {
     notes.push(
       `${missingDurationCount}/${total} Cursor sessions do not have enough timing data to compute duration.`,
     );
   }
-  if (missingTokenCount > 0) {
+  if (total > 0 && missingTokenCount > 0) {
     notes.push(
       `${missingTokenCount}/${total} Cursor sessions do not include token snapshots, so token and cost totals are partial.`,
     );
   }
-  if (missingTurnStatsCount > 0) {
+  if (total > 0 && missingTurnStatsCount > 0) {
     notes.push(`${missingTurnStatsCount}/${total} Cursor sessions do not include per-turn stats.`);
+  }
+  if (missingCostCount > 0) {
+    notes.push(
+      `${missingCostCount}/${sessionsWithTokens.length} sessions with token usage have unknown model pricing or attribution, so displayed cost is a partial lower bound.`,
+    );
   }
 
   return notes.length > 0 ? { notes } : undefined;

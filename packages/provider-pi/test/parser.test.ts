@@ -968,6 +968,45 @@ describe("Pi parser", () => {
     });
   });
 
+  it("ignores all-zero assistant usage snapshots", async () => {
+    await withPiFixture(
+      [
+        {
+          type: "session",
+          version: 3,
+          id: "pi-zero-usage",
+          timestamp: "2026-01-01T00:00:00.000Z",
+          cwd: "/Users/test/project",
+        },
+        {
+          type: "message",
+          id: "user1",
+          parentId: null,
+          timestamp: "2026-01-01T00:00:01.000Z",
+          message: { role: "user", content: [{ type: "text", text: "Inspect usage" }] },
+        },
+        {
+          type: "message",
+          id: "assistant1",
+          parentId: "user1",
+          timestamp: "2026-01-01T00:00:02.000Z",
+          message: {
+            role: "assistant",
+            model: "gpt-5.5",
+            content: [{ type: "text", text: "Done" }],
+            usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          },
+        },
+      ],
+      async (path) => {
+        const parsed = await parsePiSession(path);
+        expect(parsed.tokenUsage).toBeUndefined();
+        expect(parsed.tokenUsageByModel).toBeUndefined();
+        expect(parsed.turnStats?.[0]?.tokenUsage).toBeUndefined();
+      },
+    );
+  });
+
   it.each([
     { pairs: 15, expectedScenes: 30 },
     { pairs: 250, expectedScenes: 500 },
