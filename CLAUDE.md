@@ -19,6 +19,8 @@ pnpm test                  # Run unit tests
 pnpm test:e2e              # Run E2E tests (requires pnpm build first)
 pnpm lint                  # Lint + format (auto-fix)
 pnpm lint:check            # Lint check (no fix, for CI)
+pnpm typecheck             # Strict TypeScript + website checks
+pnpm verify                # Sequential pre-PR gate: lint, types, tests, build
 ```
 
 When to use which:
@@ -83,6 +85,7 @@ pnpm db:migrate:remote    # Apply to production D1 (requires auth)
 - **TypeScript strict mode**, ESM throughout
 - **oxlint** for linting, **oxfmt** for formatting — both run automatically via PostToolUse hook and pre-commit hook
 - **Before commit**: run `pnpm lint:check` and fix any errors. Do NOT commit code that fails lint.
+- **Before PR**: run `pnpm verify`. Keep its stages sequential; concurrent full checks can cause integration-test timeouts.
 - **Before commit**: security review — check for leaked secrets, API keys, tokens, credentials, .env files
 - **Never bump versions or publish** without explicit user confirmation
 - **After changes**: update CLAUDE.md / README.md / CONTRIBUTING.md if anything becomes outdated
