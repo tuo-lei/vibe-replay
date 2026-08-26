@@ -81,6 +81,7 @@ describe("getModelPricing — model family detection", () => {
   });
 
   it("returns GPT-5.6 family pricing for effort-suffixed model IDs", () => {
+    expect(getKnownModelPricing("gpt-5.6")).toEqual(getKnownModelPricing("gpt-5.6-sol"));
     expect(getKnownModelPricing("gpt-5.6-sol-xhigh")).toMatchObject({
       inputRate: 4,
       outputRate: 20,
@@ -161,7 +162,7 @@ describe("getModelPricing — model family detection", () => {
 describe("getModelContextLimit", () => {
   it("returns GPT-5.x public pricing threshold as fallback context limit", () => {
     expect(getModelContextLimit("gpt-5.5")).toBe(270_000);
-    expect(getModelContextLimit("gpt-5.6-sol")).toBe(272_000);
+    expect(getModelContextLimit("gpt-5.6-sol")).toBe(1_050_000);
     expect(getModelContextLimit("gpt-5.4-high")).toBe(270_000);
     expect(getModelContextLimit("gpt-5.4-mini")).toBe(270_000);
   });

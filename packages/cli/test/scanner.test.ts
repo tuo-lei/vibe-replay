@@ -1672,6 +1672,18 @@ describe("aggregateUserInsights", () => {
         tokenUsage,
         costEstimate: undefined,
       },
+      {
+        ...scans[0],
+        sessionId: "empty-usage",
+        model: "future-model",
+        tokenUsage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheCreationTokens: 0,
+          cacheReadTokens: 0,
+        },
+        costEstimate: undefined,
+      },
     ]);
 
     expect(insights.totalCost).toBe(0.01);

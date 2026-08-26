@@ -2117,7 +2117,13 @@ function buildAggregateDataQuality(scans: SessionScanResult[]): { notes: string[
   const missingDurationCount = cursorScans.filter((s) => !s.durationMs).length;
   const missingTokenCount = cursorScans.filter((s) => !s.tokenUsage).length;
   const missingTurnStatsCount = cursorScans.filter((s) => !s.turnStatCount).length;
-  const sessionsWithTokens = scans.filter((s) => s.tokenUsage);
+  const sessionsWithTokens = scans.filter((s) => {
+    const usage = s.tokenUsage;
+    return (
+      usage !== undefined &&
+      usage.inputTokens + usage.outputTokens + usage.cacheCreationTokens + usage.cacheReadTokens > 0
+    );
+  });
   const missingCostCount = sessionsWithTokens.filter((s) => s.costEstimate === undefined).length;
 
   const notes: string[] = [];

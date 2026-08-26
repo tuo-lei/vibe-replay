@@ -115,6 +115,7 @@ export function getModelPricing(model: string): ModelPricing {
 /** Resolve pricing only when the model family/version is known. */
 export function getKnownModelPricing(model: string): ModelPricing | undefined {
   const lower = model.toLowerCase();
+  if (lower === "gpt-5.6") return MODEL_PRICING["gpt-5.6-sol"];
   // GPT-5.x prices from OpenAI's public API pricing table.
   if (lower.includes("gpt-5.6-sol")) return MODEL_PRICING["gpt-5.6-sol"];
   if (lower.includes("gpt-5.6-terra")) return MODEL_PRICING["gpt-5.6-terra"];
@@ -183,7 +184,7 @@ function isUnsupportedClaudeVersion(version: ClaudeVersion | undefined): boolean
 
 // Non-Claude context window limits. Claude models are handled by name detection below.
 const MODEL_CONTEXT_LIMITS: Record<string, number> = {
-  "gpt-5.6": 272_000,
+  "gpt-5.6": 1_050_000,
   "gpt-5.5": 270_000,
   "gpt-5.4-mini": 270_000,
   "gpt-5.4": 270_000,
