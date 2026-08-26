@@ -216,6 +216,7 @@ export function parseSessionFromDb(
   const turns: ParsedTurn[] = [];
   const allTimestamps: string[] = [];
   const compactions: Compaction[] = [];
+  const summaryCompactions: Compaction[] = [];
   const skillsUsed = new Set<string>();
   let totalTokens: TokenUsage | undefined;
   let startTime: string | undefined;
@@ -244,6 +245,12 @@ export function parseSessionFromDb(
       // generated summary, prefixed with a fixed marker. Mirror claude-code's
       // isCompactSummary handling so the viewer renders a compaction scene.
       const isCompaction = text.startsWith("[CONTEXT COMPACTION");
+      if (isCompaction) {
+        summaryCompactions.push({
+          timestamp: timestamp || startTime || new Date().toISOString(),
+          trigger: "hermes-compaction-summary",
+        });
+      }
       turns.push({
         role: "user",
         ...(isCompaction ? { subtype: "compaction-summary" as const } : {}),
@@ -321,6 +328,9 @@ export function parseSessionFromDb(
       });
     }
     previousCompacted = isCompacted;
+  }
+  if (summaryCompactions.length > compactions.length) {
+    compactions.push(...summaryCompactions.slice(compactions.length));
   }
 
   const tokenUsage = usageFromSession(session);
