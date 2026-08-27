@@ -381,7 +381,8 @@ function classifyTaskType(
   if (/(latest main|branch|current feature|what.*working)/i.test(text)) {
     return "context recovery";
   }
-  if (/(skill|dev space|devspaces)/i.test(text)) return "skill workflow";
+  if (/skill/i.test(text)) return "skill workflow";
+  if (/(ssh|remote source|remote host)/i.test(text)) return "remote/SSH";
   if (/(auth|oauth|login)/i.test(text)) return "auth/debugging";
   if (/(ci|test|lint|build|e2e)/i.test(text)) return "CI/test";
   if ((scan?.editCount || 0) > 0 || (match.editCount || 0) > 0) return "implementation";

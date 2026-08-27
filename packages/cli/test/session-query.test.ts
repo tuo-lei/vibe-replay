@@ -115,6 +115,21 @@ describe("session query", () => {
     expect(text).toContain("first prompt: Debug login callback failures");
   });
 
+  it("classifies generic SSH source work separately from skills", async () => {
+    const result = await queryLocalSessions(
+      [
+        session({
+          sessionId: "ssh-source",
+          title: "Remote SSH source unavailable",
+          firstPrompt: "Debug the SSH connection to the remote host",
+        }),
+      ],
+      { query: "ssh", brief: true },
+    );
+
+    expect(result[0]?.brief?.taskType).toBe("remote/SSH");
+  });
+
   it("adds scored match context and scan-backed briefs", async () => {
     const result = await queryLocalSessions(sessions, {
       query: "codex auth",

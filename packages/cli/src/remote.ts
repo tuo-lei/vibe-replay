@@ -938,6 +938,7 @@ async function readManifest(cacheRoot: string): Promise<RemoteCacheManifest> {
 }
 
 const REMOTE_GIT_METADATA_MARKER = "# VIBE_REPLAY_GIT_METADATA";
+const REMOTE_FILE_STATE_MARKER = "# VIBE_REPLAY_FILE_STATE";
 
 function buildRemoteGitMetadataScript(cwds: string[]): string {
   const safeCwds = [...new Set(cwds)]
@@ -970,6 +971,68 @@ function parseRemoteGitMetadata(output: Buffer): Map<string, string | undefined>
     repos.set(fields[index + 1], url ? normalizeGitUrl(url) : undefined);
   }
   return repos;
+}
+
+function buildRemoteFileStateScript(files: RemoteFileEntry[]): string {
+  const quotedPaths = files.map((file) => shellQuote(file.remotePath)).join(" ");
+  return `${REMOTE_FILE_STATE_MARKER}
+set -e
+for file in ${quotedPaths}; do
+  size=$(wc -c < "$file" 2>/dev/null | tr -d '[:space:]')
+  case "$size" in
+    ''|*[!0-9]*) exit 1 ;;
+  esac
+  mtime=$(stat -c %Y "$file" 2>/dev/null)
+  if [ -z "$mtime" ]; then
+    mtime=$(stat -f %m "$file" 2>/dev/null)
+  fi
+  case "$mtime" in
+    ''|*[!0-9]*) exit 1 ;;
+  esac
+  printf 'state\\t%s\\t%s\\n' "$size" "$mtime"
+done
+`;
+}
+
+function remoteFileStateChanged(output: Buffer, files: RemoteFileEntry[]): boolean {
+  const lines = output.toString("utf-8").split(/\r?\n/).filter(Boolean);
+  if (lines.length !== files.length) return false;
+
+  for (const [index, file] of files.entries()) {
+    const fields = lines[index]?.split("\t");
+    if (!fields || fields.length !== 3 || fields[0] !== "state") return false;
+    const size = Number(fields[1]);
+    const mtimeSeconds = Number(fields[2]);
+    if (
+      !Number.isSafeInteger(size) ||
+      size < 0 ||
+      !Number.isSafeInteger(mtimeSeconds) ||
+      mtimeSeconds < 0
+    ) {
+      return false;
+    }
+    const mtimeMs = mtimeSeconds > 0 ? Math.round(mtimeSeconds * 1_000) : 0;
+    if (size !== file.size || mtimeMs !== file.mtimeMs) return true;
+  }
+  return false;
+}
+
+async function remoteFilesChangedSinceIndex(
+  target: RemoteSourceConfig,
+  files: RemoteFileEntry[],
+): Promise<boolean> {
+  if (files.length === 0) return false;
+  try {
+    const output = await runSsh(
+      target,
+      ["sh", "-s"],
+      buildRemoteFileStateScript(files),
+      1 * 1024 * 1024,
+    );
+    return remoteFileStateChanged(output, files);
+  } catch {
+    return false;
+  }
 }
 
 type RemoteCacheLockFailureKind = "busy" | "unsafe" | "permission" | "io";
@@ -1320,8 +1383,14 @@ async function syncRemoteFiles(
             }
           }
         }
-        if (transferredPaths.size === 0 && changed.length > 0) {
+        const remoteFilesChanged = await remoteFilesChangedSinceIndex(target, changed);
+        if (transferredPaths.size === 0 && changed.length > 0 && !remoteFilesChanged) {
           throw new Error("SSH file transfer failed", { cause: error });
+        }
+        if (remoteFilesChanged && process.env.VIBE_REPLAY_DEBUG) {
+          console.error(
+            `[vibe-replay] SSH transcripts for ${target.id} changed during refresh; using cached copies`,
+          );
         }
       }
 
