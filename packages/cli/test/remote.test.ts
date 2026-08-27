@@ -395,6 +395,14 @@ case "$1" in
         fi
         printf 'repo\0/remote/home/projects/app\0https://github.com/example/project.git\0'
         ;;
+      *VIBE_REPLAY_FILE_STATE*)
+        if [ "$FAKE_SSH_MODE" = "offline" ]; then
+          exit 1
+        fi
+        file="$FAKE_REMOTE_ROOT/.codex/sessions/rollout-fake.jsonl"
+        size=$(wc -c < "$file" | tr -d '[:space:]')
+        printf 'state\t%s\t1700000000\n' "$size"
+        ;;
       *)
         if [ "$FAKE_SSH_MODE" = "offline" ]; then
           exit 1
@@ -428,6 +436,9 @@ case "$1" in
         file="$FAKE_REMOTE_ROOT/.codex/sessions/rollout-fake.jsonl"
         size=$(wc -c < "$file" | tr -d '[:space:]')
         printf '%s\n' "$size"
+        if [ "$FAKE_SSH_MODE" = "unstable" ]; then
+          printf 'x' >> "$file"
+        fi
         cat "$file"
         if [ "$FAKE_SSH_MODE" = "oversized" ]; then
           printf 'overflow'
@@ -469,6 +480,9 @@ case "$1" in
         cat "$FAKE_REMOTE_ROOT/.codex/sessions/rollout-second.jsonl"
         ;;
       *)
+        if [ "$FAKE_SSH_MODE" = "unstable" ]; then
+          printf 'x' >> "$FAKE_REMOTE_ROOT/.codex/sessions/rollout-fake.jsonl"
+        fi
         cat "$FAKE_REMOTE_ROOT/.codex/sessions/rollout-fake.jsonl"
         if [ "$FAKE_SSH_MODE" = "oversized" ]; then
           printf 'overflow'
@@ -601,6 +615,22 @@ esac
     expect(
       oversized.sessions.some((session) => session.sessionId.includes("rollout-fake.jsonl")),
     ).toBe(false);
+
+    await writeFile(
+      join(remoteSessionDir, "rollout-fake.jsonl"),
+      codexRollout("This active transcript is still being written"),
+      "utf-8",
+    );
+    process.env.FAKE_SSH_MODE = "unstable";
+    const unstable = await discoverConfiguredRemoteSessions(["codex"], {
+      configPath,
+      cacheRoot,
+    });
+    expect(unstable.failedTargets).toEqual([]);
+    expect(unstable.sessions[0]?.firstPrompt).toBe(
+      "Please inspect the remote project through the fallback path now",
+    );
+
     await writeFile(
       join(remoteSessionDir, "rollout-fake.jsonl"),
       codexRollout("Please inspect the remote project through the fallback path now"),
