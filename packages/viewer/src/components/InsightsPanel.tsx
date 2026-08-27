@@ -146,7 +146,7 @@ interface UserInsights {
   };
 }
 
-interface ScanStatus {
+export interface ScanStatus {
   running: boolean;
   scanned: number;
   total: number;
@@ -163,6 +163,26 @@ interface ScanStatus {
   cachedAt?: string;
   failedProviders?: string[];
   usageBackfill?: { running: boolean; scanned: number; total: number };
+  /** Cursor sessions whose persisted snapshot still lacks rich usage facets. */
+  usageIndexPending?: number;
+}
+
+/**
+ * A fresh scan cache is not necessarily complete: the fast Cursor pass writes
+ * a usable snapshot before its usage backfill finishes. Treat that state as
+ * stale so a new browser/server process resumes the backfill instead of
+ * serving permanently incomplete Tool/MCP facets.
+ */
+export function shouldStartBackgroundScan(
+  status: Pick<
+    ScanStatus,
+    "running" | "usageBackfill" | "hasSnapshot" | "cachedAt" | "usageIndexPending"
+  >,
+): boolean {
+  if (status.running || status.usageBackfill?.running) return false;
+  if ((status.usageIndexPending || 0) > 0) return true;
+  const hasSnapshot = status.hasSnapshot;
+  return !hasSnapshot || !isCacheFresh(status.cachedAt, CACHE_REFRESH_TTL_MS);
 }
 
 // ─── Singleton Context Provider ──────────────────────────────────────
@@ -218,9 +238,12 @@ export function ScanInsightsProvider({ children }: { children: ReactNode }) {
         const status = (await resp.json()) as ScanStatus;
         setScanStatus(status);
 
-        if (status.running || status.usageBackfill?.running) return;
-        const hasSnapshot = status.hasSnapshot ?? status.hasCachedResults;
-        if (!hasSnapshot || !isCacheFresh(status.cachedAt, CACHE_REFRESH_TTL_MS)) {
+        if (
+          shouldStartBackgroundScan({
+            ...status,
+            hasSnapshot: status.hasSnapshot ?? status.hasCachedResults,
+          })
+        ) {
           startScan();
           return;
         }

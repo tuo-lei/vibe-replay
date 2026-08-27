@@ -104,6 +104,7 @@ import {
 import {
   aggregateProjectInsights,
   aggregateUserInsights,
+  countPendingCursorUsageIndexes,
   type BackgroundScanState,
   type ProjectInsights,
   projectInsightKey,
@@ -1459,6 +1460,14 @@ export async function startServer(
     })();
   };
 
+  // A previous process can have persisted the fast Cursor snapshot and exited
+  // before its in-memory usage backfill ran. Do not rely on the viewer mounting
+  // and POSTing /api/scan/start to recover those facets; API consumers and a
+  // browser opened directly on a cached page need the same startup guarantee.
+  if (countPendingCursorUsageIndexes(scanState.results) > 0) {
+    startBackgroundScan();
+  }
+
   const app = new Hono();
 
   // Serve viewer HTML with editor flag (prod) or redirect to Vite dev server (dev)
@@ -2399,6 +2408,7 @@ export async function startServer(
       finishedAt: scanState.finishedAt,
       failedProviders: scanState.failedProviders || [],
       usageBackfill: scanState.usageBackfill,
+      usageIndexPending: countPendingCursorUsageIndexes(scanState.results),
       hasInsights: insightsCache.userInsights !== null,
       hasCachedResults: scanState.results.length > 0,
       cachedResultCount: scanState.results.length,

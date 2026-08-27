@@ -54,7 +54,10 @@ import { localDayKey, shortenPath } from "./utils.js";
 // like ordinary sessions that simply have not been scanned yet.
 // v27: normalize end times, ignore zero Pi usage, and use active OpenCode duration.
 // v28: carry discovery-indexed compaction counts through lightweight SQLite scans.
-export const SCANNER_VERSION = 28;
+// v29: expand generic Cursor/Pi MCP name parsing so MCP calls cannot fall into
+// the ordinary tool facet merely because Cursor used an uppercase or opaque
+// MCP entrypoint name.
+export const SCANNER_VERSION = 29;
 
 // Keep per-invocation detail bounded in the durable insight store. The full
 // event set is still used to compute usageSummary below; only the retained
@@ -162,11 +165,15 @@ function normalizeMcpServerName(server: string): string {
 const MCP_META_TOOL_NAMES = new Set(["mcp_auth", "mcp_get_tools"]);
 
 function parseMcpUsage(rawName: string, input?: Record<string, unknown>): McpUsage | undefined {
+  const normalizedRawName = rawName.trim().toLowerCase();
+
   // Cursor maps some MCP tools (notably the browser integration) to a generic
   // replay name, while its argument mapper preserves the explicit server/tool
   // pair. Prefer that pair before attempting provider-specific name parsing.
   if (
-    (rawName === "Browser" || rawName === "CallMcpTool" || rawName.startsWith("mcp")) &&
+    (normalizedRawName === "browser" ||
+      normalizedRawName === "callmcptool" ||
+      normalizedRawName.startsWith("mcp")) &&
     typeof input?.server === "string" &&
     input.server
   ) {
@@ -185,7 +192,7 @@ function parseMcpUsage(rawName: string, input?: Record<string, unknown>): McpUsa
     }
   }
 
-  if (rawName.startsWith("mcp__")) {
+  if (normalizedRawName.startsWith("mcp__")) {
     const [, server, ...toolParts] = rawName.split("__");
     const tool = toolParts.join("__");
     if (server && tool) {
@@ -194,7 +201,7 @@ function parseMcpUsage(rawName: string, input?: Record<string, unknown>): McpUsa
   }
 
   if (
-    rawName === "CallMcpTool" &&
+    normalizedRawName === "callmcptool" &&
     typeof input?.server === "string" &&
     typeof input.toolName === "string"
   ) {
@@ -209,7 +216,7 @@ function parseMcpUsage(rawName: string, input?: Record<string, unknown>): McpUsa
   // contain dashes (`cursor-ide-browser`). Its normalized input carries the
   // server and tool explicitly; the dash split is only the fallback, and it
   // splits at the last dash because MCP tool names are not kebab-case.
-  if (rawName.startsWith("mcp-")) {
+  if (normalizedRawName.startsWith("mcp-")) {
     if (typeof input?.server === "string" && input.server) {
       const tool = typeof input.tool_name === "string" ? input.tool_name : undefined;
       return { server: stripCursorServerScope(input.server), tool, attribution: "explicit" };
@@ -223,14 +230,26 @@ function parseMcpUsage(rawName: string, input?: Record<string, unknown>): McpUsa
     if (server) return { server, tool, attribution: "parsed-name" };
   }
 
+  // Some Cursor integrations emit names such as `MCP_DOCKER-browser_navigate`.
+  // Here `MCP_DOCKER` is the server name (not a generic `mcp_` prefix), and
+  // the hyphen is the server/tool boundary.
+  if (/^mcp_[^-]+-/i.test(rawName)) {
+    const separator = rawName.indexOf("-");
+    const server = stripCursorServerScope(rawName.slice(0, separator));
+    const tool = rawName.slice(separator + 1);
+    if (server && tool) {
+      return { server, tool, attribution: "parsed-name" };
+    }
+  }
+
   // Cursor's earlier naming was `mcp_<server>_<tool>`. Server names there are
   // camel/Pascal case while tool names are snake_case, so the first underscore
   // is the boundary. Cursor's own MCP meta-tools share the prefix without
   // naming a server, so they stay ordinary tools.
   if (
-    rawName.startsWith("mcp_") &&
-    !MCP_META_TOOL_NAMES.has(rawName) &&
-    !rawName.startsWith("mcp_meta_tool")
+    normalizedRawName.startsWith("mcp_") &&
+    !MCP_META_TOOL_NAMES.has(normalizedRawName) &&
+    !normalizedRawName.startsWith("mcp_meta_tool")
   ) {
     const remainder = rawName.slice("mcp_".length);
     const separator = remainder.indexOf("_");
@@ -245,7 +264,7 @@ function parseMcpUsage(rawName: string, input?: Record<string, unknown>): McpUsa
 
   // Pi routes every MCP interaction through one `mcp` tool: discovery calls name
   // the server directly, while invocations carry `<server>_<tool>`.
-  if (rawName === "mcp" || rawName === "mcpScript") {
+  if (normalizedRawName === "mcp" || normalizedRawName === "mcpscript") {
     if (typeof input?.server === "string" && input.server) {
       const tool = typeof input.tool === "string" ? input.tool : undefined;
       return { server: input.server, tool, attribution: "explicit" };
@@ -258,9 +277,41 @@ function parseMcpUsage(rawName: string, input?: Record<string, unknown>): McpUsa
         attribution: "parsed-name",
       };
     }
+    // A generic MCP entrypoint with no payload still proves that MCP was used.
+    // Preserve it in the MCP facet instead of presenting it as an unrelated
+    // ordinary tool.
+    return { server: "Unknown", attribution: "explicit" };
+  }
+
+  // Cursor's user-meta-tool bridge names the resolved MCP server but does not
+  // expose the underlying tool arguments. It is still useful and accurate to
+  // make the server filterable.
+  const metaToolMatch = rawName.match(/^mcp_meta_tool_invocation__user_meta_tool_(.+)$/i);
+  if (metaToolMatch?.[1]) {
+    return {
+      server: stripCursorServerScope(metaToolMatch[1]),
+      attribution: "parsed-name",
+    };
   }
 
   return undefined;
+}
+
+/** Results that still need the rich Cursor pass before usage facets are complete. */
+export function isPendingCursorUsageIndex(
+  result: Pick<SessionScanResult, "provider" | "usageIndexed" | "transcriptStatus">,
+): boolean {
+  return (
+    result.provider === "cursor" &&
+    result.usageIndexed !== true &&
+    result.transcriptStatus !== "unreadable"
+  );
+}
+
+export function countPendingCursorUsageIndexes(
+  results: ReadonlyArray<Pick<SessionScanResult, "provider" | "usageIndexed" | "transcriptStatus">>,
+): number {
+  return results.filter(isPendingCursorUsageIndex).length;
 }
 
 function toolUsageEvent(
