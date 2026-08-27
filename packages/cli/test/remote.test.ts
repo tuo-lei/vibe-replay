@@ -216,6 +216,15 @@ describe("remote cache path safety and identity", () => {
     );
     expect(await readFile(activeLock, "utf-8")).toBe(`${process.pid}\n`);
 
+    const recentDeadLock = `${cacheRoot}-recent-dead`;
+    await writeFile(`${recentDeadLock}.lock`, "999999999\n", "utf-8");
+    const releaseRecentDead = await __testables.acquireRemoteCacheLock(
+      recentDeadLock,
+      20,
+      60 * 60 * 1_000,
+    );
+    await releaseRecentDead();
+
     const replacedLockRoot = `${cacheRoot}-replaced`;
     const releaseReplaced = await __testables.acquireRemoteCacheLock(replacedLockRoot);
     const replacedLock = `${replacedLockRoot}.lock`;

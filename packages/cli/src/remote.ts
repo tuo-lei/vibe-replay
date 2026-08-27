@@ -39,6 +39,7 @@ const DEFAULT_CONFIG_PATH = join(homedir(), ".vibe-replay", "config.json");
 const FALLBACK_CONFIG_PATH = join(homedir(), ".config", "vibe-replay", "config.json");
 const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
 const MAX_CONNECT_TIMEOUT_MS = 60_000;
+const MIN_REMOTE_OPERATION_TIMEOUT_MS = 2 * 60_000;
 const MAX_CODEX_METADATA_BYTES = 4 * 1024 * 1024;
 const MAX_REMOTE_FILE_BYTES = 512 * 1024 * 1024;
 const MAX_REMOTE_INDEX_BYTES = 2 * 1024 * 1024 * 1024;
@@ -440,18 +441,23 @@ async function isStaleRemoteCacheLock(
   mtimeMs: number,
   staleMs: number,
 ): Promise<boolean> {
-  if (Date.now() - mtimeMs <= staleMs) return false;
-
   const owner = await readFile(lockPath, "utf-8").catch(() => "");
   const pid = Number.parseInt(owner.trim(), 10);
-  if (!Number.isSafeInteger(pid) || pid <= 0) return true;
-
-  try {
-    process.kill(pid, 0);
-    return false;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== "EPERM";
+  if (Number.isSafeInteger(pid) && pid > 0) {
+    try {
+      process.kill(pid, 0);
+      return false;
+    } catch (error) {
+      // A lock held by a dead process is safe to reclaim immediately. Waiting
+      // for the full stale interval made an interrupted dashboard block every
+      // subsequent remote refresh for up to 30 minutes.
+      return (error as NodeJS.ErrnoException).code !== "EPERM";
+    }
   }
+
+  // Keep malformed or partially-written locks conservative until they have
+  // aged out; the owner may be between creating the file and writing its PID.
+  return Date.now() - mtimeMs > staleMs;
 }
 
 /**
@@ -529,7 +535,10 @@ function shellQuote(value: string): string {
 }
 
 function sshTimeoutMs(target: RemoteSourceConfig): number {
-  return Math.max(target.connectTimeoutMs + 5_000, 15_000);
+  // The same SSH process streams the discovery index and, on a cold cache,
+  // the remote transcript batch. A 15s floor is enough for a probe but not
+  // for a legitimate multi-hundred-megabyte first sync.
+  return Math.max(target.connectTimeoutMs + 5_000, MIN_REMOTE_OPERATION_TIMEOUT_MS);
 }
 
 function spawnSsh(target: RemoteSourceConfig, command: string[]): ChildProcess {
@@ -1035,7 +1044,7 @@ async function extractRemoteFileBatch(
   const fileArgs = files.map((file) => shellQuote(file.remotePath)).join(" ");
   const script = `set -e
 for file in ${fileArgs}; do
-  size=$(wc -c < "$file" 2>/dev/null)
+  size=$(wc -c < "$file" 2>/dev/null | tr -d '[:space:]')
   case "$size" in
     ''|*[!0-9]*) exit 1 ;;
   esac
@@ -1274,20 +1283,45 @@ async function syncRemoteFiles(
   let transactionRoot: string | undefined;
   const changedOperations: Array<{ localPath: string; backupPath?: string }> = [];
   const removedOperations: Array<{ localPath: string; backupPath: string }> = [];
+  const transferredPaths = new Set<string>();
   try {
     if (changed.length > 0) {
       stagingRoot = await mkdtemp(join(cacheRoot, ".sync-"));
       await chmod(stagingRoot, 0o700).catch(() => {});
       try {
         await extractRemoteFiles(target, changed, stagingRoot);
-      } catch {
+        for (const file of changed) transferredPaths.add(file.relativePath);
+      } catch (error) {
         // The framed batch protocol uses ordinary POSIX tools. Keep a bounded
-        // per-file `cat` fallback for unusual remote shells.
+        // per-file `cat` fallback for unusual remote shells or transcripts that
+        // changed while the batch was being streamed.
+        if (process.env.VIBE_REPLAY_DEBUG) {
+          console.error(`[vibe-replay] SSH batch transfer for ${target.id} failed:`, error);
+        }
         await rm(stagingRoot, { recursive: true, force: true });
         await mkdir(stagingRoot, { recursive: true });
         await chmod(stagingRoot, 0o700).catch(() => {});
         for (const file of changed) {
-          await downloadRemoteFile(target, file, stagingRoot);
+          let transferred = false;
+          for (let attempt = 0; attempt < 2 && !transferred; attempt++) {
+            try {
+              const retryPath = localPathForRemoteFile(stagingRoot, file.relativePath);
+              if (retryPath) await unlink(retryPath).catch(() => {});
+              await downloadRemoteFile(target, file, stagingRoot);
+              transferred = true;
+              transferredPaths.add(file.relativePath);
+            } catch (retryError) {
+              if (process.env.VIBE_REPLAY_DEBUG && attempt === 1) {
+                console.error(
+                  `[vibe-replay] SSH transcript ${file.relativePath} was not stable:`,
+                  retryError,
+                );
+              }
+            }
+          }
+        }
+        if (transferredPaths.size === 0 && changed.length > 0) {
+          throw new Error("SSH file transfer failed", { cause: error });
         }
       }
 
@@ -1307,6 +1341,7 @@ async function syncRemoteFiles(
     }
 
     for (const file of changed) {
+      if (!transferredPaths.has(file.relativePath)) continue;
       const stagedPath = stagingRoot
         ? localPathForRemoteFile(stagingRoot, file.relativePath)
         : null;

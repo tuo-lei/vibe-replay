@@ -1720,12 +1720,21 @@ function multiFacetCountMap<T>(
   return counts;
 }
 
-function usageFacetValues(scanData?: SessionScanData) {
+export function usageFacetValues(scanData?: SessionScanData) {
+  const usageSummary = scanData?.usageSummary;
+  const mcpServers = new Set([
+    ...Object.keys(usageSummary?.mcpServers || {}),
+    ...(scanData?.mcpServersUsed || []),
+  ]);
+  const skills = new Set([
+    ...Object.keys(usageSummary?.skills || {}),
+    ...(scanData?.skillsUsed || []),
+  ]);
   return {
-    tools: Object.keys(scanData?.usageSummary?.tools || {}),
-    mcpServers: Object.keys(scanData?.usageSummary?.mcpServers || {}).map(normalizeMcpServerName),
-    mcpTools: Object.keys(scanData?.usageSummary?.mcpTools || {}).map(normalizeMcpToolName),
-    skills: Object.keys(scanData?.usageSummary?.skills || {}),
+    tools: Object.keys(usageSummary?.tools || {}),
+    mcpServers: [...mcpServers].map(normalizeMcpServerName),
+    mcpTools: Object.keys(usageSummary?.mcpTools || {}).map(normalizeMcpToolName),
+    skills: [...skills],
   };
 }
 
@@ -2128,6 +2137,7 @@ function SessionsPanel() {
 
   // Background scan + insights (shared singleton context)
   const { scanStatus } = useScanInsightsContext();
+  const usageIndexPending = scanStatus?.usageIndexPending ?? 0;
   const usageBackfillKey = scanStatus?.usageBackfill
     ? scanStatus.usageBackfill.running
       ? "running"
@@ -2625,7 +2635,7 @@ function SessionsPanel() {
     (source) => (source.compactionCount ?? 0) > 0,
   ).length;
 
-  const showMcpToolFacet = selectedMcpServers.length > 0 || selectedMcpTools.length > 0;
+  const showMcpToolFacet = mcpToolEntries.length > 0;
   // Under a selected server the `server/` prefix is the same on every row.
   const mcpToolFacetLabel = (value: string) => {
     const server = selectedMcpServers.find((s) => value.startsWith(`${s}/`));
@@ -3026,6 +3036,13 @@ function SessionsPanel() {
             variant="pills"
           />
 
+          {usageIndexPending > 0 && (
+            <div className="border-t border-terminal-border-subtle pt-3 px-3 text-[11px] font-mono text-terminal-dimmer">
+              Indexing tool/MCP usage for {usageIndexPending.toLocaleString()} Cursor{" "}
+              {usageIndexPending === 1 ? "session" : "sessions"}; filters will update automatically.
+            </div>
+          )}
+
           <FacetSection
             title="MCP server"
             entries={mcpServerEntries}
@@ -3036,8 +3053,9 @@ function SessionsPanel() {
             variant="pills"
           />
 
-          {/* Drilldown: every MCP tool name repeats its server, so the list only
-              earns its space once a server (or a tool) is actually selected. */}
+          {/* Keep MCP tools visible even before a server is selected. The facet
+              is collapsed and can be scoped by server, but hiding it made the
+              advertised MCP tool filter look unavailable. */}
           {showMcpToolFacet && (
             <FacetSection
               title="MCP tool"
@@ -4437,7 +4455,7 @@ function ReplaysPanel() {
   const compactedSessionCount = compactionFacetSessions.filter(
     (session) => (session.compactionCount ?? 0) > 0,
   ).length;
-  const showMcpToolFacet = selectedMcpServers.length > 0 || selectedMcpTools.length > 0;
+  const showMcpToolFacet = mcpToolEntries.length > 0;
   const mcpToolFacetLabel = (value: string) => {
     const server = selectedMcpServers.find((s) => value.startsWith(`${s}/`));
     return server ? value.slice(server.length + 1) : value;

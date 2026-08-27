@@ -10,7 +10,9 @@ import Dashboard, {
   getSessionRangeTimestamp,
   type SessionScanData,
   shouldIncludeSessionForProject,
+  usageFacetValues,
 } from "../Dashboard";
+import { shouldStartBackgroundScan } from "../InsightsPanel";
 
 beforeEach(() => {
   stubBrowserAPIs();
@@ -179,6 +181,51 @@ describe("session scan result matching", () => {
     const index = buildSessionScanIndex([result]);
 
     expect(findSessionScanData({ provider: "cursor", slug: "unique-slug" }, index)).toBe(result);
+  });
+});
+
+describe("usage index recovery", () => {
+  it("resumes a fresh persisted snapshot when Cursor usage is incomplete", () => {
+    const cachedAt = new Date().toISOString();
+
+    expect(
+      shouldStartBackgroundScan({
+        running: false,
+        hasSnapshot: true,
+        cachedAt,
+        usageIndexPending: 3,
+      }),
+    ).toBe(true);
+    expect(
+      shouldStartBackgroundScan({
+        running: false,
+        hasSnapshot: true,
+        cachedAt,
+        usageIndexPending: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps provider-discovered MCP servers and skills visible before rich usage arrives", () => {
+    expect(
+      usageFacetValues({
+        provider: "cursor",
+        subAgentCount: 0,
+        apiErrorCount: 0,
+        compactionCount: 0,
+        editCount: 0,
+        filesModified: [],
+        promptCount: 0,
+        toolCallCount: 0,
+        mcpServersUsed: ["sourcegraph"],
+        skillsUsed: ["review"],
+      }),
+    ).toEqual({
+      tools: [],
+      mcpServers: ["sourcegraph"],
+      mcpTools: [],
+      skills: ["review"],
+    });
   });
 });
 

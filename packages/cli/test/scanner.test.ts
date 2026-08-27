@@ -5,8 +5,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   aggregateProjectInsights,
   aggregateUserInsights,
+  countPendingCursorUsageIndexes,
   type SessionScanResult,
   isPartialScanResult,
+  isPendingCursorUsageIndex,
   scanSession,
   scanCacheEntryKey,
 } from "../src/scanner.js";
@@ -636,6 +638,78 @@ describe("scanSession", () => {
     expect(result.usageSummary?.tools).toEqual({ mcp_get_tools: 1, mcp_auth: 1 });
   });
 
+  it("resolves uppercase Cursor MCP gateway names", async () => {
+    const path = join(tmpDir, "usage-cursor-uppercase-mcp.jsonl");
+    await writeFile(
+      path,
+      makeLine({
+        type: "assistant",
+        timestamp: "2025-03-20T10:00:01Z",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "mcp-docker-1",
+              name: "MCP_DOCKER-browser_navigate",
+              input: {},
+            },
+            {
+              type: "tool_use",
+              id: "mcp-docker-2",
+              name: "MCP_DOCKER-browser_resize",
+              input: {},
+            },
+          ],
+        },
+      }),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "usage-cursor-uppercase-mcp",
+      provider: "cursor",
+      project: "~/test/project",
+      slug: "usage-cursor-uppercase-mcp",
+      filePaths: [path],
+    });
+
+    expect(result.usageSummary?.mcpServers).toEqual({ MCP_DOCKER: 2 });
+    expect(result.usageSummary?.mcpTools).toEqual({
+      "MCP_DOCKER/browser_navigate": 1,
+      "MCP_DOCKER/browser_resize": 1,
+    });
+    expect(result.usageSummary?.tools).toEqual({});
+  });
+
+  it("keeps generic MCP entrypoints in the MCP facet when payloads are opaque", async () => {
+    const path = join(tmpDir, "usage-generic-mcp.jsonl");
+    await writeFile(
+      path,
+      makeLine({
+        type: "assistant",
+        timestamp: "2025-03-20T10:00:01Z",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "mcp-opaque", name: "mcp", input: {} }],
+        },
+      }),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "usage-generic-mcp",
+      provider: "claude-code",
+      project: "~/test/project",
+      slug: "usage-generic-mcp",
+      filePaths: [path],
+    });
+
+    expect(result.usageSummary?.mcpServers).toEqual({ Unknown: 1 });
+    expect(result.usageSummary?.mcpTools).toEqual({});
+    expect(result.usageSummary?.tools).toEqual({});
+  });
+
   it("resolves MCP server and tool from Pi's single-entrypoint mcp tool naming", async () => {
     const path = join(tmpDir, "usage-pi-mcp.jsonl");
     await writeFile(
@@ -676,6 +750,36 @@ describe("scanSession", () => {
 
     expect(result.usageSummary?.mcpServers).toMatchObject({ sourcegraph: 1, slack: 1 });
     expect(result.usageSummary?.mcpTools).toMatchObject({ "slack/slack_read_thread": 1 });
+  });
+
+  it("identifies persisted Cursor results that still need usage indexing", () => {
+    expect(
+      isPendingCursorUsageIndex({
+        provider: "cursor",
+        usageIndexed: false,
+      }),
+    ).toBe(true);
+    expect(
+      isPendingCursorUsageIndex({
+        provider: "cursor",
+        usageIndexed: false,
+        transcriptStatus: "unreadable",
+      }),
+    ).toBe(false);
+    expect(
+      isPendingCursorUsageIndex({
+        provider: "cursor",
+        usageIndexed: false,
+        transcriptStatus: "no-prompts",
+      }),
+    ).toBe(true);
+    expect(
+      countPendingCursorUsageIndexes([
+        { provider: "cursor", usageIndexed: false },
+        { provider: "cursor", usageIndexed: true },
+        { provider: "pi", usageIndexed: false },
+      ]),
+    ).toBe(1);
   });
 
   it("counts prompts correctly (excludes tool_result-only turns)", async () => {
