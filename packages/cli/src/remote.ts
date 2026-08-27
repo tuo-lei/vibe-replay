@@ -1326,6 +1326,7 @@ async function syncRemoteFiles(
       }
 
       for (const file of changed) {
+        if (!transferredPaths.has(file.relativePath)) continue;
         const stagedPath = localPathForRemoteFile(stagingRoot, file.relativePath);
         const stagedInspection = await inspectCachedPath(stagingRoot, file.relativePath);
         if (stagedInspection.status !== "file" || stagedInspection.size !== file.size) {
@@ -1393,12 +1394,17 @@ async function syncRemoteFiles(
     }
 
     const entries: RemoteCacheManifest["entries"] = { ...retainedEntries };
+    const changedPaths = new Set(changed.map((file) => file.relativePath));
     for (const file of index.files) {
-      entries[file.relativePath] = {
-        remotePath: file.remotePath,
-        size: file.size,
-        mtimeMs: file.mtimeMs,
-      };
+      if (!changedPaths.has(file.relativePath) || transferredPaths.has(file.relativePath)) {
+        entries[file.relativePath] = {
+          remotePath: file.remotePath,
+          size: file.size,
+          mtimeMs: file.mtimeMs,
+        };
+      } else if (previous.entries[file.relativePath]) {
+        entries[file.relativePath] = previous.entries[file.relativePath];
+      }
     }
     const cachedCodexMetadata = codexMetadata.available ? {} : { ...previous.codexMetadata };
     for (const [sessionId, metadata] of codexMetadata.entries) {

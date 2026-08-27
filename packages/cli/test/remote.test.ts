@@ -27,6 +27,7 @@ const originalFakeSshLog = process.env.FAKE_SSH_LOG;
 const originalFakeSshMode = process.env.FAKE_SSH_MODE;
 const originalFakeIncludeMetadataOnly = process.env.FAKE_INCLUDE_METADATA_ONLY;
 const originalFakeIncludeNoPrompt = process.env.FAKE_INCLUDE_NO_PROMPT;
+const originalFakeIncludeSecond = process.env.FAKE_INCLUDE_SECOND;
 
 afterEach(async () => {
   process.env.PATH = originalPath;
@@ -40,6 +41,8 @@ afterEach(async () => {
   else process.env.FAKE_INCLUDE_METADATA_ONLY = originalFakeIncludeMetadataOnly;
   if (originalFakeIncludeNoPrompt === undefined) delete process.env.FAKE_INCLUDE_NO_PROMPT;
   else process.env.FAKE_INCLUDE_NO_PROMPT = originalFakeIncludeNoPrompt;
+  if (originalFakeIncludeSecond === undefined) delete process.env.FAKE_INCLUDE_SECOND;
+  else process.env.FAKE_INCLUDE_SECOND = originalFakeIncludeSecond;
   await Promise.all(
     temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
   );
@@ -406,13 +409,18 @@ case "$1" in
           no_size=$(wc -c < "$no_prompt" | tr -d '[:space:]')
           printf 'file\tcodex\t/remote/home/.codex/sessions/rollout-no-prompts.jsonl\t.codex/sessions/rollout-no-prompts.jsonl\t%s\t1700000000\n' "$no_size"
         fi
+        if [ "$FAKE_INCLUDE_SECOND" = "yes" ]; then
+          second="$FAKE_REMOTE_ROOT/.codex/sessions/rollout-second.jsonl"
+          second_size=$(wc -c < "$second" | tr -d '[:space:]')
+          printf 'file\tcodex\t/remote/home/.codex/sessions/rollout-second.jsonl\t.codex/sessions/rollout-second.jsonl\t%s\t1700000000\n' "$second_size"
+        fi
         printf 'complete\n'
         ;;
     esac
     ;;
   set*)
     printf 'batch\n' >> "$FAKE_SSH_LOG"
-    if [ "$FAKE_SSH_MODE" = "tar-fails" ]; then
+    if [ "$FAKE_SSH_MODE" = "tar-fails" ] || [ "$FAKE_SSH_MODE" = "mixed-fallback" ]; then
       exit 1
     fi
     case "$1" in
@@ -433,6 +441,15 @@ case "$1" in
         printf '%s\n' "$size"
         cat "$file"
         ;;
+      *rollout-second.jsonl*)
+        if [ "$FAKE_SSH_MODE" = "mixed-fallback" ]; then
+          exit 1
+        fi
+        file="$FAKE_REMOTE_ROOT/.codex/sessions/rollout-second.jsonl"
+        size=$(wc -c < "$file" | tr -d '[:space:]')
+        printf '%s\n' "$size"
+        cat "$file"
+        ;;
     esac
     ;;
   'tar -czf - -C "$HOME" --null --verbatim-files-from -T -')
@@ -444,10 +461,20 @@ case "$1" in
     ;;
   cat*)
     printf 'cat\n' >> "$FAKE_SSH_LOG"
-    cat "$FAKE_REMOTE_ROOT/.codex/sessions/rollout-fake.jsonl"
-    if [ "$FAKE_SSH_MODE" = "oversized" ]; then
-      printf 'overflow'
-    fi
+    case "$1" in
+      *rollout-second.jsonl*)
+        if [ "$FAKE_SSH_MODE" = "mixed-fallback" ]; then
+          exit 1
+        fi
+        cat "$FAKE_REMOTE_ROOT/.codex/sessions/rollout-second.jsonl"
+        ;;
+      *)
+        cat "$FAKE_REMOTE_ROOT/.codex/sessions/rollout-fake.jsonl"
+        if [ "$FAKE_SSH_MODE" = "oversized" ]; then
+          printf 'overflow'
+        fi
+        ;;
+    esac
     ;;
   *)
     exit 1
@@ -478,12 +505,18 @@ esac
       codexRollout("Please inspect the remote project"),
       "utf-8",
     );
+    await writeFile(
+      join(remoteSessionDir, "rollout-second.jsonl"),
+      codexRollout("Inspect the second remote project", "remote-second"),
+      "utf-8",
+    );
 
     process.env.FAKE_REMOTE_ROOT = fakeRemoteRoot;
     process.env.FAKE_SSH_LOG = sshLogPath;
     process.env.FAKE_SSH_MODE = "normal";
     process.env.FAKE_INCLUDE_METADATA_ONLY = "no";
     process.env.FAKE_INCLUDE_NO_PROMPT = "no";
+    process.env.FAKE_INCLUDE_SECOND = "yes";
     process.env.PATH = `${fakeBinDir}:${originalPath || ""}`;
 
     const first = await discoverConfiguredRemoteSessions(["codex"], {
@@ -491,7 +524,7 @@ esac
       cacheRoot,
     });
     expect(first.failedTargets).toEqual([]);
-    expect(first.sessions).toHaveLength(1);
+    expect(first.sessions).toHaveLength(2);
     expect(first.sessions[0]).toMatchObject({
       provider: "codex",
       location: { kind: "ssh", id: "fake-remote", label: "Test remote" },
@@ -502,6 +535,11 @@ esac
       firstPrompt: "Please inspect the remote project",
     });
     expect(first.sessions[0]?.filePath).toContain(cacheRoot);
+    expect(
+      first.sessions.find((candidate) => candidate.sessionId === "remote-second"),
+    ).toMatchObject({
+      firstPrompt: "Inspect the second remote project",
+    });
     expect(await readFile(sshLogPath, "utf-8")).toBe("batch\n");
 
     const unchanged = await discoverConfiguredRemoteSessions(["codex"], {
@@ -509,6 +547,11 @@ esac
       cacheRoot,
     });
     expect(unchanged.sessions[0]?.firstPrompt).toBe("Please inspect the remote project");
+    expect(
+      unchanged.sessions.find((candidate) => candidate.sessionId === "remote-second"),
+    ).toMatchObject({
+      firstPrompt: "Inspect the second remote project",
+    });
     expect(await readFile(sshLogPath, "utf-8")).toBe("batch\n");
 
     await writeFile(
@@ -617,16 +660,43 @@ esac
     );
     expect(cachedFailure.sessions[0]?.title).toBe("Remote /resume title");
     expect(cachedFailure.sessions[0]?.gitRepo).toBe("example/project");
-  });
+
+    await writeFile(
+      join(remoteSessionDir, "rollout-fake.jsonl"),
+      codexRollout("Primary fallback succeeds despite the second failure"),
+      "utf-8",
+    );
+    await writeFile(
+      join(remoteSessionDir, "rollout-second.jsonl"),
+      codexRollout("This second fallback transfer should fail", "remote-second"),
+      "utf-8",
+    );
+    process.env.FAKE_SSH_MODE = "mixed-fallback";
+    const partialFallback = await discoverConfiguredRemoteSessions(["codex"], {
+      configPath,
+      cacheRoot,
+    });
+    expect(partialFallback.failedTargets).toEqual([]);
+    expect(
+      partialFallback.sessions.find((candidate) => candidate.sessionId === "remote-session"),
+    ).toMatchObject({
+      firstPrompt: "Primary fallback succeeds despite the second failure",
+    });
+    expect(
+      partialFallback.sessions.find((candidate) => candidate.sessionId === "remote-second"),
+    ).toMatchObject({
+      firstPrompt: "Inspect the second remote project",
+    });
+  }, 15_000);
 });
 
-function codexRollout(prompt: string): string {
+function codexRollout(prompt: string, sessionId = "remote-session"): string {
   return `${[
     {
       timestamp: "2026-08-24T10:00:00.000Z",
       type: "session_meta",
       payload: {
-        id: "remote-session",
+        id: sessionId,
         cwd: "/remote/home/projects/app",
         cli_version: "0.1.0",
       },
