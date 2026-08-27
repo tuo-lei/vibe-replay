@@ -982,7 +982,7 @@ for file in ${quotedPaths}; do
   case "$size" in
     ''|*[!0-9]*) exit 1 ;;
   esac
-  mtime=$(stat -c %Y "$file" 2>/dev/null)
+  mtime=$(stat -c %Y "$file" 2>/dev/null) || mtime=
   if [ -z "$mtime" ]; then
     mtime=$(stat -f %m "$file" 2>/dev/null)
   fi
