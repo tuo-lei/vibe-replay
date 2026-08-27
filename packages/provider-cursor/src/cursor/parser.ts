@@ -837,6 +837,7 @@ async function parseCursorSubagentTranscript(
   const toolErrors = new Set<string>();
   const toolImages = new Map<string, string[]>();
   const pendingTools: PendingCursorSubagentTool[] = [];
+  const seenToolIds = new Set<string>();
 
   const lines = content.split("\n");
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
@@ -915,6 +916,9 @@ async function parseCursorSubagentTranscript(
       if (block?.type !== "tool_use") continue;
       const rawName =
         typeof block.name === "string" && block.name.trim() ? block.name.trim() : "Tool";
+      const id = typeof block.id === "string" && block.id.trim() ? block.id : undefined;
+      if (id && seenToolIds.has(id)) continue;
+      if (id) seenToolIds.add(id);
       const scene: Extract<Scene, { type: "tool-call" }> = {
         type: "tool-call",
         toolName: deps.mapCursorToolName(rawName),
@@ -926,7 +930,7 @@ async function parseCursorSubagentTranscript(
       scenes.push(scene);
       pendingTools.push({
         scene,
-        ...(typeof block.id === "string" && block.id.trim() ? { id: block.id } : {}),
+        ...(id ? { id } : {}),
         rawName,
         rawInput: block.input,
         timestamp,
