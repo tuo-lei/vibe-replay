@@ -344,6 +344,62 @@ describe("scanSession", () => {
     expect(JSON.stringify(result.usageEvents)).not.toContain("/secret/path.ts");
   });
 
+  it("preserves repeated rich-provider skill activations and MCP attribution", async () => {
+    const path = join(tmpDir, "usage-rich-attribution.jsonl");
+    await writeFile(
+      path,
+      [
+        makeLine({
+          type: "user",
+          isMeta: true,
+          timestamp: "2025-03-20T10:00:00Z",
+          message: {
+            role: "user",
+            content: "Base directory for this skill: /Users/test/.claude/skills/review\n",
+          },
+        }),
+        makeLine({
+          type: "user",
+          isMeta: true,
+          timestamp: "2025-03-20T10:00:01Z",
+          message: {
+            role: "user",
+            content: "Base directory for this skill: /Users/test/.claude/skills/review\n",
+          },
+        }),
+        makeLine({
+          type: "assistant",
+          timestamp: "2025-03-20T10:00:02Z",
+          attributionMcpServer: "sourcegraph",
+          attributionMcpTool: "search",
+          message: {
+            role: "assistant",
+            id: "rich-mcp-call",
+            content: [{ type: "tool_use", id: "mcp-1", name: "tool", input: {} }],
+          },
+        }),
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "usage-rich-attribution",
+      provider: "claude-cowork",
+      project: "~/test/project",
+      slug: "usage-rich-attribution",
+      filePaths: [path],
+    });
+
+    expect(result.toolCallCount).toBe(1);
+    expect(result.usageSummary).toMatchObject({
+      tools: {},
+      mcpServers: { sourcegraph: 1 },
+      mcpTools: { "sourcegraph/search": 1 },
+      skills: { review: 2 },
+    });
+    expect(result.usageEvents?.filter((event) => event.kind === "skill")).toHaveLength(2);
+  });
+
   it("keeps usage summaries complete while bounding retained invocation details", async () => {
     const path = join(tmpDir, "usage-events-bounded.jsonl");
     const toolUses = Array.from({ length: 120 }, (_unused, index) => ({
@@ -456,7 +512,61 @@ describe("scanSession", () => {
     expect(result.usageSummary?.tools).toEqual({});
     expect(result.usageSummary?.mcpServers).toEqual({ "claude-in-chrome": 1 });
     expect(result.usageSummary?.mcpTools).toEqual({ "claude-in-chrome/browser_open": 1 });
-    expect(result.usageSummary?.skills).toEqual({ "browser-skill": 1 });
+    expect(result.usageSummary?.skills).toEqual({});
+    expect(result.skillsUsed).toEqual(["browser-skill"]);
+  });
+
+  it("does not count repeated streamed attributionSkill records as activations", async () => {
+    const path = join(tmpDir, "usage-repeated-attribution-skill.jsonl");
+    await writeFile(
+      path,
+      [
+        makeLine({
+          type: "assistant",
+          attributionSkill: "mcp-adaptor",
+          timestamp: "2025-03-20T10:00:00Z",
+          message: {
+            role: "assistant",
+            id: "streamed-message",
+            content: [{ type: "thinking", thinking: "one" }],
+          },
+        }),
+        makeLine({
+          type: "assistant",
+          attributionSkill: "mcp-adaptor",
+          timestamp: "2025-03-20T10:00:00Z",
+          message: {
+            role: "assistant",
+            id: "streamed-message",
+            content: [{ type: "text", text: "two" }],
+          },
+        }),
+        makeLine({
+          type: "assistant",
+          attributionSkill: "mcp-adaptor",
+          timestamp: "2025-03-20T10:00:00Z",
+          message: {
+            role: "assistant",
+            id: "streamed-message",
+            content: [{ type: "tool_use", id: "streamed-tool", name: "Read", input: {} }],
+          },
+        }),
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "usage-repeated-attribution-skill",
+      provider: "claude-code",
+      project: "~/test/project",
+      slug: "usage-repeated-attribution-skill",
+      filePaths: [path],
+    });
+
+    expect(result.skillsUsed).toEqual(["mcp-adaptor"]);
+    expect(result.usageSummary?.skills).toEqual({});
+    expect(result.usageEvents?.filter((event) => event.kind === "skill")).toHaveLength(0);
+    expect(result.usageSummary?.tools).toEqual({ Read: 1 });
   });
 
   it("normalizes placeholder MCP server names to Unknown", async () => {

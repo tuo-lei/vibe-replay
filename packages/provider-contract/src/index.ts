@@ -222,6 +222,11 @@ export type ContentBlock =
       name: string;
       input: Record<string, any>;
       _result?: string;
+      /**
+       * Whether the provider recorded a result for this call. This is separate
+       * from `_result` because an empty string can be a valid completed result.
+       */
+      _hasResult?: boolean;
       /** Internal source timestamp for the tool result; omitted from replay scenes. */
       _resultTimestamp?: string;
       _images?: string[];
@@ -229,6 +234,11 @@ export type ContentBlock =
       _subAgent?: SubAgent;
       _durationMs?: number;
       _isPendingMarker?: boolean;
+      /** Provider attribution retained for usage indexing; omitted from replay output. */
+      _mcpServer?: string;
+      _mcpTool?: string;
+      /** Canonical skill name for provider-native skill invocation records. */
+      _skillName?: string;
     }
   | {
       type: "tool_result";
@@ -316,6 +326,11 @@ export interface ProviderParseResult {
   serviceTier?: string;
   /** Skills / slash commands used in the session (e.g. ["playwright-cli", "/insights"]) */
   skillsUsed?: string[];
+  /**
+   * One entry per skill activation, preserving repeated activations. `skillsUsed`
+   * remains the distinct display/filter vocabulary.
+   */
+  skillActivations?: string[];
   /** MCP servers used in the session (e.g. ["claude-in-chrome", "playwright"]) */
   mcpServersUsed?: string[];
   /**

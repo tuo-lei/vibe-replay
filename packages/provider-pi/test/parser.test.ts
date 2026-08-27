@@ -218,6 +218,67 @@ describe("Pi parser", () => {
     });
   });
 
+  it("distinguishes missing tool results from completed empty results", async () => {
+    const lines = [
+      {
+        type: "session",
+        version: 3,
+        id: "pi-result-presence",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        cwd: "/Users/test/project",
+      },
+      {
+        type: "message",
+        id: "user1",
+        parentId: null,
+        timestamp: "2026-01-01T00:00:01.000Z",
+        message: { role: "user", content: "Check results" },
+      },
+      {
+        type: "message",
+        id: "assistant1",
+        parentId: "user1",
+        timestamp: "2026-01-01T00:00:02.000Z",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "toolCall", id: "missing", name: "read", arguments: { path: "a.ts" } },
+            { type: "toolCall", id: "empty", name: "read", arguments: { path: "b.ts" } },
+          ],
+        },
+      },
+      {
+        type: "message",
+        id: "result1",
+        parentId: "assistant1",
+        timestamp: "2026-01-01T00:00:03.000Z",
+        message: {
+          role: "toolResult",
+          toolCallId: "empty",
+          content: "",
+          isError: false,
+        },
+      },
+    ];
+
+    await withPiFixture(lines, async (path) => {
+      const parsed = await parsePiSession(path);
+      const tools = parsed.turns
+        .flatMap((turn) => turn.blocks)
+        .filter((block) => block.type === "tool_use");
+      expect(tools).toHaveLength(2);
+      expect(tools.find((tool) => tool.type === "tool_use" && tool.id === "missing")).toMatchObject(
+        {
+          _hasResult: false,
+        },
+      );
+      expect(tools.find((tool) => tool.type === "tool_use" && tool.id === "empty")).toMatchObject({
+        _hasResult: true,
+        _result: "",
+      });
+    });
+  });
+
   it("maps harness exec_command and apply_patch tools into replay-native scenes", async () => {
     const patch = `*** Begin Patch
 *** Update File: src/auth.ts

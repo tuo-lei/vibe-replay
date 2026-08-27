@@ -1016,7 +1016,7 @@ describe("cursor sqlite metrics helpers", () => {
         id: "tool-1",
         name: "Read",
         input: { file_path: "/tmp/demo.ts" },
-        _result: "",
+        _hasResult: false,
       },
     ]);
   });

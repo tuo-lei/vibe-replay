@@ -96,6 +96,32 @@ const lines = [
 ].map((line) => JSON.stringify(line));
 
 describe("Codex parser", () => {
+  it("keeps tool search as a tool invocation rather than a skill activation", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-04-26T06:00:00.000Z",
+          type: "session_meta",
+          payload: { id: "codex-tool-search", cwd: "/Users/test/project" },
+        },
+        {
+          timestamp: "2026-04-26T06:00:01.000Z",
+          type: "response_item",
+          payload: {
+            type: "tool_search_call",
+            call_id: "search-1",
+            arguments: { query: "github" },
+          },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    expect(result.skillsUsed).toBeUndefined();
+    expect(
+      result.turns.flatMap((turn) => turn.blocks).filter((block) => block.type === "tool_use"),
+    ).toHaveLength(1);
+  });
+
   it("parses Codex rollout JSONL into replay turns", () => {
     const result = parseCodexLines(lines);
 
@@ -1148,6 +1174,46 @@ describe("Codex parser", () => {
       _isError: true,
       _result: "rate limited",
       _durationMs: 3000,
+    });
+  });
+
+  it("retains an MCP invocation when only the end event is present", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-05-03T06:50:00.000Z",
+          type: "session_meta",
+          payload: {
+            id: "codex-session-mcp-orphan",
+            cwd: "/Users/test/project",
+            source: "codex-app",
+          },
+        },
+        {
+          timestamp: "2026-05-03T06:50:01.000Z",
+          type: "event_msg",
+          payload: {
+            type: "mcp_tool_call_end",
+            call_id: "mcp_orphan",
+            invocation: {
+              server: "codex_apps",
+              tool: "github_search",
+              arguments: { query: "vibe-replay" },
+            },
+            result: { Ok: { content: [{ type: "text", text: "one result" }] } },
+          },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    const tool = result.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.type === "tool_use");
+    expect(result.mcpServersUsed).toEqual(["codex_apps"]);
+    expect(tool).toMatchObject({
+      type: "tool_use",
+      name: "mcp__codex_apps__github_search",
+      _result: "one result",
     });
   });
 

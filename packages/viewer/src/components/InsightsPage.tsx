@@ -308,6 +308,176 @@ function rangeLabel(range: TimeRange): string {
   return "All Time";
 }
 
+type InsightsSectionId = "overview" | "activity" | "usage" | "workspace";
+
+const INSIGHTS_SECTIONS: Array<{
+  id: InsightsSectionId;
+  label: string;
+  description: string;
+}> = [
+  {
+    id: "overview",
+    label: "Overview",
+    description: "Your coding pulse",
+  },
+  {
+    id: "activity",
+    label: "Activity",
+    description: "When you show up",
+  },
+  {
+    id: "usage",
+    label: "Usage",
+    description: "Tools, MCP, and tokens",
+  },
+  {
+    id: "workspace",
+    label: "Workspace",
+    description: "Projects and models",
+  },
+];
+
+const INSIGHTS_CARD_CLASS =
+  "rounded-xl bg-terminal-surface border border-terminal-border-subtle shadow-layer-sm";
+
+function InsightsSectionIcon({ section }: { section: InsightsSectionId }) {
+  const paths: Record<InsightsSectionId, string> = {
+    overview: "M3 3h6v6H3zM15 3h6v6h-6zM3 15h6v6H3zM15 15h6v6h-6z",
+    activity: "M3 12h4l2-7 4 14 2-7h6",
+    usage: "M4 5h16M4 12h16M4 19h16",
+    workspace: "M4 5h6v6H4zM14 5h6v6h-6zM4 15h6v6H4zM14 15h6v6h-6z",
+  };
+
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-4 w-4 shrink-0"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d={paths[section]} />
+    </svg>
+  );
+}
+
+export function InsightsSectionNav({
+  activeSection,
+  onSelect,
+}: {
+  activeSection: InsightsSectionId;
+  onSelect: (section: InsightsSectionId) => void;
+}) {
+  return (
+    <aside className="shrink-0 border-b border-terminal-border-subtle bg-terminal-bg/70 md:w-56 md:border-b-0 md:border-r">
+      <div className="flex gap-3 overflow-x-auto p-3 md:sticky md:top-0 md:flex-col md:gap-6 md:p-5">
+        <div className="hidden md:block">
+          <div className="text-[10px] font-mono font-semibold uppercase tracking-[0.18em] text-terminal-dimmer">
+            Insights
+          </div>
+          <p className="mt-2 text-xs font-sans leading-relaxed text-terminal-dim">
+            A focused view of how you build with agents.
+          </p>
+        </div>
+
+        <nav aria-label="Insights sections" className="flex min-w-max gap-1 md:min-w-0 md:flex-col">
+          {INSIGHTS_SECTIONS.map((section, index) => {
+            const selected = activeSection === section.id;
+            return (
+              <button
+                key={section.id}
+                type="button"
+                aria-current={selected ? "location" : undefined}
+                aria-controls={`insights-${section.id}`}
+                onClick={() => onSelect(section.id)}
+                className={`group flex min-w-[118px] items-center gap-2.5 rounded-lg px-3 py-2.5 text-left transition-colors md:min-w-0 ${
+                  selected
+                    ? "bg-terminal-green-subtle text-terminal-green"
+                    : "text-terminal-dim hover:bg-terminal-surface hover:text-terminal-text"
+                }`}
+              >
+                <span
+                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
+                    selected
+                      ? "bg-terminal-green/15"
+                      : "bg-terminal-surface-2 text-terminal-dimmer group-hover:text-terminal-dim"
+                  }`}
+                >
+                  <InsightsSectionIcon section={section.id} />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-xs font-sans font-semibold">{section.label}</span>
+                  <span className="hidden truncate text-[10px] font-mono text-terminal-dimmer md:block">
+                    {section.description}
+                  </span>
+                </span>
+                <span className="ml-auto hidden text-[10px] font-mono tabular-nums text-terminal-dimmer md:block">
+                  0{index + 1}
+                </span>
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="hidden border-t border-terminal-border-subtle pt-4 md:block">
+          <div className="text-[10px] font-mono uppercase tracking-widest text-terminal-dimmer">
+            Tip
+          </div>
+          <p className="mt-2 text-[11px] font-sans leading-relaxed text-terminal-dimmer">
+            Select a tool or MCP entry to open the matching sessions.
+          </p>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+export function InsightsSection({
+  id,
+  eyebrow,
+  title,
+  description,
+  meta,
+  children,
+}: {
+  id: InsightsSectionId;
+  eyebrow: string;
+  title: string;
+  description: string;
+  meta?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      id={`insights-${id}`}
+      aria-labelledby={`insights-${id}-heading`}
+      className="scroll-mt-5"
+    >
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <div className="text-[10px] font-mono font-semibold uppercase tracking-[0.18em] text-terminal-green">
+            {eyebrow}
+          </div>
+          <h2
+            id={`insights-${id}-heading`}
+            className="mt-1 text-base font-sans font-semibold text-terminal-text"
+          >
+            {title}
+          </h2>
+          <p className="mt-1 max-w-2xl text-xs font-sans leading-relaxed text-terminal-dim">
+            {description}
+          </p>
+        </div>
+        {meta ? <div className="shrink-0">{meta}</div> : null}
+      </div>
+      {children}
+    </section>
+  );
+}
+
 // ─── GitHub-style Contribution Heatmap ──────────────────────────────
 
 export function ContributionHeatmap({
@@ -511,15 +681,15 @@ function ShareCard({
   return (
     <div
       ref={cardRef}
-      className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-terminal-surface via-terminal-bg to-terminal-surface border border-terminal-border p-6 md:p-8 shadow-layer-xl"
+      className="relative overflow-hidden rounded-xl border border-terminal-border-subtle bg-terminal-surface p-5 shadow-layer-sm md:p-6"
     >
       {/* Gradient glow */}
-      <div className="absolute -top-20 -right-20 w-64 h-64 bg-terminal-green/5 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute -bottom-20 -left-20 w-48 h-48 bg-terminal-blue/5 rounded-full blur-3xl pointer-events-none" />
+      <div className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-terminal-green/5 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-20 -left-20 h-48 w-48 rounded-full bg-terminal-blue/5 blur-3xl" />
 
       <div className="relative z-10">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="mb-5 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <span className="text-sm font-sans font-bold bg-gradient-to-r from-terminal-green to-terminal-blue bg-clip-text text-transparent">
               vibe-replay
@@ -537,7 +707,7 @@ function ShareCard({
         </div>
 
         {/* Stats grid — 4 columns matching homepage cards */}
-        <div className="grid grid-cols-4 gap-x-6 gap-y-5 mb-6">
+        <div className="mb-5 grid grid-cols-2 gap-x-4 gap-y-5 sm:grid-cols-4 xl:grid-cols-8">
           <div>
             <div className="text-2xl md:text-3xl font-mono font-bold text-terminal-green tabular-nums">
               <AnimatedValue durationMs={500} value={stats.sessions} formatter={formatCompactNum} />
@@ -601,12 +771,12 @@ function ShareCard({
         </div>
 
         {/* Mini heatmap */}
-        <div className="mb-4">
+        <div className="mb-3">
           <MiniHeatmap sessionsPerDay={sessionsPerDay} />
         </div>
 
         {/* Footer highlights */}
-        <div className="flex items-center justify-between pt-4 border-t border-terminal-border/30">
+        <div className="flex items-center justify-between border-t border-terminal-border/30 pt-3">
           <div className="flex items-center gap-4">
             {streak.current > 0 && <span className="ui-caption">{streak.current} day streak</span>}
             {bestDay && bestDay.count > 0 && (
@@ -634,7 +804,7 @@ function HighlightCard({
   sub?: string;
 }) {
   return (
-    <div className="bg-terminal-surface rounded-xl px-4 py-3.5 shadow-layer-sm hover:bg-terminal-surface-hover transition-colors group">
+    <div className="group rounded-xl border border-terminal-border-subtle bg-terminal-surface px-4 py-3.5 shadow-layer-sm transition-colors hover:bg-terminal-surface-hover">
       <div className="flex items-start gap-3">
         <span className="text-lg leading-none mt-0.5">{icon}</span>
         <div className="min-w-0">
@@ -937,84 +1107,79 @@ function ProviderBreakdown({ providers }: { providers: Record<string, number> })
 
 function InsightsPageSkeleton() {
   return (
-    <div className="flex-1 overflow-y-auto">
-      <div className="max-w-4xl mx-auto px-4 md:px-6 py-6 space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="h-6 w-32 skeleton rounded" />
-          <div className="flex gap-1">
-            {Array.from({ length: 4 }, (_, i) => (
-              <div key={i} className="h-7 w-10 skeleton rounded-md" />
-            ))}
-          </div>
-        </div>
-        {/* Share card skeleton */}
-        <div className="rounded-2xl bg-terminal-surface border border-terminal-border/30 p-6 space-y-5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="h-4 w-20 skeleton rounded" />
-              <div className="h-5 w-12 skeleton rounded-md" />
-            </div>
-            <div className="h-3 w-28 skeleton rounded" />
-          </div>
-          <div className="grid grid-cols-4 gap-6">
-            {Array.from({ length: 8 }, (_, i) => (
-              <div key={i} className="space-y-2">
-                <div
-                  className="h-7 skeleton rounded"
-                  style={{ width: `${45 + ((i * 13) % 40)}%` }}
-                />
-                <div className="h-3 w-16 skeleton rounded" />
-              </div>
-            ))}
-          </div>
-          <div className="h-2.5 w-full skeleton rounded" />
-          <div className="flex justify-between">
-            <div className="h-3 w-40 skeleton rounded" />
-            <div className="h-3 w-24 skeleton rounded" />
-          </div>
-        </div>
-        {/* Activity heatmap skeleton */}
-        <div className="rounded-xl bg-terminal-surface p-5 shadow-layer-sm space-y-4">
-          <div className="h-3 w-16 skeleton rounded" />
-          <div className="space-y-1.5">
-            {Array.from({ length: 3 }, (_, i) => (
-              <div key={i} className="h-3 skeleton rounded" />
-            ))}
-          </div>
-        </div>
-        {/* Highlight cards skeleton */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 xl:px-8 2xl:px-10 space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="h-6 w-32 skeleton rounded" />
+        <div className="flex gap-1">
           {Array.from({ length: 4 }, (_, i) => (
-            <div key={i} className="rounded-xl bg-terminal-surface p-4 shadow-layer-sm space-y-2.5">
-              <div className="flex items-center gap-2">
-                <div className="h-5 w-5 skeleton rounded" />
-                <div className="h-3 w-20 skeleton rounded" />
-              </div>
-              <div className="h-6 w-24 skeleton rounded" />
-              <div className="h-2.5 w-16 skeleton rounded" />
+            <div key={i} className="h-7 w-10 skeleton rounded-md" />
+          ))}
+        </div>
+      </div>
+      {/* Share card skeleton */}
+      <div className="rounded-2xl bg-terminal-surface border border-terminal-border/30 p-6 space-y-5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="h-4 w-20 skeleton rounded" />
+            <div className="h-5 w-12 skeleton rounded-md" />
+          </div>
+          <div className="h-3 w-28 skeleton rounded" />
+        </div>
+        <div className="grid grid-cols-4 gap-6">
+          {Array.from({ length: 8 }, (_, i) => (
+            <div key={i} className="space-y-2">
+              <div className="h-7 skeleton rounded" style={{ width: `${45 + ((i * 13) % 40)}%` }} />
+              <div className="h-3 w-16 skeleton rounded" />
             </div>
           ))}
         </div>
-        {/* Weekly Trend + Day of Week skeleton */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {Array.from({ length: 2 }, (_, col) => (
-            <div key={col} className="rounded-xl bg-terminal-surface p-5 shadow-layer-sm space-y-4">
-              <div className="h-3 w-24 skeleton rounded" />
-              <div className="space-y-2">
-                {Array.from({ length: 5 }, (_, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <div className="h-3 w-8 skeleton rounded shrink-0" />
-                    <div
-                      className="h-5 skeleton rounded"
-                      style={{ width: `${25 + ((i * 17 + col * 31) % 60)}%` }}
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
+        <div className="h-2.5 w-full skeleton rounded" />
+        <div className="flex justify-between">
+          <div className="h-3 w-40 skeleton rounded" />
+          <div className="h-3 w-24 skeleton rounded" />
+        </div>
+      </div>
+      {/* Activity heatmap skeleton */}
+      <div className="rounded-xl bg-terminal-surface p-5 shadow-layer-sm space-y-4">
+        <div className="h-3 w-16 skeleton rounded" />
+        <div className="space-y-1.5">
+          {Array.from({ length: 3 }, (_, i) => (
+            <div key={i} className="h-3 skeleton rounded" />
           ))}
         </div>
+      </div>
+      {/* Highlight cards skeleton */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {Array.from({ length: 4 }, (_, i) => (
+          <div key={i} className="rounded-xl bg-terminal-surface p-4 shadow-layer-sm space-y-2.5">
+            <div className="flex items-center gap-2">
+              <div className="h-5 w-5 skeleton rounded" />
+              <div className="h-3 w-20 skeleton rounded" />
+            </div>
+            <div className="h-6 w-24 skeleton rounded" />
+            <div className="h-2.5 w-16 skeleton rounded" />
+          </div>
+        ))}
+      </div>
+      {/* Weekly Trend + Day of Week skeleton */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {Array.from({ length: 2 }, (_, col) => (
+          <div key={col} className="rounded-xl bg-terminal-surface p-5 shadow-layer-sm space-y-4">
+            <div className="h-3 w-24 skeleton rounded" />
+            <div className="space-y-2">
+              {Array.from({ length: 5 }, (_, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <div className="h-3 w-8 skeleton rounded shrink-0" />
+                  <div
+                    className="h-5 skeleton rounded"
+                    style={{ width: `${25 + ((i * 17 + col * 31) % 60)}%` }}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -1046,7 +1211,7 @@ function InsightsLoadingState({
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-4xl mx-auto px-4 md:px-6 py-8 space-y-4">
+      <div className="mx-auto w-full max-w-[1600px] px-4 py-8 sm:px-6 xl:px-8 2xl:px-10 space-y-4">
         <div className="rounded-xl border border-terminal-purple/20 bg-terminal-surface px-4 py-3">
           <div className="flex items-center gap-2 text-sm font-sans text-terminal-text">
             <span className="w-2 h-2 rounded-full bg-terminal-purple animate-pulse" />
@@ -1076,7 +1241,7 @@ function InsightsRangeLoadingState({
 }) {
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-4xl mx-auto px-4 md:px-6 py-6 space-y-6">
+      <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 xl:px-8 2xl:px-10 space-y-6">
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-sans font-bold text-terminal-text">Your Insights</h1>
           <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-terminal-surface">
@@ -1350,15 +1515,43 @@ export function UsageBarList({
   );
 }
 
+export function UsageCoverage({ payload }: { payload: UsageRollupPayload | null }) {
+  if (!payload || payload.totalSessions <= 0) return null;
+  const indexed = Math.min(payload.indexedSessions, payload.totalSessions);
+  const coverage = Math.round((indexed / payload.totalSessions) * 100);
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-terminal-border-subtle pt-3 text-[10px] font-mono text-terminal-dimmer">
+      <span className="uppercase tracking-widest">Invocation index</span>
+      <span className="text-terminal-dim">
+        {indexed.toLocaleString()} / {payload.totalSessions.toLocaleString()} sessions
+      </span>
+      <span className={coverage === 100 ? "text-terminal-green" : "text-terminal-orange"}>
+        {coverage}% covered
+      </span>
+      {coverage < 100 && <span>Counts will grow as provider details finish indexing.</span>}
+    </div>
+  );
+}
+
 // ─── Main Component ─────────────────────────────────────────────────
 
 export default function InsightsPage() {
   const { userInsights, loading, scanStatus } = useScanInsightsContext();
   const homePageCounts = useHomePageCounts();
   const [range, setRange] = useState<TimeRange>(getInsightsRangeFromUrl);
+  const [activeSection, setActiveSection] = useState<InsightsSectionId>("overview");
+  const contentRef = useRef<HTMLElement>(null);
   const handleRangeChange = useCallback((next: TimeRange) => {
     setRange(next);
     navigateTo({ [INSIGHTS_RANGE_PARAM]: next === "all" ? null : next }, { notify: false });
+  }, []);
+  const handleSectionSelect = useCallback((section: InsightsSectionId) => {
+    setActiveSection(section);
+    const target = document.getElementById(`insights-${section}`);
+    if (target && typeof target.scrollIntoView === "function") {
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   }, []);
   useEffect(() => {
     const handlePopState = () => setRange(getInsightsRangeFromUrl());
@@ -1470,6 +1663,27 @@ export default function InsightsPage() {
     [usagePayload, range],
   );
 
+  useEffect(() => {
+    const root = contentRef.current;
+    if (!root || !userInsights) return;
+
+    const updateActiveSection = () => {
+      const rootTop = root.getBoundingClientRect().top;
+      let next: InsightsSectionId = "overview";
+      for (const section of INSIGHTS_SECTIONS) {
+        const element = document.getElementById(`insights-${section.id}`);
+        if (element && element.getBoundingClientRect().top - rootTop <= 144) {
+          next = section.id;
+        }
+      }
+      setActiveSection((current) => (current === next ? current : next));
+    };
+
+    updateActiveSection();
+    root.addEventListener("scroll", updateActiveSection, { passive: true });
+    return () => root.removeEventListener("scroll", updateActiveSection);
+  }, [userInsights, range, usage.sessionCount, turnDurationHistogram, tokenBreakdown]);
+
   if (!userInsights && (loading || isInitialScan || scanStatus?.phase === "discovering")) {
     return (
       <InsightsLoadingState
@@ -1509,262 +1723,323 @@ export default function InsightsPage() {
       : undefined;
 
   return (
-    <div className="flex-1 overflow-y-auto">
-      <div className="max-w-4xl mx-auto px-4 md:px-6 py-6 space-y-6">
-        {/* Header with time range selector */}
-        <div className="flex items-center justify-between">
-          <h1 className="text-lg font-sans font-bold text-terminal-text">Your Insights</h1>
-          <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-terminal-surface">
-            {(["7d", "30d", "90d", "all"] as TimeRange[]).map((r) => (
-              <button
-                key={r}
-                onClick={() => handleRangeChange(r)}
-                className={`px-3 py-1.5 text-xs font-sans rounded-md transition-all ${
-                  range === r
-                    ? "bg-terminal-green-subtle text-terminal-green font-bold"
-                    : "text-terminal-dim hover:text-terminal-text"
-                }`}
-              >
-                {r === "all" ? "All" : r}
-              </button>
-            ))}
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">
+      <InsightsSectionNav activeSection={activeSection} onSelect={handleSectionSelect} />
+      <main ref={contentRef} className="min-w-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 xl:px-8 2xl:px-10">
+          {/* Page header and range selector */}
+          <div className="mb-8 flex flex-col gap-4 border-b border-terminal-border-subtle pb-5 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <div className="text-[10px] font-mono font-semibold uppercase tracking-[0.18em] text-terminal-green">
+                Personal analytics
+              </div>
+              <h1 className="mt-1 text-xl font-sans font-bold text-terminal-text">Your Insights</h1>
+              <p className="mt-1 text-xs font-sans text-terminal-dim">
+                A wider view of your sessions, activity, and agent usage.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 self-start sm:self-auto">
+              <span className="text-[10px] font-mono uppercase tracking-widest text-terminal-dimmer">
+                Range
+              </span>
+              <div className="flex items-center gap-0.5 rounded-lg border border-terminal-border-subtle bg-terminal-surface p-0.5">
+                {(["7d", "30d", "90d", "all"] as TimeRange[]).map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => handleRangeChange(r)}
+                    className={`rounded-md px-3 py-1.5 text-xs font-sans transition-all ${
+                      range === r
+                        ? "bg-terminal-green-subtle font-bold text-terminal-green"
+                        : "text-terminal-dim hover:text-terminal-text"
+                    }`}
+                  >
+                    {r === "all" ? "All" : r}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
-        </div>
 
-        {showSnapshotNotice && (
-          <div className="rounded-xl border border-terminal-blue/30 bg-terminal-blue/10 px-4 py-3">
-            <div className="flex items-start gap-3">
-              <div className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-terminal-blue" />
-              <div className="space-y-1">
-                <div className="text-xs font-sans font-semibold text-terminal-text">
-                  Showing cached insights snapshot while the background refresh runs
-                </div>
-                <div className="text-xs font-mono text-terminal-dim">
-                  {snapshotAge
-                    ? `Snapshot from ${snapshotAge} ago.`
-                    : "Using the latest cached scan."}{" "}
-                  {refreshProgress
-                    ? `Refreshing ${refreshProgress} sessions now.`
-                    : "Refreshing now."}
-                </div>
-                {pendingSessionDelta > 0 && (
+          {showSnapshotNotice && (
+            <div className="rounded-xl border border-terminal-blue/30 bg-terminal-blue/10 px-4 py-3">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-terminal-blue" />
+                <div className="space-y-1">
+                  <div className="text-xs font-sans font-semibold text-terminal-text">
+                    Showing cached insights snapshot while the background refresh runs
+                  </div>
                   <div className="text-xs font-mono text-terminal-dim">
-                    Insights currently cover {userInsights.totalSessions} scanned sessions;{" "}
-                    {pendingSessionDelta} additional session
-                    {pendingSessionDelta === 1 ? "" : "s"} will appear after the refresh completes.
+                    {snapshotAge
+                      ? `Snapshot from ${snapshotAge} ago.`
+                      : "Using the latest cached scan."}{" "}
+                    {refreshProgress
+                      ? `Refreshing ${refreshProgress} sessions now.`
+                      : "Refreshing now."}
+                  </div>
+                  {pendingSessionDelta > 0 && (
+                    <div className="text-xs font-mono text-terminal-dim">
+                      Insights currently cover {userInsights.totalSessions} scanned sessions;{" "}
+                      {pendingSessionDelta} additional session
+                      {pendingSessionDelta === 1 ? "" : "s"} will appear after the refresh
+                      completes.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          <ScanFailureNotice failedProviders={scanStatus?.failedProviders} />
+
+          <div className="space-y-10">
+            <InsightsSection
+              id="overview"
+              eyebrow="01 / Overview"
+              title="Your coding pulse"
+              description="The high-level picture for the selected range, with the all-time streak kept in view."
+              meta={
+                <span className="ui-pill-compact bg-terminal-green-subtle text-terminal-green">
+                  {formatCompactNum(stats.sessions)} sessions
+                </span>
+              }
+            >
+              <div className="space-y-4">
+                <ShareCard
+                  stats={stats}
+                  streak={streak}
+                  bestDay={bestDay}
+                  sessionsPerDay={sessionsPerDay}
+                  range={range}
+                  providers={providers}
+                  dataQualityNotes={userInsights.dataQuality?.notes}
+                />
+
+                {/* Highlights */}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <HighlightCard
+                    icon={"\u{1F525}"}
+                    label="Current Streak"
+                    value={`${streak.current} day${streak.current !== 1 ? "s" : ""}`}
+                    sub={
+                      streak.longest > streak.current
+                        ? `Best: ${streak.longest} days`
+                        : streak.current > 0
+                          ? "Personal best!"
+                          : undefined
+                    }
+                  />
+                  <HighlightCard
+                    icon={"\u26A1"}
+                    label="Avg / Active Day"
+                    value={`${avgPerActiveDay} sessions`}
+                    sub={`${activeDays} active day${activeDays !== 1 ? "s" : ""}`}
+                  />
+                  <HighlightCard
+                    icon={"\u{1F4AC}"}
+                    label="Avg / Session"
+                    value={`${avgPromptsPerSession} prompts`}
+                    sub={
+                      stats.sessions > 0
+                        ? `~${formatCompactDuration(stats.durationMs / stats.sessions)} each`
+                        : undefined
+                    }
+                  />
+                  {peak ? (
+                    <HighlightCard
+                      icon={"\u{1F3C6}"}
+                      label="Peak Day"
+                      value={`${peak.count} sessions`}
+                      sub={new Date(`${peak.date}T00:00:00`).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      })}
+                    />
+                  ) : (
+                    <HighlightCard
+                      icon={"\u{1F4C5}"}
+                      label="Vibe Coding Since"
+                      value={daysSinceFirst > 0 ? `${daysSinceFirst} days` : "Today"}
+                      sub={
+                        firstSessionDate
+                          ? new Date(firstSessionDate).toLocaleDateString("en-US", {
+                              month: "short",
+                              day: "numeric",
+                              year: "numeric",
+                            })
+                          : undefined
+                      }
+                    />
+                  )}
+                </div>
+              </div>
+            </InsightsSection>
+
+            <InsightsSection
+              id="activity"
+              eyebrow="02 / Activity"
+              title="When you show up"
+              description="See your working rhythm over the full history, then compare recent weeks and weekdays."
+              meta={
+                <span className="text-[10px] font-mono text-terminal-dimmer">Last 52 weeks</span>
+              }
+            >
+              <div className="space-y-4">
+                {/* Activity Heatmap — always shows full history regardless of range filter */}
+                <div className={`${INSIGHTS_CARD_CLASS} p-5 md:p-6`}>
+                  <div className="mb-4 flex items-center justify-between">
+                    <h3 className="ui-section-title-strong">Contribution activity</h3>
+                    <span className="text-[10px] font-mono text-terminal-dimmer">
+                      {activeDays} active day{activeDays !== 1 ? "s" : ""} in range
+                    </span>
+                  </div>
+                  <ContributionHeatmap sessionsPerDay={userInsights.sessionsPerDay || {}} />
+                </div>
+                <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                  <div className={`${INSIGHTS_CARD_CLASS} p-5 md:p-6`}>
+                    <h3 className="ui-section-title-strong mb-4">Weekly Trend</h3>
+                    <WeeklyTrendChart data={weeklyTrend} />
+                  </div>
+                  <div className={`${INSIGHTS_CARD_CLASS} p-5 md:p-6`}>
+                    <h3 className="ui-section-title-strong mb-4">Day of Week</h3>
+                    <DayOfWeekChart data={dayOfWeek} />
+                  </div>
+                </div>
+              </div>
+            </InsightsSection>
+
+            <InsightsSection
+              id="usage"
+              eyebrow="03 / Usage"
+              title="How your agents work"
+              description="Invocation counts are kept separate: ordinary tools, MCP servers and tools, and skill activations."
+              meta={
+                usage.sessionCount > 0 ? (
+                  <span className="text-[10px] font-mono tabular-nums text-terminal-dimmer">
+                    {formatCompactNum(usage.toolCalls)} tools · {formatCompactNum(usage.mcpCalls)}{" "}
+                    MCP
+                  </span>
+                ) : null
+              }
+            >
+              <div className="space-y-4">
+                {/* Turn Duration Distribution + Token Breakdown */}
+                {(turnDurationHistogram || tokenBreakdown) && (
+                  <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                    {turnDurationHistogram && (
+                      <div className={`${INSIGHTS_CARD_CLASS} p-5 md:p-6`}>
+                        <h3 className="ui-section-title-strong mb-4">Turn Duration Distribution</h3>
+                        <TurnDurationChart histogram={turnDurationHistogram} />
+                      </div>
+                    )}
+                    {tokenBreakdown && (
+                      <div className={`${INSIGHTS_CARD_CLASS} p-5 md:p-6`}>
+                        <h3 className="ui-section-title-strong mb-4">Token Usage</h3>
+                        <TokenBreakdownChart breakdown={tokenBreakdown} />
+                      </div>
+                    )}
                   </div>
                 )}
-              </div>
-            </div>
-          </div>
-        )}
 
-        <ScanFailureNotice failedProviders={scanStatus?.failedProviders} />
-
-        {/* Share Card */}
-        <ShareCard
-          stats={stats}
-          streak={streak}
-          bestDay={bestDay}
-          sessionsPerDay={sessionsPerDay}
-          range={range}
-          providers={providers}
-          dataQualityNotes={userInsights.dataQuality?.notes}
-        />
-
-        {/* Activity Heatmap — always shows full history regardless of range filter */}
-        <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="ui-section-title-strong">Activity</h3>
-            {range !== "all" && (
-              <span className="text-[9px] font-mono text-terminal-dimmer">Last 52 weeks</span>
-            )}
-          </div>
-          <ContributionHeatmap sessionsPerDay={userInsights.sessionsPerDay || {}} />
-        </div>
-
-        {/* Highlights */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <HighlightCard
-            icon={"\u{1F525}"}
-            label="Current Streak"
-            value={`${streak.current} day${streak.current !== 1 ? "s" : ""}`}
-            sub={
-              streak.longest > streak.current
-                ? `Best: ${streak.longest} days`
-                : streak.current > 0
-                  ? "Personal best!"
-                  : undefined
-            }
-          />
-          <HighlightCard
-            icon={"\u26A1"}
-            label="Avg / Active Day"
-            value={`${avgPerActiveDay} sessions`}
-            sub={`${activeDays} active day${activeDays !== 1 ? "s" : ""}`}
-          />
-          <HighlightCard
-            icon={"\u{1F4AC}"}
-            label="Avg / Session"
-            value={`${avgPromptsPerSession} prompts`}
-            sub={
-              stats.sessions > 0
-                ? `~${formatCompactDuration(stats.durationMs / stats.sessions)} each`
-                : undefined
-            }
-          />
-          {peak ? (
-            <HighlightCard
-              icon={"\u{1F3C6}"}
-              label="Peak Day"
-              value={`${peak.count} sessions`}
-              sub={new Date(`${peak.date}T00:00:00`).toLocaleDateString("en-US", {
-                month: "short",
-                day: "numeric",
-                year: "numeric",
-              })}
-            />
-          ) : (
-            <HighlightCard
-              icon={"\u{1F4C5}"}
-              label="Vibe Coding Since"
-              value={daysSinceFirst > 0 ? `${daysSinceFirst} days` : "Today"}
-              sub={
-                firstSessionDate
-                  ? new Date(firstSessionDate).toLocaleDateString("en-US", {
-                      month: "short",
-                      day: "numeric",
-                      year: "numeric",
-                    })
-                  : undefined
-              }
-            />
-          )}
-        </div>
-
-        {/* Turn Duration Distribution + Token Breakdown */}
-        {(turnDurationHistogram || tokenBreakdown) && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {turnDurationHistogram && (
-              <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm">
-                <h3 className="ui-section-title-strong mb-4">Turn Duration Distribution</h3>
-                <TurnDurationChart histogram={turnDurationHistogram} />
+                {/* Tool & MCP usage — aggregated from per-session usage counters */}
+                {usage.sessionCount > 0 && (
+                  <div className={`${INSIGHTS_CARD_CLASS} space-y-5 p-5 md:p-6`}>
+                    <div className="flex items-baseline justify-between gap-3">
+                      <h3 className="ui-section-title-strong">Tools &amp; MCP</h3>
+                      <span className="text-[10px] font-mono text-terminal-dimmer tabular-nums">
+                        {formatCompactNum(usage.toolCalls)} tool ·{" "}
+                        {formatCompactNum(usage.mcpCalls)} MCP calls
+                        {usage.errorCount > 0 && ` · ${formatCompactNum(usage.errorCount)} failed`}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                      <div>
+                        <h4 className="ui-section-title mb-3">Top tools</h4>
+                        <UsageBarList
+                          entries={usage.tools}
+                          emptyLabel="No tool data"
+                          unit="calls"
+                          onSelect={(name) => navigateToUsageSessions("tool", name, range)}
+                        />
+                      </div>
+                      <div>
+                        <h4 className="ui-section-title mb-3">Top MCP servers</h4>
+                        <UsageBarList
+                          entries={usage.mcpServers}
+                          emptyLabel="No MCP data"
+                          unit="calls"
+                          onSelect={(name) => navigateToUsageSessions("mcp", name, range)}
+                        />
+                      </div>
+                    </div>
+                    {usage.mcpTools.length > 0 && (
+                      <div>
+                        <h4 className="ui-section-title mb-3">Top MCP tools</h4>
+                        <UsageBarList
+                          entries={usage.mcpTools}
+                          emptyLabel="No MCP data"
+                          unit="calls"
+                          onSelect={(name) => navigateToUsageSessions("mcpTool", name, range)}
+                        />
+                      </div>
+                    )}
+                    {usage.skills.length > 0 && (
+                      <div>
+                        <h4 className="ui-section-title mb-3">Top skills</h4>
+                        <UsageBarList
+                          entries={usage.skills}
+                          emptyLabel="No skill data"
+                          unit="activations"
+                          onSelect={(name) => navigateToUsageSessions("skill", name, range)}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+                <UsageCoverage payload={usagePayload} />
               </div>
-            )}
-            {tokenBreakdown && (
-              <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm">
-                <h3 className="ui-section-title-strong mb-4">Token Usage</h3>
-                <TokenBreakdownChart breakdown={tokenBreakdown} />
-              </div>
-            )}
-          </div>
-        )}
+            </InsightsSection>
 
-        {/* Tool & MCP usage — aggregated from per-session usage counters */}
-        {usage.sessionCount > 0 && (
-          <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm space-y-5">
-            <div className="flex items-baseline justify-between gap-3">
-              <h3 className="ui-section-title-strong">Tools &amp; MCP</h3>
-              <span className="text-[10px] font-mono text-terminal-dimmer tabular-nums">
-                {formatCompactNum(usage.toolCalls)} tool · {formatCompactNum(usage.mcpCalls)} MCP
-                calls
-                {usage.errorCount > 0 && ` · ${formatCompactNum(usage.errorCount)} failed`}
-              </span>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <div>
-                <h4 className="ui-section-title mb-3">Top tools</h4>
-                <UsageBarList
-                  entries={usage.tools}
-                  emptyLabel="No tool data"
-                  unit="calls"
-                  onSelect={(name) => navigateToUsageSessions("tool", name, range)}
-                />
+            <InsightsSection
+              id="workspace"
+              eyebrow="04 / Workspace"
+              title="Your working set"
+              description="The projects, models, and providers that shaped your sessions in this range."
+            >
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                <div className={`${INSIGHTS_CARD_CLASS} p-5 md:p-6`}>
+                  <h3 className="ui-section-title-strong mb-4">Top Projects</h3>
+                  <TopProjectsList projects={topProjects} />
+                </div>
+                <div className={`${INSIGHTS_CARD_CLASS} space-y-5 p-5 md:p-6`}>
+                  <div>
+                    <h3 className="ui-section-title-strong mb-4">Models</h3>
+                    <ModelBreakdown models={models} />
+                  </div>
+                  {Object.keys(providers).length > 1 && (
+                    <div>
+                      <h3 className="ui-section-title-strong mb-4">Providers</h3>
+                      <ProviderBreakdown providers={providers} />
+                    </div>
+                  )}
+                </div>
               </div>
-              <div>
-                <h4 className="ui-section-title mb-3">Top MCP servers</h4>
-                <UsageBarList
-                  entries={usage.mcpServers}
-                  emptyLabel="No MCP data"
-                  unit="calls"
-                  onSelect={(name) => navigateToUsageSessions("mcp", name, range)}
-                />
-              </div>
-            </div>
-            {usage.mcpTools.length > 0 && (
-              <div>
-                <h4 className="ui-section-title mb-3">Top MCP tools</h4>
-                <UsageBarList
-                  entries={usage.mcpTools}
-                  emptyLabel="No MCP data"
-                  unit="calls"
-                  onSelect={(name) => navigateToUsageSessions("mcpTool", name, range)}
-                />
-              </div>
-            )}
-            {usage.skills.length > 0 && (
-              <div>
-                <h4 className="ui-section-title mb-3">Top skills</h4>
-                <UsageBarList
-                  entries={usage.skills}
-                  emptyLabel="No skill data"
-                  unit="activations"
-                  onSelect={(name) => navigateToUsageSessions("skill", name, range)}
-                />
-              </div>
-            )}
-            {usagePayload && usagePayload.indexedSessions < usagePayload.totalSessions && (
-              <div className="text-[10px] font-mono text-terminal-dimmer">
-                Based on {usagePayload.indexedSessions} of {usagePayload.totalSessions} scanned
-                sessions — the rest have no usage index yet.
-              </div>
-            )}
-          </div>
-        )}
+            </InsightsSection>
 
-        {/* Two-column: Weekly Trend + Day of Week */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm">
-            <h3 className="ui-section-title-strong mb-4">Weekly Trend</h3>
-            <WeeklyTrendChart data={weeklyTrend} />
-          </div>
-          <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm">
-            <h3 className="ui-section-title-strong mb-4">Day of Week</h3>
-            <DayOfWeekChart data={dayOfWeek} />
-          </div>
-        </div>
-
-        {/* Two-column: Top Projects + Models & Providers */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm">
-            <h3 className="ui-section-title-strong mb-4">Top Projects</h3>
-            <TopProjectsList projects={topProjects} />
-          </div>
-          <div className="bg-terminal-surface rounded-xl p-5 shadow-layer-sm space-y-5">
-            <div>
-              <h3 className="ui-section-title-strong mb-4">Models</h3>
-              <ModelBreakdown models={models} />
-            </div>
-            {Object.keys(providers).length > 1 && (
-              <div>
-                <h3 className="ui-section-title-strong mb-4">Providers</h3>
-                <ProviderBreakdown providers={providers} />
+            {/* Vibe coding since banner */}
+            {daysSinceFirst > 0 && (
+              <div className="text-center py-4">
+                <span className="text-[11px] font-mono text-terminal-dimmer">
+                  You've been vibe coding for {daysSinceFirst} day{daysSinceFirst !== 1 ? "s" : ""}{" "}
+                  · {formatDuration(stats.durationMs)} total · {formatCompactNum(stats.toolCalls)}{" "}
+                  tool calls
+                </span>
               </div>
             )}
           </div>
         </div>
-
-        {/* Vibe coding since banner */}
-        {daysSinceFirst > 0 && (
-          <div className="text-center py-4">
-            <span className="text-[11px] font-mono text-terminal-dimmer">
-              You've been vibe coding for {daysSinceFirst} day{daysSinceFirst !== 1 ? "s" : ""} ·{" "}
-              {formatDuration(stats.durationMs)} total · {formatCompactNum(stats.toolCalls)} tool
-              calls
-            </span>
-          </div>
-        )}
-      </div>
+      </main>
     </div>
   );
 }

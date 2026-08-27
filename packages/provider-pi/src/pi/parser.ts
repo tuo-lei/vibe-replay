@@ -453,14 +453,25 @@ function buildAssistantBlocks(
     } else if (block.type === "toolCall") {
       const result = toolResults.get(block.id);
       const rawInput = block.arguments || {};
+      const normalizedName = block.name.toLowerCase();
+      const skillName =
+        normalizedName === "skill" || normalizedName === "skill_view"
+          ? ["name", "skill", "skillName", "skill_name", "slug"]
+              .map((key) => rawInput[key])
+              .find(
+                (value): value is string => typeof value === "string" && value.trim().length > 0,
+              )
+          : undefined;
       blocks.push({
         type: "tool_use",
         id: block.id,
         name: mapToolName(block.name, rawInput),
         input: normalizeToolInput(block.name, rawInput),
-        _result: result?.text || "",
+        _hasResult: result !== undefined,
+        ...(result !== undefined ? { _result: result.text } : {}),
         ...(result?.images.length ? { _images: result.images } : {}),
         ...(result?.isError ? { _isError: true } : {}),
+        ...(skillName ? { _skillName: skillName.trim() } : {}),
         ...(assistantTimestamp && result?.timestamp
           ? { _durationMs: toolDurationMs(assistantTimestamp, result.timestamp) }
           : {}),
@@ -489,6 +500,7 @@ function buildBashExecutionBlock(
     id: fallbackId,
     name: "Bash",
     input: { command: message.command || "" },
+    _hasResult: true,
     _result: outputParts.join(""),
     ...(message.exitCode !== undefined && message.exitCode !== 0 ? { _isError: true } : {}),
   };

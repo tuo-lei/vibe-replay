@@ -82,7 +82,6 @@ export function parseCodexLines(
   const tokenSnapshots: CodexTokenSnapshot[] = [];
   const taskDurations: number[] = [];
   const mcpServersUsed = new Set<string>();
-  const skillsUsed = new Set<string>();
   const gitBranches: string[] = [];
   const seenUserMessages = new Map<string, number[]>();
   const seenAssistantMessages = new Map<string, number[]>();
@@ -175,6 +174,14 @@ export function parseCodexLines(
         continue;
       }
       if (p.type === "exec_command_end" && p.call_id) {
+        if (!tools.has(p.call_id)) {
+          tools.set(p.call_id, {
+            id: p.call_id,
+            name: "exec_command",
+            input: p.command || p.action || {},
+            timestamp: obj.timestamp,
+          });
+        }
         mergeToolResult(toolResults, p.call_id, {
           result: formatExecResult(p),
           isError: typeof p.exit_code === "number" ? p.exit_code !== 0 : undefined,
@@ -206,6 +213,14 @@ export function parseCodexLines(
       if (p.type === "patch_apply_end" && p.call_id) {
         const tool = tools.get(p.call_id);
         const changedFiles = patchApplyChangedFiles(p);
+        if (!tool) {
+          tools.set(p.call_id, {
+            id: p.call_id,
+            name: "apply_patch",
+            input: {},
+            timestamp: obj.timestamp,
+          });
+        }
         if (tool && changedFiles.length > 0) {
           tool.input = mergeToolFilePaths(tool.input, changedFiles);
         }
@@ -239,10 +254,33 @@ export function parseCodexLines(
         const invocation = p.invocation || {};
         const server = typeof invocation.server === "string" ? invocation.server : "";
         const toolName = typeof invocation.tool === "string" ? invocation.tool : "";
-        const tool = tools.get(p.call_id);
-        if (tool && server && toolName) {
-          tool.name = `mcp__${server}__${toolName}`;
+        let tool = tools.get(p.call_id);
+        if (server) {
           mcpServersUsed.add(server);
+          if (!tool) {
+            tool = {
+              id: p.call_id,
+              name: toolName ? `mcp__${server}__${toolName}` : "mcp",
+              input: toolName
+                ? invocation.arguments || {}
+                : {
+                    server,
+                  },
+              timestamp: obj.timestamp,
+            };
+            tools.set(p.call_id, tool);
+          } else if (toolName) {
+            tool.name = `mcp__${server}__${toolName}`;
+          }
+        } else if (!tool) {
+          // The completion event itself proves that Codex attempted an MCP
+          // invocation, even when the start payload omitted server metadata.
+          tools.set(p.call_id, {
+            id: p.call_id,
+            name: "mcp",
+            input: {},
+            timestamp: obj.timestamp,
+          });
         }
         mergeToolResult(toolResults, p.call_id, {
           result: formatMcpToolResult(p),
@@ -343,7 +381,6 @@ export function parseCodexLines(
         const server = name.split("__")[1];
         if (server) mcpServersUsed.add(server);
       }
-      if (name === "tool_search") skillsUsed.add("tool_search");
       continue;
     }
 
@@ -353,6 +390,16 @@ export function parseCodexLines(
       p.type === "tool_search_output"
     ) {
       if (p.call_id) {
+        if (!tools.has(p.call_id)) {
+          // Preserve orphan completions as an unknown ordinary tool rather
+          // than silently losing a concrete provider event.
+          tools.set(p.call_id, {
+            id: p.call_id,
+            name: "Unknown",
+            input: {},
+            timestamp: obj.timestamp,
+          });
+        }
         mergeToolResult(
           toolResults,
           p.call_id,
@@ -378,6 +425,7 @@ export function parseCodexLines(
           id: tool.id,
           name: normalizeToolName(tool.name),
           input: normalizeToolInput(tool.name, tool.input),
+          _hasResult: toolResults.has(tool.id),
           _result: tr?.result || "",
           ...(tr?.isError ? { _isError: true } : {}),
           ...(tr?.durationMs ? { _durationMs: tr.durationMs } : {}),
@@ -424,7 +472,6 @@ export function parseCodexLines(
     entrypoint,
     permissionMode: approvalPolicy || permissionMode,
     memoryMode,
-    skillsUsed: skillsUsed.size > 0 ? [...skillsUsed].sort() : undefined,
     mcpServersUsed: mcpServersUsed.size > 0 ? [...mcpServersUsed].sort() : undefined,
     dataSource: "jsonl",
     dataSourceInfo: {

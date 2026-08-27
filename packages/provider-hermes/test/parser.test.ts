@@ -361,7 +361,7 @@ describe("hermes parser", () => {
     });
   });
 
-  it("skips session_meta and empty user rows, drops orphan tool results", async () => {
+  it("skips session_meta and empty user rows, preserves orphan tool results", async () => {
     const db = await buildHermesDb({
       sessions: [baseSession],
       messages: [
@@ -388,10 +388,22 @@ describe("hermes parser", () => {
 
     try {
       const result = parseSessionFromDb(db, baseSession.id);
-      expect(result.turns).toHaveLength(1);
+      expect(result.turns).toHaveLength(2);
       expect(result.turns[0]).toMatchObject({
         role: "user",
         blocks: [{ type: "text", text: "real prompt" }],
+      });
+      expect(result.turns[1]).toMatchObject({
+        role: "assistant",
+        blocks: [
+          {
+            type: "tool_use",
+            id: "missing_call",
+            name: "Bash",
+            _hasResult: true,
+            _result: "orphan",
+          },
+        ],
       });
     } finally {
       db.close();

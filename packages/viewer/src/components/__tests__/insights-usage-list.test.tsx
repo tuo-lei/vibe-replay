@@ -1,7 +1,14 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { navigateToUsageSessions, TopProjectsList, UsageBarList } from "../InsightsPage";
+import {
+  InsightsSection,
+  InsightsSectionNav,
+  navigateToUsageSessions,
+  TopProjectsList,
+  UsageBarList,
+  UsageCoverage,
+} from "../InsightsPage";
 import { getInsightsRangeFromUrl, getMultiFromUrl } from "../../hooks/usePanelFilters";
 
 afterEach(() => {
@@ -80,6 +87,49 @@ describe("UsageBarList", () => {
     const params = new URLSearchParams(window.location.search);
     expect(params.get("mcpTool")).toBe(value);
     expect(getMultiFromUrl("mcpTool")).toEqual([value]);
+  });
+});
+
+describe("Insights sections", () => {
+  it("exposes section anchors and navigates from the sidebar", () => {
+    const onSelect = vi.fn();
+    render(
+      <>
+        <InsightsSectionNav activeSection="overview" onSelect={onSelect} />
+        <InsightsSection
+          id="usage"
+          eyebrow="03 / Usage"
+          title="How your agents work"
+          description="Invocation counts"
+        >
+          <div>Usage content</div>
+        </InsightsSection>
+      </>,
+    );
+
+    const usageButton = screen.getByRole("button", { name: /Usage/i });
+    expect(usageButton.getAttribute("aria-controls")).toBe("insights-usage");
+    expect(screen.getByRole("heading", { name: "How your agents work" })).toBeDefined();
+    expect(document.getElementById("insights-usage")).toBeDefined();
+
+    fireEvent.click(usageButton);
+    expect(onSelect).toHaveBeenCalledWith("usage");
+  });
+
+  it("communicates incomplete invocation-index coverage", () => {
+    const { container } = render(
+      <UsageCoverage
+        payload={{
+          sessions: [],
+          indexedSessions: 2,
+          totalSessions: 4,
+        }}
+      />,
+    );
+
+    expect(container.textContent).toContain("2 / 4 sessions");
+    expect(container.textContent).toContain("50% covered");
+    expect(container.textContent).toContain("Counts will grow");
   });
 });
 
