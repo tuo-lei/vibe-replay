@@ -57,7 +57,7 @@ function ToolResultBadge({ scene }: { scene: ToolScene }) {
       </span>
     );
   }
-  if (scene.hasResult === true && scene.result.length === 0) {
+  if (scene.hasResult === true && (scene.result || "").length === 0) {
     return (
       <span
         className="text-[10px] font-mono text-terminal-dimmer shrink-0"
