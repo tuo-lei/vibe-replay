@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { providerDisplayName } from "./dashboard-utils";
 
 type RemoteProvider = "claude-code" | "codex" | "pi";
@@ -124,8 +124,11 @@ export default function SettingsPanel() {
   const [testResults, setTestResults] = useState<Record<string, TestResult>>({});
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const sourceRequestVersion = useRef(0);
+  const sourceActionsLocked = loading || saving || refreshing;
 
   const loadSettings = useCallback(async () => {
+    const requestVersion = ++sourceRequestVersion.current;
     setLoading(true);
     setError(null);
     try {
@@ -135,11 +138,15 @@ export default function SettingsPanel() {
         error?: string;
       } | null;
       if (!response.ok) throw new Error(data?.error || "Settings could not be loaded");
-      setSources(parseRemoteSources(data?.remoteSources));
+      if (requestVersion === sourceRequestVersion.current) {
+        setSources(parseRemoteSources(data?.remoteSources));
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Settings could not be loaded");
+      if (requestVersion === sourceRequestVersion.current) {
+        setError(err instanceof Error ? err.message : "Settings could not be loaded");
+      }
     } finally {
-      setLoading(false);
+      if (requestVersion === sourceRequestVersion.current) setLoading(false);
     }
   }, []);
 
@@ -148,6 +155,7 @@ export default function SettingsPanel() {
   }, [loadSettings]);
 
   const saveSources = async (nextSources: RemoteSource[], successMessage: string) => {
+    const requestVersion = ++sourceRequestVersion.current;
     setSaving(true);
     setError(null);
     setMessage(null);
@@ -162,15 +170,19 @@ export default function SettingsPanel() {
         error?: string;
       } | null;
       if (!response.ok) throw new Error(data?.error || "SSH settings could not be saved");
-      setSources(parseRemoteSources(data?.remoteSources));
-      setTestResults({});
-      setMessage(successMessage);
-      setDraft(null);
-      setEditingId(null);
+      if (requestVersion === sourceRequestVersion.current) {
+        setSources(parseRemoteSources(data?.remoteSources));
+        setTestResults({});
+        setMessage(successMessage);
+        setDraft(null);
+        setEditingId(null);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "SSH settings could not be saved");
+      if (requestVersion === sourceRequestVersion.current) {
+        setError(err instanceof Error ? err.message : "SSH settings could not be saved");
+      }
     } finally {
-      setSaving(false);
+      if (requestVersion === sourceRequestVersion.current) setSaving(false);
     }
   };
 
@@ -233,6 +245,7 @@ export default function SettingsPanel() {
   };
 
   const refreshSources = async () => {
+    const requestVersion = ++sourceRequestVersion.current;
     setRefreshing(true);
     setError(null);
     setMessage(null);
@@ -243,13 +256,17 @@ export default function SettingsPanel() {
         error?: string;
       } | null;
       if (!response.ok) throw new Error(data?.error || "Source discovery failed");
-      setMessage("Source discovery finished. Sessions and Insights will use the new catalog.");
-      const refreshedSettings = parseRemoteSources(data?.remoteSources);
-      setSources(refreshedSettings);
+      if (requestVersion === sourceRequestVersion.current) {
+        setMessage("Source discovery finished. Sessions and Insights will use the new catalog.");
+        const refreshedSettings = parseRemoteSources(data?.remoteSources);
+        setSources(refreshedSettings);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Source discovery failed");
+      if (requestVersion === sourceRequestVersion.current) {
+        setError(err instanceof Error ? err.message : "Source discovery failed");
+      }
     } finally {
-      setRefreshing(false);
+      if (requestVersion === sourceRequestVersion.current) setRefreshing(false);
     }
   };
 
@@ -297,6 +314,7 @@ export default function SettingsPanel() {
             </div>
             <button
               type="button"
+              disabled={sourceActionsLocked}
               onClick={() => {
                 setDraft(emptyDraft());
                 setEditingId(null);
@@ -367,7 +385,7 @@ export default function SettingsPanel() {
                         <button
                           type="button"
                           onClick={() => void testSource(source)}
-                          disabled={testingId === source.id}
+                          disabled={sourceActionsLocked || testingId === source.id}
                           className="rounded-md bg-terminal-green-subtle px-2.5 py-1.5 text-[10px] font-mono font-semibold text-terminal-green transition-colors hover:bg-terminal-green/20 disabled:cursor-wait disabled:opacity-50"
                         >
                           {testingId === source.id ? "Testing…" : "Test"}
@@ -380,6 +398,7 @@ export default function SettingsPanel() {
                             setError(null);
                             setMessage(null);
                           }}
+                          disabled={sourceActionsLocked}
                           className="rounded-md bg-terminal-surface-2 px-2.5 py-1.5 text-[10px] font-mono text-terminal-dim transition-colors hover:text-terminal-text"
                         >
                           Edit
@@ -387,6 +406,7 @@ export default function SettingsPanel() {
                         <button
                           type="button"
                           onClick={() => void removeSource(source)}
+                          disabled={sourceActionsLocked}
                           className="rounded-md bg-terminal-red-subtle px-2.5 py-1.5 text-[10px] font-mono text-terminal-red transition-colors hover:bg-terminal-red/20"
                         >
                           Remove
@@ -547,7 +567,7 @@ export default function SettingsPanel() {
             <button
               type="button"
               onClick={() => void refreshSources()}
-              disabled={refreshing}
+              disabled={sourceActionsLocked}
               className="rounded-lg bg-terminal-surface-2 px-3 py-2 text-xs font-mono text-terminal-dim transition-colors hover:text-terminal-text disabled:cursor-wait disabled:opacity-50"
             >
               {refreshing ? "Refreshing…" : "Refresh sources now"}

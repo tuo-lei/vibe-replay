@@ -161,6 +161,21 @@ function parseRemoteSourcesSettingsBody(
   return { sources };
 }
 
+function isSameOriginSettingsRequest(c: Context): boolean {
+  const origin = c.req.header("Origin");
+  if (origin) {
+    try {
+      if (new URL(origin).origin !== new URL(c.req.url).origin) return false;
+    } catch {
+      return false;
+    }
+  }
+  const fetchSite = c.req.header("Sec-Fetch-Site");
+  return (
+    !fetchSite || fetchSite === "same-origin" || fetchSite === "same-site" || fetchSite === "none"
+  );
+}
+
 const replayGitRepoByProjectCache = new Map<string, string | undefined>();
 
 async function readReplayGitRepo(project: string): Promise<string | undefined> {
@@ -2218,6 +2233,9 @@ export async function startServer(
   });
 
   app.put("/api/settings/remote-sources", async (c) => {
+    if (!isSameOriginSettingsRequest(c)) {
+      return c.json({ error: "Settings requests must be same-origin" }, 403);
+    }
     const parsed = parseRemoteSourcesSettingsBody(await c.req.json().catch(() => undefined));
     if ("error" in parsed) return c.json({ error: parsed.error }, 400);
 
@@ -2232,6 +2250,9 @@ export async function startServer(
   });
 
   app.post("/api/settings/remote-sources/test", async (c) => {
+    if (!isSameOriginSettingsRequest(c)) {
+      return c.json({ ok: false, message: "Settings requests must be same-origin" }, 403);
+    }
     const body = await c.req.json().catch(() => undefined);
     const value =
       body && typeof body === "object" && !Array.isArray(body)
