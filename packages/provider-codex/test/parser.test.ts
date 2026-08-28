@@ -810,6 +810,43 @@ describe("Codex parser", () => {
     });
   });
 
+  it("preserves changed files when patch_apply_end is the only patch event", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-04-26T10:21:00.000Z",
+          type: "session_meta",
+          payload: { id: "codex-session-orphan-patch", cwd: "/Users/test/project", source: "cli" },
+        },
+        {
+          timestamp: "2026-04-26T10:21:01.000Z",
+          type: "event_msg",
+          payload: {
+            type: "patch_apply_end",
+            call_id: "patch_orphan",
+            status: "completed",
+            success: true,
+            changes: {
+              "/Users/test/project/src/app.ts": { status: "modified" },
+              "/Users/test/project/src/auth.ts": { status: "added" },
+            },
+          },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    const tool = result.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.type === "tool_use");
+    expect(tool).toMatchObject({
+      type: "tool_use",
+      name: "Edit",
+      input: {
+        file_paths: ["/Users/test/project/src/app.ts", "/Users/test/project/src/auth.ts"],
+      },
+    });
+  });
+
   it("preserves multi-file apply_patch contents through replay transform", () => {
     const patch = `*** Begin Patch
 *** Update File: src/app.ts

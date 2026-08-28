@@ -211,15 +211,16 @@ export function parseCodexLines(
         continue;
       }
       if (p.type === "patch_apply_end" && p.call_id) {
-        const tool = tools.get(p.call_id);
+        let tool = tools.get(p.call_id);
         const changedFiles = patchApplyChangedFiles(p);
         if (!tool) {
-          tools.set(p.call_id, {
+          tool = {
             id: p.call_id,
             name: "apply_patch",
             input: {},
             timestamp: obj.timestamp,
-          });
+          };
+          tools.set(p.call_id, tool);
         }
         if (tool && changedFiles.length > 0) {
           tool.input = mergeToolFilePaths(tool.input, changedFiles);

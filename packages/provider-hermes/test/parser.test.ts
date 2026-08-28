@@ -523,7 +523,9 @@ describe("hermes parser", () => {
           id: 2,
           sessionId: baseSession.id,
           role: "assistant",
-          toolCalls: toolCallsFor([{ id: "call_s", name: "skill_view", args: { name: "replay" } }]),
+          toolCalls: toolCallsFor([
+            { id: "call_s", name: "skill_view", args: { name: " replay " } },
+          ]),
           finishReason: "tool_calls",
           timestamp: 1_800_000_002,
         },

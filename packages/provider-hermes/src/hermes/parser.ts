@@ -289,7 +289,7 @@ export function parseSessionFromDb(
         pendingResults.set(block.id, block);
 
         if (rawName === "skill_view") {
-          const skillName = typeof mappedInput.name === "string" ? mappedInput.name : "";
+          const skillName = typeof mappedInput.name === "string" ? mappedInput.name.trim() : "";
           if (skillName) {
             skillsUsed.add(skillName);
             skillActivations.push(skillName);

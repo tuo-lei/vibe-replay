@@ -110,7 +110,7 @@ describe("Insights sections", () => {
     const usageButton = screen.getByRole("button", { name: /Usage/i });
     expect(usageButton.getAttribute("aria-controls")).toBe("insights-usage");
     expect(screen.getByRole("heading", { name: "How your agents work" })).toBeDefined();
-    expect(document.getElementById("insights-usage")).toBeDefined();
+    expect(document.getElementById("insights-usage")).not.toBeNull();
 
     fireEvent.click(usageButton);
     expect(onSelect).toHaveBeenCalledWith("usage");

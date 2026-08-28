@@ -118,7 +118,7 @@ export async function parseOpencodeSession(
     );
   }
 
-  const opened = await openOpencodeDb(hintedDbPath(paths) || undefined);
+  const opened = await openOpencodeDb(hintedDbPath(paths, sessionInfo) || undefined);
   if (!opened) {
     throw new Error(`opencode database not found at ${opencodeDbPath()}`);
   }
