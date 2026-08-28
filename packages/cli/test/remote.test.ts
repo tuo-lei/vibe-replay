@@ -10,7 +10,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { deduplicateSessionsByProvider } from "@vibe-replay/providers-default";
 import { replayOutputSlug } from "../src/server-core.js";
@@ -177,7 +177,7 @@ describe("remote source configuration", () => {
       "utf-8",
     );
     if (process.platform !== "win32") await chmod(fakeSsh, 0o755);
-    process.env.PATH = `${fakeBin}:${originalPath || ""}`;
+    process.env.PATH = `${fakeBin}${delimiter}${originalPath || ""}`;
 
     await expect(
       testRemoteSourceConnection({
