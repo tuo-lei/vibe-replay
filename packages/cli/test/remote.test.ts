@@ -163,12 +163,20 @@ describe("remote source configuration", () => {
     temporaryRoots.push(root);
     const fakeBin = join(root, "bin");
     await mkdir(fakeBin, { recursive: true });
+    const fakeSsh = process.platform === "win32" ? join(fakeBin, "ssh.cmd") : join(fakeBin, "ssh");
     await writeFile(
-      join(fakeBin, "ssh"),
-      "#!/bin/sh\ncat >/dev/null\nprintf 'vibe-replay-ssh-ok\\n'\n",
+      join(fakeBin, "fake-ssh.mjs"),
+      "process.stdin.resume(); process.stdin.on('end', () => process.stdout.write('vibe-replay-ssh-ok\\n'));",
       "utf-8",
     );
-    await chmod(join(fakeBin, "ssh"), 0o755);
+    await writeFile(
+      fakeSsh,
+      process.platform === "win32"
+        ? '@echo off\r\nnode "%~dp0fake-ssh.mjs"\r\n'
+        : '#!/bin/sh\nexec node "$(dirname "$0")/fake-ssh.mjs"\n',
+      "utf-8",
+    );
+    if (process.platform !== "win32") await chmod(fakeSsh, 0o755);
     process.env.PATH = `${fakeBin}:${originalPath || ""}`;
 
     await expect(
