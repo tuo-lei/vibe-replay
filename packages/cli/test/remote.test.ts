@@ -157,6 +157,30 @@ describe("remote source configuration", () => {
       message: "Invalid SSH source configuration.",
     });
   });
+
+  it("runs a bounded probe for a valid SSH target", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-remote-probe-"));
+    temporaryRoots.push(root);
+    const fakeBin = join(root, "bin");
+    await mkdir(fakeBin, { recursive: true });
+    await writeFile(
+      join(fakeBin, "ssh"),
+      "#!/bin/sh\ncat >/dev/null\nprintf 'vibe-replay-ssh-ok\\n'\n",
+      "utf-8",
+    );
+    await chmod(join(fakeBin, "ssh"), 0o755);
+    process.env.PATH = `${fakeBin}:${originalPath || ""}`;
+
+    await expect(
+      testRemoteSourceConnection({
+        id: "remote-dev",
+        label: "Remote dev",
+        sshHost: "devbox",
+        providers: ["codex"],
+        connectTimeoutMs: 1_000,
+      }),
+    ).resolves.toEqual({ ok: true, message: "Connected to Remote dev." });
+  });
 });
 
 describe("remote cache path safety and identity", () => {
