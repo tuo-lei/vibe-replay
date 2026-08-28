@@ -99,6 +99,8 @@ interface ScanResultsPayload {
   results: SessionScanData[] | null;
   /** When the last full background scan finished (global, not per-session). */
   finishedAt?: string;
+  /** Result generation used to reject responses from an older scan. */
+  revision?: number;
 }
 let scanResultsCache: ScanResultsPayload | null = null;
 let scanResultsFetchPromise: Promise<ScanResultsPayload | null> | null = null;
@@ -113,7 +115,7 @@ function fetchScanResults(forceRefresh = false): Promise<ScanResultsPayload | nu
   if (scanResultsCache) return Promise.resolve(scanResultsCache);
   if (scanResultsFetchPromise) return scanResultsFetchPromise;
   const requestVersion = ++scanResultsRequestVersion;
-  const request = fetch("/api/scan/results")
+  const request = fetch("/api/scan/results", { cache: "no-store" })
     .then((r) => (r.ok ? r.json() : null))
     .then((data) => {
       // A usage-backfill refresh may have superseded this request while it was
@@ -123,6 +125,7 @@ function fetchScanResults(forceRefresh = false): Promise<ScanResultsPayload | nu
       const payload: ScanResultsPayload = {
         results: data?.results ?? null,
         finishedAt: data?.finishedAt,
+        revision: data?.revision,
       };
       scanResultsCache = payload;
       // Invalidate after 30s so fresh data can come in
@@ -397,7 +400,9 @@ function RawJsonModal({
     setLoadingId(itemId);
     setRemoteErrors((prev) => ({ ...prev, [itemId]: "" }));
     const targetQuery = targetId ? `&targetId=${encodeURIComponent(targetId)}` : "";
-    fetch(`/api/session?slug=${encodeURIComponent(fetchReplaySlug)}${targetQuery}`)
+    fetch(`/api/session?slug=${encodeURIComponent(fetchReplaySlug)}${targetQuery}`, {
+      cache: "no-store",
+    })
       .then(async (resp) => {
         const data = await resp.json().catch(() => null);
         if (!resp.ok) throw new Error(data?.error || "Failed to load replay JSON");
@@ -2189,7 +2194,11 @@ function SessionsPanel() {
     source: SourceSession;
     scanData: SessionScanData | null;
   } | null>(null);
-  const scanResultsRefreshRef = useRef({ running: false, usageBackfillKey: "none" });
+  const scanResultsRefreshRef = useRef({
+    running: false,
+    usageBackfillKey: "none",
+    revision: undefined as number | undefined,
+  });
   // When another panel (Projects → Timeline / Hot Files) opens a session via
   // the `vibe-open-session` event, route the slug into the popup. Two paths:
   //   1. If SessionsPanel just mounted (e.g. tab switched from Projects),
@@ -2286,13 +2295,13 @@ function SessionsPanel() {
     setRefreshing(false);
     setStaleCachedAt(null);
 
-    const archive = await fetch("/api/archived")
+    const archive = await fetch("/api/archived", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : { slugs: [] }))
       .catch(() => ({ slugs: [] as string[] }));
     setArchivedSlugs(new Set(archive.slugs));
 
     let servedFromCache = false;
-    const cached = await fetch("/api/sources/cached")
+    const cached = await fetch("/api/sources/cached", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .catch(() => null);
     setFailedRemoteSources(remoteSourceFailureIds(cached));
@@ -2358,14 +2367,28 @@ function SessionsPanel() {
     const scanRunning = scanStatus?.running === true;
     const forceRefresh =
       scanResultsRefreshRef.current.running !== scanRunning ||
-      scanResultsRefreshRef.current.usageBackfillKey !== usageBackfillKey;
-    scanResultsRefreshRef.current = { running: scanRunning, usageBackfillKey };
+      scanResultsRefreshRef.current.usageBackfillKey !== usageBackfillKey ||
+      scanResultsRefreshRef.current.revision !== scanStatus?.revision;
+    scanResultsRefreshRef.current = {
+      running: scanRunning,
+      usageBackfillKey,
+      revision: scanStatus?.revision,
+    };
     const loadScanResults = async (refresh = false) => {
       // The fast pass and usage backfill both update the same result endpoint;
       // invalidate the short-lived module cache when that phase changes so
       // facets do not stay blind to newly indexed usage for 30 seconds.
       const payload = await fetchScanResults(refresh);
       if (cancelled || !payload?.results) return;
+      // A scan can finish between the status poll and this response. Never
+      // let an older generation replace facets for the newer revision.
+      if (
+        payload.revision !== undefined &&
+        scanStatus?.revision !== undefined &&
+        payload.revision !== scanStatus.revision
+      ) {
+        return;
+      }
       setScanFinishedAt(payload.finishedAt ?? null);
       setScanResultsIndex(buildSessionScanIndex(payload.results));
     };
@@ -2380,7 +2403,7 @@ function SessionsPanel() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [scanStatus?.running, usageBackfillKey, sources.length]);
+  }, [scanStatus?.running, scanStatus?.revision, usageBackfillKey, sources.length]);
 
   useEffect(() => {
     if (!loading && !hasCursorSources && !wasEnrichingRef.current) return;
@@ -2388,7 +2411,7 @@ function SessionsPanel() {
     let cancelled = false;
     let timer: number | undefined;
     const refreshSourcesFromCache = async () => {
-      const payload = await fetch("/api/sources/cached")
+      const payload = await fetch("/api/sources/cached", { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null);
       const cached = parseCachedList<SourceSession>(payload);
@@ -2397,7 +2420,7 @@ function SessionsPanel() {
       }
     };
     const poll = async () => {
-      const status = await fetch("/api/sources/enrichment-status")
+      const status = await fetch("/api/sources/enrichment-status", { cache: "no-store" })
         .then((r) => (r.ok ? (r.json() as Promise<SourcesEnrichmentStatus>) : null))
         .catch(() => null);
       if (!status || cancelled) return;
@@ -4185,7 +4208,11 @@ function ReplaysPanel() {
       ? "running"
       : "done"
     : "none";
-  const scanResultsRefreshRef = useRef({ running: false, usageBackfillKey: "none" });
+  const scanResultsRefreshRef = useRef({
+    running: false,
+    usageBackfillKey: "none",
+    revision: undefined as number | undefined,
+  });
 
   // Roll worktree paths up to the parent project so URL navigation to a
   // (possibly cleaned-up) worktree path still hits the parent's data.
@@ -4209,7 +4236,7 @@ function ReplaysPanel() {
       setRefreshing(false);
       setStaleCachedAt(null);
 
-      const archive = await fetch("/api/archived")
+      const archive = await fetch("/api/archived", { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : { slugs: [] }))
         .catch(() => ({ slugs: [] as string[] }));
       if (mounted) {
@@ -4217,7 +4244,7 @@ function ReplaysPanel() {
       }
 
       let servedFromCache = false;
-      const cached = await fetch("/api/sessions/cached")
+      const cached = await fetch("/api/sessions/cached", { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null);
       const cachedData = parseCachedList<SessionSummary>(cached);
@@ -4277,11 +4304,23 @@ function ReplaysPanel() {
     const scanRunning = scanStatus?.running === true;
     const forceRefresh =
       scanResultsRefreshRef.current.running !== scanRunning ||
-      scanResultsRefreshRef.current.usageBackfillKey !== usageBackfillKey;
-    scanResultsRefreshRef.current = { running: scanRunning, usageBackfillKey };
+      scanResultsRefreshRef.current.usageBackfillKey !== usageBackfillKey ||
+      scanResultsRefreshRef.current.revision !== scanStatus?.revision;
+    scanResultsRefreshRef.current = {
+      running: scanRunning,
+      usageBackfillKey,
+      revision: scanStatus?.revision,
+    };
     const loadScanResults = async (refresh = false) => {
       const payload = await fetchScanResults(refresh);
       if (cancelled || !payload?.results) return;
+      if (
+        payload.revision !== undefined &&
+        scanStatus?.revision !== undefined &&
+        payload.revision !== scanStatus.revision
+      ) {
+        return;
+      }
       setScanResultsIndex(buildSessionScanIndex(payload.results));
     };
     void loadScanResults(forceRefresh);
@@ -4295,7 +4334,7 @@ function ReplaysPanel() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [scanStatus?.running, usageBackfillKey, sessions.length]);
+  }, [scanStatus?.running, scanStatus?.revision, usageBackfillKey, sessions.length]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setRefreshClockMs(Date.now()), 30_000);

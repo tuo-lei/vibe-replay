@@ -7,6 +7,7 @@ import {
   navigateToUsageSessions,
   TopProjectsList,
   CoverageAudit,
+  formatCompactNum,
   UsageBarList,
   UsageCoverage,
 } from "../InsightsPage";
@@ -88,6 +89,13 @@ describe("UsageBarList", () => {
     const params = new URLSearchParams(window.location.search);
     expect(params.get("mcpTool")).toBe(value);
     expect(getMultiFromUrl("mcpTool")).toEqual([value]);
+  });
+});
+
+describe("insight metric formatting", () => {
+  it("rounds animated intermediate values so metric cards cannot overflow", () => {
+    expect(formatCompactNum(555.225)).toBe("555");
+    expect(formatCompactNum(158_900.4)).toBe("158.9k");
   });
 });
 

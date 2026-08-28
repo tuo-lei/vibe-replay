@@ -265,9 +265,10 @@ function formatCost(cost: number): string {
   return `$${Math.round(cost)}`;
 }
 
-function formatCompactNum(n: number): string {
-  if (n >= 10000) return `${(n / 1000).toFixed(1)}k`;
-  return n.toLocaleString();
+export function formatCompactNum(n: number): string {
+  const rounded = Math.round(n);
+  if (rounded >= 10000) return `${(rounded / 1000).toFixed(1)}k`;
+  return rounded.toLocaleString();
 }
 
 function buildAggregateMetricQuality(notes: string[] | undefined): {
@@ -1385,7 +1386,7 @@ function useInsightsRollup(scanFinishedAt?: string, scanRevision?: number) {
     let stopped = false;
     setLoading(true);
     setError(false);
-    fetch("/api/insights/rollup")
+    fetch("/api/insights/rollup", { cache: "no-store" })
       .then(async (r) => {
         if (!r.ok) throw new Error(`Insights rollup request failed: ${r.status}`);
         return (await r.json()) as InsightsRollupPayload;
@@ -1427,7 +1428,7 @@ function useUsageRollupSessions(
 
   useEffect(() => {
     let stopped = false;
-    fetch("/api/usage/rollup")
+    fetch("/api/usage/rollup", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((data: UsageRollupPayload | null) => {
         if (!stopped && data?.sessions) setPayload(data);

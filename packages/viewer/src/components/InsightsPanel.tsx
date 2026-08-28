@@ -233,7 +233,7 @@ export function ScanInsightsProvider({ children }: { children: ReactNode }) {
 
     const scheduleRefresh = async () => {
       try {
-        const resp = await fetch("/api/scan/status");
+        const resp = await fetch("/api/scan/status", { cache: "no-store" });
         if (!resp.ok || stopped) return;
         const status = (await resp.json()) as ScanStatus;
         setScanStatus(status);
@@ -270,7 +270,7 @@ export function ScanInsightsProvider({ children }: { children: ReactNode }) {
 
     const poll = async () => {
       try {
-        const resp = await fetch("/api/scan/status");
+        const resp = await fetch("/api/scan/status", { cache: "no-store" });
         if (!resp.ok || stopped) return null;
         const status = (await resp.json()) as ScanStatus;
         setScanStatus(status);
@@ -283,7 +283,7 @@ export function ScanInsightsProvider({ children }: { children: ReactNode }) {
     const fetchUserInsights = async () => {
       setLoading(true);
       try {
-        const resp = await fetch("/api/insights");
+        const resp = await fetch("/api/insights", { cache: "no-store" });
         if (resp.ok) {
           const data = await resp.json();
           if (data.type === "user" && !stopped) {
@@ -349,7 +349,9 @@ export function ScanInsightsProvider({ children }: { children: ReactNode }) {
       if (projectInsightsCache.has(cacheKey) && !staleCacheRef.current) return;
       setLoading(true);
       const targetQuery = targetId ? `&targetId=${encodeURIComponent(targetId)}` : "";
-      fetch(`/api/insights?project=${encodeURIComponent(project)}${targetQuery}`)
+      fetch(`/api/insights?project=${encodeURIComponent(project)}${targetQuery}`, {
+        cache: "no-store",
+      })
         .then((resp) => (resp.ok ? resp.json() : null))
         .then((data) => {
           if (data?.type === "project") {
