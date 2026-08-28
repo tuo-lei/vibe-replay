@@ -187,6 +187,46 @@ describe("opencode parser", () => {
     }
   });
 
+  it("retains concrete failed tool parts on an error finish", async () => {
+    const db = await buildOpencodeDb({
+      session: [baseSession],
+      messages: [
+        {
+          id: "msg_tool_error",
+          sessionId: "ses_111",
+          role: "assistant",
+          modelID: "deepseek-v4-flash-free",
+          timeCreated: 1_800_000_003_500,
+          finish: "error",
+          parts: [
+            {
+              type: "tool",
+              tool: "bash",
+              callID: "call_error",
+              state: { status: "error", input: { command: "false" }, output: "permission denied" },
+            },
+          ],
+        },
+      ],
+    });
+
+    try {
+      const result = parseSessionFromDb(db, "ses_111");
+      const tool = result.turns
+        .flatMap((turn) => turn.blocks)
+        .find((block) => block.type === "tool_use");
+      expect(tool).toMatchObject({
+        type: "tool_use",
+        name: "Bash",
+        _hasResult: true,
+        _isError: true,
+        _result: "permission denied",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("marks running tool parts without dropping their call", async () => {
     const db = await buildOpencodeDb({
       session: [baseSession],

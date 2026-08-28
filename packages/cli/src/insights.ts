@@ -166,6 +166,16 @@ export function mergeInsights(
   }
 
   for (const scan of scanResults) {
+    // A failed/deferred rich scan is a coverage signal, not fresh session
+    // truth. Do not replace a previously complete durable record with its
+    // discovery-only placeholder.
+    if (
+      scan.dataQualityNotes?.some((note) =>
+        /^Partial [a-z0-9_-]+(?: [a-z0-9_-]+)* scan:/i.test(note),
+      )
+    ) {
+      continue;
+    }
     const targetId = scan.location?.kind === "ssh" ? scan.location.id : undefined;
     const key = insightKey(scan.provider, scan.sessionId, targetId);
     const existing = byId.get(key);

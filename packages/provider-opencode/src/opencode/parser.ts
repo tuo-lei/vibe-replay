@@ -184,6 +184,9 @@ export function parseSessionFromDb(
     `,
     { sid: sessionId },
   ) as OpencodeMessageRow[];
+  if (!session) {
+    throw new Error(`opencode session '${sessionId}' not found`);
+  }
 
   const turns: ParsedTurn[] = [];
   const allTimestamps: string[] = [];
@@ -255,26 +258,17 @@ export function parseSessionFromDb(
     }
 
     if (meta.role === "assistant") {
-      if (meta.finish === "error" || meta.finish === "unknown") {
-        // opencode writes `finish: "error"` on failed steps; surface the last
-        // text part (if any) so the failure is visible rather than dropped.
-        const parts = partsForMessage(db, message.id, parseWarnings);
-        const text = parts
-          .filter((p) => p.type === "text" && p.text)
-          .map((p) => p.text)
-          .join("\n");
-        if (text.trim()) {
-          turns.push({
-            role: "assistant",
-            timestamp,
-            blocks: [{ type: "text", text }],
-            model: meta.modelID,
-          });
-        }
-        continue;
-      }
-
       const blocks = assistantBlocksFromParts(db, message.id, parseWarnings);
+      if (meta.finish === "error" || meta.finish === "unknown") {
+        // Keep concrete tool parts even when the assistant message failed.
+        // Previously this branch rendered text only and silently erased failed
+        // tool invocations from both the replay and usage index.
+        for (const block of blocks) {
+          if (block.type === "tool_use" && block._hasResult !== true) {
+            block._isError = true;
+          }
+        }
+      }
       if (blocks.length === 0) continue;
       for (const block of blocks) {
         if (block.type !== "tool_use" || !block._skillName) continue;
@@ -359,6 +353,7 @@ function assistantBlocksFromParts(
   // same callID arrives, remove only that callID's marker so interleaved
   // concurrent tool calls each resolve to their real call with a result.
   const pendingByCallId = new Map<string, Extract<ContentBlock, { type: "tool_use" }>>();
+  const blockByCallId = new Map<string, Extract<ContentBlock, { type: "tool_use" }>>();
 
   for (const part of parts) {
     switch (part.type) {
@@ -386,6 +381,21 @@ function assistantBlocksFromParts(
           (state.status !== "running" && state.status !== "pending" && result.length > 0);
         const durationMs = durationFromState(state.time);
 
+        const existingBlock = blockByCallId.get(callID);
+        if (existingBlock && isPending) {
+          // Streaming can emit several running snapshots for one call. Keep
+          // one logical invocation and wait for its terminal state.
+          continue;
+        }
+        if (existingBlock && !isPending) {
+          // A terminal update supersedes either a pending marker or an older
+          // terminal snapshot for the same call ID.
+          const existingIndex = blocks.indexOf(existingBlock);
+          if (existingIndex >= 0) blocks.splice(existingIndex, 1);
+          blockByCallId.delete(callID);
+          pendingByCallId.delete(callID);
+        }
+
         // A completed tool part supersedes its earlier pending marker: drop the
         // placeholder (by callID) and emit the real call with its result.
         const pendingBlock = pendingByCallId.get(callID);
@@ -411,6 +421,7 @@ function assistantBlocksFromParts(
             : {}),
         };
         blocks.push(block);
+        blockByCallId.set(callID, block);
         if (isPending) {
           pendingByCallId.set(callID, block);
         }

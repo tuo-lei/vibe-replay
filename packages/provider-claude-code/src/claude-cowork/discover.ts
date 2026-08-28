@@ -141,6 +141,9 @@ export async function extractCoworkSessionInfo(jsonPath: string): Promise<Sessio
   let lineCount = 0;
   let toolCallCount = 0;
   let promptCount = 0;
+  let compactionBoundaryCount = 0;
+  let compactionSummaryCount = 0;
+  const seenCompactionSummaries = new Set<string>();
   const earlyLines: string[] = [];
   const originalUserKeys = new Set<string>();
   const countedReplayKeys = new Set<string>();
@@ -156,6 +159,16 @@ export async function extractCoworkSessionInfo(jsonPath: string): Promise<Sessio
       if (earlyLines.length < PROMPT_SCAN_LINES) earlyLines.push(line);
       const m = line.match(TOOL_USE_RE);
       if (m) toolCallCount += m.length;
+      if (/(?:^|[{,])\s*"subtype"\s*:\s*"compact_boundary"/.test(line)) {
+        compactionBoundaryCount++;
+      }
+      if (/(?:^|[{,])\s*"isCompactSummary"\s*:\s*true/.test(line)) {
+        const uuid = line.match(/"uuid"\s*:\s*"([^"]+)"/)?.[1];
+        if (!uuid || !seenCompactionSummaries.has(uuid)) {
+          if (uuid) seenCompactionSummaries.add(uuid);
+          compactionSummaryCount++;
+        }
+      }
       if (line.includes('"type":"user"') || line.includes('"type": "user"')) {
         try {
           const obj = JSON.parse(line) as Record<string, any>;
@@ -233,6 +246,7 @@ export async function extractCoworkSessionInfo(jsonPath: string): Promise<Sessio
     prompts,
     promptCount,
     toolCallCount,
+    compactionCount: Math.max(compactionBoundaryCount, compactionSummaryCount) || undefined,
     model,
     isStarred: meta.isStarred,
     spaceId: meta.spaceId,

@@ -199,6 +199,8 @@ export async function extractCodexSessionInfo(
   let toolCallCount = 0;
   let editCountEst = 0;
   let durationMsEst = 0;
+  let compactionCount = 0;
+  const compactionTimestamps: string[] = [];
   const prompts: string[] = [];
   const promptSeen = new Map<string, number[]>();
   let sawKnownRecord = false;
@@ -232,6 +234,21 @@ export async function extractCodexSessionInfo(
 
       if (obj.timestamp) timestamp = obj.timestamp;
 
+      const recordCompaction = (kind: string) => {
+        const current = obj.timestamp ? Date.parse(obj.timestamp) : Number.NaN;
+        const duplicate = compactionTimestamps.some((previous) => {
+          const prior = Date.parse(previous);
+          return Number.isFinite(current) && Number.isFinite(prior)
+            ? Math.abs(current - prior) <= 2_000
+            : previous === `${kind}:${obj.timestamp || lineCount}`;
+        });
+        if (duplicate) return;
+        compactionTimestamps.push(
+          Number.isFinite(current) ? obj.timestamp : `${kind}:${obj.timestamp || lineCount}`,
+        );
+        compactionCount++;
+      };
+
       if (obj.type === "session_meta") {
         const p = obj.payload || {};
         sessionId = sessionId || p.id || "";
@@ -262,11 +279,13 @@ export async function extractCodexSessionInfo(
         if (p.type === "exec_command_end" && typeof p.duration?.secs === "number") {
           durationMsEst += p.duration.secs * 1000 + Math.round((p.duration.nanos || 0) / 1_000_000);
         }
+        if (p.type === "context_compacted") recordCompaction("codex-context");
         continue;
       }
 
       if (obj.type === "response_item") {
         const p = obj.payload || {};
+        if (p.type === "compaction") recordCompaction("codex");
         if (p.type === "message" && p.role === "user") {
           const rawText = contentText(p.content);
           const cleaned = normalizeDiscoveredUserMessage(rawText);
@@ -280,6 +299,7 @@ export async function extractCodexSessionInfo(
           if (isEditTool(p.name)) editCountEst++;
         }
       }
+      if (obj.type === "compacted") recordCompaction("codex");
     }
   } catch {
     readFailed = true;
@@ -326,6 +346,7 @@ export async function extractCodexSessionInfo(
     model,
     durationMsEst: durationMsEst || undefined,
     editCountEst: editCountEst || undefined,
+    compactionCount: compactionCount || undefined,
   };
 }
 

@@ -105,6 +105,18 @@ describe("session query", () => {
     expect(result.map((s) => s.sessionId)).toEqual(["older"]);
   });
 
+  it("can query sessions with recorded compactions", () => {
+    const result = filterSessionInfos(
+      [
+        session({ sessionId: "compacted", compactionCount: 2 }),
+        session({ sessionId: "plain", compactionCount: undefined }),
+      ],
+      { compacted: true },
+    );
+
+    expect(result.map((s) => s.sessionId)).toEqual(["compacted"]);
+  });
+
   it("limits query results and formats text output", async () => {
     const result = await queryLocalSessions(sessions, { query: "login", limit: 1 });
     const text = formatSessionQueryText(result);
@@ -217,6 +229,7 @@ describe("session query", () => {
     const input = scanInputFromSession(
       session({
         hasSqlite: true,
+        sourceFingerprint: "cursor-fingerprint",
         workspacePath: "/Users/test/Code/app",
         toolPaths: ["/tmp/tool.txt"],
       }),
@@ -230,6 +243,7 @@ describe("session query", () => {
       toolPaths: ["/tmp/tool.txt"],
       sourceFilePath: "/tmp/session.jsonl",
       hasSqlite: true,
+      sourceFingerprint: "cursor-fingerprint",
       workspacePath: "/Users/test/Code/app",
     });
   });

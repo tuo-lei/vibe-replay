@@ -37,6 +37,7 @@ import { generateOutput, injectDataScript, loadViewerHtml } from "./generator.js
 import { buildInsightsRollup } from "./insights-rollup.js";
 import { mergeInsights, readInsightsStore, writeInsightsStore } from "./insights.js";
 import { loadOverlays, sessionForExternalOutput, sessionWithEffectiveContent } from "./overlays.js";
+import { buildUsageCoverageReport } from "./usage-coverage.js";
 import { parseClaudeCodeLines } from "./providers/claude-code/parser.js";
 import { parseCodexLines } from "./providers/codex/parser.js";
 import { parsePiLines } from "./providers/pi/parser.js";
@@ -105,6 +106,7 @@ import {
   aggregateProjectInsights,
   aggregateUserInsights,
   countPendingCursorUsageIndexes,
+  isPartialScanResult,
   type BackgroundScanState,
   type ProjectInsights,
   projectInsightKey,
@@ -527,6 +529,7 @@ async function buildSourcesResult(
       toolPaths: s.toolPaths,
       hasSqlite: s.hasSqlite,
       hasSdk: s.hasSdk,
+      sourceFingerprint: s.sourceFingerprint,
       gitBranch: s.gitBranch,
       gitRepo,
       model: s.model,
@@ -683,7 +686,8 @@ export async function startServer(
   // v6 → v7: refine Cursor SDK context-worktree identity grouping.
   // v7 → v8: disambiguate Cursor SDK workflow display labels.
   // v8 → v9: Codex source titles now follow explicit session_index names.
-  const sourcesCacheKey = `dashboard-sources-v9-${cacheKeySuffix}`;
+  // v9 → v10: carry provider compaction counts and storage fingerprints.
+  const sourcesCacheKey = `dashboard-sources-v10-${cacheKeySuffix}`;
   const replaysCacheKey = `dashboard-replays-v1-${cacheKeySuffix}`;
   // Keyed by scanner version too: a bump changes the shape of what a scan
   // extracts, so serving the previous run's results would show stale facets
@@ -1033,9 +1037,11 @@ export async function startServer(
     // The fast Cursor pass and its usage backfill complete close together. Keep
     // their read/merge/write cycles ordered or the older, usage-less snapshot
     // can finish last and erase the enriched fields from the durable store.
+    const persistableResults = results.filter((result) => !isPartialScanResult(result));
     const job = insightsPersistChain.then(async () => {
+      if (persistableResults.length === 0) return;
       const store = await readInsightsStore();
-      const updated = mergeInsights(store, results);
+      const updated = mergeInsights(store, persistableResults);
       await writeInsightsStore(updated);
     });
     insightsPersistChain = job.catch(() => {});
@@ -1390,6 +1396,7 @@ export async function startServer(
             workspacePath: s.workspacePath,
             hasSqlite: s.hasSqlite,
             hasSdk: s.hasSdk,
+            sourceFingerprint: s.sourceFingerprint,
             deferRichCursorParse: s.provider === "cursor" && !!(s.hasSqlite || s.hasSdk),
             timestamp: s.timestamp,
             title: s.title,
@@ -1426,7 +1433,7 @@ export async function startServer(
         scanState = {
           running: false,
           scanned: results.length,
-          total: results.length,
+          total: scanInputs.length,
           results,
           revision: scanState.revision + 1,
           hasSnapshot: true,
@@ -2474,6 +2481,7 @@ export async function startServer(
       indexedSessions: scanState.results.filter((scan) => scan.usageIndexed === true).length,
       totalSessions: scanState.results.length,
       scannedAt: scanState.finishedAt,
+      coverage: buildUsageCoverageReport(scanState.results),
     });
   });
 

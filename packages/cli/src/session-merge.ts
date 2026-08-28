@@ -41,6 +41,9 @@ export function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
     const toolCallCount = group.some((session) => session.toolCallCount != null)
       ? group.reduce((sum, session) => sum + (session.toolCallCount || 0), 0)
       : undefined;
+    const compactionCount = group.some((session) => session.compactionCount != null)
+      ? group.reduce((sum, session) => sum + (session.compactionCount || 0), 0)
+      : undefined;
     const transcriptStatus = group.some((session) => !session.transcriptStatus)
       ? undefined
       : group.some((session) => session.transcriptStatus === "no-prompts")
@@ -55,6 +58,7 @@ export function mergeSameSessions(sessions: SessionInfo[]): SessionInfo[] {
       toolPaths: [...new Set(group.flatMap((session) => session.toolPaths || []))],
       promptCount,
       toolCallCount,
+      compactionCount,
       transcriptStatus,
     });
   }

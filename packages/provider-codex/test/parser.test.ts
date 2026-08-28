@@ -1254,6 +1254,39 @@ describe("Codex parser", () => {
     });
   });
 
+  it("keeps a serverless MCP completion in the MCP facet", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-05-03T06:55:00.000Z",
+          type: "session_meta",
+          payload: { id: "codex-session-mcp-unknown", cwd: "/Users/test/project" },
+        },
+        {
+          timestamp: "2026-05-03T06:55:01.000Z",
+          type: "event_msg",
+          payload: {
+            type: "mcp_tool_call_end",
+            call_id: "mcp_unknown",
+            invocation: {},
+            result: { Err: "server unavailable" },
+          },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    const tool = result.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.type === "tool_use");
+    expect(tool).toMatchObject({
+      type: "tool_use",
+      name: "mcp",
+      _mcpServer: "Unknown",
+      _hasResult: true,
+      _isError: true,
+    });
+  });
+
   it("marks Codex MCP result.isError payloads as errors", () => {
     const result = parseCodexLines(
       [

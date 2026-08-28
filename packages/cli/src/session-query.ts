@@ -3,6 +3,7 @@ import { scanSession, type ScanInput, type SessionScanResult } from "./scanner.j
 import { getRemoteHome } from "./remote.js";
 import type { SessionInfo } from "./types.js";
 import { shortenPath } from "./utils.js";
+import { deriveTokenUsageMetrics } from "@vibe-replay/types";
 
 export interface SessionQueryOptions {
   query?: string;
@@ -13,6 +14,7 @@ export interface SessionQueryOptions {
   any?: boolean;
   brief?: boolean;
   dedupe?: boolean;
+  compacted?: boolean;
 }
 
 export interface SessionQueryMatch {
@@ -37,6 +39,7 @@ export interface SessionQueryMatch {
   toolCallCount?: number;
   editCount?: number;
   durationMs?: number;
+  compactionCount?: number;
   hasPR?: boolean;
   score?: number;
   matchedTerms?: string[];
@@ -60,6 +63,7 @@ export interface SessionQueryScanSummary {
   toolCallsPerPrompt?: number;
   editsPerPrompt?: number;
   medianTurnDurationMs?: number;
+  tokenUsage?: SessionScanResult["tokenUsage"];
   dataQualityNotes?: string[];
 }
 
@@ -111,14 +115,20 @@ export async function queryLocalSessions(
 
 export function filterSessionInfos(
   sessions: SessionInfo[],
-  options: Pick<SessionQueryOptions, "query" | "project" | "provider" | "any" | "dedupe"> = {},
+  options: Pick<
+    SessionQueryOptions,
+    "query" | "project" | "provider" | "any" | "dedupe" | "compacted"
+  > = {},
 ): SessionInfo[] {
   return filterScoredSessionInfos(sessions, options).map(({ session }) => session);
 }
 
 function filterScoredSessionInfos(
   sessions: SessionInfo[],
-  options: Pick<SessionQueryOptions, "query" | "project" | "provider" | "any" | "dedupe"> = {},
+  options: Pick<
+    SessionQueryOptions,
+    "query" | "project" | "provider" | "any" | "dedupe" | "compacted"
+  > = {},
 ): ScoredSessionInfo[] {
   const terms = splitTerms(options.query);
   const projectTerm = normalizeSearch(options.project);
@@ -133,6 +143,7 @@ function filterScoredSessionInfos(
     .filter(({ session, query }) => {
       if (provider && normalizeSearch(session.provider) !== provider) return false;
       if (projectTerm && !sessionProjectHaystack(session).includes(projectTerm)) return false;
+      if (options.compacted && (session.compactionCount || 0) <= 0) return false;
       if (terms.length > 0) {
         if (wideMatch) return query.matchedTerms.length > 0;
         if (query.matchedTerms.length !== terms.length) return false;
@@ -165,6 +176,8 @@ export function scanInputFromSession(session: SessionInfo): ScanInput {
     sourceLineCount: session.lineCount,
     workspacePath: session.workspacePath,
     hasSqlite: session.hasSqlite,
+    hasSdk: session.hasSdk,
+    sourceFingerprint: session.sourceFingerprint,
     timestamp: session.timestamp,
     title: session.title,
     firstPrompt: session.firstPrompt,
@@ -203,6 +216,9 @@ export function formatSessionQueryText(matches: SessionQueryMatch[]): string {
       }
       if (match.whyMatched?.length) lines.push(`   why: ${match.whyMatched.join("; ")}`);
       if (match.firstPrompt) lines.push(`   first prompt: ${previewPrompt(match.firstPrompt)}`);
+      if ((match.compactionCount || 0) > 0) {
+        lines.push(`   compactions: ${match.compactionCount}`);
+      }
       if (match.scan) lines.push(`   efficiency: ${formatScanSummary(match.scan)}`);
       if (match.brief) {
         lines.push(`   brief: ${match.brief.summary}`);
@@ -244,6 +260,7 @@ function sessionInfoToMatch(
     toolCallCount: session.toolCallCount,
     editCount: session.editCountEst,
     durationMs: session.durationMsEst,
+    compactionCount: session.compactionCount,
     hasPR: session.hasPR,
     score: query.score,
     matchedTerms: query.matchedTerms,
@@ -268,6 +285,7 @@ function scanSummary(scan: SessionScanResult): SessionQueryScanSummary {
     toolCallsPerPrompt: ratio(scan.toolCallCount, promptCount),
     editsPerPrompt: ratio(scan.editCount, promptCount),
     medianTurnDurationMs: median(scan.turnDurations),
+    tokenUsage: scan.tokenUsage,
     dataQualityNotes: scan.dataQualityNotes,
   };
 }
@@ -285,6 +303,14 @@ function formatScanSummary(scan: SessionQueryScanSummary): string {
   }
   if (scan.apiErrorCount > 0) parts.push(`${scan.apiErrorCount} API errors`);
   if (scan.compactionCount > 0) parts.push(`${scan.compactionCount} compactions`);
+  if (scan.tokenUsage) {
+    const tokenMetrics = deriveTokenUsageMetrics(scan.tokenUsage);
+    parts.push(`${formatTokenCount(tokenMetrics.promptTokens)} prompt tokens`);
+    parts.push(`${formatTokenCount(tokenMetrics.cacheMissTokens)} uncached/miss`);
+    if (tokenMetrics.cacheReadShare !== undefined) {
+      parts.push(`${Math.round(tokenMetrics.cacheReadShare * 1000) / 10}% cache read`);
+    }
+  }
   return parts.join(", ");
 }
 
@@ -311,6 +337,11 @@ function scoreSession(session: SessionInfo, terms: string[]): SessionQueryScore 
     { name: "provider", value: session.provider, weight: 2 },
     { name: "slug", value: session.slug, weight: 2 },
     { name: "files", value: (session.fsDetectedFiles || []).join(" "), weight: 3 },
+    {
+      name: "signals",
+      value: session.compactionCount ? "compaction compacted" : undefined,
+      weight: 3,
+    },
   ].map((field) => ({ ...field, normalized: normalizeSearch(field.value) }));
 
   const matchedTerms: string[] = [];
@@ -525,4 +556,10 @@ function formatDuration(ms: number): string {
   const hours = Math.floor(minutes / 60);
   const remainder = minutes % 60;
   return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
+}
+
+function formatTokenCount(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
+  if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}K`;
+  return String(tokens);
 }

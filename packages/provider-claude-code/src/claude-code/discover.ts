@@ -114,6 +114,9 @@ export async function extractSessionInfo(
   let durationMsEst = 0;
   let hasPR = false;
   let model: string | undefined;
+  let compactionBoundaryCount = 0;
+  let compactionSummaryCount = 0;
+  const seenCompactionSummaries = new Set<string>();
   let sawParseableRecord = false;
   let readFailed = false;
 
@@ -152,6 +155,16 @@ export async function extractSessionInfo(
       if (toolMatches) {
         toolCallCount += toolMatches.length;
         if (editToolRe.test(line)) editCountEst++;
+      }
+      if (/(?:^|[{,])\s*"subtype"\s*:\s*"compact_boundary"/.test(line)) {
+        compactionBoundaryCount++;
+      }
+      if (/(?:^|[{,])\s*"isCompactSummary"\s*:\s*true/.test(line)) {
+        const uuid = line.match(/"uuid"\s*:\s*"([^"]+)"/)?.[1];
+        if (!uuid || !seenCompactionSummaries.has(uuid)) {
+          if (uuid) seenCompactionSummaries.add(uuid);
+          compactionSummaryCount++;
+        }
       }
       if (!model && line.includes('"assistant"') && line.includes('"model"')) {
         const m = line.match(modelRe);
@@ -285,6 +298,7 @@ export async function extractSessionInfo(
     model,
     durationMsEst: durationMsEst || undefined,
     editCountEst: editCountEst || undefined,
+    compactionCount: Math.max(compactionBoundaryCount, compactionSummaryCount) || undefined,
     hasPR: hasPR || undefined,
     ...(unreadable || prompts.length === 0
       ? { transcriptStatus: unreadable ? ("unreadable" as const) : ("no-prompts" as const) }

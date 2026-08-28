@@ -1,7 +1,10 @@
 export {
   __testables,
   countComposerConversationHeaders,
+  cursorCompactionCount,
+  cursorCompactions,
   discoverGlobalStateOnlySessions,
+  getCursorSessionFingerprints,
   storeDbPath,
   discoverSqliteOnlySessions,
   isSystemContextText,

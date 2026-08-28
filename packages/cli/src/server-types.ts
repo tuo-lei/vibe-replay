@@ -25,6 +25,7 @@ export interface SourceSummaryRecord {
   toolPaths?: string[];
   hasSqlite?: boolean;
   hasSdk?: boolean;
+  sourceFingerprint?: string;
   isStarred?: boolean;
   spaceId?: string;
   spaceIdSetBy?: string;

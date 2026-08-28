@@ -78,6 +78,10 @@ async function extractPiSessionInfo(
   let promptCount = 0;
   let toolCallCount = 0;
   let editCountEst = 0;
+  let compactionCount = 0;
+  const entryParents = new Map<string, string | null | undefined>();
+  const compactionEntryIds = new Set<string>();
+  let lastEntryId: string | undefined;
   let model: string | undefined;
   let title: string | undefined;
   const prompts: string[] = [];
@@ -101,6 +105,10 @@ async function extractPiSessionInfo(
       }
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
       sawParseableRecord = true;
+      if (entry.id) {
+        entryParents.set(entry.id, entry.parentId);
+        lastEntryId = entry.id;
+      }
 
       if (typeof entry.timestamp === "string" && entry.timestamp) {
         timestamp = entry.timestamp;
@@ -119,6 +127,12 @@ async function extractPiSessionInfo(
       if (entry.type === "session_info") {
         const name = typeof entry.name === "string" ? entry.name.trim() : "";
         title = name || undefined;
+        continue;
+      }
+
+      if (entry.type === "compaction") {
+        if (entry.id) compactionEntryIds.add(entry.id);
+        else compactionCount++;
         continue;
       }
 
@@ -159,6 +173,17 @@ async function extractPiSessionInfo(
     rl.close();
   }
 
+  if (compactionEntryIds.size > 0) {
+    const activeIds = new Set<string>();
+    let current = lastEntryId;
+    while (current && !activeIds.has(current)) {
+      activeIds.add(current);
+      const parent = entryParents.get(current);
+      current = typeof parent === "string" ? parent : undefined;
+    }
+    compactionCount += [...compactionEntryIds].filter((id) => activeIds.has(id)).length;
+  }
+
   const sessionId = header?.id || basename(filePath, ".jsonl");
   if (!sessionId) return null;
 
@@ -190,6 +215,7 @@ async function extractPiSessionInfo(
     toolCallCount,
     model,
     editCountEst,
+    compactionCount: compactionCount || undefined,
     ...(unreadable || prompts.length === 0
       ? { transcriptStatus: unreadable ? ("unreadable" as const) : ("no-prompts" as const) }
       : {}),

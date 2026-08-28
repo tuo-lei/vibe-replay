@@ -61,6 +61,42 @@ describe("structured Cursor subagents", () => {
   });
 });
 
+describe("Cursor compaction metadata", () => {
+  it("detects the persisted latest conversation summary as a lower bound", () => {
+    const composer = {
+      lastUpdatedAt: 1_800_000_000_000,
+      latestConversationSummary: {
+        summary: {
+          summary: "Earlier context was condensed.",
+          includesToolResults: false,
+        },
+      },
+    };
+
+    expect(__testables.cursorCompactionCount(composer)).toBe(1);
+    expect(__testables.cursorCompactions(composer)).toEqual([
+      {
+        timestamp: "2027-01-15T08:00:00.000Z",
+        trigger: "cursor-context",
+        accuracy: "lower-bound",
+      },
+    ]);
+  });
+
+  it("does not treat an empty summary container as a compaction", () => {
+    expect(
+      __testables.cursorCompactionCount({
+        latestConversationSummary: { summary: { summary: "" } },
+      }),
+    ).toBe(0);
+    expect(
+      __testables.cursorCompactions({
+        latestConversationSummary: { summary: { summary: "" } },
+      }),
+    ).toBeUndefined();
+  });
+});
+
 describe("countComposerConversationHeaders", () => {
   it("returns zero when headers are missing", () => {
     expect(countComposerConversationHeaders({})).toBe(0);

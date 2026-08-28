@@ -12,7 +12,12 @@ import {
   buildTurnDurationIntervals,
   sumDurationIntervals,
 } from "@vibe-replay/provider-core/duration";
-import type { ContentBlock, ParsedTurn, SessionInfo } from "@vibe-replay/provider-contract";
+import type {
+  Compaction,
+  ContentBlock,
+  ParsedTurn,
+  SessionInfo,
+} from "@vibe-replay/provider-contract";
 import { shortenPath } from "@vibe-replay/provider-core/utils";
 import type { ProviderParseResult } from "@vibe-replay/provider-contract";
 import {
@@ -127,7 +132,7 @@ function closeCachedSqlJsDb(): void {
 
 let cachedStoreDbIndex: Map<string, StoreDbIndexEntry> | null = null;
 const resolvedProjectRootCache = new Map<string, Promise<string | null>>();
-const GLOBAL_STATE_DISCOVERY_CACHE_PREFIX = "cursor-global-state-discovery-v5";
+const GLOBAL_STATE_DISCOVERY_CACHE_PREFIX = "cursor-global-state-discovery-v7";
 
 interface CursorComposerHeader {
   composerId: string;
@@ -606,6 +611,44 @@ async function findStoreDb(sessionId: string): Promise<string | null> {
   if (cached.has(sessionId)) return cached.get(sessionId)?.dbPath || null;
   const refreshed = await getStoreDbIndex(true);
   return refreshed.get(sessionId)?.dbPath || null;
+}
+
+/**
+ * Build a cheap freshness token for Cursor's split storage. A shared global
+ * state component deliberately invalidates all Cursor sessions when the global
+ * database changes: it is the only reliable signal for late tool results and
+ * conversation summaries that may not touch the transcript or store.db.
+ */
+export async function getCursorSessionFingerprints(
+  sessionIds: readonly string[],
+): Promise<Map<string, string>> {
+  const storeIndex = await getStoreDbIndex();
+  const globalStateDb = await openGlobalStateDb();
+  const globalPart = globalStateDb
+    ? [
+        globalStateDb.dbPath,
+        globalStateDb.size,
+        globalStateDb.mtimeMs,
+        globalStateDb.walSize,
+        globalStateDb.walMtimeMs,
+      ].join(":")
+    : "no-global-state";
+
+  const entries = await Promise.all(
+    sessionIds.map(async (sessionId) => {
+      const store = storeIndex.get(sessionId);
+      const wal = store ? await stat(`${store.dbPath}-wal`).catch(() => null) : null;
+      const storePart = store
+        ? [store.dbPath, store.size, store.mtimeMs, wal?.size || 0, wal?.mtimeMs || 0].join(":")
+        : "no-store-db";
+      const fingerprint = createHash("sha1")
+        .update(`${sessionId}|${globalPart}|${storePart}`)
+        .digest("hex")
+        .slice(0, 20);
+      return [sessionId, fingerprint] as const;
+    }),
+  );
+  return new Map(entries);
 }
 
 async function existingPath(path: string): Promise<string | null> {
@@ -1360,6 +1403,8 @@ export async function discoverSqliteOnlySessions(
 export interface GlobalStateDiscoveryResult {
   sessions: SessionInfo[];
   sessionIds: Set<string>;
+  /** All replayable global-state sessions, including IDs already found in transcripts. */
+  allSessions: SessionInfo[];
 }
 
 export function countComposerConversationHeaders(composer: Record<string, any>): number {
@@ -1370,6 +1415,60 @@ export function countComposerConversationHeaders(composer: Record<string, any>):
     ? composer.conversation.length
     : 0;
   return Math.max(fullHeaders, legacyConversation);
+}
+
+function cursorLatestSummaryText(composer: Record<string, any>): string | undefined {
+  const latest = composer.latestConversationSummary;
+  if (!latest || typeof latest !== "object") return undefined;
+  const summary = (latest as Record<string, any>).summary;
+  if (typeof summary === "string" && summary.trim()) return summary;
+  if (summary && typeof summary === "object") {
+    const text = (summary as Record<string, any>).summary;
+    if (typeof text === "string" && text.trim()) return text;
+  }
+  return undefined;
+}
+
+/**
+ * Cursor keeps the latest compaction summary on composerData rather than a
+ * durable event list. Treat its presence as one known compaction and expose
+ * the result as a lower bound; older summaries may have been overwritten.
+ */
+export function cursorCompactionCount(composer: Record<string, any>): number {
+  return cursorLatestSummaryText(composer) ? 1 : 0;
+}
+
+export function cursorCompactions(
+  composer: Record<string, any>,
+  fallbackTimestamp?: string,
+): Compaction[] | undefined {
+  if (!cursorLatestSummaryText(composer)) return undefined;
+  const latest = composer.latestConversationSummary as Record<string, any>;
+  const summary =
+    latest.summary && typeof latest.summary === "object"
+      ? (latest.summary as Record<string, any>)
+      : latest;
+  const timestamp =
+    maxIsoTimestamp([
+      latest.createdAt,
+      latest.created_at,
+      latest.timestamp,
+      latest.lastUpdatedAt,
+      summary.createdAt,
+      summary.created_at,
+      summary.timestamp,
+      composer.lastUpdatedAt,
+      composer.createdAt,
+    ]) ||
+    fallbackTimestamp ||
+    new Date().toISOString();
+  return [
+    {
+      timestamp,
+      trigger: "cursor-context",
+      accuracy: "lower-bound",
+    },
+  ];
 }
 
 function composerHeaderBubbleIds(composer: Record<string, any>): string[] {
@@ -1451,7 +1550,7 @@ export async function discoverGlobalStateOnlySessions(
 ): Promise<GlobalStateDiscoveryResult> {
   const sessionIds = new Set<string>();
   const globalStateDb = await openGlobalStateDb();
-  if (!globalStateDb) return { sessions: [], sessionIds };
+  if (!globalStateDb) return { sessions: [], sessionIds, allSessions: [] };
   const { dbPath } = globalStateDb;
   const decodedPathsHash = hashWorkspacePaths(decodedWorkspacePaths);
   const cacheKey = `${GLOBAL_STATE_DISCOVERY_CACHE_PREFIX}-${decodedPathsHash}`;
@@ -1469,6 +1568,7 @@ export async function discoverGlobalStateOnlySessions(
     return {
       sessions: finalizeGlobalStateDiscovery(cached.data.sessions, knownSessionIds),
       sessionIds: cachedIds,
+      allSessions: cached.data.sessions,
     };
   }
 
@@ -1485,6 +1585,9 @@ export async function discoverGlobalStateOnlySessions(
             "json_extract(kv.value,'$.lastUpdatedAt') AS lastUpdatedAt,",
             "json_extract(kv.value,'$.createdAt') AS createdAt,",
             "json_extract(kv.value,'$.name') AS title,",
+            "CASE WHEN json_type(kv.value,'$.latestConversationSummary.summary.summary') = 'text'",
+            "AND length(trim(json_extract(kv.value,'$.latestConversationSummary.summary.summary'))) > 0",
+            "THEN 1 ELSE 0 END AS hasLatestConversationSummary,",
             "length(kv.value) AS fileSize,",
             `${replayableGlobalStateBubbleCountSql("kv.value", "kv.key")} AS replayableBubbleCount`,
             `FROM cursorDiskKV AS kv WHERE ${sqlKeyPrefixRange(
@@ -1494,7 +1597,7 @@ export async function discoverGlobalStateOnlySessions(
           ].join(" ")
         : `SELECT key, value FROM cursorDiskKV WHERE ${sqlKeyPrefixRange("composerData:")}`;
     const rows = await queryGlobalStateRows(globalStateDb, composerDiscoverySql);
-    if (rows.length === 0) return { sessions: [], sessionIds };
+    if (rows.length === 0) return { sessions: [], sessionIds, allSessions: [] };
 
     for (const row of rows) {
       const key = valueToString(row.key);
@@ -1551,6 +1654,9 @@ export async function discoverGlobalStateOnlySessions(
         workspacePath: projectPath,
         hasSqlite: true,
         firstPrompt,
+        compactionCount: composer
+          ? cursorCompactionCount(composer)
+          : toNonNegativeInt(row.hasLatestConversationSummary),
       };
       discoveredSessions.push(sessionInfo);
     }
@@ -1572,6 +1678,7 @@ export async function discoverGlobalStateOnlySessions(
   return {
     sessions: finalizeGlobalStateDiscovery(discoveredSessions, knownSessionIds),
     sessionIds,
+    allSessions: discoveredSessions,
   };
 }
 
@@ -2664,6 +2771,7 @@ function mergeCursorParseResults(
   const mergedTurnStats = mergeTurnStats(primary.turnStats, enrichment.turnStats, {
     preferEnrichmentDuration,
   });
+  const mergedCompactions = mergeCursorCompactions(primary.compactions, enrichment.compactions);
   const mergedTokenUsage = primary.tokenUsage || enrichment.tokenUsage;
   const mergedTokenUsageByModel = primary.tokenUsageByModel || enrichment.tokenUsageByModel;
   const mergedTotalDurationMs =
@@ -2692,6 +2800,8 @@ function mergeCursorParseResults(
     (!!enrichment.contextFiles?.length && !primary.contextFiles?.length) ||
     (!!enrichment.cursorSidecars && !primary.cursorSidecars) ||
     mergedSubagents ||
+    JSON.stringify(mergedCompactions || undefined) !==
+      JSON.stringify(primary.compactions || undefined) ||
     (!!mergedTurnStats &&
       JSON.stringify(mergedTurnStats) !== JSON.stringify(primary.turnStats || undefined));
   const primaryNotes = (primary.dataSourceInfo?.notes || []).filter(
@@ -2722,6 +2832,7 @@ function mergeCursorParseResults(
     ...(mergedTokenUsage ? { tokenUsage: mergedTokenUsage } : {}),
     ...(mergedTokenUsageByModel ? { tokenUsageByModel: mergedTokenUsageByModel } : {}),
     ...(mergedTurnStats ? { turnStats: mergedTurnStats } : {}),
+    ...(mergedCompactions ? { compactions: mergedCompactions } : {}),
     ...(primary.gitBranch ? {} : enrichment.gitBranch ? { gitBranch: enrichment.gitBranch } : {}),
     ...(primary.gitBranches
       ? {}
@@ -2746,6 +2857,37 @@ function mergeCursorParseResults(
         }
       : enrichment.dataSourceInfo,
   };
+}
+
+function mergeCursorCompactions(
+  primary: Compaction[] | undefined,
+  enrichment: Compaction[] | undefined,
+): Compaction[] | undefined {
+  const merged: Compaction[] = [];
+  for (const compaction of [...(primary || []), ...(enrichment || [])]) {
+    const timestampMs = Date.parse(compaction.timestamp);
+    const existing = merged.find((candidate) => {
+      const candidateMs = Date.parse(candidate.timestamp);
+      return Number.isFinite(timestampMs) && Number.isFinite(candidateMs)
+        ? Math.abs(timestampMs - candidateMs) <= 2_000
+        : candidate.timestamp === compaction.timestamp;
+    });
+    if (!existing) {
+      merged.push(compaction);
+      continue;
+    }
+    if (compactionAccuracy(compaction) > compactionAccuracy(existing)) {
+      Object.assign(existing, compaction);
+    }
+  }
+  return merged.length > 0 ? merged : undefined;
+}
+
+function compactionAccuracy(compaction: Compaction): number {
+  if (compaction.accuracy === "exact") return 3;
+  if (compaction.accuracy === "estimated") return 2;
+  if (compaction.accuracy === "lower-bound") return 1;
+  return 0;
 }
 
 function mergeCursorSidecars(
@@ -3186,6 +3328,7 @@ async function parseCursorGlobalStateDb(
 
     const turns = entries.map((entry) => entry.turn);
     if (turns.length === 0) return null;
+    const summaryText = cursorLatestSummaryText(composer);
     const structuredSubagentCount = attachStructuredCursorSubagents(
       turns,
       sessionId,
@@ -3214,6 +3357,18 @@ async function parseCursorGlobalStateDb(
       composer.conversationCheckpointLastUpdatedAt,
       ...turnTimestamps,
     ]);
+    const compactions = cursorCompactions(composer, endTime);
+    const replayTurns = summaryText
+      ? [
+          {
+            role: "user" as const,
+            subtype: "compaction-summary" as const,
+            timestamp: compactions?.[0]?.timestamp,
+            blocks: [{ type: "text" as const, text: summaryText }],
+          },
+          ...turns,
+        ]
+      : turns;
     const sessionTokenUsage = tokenUsageFromCursorTokenCount(composer.tokenCount);
     const metrics = buildGlobalStateMetrics(entries, modelName, sessionTokenUsage);
     const branchMeta = extractCursorBranchMetadata(composer);
@@ -3235,6 +3390,11 @@ async function parseCursorGlobalStateDb(
       notes.push("Token usage is estimated from Cursor token snapshots and may be approximate.");
     } else {
       notes.push("Token usage is estimated from Cursor token snapshots.");
+    }
+    if (compactions) {
+      notes.push(
+        "Cursor persisted a conversation summary; compaction count is a lower bound because older summaries may be overwritten.",
+      );
     }
     if (metrics.totalDurationMs !== undefined) {
       notes.push(
@@ -3301,13 +3461,14 @@ async function parseCursorGlobalStateDb(
       ...(metrics.tokenUsage ? { tokenUsage: metrics.tokenUsage } : {}),
       ...(metrics.tokenUsageByModel ? { tokenUsageByModel: metrics.tokenUsageByModel } : {}),
       ...(metrics.turnStats ? { turnStats: metrics.turnStats } : {}),
+      ...(compactions ? { compactions } : {}),
       ...(branchMeta.gitBranch ? { gitBranch: branchMeta.gitBranch } : {}),
       ...(branchMeta.gitBranches ? { gitBranches: branchMeta.gitBranches } : {}),
       ...(prLinks.length > 0 ? { prLinks } : {}),
       ...(apiErrors ? { apiErrors } : {}),
       ...(contextSummary.contextFiles ? { contextFiles: contextSummary.contextFiles } : {}),
       ...(cursorSidecars ? { cursorSidecars } : {}),
-      turns,
+      turns: replayTurns,
       dataSource: "global-state",
       dataSourceInfo: {
         primary: "global-state",
@@ -3502,6 +3663,8 @@ export const __testables = {
   loadAgentKvBlobMessages,
   cursorComposerSidecarMetadata,
   composerHeaderBubbleIds,
+  cursorCompactionCount,
+  cursorCompactions,
   extractCursorBranchMetadata,
   extractCursorContextSummary,
   extractCursorPrLinks,

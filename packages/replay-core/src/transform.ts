@@ -13,7 +13,7 @@ import type {
   SessionTranscriptStatus,
   SubAgent,
 } from "@vibe-replay/types";
-import { REPLAY_SCHEMA_VERSION } from "@vibe-replay/types";
+import { deriveTokenUsageMetrics, REPLAY_SCHEMA_VERSION } from "@vibe-replay/types";
 import { estimateTokens } from "./utils/tokenEstimate.js";
 
 type ToolCallScene = Extract<Scene, { type: "tool-call" }>;
@@ -253,6 +253,7 @@ export function transformToReplay(
         );
         scene.timestamp = turn.timestamp;
         scene.isError = !!block._isError;
+        scene.hasResult = block._hasResult ?? block._result !== undefined;
         if (block._durationMs) scene.durationMs = block._durationMs;
         // Attach subagent data for Agent tool calls
         if (block.name === "Agent" && block._subAgent) {
@@ -338,6 +339,7 @@ export function transformToReplay(
         thinkingBlocks,
         durationMs,
         tokenUsage: parsed.tokenUsage,
+        ...(parsed.tokenUsage ? { tokenMetrics: deriveTokenUsageMetrics(parsed.tokenUsage) } : {}),
         costEstimate,
         ...(parsed.turnStats ? { turnStats: parsed.turnStats } : {}),
       },
@@ -709,6 +711,11 @@ function redactSubAgentScene(s: Scene): Scene {
       toolName,
       input: s.input ? sanitizeInput(s.input) : {},
       result: truncate(redactPath(resultRaw), 1000),
+      ...(s.hasResult !== undefined
+        ? { hasResult: s.hasResult }
+        : resultRaw.length > 0
+          ? { hasResult: true }
+          : {}),
       timestamp: s.timestamp,
       isError: s.isError || false,
       ...(s.durationMs ? { durationMs: s.durationMs } : {}),

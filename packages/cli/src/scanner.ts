@@ -25,6 +25,7 @@ import { estimateCostIfKnown, estimateCostSimpleIfKnown } from "@vibe-replay/rep
 import { classifyProject, mergeProjectIdentities, projectIdentityKey } from "@vibe-replay/types";
 import { parseCodexSession } from "./providers/codex/parser.js";
 import { parseClaudeCoworkSession } from "@vibe-replay/provider-claude-code/claude-cowork/parser";
+import { parseClaudeCodeSession } from "./providers/claude-code/parser.js";
 import { parseCursorSession } from "./providers/cursor/parser.js";
 import { parseHermesSession } from "@vibe-replay/provider-hermes/parser";
 import { parseOpencodeSession } from "@vibe-replay/provider-opencode/parser";
@@ -33,6 +34,7 @@ import type { ContentBlock } from "@vibe-replay/provider-contract";
 import type { ProviderParseResult } from "./providers/types.js";
 import type {
   DataSource,
+  ParseWarning,
   ProjectIdentity,
   PrLink,
   SessionInfo,
@@ -62,7 +64,9 @@ import { localDayKey, shortenPath } from "./utils.js";
 // MCP entrypoint name.
 // v30: preserve repeated rich-provider skill activations and MCP attribution.
 // v31: deduplicate streamed skill attribution and index OpenCode/Hermes usage.
-export const SCANNER_VERSION = 31;
+// v32: add provider coverage reporting, rich Claude scans, and Cursor compaction
+// summary detection.
+export const SCANNER_VERSION = 32;
 
 // Keep per-invocation detail bounded in the durable insight store. The full
 // event set is still used to compute usageSummary below; only the retained
@@ -133,6 +137,7 @@ export interface SessionScanResult {
 interface ScanCacheEntry {
   mtimeMs: number;
   fileSize: number;
+  sourceFingerprint?: string;
   scannedAt: string;
   result: SessionScanResult;
 }
@@ -608,6 +613,8 @@ export interface ScanInput {
   workspacePath?: string;
   hasSqlite?: boolean;
   hasSdk?: boolean;
+  /** Provider-side storage fingerprint for cache freshness. */
+  sourceFingerprint?: string;
   deferRichCursorParse?: boolean;
   timestamp?: string;
   title?: string;
@@ -735,6 +742,15 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
       richFallbackProvider = "Claude Cowork";
     }
   }
+  if (input.provider === "claude-code" || input.provider === "claude-desktop") {
+    try {
+      return await scanClaudeCodeSession(input);
+    } catch {
+      // Fall through to the generic JSONL scanner so a partially written
+      // transcript remains visible while the rich parser is unavailable.
+      richFallbackProvider = input.provider === "claude-desktop" ? "Claude Desktop" : "Claude Code";
+    }
+  }
   if (input.provider === "cursor") {
     try {
       return await scanCursorSession(input);
@@ -797,6 +813,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
   const mcpServersUsed = new Set<string>();
   const usageEvents: UsageEvent[] = [];
   const eventByToolUseId = new Map<string, UsageEvent>();
+  const seenToolUseIds = new Set<string>();
   let readAnySourceFile = false;
 
   let promptCount = 0;
@@ -1022,6 +1039,8 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
       if (role === "assistant" && Array.isArray(msgContent)) {
         for (const block of msgContent) {
           if (block.type === "tool_use") {
+            if (typeof block.id === "string" && seenToolUseIds.has(block.id)) continue;
+            if (typeof block.id === "string") seenToolUseIds.add(block.id);
             toolCallCount++;
             const skillName = skillNameFromTool({
               type: "tool_use",
@@ -1238,6 +1257,35 @@ function scanFallbackPrompt(input: ScanInput, placeholder = ""): string {
   return input.firstPrompt || input.title || placeholder;
 }
 
+function buildFailedScanResult(input: ScanInput): SessionScanResult {
+  return {
+    sessionId: input.sessionId,
+    provider: input.provider,
+    location: input.location,
+    transcriptStatus: input.transcriptStatus,
+    project: input.project,
+    projectIdentity: input.projectIdentity,
+    slug: input.slug,
+    title: input.title,
+    firstPrompt: scanFallbackPrompt(input),
+    startTime: input.timestamp,
+    model: input.discoveryModel,
+    promptCount: input.transcriptStatus ? 0 : (input.discoveryPromptCount ?? 0),
+    toolCallCount: input.discoveryToolCallCount ?? 0,
+    editCount: input.discoveryEditCount ?? 0,
+    filesModified: [],
+    tokenUsage: input.discoveryTokenUsage,
+    costEstimate: input.discoveryCostEstimate,
+    subAgentCount: 0,
+    apiErrorCount: 0,
+    compactionCount: input.discoveryCompactionCount ?? 0,
+    usageIndexed: false,
+    dataQualityNotes: [
+      `Partial ${input.provider} scan: the source could not be read, so discovery metadata was retained.`,
+    ],
+  };
+}
+
 /** Keep persisted timing internally consistent without discarding active-time evidence. */
 function ensureEndCoversDuration(
   startTime: string | undefined,
@@ -1274,6 +1322,18 @@ async function scanClaudeCoworkSession(input: ScanInput): Promise<SessionScanRes
     model: input.discoveryModel,
   };
   const parsed = await parseClaudeCoworkSession(input.filePaths, sessionInfo);
+  return buildScanResultFromParsed(input, parsed);
+}
+
+async function scanClaudeCodeSession(input: ScanInput): Promise<SessionScanResult> {
+  const parsed = await parseClaudeCodeSession(input.filePaths);
+  const hasAssistantTurn = parsed.turns.some((turn) => turn.role === "assistant");
+  if (
+    !hasAssistantTurn &&
+    (input.discoveryPromptCount === undefined || input.discoveryPromptCount > 0)
+  ) {
+    throw new Error("Claude transcript did not contain parseable turns");
+  }
   return buildScanResultFromParsed(input, parsed);
 }
 
@@ -1484,6 +1544,7 @@ function buildLightweightOpencodeScanResult(input: ScanInput): SessionScanResult
     compactionCount: input.discoveryCompactionCount ?? 0,
     dataSource: "sqlite",
     dataQualityNotes: [
+      "Partial opencode scan: rich SQLite usage details were not available during this pass.",
       "OpenCode details are read from its SQLite database; rich per-file edit counts are resolved when a replay is generated.",
       "Tool, MCP, and skill usage is not indexed for OpenCode sessions during background scans.",
     ],
@@ -1517,6 +1578,7 @@ function buildLightweightHermesScanResult(input: ScanInput): SessionScanResult {
     compactionCount: input.discoveryCompactionCount ?? 0,
     dataSource: "sqlite",
     dataQualityNotes: [
+      "Partial hermes scan: rich SQLite usage details were not available during this pass.",
       "Hermes details are read from its SQLite database (~/.hermes/state.db); rich per-file edit counts are resolved when a replay is generated.",
       "Tool, MCP, and skill usage is not indexed for Hermes sessions during background scans.",
     ],
@@ -1615,41 +1677,73 @@ function buildScanResultFromParsed(
 
       // Count file modifications from sub-agent scenes
       if (block.name === "Agent" && block._subAgent?.scenes) {
+        const nestedUsageEvents = block._subAgent.usageEvents;
+        if (nestedUsageEvents && nestedUsageEvents.length > 0) {
+          // The replay trace is intentionally capped, but the provider parser
+          // keeps a complete metadata-only invocation index for aggregation.
+          toolCallCount += nestedUsageEvents.length;
+          for (const event of nestedUsageEvents) {
+            if (event.kind === "skill") {
+              usageEvents.push({
+                ...event,
+                parentAgentId: event.parentAgentId || block._subAgent.agentId,
+              });
+              if (event.skillName) skillsUsed.add(event.skillName);
+              continue;
+            }
+            usageEvents.push(
+              toolUsageEvent(event.name, {
+                timestamp: event.timestamp,
+                durationMs: event.durationMs,
+                isError: event.status === "error",
+                hasResult: event.status === "success",
+                parentAgentId: event.parentAgentId || block._subAgent.agentId,
+                mcpServer: event.mcpServer,
+                mcpTool: event.mcpTool,
+                mcpServerNames: parsed.mcpServerNames,
+              }),
+            );
+          }
+        }
         for (const saScene of block._subAgent.scenes) {
           if (saScene.type !== "tool-call") continue;
-          toolCallCount++;
-          const saToolBlock = {
-            name: saScene.toolName || "Unknown",
-            input: saScene.input,
-            _skillName: undefined,
-          } as Extract<ContentBlock, { type: "tool_use" }>;
-          const saSkillName = skillNameFromTool(saToolBlock);
-          if (saSkillName) {
-            usageEvents.push({
-              kind: "skill",
-              name: saSkillName,
-              skillName: saSkillName,
-              timestamp: saScene.timestamp,
-              status: "unknown",
-              attribution: "explicit",
-            });
-            skillsUsed.add(saSkillName);
-            continue;
-          }
-          usageEvents.push(
-            toolUsageEvent(saScene.toolName, {
+          // When a complete provider-side index exists, it has already
+          // contributed the nested call count and usage events above.
+          if (!nestedUsageEvents?.length) {
+            toolCallCount++;
+            const saToolBlock = {
+              name: saScene.toolName || "Unknown",
               input: saScene.input,
-              timestamp: saScene.timestamp,
-              durationMs: saScene.durationMs,
-              isError: saScene.isError,
-              hasResult:
-                (saScene as typeof saScene & { hasResult?: boolean }).hasResult ??
-                (saScene.result !== undefined && saScene.result !== ""),
-              parentAgentId: block._subAgent.agentId,
-              mcpServerNames: parsed.mcpServerNames,
-            }),
-          );
-          const saTool = saScene.toolName;
+              _skillName: undefined,
+            } as Extract<ContentBlock, { type: "tool_use" }>;
+            const saSkillName = skillNameFromTool(saToolBlock);
+            if (saSkillName) {
+              usageEvents.push({
+                kind: "skill",
+                name: saSkillName,
+                skillName: saSkillName,
+                timestamp: saScene.timestamp,
+                status: "unknown",
+                attribution: "explicit",
+              });
+              skillsUsed.add(saSkillName);
+            } else {
+              usageEvents.push(
+                toolUsageEvent(saScene.toolName, {
+                  input: saScene.input,
+                  timestamp: saScene.timestamp,
+                  durationMs: saScene.durationMs,
+                  isError: saScene.isError,
+                  hasResult:
+                    (saScene as typeof saScene & { hasResult?: boolean }).hasResult ??
+                    (saScene.result !== undefined && saScene.result !== ""),
+                  parentAgentId: block._subAgent.agentId,
+                  mcpServerNames: parsed.mcpServerNames,
+                }),
+              );
+            }
+          }
+          const saTool = saScene.toolName || "Unknown";
           if (!FILE_EDIT_TOOLS.has(saTool)) continue;
           const saPath = extractToolFilePath(saScene.input);
           if (!saPath) continue;
@@ -1689,6 +1783,11 @@ function buildScanResultFromParsed(
       attribution: "session-metadata",
     });
   }
+  // Keep the headline tool count aligned with the complete invocation index.
+  // Nested provider traces may contain more calls than the bounded replay scene
+  // list, while skill activations remain a separate usage facet.
+  const indexedToolCallCount = usageEvents.filter((event) => event.kind === "tool").length;
+  toolCallCount = Math.max(toolCallCount, indexedToolCallCount);
   const derivedMcpServers = new Set(
     (parsed.mcpServersUsed || []).map((server) =>
       normalizeMcpServerName(stripCursorServerScope(parsed.mcpServerNames?.[server] || server)),
@@ -1736,7 +1835,7 @@ function buildScanResultFromParsed(
     usageIndexed: true,
     dataSource: parsed.dataSource,
     dataQualityNotes: costDataQualityNotes(
-      parsed.dataSourceInfo?.notes,
+      [...(parsed.dataSourceInfo?.notes || []), ...parseWarningQualityNotes(parsed.parseWarnings)],
       parsed.tokenUsage,
       costEstimate,
     ),
@@ -1745,6 +1844,15 @@ function buildScanResultFromParsed(
       ?.map((t) => t.durationMs)
       .filter((d): d is number => d != null && d > 0),
   };
+}
+
+function parseWarningQualityNotes(warnings: ParseWarning[] | undefined): string[] {
+  if (!warnings || warnings.length === 0) return [];
+  return warnings.map((warning) => {
+    const source = warning.source ? ` in ${warning.source}` : "";
+    const firstLine = warning.firstLine ? ` (first at line ${warning.firstLine})` : "";
+    return `${warning.count} ${warning.kind} record${warning.count === 1 ? "" : "s"} skipped${source}${firstLine}.`;
+  });
 }
 
 function firstUserPrompt(turns: ProviderParseResult["turns"]): string | undefined {
@@ -1826,6 +1934,7 @@ async function getFileMeta(filePaths: string[]): Promise<{ mtimeMs: number; file
 async function getScanCacheMeta(session: ScanInput): Promise<{
   mtimeMs: number;
   fileSize: number;
+  sourceFingerprint?: string;
 }> {
   const paths = [...session.filePaths, ...(session.toolPaths || [])];
   const sourceFilePath = session.sourceFilePath || "";
@@ -1836,16 +1945,19 @@ async function getScanCacheMeta(session: ScanInput): Promise<{
   const meta = await getFileMeta([...new Set(paths)]);
   if (session.hasSqlite) {
     // Marker paths (`db#session:id`) cannot be stat'ed directly. Use the
-    // discovery timestamp as per-session freshness so new SQLite activity
-    // invalidates only the affected cached scan instead of reopening every
-    // session whenever the shared database changes.
+    // discovery timestamp as a fallback for marker paths that cannot be
+    // stat'ed. The provider fingerprint below also catches late SQLite/WAL
+    // updates that do not touch the transcript.
     const sessionTimestampMs = session.timestamp ? Date.parse(session.timestamp) : NaN;
     if (Number.isFinite(sessionTimestampMs) && sessionTimestampMs > meta.mtimeMs) {
       meta.mtimeMs = sessionTimestampMs;
     }
     meta.fileSize += session.sourceFileSize || 0;
   }
-  return meta;
+  return {
+    ...meta,
+    ...(session.sourceFingerprint ? { sourceFingerprint: session.sourceFingerprint } : {}),
+  };
 }
 
 /**
@@ -1855,9 +1967,16 @@ async function getScanCacheMeta(session: ScanInput): Promise<{
 async function checkCache(
   entry: ScanCacheEntry | undefined,
   session: ScanInput,
-): Promise<{ valid: boolean; meta: { mtimeMs: number; fileSize: number } }> {
+): Promise<{
+  valid: boolean;
+  meta: { mtimeMs: number; fileSize: number; sourceFingerprint?: string };
+}> {
   const meta = await getScanCacheMeta(session);
-  const valid = !!entry && entry.mtimeMs === meta.mtimeMs && entry.fileSize === meta.fileSize;
+  const valid =
+    !!entry &&
+    entry.mtimeMs === meta.mtimeMs &&
+    entry.fileSize === meta.fileSize &&
+    entry.sourceFingerprint === meta.sourceFingerprint;
   return { valid, meta };
 }
 
@@ -1933,12 +2052,17 @@ export async function runBackgroundScan(
           cache.entries[cacheKey] = {
             mtimeMs: cacheCheck.meta.mtimeMs,
             fileSize: cacheCheck.meta.fileSize,
+            ...(cacheCheck.meta.sourceFingerprint
+              ? { sourceFingerprint: cacheCheck.meta.sourceFingerprint }
+              : {}),
             scannedAt: new Date().toISOString(),
             result,
           };
         }
       } catch {
-        // Skip failed sessions silently
+        // Keep failed sessions in the snapshot so coverage never turns a
+        // per-session read failure into a false 100% result.
+        results[index] = buildFailedScanResult(session);
       }
     }
 

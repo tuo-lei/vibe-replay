@@ -75,6 +75,42 @@ describe("transform — scene generation", () => {
     expect(replay.scenes[0].content).toBe("Hello world");
   });
 
+  it("preserves empty and missing tool results as distinct states", () => {
+    const replay = transformToReplay(
+      buildParsed({
+        turns: [
+          {
+            role: "assistant",
+            blocks: [
+              {
+                type: "tool_use",
+                id: "empty-result",
+                name: "Read",
+                input: { file_path: "/tmp/empty" },
+                _hasResult: true,
+                _result: "",
+              },
+              {
+                type: "tool_use",
+                id: "missing-result",
+                name: "Read",
+                input: { file_path: "/tmp/missing" },
+                _hasResult: false,
+              },
+            ],
+          },
+        ],
+      }),
+      "claude-code",
+      "~/test",
+    );
+
+    const tools = replay.scenes.filter((scene) => scene.type === "tool-call");
+    expect(tools).toHaveLength(2);
+    expect(tools[0]).toMatchObject({ toolName: "Read", result: "", hasResult: true });
+    expect(tools[1]).toMatchObject({ toolName: "Read", result: "", hasResult: false });
+  });
+
   it("propagates parse warnings into replay metadata", () => {
     const replay = transformToReplay(
       buildParsed({

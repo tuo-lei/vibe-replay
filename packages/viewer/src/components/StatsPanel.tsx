@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { deriveTokenUsageMetrics } from "@vibe-replay/types";
 import type { ReplaySession } from "../types";
 import { getToolDiffs } from "../utils/sceneDiffs";
 import { formatReplaySourceLabel } from "../utils/format";
@@ -76,6 +77,9 @@ export default function StatsPanel({ session }: Props) {
       topTools,
       durationMs: meta.stats.durationMs,
       tokenUsage: meta.stats.tokenUsage,
+      tokenMetrics: meta.stats.tokenUsage
+        ? deriveTokenUsageMetrics(meta.stats.tokenUsage)
+        : undefined,
       costEstimate: meta.stats.costEstimate,
       compactions: meta.compactions,
       peakContextTokens: (() => {
@@ -240,7 +244,8 @@ export default function StatsPanel({ session }: Props) {
           </div>
           <div className="text-terminal-dim leading-relaxed space-y-0.5">
             <div>
-              In: <span className="text-terminal-blue">{fmtNum(stats.tokenUsage.inputTokens)}</span>
+              Input:{" "}
+              <span className="text-terminal-blue">{fmtNum(stats.tokenUsage.inputTokens)}</span>
               {" / "}
               Out:{" "}
               <span className="text-terminal-green">{fmtNum(stats.tokenUsage.outputTokens)}</span>
@@ -255,8 +260,30 @@ export default function StatsPanel({ session }: Props) {
               <span className="text-terminal-orange">
                 {fmtNum(stats.tokenUsage.cacheCreationTokens)}
               </span>{" "}
-              created
+              write
             </div>
+            {stats.tokenMetrics && (
+              <div className="pt-1 text-[10px] text-terminal-dimmer">
+                Prompt{" "}
+                <span className="text-terminal-blue">
+                  {fmtNum(stats.tokenMetrics.promptTokens)}
+                </span>
+                {" · "}
+                uncached/miss{" "}
+                <span className="text-terminal-orange">
+                  {fmtNum(stats.tokenMetrics.cacheMissTokens)}
+                </span>
+                {stats.tokenMetrics.cacheReadShare !== undefined && (
+                  <>
+                    {" · "}
+                    read share{" "}
+                    <span className="text-terminal-green">
+                      {Math.round(stats.tokenMetrics.cacheReadShare * 1000) / 10}%
+                    </span>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -368,7 +395,10 @@ export default function StatsPanel({ session }: Props) {
                 className="text-terminal-dim text-xs flex items-baseline gap-1.5 flex-wrap"
               >
                 <span className="text-terminal-orange">●</span>
-                <span>{c.trigger}</span>
+                <span>
+                  {c.accuracy === "lower-bound" ? "at least " : ""}
+                  {c.trigger}
+                </span>
                 {c.preTokens && (
                   <span className="text-terminal-text">{fmtNum(c.preTokens)} tokens</span>
                 )}

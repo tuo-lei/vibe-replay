@@ -5,6 +5,9 @@ export type {
   DataSource,
   DataSourceInfo,
   FileDiff,
+  MetricCoverage,
+  MetricQuality,
+  ProviderCoverage,
   OverlaySource,
   ProjectIdentity,
   PrLink,
@@ -17,7 +20,9 @@ export type {
   SessionTranscriptStatus,
   SubAgent,
   TokenUsage,
+  TokenUsageMetrics,
   TurnStat,
+  UsageCoverageReport,
 } from "@vibe-replay/types";
 
 // Re-import for local use in this file
@@ -91,6 +96,7 @@ export interface SourceSession {
   toolPaths?: string[];
   hasSqlite?: boolean;
   hasSdk?: boolean;
+  sourceFingerprint?: string;
   gitBranch?: string;
   gitRepo?: string;
   existingReplay: string | null;
