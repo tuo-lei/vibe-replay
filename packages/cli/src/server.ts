@@ -1046,6 +1046,7 @@ export async function startServer(
   };
   // Incremented per scan so a slower follow-up pass can tell it was superseded.
   let scanGeneration = 0;
+  let queuedScanHints: EnrichmentHints | undefined;
 
   // Pre-computed insights cache — populated after each scan completes.
   // Kept across scans (stale-while-refresh): new scan overwrites, never clears.
@@ -1281,7 +1282,10 @@ export async function startServer(
     const pending = scanInputs
       .filter((input) => input.deferRichCursorParse && (input.hasSqlite || input.hasSdk))
       .map((input) => ({ ...input, deferRichCursorParse: false }));
-    if (pending.length === 0) return;
+    if (pending.length === 0) {
+      drainQueuedScan();
+      return;
+    }
 
     const superseded = (): boolean => generation !== scanGeneration;
     scanState = {
@@ -1352,6 +1356,7 @@ export async function startServer(
         revision: scanState.revision + 1,
         hasSnapshot: true,
       };
+      drainQueuedScan();
     } catch {
       if (!superseded()) {
         scanState = {
@@ -1362,6 +1367,7 @@ export async function startServer(
             total: scanState.usageBackfill?.total ?? 0,
           },
         };
+        drainQueuedScan();
       }
     }
   };
@@ -1497,8 +1503,25 @@ export async function startServer(
           phase: undefined,
           finishedAt: new Date().toISOString(),
         };
+        drainQueuedScan();
       }
     })();
+  };
+
+  const drainQueuedScan = (): void => {
+    if (!queuedScanHints || scanState.running || scanState.usageBackfill?.running) return;
+    const hints = queuedScanHints;
+    queuedScanHints = undefined;
+    startBackgroundScan(hints);
+  };
+
+  const requestBackgroundScan = (hints: EnrichmentHints = {}): boolean => {
+    if (scanState.running || scanState.usageBackfill?.running) {
+      queuedScanHints = mergeEnrichmentHints(queuedScanHints, hints);
+      return true;
+    }
+    startBackgroundScan(hints);
+    return false;
   };
 
   // A previous process can have persisted the fast Cursor snapshot and exited
@@ -2201,8 +2224,8 @@ export async function startServer(
     try {
       await saveRemoteSourceConfigs(parsed.sources);
       remoteConfigChangedAt = Date.now();
-      startBackgroundScan();
-      return c.json({ ok: true, remoteSources: parsed.sources });
+      const queued = requestBackgroundScan();
+      return c.json({ ok: true, queued, remoteSources: parsed.sources });
     } catch (err) {
       return c.json({ error: getErrorMessage(err) }, 500);
     }
@@ -2483,8 +2506,12 @@ export async function startServer(
 
   app.post("/api/scan/start", async (c) => {
     const hints = enrichmentHintsFromBody(await c.req.json().catch(() => undefined));
-    startBackgroundScan(hints);
-    return c.json({ ok: true, message: "Background scan started" });
+    const queued = requestBackgroundScan(hints);
+    return c.json({
+      ok: true,
+      queued,
+      message: queued ? "Background scan queued" : "Background scan started",
+    });
   });
 
   app.get("/api/scan/status", async (c) => {
