@@ -14,7 +14,13 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { deduplicateSessionsByProvider } from "@vibe-replay/providers-default";
 import { replayOutputSlug } from "../src/server-core.js";
-import { discoverConfiguredRemoteSessions, parseRemoteSourceConfig } from "../src/remote.js";
+import {
+  discoverConfiguredRemoteSessions,
+  normalizeRemoteSourceConfig,
+  parseRemoteSourceConfig,
+  saveRemoteSourceConfigs,
+  testRemoteSourceConnection,
+} from "../src/remote.js";
 import { scanCacheEntryKey } from "../src/scanner.js";
 import { providerSessionKey, sourceSessionKey } from "../src/server-enrichment.js";
 import type { SessionInfo } from "../src/types.js";
@@ -108,6 +114,48 @@ describe("remote source configuration", () => {
         remoteSources: [{ id: "local", sshHost: "devbox" }],
       }),
     ).toEqual([]);
+  });
+
+  it("preserves unrelated config keys when saving SSH sources", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-remote-settings-"));
+    temporaryRoots.push(root);
+    const configPath = join(root, "config.json");
+    await writeFile(
+      configPath,
+      JSON.stringify({ futureSetting: { enabled: true }, remoteSources: [] }),
+      "utf-8",
+    );
+
+    const source = normalizeRemoteSourceConfig({
+      id: "remote-dev",
+      sshHost: "devbox",
+      label: "Remote dev",
+      providers: ["codex"],
+      connectTimeoutMs: 15_000,
+    });
+    expect(source).not.toBeNull();
+    await saveRemoteSourceConfigs([source!], configPath);
+
+    const saved = JSON.parse(await readFile(configPath, "utf-8"));
+    expect(saved).toMatchObject({
+      futureSetting: { enabled: true },
+      remoteSources: [
+        {
+          id: "remote-dev",
+          sshHost: "devbox",
+          label: "Remote dev",
+          providers: ["codex"],
+          connectTimeoutMs: 15_000,
+        },
+      ],
+    });
+  });
+
+  it("rejects invalid settings before starting an SSH probe", async () => {
+    await expect(testRemoteSourceConnection({ id: "bad/id", sshHost: "devbox" })).resolves.toEqual({
+      ok: false,
+      message: "Invalid SSH source configuration.",
+    });
   });
 });
 

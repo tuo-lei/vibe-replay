@@ -47,13 +47,36 @@ export function transcriptStatusLabel(status?: SessionTranscriptStatus): string 
   return undefined;
 }
 
-export function remoteSourceFailureIds(value: unknown): string[] {
+export function remoteSourceFailureLabels(value: unknown): string[] {
   if (!value || typeof value !== "object") return [];
-  const failures = (value as { failedProviders?: unknown }).failedProviders;
+  const payload = value as {
+    failedProviders?: unknown;
+    remoteSources?: unknown;
+  };
+  const failures = payload.failedProviders;
   if (!Array.isArray(failures)) return [];
-  return failures.filter(
-    (failure): failure is string => typeof failure === "string" && failure.startsWith("ssh:"),
-  );
+  const labels = new Map<string, string>();
+  if (Array.isArray(payload.remoteSources)) {
+    for (const source of payload.remoteSources) {
+      if (!source || typeof source !== "object") continue;
+      const record = source as { id?: unknown; label?: unknown };
+      if (
+        typeof record.id === "string" &&
+        typeof record.label === "string" &&
+        record.label.trim()
+      ) {
+        labels.set(record.id, record.label.trim());
+      }
+    }
+  }
+  return failures
+    .filter(
+      (failure): failure is string => typeof failure === "string" && failure.startsWith("ssh:"),
+    )
+    .map((failure) => {
+      const id = failure.slice("ssh:".length);
+      return labels.get(id) || id;
+    });
 }
 
 export function transcriptStatusDescription(status?: SessionTranscriptStatus): string | undefined {

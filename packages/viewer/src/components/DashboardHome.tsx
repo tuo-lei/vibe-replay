@@ -14,7 +14,7 @@ import {
   parseCachedList,
   projectDisplayName,
   replaySuggestedTitle,
-  remoteSourceFailureIds,
+  remoteSourceFailureLabels,
   rollupTopProjects,
   sameSessionLocation,
   sessionIdentityKey,
@@ -94,12 +94,11 @@ function sourceTranscriptStatusBadge(status?: SourceSession["transcriptStatus"])
 
 function RemoteSourceFailureNotice({ failures }: { failures: string[] }) {
   if (failures.length === 0) return null;
-  const labels = failures.map((failure) => failure.slice("ssh:".length));
   return (
     <div className="rounded-xl bg-terminal-red-subtle px-4 py-3 text-xs font-mono text-terminal-red shadow-layer-sm">
       <div className="font-semibold">Remote SSH source unavailable</div>
       <div className="mt-1 text-terminal-red/80">
-        {labels.join(", ")} — showing cached sessions when available. Check the SSH connection and
+        {failures.join(", ")} — showing cached sessions when available. Check the SSH connection and
         refresh.
       </div>
     </div>
@@ -133,17 +132,17 @@ function useDashboardData() {
 
     try {
       const [sourcesRes, replaysRes] = await Promise.all([
-        fetch("/api/sources/cached")
+        fetch("/api/sources/cached", { cache: "no-store" })
           .then((r) => (r.ok ? r.json() : null))
           .catch(() => null),
-        fetch("/api/sessions/cached")
+        fetch("/api/sessions/cached", { cache: "no-store" })
           .then((r) => (r.ok ? r.json() : null))
           .catch(() => null),
       ]);
 
       const cachedSources = parseCachedList<SourceSession>(sourcesRes);
       const cachedReplays = parseCachedList<SessionSummary>(replaysRes);
-      setFailedRemoteSources(remoteSourceFailureIds(sourcesRes));
+      setFailedRemoteSources(remoteSourceFailureLabels(sourcesRes));
 
       if (cachedSources?.sessions.length) setSources(cachedSources.sessions);
       if (cachedReplays?.sessions.length) setReplays(cachedReplays.sessions);
@@ -172,7 +171,7 @@ function useDashboardData() {
                   setScanProgress(msg.scanned);
                 } else if (msg.type === "complete") {
                   setSources(msg.sessions);
-                  setFailedRemoteSources(remoteSourceFailureIds(msg));
+                  setFailedRemoteSources(remoteSourceFailureLabels(msg));
                   setScanProgress(null);
                   es.close();
                   resolve();
@@ -199,7 +198,7 @@ function useDashboardData() {
                 })
                 .then((data: { sessions: SourceSession[]; failedProviders?: unknown }) => {
                   setSources(data.sessions);
-                  setFailedRemoteSources(remoteSourceFailureIds(data));
+                  setFailedRemoteSources(remoteSourceFailureLabels(data));
                 })
                 .catch((err) => {
                   if (!cachedSources?.sessions.length) {
@@ -248,7 +247,7 @@ function useDashboardData() {
     let timer: number | undefined;
 
     const maybeRefreshSourcesFromCache = async () => {
-      const payload = await fetch("/api/sources/cached")
+      const payload = await fetch("/api/sources/cached", { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null);
       const cached = parseCachedList<SourceSession>(payload);
@@ -263,7 +262,7 @@ function useDashboardData() {
     };
 
     const poll = async () => {
-      const status = await fetch("/api/sources/enrichment-status")
+      const status = await fetch("/api/sources/enrichment-status", { cache: "no-store" })
         .then((r) => (r.ok ? (r.json() as Promise<SourcesEnrichmentStatus>) : null))
         .catch(() => null);
       if (!status || cancelled) return;

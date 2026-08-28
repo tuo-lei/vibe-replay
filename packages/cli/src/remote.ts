@@ -12,6 +12,7 @@ import {
   rm,
   stat,
   unlink,
+  writeFile,
 } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, posix } from "node:path";
@@ -564,6 +565,7 @@ function runSsh(
   command: string[],
   input: string,
   maxOutputBytes = 16 * 1024 * 1024,
+  timeoutMs = sshTimeoutMs(target),
 ): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const child = spawnSsh(target, command);
@@ -580,7 +582,7 @@ function runSsh(
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill("SIGTERM");
-    }, sshTimeoutMs(target));
+    }, timeoutMs);
 
     const fail = (error: Error): void => {
       if (settled) return;
@@ -1894,4 +1896,101 @@ export async function discoverConfiguredRemoteSessions(
     sessions: results.flatMap(({ result }) => result.sessions),
     failedTargets: results.filter(({ result }) => result.failed).map(({ target }) => target.id),
   };
+}
+
+/** Normalize one untrusted settings payload using the same SSH config rules as discovery. */
+export function normalizeRemoteSourceConfig(value: unknown): RemoteSourceConfig | null {
+  return parseRemoteSourceConfig({ remoteSources: [value] })[0] || null;
+}
+
+async function writableRemoteConfigPath(configPath?: string): Promise<string> {
+  const configuredPath = configPath || process.env.VIBE_REPLAY_CONFIG;
+  if (configuredPath) {
+    if (configuredPath === "/dev/null") {
+      throw new Error("SSH settings are disabled by VIBE_REPLAY_CONFIG");
+    }
+    return configuredPath;
+  }
+
+  for (const candidate of [DEFAULT_CONFIG_PATH, FALLBACK_CONFIG_PATH]) {
+    const existing = await stat(candidate).catch(() => null);
+    if (existing?.isFile()) return candidate;
+  }
+  return DEFAULT_CONFIG_PATH;
+}
+
+/**
+ * Persist SSH source settings without touching unrelated config keys. The
+ * atomic replace and restrictive mode keep a partial write from breaking the
+ * next dashboard start.
+ */
+export async function saveRemoteSourceConfigs(
+  configs: readonly RemoteSourceConfig[],
+  configPath?: string,
+): Promise<void> {
+  if (configs.length > 32) throw new Error("At most 32 SSH sources can be configured");
+
+  const targetPath = await writableRemoteConfigPath(configPath);
+  let config: Record<string, unknown> = {};
+  try {
+    const content = await readFile(targetPath, "utf-8");
+    const parsed = JSON.parse(content);
+    if (isRecord(parsed)) config = parsed;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw new Error("SSH settings file is not valid JSON", { cause: error });
+    }
+  }
+
+  config.remoteSources = configs.map((config) => ({
+    id: config.id,
+    sshHost: config.sshHost,
+    label: config.label,
+    providers: [...config.providers],
+    connectTimeoutMs: config.connectTimeoutMs,
+  }));
+
+  await mkdir(dirname(targetPath), { recursive: true, mode: 0o700 });
+  const temporaryPath = `${targetPath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporaryPath, `${JSON.stringify(config, null, 2)}\n`, {
+      encoding: "utf-8",
+      mode: 0o600,
+    });
+    await chmod(temporaryPath, 0o600);
+    await rename(temporaryPath, targetPath);
+    await chmod(targetPath, 0o600);
+  } finally {
+    await unlink(temporaryPath).catch(() => {});
+  }
+}
+
+/** Run a bounded SSH probe without starting a full remote session discovery. */
+export async function testRemoteSourceConnection(
+  value: unknown,
+): Promise<{ ok: boolean; message: string }> {
+  const target = normalizeRemoteSourceConfig(value);
+  if (!target) return { ok: false, message: "Invalid SSH source configuration." };
+
+  try {
+    const output = await runSsh(
+      target,
+      ["sh", "-s"],
+      "printf 'vibe-replay-ssh-ok\\n'\\n",
+      1_024,
+      Math.min(30_000, Math.max(5_000, target.connectTimeoutMs + 5_000)),
+    );
+    if (output.toString("utf-8").trim() !== "vibe-replay-ssh-ok") {
+      return {
+        ok: false,
+        message: "SSH connected but the remote probe returned an unexpected response.",
+      };
+    }
+    return { ok: true, message: `Connected to ${target.label}.` };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "SSH connection failed.",
+    };
+  }
 }

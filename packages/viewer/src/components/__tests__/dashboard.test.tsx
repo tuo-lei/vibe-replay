@@ -12,6 +12,7 @@ import Dashboard, {
   shouldIncludeSessionForProject,
   usageFacetValues,
 } from "../Dashboard";
+import { remoteSourceFailureLabels } from "../dashboard-utils";
 import { shouldStartBackgroundScan } from "../InsightsPanel";
 
 beforeEach(() => {
@@ -50,6 +51,17 @@ describe("Dashboard (smoke)", () => {
     // (The post-fetch view depends on each endpoint's exact response shape, so
     // asserting it is out of scope for this smoke test — the mount + load path
     // not throwing is the signal.)
+  });
+});
+
+describe("remote source diagnostics", () => {
+  it("uses the configured remote label instead of exposing its internal id", () => {
+    expect(
+      remoteSourceFailureLabels({
+        failedProviders: ["ssh:remote-devspace"],
+        remoteSources: [{ id: "remote-devspace", label: "ROS devspace" }],
+      }),
+    ).toEqual(["ROS devspace"]);
   });
 });
 

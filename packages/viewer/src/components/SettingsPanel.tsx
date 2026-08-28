@@ -1,0 +1,568 @@
+import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { providerDisplayName } from "./dashboard-utils";
+
+type RemoteProvider = "claude-code" | "codex" | "pi";
+
+interface RemoteSource {
+  id: string;
+  sshHost: string;
+  label: string;
+  providers: RemoteProvider[];
+  connectTimeoutMs: number;
+}
+
+interface RemoteSourceDraft {
+  id: string;
+  sshHost: string;
+  label: string;
+  providers: RemoteProvider[];
+  connectTimeoutSeconds: string;
+}
+
+interface TestResult {
+  ok: boolean;
+  message: string;
+}
+
+const REMOTE_PROVIDERS: Array<{ value: RemoteProvider; label: string }> = [
+  { value: "claude-code", label: "Claude Code" },
+  { value: "codex", label: "Codex" },
+  { value: "pi", label: "Pi" },
+];
+
+const INPUT_CLASS =
+  "w-full rounded-lg border border-terminal-border-subtle bg-terminal-bg px-3 py-2 text-xs font-mono text-terminal-text outline-none transition-colors placeholder:text-terminal-dimmer focus:border-terminal-green/60 focus:ring-1 focus:ring-terminal-green/30";
+
+function emptyDraft(): RemoteSourceDraft {
+  return {
+    id: "",
+    sshHost: "",
+    label: "",
+    providers: ["codex", "claude-code", "pi"],
+    connectTimeoutSeconds: "10",
+  };
+}
+
+function sourceToDraft(source: RemoteSource): RemoteSourceDraft {
+  return {
+    id: source.id,
+    sshHost: source.sshHost,
+    label: source.label,
+    providers: [...source.providers],
+    connectTimeoutSeconds: String(Math.round(source.connectTimeoutMs / 1_000)),
+  };
+}
+
+function isRemoteProvider(value: unknown): value is RemoteProvider {
+  return value === "claude-code" || value === "codex" || value === "pi";
+}
+
+function parseRemoteSources(value: unknown): RemoteSource[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const source = item as Partial<RemoteSource>;
+    if (
+      typeof source.id !== "string" ||
+      typeof source.sshHost !== "string" ||
+      typeof source.label !== "string" ||
+      !Array.isArray(source.providers) ||
+      typeof source.connectTimeoutMs !== "number"
+    ) {
+      return [];
+    }
+    return [
+      {
+        id: source.id,
+        sshHost: source.sshHost,
+        label: source.label,
+        providers: source.providers.filter(isRemoteProvider),
+        connectTimeoutMs: source.connectTimeoutMs,
+      },
+    ];
+  });
+}
+
+function sourceForDraft(draft: RemoteSourceDraft): { source?: RemoteSource; error?: string } {
+  const id = draft.id.trim();
+  const sshHost = draft.sshHost.trim();
+  const label = draft.label.trim() || id;
+  const timeoutSeconds = Number(draft.connectTimeoutSeconds);
+
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(id) || id === "local") {
+    return { error: "Use a unique id with letters, numbers, '.', '_' or '-'." };
+  }
+  if (!sshHost || sshHost.startsWith("-") || /\s/.test(sshHost)) {
+    return { error: "SSH host must be a host alias or address without spaces." };
+  }
+  if (draft.providers.length === 0) {
+    return { error: "Select at least one provider to scan on this host." };
+  }
+  if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 60) {
+    return { error: "Connection timeout must be between 1 and 60 seconds." };
+  }
+
+  return {
+    source: {
+      id,
+      sshHost,
+      label,
+      providers: [...new Set(draft.providers)],
+      connectTimeoutMs: timeoutSeconds * 1_000,
+    },
+  };
+}
+
+export default function SettingsPanel() {
+  const [sources, setSources] = useState<RemoteSource[]>([]);
+  const [draft, setDraft] = useState<RemoteSourceDraft | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, TestResult>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const loadSettings = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/settings", { cache: "no-store" });
+      const data = (await response.json().catch(() => null)) as {
+        remoteSources?: unknown;
+        error?: string;
+      } | null;
+      if (!response.ok) throw new Error(data?.error || "Settings could not be loaded");
+      setSources(parseRemoteSources(data?.remoteSources));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Settings could not be loaded");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSettings();
+  }, [loadSettings]);
+
+  const saveSources = async (nextSources: RemoteSource[], successMessage: string) => {
+    setSaving(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const response = await fetch("/api/settings/remote-sources", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ remoteSources: nextSources }),
+      });
+      const data = (await response.json().catch(() => null)) as {
+        remoteSources?: unknown;
+        error?: string;
+      } | null;
+      if (!response.ok) throw new Error(data?.error || "SSH settings could not be saved");
+      setSources(parseRemoteSources(data?.remoteSources));
+      setTestResults({});
+      setMessage(successMessage);
+      setDraft(null);
+      setEditingId(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "SSH settings could not be saved");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const submitDraft = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!draft) return;
+    const parsed = sourceForDraft(draft);
+    if (!parsed.source) {
+      setError(parsed.error || "Invalid SSH source");
+      return;
+    }
+    if (editingId === null && sources.some((source) => source.id === parsed.source!.id)) {
+      setError(`An SSH source with id "${parsed.source.id}" already exists.`);
+      return;
+    }
+
+    const nextSources =
+      editingId === null
+        ? [...sources, parsed.source]
+        : sources.map((source) => (source.id === editingId ? parsed.source! : source));
+    await saveSources(
+      nextSources,
+      `Saved "${parsed.source.label}". Source discovery will refresh.`,
+    );
+  };
+
+  const removeSource = async (source: RemoteSource) => {
+    if (!window.confirm(`Remove SSH source "${source.label}"?`)) return;
+    await saveSources(
+      sources.filter((candidate) => candidate.id !== source.id),
+      `Removed "${source.label}".`,
+    );
+  };
+
+  const testSource = async (source: RemoteSource) => {
+    setTestingId(source.id);
+    setError(null);
+    try {
+      const response = await fetch("/api/settings/remote-sources/test", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ remoteSource: source }),
+      });
+      const result = (await response.json().catch(() => null)) as TestResult | null;
+      setTestResults((current) => ({
+        ...current,
+        [source.id]: result || { ok: false, message: "SSH probe returned no response." },
+      }));
+    } catch (err) {
+      setTestResults((current) => ({
+        ...current,
+        [source.id]: {
+          ok: false,
+          message: err instanceof Error ? err.message : "SSH probe failed.",
+        },
+      }));
+    } finally {
+      setTestingId(null);
+    }
+  };
+
+  const refreshSources = async () => {
+    setRefreshing(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const response = await fetch("/api/sources", { cache: "no-store" });
+      const data = (await response.json().catch(() => null)) as {
+        remoteSources?: unknown;
+        error?: string;
+      } | null;
+      if (!response.ok) throw new Error(data?.error || "Source discovery failed");
+      setMessage("Source discovery finished. Sessions and Insights will use the new catalog.");
+      const refreshedSettings = parseRemoteSources(data?.remoteSources);
+      setSources(refreshedSettings);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Source discovery failed");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const editingLabel = editingId === null ? "Add SSH source" : "Edit SSH source";
+
+  return (
+    <main className="min-h-0 flex-1 overflow-y-auto bg-terminal-bg">
+      <div className="mx-auto w-full max-w-5xl space-y-5 p-5 md:p-8">
+        <header>
+          <div className="text-[10px] font-mono font-semibold uppercase tracking-[0.18em] text-terminal-green">
+            Settings
+          </div>
+          <h1 className="mt-2 text-2xl font-sans font-bold text-terminal-text">
+            Local workspace settings
+          </h1>
+          <p className="mt-1 max-w-2xl text-xs font-sans leading-relaxed text-terminal-dim">
+            Configure the sources and defaults used by this dashboard. Settings stay on this machine
+            and are stored outside the repository.
+          </p>
+        </header>
+
+        {(error || message) && (
+          <div
+            className={`rounded-xl border px-4 py-3 text-xs font-mono ${
+              error
+                ? "border-terminal-red/30 bg-terminal-red-subtle text-terminal-red"
+                : "border-terminal-green/30 bg-terminal-green-subtle text-terminal-green"
+            }`}
+            role={error ? "alert" : "status"}
+          >
+            {error || message}
+          </div>
+        )}
+
+        <section className="rounded-xl bg-terminal-surface p-5 shadow-layer-sm md:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-sans font-semibold text-terminal-text">
+                Remote SSH sources
+              </h2>
+              <p className="mt-1 max-w-2xl text-xs font-sans leading-relaxed text-terminal-dim">
+                Add a host alias or address from your normal OpenSSH configuration. vibe-replay
+                never stores passwords, private keys, or SSH commands here.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setDraft(emptyDraft());
+                setEditingId(null);
+                setError(null);
+                setMessage(null);
+              }}
+              className="rounded-lg bg-terminal-blue-subtle px-3 py-2 text-xs font-mono font-semibold text-terminal-blue transition-colors hover:bg-terminal-blue/20"
+            >
+              + Add SSH source
+            </button>
+          </div>
+
+          {loading ? (
+            <div className="mt-5 rounded-lg bg-terminal-bg px-4 py-5 text-xs font-mono text-terminal-dimmer">
+              Loading SSH settings…
+            </div>
+          ) : sources.length === 0 ? (
+            <div className="mt-5 rounded-lg border border-dashed border-terminal-border-subtle bg-terminal-bg px-4 py-6 text-center text-xs font-mono text-terminal-dimmer">
+              No remote SSH sources configured.
+            </div>
+          ) : (
+            <div className="mt-5 space-y-3">
+              {sources.map((source) => {
+                const result = testResults[source.id];
+                return (
+                  <div
+                    key={source.id}
+                    className="rounded-lg border border-terminal-border-subtle bg-terminal-bg p-4"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-sm font-sans font-semibold text-terminal-text">
+                            {source.label}
+                          </h3>
+                          <span className="rounded bg-terminal-surface-2 px-1.5 py-0.5 text-[10px] font-mono text-terminal-dimmer">
+                            {source.id}
+                          </span>
+                        </div>
+                        <div className="mt-1 break-all text-xs font-mono text-terminal-blue">
+                          {source.sshHost}
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {source.providers.map((provider) => (
+                            <span
+                              key={provider}
+                              className="rounded-full bg-terminal-purple-subtle px-2 py-0.5 text-[10px] font-mono text-terminal-purple"
+                            >
+                              {providerDisplayName(provider)}
+                            </span>
+                          ))}
+                          <span className="rounded-full bg-terminal-surface-2 px-2 py-0.5 text-[10px] font-mono text-terminal-dimmer">
+                            {Math.round(source.connectTimeoutMs / 1_000)}s timeout
+                          </span>
+                        </div>
+                        {result && (
+                          <output
+                            className={`mt-2 text-[10px] font-mono ${
+                              result.ok ? "text-terminal-green" : "text-terminal-red"
+                            }`}
+                          >
+                            {result.ok ? "✓ " : "✕ "}
+                            {result.message}
+                          </output>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => void testSource(source)}
+                          disabled={testingId === source.id}
+                          className="rounded-md bg-terminal-green-subtle px-2.5 py-1.5 text-[10px] font-mono font-semibold text-terminal-green transition-colors hover:bg-terminal-green/20 disabled:cursor-wait disabled:opacity-50"
+                        >
+                          {testingId === source.id ? "Testing…" : "Test"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDraft(sourceToDraft(source));
+                            setEditingId(source.id);
+                            setError(null);
+                            setMessage(null);
+                          }}
+                          className="rounded-md bg-terminal-surface-2 px-2.5 py-1.5 text-[10px] font-mono text-terminal-dim transition-colors hover:text-terminal-text"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void removeSource(source)}
+                          className="rounded-md bg-terminal-red-subtle px-2.5 py-1.5 text-[10px] font-mono text-terminal-red transition-colors hover:bg-terminal-red/20"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {draft && (
+            <form
+              onSubmit={(event) => void submitDraft(event)}
+              className="mt-5 space-y-4 rounded-lg border border-terminal-blue/30 bg-terminal-blue/5 p-4"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-sans font-semibold text-terminal-text">
+                  {editingLabel}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraft(null);
+                    setEditingId(null);
+                  }}
+                  className="text-xs font-mono text-terminal-dimmer hover:text-terminal-text"
+                >
+                  Cancel
+                </button>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <label htmlFor="remote-source-id" className="space-y-1.5">
+                  <span className="text-[10px] font-mono uppercase tracking-widest text-terminal-dimmer">
+                    Stable id
+                  </span>
+                  <input
+                    id="remote-source-id"
+                    aria-label="Stable id"
+                    className={INPUT_CLASS}
+                    value={draft.id}
+                    disabled={editingId !== null}
+                    onChange={(event) => setDraft({ ...draft, id: event.target.value })}
+                    placeholder="remote-devspace"
+                    autoComplete="off"
+                  />
+                  <span className="block text-[10px] font-sans text-terminal-dimmer">
+                    Used to keep this source’s cached sessions separate.
+                  </span>
+                </label>
+                <label htmlFor="remote-source-label" className="space-y-1.5">
+                  <span className="text-[10px] font-mono uppercase tracking-widest text-terminal-dimmer">
+                    Display label
+                  </span>
+                  <input
+                    id="remote-source-label"
+                    aria-label="Display label"
+                    className={INPUT_CLASS}
+                    value={draft.label}
+                    onChange={(event) => setDraft({ ...draft, label: event.target.value })}
+                    placeholder="ROS devspace"
+                    autoComplete="off"
+                  />
+                </label>
+                <label htmlFor="remote-source-host" className="space-y-1.5 md:col-span-2">
+                  <span className="text-[10px] font-mono uppercase tracking-widest text-terminal-dimmer">
+                    SSH host
+                  </span>
+                  <input
+                    id="remote-source-host"
+                    aria-label="SSH host"
+                    className={INPUT_CLASS}
+                    value={draft.sshHost}
+                    onChange={(event) => setDraft({ ...draft, sshHost: event.target.value })}
+                    placeholder="dev.example.internal"
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  <span className="block text-[10px] font-sans text-terminal-dimmer">
+                    This is passed as the OpenSSH host argument. Configure aliases, keys, and
+                    ProxyJump in your normal SSH config.
+                  </span>
+                </label>
+              </div>
+
+              <fieldset>
+                <legend className="text-[10px] font-mono uppercase tracking-widest text-terminal-dimmer">
+                  Providers to scan
+                </legend>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {REMOTE_PROVIDERS.map((provider) => {
+                    const checked = draft.providers.includes(provider.value);
+                    return (
+                      <label
+                        key={provider.value}
+                        className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-xs font-mono transition-colors ${
+                          checked
+                            ? "border-terminal-green/40 bg-terminal-green-subtle text-terminal-green"
+                            : "border-terminal-border-subtle bg-terminal-bg text-terminal-dim"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() =>
+                            setDraft({
+                              ...draft,
+                              providers: checked
+                                ? draft.providers.filter((value) => value !== provider.value)
+                                : [...draft.providers, provider.value],
+                            })
+                          }
+                          className="accent-terminal-green"
+                        />
+                        {provider.label}
+                      </label>
+                    );
+                  })}
+                </div>
+              </fieldset>
+
+              <div className="flex flex-wrap items-end justify-between gap-4">
+                <label htmlFor="remote-source-timeout" className="w-40 space-y-1.5">
+                  <span className="text-[10px] font-mono uppercase tracking-widest text-terminal-dimmer">
+                    Connect timeout (seconds)
+                  </span>
+                  <input
+                    id="remote-source-timeout"
+                    aria-label="Connect timeout (seconds)"
+                    type="number"
+                    min={1}
+                    max={60}
+                    step={1}
+                    className={INPUT_CLASS}
+                    value={draft.connectTimeoutSeconds}
+                    onChange={(event) =>
+                      setDraft({ ...draft, connectTimeoutSeconds: event.target.value })
+                    }
+                  />
+                </label>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="rounded-lg bg-terminal-blue px-4 py-2 text-xs font-mono font-semibold text-terminal-bg transition-opacity hover:opacity-90 disabled:cursor-wait disabled:opacity-50"
+                >
+                  {saving ? "Saving…" : "Save SSH source"}
+                </button>
+              </div>
+            </form>
+          )}
+
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-terminal-border-subtle pt-4">
+            <p className="max-w-2xl text-[10px] font-sans leading-relaxed text-terminal-dimmer">
+              Saving starts a background scan. Use this button when you want to refresh the source
+              catalog immediately.
+            </p>
+            <button
+              type="button"
+              onClick={() => void refreshSources()}
+              disabled={refreshing}
+              className="rounded-lg bg-terminal-surface-2 px-3 py-2 text-xs font-mono text-terminal-dim transition-colors hover:text-terminal-text disabled:cursor-wait disabled:opacity-50"
+            >
+              {refreshing ? "Refreshing…" : "Refresh sources now"}
+            </button>
+          </div>
+        </section>
+
+        <section className="rounded-xl border border-dashed border-terminal-border-subtle bg-terminal-surface/50 p-5 md:p-6">
+          <h2 className="text-sm font-sans font-semibold text-terminal-text">More settings</h2>
+          <p className="mt-1 text-xs font-sans leading-relaxed text-terminal-dim">
+            Additional common options can be added here without changing provider session data or
+            replay files.
+          </p>
+        </section>
+      </div>
+    </main>
+  );
+}
