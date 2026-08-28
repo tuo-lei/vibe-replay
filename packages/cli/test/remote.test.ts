@@ -14,7 +14,13 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { deduplicateSessionsByProvider } from "@vibe-replay/providers-default";
 import { replayOutputSlug } from "../src/server-core.js";
-import { discoverConfiguredRemoteSessions, parseRemoteSourceConfig } from "../src/remote.js";
+import {
+  discoverConfiguredRemoteSessions,
+  normalizeRemoteSourceConfig,
+  parseRemoteSourceConfig,
+  saveRemoteSourceConfigs,
+  testRemoteSourceConnection,
+} from "../src/remote.js";
 import { scanCacheEntryKey } from "../src/scanner.js";
 import { providerSessionKey, sourceSessionKey } from "../src/server-enrichment.js";
 import type { SessionInfo } from "../src/types.js";
@@ -109,6 +115,80 @@ describe("remote source configuration", () => {
       }),
     ).toEqual([]);
   });
+
+  it("preserves unrelated config keys when saving SSH sources", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-remote-settings-"));
+    temporaryRoots.push(root);
+    const configPath = join(root, "config.json");
+    await writeFile(
+      configPath,
+      JSON.stringify({ futureSetting: { enabled: true }, remoteSources: [] }),
+      "utf-8",
+    );
+
+    const source = normalizeRemoteSourceConfig({
+      id: "remote-dev",
+      sshHost: "devbox",
+      label: "Remote dev",
+      providers: ["codex"],
+      connectTimeoutMs: 15_000,
+    });
+    expect(source).not.toBeNull();
+    await saveRemoteSourceConfigs([source!], configPath);
+
+    const saved = JSON.parse(await readFile(configPath, "utf-8"));
+    expect(saved).toMatchObject({
+      futureSetting: { enabled: true },
+      remoteSources: [
+        {
+          id: "remote-dev",
+          sshHost: "devbox",
+          label: "Remote dev",
+          providers: ["codex"],
+          connectTimeoutMs: 15_000,
+        },
+      ],
+    });
+  });
+
+  it("rejects invalid settings before starting an SSH probe", async () => {
+    await expect(testRemoteSourceConnection({ id: "bad/id", sshHost: "devbox" })).resolves.toEqual({
+      ok: false,
+      message: "Invalid SSH source configuration.",
+    });
+  });
+
+  // The existing Windows smoke job cannot execute a synthetic .cmd file via
+  // child_process.spawn("ssh") without a shell; validation and persistence
+  // remain covered on Windows, while the transport probe is covered on POSIX.
+  it.skipIf(process.platform === "win32")(
+    "runs a bounded probe for a valid SSH target",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "vibe-remote-probe-"));
+      temporaryRoots.push(root);
+      const fakeBin = join(root, "bin");
+      await mkdir(fakeBin, { recursive: true });
+      const fakeSsh = join(fakeBin, "ssh");
+      await writeFile(
+        join(fakeBin, "fake-ssh.mjs"),
+        "process.stdin.resume(); process.stdin.on('end', () => process.stdout.write('vibe-replay-ssh-ok\\n'));",
+        "utf-8",
+      );
+      await writeFile(fakeSsh, '#!/bin/sh\nexec node "$(dirname "$0")/fake-ssh.mjs"\n', "utf-8");
+      await chmod(fakeSsh, 0o755);
+      process.env.PATH = `${fakeBin}:${originalPath || ""}`;
+
+      await expect(
+        testRemoteSourceConnection({
+          id: "remote-dev",
+          label: "Remote dev",
+          sshHost: "devbox",
+          providers: ["codex"],
+          connectTimeoutMs: 1_000,
+        }),
+      ).resolves.toEqual({ ok: true, message: "Connected to Remote dev." });
+    },
+  );
 });
 
 describe("remote cache path safety and identity", () => {

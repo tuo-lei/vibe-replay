@@ -50,7 +50,7 @@ import {
   projectDisplayName,
   projectName,
   providerDisplayName,
-  remoteSourceFailureIds,
+  remoteSourceFailureLabels,
   replayArchiveKey,
   replaySuggestedTitle,
   rollupProject,
@@ -79,6 +79,7 @@ import {
 import InsightsPage from "./InsightsPage";
 import { ScanInsightsProvider, useScanInsightsContext } from "./InsightsPanel";
 import ProjectsPanel from "./ProjectsPanel";
+import SettingsPanel from "./SettingsPanel";
 import {
   DataLevelBadge,
   DataLevelIcon,
@@ -92,7 +93,7 @@ import {
 } from "./SessionDataProgress";
 import { formatDuration } from "./StatsPanel";
 
-export type Tab = "home" | "sessions" | "replays" | "projects" | "insights";
+export type Tab = "home" | "sessions" | "replays" | "projects" | "insights" | "settings";
 
 // Module-level cache for scan results (avoids re-fetching on every popup open)
 interface ScanResultsPayload {
@@ -1941,12 +1942,11 @@ function SessionLocationBadge({ location }: { location?: SessionLocation }) {
 
 function RemoteSourceFailureNotice({ failures }: { failures: string[] }) {
   if (failures.length === 0) return null;
-  const labels = failures.map((failure) => failure.slice("ssh:".length));
   return (
     <div className="mx-4 mb-2 rounded-lg bg-terminal-red-subtle px-3 py-2.5 text-xs font-mono text-terminal-red shadow-layer-sm">
       <div className="font-semibold">Remote SSH source unavailable</div>
       <div className="mt-1 text-terminal-red/80">
-        {labels.join(", ")} — showing cached sessions when available. Check the SSH connection and
+        {failures.join(", ")} — showing cached sessions when available. Check the SSH connection and
         refresh.
       </div>
     </div>
@@ -2304,7 +2304,7 @@ function SessionsPanel() {
     const cached = await fetch("/api/sources/cached", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .catch(() => null);
-    setFailedRemoteSources(remoteSourceFailureIds(cached));
+    setFailedRemoteSources(remoteSourceFailureLabels(cached));
     const cachedData = parseCachedList<SourceSession>(cached);
     const shouldSkipRefresh = !opts?.forceRefresh && !shouldRefreshCachedList(cachedData);
     if (cachedData && cachedData.sessions.length > 0) {
@@ -2331,7 +2331,7 @@ function SessionsPanel() {
         failedProviders?: unknown;
       };
       setSources(fresh.sessions);
-      setFailedRemoteSources(remoteSourceFailureIds(fresh));
+      setFailedRemoteSources(remoteSourceFailureLabels(fresh));
       if (fresh.cleanupPeriodDays != null) setCleanupPeriodDays(fresh.cleanupPeriodDays);
       setLastRefreshedAt(new Date().toISOString());
       setStaleCachedAt(null);
@@ -5377,7 +5377,14 @@ export default function Dashboard({
   const getTabFromUrl = useCallback((): Tab => {
     const params = new URLSearchParams(window.location.search);
     const t = params.get("tab") as Tab;
-    if (t === "home" || t === "sessions" || t === "replays" || t === "projects" || t === "insights")
+    if (
+      t === "home" ||
+      t === "sessions" ||
+      t === "replays" ||
+      t === "projects" ||
+      t === "insights" ||
+      t === "settings"
+    )
       return t;
     return isEditor ? "home" : "replays";
   }, [isEditor]);
@@ -5480,6 +5487,7 @@ export default function Dashboard({
               {tabButton("replays", "Replays")}
               {tabButton("projects", "Projects")}
               {tabButton("insights", "Insights")}
+              {tabButton("settings", "Settings")}
             </div>
             <div className="flex-1" />
             {headerRight}
@@ -5493,6 +5501,8 @@ export default function Dashboard({
           <InsightsPage />
         ) : tab === "projects" && isEditor ? (
           <ProjectsPanel onNavigate={handleTabChange} />
+        ) : tab === "settings" && isEditor ? (
+          <SettingsPanel />
         ) : tab === "sessions" && isEditor ? (
           <SessionsPanel />
         ) : (

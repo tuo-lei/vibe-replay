@@ -56,7 +56,14 @@ import {
 } from "./publishers/gist.js";
 import { scanForSecrets } from "./scan.js";
 import { mergeSameSessions } from "./session-merge.js";
-import { getRemoteHome } from "./remote.js";
+import {
+  getRemoteHome,
+  loadRemoteSourceConfigs,
+  normalizeRemoteSourceConfig,
+  saveRemoteSourceConfigs,
+  testRemoteSourceConnection,
+  type RemoteSourceConfig,
+} from "./remote.js";
 import {
   type EnrichmentHints,
   enrichmentHintsFromBody,
@@ -127,6 +134,47 @@ export { resolveGenerateInputs } from "./server-core.js";
 // Re-exported for tests that import it from "../src/server.js" (kept stable
 // after the type moved to server-types.ts).
 export type { SourceSummaryRecord } from "./server-types.js";
+
+function parseRemoteSourcesSettingsBody(
+  body: unknown,
+): { sources: RemoteSourceConfig[] } | { error: string } {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { error: "Request body must be an object" };
+  }
+  const rawSources = (body as { remoteSources?: unknown }).remoteSources;
+  if (!Array.isArray(rawSources)) {
+    return { error: "remoteSources must be an array" };
+  }
+  if (rawSources.length > 32) {
+    return { error: "At most 32 SSH sources can be configured" };
+  }
+
+  const sources: RemoteSourceConfig[] = [];
+  const ids = new Set<string>();
+  for (const rawSource of rawSources) {
+    const source = normalizeRemoteSourceConfig(rawSource);
+    if (!source) return { error: "Each SSH source must have a valid id and sshHost" };
+    if (ids.has(source.id)) return { error: `Duplicate SSH source id: ${source.id}` };
+    ids.add(source.id);
+    sources.push(source);
+  }
+  return { sources };
+}
+
+function isSameOriginSettingsRequest(c: Context): boolean {
+  const origin = c.req.header("Origin");
+  if (origin) {
+    try {
+      if (new URL(origin).origin !== new URL(c.req.url).origin) return false;
+    } catch {
+      return false;
+    }
+  }
+  const fetchSite = c.req.header("Sec-Fetch-Site");
+  return (
+    !fetchSite || fetchSite === "same-origin" || fetchSite === "same-site" || fetchSite === "none"
+  );
+}
 
 const replayGitRepoByProjectCache = new Map<string, string | undefined>();
 
@@ -833,6 +881,7 @@ export async function startServer(
   } | null = null;
   let lastDiscoveredMergedSessions: SessionInfo[] = [];
   let latestSourceFailures: string[] | undefined;
+  let remoteConfigChangedAt: number | undefined;
 
   const enrichCursorStatsInBackground = (
     merged: SessionInfo[],
@@ -1012,6 +1061,7 @@ export async function startServer(
   };
   // Incremented per scan so a slower follow-up pass can tell it was superseded.
   let scanGeneration = 0;
+  let queuedScanHints: EnrichmentHints | undefined;
 
   // Pre-computed insights cache — populated after each scan completes.
   // Kept across scans (stale-while-refresh): new scan overwrites, never clears.
@@ -1247,7 +1297,10 @@ export async function startServer(
     const pending = scanInputs
       .filter((input) => input.deferRichCursorParse && (input.hasSqlite || input.hasSdk))
       .map((input) => ({ ...input, deferRichCursorParse: false }));
-    if (pending.length === 0) return;
+    if (pending.length === 0) {
+      drainQueuedScan();
+      return;
+    }
 
     const superseded = (): boolean => generation !== scanGeneration;
     scanState = {
@@ -1318,6 +1371,7 @@ export async function startServer(
         revision: scanState.revision + 1,
         hasSnapshot: true,
       };
+      drainQueuedScan();
     } catch {
       if (!superseded()) {
         scanState = {
@@ -1328,6 +1382,7 @@ export async function startServer(
             total: scanState.usageBackfill?.total ?? 0,
           },
         };
+        drainQueuedScan();
       }
     }
   };
@@ -1463,8 +1518,25 @@ export async function startServer(
           phase: undefined,
           finishedAt: new Date().toISOString(),
         };
+        drainQueuedScan();
       }
     })();
+  };
+
+  const drainQueuedScan = (): void => {
+    if (!queuedScanHints || scanState.running || scanState.usageBackfill?.running) return;
+    const hints = queuedScanHints;
+    queuedScanHints = undefined;
+    startBackgroundScan(hints);
+  };
+
+  const requestBackgroundScan = (hints: EnrichmentHints = {}): boolean => {
+    if (scanState.running || scanState.usageBackfill?.running) {
+      queuedScanHints = mergeEnrichmentHints(queuedScanHints, hints);
+      return true;
+    }
+    startBackgroundScan(hints);
+    return false;
   };
 
   // A previous process can have persisted the fast Cursor snapshot and exited
@@ -2046,13 +2118,21 @@ export async function startServer(
   // --- Source sessions: discover raw AI coding sessions from all providers ---
   const getCachedSourceSessions = async (c: Context) => {
     const cached = await readSourcesCatalogCache();
+    const remoteSources = await loadRemoteSourceConfigs();
     const staleProviders = await getStaleSourceProviders(cached);
     const failedProviders = latestSourceFailures ?? cached?.failedProviders ?? [];
-    const allStaleProviders = [...new Set([...staleProviders, ...failedProviders])];
+    const discoveredAtMs = cached?.discoveredAt ? Date.parse(cached.discoveredAt) : Number.NaN;
+    const configStale =
+      remoteConfigChangedAt !== undefined &&
+      (!Number.isFinite(discoveredAtMs) || discoveredAtMs < remoteConfigChangedAt);
+    const allStaleProviders = [
+      ...new Set([...staleProviders, ...failedProviders, ...(configStale ? ["ssh-config"] : [])]),
+    ];
     return c.json({
       sessions: cached?.sessions || [],
       cachedAt: cached?.cachedAt,
       discoveredAt: cached?.discoveredAt,
+      remoteSources,
       stale: allStaleProviders.length > 0,
       staleProviders: allStaleProviders,
       failedProviders,
@@ -2125,10 +2205,12 @@ export async function startServer(
         discovery.failedProviders,
       );
       enrichCursorStatsInBackground(merged, result);
+      const remoteSources = await loadRemoteSourceConfigs();
       return c.json({
         sessions: catalog.sessions,
         cleanupPeriodDays,
         discoveredAt: catalog.discoveredAt,
+        remoteSources,
         stale: discovery.failedProviders.length > 0,
         staleProviders: discovery.failedProviders,
         failedProviders: discovery.failedProviders,
@@ -2140,6 +2222,44 @@ export async function startServer(
 
   app.get("/api/sources", getSourceSessions);
   app.get("/api/source-sessions", getSourceSessions);
+
+  // --- Local settings: user-managed SSH sources ---
+  app.get("/api/settings", async (c) => {
+    try {
+      return c.json({ remoteSources: await loadRemoteSourceConfigs() });
+    } catch (err) {
+      return c.json({ error: getErrorMessage(err) }, 500);
+    }
+  });
+
+  app.put("/api/settings/remote-sources", async (c) => {
+    if (!isSameOriginSettingsRequest(c)) {
+      return c.json({ error: "Settings requests must be same-origin" }, 403);
+    }
+    const parsed = parseRemoteSourcesSettingsBody(await c.req.json().catch(() => undefined));
+    if ("error" in parsed) return c.json({ error: parsed.error }, 400);
+
+    try {
+      await saveRemoteSourceConfigs(parsed.sources);
+      remoteConfigChangedAt = Date.now();
+      const queued = requestBackgroundScan();
+      return c.json({ ok: true, queued, remoteSources: parsed.sources });
+    } catch (err) {
+      return c.json({ error: getErrorMessage(err) }, 500);
+    }
+  });
+
+  app.post("/api/settings/remote-sources/test", async (c) => {
+    if (!isSameOriginSettingsRequest(c)) {
+      return c.json({ ok: false, message: "Settings requests must be same-origin" }, 403);
+    }
+    const body = await c.req.json().catch(() => undefined);
+    const value =
+      body && typeof body === "object" && !Array.isArray(body)
+        ? (body as { remoteSource?: unknown }).remoteSource
+        : undefined;
+    return c.json(await testRemoteSourceConnection(value));
+  });
 
   // --- Source sessions SSE: stream discovery progress to the dashboard ---
   const streamSourceSessions = (c: Context) => {
@@ -2174,12 +2294,14 @@ export async function startServer(
           discovery.failedProviders,
         );
         enrichCursorStatsInBackground(merged, result);
+        const remoteSources = await loadRemoteSourceConfigs();
         await stream.writeSSE({
           data: JSON.stringify({
             type: "complete",
             sessions: catalog.sessions,
             cleanupPeriodDays,
             discoveredAt: catalog.discoveredAt,
+            remoteSources,
             stale: discovery.failedProviders.length > 0,
             staleProviders: discovery.failedProviders,
             failedProviders: discovery.failedProviders,
@@ -2405,8 +2527,12 @@ export async function startServer(
 
   app.post("/api/scan/start", async (c) => {
     const hints = enrichmentHintsFromBody(await c.req.json().catch(() => undefined));
-    startBackgroundScan(hints);
-    return c.json({ ok: true, message: "Background scan started" });
+    const queued = requestBackgroundScan(hints);
+    return c.json({
+      ok: true,
+      queued,
+      message: queued ? "Background scan queued" : "Background scan started",
+    });
   });
 
   app.get("/api/scan/status", async (c) => {
