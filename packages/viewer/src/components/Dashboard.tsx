@@ -99,6 +99,8 @@ interface ScanResultsPayload {
   results: SessionScanData[] | null;
   /** When the last full background scan finished (global, not per-session). */
   finishedAt?: string;
+  /** Result generation used to reject responses from an older scan. */
+  revision?: number;
 }
 let scanResultsCache: ScanResultsPayload | null = null;
 let scanResultsFetchPromise: Promise<ScanResultsPayload | null> | null = null;
@@ -123,6 +125,7 @@ function fetchScanResults(forceRefresh = false): Promise<ScanResultsPayload | nu
       const payload: ScanResultsPayload = {
         results: data?.results ?? null,
         finishedAt: data?.finishedAt,
+        revision: data?.revision,
       };
       scanResultsCache = payload;
       // Invalidate after 30s so fresh data can come in
@@ -2377,6 +2380,15 @@ function SessionsPanel() {
       // facets do not stay blind to newly indexed usage for 30 seconds.
       const payload = await fetchScanResults(refresh);
       if (cancelled || !payload?.results) return;
+      // A scan can finish between the status poll and this response. Never
+      // let an older generation replace facets for the newer revision.
+      if (
+        payload.revision !== undefined &&
+        scanStatus?.revision !== undefined &&
+        payload.revision !== scanStatus.revision
+      ) {
+        return;
+      }
       setScanFinishedAt(payload.finishedAt ?? null);
       setScanResultsIndex(buildSessionScanIndex(payload.results));
     };
@@ -4302,6 +4314,13 @@ function ReplaysPanel() {
     const loadScanResults = async (refresh = false) => {
       const payload = await fetchScanResults(refresh);
       if (cancelled || !payload?.results) return;
+      if (
+        payload.revision !== undefined &&
+        scanStatus?.revision !== undefined &&
+        payload.revision !== scanStatus.revision
+      ) {
+        return;
+      }
       setScanResultsIndex(buildSessionScanIndex(payload.results));
     };
     void loadScanResults(forceRefresh);
