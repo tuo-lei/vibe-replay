@@ -21,6 +21,7 @@ interface Props {
   durationMs?: number;
   resultTokens?: number;
   hasResult?: boolean;
+  resultEmpty?: boolean;
 }
 
 interface DiffLine {
@@ -83,6 +84,7 @@ export default memo(function CodeDiffBlock({
   durationMs,
   resultTokens,
   hasResult,
+  resultEmpty,
 }: Props) {
   const diffLines = useMemo(() => computeDiff(oldContent, newContent), [oldContent, newContent]);
   const language = guessLanguage(filePath);
@@ -121,7 +123,7 @@ export default memo(function CodeDiffBlock({
             className="text-[10px] text-terminal-dimmer font-mono shrink-0"
             title="The provider recorded a result for this edit."
           >
-            result recorded
+            {resultEmpty ? "empty result" : "result recorded"}
           </span>
         )}
         <ToolTokens tokens={resultTokens} />

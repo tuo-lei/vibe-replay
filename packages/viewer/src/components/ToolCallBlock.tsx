@@ -298,6 +298,7 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
         <span className="truncate flex-1">{summarizeInput(scene.toolName, scene.input)}</span>
         {scene.subAgent && <AgentTypeBadge type={scene.subAgent.agentType} />}
         {scene.isError && <ErrorBadge />}
+        <ToolResultBadge scene={scene} />
         <ToolTokens tokens={scene.resultTokens} />
         <ToolDuration ms={scene.durationMs} />
       </div>
@@ -333,6 +334,7 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
         durationMs={scene.durationMs}
         resultTokens={scene.resultTokens}
         hasResult={scene.hasResult}
+        resultEmpty={(scene.result || "").length === 0}
       />
     );
   }
@@ -351,6 +353,7 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
             durationMs={index === 0 ? scene.durationMs : undefined}
             resultTokens={index === 0 ? scene.resultTokens : undefined}
             hasResult={index === 0 ? scene.hasResult : undefined}
+            resultEmpty={index === 0 ? (scene.result || "").length === 0 : undefined}
           />
         ))}
       </div>
