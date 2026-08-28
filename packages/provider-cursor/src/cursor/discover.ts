@@ -7,6 +7,7 @@ import { classifyProject, isCursorSdkAutomationPath } from "@vibe-replay/types";
 import {
   discoverGlobalStateOnlySessions,
   discoverSqliteOnlySessions,
+  getCursorSessionFingerprints,
   listStoreDbSessionIds,
 } from "./sqlite-reader.js";
 import { discoverSdkAgents, type SdkAgent } from "./sdk-reader.js";
@@ -41,7 +42,7 @@ async function discoverCursorSessionsOnce(): Promise<SessionInfo[]> {
   try {
     projectDirs = await readdir(CURSOR_DIR);
   } catch {
-    return sessions;
+    projectDirs = [];
   }
 
   const projectSessions = await mapLimit(projectDirs, PROJECT_DISCOVERY_CONCURRENCY, (projDir) =>
@@ -65,18 +66,35 @@ async function discoverCursorSessionsOnce(): Promise<SessionInfo[]> {
   // Discover sessions kept in Cursor global state DB (composerData/bubbleId).
   const globalState = await discoverGlobalStateOnlySessions(knownIds, decodedPaths);
   sessions.push(...globalState.sessions);
+  const globalStateById = new Map(
+    globalState.allSessions.map((session) => [session.sessionId, session]),
+  );
 
   // Mark transcript-discovered sessions that have any SQLite-backed rich data.
   const storeDbSessionIds = await listStoreDbSessionIds();
   for (const session of transcriptSessions) {
     const hasStoreDb = storeDbSessionIds.has(session.sessionId);
     session.hasSqlite = hasStoreDb || globalState.sessionIds.has(session.sessionId);
+    const globalStateSession = globalStateById.get(session.sessionId);
+    if (globalStateSession?.compactionCount) {
+      session.compactionCount = Math.max(
+        session.compactionCount || 0,
+        globalStateSession.compactionCount,
+      );
+    }
   }
 
   // Cursor SDK sessions live alongside Cursor IDE chats but in their own SQLite
   // store. Mark transcripts that also have an SDK record so the parser can enrich
   // them with structured tool results, run timing, and per-turn model.
   await enrichWithSdkAgents(sessions, await sdkAgentsPromise);
+  const fingerprints = await getCursorSessionFingerprints(
+    sessions.map((session) => session.sessionId),
+  );
+  for (const session of sessions) {
+    const fingerprint = fingerprints.get(session.sessionId);
+    if (fingerprint) session.sourceFingerprint = fingerprint;
+  }
 
   sessions.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
   return sessions;

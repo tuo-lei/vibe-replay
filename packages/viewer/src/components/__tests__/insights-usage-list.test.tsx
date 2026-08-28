@@ -6,6 +6,7 @@ import {
   InsightsSectionNav,
   navigateToUsageSessions,
   TopProjectsList,
+  CoverageAudit,
   UsageBarList,
   UsageCoverage,
 } from "../InsightsPage";
@@ -128,8 +129,69 @@ describe("Insights sections", () => {
     );
 
     expect(container.textContent).toContain("2 / 4 sessions");
-    expect(container.textContent).toContain("50% covered");
+    expect(container.textContent).toContain("50% indexed");
     expect(container.textContent).toContain("Counts will grow");
+  });
+
+  it("shows provider precision and derived cache-miss coverage", () => {
+    render(
+      <CoverageAudit
+        report={{
+          totalSessions: 2,
+          indexedSessions: 2,
+          invocationSessions: 1,
+          invocationCalls: 3,
+          missingInvocationSessions: 0,
+          mcpCalls: 1,
+          mcpToolSessions: 1,
+          mcpToolCalls: 1,
+          tokenSessions: 1,
+          inputTokens: 100,
+          outputTokens: 20,
+          cacheReadTokens: 300,
+          cacheCreationTokens: 10,
+          promptTokens: 410,
+          cacheMissTokens: 110,
+          compactionSessions: 1,
+          compactionCount: 1,
+          providers: [
+            {
+              provider: "cursor",
+              totalSessions: 2,
+              indexedSessions: 2,
+              invocationSessions: 1,
+              invocationCalls: 3,
+              missingInvocationSessions: 0,
+              mcpSessions: 1,
+              mcpCalls: 1,
+              mcpToolSessions: 1,
+              mcpToolCalls: 1,
+              tokenSessions: 1,
+              inputTokens: 100,
+              outputTokens: 20,
+              cacheReadTokens: 300,
+              cacheCreationTokens: 10,
+              promptTokens: 410,
+              cacheMissTokens: 110,
+              compactionSessions: 1,
+              compactionCount: 1,
+              metrics: {
+                invocations: { availableSessions: 2, totalSessions: 2, quality: "exact" },
+                mcpTools: { availableSessions: 1, totalSessions: 1, quality: "exact" },
+                tokens: { availableSessions: 1, totalSessions: 2, quality: "partial" },
+                cache: { availableSessions: 1, totalSessions: 2, quality: "partial" },
+                compactions: { availableSessions: 1, totalSessions: 2, quality: "partial" },
+              },
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(document.body.textContent).toContain("uncached / miss");
+    expect(screen.getByText("110")).toBeDefined();
+    expect(screen.getAllByText("partial").length).toBeGreaterThan(0);
+    expect(screen.getByText("Cursor")).toBeDefined();
   });
 });
 

@@ -53,7 +53,7 @@ describe("ProjectPerformance", () => {
     expect(screen.getByText("P90")).toBeDefined();
     expect(screen.getByText("8s")).toBeDefined();
     expect(screen.getByText("Cache Read")).toBeDefined();
-    expect(screen.getAllByText("1k")).toHaveLength(2);
+    expect(screen.getAllByText("1k")).toHaveLength(4);
   });
 
   it("keeps zero token categories visible", () => {
@@ -68,7 +68,7 @@ describe("ProjectPerformance", () => {
       />,
     );
 
-    expect(screen.getByText("Input")).toBeDefined();
+    expect(screen.getByText("Input (uncached)")).toBeDefined();
     expect(screen.getByText("Output")).toBeDefined();
     expect(screen.getByText("Cache Read")).toBeDefined();
     expect(screen.getByText("Cache Write")).toBeDefined();

@@ -3,10 +3,35 @@ import type { ProjectIdentity } from "./project-identity.js";
 export type DataSource = "jsonl" | "sqlite" | "jsonl+tools" | "global-state";
 
 export interface TokenUsage {
+  /**
+   * Uncached input tokens after provider-specific normalization.
+   * The full prompt footprint is input + cacheRead + cacheCreation.
+   */
   inputTokens: number;
   outputTokens: number;
   cacheCreationTokens: number;
   cacheReadTokens: number;
+}
+
+export interface TokenUsageMetrics {
+  /** Full prompt footprint sent to the model. */
+  promptTokens: number;
+  /**
+   * Prompt tokens not served by a cache read. This is derived as uncached input
+   * plus cache writes; providers do not expose a universal "miss" counter.
+   */
+  cacheMissTokens: number;
+  /** Fraction of prompt tokens served by a cache read, when promptTokens > 0. */
+  cacheReadShare?: number;
+}
+
+export function deriveTokenUsageMetrics(usage: TokenUsage): TokenUsageMetrics {
+  const promptTokens = usage.inputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
+  return {
+    promptTokens,
+    cacheMissTokens: usage.inputTokens + usage.cacheCreationTokens,
+    ...(promptTokens > 0 ? { cacheReadShare: usage.cacheReadTokens / promptTokens } : {}),
+  };
 }
 
 export interface TurnStat {
@@ -85,6 +110,11 @@ export interface SubAgent {
   tokenUsage?: TokenUsage;
   model?: string;
   scenes: Scene[];
+  /**
+   * Complete invocation index for scanner aggregation. This is intentionally
+   * omitted by replay transformation so large child traces can stay bounded.
+   */
+  usageEvents?: UsageEvent[];
 }
 
 export interface FileDiff {
@@ -116,6 +146,11 @@ export type Scene =
       toolName: string;
       input: Record<string, any>;
       result: string;
+      /**
+       * Whether the provider recorded a result for this call. This is separate
+       * from `result` because an empty string can be a valid completed result.
+       */
+      hasResult?: boolean;
       timestamp?: string;
       isError?: boolean;
       /** Primary/first diff, retained for backward compatibility. */
@@ -253,6 +288,67 @@ export interface SessionUsageSummary {
   durationCount: number;
 }
 
+export type MetricQuality = "exact" | "estimated" | "partial" | "unavailable";
+
+export interface MetricCoverage {
+  /** Sessions for which this metric was observed or conclusively indexed. */
+  availableSessions: number;
+  totalSessions: number;
+  quality: MetricQuality;
+}
+
+/** Provider-level observability audit data; contains no prompt or tool payloads. */
+export interface ProviderCoverage {
+  provider: string;
+  totalSessions: number;
+  indexedSessions: number;
+  invocationSessions: number;
+  invocationCalls: number;
+  missingInvocationSessions: number;
+  mcpSessions: number;
+  mcpCalls: number;
+  mcpToolSessions: number;
+  mcpToolCalls: number;
+  tokenSessions: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  promptTokens: number;
+  cacheMissTokens: number;
+  compactionSessions: number;
+  compactionCount: number;
+  notes?: string[];
+  metrics: {
+    invocations: MetricCoverage;
+    mcpTools: MetricCoverage;
+    tokens: MetricCoverage;
+    cache: MetricCoverage;
+    compactions: MetricCoverage;
+  };
+}
+
+export interface UsageCoverageReport {
+  totalSessions: number;
+  indexedSessions: number;
+  invocationSessions: number;
+  invocationCalls: number;
+  missingInvocationSessions: number;
+  mcpCalls: number;
+  mcpToolSessions: number;
+  mcpToolCalls: number;
+  tokenSessions: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  promptTokens: number;
+  cacheMissTokens: number;
+  compactionSessions: number;
+  compactionCount: number;
+  providers: ProviderCoverage[];
+}
+
 /**
  * A single session's insights — lightweight metadata persisted locally so it
  * survives after source JSONL files are deleted (e.g. Claude Code 30-day cleanup).
@@ -345,20 +441,28 @@ export interface SessionScanWireData {
   endTime?: string;
   durationMs?: number;
   gitBranch?: string;
+  gitBranches?: string[];
   model?: string;
   promptCount: number;
   toolCallCount: number;
   editCount: number;
   filesModified: Array<{ file: string; count: number }>;
+  tokenUsage?: TokenUsage;
   costEstimate?: number;
   subAgentCount: number;
+  apiErrorCount: number;
   entrypoint?: string;
+  permissionMode?: string;
   prLinks?: PrLink[];
   skillsUsed?: string[];
   mcpServersUsed?: string[];
   usageSummary?: SessionUsageSummary;
+  usageIndexed?: boolean;
+  compactionCount: number;
   dataSource?: DataSource;
   dataQualityNotes?: string[];
+  turnStatCount?: number;
+  turnDurations?: number[];
 }
 
 export interface ReplaySession {
@@ -390,6 +494,7 @@ export interface ReplaySession {
       thinkingBlocks?: number;
       durationMs?: number;
       tokenUsage?: TokenUsage;
+      tokenMetrics?: TokenUsageMetrics;
       costEstimate?: number;
       turnStats?: TurnStat[];
     };
@@ -401,6 +506,8 @@ export interface ReplaySession {
       timestamp: string;
       trigger: string;
       preTokens?: number;
+      /** Cursor only exposes the latest persisted summary, so this can be a lower bound. */
+      accuracy?: "exact" | "estimated" | "lower-bound";
     }>;
     subAgentSummary?: Array<{
       agentId: string;

@@ -25,7 +25,14 @@ import {
 } from "../engine/insights-rollup";
 import { AnimatedValue } from "../hooks/useAnimatedNumber";
 import { getInsightsRangeFromUrl, INSIGHTS_RANGE_PARAM } from "../hooks/usePanelFilters";
-import type { SessionLocation, SessionSummary, SourceSession } from "../types";
+import type {
+  MetricCoverage,
+  ProviderCoverage,
+  SessionLocation,
+  SessionSummary,
+  SourceSession,
+  UsageCoverageReport,
+} from "../types";
 import { localDayKey } from "../utils/date";
 import { DataQualityIndicator } from "./DataQualityIndicator";
 import { TokenBreakdownChart, TurnDurationChart } from "./InsightCharts";
@@ -53,6 +60,7 @@ interface UsageRollupPayload {
   sessions: UsageRollupSession[];
   indexedSessions: number;
   totalSessions: number;
+  coverage?: UsageCoverageReport;
 }
 
 type ComputedStats = InsightsRangeStats;
@@ -308,7 +316,7 @@ function rangeLabel(range: TimeRange): string {
   return "All Time";
 }
 
-type InsightsSectionId = "overview" | "activity" | "usage" | "workspace";
+type InsightsSectionId = "overview" | "activity" | "usage" | "coverage" | "workspace";
 
 const INSIGHTS_SECTIONS: Array<{
   id: InsightsSectionId;
@@ -331,6 +339,11 @@ const INSIGHTS_SECTIONS: Array<{
     description: "Tools, MCP, and tokens",
   },
   {
+    id: "coverage",
+    label: "Coverage",
+    description: "What was captured",
+  },
+  {
     id: "workspace",
     label: "Workspace",
     description: "Projects and models",
@@ -345,6 +358,7 @@ function InsightsSectionIcon({ section }: { section: InsightsSectionId }) {
     overview: "M3 3h6v6H3zM15 3h6v6h-6zM3 15h6v6H3zM15 15h6v6h-6z",
     activity: "M3 12h4l2-7 4 14 2-7h6",
     usage: "M4 5h16M4 12h16M4 19h16",
+    coverage: "M12 3v18M3 12h18M5 5l14 14M19 5 5 19",
     workspace: "M4 5h6v6H4zM14 5h6v6h-6zM4 15h6v6H4zM14 15h6v6h-6z",
   };
 
@@ -1519,17 +1533,243 @@ export function UsageCoverage({ payload }: { payload: UsageRollupPayload | null 
   if (!payload || payload.totalSessions <= 0) return null;
   const indexed = Math.min(payload.indexedSessions, payload.totalSessions);
   const coverage = Math.round((indexed / payload.totalSessions) * 100);
+  const report = payload.coverage;
+  const invocationSessions = report?.invocationSessions ?? payload.sessions.length;
+  const missingInvocationSessions = report?.missingInvocationSessions ?? 0;
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-terminal-border-subtle pt-3 text-[10px] font-mono text-terminal-dimmer">
-      <span className="uppercase tracking-widest">Invocation index</span>
+      <span className="uppercase tracking-widest">Index status</span>
       <span className="text-terminal-dim">
         {indexed.toLocaleString()} / {payload.totalSessions.toLocaleString()} sessions
       </span>
       <span className={coverage === 100 ? "text-terminal-green" : "text-terminal-orange"}>
-        {coverage}% covered
+        {coverage}% indexed
       </span>
+      <span className="text-terminal-dim">
+        {invocationSessions.toLocaleString()} with invocation records
+      </span>
+      {missingInvocationSessions > 0 && (
+        <span className="text-terminal-orange">
+          {missingInvocationSessions.toLocaleString()} expected records missing
+        </span>
+      )}
       {coverage < 100 && <span>Counts will grow as provider details finish indexing.</span>}
+    </div>
+  );
+}
+
+function qualityLabel(quality: MetricCoverage["quality"]): string {
+  return quality;
+}
+
+function qualityClass(quality: MetricCoverage["quality"]): string {
+  if (quality === "exact") return "text-terminal-green";
+  if (quality === "estimated") return "text-terminal-blue";
+  if (quality === "partial") return "text-terminal-orange";
+  return "text-terminal-dimmer";
+}
+
+function CoverageMetricCell({ metric, detail }: { metric: MetricCoverage; detail: string }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-xs font-mono text-terminal-text tabular-nums">{detail}</div>
+      <div className={`text-[10px] font-mono ${qualityClass(metric.quality)}`}>
+        {qualityLabel(metric.quality)}
+      </div>
+    </div>
+  );
+}
+
+export function CoverageAudit({ report }: { report?: UsageCoverageReport }) {
+  if (!report || report.totalSessions === 0) {
+    return (
+      <div className={`${INSIGHTS_CARD_CLASS} px-5 py-6 text-center`}>
+        <div className="text-xs font-mono text-terminal-dimmer">
+          Coverage audit will appear after the session scan finishes.
+        </div>
+      </div>
+    );
+  }
+
+  const indexedPct = Math.round((report.indexedSessions / report.totalSessions) * 100);
+  const tokenPct = Math.round((report.tokenSessions / report.totalSessions) * 100);
+  const cacheReadShare =
+    report.promptTokens > 0 ? (report.cacheReadTokens / report.promptTokens) * 100 : undefined;
+  const noInvocationSessions = Math.max(0, report.indexedSessions - report.invocationSessions);
+
+  return (
+    <div className={`${INSIGHTS_CARD_CLASS} space-y-5 p-5 md:p-6`}>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="rounded-lg bg-terminal-bg px-3 py-2">
+          <div className="text-lg font-mono font-bold text-terminal-green tabular-nums">
+            {indexedPct}%
+          </div>
+          <div className="ui-section-title">scan indexed</div>
+          <div className="mt-0.5 text-[10px] font-mono text-terminal-dimmer">
+            {report.indexedSessions.toLocaleString()} / {report.totalSessions.toLocaleString()}
+          </div>
+        </div>
+        <div className="rounded-lg bg-terminal-bg px-3 py-2">
+          <div className="text-lg font-mono font-bold text-terminal-orange tabular-nums">
+            {report.invocationSessions.toLocaleString()}
+          </div>
+          <div className="ui-section-title">sessions with calls</div>
+          <div className="mt-0.5 text-[10px] font-mono text-terminal-dimmer">
+            {report.invocationCalls.toLocaleString()} invocations
+          </div>
+        </div>
+        <div className="rounded-lg bg-terminal-bg px-3 py-2">
+          <div className="text-lg font-mono font-bold text-terminal-blue tabular-nums">
+            {tokenPct}%
+          </div>
+          <div className="ui-section-title">token records</div>
+          <div className="mt-0.5 text-[10px] font-mono text-terminal-dimmer">
+            {report.tokenSessions.toLocaleString()} / {report.totalSessions.toLocaleString()}
+          </div>
+        </div>
+        <div className="rounded-lg bg-terminal-bg px-3 py-2">
+          <div className="text-lg font-mono font-bold text-terminal-purple tabular-nums">
+            {report.compactionCount.toLocaleString()}
+          </div>
+          <div className="ui-section-title">compactions observed</div>
+          <div className="mt-0.5 text-[10px] font-mono text-terminal-dimmer">
+            {report.compactionSessions.toLocaleString()} sessions
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-terminal-blue/20 bg-terminal-blue/5 px-3 py-2.5 text-[11px] font-mono leading-relaxed text-terminal-dim">
+        <div>
+          Prompt footprint:{" "}
+          <span className="text-terminal-text">{formatCompactNum(report.promptTokens)}</span> tokens
+          · uncached / miss:{" "}
+          <span className="text-terminal-orange">{formatCompactNum(report.cacheMissTokens)}</span>
+        </div>
+        <div>
+          Cache read:{" "}
+          <span className="text-terminal-purple">{formatCompactNum(report.cacheReadTokens)}</span>
+          {cacheReadShare !== undefined
+            ? ` (${cacheReadShare.toFixed(1)}% of prompt footprint)`
+            : ""}
+          . “Miss” is derived as uncached input + cache writes; providers do not expose one
+          universal miss counter.
+        </div>
+        <div>
+          No invocation events recorded in{" "}
+          <span className="text-terminal-text">{noInvocationSessions.toLocaleString()}</span>{" "}
+          indexed sessions; this is distinct from sessions whose invocation index is still missing.
+        </div>
+        {report.missingInvocationSessions > 0 && (
+          <div className="mt-1 text-terminal-orange">
+            {report.missingInvocationSessions} sessions advertise calls but have no indexed
+            invocation summary.
+          </div>
+        )}
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[880px] border-collapse text-left">
+          <caption className="sr-only">Session observability coverage by provider</caption>
+          <thead>
+            <tr className="border-b border-terminal-border-subtle text-[10px] font-mono uppercase tracking-widest text-terminal-dimmer">
+              <th className="px-2 py-2 font-normal">Provider</th>
+              <th className="px-2 py-2 font-normal">Index</th>
+              <th className="px-2 py-2 font-normal">Calls</th>
+              <th className="px-2 py-2 font-normal">MCP</th>
+              <th className="px-2 py-2 font-normal">MCP tools</th>
+              <th className="px-2 py-2 font-normal">Tokens</th>
+              <th className="px-2 py-2 font-normal">Cache</th>
+              <th className="px-2 py-2 font-normal">Compaction</th>
+            </tr>
+          </thead>
+          <tbody>
+            {report.providers.map((provider: ProviderCoverage) => {
+              const providerCacheShare =
+                provider.promptTokens > 0
+                  ? `${((provider.cacheReadTokens / provider.promptTokens) * 100).toFixed(1)}% read`
+                  : "no reads";
+              return (
+                <tr
+                  key={provider.provider}
+                  className="border-b border-terminal-border/40 last:border-0"
+                >
+                  <th
+                    className="px-2 py-3 text-xs font-sans font-semibold text-terminal-text"
+                    title={provider.notes?.join("\n")}
+                  >
+                    {providerDisplayName(provider.provider)}
+                    <div className="text-[10px] font-mono font-normal text-terminal-dimmer">
+                      {provider.totalSessions.toLocaleString()} sessions
+                    </div>
+                    {provider.notes?.[0] && (
+                      <div className="mt-1 max-w-52 text-[10px] font-mono font-normal leading-relaxed text-terminal-dimmer">
+                        {provider.notes[0]}
+                      </div>
+                    )}
+                  </th>
+                  <td className="px-2 py-3">
+                    <CoverageMetricCell
+                      metric={provider.metrics.invocations}
+                      detail={`${provider.indexedSessions}/${provider.totalSessions}`}
+                    />
+                  </td>
+                  <td className="px-2 py-3">
+                    <div className="text-xs font-mono text-terminal-text tabular-nums">
+                      {provider.invocationCalls.toLocaleString()}
+                    </div>
+                    <div className="text-[10px] font-mono text-terminal-dimmer">
+                      {provider.invocationSessions} sessions
+                    </div>
+                  </td>
+                  <td className="px-2 py-3">
+                    <div className="text-xs font-mono text-terminal-text tabular-nums">
+                      {provider.mcpCalls.toLocaleString()}
+                    </div>
+                    <div className="text-[10px] font-mono text-terminal-dimmer">
+                      {provider.mcpSessions} sessions
+                    </div>
+                  </td>
+                  <td className="px-2 py-3">
+                    <CoverageMetricCell
+                      metric={provider.metrics.mcpTools}
+                      detail={
+                        provider.mcpCalls > 0
+                          ? `${provider.mcpToolCalls}/${provider.mcpCalls}`
+                          : "—"
+                      }
+                    />
+                  </td>
+                  <td className="px-2 py-3">
+                    <CoverageMetricCell
+                      metric={provider.metrics.tokens}
+                      detail={`${provider.tokenSessions}/${provider.totalSessions}`}
+                    />
+                  </td>
+                  <td className="px-2 py-3">
+                    <CoverageMetricCell
+                      metric={provider.metrics.cache}
+                      detail={providerCacheShare}
+                    />
+                  </td>
+                  <td className="px-2 py-3">
+                    <CoverageMetricCell
+                      metric={provider.metrics.compactions}
+                      detail={`${provider.compactionCount} · ${provider.compactionSessions}/${provider.totalSessions}`}
+                    />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="text-[10px] font-mono leading-relaxed text-terminal-dimmer">
+        Exact = provider-reported or conclusively indexed. Estimated = provider snapshots or
+        inferred timing. Partial = some sessions or events are missing. Cursor compactions are lower
+        bounds because Cursor keeps the latest summary rather than a durable compaction log.
+      </div>
     </div>
   );
 }
@@ -1715,11 +1955,15 @@ export default function InsightsPage() {
     : 0;
   const currentSourceSessionCount = homePageCounts?.sessions ?? userInsights.totalSessions;
   const pendingSessionDelta = Math.max(0, currentSourceSessionCount - userInsights.totalSessions);
-  const showSnapshotNotice = Boolean(scanStatus?.running && scanStatus?.hasCachedResults);
+  const backgroundRefreshRunning = Boolean(
+    scanStatus?.running || scanStatus?.usageBackfill?.running,
+  );
+  const showSnapshotNotice = Boolean(backgroundRefreshRunning && scanStatus?.hasCachedResults);
   const snapshotAge = scanStatus?.cachedAt ? formatCompactAge(scanStatus.cachedAt) : "";
-  const refreshProgress =
-    scanStatus?.total && scanStatus.total > 0
-      ? `${Math.min(scanStatus.scanned, scanStatus.total)}/${scanStatus.total}`
+  const refreshProgress = scanStatus?.usageBackfill?.running
+    ? `${scanStatus.usageBackfill.scanned}/${scanStatus.usageBackfill.total} usage indexes`
+    : scanStatus?.total && scanStatus.total > 0
+      ? `${Math.min(scanStatus.scanned, scanStatus.total)}/${scanStatus.total} sessions`
       : undefined;
 
   return (
@@ -1767,7 +2011,9 @@ export default function InsightsPage() {
                 <div className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-terminal-blue" />
                 <div className="space-y-1">
                   <div className="text-xs font-sans font-semibold text-terminal-text">
-                    Showing cached insights snapshot while the background refresh runs
+                    {scanStatus?.usageBackfill?.running
+                      ? "Indexing tool, MCP, and skill usage in the background"
+                      : "Showing cached insights snapshot while the background refresh runs"}
                   </div>
                   <div className="text-xs font-mono text-terminal-dim">
                     {snapshotAge
@@ -2002,8 +2248,24 @@ export default function InsightsPage() {
             </InsightsSection>
 
             <InsightsSection
+              id="coverage"
+              eyebrow="04 / Coverage"
+              title="What was captured"
+              description="All-time audit: separate scan completion from metric availability and provider precision."
+              meta={
+                usagePayload ? (
+                  <span className="text-[10px] font-mono text-terminal-dimmer">
+                    {usagePayload.totalSessions.toLocaleString()} all-time sessions audited
+                  </span>
+                ) : null
+              }
+            >
+              <CoverageAudit report={usagePayload?.coverage} />
+            </InsightsSection>
+
+            <InsightsSection
               id="workspace"
-              eyebrow="04 / Workspace"
+              eyebrow="05 / Workspace"
               title="Your working set"
               description="The projects, models, and providers that shaped your sessions in this range."
             >

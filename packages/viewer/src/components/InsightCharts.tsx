@@ -1,3 +1,5 @@
+import { deriveTokenUsageMetrics } from "@vibe-replay/types";
+
 export interface TurnDurationHistogramData {
   buckets: Array<{ label: string; count: number; pct: number }>;
   percentiles: { p50Ms: number; p75Ms: number; p90Ms: number };
@@ -106,7 +108,7 @@ const TOKEN_COLORS = [
   { key: "cacheRead", label: "Cache Read", color: "bg-terminal-purple" },
   { key: "cacheCreation", label: "Cache Write", color: "bg-terminal-orange" },
   { key: "output", label: "Output", color: "bg-terminal-green" },
-  { key: "input", label: "Input", color: "bg-terminal-blue" },
+  { key: "input", label: "Input (uncached)", color: "bg-terminal-blue" },
 ] as const;
 
 function formatTokenCount(value: number): string {
@@ -118,6 +120,12 @@ function formatTokenCount(value: number): string {
 export function TokenBreakdownChart({ breakdown }: { breakdown: TokenBreakdownData }) {
   const total = breakdown.input + breakdown.output + breakdown.cacheRead + breakdown.cacheCreation;
   if (total === 0) return null;
+  const tokenMetrics = deriveTokenUsageMetrics({
+    inputTokens: breakdown.input,
+    outputTokens: breakdown.output,
+    cacheReadTokens: breakdown.cacheRead,
+    cacheCreationTokens: breakdown.cacheCreation,
+  });
 
   const items = TOKEN_COLORS.map((token) => ({
     ...token,
@@ -136,6 +144,34 @@ export function TokenBreakdownChart({ breakdown }: { breakdown: TokenBreakdownDa
             style={{ width: `${item.pct}%`, opacity: 0.7 }}
           />
         ))}
+      </div>
+      <div className="grid grid-cols-2 gap-2 border-y border-terminal-border/20 py-3 sm:grid-cols-4">
+        <div title="Uncached input + cache writes. Providers do not expose a universal miss counter.">
+          <div className="text-[11px] font-mono font-bold text-terminal-orange">
+            {formatTokenCount(tokenMetrics.cacheMissTokens)}
+          </div>
+          <div className="text-[10px] font-mono text-terminal-dimmer">uncached / miss</div>
+        </div>
+        <div title="Input + cache read + cache write tokens for the prompt context.">
+          <div className="text-[11px] font-mono font-bold text-terminal-blue">
+            {formatTokenCount(tokenMetrics.promptTokens)}
+          </div>
+          <div className="text-[10px] font-mono text-terminal-dimmer">prompt footprint</div>
+        </div>
+        <div title="Tokens served from the provider cache.">
+          <div className="text-[11px] font-mono font-bold text-terminal-purple">
+            {formatTokenCount(breakdown.cacheRead)}
+          </div>
+          <div className="text-[10px] font-mono text-terminal-dimmer">cache read</div>
+        </div>
+        <div title="Cache read divided by the prompt footprint; this is a cache-read share, not a provider billing guarantee.">
+          <div className="text-[11px] font-mono font-bold text-terminal-green">
+            {tokenMetrics.cacheReadShare !== undefined
+              ? `${Math.round(tokenMetrics.cacheReadShare * 1000) / 10}%`
+              : "—"}
+          </div>
+          <div className="text-[10px] font-mono text-terminal-dimmer">read share</div>
+        </div>
       </div>
       <div className="space-y-2">
         {items.map((item) => (

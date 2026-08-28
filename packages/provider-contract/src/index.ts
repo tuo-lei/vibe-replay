@@ -2,18 +2,30 @@ import type {
   CursorSidecars,
   DataSource,
   DataSourceInfo,
+  MetricCoverage,
+  MetricQuality,
   ParseWarning,
   ProjectIdentity,
   PrLink,
+  ProviderCoverage,
   SessionLocation,
   SessionTranscriptStatus,
   SubAgent,
   TokenUsage,
+  TokenUsageMetrics,
   TurnStat,
+  UsageCoverageReport,
 } from "@vibe-replay/types";
 
 export type { DataSource, DataSourceInfo, SessionLocation, TokenUsage };
 export type { SessionTranscriptStatus };
+export type {
+  MetricCoverage,
+  MetricQuality,
+  ProviderCoverage,
+  TokenUsageMetrics,
+  UsageCoverageReport,
+};
 
 /** Stable provider API version for the current in-repo provider contract. */
 export const PROVIDER_API_VERSION = 1;
@@ -55,6 +67,8 @@ export interface SessionInfo {
   filePath: string; // primary file (most recent)
   filePaths: string[]; // all JSONL files for this session (sorted by timestamp asc)
   toolPaths?: string[]; // cursor tool outputs associated with this session
+  /** Provider-side storage fingerprint used to invalidate rich scan caches. */
+  sourceFingerprint?: string;
   workspacePath?: string; // absolute workspace path for Cursor lookup
   hasSqlite?: boolean; // true if any Cursor SQLite source exists (store.db or global state DB)
   hasSdk?: boolean; // true if a Cursor SDK agent record exists in sdk-agent-store/index.db
@@ -106,6 +120,8 @@ export interface RawMessage {
   sourceToolAssistantUUID?: string;
   /** Newer Claude Code field for tool-originated user messages. */
   sourceToolUseID?: string;
+  /** Legacy snake_case spelling of the parent tool for tool-originated messages. */
+  parent_tool_use_id?: string;
   /** Source classification for user messages (for example, tool-originated messages). */
   origin?: string;
   /**
@@ -265,6 +281,7 @@ export interface Compaction {
   timestamp: string;
   trigger: string;
   preTokens?: number;
+  accuracy?: "exact" | "estimated" | "lower-bound";
 }
 
 export interface ProviderParseResult {

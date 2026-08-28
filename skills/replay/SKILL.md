@@ -67,6 +67,7 @@ npx vibe-replay sessions --project "vibe-replay" --json
 npx vibe-replay sessions --provider cursor --query "auth bug" --json
 npx vibe-replay sessions --query "codex parser" --scan --json
 npx vibe-replay sessions --query "PR review CI" --any --brief --dedupe --json
+npx vibe-replay sessions --compacted --limit 10 --json
 ```
 
 Search workflow:
@@ -215,6 +216,9 @@ For efficiency analysis, look at:
 - Prompt count and whether the user had to repeat intent.
 - Tool calls per prompt and edit count per prompt.
 - Long duration, API errors, compactions, and subagent count.
+- Token input/output, cache read/write, and the derived uncached/miss prompt
+  footprint. Treat Cursor token snapshots and compaction counts as estimated or
+  lower-bound evidence, respectively.
 - First prompt clarity: goal, constraints, files, expected verification, and merge/review instructions.
 
 Prefer actionable advice such as "the first prompt had a clear goal but missed verification criteria" or "the session became expensive because it searched broadly before narrowing to one file."

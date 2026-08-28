@@ -4,6 +4,8 @@ export type {
   DataSource,
   DataSourceInfo,
   InsightsStore,
+  MetricCoverage,
+  MetricQuality,
   OverlaySource,
   ProjectIdentity,
   ParseWarning,
@@ -17,8 +19,11 @@ export type {
   SessionUsageSummary,
   SessionOverlays,
   SubAgent,
+  ProviderCoverage,
   TokenUsage,
+  TokenUsageMetrics,
   TurnStat,
+  UsageCoverageReport,
   UsageEvent,
 } from "@vibe-replay/types";
 

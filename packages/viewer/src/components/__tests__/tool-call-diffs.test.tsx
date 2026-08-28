@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Scene } from "../../types";
 import ToolCallBlock from "../ToolCallBlock";
@@ -25,5 +25,45 @@ describe("ToolCallBlock multi-file diffs", () => {
 
     expect(screen.getByText("src/app.ts")).toBeTruthy();
     expect(screen.getByText("src/auth.ts")).toBeTruthy();
+  });
+});
+
+describe("ToolCallBlock result state", () => {
+  it("shows an empty recorded result instead of treating it as missing", () => {
+    render(
+      <ToolCallBlock
+        scene={{
+          type: "tool-call",
+          toolName: "Custom",
+          input: {},
+          result: "",
+          hasResult: true,
+        }}
+        isActive={false}
+      />,
+    );
+
+    expect(screen.getByText("empty result")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button"));
+    expect(screen.getByText("(empty result)")).toBeTruthy();
+  });
+
+  it("shows when a tool result was not recorded", () => {
+    render(
+      <ToolCallBlock
+        scene={{
+          type: "tool-call",
+          toolName: "Custom",
+          input: {},
+          result: "",
+          hasResult: false,
+        }}
+        isActive={false}
+      />,
+    );
+
+    expect(screen.getByText("pending")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button"));
+    expect(screen.getByText("Result not recorded.")).toBeTruthy();
   });
 });

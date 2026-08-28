@@ -246,6 +246,80 @@ describe("scanSession", () => {
     expect(result.usageIndexed).toBe(true);
   });
 
+  it("uses the rich Claude parser so compactions and tool outcomes are indexed", async () => {
+    const path = join(tmpDir, "claude-rich-scan.jsonl");
+    await writeFile(
+      path,
+      [
+        makeLine({
+          type: "user",
+          sessionId: "claude-rich-scan",
+          timestamp: "2025-03-20T10:00:00Z",
+          message: { role: "user", content: "Inspect the auth flow" },
+        }),
+        makeLine({
+          type: "assistant",
+          sessionId: "claude-rich-scan",
+          timestamp: "2025-03-20T10:00:01Z",
+          message: {
+            id: "assistant-1",
+            role: "assistant",
+            model: "claude-sonnet-4-20250514",
+            usage: {
+              input_tokens: 100,
+              output_tokens: 20,
+              cache_creation_input_tokens: 5,
+              cache_read_input_tokens: 30,
+            },
+            content: [
+              {
+                type: "tool_use",
+                id: "tool-1",
+                name: "Read",
+                input: { file_path: "src/auth.ts" },
+              },
+            ],
+          },
+        }),
+        makeLine({
+          type: "user",
+          sessionId: "claude-rich-scan",
+          timestamp: "2025-03-20T10:00:02Z",
+          message: {
+            role: "user",
+            content: [{ type: "tool_result", tool_use_id: "tool-1", content: "auth source" }],
+          },
+        }),
+        makeLine({
+          type: "system",
+          sessionId: "claude-rich-scan",
+          timestamp: "2025-03-20T10:00:03Z",
+          subtype: "compact_boundary",
+          compactMetadata: { trigger: "context_limit", preTokens: 50_000 },
+        }),
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "claude-rich-scan",
+      provider: "claude-code",
+      project: "~/test/project",
+      slug: "claude-rich-scan",
+      filePaths: [path],
+    });
+
+    expect(result.toolCallCount).toBe(1);
+    expect(result.usageSummary?.tools).toEqual({ Read: 1 });
+    expect(result.compactionCount).toBe(1);
+    expect(result.tokenUsage).toMatchObject({
+      inputTokens: 100,
+      outputTokens: 20,
+      cacheCreationTokens: 5,
+      cacheReadTokens: 30,
+    });
+  });
+
   it("keeps malformed tool blocks from aborting the usage scan", async () => {
     const path = join(tmpDir, "usage-malformed-tool.jsonl");
     await writeFile(

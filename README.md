@@ -68,11 +68,17 @@ Pick a session and step through every prompt, thinking block, tool call, and cod
 
 ### Deep insights for every session
 
-Auto-generated analytics: token burn & cost over time, context window usage, cache hit rates, tool call distribution, model breakdown, and per-turn breakdowns.
+Auto-generated analytics: token burn & cost over time, context window usage, cache read share, tool call distribution, model breakdown, and per-turn breakdowns.
 
 <p align="center">
   <img src="docs/screenshots/insights.png" alt="Session insights — token usage, cost tracking, tool distribution, and context window charts" width="800" />
 </p>
+
+The Insights **Coverage** section separates scan completion from metric availability and shows
+provider-level precision for invocations, MCP calls, tokens, cache reads/writes, and compactions.
+“Uncached / miss” is a derived prompt metric (`uncached input + cache writes`); providers do not
+share one universal cache-miss counter. Cursor snapshot totals are marked estimated, and Cursor
+compactions are lower bounds because its local store can retain only the latest summary.
 
 ### Your AI coding wrapped
 

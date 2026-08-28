@@ -402,10 +402,14 @@ export function ScanFailureNotice({ failedProviders }: { failedProviders?: strin
 }
 
 export function ScanProgressBar({ status }: { status: ScanStatus }) {
-  if (!status.running) return null;
-  const pct = status.total > 0 ? Math.round((status.scanned / status.total) * 100) : 0;
-  const label =
-    status.phase === "discovering"
+  const backfillRunning = status.usageBackfill?.running === true;
+  if (!status.running && !backfillRunning) return null;
+  const progressTotal = backfillRunning ? status.usageBackfill?.total || 0 : status.total;
+  const progressScanned = backfillRunning ? status.usageBackfill?.scanned || 0 : status.scanned;
+  const pct = progressTotal > 0 ? Math.round((progressScanned / progressTotal) * 100) : 0;
+  const label = backfillRunning
+    ? `Indexing usage... ${progressScanned}/${progressTotal}`
+    : status.phase === "discovering"
       ? "Discovering sessions..."
       : status.total > 0
         ? `Refreshing insights... ${status.scanned}/${status.total}`
@@ -419,7 +423,7 @@ export function ScanProgressBar({ status }: { status: ScanStatus }) {
           showing {status.cachedResultCount || status.resultCount} cached
         </span>
       )}
-      {status.total > 0 && (
+      {progressTotal > 0 && (
         <div className="flex-1 max-w-[120px] h-1 rounded-full bg-terminal-surface-2 overflow-hidden">
           <div
             className="h-full bg-terminal-purple rounded-full transition-all duration-300"

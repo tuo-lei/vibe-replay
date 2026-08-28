@@ -144,7 +144,8 @@ function getDevViewerOpts(): { externalViewerUrl: string } | undefined {
 // v3 → v4: Cursor project paths decode differently, so cached entries would
 // keep showing the old exploded paths in the picker.
 // v4 → v5: Codex explicit session_index names supersede generated titles.
-const SESSION_DISCOVERY_CACHE_KEY = "session-discovery-v5";
+// v5 → v6: provider compaction counts and Cursor storage fingerprints.
+const SESSION_DISCOVERY_CACHE_KEY = "session-discovery-v6";
 
 function normalizePromptTitle(value?: string): string {
   return normalizeTitle(cleanPromptText(value || "")) || "";
@@ -816,6 +817,7 @@ interface SessionsCommandOptions {
   any?: boolean;
   brief?: boolean;
   dedupe?: boolean;
+  compacted?: boolean;
   json?: boolean;
 }
 
@@ -833,6 +835,7 @@ program
   .option("--any", "Match any query term instead of requiring all terms")
   .option("--brief", "Include scan-backed session briefs and match evidence")
   .option("--dedupe", "Collapse near-duplicate sessions with the same long prompt/title")
+  .option("--compacted", "Only return sessions with recorded context compaction")
   .option("--json", "Print machine-readable JSON")
   .action(async (opts: SessionsCommandOptions, command: Command) => {
     const discoverSpinner = opts.json ? undefined : ora("Discovering sessions...").start();

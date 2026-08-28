@@ -12,6 +12,8 @@ interface PendingTool {
   name: string;
   input: Record<string, any>;
   timestamp?: string;
+  mcpServer?: string;
+  mcpTool?: string;
 }
 
 interface ToolResult {
@@ -253,8 +255,18 @@ export function parseCodexLines(
       }
       if (p.type === "mcp_tool_call_end" && p.call_id) {
         const invocation = p.invocation || {};
-        const server = typeof invocation.server === "string" ? invocation.server : "";
-        const toolName = typeof invocation.tool === "string" ? invocation.tool : "";
+        const server =
+          typeof invocation.server === "string"
+            ? invocation.server
+            : typeof invocation.server_name === "string"
+              ? invocation.server_name
+              : "";
+        const toolName =
+          typeof invocation.tool === "string"
+            ? invocation.tool
+            : typeof invocation.tool_name === "string"
+              ? invocation.tool_name
+              : "";
         let tool = tools.get(p.call_id);
         if (server) {
           mcpServersUsed.add(server);
@@ -268,10 +280,16 @@ export function parseCodexLines(
                     server,
                   },
               timestamp: obj.timestamp,
+              mcpServer: server,
+              ...(toolName ? { mcpTool: toolName } : {}),
             };
             tools.set(p.call_id, tool);
-          } else if (toolName) {
-            tool.name = `mcp__${server}__${toolName}`;
+          } else {
+            tool.mcpServer = server;
+            if (toolName) {
+              tool.mcpTool = toolName;
+              tool.name = `mcp__${server}__${toolName}`;
+            }
           }
         } else if (!tool) {
           // The completion event itself proves that Codex attempted an MCP
@@ -281,7 +299,10 @@ export function parseCodexLines(
             name: "mcp",
             input: {},
             timestamp: obj.timestamp,
+            mcpServer: "Unknown",
           });
+        } else {
+          tool.mcpServer ||= "Unknown";
         }
         mergeToolResult(toolResults, p.call_id, {
           result: formatMcpToolResult(p),
@@ -427,9 +448,11 @@ export function parseCodexLines(
           name: normalizeToolName(tool.name),
           input: normalizeToolInput(tool.name, tool.input),
           _hasResult: toolResults.has(tool.id),
-          _result: tr?.result || "",
+          ...(tr ? { _result: tr.result } : {}),
           ...(tr?.isError ? { _isError: true } : {}),
           ...(tr?.durationMs ? { _durationMs: tr.durationMs } : {}),
+          ...(tool.mcpServer ? { _mcpServer: tool.mcpServer } : {}),
+          ...(tool.mcpTool ? { _mcpTool: tool.mcpTool } : {}),
         },
       ],
     });

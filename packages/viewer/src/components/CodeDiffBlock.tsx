@@ -20,6 +20,7 @@ interface Props {
   isError?: boolean;
   durationMs?: number;
   resultTokens?: number;
+  hasResult?: boolean;
 }
 
 interface DiffLine {
@@ -81,6 +82,7 @@ export default memo(function CodeDiffBlock({
   isError,
   durationMs,
   resultTokens,
+  hasResult,
 }: Props) {
   const diffLines = useMemo(() => computeDiff(oldContent, newContent), [oldContent, newContent]);
   const language = guessLanguage(filePath);
@@ -102,6 +104,26 @@ export default memo(function CodeDiffBlock({
         </span>
         <span className="text-xs font-mono text-terminal-blue truncate flex-1">{filePath}</span>
         {isError && <ErrorBadge />}
+        {hasResult === false && (
+          <span
+            className="text-[10px] text-terminal-dimmer font-mono shrink-0"
+            title={
+              isError
+                ? "The edit failed before a result was recorded."
+                : "No edit result was recorded."
+            }
+          >
+            {isError ? "no result" : "pending"}
+          </span>
+        )}
+        {hasResult === true && (
+          <span
+            className="text-[10px] text-terminal-dimmer font-mono shrink-0"
+            title="The provider recorded a result for this edit."
+          >
+            result recorded
+          </span>
+        )}
         <ToolTokens tokens={resultTokens} />
         <ToolDuration ms={durationMs} />
         {isNewFile && (

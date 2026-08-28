@@ -41,6 +41,35 @@ interface Props {
   forceCollapse?: boolean;
 }
 
+function ToolResultBadge({ scene }: { scene: ToolScene }) {
+  if (scene.hasResult === false) {
+    const label = scene.isError ? "no result" : "pending";
+    return (
+      <span
+        className="text-[10px] font-mono text-terminal-dimmer shrink-0"
+        title={
+          scene.isError
+            ? "The tool failed before a result was recorded."
+            : "No tool result was recorded."
+        }
+      >
+        {label}
+      </span>
+    );
+  }
+  if (scene.hasResult === true && scene.result.length === 0) {
+    return (
+      <span
+        className="text-[10px] font-mono text-terminal-dimmer shrink-0"
+        title="The provider recorded a successful empty result."
+      >
+        empty result
+      </span>
+    );
+  }
+  return null;
+}
+
 function toolIcon(name: string): string {
   if (name.startsWith("mcp__")) return "🔌"; // 🔌
   switch (name) {
@@ -227,13 +256,24 @@ function SubAgentSceneItem({ scene }: { scene: Scene }) {
             {summarizeInput(toolScene.toolName, toolScene.input)}
           </span>
           {toolScene.isError && <ErrorBadge />}
+          <ToolResultBadge scene={toolScene} />
           <ToolTokens tokens={toolScene.resultTokens} />
           <ToolDuration ms={toolScene.durationMs} />
         </button>
-        {expanded && toolScene.result && (
-          <pre className="text-[9px] text-terminal-dim font-mono whitespace-pre-wrap break-words max-h-[100px] overflow-y-auto mt-0.5 px-1 bg-terminal-bg/50 rounded">
-            {toolScene.result.slice(0, 500)}
-          </pre>
+        {expanded && (
+          <>
+            {toolScene.hasResult === false ? (
+              <div className="text-[9px] text-terminal-dimmer font-mono mt-0.5 px-1">
+                Result not recorded.
+              </div>
+            ) : (
+              (toolScene.result || toolScene.hasResult === true) && (
+                <pre className="text-[9px] text-terminal-dim font-mono whitespace-pre-wrap break-words max-h-[100px] overflow-y-auto mt-0.5 px-1 bg-terminal-bg/50 rounded">
+                  {toolScene.result ? toolScene.result.slice(0, 500) : "(empty result)"}
+                </pre>
+              )
+            )}
+          </>
         )}
       </div>
     );
@@ -274,6 +314,7 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
         durationMs={scene.durationMs}
         resultTokens={scene.resultTokens}
         isError={scene.isError}
+        hasResult={scene.hasResult}
       />
     );
   }
@@ -291,6 +332,7 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
         isError={scene.isError}
         durationMs={scene.durationMs}
         resultTokens={scene.resultTokens}
+        hasResult={scene.hasResult}
       />
     );
   }
@@ -308,6 +350,7 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
             isError={scene.isError}
             durationMs={index === 0 ? scene.durationMs : undefined}
             resultTokens={index === 0 ? scene.resultTokens : undefined}
+            hasResult={index === 0 ? scene.hasResult : undefined}
           />
         ))}
       </div>
@@ -357,6 +400,7 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
             >
               {CHEVRON}
             </span>
+            <ToolResultBadge scene={scene} />
           </div>
           {/* Description — large, like a section title */}
           {description && (
@@ -392,6 +436,7 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
             {summarizeInput(scene.toolName, scene.input)}
           </span>
           {scene.isError && <ErrorBadge />}
+          <ToolResultBadge scene={scene} />
           <ToolTokens tokens={scene.resultTokens} />
           <ToolDuration ms={scene.durationMs} />
           <span
@@ -408,13 +453,19 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
                 {JSON.stringify(scene.input, null, 2)}
               </pre>
             </div>
-            {scene.result && (
+            {scene.hasResult === false ? (
               <div className="px-3 py-2 border-t border-terminal-border-subtle">
-                <div className="text-xs text-terminal-dim font-mono mb-1">Result:</div>
-                <pre className="text-xs text-terminal-text font-mono whitespace-pre-wrap break-words max-h-[200px] overflow-y-auto">
-                  {scene.result}
-                </pre>
+                <div className="text-xs text-terminal-dimmer font-mono">Result not recorded.</div>
               </div>
+            ) : (
+              (scene.result || scene.hasResult === true) && (
+                <div className="px-3 py-2 border-t border-terminal-border-subtle">
+                  <div className="text-xs text-terminal-dim font-mono mb-1">Result:</div>
+                  <pre className="text-xs text-terminal-text font-mono whitespace-pre-wrap break-words max-h-[200px] overflow-y-auto">
+                    {scene.result || "(empty result)"}
+                  </pre>
+                </div>
+              )
             )}
             {scene.images && scene.images.length > 0 && (
               <div className="px-3 py-2 border-t border-terminal-border-subtle">

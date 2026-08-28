@@ -177,6 +177,32 @@ describe("mergeInsights", () => {
       ["pi", "shared", 3],
     ]);
   });
+
+  it("does not overwrite a durable record with a partial scan placeholder", () => {
+    const existing = makeInsight({
+      tokenUsage: {
+        inputTokens: 100,
+        outputTokens: 20,
+        cacheReadTokens: 30,
+        cacheCreationTokens: 10,
+      },
+      toolCallCount: 12,
+    });
+    const merged = mergeInsights(makeStore([existing]), [
+      makeScan({
+        dataQualityNotes: [
+          "Partial cursor scan: the source could not be read, so discovery metadata was retained.",
+        ],
+        tokenUsage: undefined,
+        toolCallCount: 0,
+      }),
+    ]);
+
+    expect(merged.sessions[0]).toMatchObject({
+      toolCallCount: 12,
+      tokenUsage: existing.tokenUsage,
+    });
+  });
 });
 
 describe("aggregateDailyInsights", () => {

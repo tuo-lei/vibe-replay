@@ -279,6 +279,7 @@ export function parseSessionFromDb(
           id: call.call_id || call.id || `hermes-${rawName}-${message.id}`,
           name,
           input: mappedInput,
+          _hasResult: false,
           ...(rawName === "skill_view" &&
           typeof mappedInput.name === "string" &&
           mappedInput.name.trim()

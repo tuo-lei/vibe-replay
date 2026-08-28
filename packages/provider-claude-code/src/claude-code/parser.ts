@@ -1,6 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { PrLink, SubAgent, TurnStat } from "@vibe-replay/types";
+import type { PrLink, SubAgent, TurnStat, UsageEvent } from "@vibe-replay/types";
 import { isSystemGeneratedMessage } from "@vibe-replay/provider-core/clean-prompt";
 import { estimateActiveDuration, getTimestampBounds } from "@vibe-replay/provider-core/duration";
 import type { ContentBlock, ParsedTurn, RawMessage } from "@vibe-replay/provider-contract";
@@ -122,6 +122,7 @@ export async function parseClaudeCodeLines(
   const assistantBlocks = new Map<string, ContentBlock[]>();
   const assistantTimestamps = new Map<string, string>();
   const assistantModels = new Map<string, string>();
+  const assistantAttributions = new Map<string, { mcpServer?: string; mcpTool?: string }>();
   const assistantOrder: string[] = [];
 
   // Collect tool results by tool_use_id
@@ -366,7 +367,11 @@ export async function parseClaudeCodeLines(
       // or newer sourceToolUseID/origin fields on the raw object. Process
       // tool_result blocks for result matching, but skip emitting a user turn.
       const isToolSearchResponse =
-        !!obj.sourceToolAssistantUUID || !!obj.sourceToolUseID || obj.origin === "tool_result";
+        !!obj.sourceToolAssistantUUID ||
+        !!obj.sourceToolUseID ||
+        !!obj.parentToolUseID ||
+        !!obj.parent_tool_use_id ||
+        obj.origin === "tool_result";
 
       const textParts: string[] = [];
       const userImages: string[] = [];
@@ -425,6 +430,14 @@ export async function parseClaudeCodeLines(
         // assistant messages, so it is vocabulary evidence, not an activation.
         if (skillName) skillsUsed.add(skillName);
       }
+      if (obj.attributionMcpServer || obj.attributionMcpTool) {
+        const previous = assistantAttributions.get(msgId) || {};
+        assistantAttributions.set(msgId, {
+          ...previous,
+          ...(obj.attributionMcpServer ? { mcpServer: obj.attributionMcpServer } : {}),
+          ...(obj.attributionMcpTool ? { mcpTool: obj.attributionMcpTool } : {}),
+        });
+      }
       // attributionMcpTool is tool-level detail; the replay metadata currently
       // summarizes MCP usage by server only, so keep the typed field for
       // forward compatibility without surfacing another aggregate today.
@@ -457,6 +470,7 @@ export async function parseClaudeCodeLines(
       }
 
       const blocks = assistantBlocks.get(msgId)!;
+      const attribution = assistantAttributions.get(msgId);
       const seenToolIds = new Set(
         blocks
           .filter(
@@ -483,8 +497,12 @@ export async function parseClaudeCodeLines(
               : undefined;
           blocks.push({
             ...block,
-            ...(obj.attributionMcpServer ? { _mcpServer: obj.attributionMcpServer } : {}),
-            ...(obj.attributionMcpTool ? { _mcpTool: obj.attributionMcpTool } : {}),
+            ...(obj.attributionMcpServer || attribution?.mcpServer
+              ? { _mcpServer: obj.attributionMcpServer || attribution?.mcpServer }
+              : {}),
+            ...(obj.attributionMcpTool || attribution?.mcpTool
+              ? { _mcpTool: obj.attributionMcpTool || attribution?.mcpTool }
+              : {}),
             ...(skillName ? { _skillName: skillName } : {}),
           });
           if (skillName) recordSkillActivation(skillName);
@@ -495,6 +513,17 @@ export async function parseClaudeCodeLines(
           }
         }
       }
+    }
+  }
+
+  for (const [msgId, attribution] of assistantAttributions) {
+    if (attribution.mcpServer) mcpServersUsed.add(attribution.mcpServer);
+    const blocks = assistantBlocks.get(msgId);
+    if (!blocks) continue;
+    for (const block of blocks) {
+      if (block.type !== "tool_use") continue;
+      if (attribution.mcpServer && !block._mcpServer) block._mcpServer = attribution.mcpServer;
+      if (attribution.mcpTool && !block._mcpTool) block._mcpTool = attribution.mcpTool;
     }
   }
 
@@ -773,6 +802,25 @@ function extractToolResultText(block: ContentBlock): string {
   return JSON.stringify(content);
 }
 
+function claudeSkillNameFromTool(
+  block: Extract<ContentBlock, { type: "tool_use" }>,
+): string | undefined {
+  if (block.name.trim().toLowerCase() !== "skill") return undefined;
+  for (const key of ["name", "skill", "skillName", "skill_name"]) {
+    const value = block.input?.[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function durationBetweenTimestamps(start?: string, end?: string): number | undefined {
+  if (!start || !end) return undefined;
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return undefined;
+  return endMs - startMs;
+}
+
 /**
  * Claude Code wraps oversized tool results as:
  *   <persisted-output>
@@ -914,6 +962,7 @@ interface SubAgentParsed {
   toolCalls: number;
   thinkingBlocks: number;
   textResponses: number;
+  usageEvents: UsageEvent[];
   tokenUsage?: {
     inputTokens: number;
     outputTokens: number;
@@ -993,6 +1042,7 @@ async function readSubagents(
     let toolCalls = 0;
     let thinkingBlocks = 0;
     let textResponses = 0;
+    const usageEvents: UsageEvent[] = [];
     const scenes: SubAgentParsed["scenes"] = [];
     const saUsageByMessageId = new Map<string, TokenUsage>();
 
@@ -1000,6 +1050,7 @@ async function readSubagents(
     const saToolResults = new Map<string, string>();
     const saToolResultIds = new Set<string>();
     const saToolErrors = new Map<string, boolean>();
+    const saToolResultTimestamps = new Map<string, string>();
 
     // Collect assistant blocks by message ID (same dedup as main parser)
     const saAssistantBlocks = new Map<string, ContentBlock[]>();
@@ -1049,6 +1100,7 @@ async function readSubagents(
             const resultText = extractToolResultText(block as ContentBlock);
             saToolResults.set(block.tool_use_id, resultText.slice(0, 1000));
             saToolResultIds.add(block.tool_use_id);
+            if (obj.timestamp) saToolResultTimestamps.set(block.tool_use_id, obj.timestamp);
             if (block.is_error) saToolErrors.set(block.tool_use_id, true);
           }
         }
@@ -1119,6 +1171,27 @@ async function readSubagents(
           const toolResult = saToolResults.get(block.id) || "";
           const hasResult = saToolResultIds.has(block.id);
           const isError = saToolErrors.get(block.id);
+          const skillName = claudeSkillNameFromTool(block);
+          usageEvents.push({
+            kind: skillName ? "skill" : "tool",
+            name: skillName || block.name,
+            ...(skillName ? { skillName } : {}),
+            timestamp: ts,
+            ...(durationBetweenTimestamps(ts, saToolResultTimestamps.get(block.id)) !== undefined
+              ? {
+                  durationMs: durationBetweenTimestamps(ts, saToolResultTimestamps.get(block.id)),
+                }
+              : {}),
+            status: isError ? "error" : hasResult ? "success" : "unknown",
+            ...(block.name.startsWith("mcp__")
+              ? {
+                  mcpServer: block.name.split("__")[1],
+                  mcpTool: block.name.split("__").slice(2).join("__"),
+                }
+              : {}),
+            attribution: "explicit",
+            parentAgentId: agentId,
+          });
           scenes.push({
             type: "tool-call",
             toolName: block.name,
@@ -1157,6 +1230,7 @@ async function readSubagents(
       toolCalls,
       thinkingBlocks,
       textResponses,
+      usageEvents,
       tokenUsage: saUsage,
       model,
       scenes: cappedScenes,

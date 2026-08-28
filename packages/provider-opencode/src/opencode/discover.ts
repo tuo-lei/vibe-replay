@@ -159,10 +159,12 @@ function buildSessionStats(db: Database): Map<string, SessionStats> {
   const compactionCounts = countBySession(
     db,
     `
-      SELECT session_id, count(*) AS c
-      FROM part
-      WHERE json_extract(data, '$.type') = 'compaction'
-      GROUP BY session_id
+      SELECT m.session_id, count(DISTINCT m.id) AS c
+      FROM part p
+      JOIN message m ON m.id = p.message_id
+      WHERE json_extract(m.data, '$.role') = 'user'
+        AND json_extract(p.data, '$.type') = 'compaction'
+      GROUP BY m.session_id
     `,
   );
   const firstPrompts = firstUserPrompts(db);
@@ -247,9 +249,9 @@ function firstUserPrompts(db: Database): Map<string, string> {
       const parsed = JSON.parse(row.data as string) as { text?: string };
       text = typeof parsed.text === "string" ? parsed.text : "";
     } catch {
-      // skip malformed part; fall through to keep map entry reserved
+      // Skip malformed parts and keep looking for the next valid user text.
     }
-    map.set(sessionId, text);
+    if (text.trim()) map.set(sessionId, text);
   }
   return map;
 }

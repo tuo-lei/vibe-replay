@@ -8,6 +8,7 @@ import type {
   SessionUsageSummary,
   SourceSession,
 } from "../types";
+import { deriveTokenUsageMetrics } from "@vibe-replay/types";
 import DashboardHome from "./DashboardHome";
 import { isInInsightsRange, rangeSince as insightsRangeSince } from "../engine/insights-rollup";
 import {
@@ -168,6 +169,7 @@ export interface SessionScanData {
   skillsUsed?: string[];
   mcpServersUsed?: string[];
   usageSummary?: SessionUsageSummary;
+  usageIndexed?: boolean;
   model?: string;
   gitBranch?: string;
   startTime?: string;
@@ -667,6 +669,7 @@ export function SessionDetailPopup({
   const transcriptStatus = s.transcriptStatus || scanData?.transcriptStatus;
   const transcriptStatusText = transcriptStatusLabel(transcriptStatus);
   const transcriptStatusHelp = transcriptStatusDescription(transcriptStatus);
+  const compactionCount = Math.max(scanData?.compactionCount ?? 0, s.compactionCount ?? 0);
 
   // Use scan data when available, fall back to discovery estimates
   const promptCount = scanData?.promptCount ?? s.promptCount;
@@ -674,9 +677,13 @@ export function SessionDetailPopup({
   const editCount = scanData?.editCount ?? s.editCountEst;
   const durationMs = scanData?.durationMs ?? s.durationMsEst;
   const cost = scanData?.costEstimate ?? s.replay?.stats?.costEstimate;
-  const totalTokens = scanData?.tokenUsage
-    ? scanData.tokenUsage.inputTokens + scanData.tokenUsage.outputTokens
+  const tokenMetrics = scanData?.tokenUsage
+    ? deriveTokenUsageMetrics(scanData.tokenUsage)
     : undefined;
+  const totalTokens =
+    tokenMetrics && scanData?.tokenUsage
+      ? tokenMetrics.promptTokens + scanData.tokenUsage.outputTokens
+      : undefined;
   const startedAt = scanData?.startTime || s.timestamp;
 
   const handleSaveTitle = async () => {
@@ -901,7 +908,7 @@ export function SessionDetailPopup({
                   value={totalTokens.toLocaleString()}
                   title={
                     scanData?.tokenUsage
-                      ? `In: ${scanData.tokenUsage.inputTokens.toLocaleString()} / Out: ${scanData.tokenUsage.outputTokens.toLocaleString()} / Cache write: ${scanData.tokenUsage.cacheCreationTokens.toLocaleString()} / Cache read: ${scanData.tokenUsage.cacheReadTokens.toLocaleString()}`
+                      ? `Prompt: ${tokenMetrics?.promptTokens.toLocaleString()} / Input (uncached): ${scanData.tokenUsage.inputTokens.toLocaleString()} / Out: ${scanData.tokenUsage.outputTokens.toLocaleString()} / Cache write: ${scanData.tokenUsage.cacheCreationTokens.toLocaleString()} / Cache read: ${scanData.tokenUsage.cacheReadTokens.toLocaleString()} / Uncached or miss: ${tokenMetrics?.cacheMissTokens.toLocaleString()}`
                       : undefined
                   }
                 />
@@ -909,9 +916,7 @@ export function SessionDetailPopup({
               {scanData != null && scanData.subAgentCount > 0 && (
                 <InfoRow label="Agents" value={`${scanData.subAgentCount} sub-agents`} />
               )}
-              {scanData != null && scanData.compactionCount > 0 && (
-                <InfoRow label="Compacts" value={String(scanData.compactionCount)} />
-              )}
+              {compactionCount > 0 && <InfoRow label="Compacts" value={String(compactionCount)} />}
               {scanData != null && scanData.apiErrorCount > 0 && (
                 <InfoRow label="Errors" value={`${scanData.apiErrorCount} API errors`} />
               )}
@@ -1284,11 +1289,16 @@ function ReplayCard({
   const tooBig = s.replaySize != null && s.replaySize > 10 * 1024 * 1024;
   const compactionCount = s.compactionCount ?? 0;
   const costTitle = s.stats.tokenUsage
-    ? `${formatTokens(s.stats.tokenUsage.cacheReadTokens)} cache read · ${formatTokens(
-        s.stats.tokenUsage.cacheCreationTokens,
-      )} cache write · ${formatTokens(s.stats.tokenUsage.inputTokens)} in · ${formatTokens(
-        s.stats.tokenUsage.outputTokens,
-      )} out`
+    ? (() => {
+        const tokenMetrics = deriveTokenUsageMetrics(s.stats.tokenUsage);
+        return `${formatTokens(tokenMetrics.promptTokens)} prompt · ${formatTokens(
+          tokenMetrics.cacheMissTokens,
+        )} uncached/miss · ${formatTokens(s.stats.tokenUsage.cacheReadTokens)} cache read · ${formatTokens(
+          s.stats.tokenUsage.cacheCreationTokens,
+        )} cache write · ${formatTokens(s.stats.tokenUsage.inputTokens)} in · ${formatTokens(
+          s.stats.tokenUsage.outputTokens,
+        )} out`;
+      })()
     : "Estimated cost";
 
   return (
@@ -1979,6 +1989,8 @@ function UsageChip({
  */
 function SessionUsageDetails({
   summary,
+  usageIndexed,
+  expectedCalls,
   selectedTools,
   selectedMcpTools,
   selectedSkills,
@@ -1987,6 +1999,8 @@ function SessionUsageDetails({
   onSkillToggle,
 }: {
   summary?: SessionUsageSummary;
+  usageIndexed?: boolean;
+  expectedCalls?: number;
   selectedTools: readonly string[];
   selectedMcpTools: readonly string[];
   selectedSkills: readonly string[];
@@ -1996,7 +2010,19 @@ function SessionUsageDetails({
 }) {
   const [expanded, setExpanded] = useState(false);
   const breakdown = useMemo(() => summarizeSessionUsage(summary), [summary]);
-  if (!breakdown) return null;
+  if (!breakdown) {
+    if (usageIndexed === false && (expectedCalls ?? 0) > 0) {
+      return (
+        <div
+          className="text-[10px] font-mono text-terminal-orange"
+          title="Rich usage indexing is still pending for this session"
+        >
+          usage indexing pending
+        </div>
+      );
+    }
+    return null;
+  }
 
   const headline = [
     breakdown.totalCalls > 0 ? `${breakdown.totalCalls} calls` : null,
@@ -2563,6 +2589,10 @@ function SessionsPanel() {
           ...usage.mcpServers,
           ...usage.mcpTools,
           ...usage.skills,
+          ...((scanData?.compactionCount ?? s.compactionCount ?? 0) > 0
+            ? ["compaction", "compacted"]
+            : []),
+          ...(scanData?.tokenUsage ? ["token", "tokens", "cache", "input", "output"] : []),
         ]
           .filter(Boolean)
           .some((value) => String(value).toLowerCase().includes(query));
@@ -3571,11 +3601,16 @@ function SessionsPanel() {
                   .filter(Boolean)
                   .join(" · ");
                 const costTitle = scanData?.tokenUsage
-                  ? `${formatTokens(scanData.tokenUsage.cacheReadTokens)} cache read · ${formatTokens(
-                      scanData.tokenUsage.cacheCreationTokens,
-                    )} cache write · ${formatTokens(scanData.tokenUsage.inputTokens)} in · ${formatTokens(
-                      scanData.tokenUsage.outputTokens,
-                    )} out`
+                  ? (() => {
+                      const tokenMetrics = deriveTokenUsageMetrics(scanData.tokenUsage);
+                      return `${formatTokens(tokenMetrics.promptTokens)} prompt · ${formatTokens(
+                        tokenMetrics.cacheMissTokens,
+                      )} uncached/miss · ${formatTokens(scanData.tokenUsage.cacheReadTokens)} cache read · ${formatTokens(
+                        scanData.tokenUsage.cacheCreationTokens,
+                      )} cache write · ${formatTokens(scanData.tokenUsage.inputTokens)} in · ${formatTokens(
+                        scanData.tokenUsage.outputTokens,
+                      )} out`;
+                    })()
                   : "Estimated cost";
                 return (
                   <div
@@ -3846,6 +3881,8 @@ function SessionsPanel() {
 
                     <SessionUsageDetails
                       summary={scanData?.usageSummary}
+                      usageIndexed={scanData?.usageIndexed}
+                      expectedCalls={displayToolCount}
                       selectedTools={selectedTools}
                       selectedMcpTools={selectedMcpTools}
                       selectedSkills={selectedSkills}
