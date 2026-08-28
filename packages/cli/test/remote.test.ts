@@ -10,7 +10,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { deduplicateSessionsByProvider } from "@vibe-replay/providers-default";
 import { replayOutputSlug } from "../src/server-core.js";
@@ -158,37 +158,37 @@ describe("remote source configuration", () => {
     });
   });
 
-  it("runs a bounded probe for a valid SSH target", async () => {
-    const root = await mkdtemp(join(tmpdir(), "vibe-remote-probe-"));
-    temporaryRoots.push(root);
-    const fakeBin = join(root, "bin");
-    await mkdir(fakeBin, { recursive: true });
-    const fakeSsh = process.platform === "win32" ? join(fakeBin, "ssh.cmd") : join(fakeBin, "ssh");
-    await writeFile(
-      join(fakeBin, "fake-ssh.mjs"),
-      "process.stdin.resume(); process.stdin.on('end', () => process.stdout.write('vibe-replay-ssh-ok\\n'));",
-      "utf-8",
-    );
-    await writeFile(
-      fakeSsh,
-      process.platform === "win32"
-        ? '@echo off\r\nnode "%~dp0fake-ssh.mjs"\r\n'
-        : '#!/bin/sh\nexec node "$(dirname "$0")/fake-ssh.mjs"\n',
-      "utf-8",
-    );
-    if (process.platform !== "win32") await chmod(fakeSsh, 0o755);
-    process.env.PATH = `${fakeBin}${delimiter}${originalPath || ""}`;
+  // The existing Windows smoke job cannot execute a synthetic .cmd file via
+  // child_process.spawn("ssh") without a shell; validation and persistence
+  // remain covered on Windows, while the transport probe is covered on POSIX.
+  it.skipIf(process.platform === "win32")(
+    "runs a bounded probe for a valid SSH target",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "vibe-remote-probe-"));
+      temporaryRoots.push(root);
+      const fakeBin = join(root, "bin");
+      await mkdir(fakeBin, { recursive: true });
+      const fakeSsh = join(fakeBin, "ssh");
+      await writeFile(
+        join(fakeBin, "fake-ssh.mjs"),
+        "process.stdin.resume(); process.stdin.on('end', () => process.stdout.write('vibe-replay-ssh-ok\\n'));",
+        "utf-8",
+      );
+      await writeFile(fakeSsh, '#!/bin/sh\nexec node "$(dirname "$0")/fake-ssh.mjs"\n', "utf-8");
+      await chmod(fakeSsh, 0o755);
+      process.env.PATH = `${fakeBin}:${originalPath || ""}`;
 
-    await expect(
-      testRemoteSourceConnection({
-        id: "remote-dev",
-        label: "Remote dev",
-        sshHost: "devbox",
-        providers: ["codex"],
-        connectTimeoutMs: 1_000,
-      }),
-    ).resolves.toEqual({ ok: true, message: "Connected to Remote dev." });
-  });
+      await expect(
+        testRemoteSourceConnection({
+          id: "remote-dev",
+          label: "Remote dev",
+          sshHost: "devbox",
+          providers: ["codex"],
+          connectTimeoutMs: 1_000,
+        }),
+      ).resolves.toEqual({ ok: true, message: "Connected to Remote dev." });
+    },
+  );
 });
 
 describe("remote cache path safety and identity", () => {
