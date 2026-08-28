@@ -26,7 +26,10 @@ import { classifyProject, mergeProjectIdentities, projectIdentityKey } from "@vi
 import { parseCodexSession } from "./providers/codex/parser.js";
 import { parseClaudeCoworkSession } from "@vibe-replay/provider-claude-code/claude-cowork/parser";
 import { parseCursorSession } from "./providers/cursor/parser.js";
+import { parseHermesSession } from "@vibe-replay/provider-hermes/parser";
+import { parseOpencodeSession } from "@vibe-replay/provider-opencode/parser";
 import { parsePiSession } from "./providers/pi/parser.js";
+import type { ContentBlock } from "@vibe-replay/provider-contract";
 import type { ProviderParseResult } from "./providers/types.js";
 import type {
   DataSource,
@@ -57,7 +60,9 @@ import { localDayKey, shortenPath } from "./utils.js";
 // v29: expand generic Cursor/Pi MCP name parsing so MCP calls cannot fall into
 // the ordinary tool facet merely because Cursor used an uppercase or opaque
 // MCP entrypoint name.
-export const SCANNER_VERSION = 29;
+// v30: preserve repeated rich-provider skill activations and MCP attribution.
+// v31: deduplicate streamed skill attribution and index OpenCode/Hermes usage.
+export const SCANNER_VERSION = 31;
 
 // Keep per-invocation detail bounded in the durable insight store. The full
 // event set is still used to compute usageSummary below; only the retained
@@ -192,6 +197,21 @@ function parseMcpUsage(rawName: string, input?: Record<string, unknown>): McpUsa
     }
   }
 
+  // Cursor's generic MCP bridge uses `mcp--` for calls that could not be
+  // represented by a stable server/tool name. Authentication failures still
+  // carry the concrete server identifier in the input, so retain that server
+  // instead of collapsing the event into Unknown.
+  if (
+    normalizedRawName === "mcp--" &&
+    typeof input?.serverIdentifier === "string" &&
+    input.serverIdentifier
+  ) {
+    return {
+      server: stripCursorServerScope(input.serverIdentifier),
+      attribution: "explicit",
+    };
+  }
+
   if (normalizedRawName.startsWith("mcp__")) {
     const [, server, ...toolParts] = rawName.split("__");
     const tool = toolParts.join("__");
@@ -297,6 +317,17 @@ function parseMcpUsage(rawName: string, input?: Record<string, unknown>): McpUsa
   return undefined;
 }
 
+function skillNameFromTool(block: Extract<ContentBlock, { type: "tool_use" }>): string | undefined {
+  if (block._skillName?.trim()) return block._skillName.trim();
+  const normalizedName = block.name.trim().toLowerCase();
+  if (normalizedName !== "skill" && normalizedName !== "skill_view") return undefined;
+  for (const key of ["name", "skill", "skillName", "skill_name", "slug"]) {
+    const value = block.input?.[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
 /** Results that still need the rich Cursor pass before usage facets are complete. */
 export function isPendingCursorUsageIndex(
   result: Pick<SessionScanResult, "provider" | "usageIndexed" | "transcriptStatus">,
@@ -334,7 +365,7 @@ function toolUsageEvent(
   const name = typeof rawName === "string" && rawName.trim() ? rawName : "Unknown";
   const mcp = options.mcpServer
     ? {
-        server: options.mcpServer,
+        server: stripCursorServerScope(options.mcpServer),
         tool: options.mcpTool,
         attribution: "explicit" as const,
       }
@@ -356,14 +387,8 @@ function toolUsageEvent(
   };
 }
 
-function summarizeUsage(
-  events: UsageEvent[],
-  skillsUsed?: Iterable<string>,
-  mcpServersUsed?: Iterable<string>,
-): SessionUsageSummary | undefined {
-  const skills = skillsUsed ? [...skillsUsed] : [];
-  const mcpServers = mcpServersUsed ? [...mcpServersUsed].map(normalizeMcpServerName) : [];
-  if (events.length === 0 && skills.length === 0 && mcpServers.length === 0) return undefined;
+function summarizeUsage(events: UsageEvent[]): SessionUsageSummary | undefined {
+  if (events.length === 0) return undefined;
   const summary: SessionUsageSummary = {
     tools: {},
     mcpServers: {},
@@ -393,13 +418,6 @@ function summarizeUsage(
       summary.totalDurationMs += event.durationMs;
       summary.durationCount++;
     }
-  }
-
-  for (const skill of skills) {
-    if (!summary.skills[skill]) summary.skills[skill] = 1;
-  }
-  for (const server of mcpServers) {
-    if (!summary.mcpServers[server]) summary.mcpServers[server] = 1;
   }
 
   return summary;
@@ -663,6 +681,7 @@ interface ScanLinePrLink {
  * field. Replaces an untyped `JSON.parse(...)` result.
  */
 interface ScanLine extends ScanLinePrLink {
+  uuid?: string;
   gitBranch?: string;
   entrypoint?: string;
   permissionMode?: string;
@@ -744,9 +763,24 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
     }
   }
   if (input.provider === "opencode") {
+    if (hasSqliteSessionMarker(input)) {
+      try {
+        return await scanOpencodeSession(input);
+      } catch {
+        // Keep discovery visible when a database is replaced or a session is
+        // removed between discovery and the rich pass.
+      }
+    }
     return buildLightweightOpencodeScanResult(input);
   }
   if (input.provider === "hermes") {
+    if (hasSqliteSessionMarker(input)) {
+      try {
+        return await scanHermesSession(input);
+      } catch {
+        // Fall back to the discovery summary for unavailable SQLite sources.
+      }
+    }
     return buildLightweightHermesScanResult(input);
   }
 
@@ -920,9 +954,17 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
         model = obj.message.model;
       }
       if (obj.attributionMcpServer) {
-        mcpServersUsed.add(normalizeMcpServerName(obj.attributionMcpServer));
+        mcpServersUsed.add(
+          normalizeMcpServerName(stripCursorServerScope(obj.attributionMcpServer)),
+        );
       }
-      if (obj.attributionSkill) skillsUsed.add(obj.attributionSkill);
+      if (obj.attributionSkill) {
+        const skillName = obj.attributionSkill.trim();
+        // attributionSkill is repeated response provenance, not a skill
+        // invocation. Keep it in the distinct vocabulary, but only concrete
+        // injection/Skill records contribute to usageSummary.skills.
+        if (skillName) skillsUsed.add(skillName);
+      }
 
       // Tool results carry the outcome of an earlier tool_use block, which is
       // the only place this raw path can learn whether a call actually failed.
@@ -981,6 +1023,29 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
         for (const block of msgContent) {
           if (block.type === "tool_use") {
             toolCallCount++;
+            const skillName = skillNameFromTool({
+              type: "tool_use",
+              name: typeof block.name === "string" ? block.name : "Unknown",
+              input:
+                block.input && typeof block.input === "object" && !Array.isArray(block.input)
+                  ? block.input
+                  : {},
+              id: typeof block.id === "string" ? block.id : `skill-${toolCallCount}`,
+            });
+            if (skillName) {
+              const event: UsageEvent = {
+                kind: "skill",
+                name: skillName,
+                skillName,
+                timestamp: obj.timestamp,
+                status: "unknown",
+                attribution: "explicit",
+              };
+              if (typeof block.id === "string") eventByToolUseId.set(block.id, event);
+              usageEvents.push(event);
+              skillsUsed.add(skillName);
+              continue;
+            }
             const event = toolUsageEvent(block.name, {
               input: block.input,
               timestamp: obj.timestamp,
@@ -1157,7 +1222,7 @@ export async function scanSession(input: ScanInput): Promise<SessionScanResult> 
     permissionMode,
     skillsUsed: skillsUsed.size > 0 ? [...skillsUsed].sort() : undefined,
     mcpServersUsed: mcpServersUsed.size > 0 ? [...mcpServersUsed].sort() : undefined,
-    usageSummary: summarizeUsage(usageEvents, skillsUsed, mcpServersUsed),
+    usageSummary: summarizeUsage(usageEvents),
     usageEvents: retainedUsageEvents(usageEvents),
     // A normal generic scan is the usage-aware path even when a source file
     // disappeared between discovery and reading. Rich-parser fallbacks need a
@@ -1255,6 +1320,63 @@ async function scanPiSession(input: ScanInput): Promise<SessionScanResult> {
   };
 
   const parsed = await parsePiSession(input.filePaths, sessionInfo);
+  return buildScanResultFromParsed(input, parsed);
+}
+
+function hasSqliteSessionMarker(
+  input: Pick<ScanInput, "filePaths" | "sourceFilePath" | "sessionId">,
+): boolean {
+  const paths = [...input.filePaths, input.sourceFilePath || ""];
+  return (
+    paths.some((path) => path.includes("#session:")) ||
+    input.sessionId.startsWith("ses_") ||
+    input.sessionId.startsWith("session_")
+  );
+}
+
+async function scanOpencodeSession(input: ScanInput): Promise<SessionScanResult> {
+  const sessionInfo: SessionInfo = {
+    provider: "opencode",
+    sessionId: input.sessionId,
+    slug: input.slug,
+    location: input.location,
+    transcriptStatus: input.transcriptStatus,
+    title: input.title,
+    project: input.project,
+    cwd: input.workspacePath || input.project,
+    version: "",
+    timestamp: input.timestamp || new Date().toISOString(),
+    lineCount: input.sourceLineCount || 0,
+    fileSize: input.sourceFileSize || 0,
+    filePath: input.filePaths[0] || input.sourceFilePath || "",
+    filePaths: input.filePaths,
+    firstPrompt: scanFallbackPrompt(input, "(OpenCode session)"),
+    model: input.discoveryModel,
+  };
+  const parsed = await parseOpencodeSession(input.filePaths, sessionInfo);
+  return buildScanResultFromParsed(input, parsed);
+}
+
+async function scanHermesSession(input: ScanInput): Promise<SessionScanResult> {
+  const sessionInfo: SessionInfo = {
+    provider: "hermes",
+    sessionId: input.sessionId,
+    slug: input.slug,
+    location: input.location,
+    transcriptStatus: input.transcriptStatus,
+    title: input.title,
+    project: input.project,
+    cwd: input.workspacePath || input.project,
+    version: "",
+    timestamp: input.timestamp || new Date().toISOString(),
+    lineCount: input.sourceLineCount || 0,
+    fileSize: input.sourceFileSize || 0,
+    filePath: input.filePaths[0] || input.sourceFilePath || "",
+    filePaths: input.filePaths,
+    firstPrompt: scanFallbackPrompt(input, "(Hermes session)"),
+    model: input.discoveryModel,
+  };
+  const parsed = await parseHermesSession(input.filePaths, sessionInfo);
   return buildScanResultFromParsed(input, parsed);
 }
 
@@ -1413,6 +1535,20 @@ function buildScanResultFromParsed(
   let derivedSubAgentCount = 0;
   const fileEditCounts = new Map<string, number>();
   const usageEvents: UsageEvent[] = [];
+  const skillActivations =
+    parsed.skillActivations && parsed.skillActivations.length > 0 ? parsed.skillActivations : [];
+  const pendingSkillActivations = new Map<string, number>();
+  for (const skill of skillActivations) {
+    const normalized = skill.trim();
+    if (normalized) {
+      pendingSkillActivations.set(normalized, (pendingSkillActivations.get(normalized) || 0) + 1);
+    }
+  }
+  const skillsUsed = new Set(
+    [...(parsed.skillsUsed || []), ...skillActivations]
+      .map((skill) => skill.trim())
+      .filter(Boolean),
+  );
 
   for (const [turnIndex, turn] of parsed.turns.entries()) {
     if (turn.role === "user" && !turn.subtype) {
@@ -1429,6 +1565,31 @@ function buildScanResultFromParsed(
     for (const block of turn.blocks) {
       if (block.type !== "tool_use") continue;
       toolCallCount++;
+      const skillName = skillNameFromTool(block);
+      if (skillName) {
+        const knownCount = pendingSkillActivations.get(skillName) || 0;
+        if (knownCount > 0) {
+          // Provider parsers report these activations separately so their
+          // repeated activation list remains available. Do not also count the
+          // underlying Skill tool as an ordinary tool call.
+          pendingSkillActivations.set(skillName, knownCount - 1);
+        } else {
+          // Some providers expose a canonical Skill tool but do not populate
+          // skillActivations. The tool block itself is still concrete evidence
+          // of one activation.
+          usageEvents.push({
+            kind: "skill",
+            name: skillName,
+            skillName,
+            turnIndex,
+            timestamp: turn.timestamp,
+            status: "unknown",
+            attribution: "explicit",
+          });
+          skillsUsed.add(skillName);
+        }
+        continue;
+      }
       usageEvents.push(
         toolUsageEvent(block.name, {
           input: block.input,
@@ -1436,7 +1597,9 @@ function buildScanResultFromParsed(
           timestamp: turn.timestamp,
           durationMs: block._durationMs,
           isError: block._isError,
-          hasResult: block._result !== undefined,
+          hasResult: block._hasResult ?? block._result !== undefined,
+          mcpServer: block._mcpServer,
+          mcpTool: block._mcpTool,
           mcpServerNames: parsed.mcpServerNames,
         }),
       );
@@ -1454,13 +1617,34 @@ function buildScanResultFromParsed(
       if (block.name === "Agent" && block._subAgent?.scenes) {
         for (const saScene of block._subAgent.scenes) {
           if (saScene.type !== "tool-call") continue;
+          toolCallCount++;
+          const saToolBlock = {
+            name: saScene.toolName || "Unknown",
+            input: saScene.input,
+            _skillName: undefined,
+          } as Extract<ContentBlock, { type: "tool_use" }>;
+          const saSkillName = skillNameFromTool(saToolBlock);
+          if (saSkillName) {
+            usageEvents.push({
+              kind: "skill",
+              name: saSkillName,
+              skillName: saSkillName,
+              timestamp: saScene.timestamp,
+              status: "unknown",
+              attribution: "explicit",
+            });
+            skillsUsed.add(saSkillName);
+            continue;
+          }
           usageEvents.push(
             toolUsageEvent(saScene.toolName, {
               input: saScene.input,
               timestamp: saScene.timestamp,
               durationMs: saScene.durationMs,
               isError: saScene.isError,
-              hasResult: saScene.result !== "",
+              hasResult:
+                (saScene as typeof saScene & { hasResult?: boolean }).hasResult ??
+                (saScene.result !== undefined && saScene.result !== ""),
               parentAgentId: block._subAgent.agentId,
               mcpServerNames: parsed.mcpServerNames,
             }),
@@ -1494,18 +1678,20 @@ function buildScanResultFromParsed(
   const firstPrompt = input.transcriptStatus
     ? ""
     : firstUserPrompt(parsed.turns) || input.firstPrompt || parsed.title;
-  for (const skill of parsed.skillsUsed || []) {
+  for (const skill of skillActivations) {
+    const normalized = skill.trim();
+    if (!normalized) continue;
     usageEvents.push({
       kind: "skill",
-      name: skill,
-      skillName: skill,
+      name: normalized,
+      skillName: normalized,
       status: "unknown",
       attribution: "session-metadata",
     });
   }
   const derivedMcpServers = new Set(
     (parsed.mcpServersUsed || []).map((server) =>
-      normalizeMcpServerName(parsed.mcpServerNames?.[server] || server),
+      normalizeMcpServerName(stripCursorServerScope(parsed.mcpServerNames?.[server] || server)),
     ),
   );
   for (const event of usageEvents) {
@@ -1543,9 +1729,9 @@ function buildScanResultFromParsed(
     compactionCount: parsed.compactions?.length || 0,
     entrypoint: parsed.entrypoint,
     permissionMode: parsed.permissionMode,
-    skillsUsed: parsed.skillsUsed,
+    skillsUsed: skillsUsed.size > 0 ? [...skillsUsed].sort() : undefined,
     mcpServersUsed: derivedMcpServers.size > 0 ? [...derivedMcpServers].sort() : undefined,
-    usageSummary: summarizeUsage(usageEvents, parsed.skillsUsed, derivedMcpServers),
+    usageSummary: summarizeUsage(usageEvents),
     usageEvents: retainedUsageEvents(usageEvents),
     usageIndexed: true,
     dataSource: parsed.dataSource,

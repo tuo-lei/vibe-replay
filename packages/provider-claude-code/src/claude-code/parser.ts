@@ -106,6 +106,14 @@ export async function parseClaudeCodeLines(
 
   // Skills used in the session (extracted from isMeta skill injection messages and attribution fields)
   const skillsUsed = new Set<string>();
+  const skillActivations: string[] = [];
+
+  const recordSkillActivation = (skillName: string) => {
+    const normalized = skillName.trim();
+    if (!normalized) return;
+    skillsUsed.add(normalized);
+    skillActivations.push(normalized);
+  };
 
   // MCP servers used (extracted from mcp__server__tool naming convention and attribution fields)
   const mcpServersUsed = new Set<string>();
@@ -118,6 +126,7 @@ export async function parseClaudeCodeLines(
 
   // Collect tool results by tool_use_id
   const toolResults = new Map<string, string>();
+  const toolResultIds = new Set<string>();
   // Collect tool error flags by tool_use_id
   const toolErrors = new Map<string, boolean>();
   // Collect tool result timestamps by tool_use_id (for duration calculation)
@@ -310,12 +319,12 @@ export async function parseClaudeCodeLines(
             .replace("Base directory for this skill: ", "")
             .trim();
           const skillName = skillPath.split("/").pop() || skillPath;
-          skillsUsed.add(skillName);
+          recordSkillActivation(skillName);
         }
         // Extract slash command name from command output
         if (text.startsWith("The user just ran /")) {
           const cmd = text.split("/")[1]?.split(/[\s\n]/)[0];
-          if (cmd) skillsUsed.add(`/${cmd}`);
+          if (cmd) recordSkillActivation(`/${cmd}`);
         }
         // Only emit context-injection scenes for content with real information value.
         // Skip local-command caveats (just a wrapper telling the model to ignore) and
@@ -366,6 +375,7 @@ export async function parseClaudeCodeLines(
         if (block.type === "tool_result") {
           const resultText = extractToolResultText(block);
           toolResults.set(block.tool_use_id, resultText);
+          toolResultIds.add(block.tool_use_id);
           if (obj.timestamp) toolResultTimestamps.set(block.tool_use_id, obj.timestamp);
           if (block.is_error) {
             toolErrors.set(block.tool_use_id, true);
@@ -408,7 +418,13 @@ export async function parseClaudeCodeLines(
     if (role === "assistant" && msgId && Array.isArray(msgContent)) {
       if (!model && obj.message.model) model = obj.message.model;
       if (obj.attributionMcpServer) mcpServersUsed.add(obj.attributionMcpServer);
-      if (obj.attributionSkill) skillsUsed.add(obj.attributionSkill);
+      if (obj.attributionSkill) {
+        const skillName = obj.attributionSkill.trim();
+        // attributionSkill describes which skill supplied an assistant
+        // response. It is repeated on streamed fragments and across follow-up
+        // assistant messages, so it is vocabulary evidence, not an activation.
+        if (skillName) skillsUsed.add(skillName);
+      }
       // attributionMcpTool is tool-level detail; the replay metadata currently
       // summarizes MCP usage by server only, so keep the typed field for
       // forward compatibility without surfacing another aggregate today.
@@ -441,13 +457,37 @@ export async function parseClaudeCodeLines(
       }
 
       const blocks = assistantBlocks.get(msgId)!;
+      const seenToolIds = new Set(
+        blocks
+          .filter(
+            (candidate): candidate is Extract<ContentBlock, { type: "tool_use" }> =>
+              candidate.type === "tool_use",
+          )
+          .map((candidate) => candidate.id),
+      );
       for (const block of msgContent as ContentBlock[]) {
         if (block.type === "thinking") {
           blocks.push({ type: "thinking", thinking: block.thinking });
         } else if (block.type === "text") {
           blocks.push(block);
         } else if (block.type === "tool_use") {
-          blocks.push(block);
+          if (seenToolIds.has(block.id)) continue;
+          seenToolIds.add(block.id);
+          const skillName =
+            block.name.toLowerCase() === "skill"
+              ? typeof block.input?.name === "string"
+                ? block.input.name.trim()
+                : typeof block.input?.skill === "string"
+                  ? block.input.skill.trim()
+                  : undefined
+              : undefined;
+          blocks.push({
+            ...block,
+            ...(obj.attributionMcpServer ? { _mcpServer: obj.attributionMcpServer } : {}),
+            ...(obj.attributionMcpTool ? { _mcpTool: obj.attributionMcpTool } : {}),
+            ...(skillName ? { _skillName: skillName } : {}),
+          });
+          if (skillName) recordSkillActivation(skillName);
           // Track MCP server usage from mcp__server__tool naming convention
           if (block.name.startsWith("mcp__")) {
             const server = block.name.split("__")[1];
@@ -474,6 +514,7 @@ export async function parseClaudeCodeLines(
     let prevToolEndTs = assistantTimestamps.get(msgId);
     const enrichedBlocks = blocks.map((block) => {
       if (block.type === "tool_use") {
+        const hasResult = toolResultIds.has(block.id);
         const result = toolResults.get(block.id) || "";
         const images = toolImages.get(block.id);
         const isError = toolErrors.get(block.id);
@@ -490,6 +531,7 @@ export async function parseClaudeCodeLines(
         if (resultTs) prevToolEndTs = resultTs;
         return {
           ...block,
+          _hasResult: hasResult,
           _result: result,
           _images: images,
           ...(isError ? { _isError: true } : {}),
@@ -643,6 +685,7 @@ export async function parseClaudeCodeLines(
     serviceTier,
     truncatedResponses: truncatedCount > 0 ? truncatedCount : undefined,
     skillsUsed: skillsUsed.size > 0 ? [...skillsUsed].sort() : undefined,
+    skillActivations: skillActivations.length > 0 ? skillActivations : undefined,
     mcpServersUsed: mcpServersUsed.size > 0 ? [...mcpServersUsed].sort() : undefined,
     agentName,
     worktree,
@@ -884,6 +927,7 @@ interface SubAgentParsed {
     toolName?: string;
     input?: Record<string, any>;
     result?: string;
+    hasResult?: boolean;
     isError?: boolean;
     timestamp?: string;
   }>;
@@ -954,6 +998,7 @@ async function readSubagents(
 
     // Track tool results for enrichment
     const saToolResults = new Map<string, string>();
+    const saToolResultIds = new Set<string>();
     const saToolErrors = new Map<string, boolean>();
 
     // Collect assistant blocks by message ID (same dedup as main parser)
@@ -1003,6 +1048,7 @@ async function readSubagents(
           if (block.type === "tool_result") {
             const resultText = extractToolResultText(block as ContentBlock);
             saToolResults.set(block.tool_use_id, resultText.slice(0, 1000));
+            saToolResultIds.add(block.tool_use_id);
             if (block.is_error) saToolErrors.set(block.tool_use_id, true);
           }
         }
@@ -1032,7 +1078,17 @@ async function readSubagents(
         }
 
         const blocks = saAssistantBlocks.get(msgId)!;
+        const seenToolIds = new Set(
+          blocks
+            .filter(
+              (candidate): candidate is Extract<ContentBlock, { type: "tool_use" }> =>
+                candidate.type === "tool_use",
+            )
+            .map((candidate) => candidate.id),
+        );
         for (const block of msgContent) {
+          if (block.type === "tool_use" && seenToolIds.has(block.id)) continue;
+          if (block.type === "tool_use") seenToolIds.add(block.id);
           if (block.type === "thinking" || block.type === "text" || block.type === "tool_use") {
             blocks.push(block);
           }
@@ -1061,12 +1117,14 @@ async function readSubagents(
           }
         } else if (block.type === "tool_use") {
           const toolResult = saToolResults.get(block.id) || "";
+          const hasResult = saToolResultIds.has(block.id);
           const isError = saToolErrors.get(block.id);
           scenes.push({
             type: "tool-call",
             toolName: block.name,
             input: block.input,
             result: toolResult,
+            hasResult,
             isError: isError || false,
             timestamp: ts,
           });

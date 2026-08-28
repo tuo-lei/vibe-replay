@@ -118,7 +118,7 @@ export async function parseOpencodeSession(
     );
   }
 
-  const opened = await openOpencodeDb();
+  const opened = await openOpencodeDb(hintedDbPath(paths, sessionInfo) || undefined);
   if (!opened) {
     throw new Error(`opencode database not found at ${opencodeDbPath()}`);
   }
@@ -152,6 +152,19 @@ export function resolveSessionId(paths: string[], sessionInfo?: SessionInfo): st
   return undefined;
 }
 
+function hintedDbPath(paths: string[], sessionInfo?: SessionInfo): string | undefined {
+  for (const path of paths) {
+    const markerIndex = path.indexOf("#session:");
+    if (markerIndex >= 0) {
+      const dbPath = path.slice(0, markerIndex);
+      if (dbPath) return dbPath;
+    }
+  }
+  const filePath = sessionInfo?.filePath;
+  if (filePath?.includes("#session:")) return filePath.split("#session:", 1)[0];
+  return undefined;
+}
+
 export function parseSessionFromDb(
   db: Database,
   sessionId: string,
@@ -176,6 +189,8 @@ export function parseSessionFromDb(
   const allTimestamps: string[] = [];
   const compactions: Compaction[] = [];
   const tokenByModel = new Map<string, TokenUsage>();
+  const skillsUsed = new Set<string>();
+  const skillActivations: string[] = [];
   let totalTokens: TokenUsage | undefined;
   let startTime: string | undefined;
   let endTime: string | undefined;
@@ -261,6 +276,11 @@ export function parseSessionFromDb(
 
       const blocks = assistantBlocksFromParts(db, message.id, parseWarnings);
       if (blocks.length === 0) continue;
+      for (const block of blocks) {
+        if (block.type !== "tool_use" || !block._skillName) continue;
+        skillsUsed.add(block._skillName);
+        skillActivations.push(block._skillName);
+      }
       if (meta.finish === "max_tokens") truncatedResponses++;
 
       const modelForTurn = meta.modelID || model;
@@ -304,6 +324,8 @@ export function parseSessionFromDb(
     ...(tokenUsageByModel ? { tokenUsageByModel } : {}),
     ...(Number.isFinite(reportedCostUsd) && reportedCostUsd > 0 ? { reportedCostUsd } : {}),
     compactions: compactions.length > 0 ? compactions : undefined,
+    ...(skillsUsed.size > 0 ? { skillsUsed: [...skillsUsed] } : {}),
+    ...(skillActivations.length > 0 ? { skillActivations } : {}),
     parseWarnings: parseWarnings.length > 0 ? parseWarnings : undefined,
     ...(truncatedResponses > 0 ? { truncatedResponses } : {}),
   };
@@ -357,7 +379,11 @@ function assistantBlocksFromParts(
         const input = mapOpencodeToolArgs(toolName, state.input);
         const result = toolResultText(part);
         const isError = state.status === "error";
-        const isPending = state.status === "running";
+        const isPending = state.status === "running" || state.status === "pending";
+        const hasResult =
+          state.status === "completed" ||
+          state.status === "error" ||
+          (state.status !== "running" && state.status !== "pending" && result.length > 0);
         const durationMs = durationFromState(state.time);
 
         // A completed tool part supersedes its earlier pending marker: drop the
@@ -374,10 +400,15 @@ function assistantBlocksFromParts(
           id: callID,
           name: mapOpencodeToolName(toolName),
           input,
-          ...(result ? { _result: result } : {}),
+          ...(hasResult ? { _hasResult: true, _result: result } : { _hasResult: false }),
           ...(isError ? { _isError: true } : {}),
           ...(isPending ? { _isPendingMarker: true } : {}),
           ...(durationMs ? { _durationMs: durationMs } : {}),
+          ...(toolName.toLowerCase() === "skill" &&
+          typeof input.name === "string" &&
+          input.name.trim()
+            ? { _skillName: input.name.trim() }
+            : {}),
         };
         blocks.push(block);
         if (isPending) {

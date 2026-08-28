@@ -236,6 +236,7 @@ function projectedCursorBubbleSelectSql(): string {
     `json_extract(${value}, '$.toolFormerData.name') AS toolName`,
     `json_extract(${value}, '$.toolFormerData.params') AS toolParams`,
     `${truncatedToolResult} AS toolResult`,
+    `json_extract(${value}, '$.toolFormerData.result') IS NOT NULL AS toolHasResult`,
     `length(${toolResult}) AS toolResultLength`,
     `json_extract(${value}, '$.toolFormerData.toolCallId') AS toolCallId`,
     `json_extract(${value}, '$.pullRequests') AS pullRequests`,
@@ -851,15 +852,23 @@ function projectedCursorBubbleRowToBubble(row: Record<string, any>): Record<stri
       typeof row.toolResult === "string" ? row.toolResult : valueToString(row.toolResult);
     const parsedResultLength = Number(row.toolResultLength);
     const resultLength = Number.isFinite(parsedResultLength) ? parsedResultLength : result.length;
+    const hasResult =
+      row.toolHasResult === undefined
+        ? row.toolResult !== null && row.toolResult !== undefined
+        : Number(row.toolHasResult) !== 0;
     bubble.toolFormerData = {
       name: valueToString(row.toolName),
       ...(row.toolParams !== null && row.toolParams !== undefined
         ? { params: optionalJsonColumn(row.toolParams) ?? row.toolParams }
         : {}),
-      result:
-        resultLength > MAX_CURSOR_GLOBAL_STATE_TOOL_RESULT_CHARS
-          ? `${result}\n... (truncated by vibe-replay, ${resultLength} chars total)`
-          : result,
+      ...(hasResult
+        ? {
+            result:
+              resultLength > MAX_CURSOR_GLOBAL_STATE_TOOL_RESULT_CHARS
+                ? `${result}\n... (truncated by vibe-replay, ${resultLength} chars total)`
+                : result,
+          }
+        : {}),
       ...(row.toolCallId ? { toolCallId: valueToString(row.toolCallId) } : {}),
     };
   }
@@ -2109,6 +2118,7 @@ function parseToolFormerBlock(
   const parsedParams = parseJson<Record<string, any>>(toolFormerData.params);
   const paramsRaw = parsedParams ?? toolFormerData.params ?? {};
   const result = extractToolResultText(toolFormerData.result);
+  const hasResult = Object.prototype.hasOwnProperty.call(toolFormerData, "result");
 
   return {
     type: "tool_use",
@@ -2117,7 +2127,8 @@ function parseToolFormerBlock(
       `cursor-bubble-${bubbleId}`,
     name: mapCursorToolName(name),
     input: mapToolArgs(name, paramsRaw, result),
-    _result: result,
+    _hasResult: hasResult,
+    ...(hasResult ? { _result: result } : {}),
     ...(hasToolError(toolFormerData.result) ? { _isError: true } : {}),
   };
 }
@@ -3429,7 +3440,8 @@ function parseAssistantContent(
         id: b.toolCallId,
         name: mapCursorToolName(b.toolName),
         input: mapToolArgs(b.toolName, b.args || {}, result?.result || ""),
-        _result: result?.result || "",
+        _hasResult: result !== undefined,
+        ...(result !== undefined ? { _result: result.result } : {}),
         ...(result?.isError ? { _isError: true } : {}),
         ...(result?.executionTimeMs ? { _durationMs: result.executionTimeMs } : {}),
       };

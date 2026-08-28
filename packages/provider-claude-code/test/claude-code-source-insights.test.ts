@@ -7,7 +7,7 @@
  */
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseClaudeCodeSession } from "../src/claude-code/parser.js";
+import { parseClaudeCodeLines, parseClaudeCodeSession } from "../src/claude-code/parser.js";
 import { transformToReplay } from "./helpers/transform.js";
 import type { ContentBlock } from "@vibe-replay/provider-contract";
 
@@ -67,6 +67,34 @@ describe("Claude Code source insights: isMeta as context-injection", () => {
   it("extracts skillsUsed from isMeta skill injections", async () => {
     const result = await parseClaudeCodeSession(FIXTURE);
     expect(result.skillsUsed).toEqual(["auth-skill"]);
+  });
+
+  it("preserves repeated skill activations separately from distinct skill names", async () => {
+    const result = await parseClaudeCodeLines(
+      [
+        {
+          type: "user",
+          isMeta: true,
+          timestamp: "2026-03-31T10:05:01Z",
+          message: {
+            role: "user",
+            content: "Base directory for this skill: /Users/test/skills/auth-skill",
+          },
+        },
+        {
+          type: "user",
+          isMeta: true,
+          timestamp: "2026-03-31T10:06:01Z",
+          message: {
+            role: "user",
+            content: "Base directory for this skill: /Users/test/skills/auth-skill",
+          },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    expect(result.skillsUsed).toEqual(["auth-skill"]);
+    expect(result.skillActivations).toEqual(["auth-skill", "auth-skill"]);
   });
 
   it("passes skillsUsed through to ReplaySession", async () => {
@@ -187,5 +215,32 @@ describe("Claude Code source insights: MCP server detection", () => {
     expect(mcpScene!.type === "tool-call" && mcpScene!.toolName).toBe(
       "mcp__claude-in-chrome__tabs_context_mcp",
     );
+  });
+
+  it("preserves message-level MCP attribution on generic tool blocks", async () => {
+    const result = await parseClaudeCodeLines(
+      [
+        {
+          type: "assistant",
+          timestamp: "2026-03-31T10:05:03Z",
+          attributionMcpServer: "sourcegraph",
+          attributionMcpTool: "search",
+          message: {
+            role: "assistant",
+            id: "msg_attributed_mcp",
+            content: [{ type: "tool_use", id: "tool_attributed", name: "tool", input: {} }],
+          },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+    const tool = result.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.type === "tool_use");
+
+    expect(tool).toMatchObject({
+      type: "tool_use",
+      _mcpServer: "sourcegraph",
+      _mcpTool: "search",
+    });
   });
 });

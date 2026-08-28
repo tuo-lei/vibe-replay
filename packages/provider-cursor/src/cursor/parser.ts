@@ -422,6 +422,7 @@ async function parseCursorJsonl(
   const toolResults = new Map<string, CursorToolResult>();
   const toolErrors = new Map<string, boolean>();
   const toolImages = new Map<string, string[]>();
+  const seenToolUseIds = new Set<string>();
   const parseWarnings: NonNullable<ProviderParseResult["parseWarnings"]> = [];
   const sortedTranscriptPaths = await sortByMtime(transcriptPaths);
   const sessionId = basename(sortedTranscriptPaths[sortedTranscriptPaths.length - 1], ".jsonl");
@@ -543,6 +544,7 @@ async function parseCursorJsonl(
               id: `cursor-marker-${syntheticToolId++}`,
               name: markerParsed.markerName,
               input: { marker: markerParsed.markerName },
+              _hasResult: false,
               _isPendingMarker: true,
             });
           } else {
@@ -561,16 +563,30 @@ async function parseCursorJsonl(
           const rawName =
             typeof block.name === "string" && block.name.trim() ? block.name.trim() : "Tool";
           const name = deps.mapCursorToolName(rawName);
+          const id =
+            typeof block.id === "string" && block.id.trim()
+              ? block.id
+              : `cursor-inline-${syntheticToolId++}`;
+          if (seenToolUseIds.has(id)) continue;
+          seenToolUseIds.add(id);
+          const mappedInput = deps.mapToolArgs(rawName, block.input);
+          const skillName =
+            rawName.toLowerCase() === "skill"
+              ? ["name", "skill", "skillName", "skill_name"]
+                  .map((key) => mappedInput?.[key])
+                  .find(
+                    (value): value is string =>
+                      typeof value === "string" && value.trim().length > 0,
+                  )
+              : undefined;
           blocks.push({
             type: "tool_use",
-            id:
-              typeof block.id === "string" && block.id.trim()
-                ? block.id
-                : `cursor-inline-${syntheticToolId++}`,
+            id,
             name,
             // Keep the raw name here because Cursor raw tools carry different arg
             // schemas even when they map to the same canonical replay tool.
-            input: deps.mapToolArgs(rawName, block.input),
+            input: mappedInput,
+            ...(skillName ? { _skillName: skillName.trim() } : {}),
           });
         }
       }
@@ -821,6 +837,7 @@ async function parseCursorSubagentTranscript(
   const toolErrors = new Set<string>();
   const toolImages = new Map<string, string[]>();
   const pendingTools: PendingCursorSubagentTool[] = [];
+  const seenToolIds = new Set<string>();
 
   const lines = content.split("\n");
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
@@ -899,6 +916,9 @@ async function parseCursorSubagentTranscript(
       if (block?.type !== "tool_use") continue;
       const rawName =
         typeof block.name === "string" && block.name.trim() ? block.name.trim() : "Tool";
+      const id = typeof block.id === "string" && block.id.trim() ? block.id : undefined;
+      if (id && seenToolIds.has(id)) continue;
+      if (id) seenToolIds.add(id);
       const scene: Extract<Scene, { type: "tool-call" }> = {
         type: "tool-call",
         toolName: deps.mapCursorToolName(rawName),
@@ -910,7 +930,7 @@ async function parseCursorSubagentTranscript(
       scenes.push(scene);
       pendingTools.push({
         scene,
-        ...(typeof block.id === "string" && block.id.trim() ? { id: block.id } : {}),
+        ...(id ? { id } : {}),
         rawName,
         rawInput: block.input,
         timestamp,
@@ -1236,6 +1256,7 @@ function attachToolResults(
       if (block.type !== "tool_use" || typeof block.id !== "string") continue;
       const result = toolResults.get(block.id);
       if (result !== undefined) {
+        block._hasResult = true;
         block._result = result.result;
         block.input = deps.mapToolArgs(block.name, block.input, result.result);
         const durationMs = durationBetween(turn.timestamp, result.timestamp);
@@ -1541,6 +1562,7 @@ function attachToolEvents(
       ...tool.input,
     };
     marker.block._result = tool.result;
+    marker.block._hasResult = true;
     if (tool.timestamp) marker.block._resultTimestamp = tool.timestamp;
     const durationMs = durationBetween(marker.turn.timestamp, tool.timestamp);
     if (durationMs !== undefined) marker.block._durationMs = durationMs;
@@ -1573,8 +1595,14 @@ function attachToolEvents(
     // Consume the sidecar belonging to an inline-resolved call as well. Without
     // advancing here, consecutive same-name calls can reuse the first call's
     // sidecar result when the later call is still unresolved.
-    if (typeof block._result === "string") continue;
+    if (
+      block._hasResult === true ||
+      (block._hasResult === undefined && typeof block._result === "string")
+    ) {
+      continue;
+    }
     block._result = tool.result;
+    block._hasResult = true;
     if (tool.timestamp) block._resultTimestamp = tool.timestamp;
     block.input = { ...block.input, ...tool.input };
     try {
@@ -1616,6 +1644,7 @@ function toToolUseBlock(tool: ToolEvent): ContentBlock {
     id: tool.id,
     name: tool.name,
     input: tool.input,
+    _hasResult: true,
     _result: tool.result,
     ...(tool.timestamp ? { _resultTimestamp: tool.timestamp } : {}),
   };

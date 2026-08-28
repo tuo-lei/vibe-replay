@@ -218,6 +218,7 @@ export function parseSessionFromDb(
   const compactions: Compaction[] = [];
   const summaryCompactions: Compaction[] = [];
   const skillsUsed = new Set<string>();
+  const skillActivations: string[] = [];
   let totalTokens: TokenUsage | undefined;
   let startTime: string | undefined;
   let endTime: string | undefined;
@@ -278,13 +279,21 @@ export function parseSessionFromDb(
           id: call.call_id || call.id || `hermes-${rawName}-${message.id}`,
           name,
           input: mappedInput,
+          ...(rawName === "skill_view" &&
+          typeof mappedInput.name === "string" &&
+          mappedInput.name.trim()
+            ? { _skillName: mappedInput.name.trim() }
+            : {}),
         };
         blocks.push(block);
         pendingResults.set(block.id, block);
 
         if (rawName === "skill_view") {
-          const skillName = typeof mappedInput.name === "string" ? mappedInput.name : "";
-          if (skillName) skillsUsed.add(skillName);
+          const skillName = typeof mappedInput.name === "string" ? mappedInput.name.trim() : "";
+          if (skillName) {
+            skillsUsed.add(skillName);
+            skillActivations.push(skillName);
+          }
         }
       }
 
@@ -304,9 +313,32 @@ export function parseSessionFromDb(
 
     if (message.role === "tool") {
       const block = message.tool_call_id ? pendingResults.get(message.tool_call_id) : undefined;
-      if (!block) continue; // orphan result (no matching tool_use) — drop
       const result = (message.content || "").trim();
+      if (!block) {
+        // A persisted tool result is concrete evidence of an invocation even
+        // when its assistant start record was lost during compaction/export.
+        // Keep it as a synthetic assistant tool block instead of undercounting.
+        const rawName = message.tool_name || "Unknown";
+        turns.push({
+          role: "assistant",
+          timestamp,
+          blocks: [
+            {
+              type: "tool_use",
+              id: message.tool_call_id || `hermes-orphan-${message.id}`,
+              name: mapHermesToolName(rawName),
+              input: mapHermesToolArgs(rawName, {}),
+              _hasResult: true,
+              _result: result,
+            },
+          ],
+          ...(model ? { model } : {}),
+        });
+        continue;
+      }
+      block._hasResult = true;
       if (result) block._result = result;
+      else block._result = "";
       pendingResults.delete(block.id);
       continue;
     }
@@ -365,6 +397,7 @@ export function parseSessionFromDb(
     compactions: compactions.length > 0 ? compactions : undefined,
     gitBranch: session?.git_branch || undefined,
     ...(skillsUsed.size > 0 ? { skillsUsed: Array.from(skillsUsed) } : {}),
+    ...(skillActivations.length > 0 ? { skillActivations } : {}),
     parseWarnings: parseWarnings.length > 0 ? parseWarnings : undefined,
     ...(truncatedResponses > 0 ? { truncatedResponses } : {}),
   };

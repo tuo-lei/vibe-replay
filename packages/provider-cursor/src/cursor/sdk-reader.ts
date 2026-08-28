@@ -595,7 +595,12 @@ export function applySdkEnrichmentToTurns(
       if (block.type !== "tool_use") continue;
       // Only enrich when the JSONL block lacks a result. Empty-string results
       // are valid tool outputs, so any string `_result` counts as already resolved.
-      if (typeof block._result === "string") continue;
+      if (
+        block._hasResult === true ||
+        (block._hasResult === undefined && typeof block._result === "string")
+      ) {
+        continue;
+      }
 
       // Positional pairing only holds while both streams agree. When they drift
       // (SDK-only calls, renamed tools), find the next compatible call instead of
@@ -610,6 +615,7 @@ export function applySdkEnrichmentToTurns(
       if (sdkCall.result === undefined) continue;
 
       block._result = sdkCall.result;
+      block._hasResult = true;
       if (sdkCall.isError) block._isError = true;
       if (sdkCall.durationMs !== undefined && block._durationMs === undefined) {
         block._durationMs = sdkCall.durationMs;
