@@ -66,7 +66,8 @@ import { localDayKey, shortenPath } from "./utils.js";
 // v31: deduplicate streamed skill attribution and index OpenCode/Hermes usage.
 // v32: add provider coverage reporting, rich Claude scans, and Cursor compaction
 // summary detection.
-export const SCANNER_VERSION = 32;
+// v33: reject Cursor request-relative timing values as session timestamps.
+export const SCANNER_VERSION = 33;
 
 // Keep per-invocation detail bounded in the durable insight store. The full
 // event set is still used to compute usageSummary below; only the retained

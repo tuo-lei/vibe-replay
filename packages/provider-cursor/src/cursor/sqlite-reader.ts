@@ -932,6 +932,16 @@ function toIsoTimestamp(value: unknown): string | undefined {
   return undefined;
 }
 
+function toPlausibleCursorTimestamp(value: unknown): string | undefined {
+  const iso = toIsoTimestamp(value);
+  if (!iso) return undefined;
+  const timestampMs = Date.parse(iso);
+  // Cursor's timingInfo.clientStartTime is sometimes elapsed milliseconds
+  // since the request began, not an epoch timestamp. Do not turn that value
+  // into a fake 1970 session start.
+  return timestampMs >= Date.UTC(2000, 0, 1) ? iso : undefined;
+}
+
 function cursorComposerSidecarMetadata(composer: Record<string, any>): CursorSidecars | undefined {
   const conversationCheckpointLastUpdatedAt = toIsoTimestamp(
     composer.conversationCheckpointLastUpdatedAt,
@@ -983,11 +993,11 @@ function bubbleTimestamp(bubble: Record<string, any>): string | undefined {
       ? (bubble.timingInfo as Record<string, any>)
       : undefined;
   return (
-    toIsoTimestamp(bubble.createdAt) ||
-    toIsoTimestamp(bubble.lastUpdatedAt) ||
-    toIsoTimestamp(timingInfo?.clientStartTime) ||
-    toIsoTimestamp(timingInfo?.clientEndTime) ||
-    toIsoTimestamp(timingInfo?.clientSettleTime)
+    toPlausibleCursorTimestamp(bubble.createdAt) ||
+    toPlausibleCursorTimestamp(bubble.lastUpdatedAt) ||
+    toPlausibleCursorTimestamp(timingInfo?.clientStartTime) ||
+    toPlausibleCursorTimestamp(timingInfo?.clientEndTime) ||
+    toPlausibleCursorTimestamp(timingInfo?.clientSettleTime)
   );
 }
 
@@ -1373,9 +1383,7 @@ export async function discoverSqliteOnlySessions(
 
       const project = hashToProject.get(entry.workspaceHash) || "";
       const firstPrompt = meta.name || "(sqlite-only session)";
-      const timestamp = meta.createdAt
-        ? new Date(meta.createdAt).toISOString()
-        : new Date(entry.mtimeMs).toISOString();
+      const timestamp = toIsoTimestamp(meta.createdAt) || new Date(entry.mtimeMs).toISOString();
 
       sessions.push({
         provider: "cursor",
@@ -2077,7 +2085,7 @@ function buildCursorStoreResult(
     model:
       normalizeCursorModelName(metaJson.lastUsedModel) ||
       turnStats.find((stat) => typeof stat.model === "string" && stat.model)?.model,
-    startTime: metaJson.createdAt ? new Date(metaJson.createdAt).toISOString() : undefined,
+    startTime: toIsoTimestamp(metaJson.createdAt),
     ...(totalDurationMs !== undefined ? { totalDurationMs } : {}),
     ...(turnStats.length > 0 ? { turnStats } : {}),
     turns,

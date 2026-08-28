@@ -1477,6 +1477,14 @@ export async function startServer(
 
   const app = new Hono();
 
+  // Dashboard APIs are mutable scan snapshots. Prevent browser/proxy caching
+  // from serving an earlier aggregate after a background scan completes.
+  app.use("/api/*", async (c, next) => {
+    await next();
+    c.header("Cache-Control", "no-store, max-age=0");
+    c.header("Pragma", "no-cache");
+  });
+
   // Serve viewer HTML with editor flag (prod) or redirect to Vite dev server (dev)
   app.get("/", (c) => {
     if (isDevMode) {

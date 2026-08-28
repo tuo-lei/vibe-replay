@@ -97,6 +97,21 @@ describe("Cursor compaction metadata", () => {
   });
 });
 
+describe("Cursor timestamp normalization", () => {
+  it("does not treat request-relative timing as a 1970 session timestamp", () => {
+    expect(
+      __testables.bubbleTimestamp({
+        timingInfo: { clientStartTime: 3568.9 },
+      }),
+    ).toBeUndefined();
+    expect(
+      __testables.bubbleTimestamp({
+        timingInfo: { clientStartTime: 3568.9, clientEndTime: 1_754_501_490_954 },
+      }),
+    ).toBe("2025-08-06T17:31:30.954Z");
+  });
+});
+
 describe("countComposerConversationHeaders", () => {
   it("returns zero when headers are missing", () => {
     expect(countComposerConversationHeaders({})).toBe(0);
