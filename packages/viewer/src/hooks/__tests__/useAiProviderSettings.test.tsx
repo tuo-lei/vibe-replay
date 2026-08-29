@@ -129,4 +129,35 @@ describe("useAiProviderSettings", () => {
     expect(result.current.aiProvidersLoading).toBe(false);
     expect(result.current.aiProvidersError).toBeNull();
   });
+
+  it("ignores a refresh that finishes after the hook is disabled", async () => {
+    let resolvePending!: (response: Response) => void;
+    const pendingResponse = new Promise<Response>((resolve) => {
+      resolvePending = resolve;
+    });
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockReset();
+    fetchMock.mockImplementationOnce(() => pendingResponse);
+
+    const { result, rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) => useAiProviderSettings(enabled),
+      { initialProps: { enabled: true } },
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    rerender({ enabled: false });
+    await act(async () => {
+      resolvePending(
+        new Response(JSON.stringify({ providers, defaultProvider: { id: "custom-openai" } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(result.current.aiProviders).toEqual([]);
+    expect(result.current.aiProviderId).toBeNull();
+    expect(result.current.aiModelId).toBeNull();
+  });
 });

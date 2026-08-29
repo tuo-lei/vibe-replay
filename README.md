@@ -221,8 +221,9 @@ The CLI auto-discovers sessions on your machine, parses conversation data from a
   Custom endpoint metadata is stored separately in `~/.vibe-replay/ai-providers.json` with the
   same local-only permissions; the endpoint file never contains the custom API key. Enter a base
   URL such as `http://127.0.0.1:58788/v1` in Settings or the AI Studio provider dialog, not
-  `/models` or `/chat/completions`. The selected provider/model is remembered automatically as a
-  browser-local preference; model lists are searchable rather than hardcoded.
+  `/models` or `/chat/completions`. HTTP is restricted to loopback endpoints; use HTTPS for a
+  remote gateway. The selected provider/model is remembered automatically as a browser-local
+  preference; model lists are searchable rather than hardcoded.
 
 ## Development
 

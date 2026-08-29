@@ -424,27 +424,93 @@ describe("PiAiRuntime", () => {
       });
 
       await runtime.configureCustomProvider(
-        { baseUrl: "http://old-gateway.example/v1" },
+        { baseUrl: "https://old-gateway.example/v1" },
         "old-gateway-secret",
       );
-      await runtime.configureCustomProvider({ baseUrl: "http://old-gateway.example/v1" });
-      await runtime.configureCustomProvider({ baseUrl: "http://new-gateway.example/v1" });
+      await runtime.configureCustomProvider({ baseUrl: "https://old-gateway.example/v1" });
+      await runtime.configureCustomProvider({ baseUrl: "https://new-gateway.example/v1" });
 
       expect(requests).toEqual([
         {
-          url: "http://old-gateway.example/v1/models",
+          url: "https://old-gateway.example/v1/models",
           authorization: "Bearer old-gateway-secret",
         },
         {
-          url: "http://old-gateway.example/v1/models",
+          url: "https://old-gateway.example/v1/models",
           authorization: "Bearer old-gateway-secret",
         },
         {
-          url: "http://new-gateway.example/v1/models",
+          url: "https://new-gateway.example/v1/models",
           authorization: null,
         },
       ]);
       expect(await runtime.credentials.read("custom-openai")).toBeUndefined();
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it("serializes concurrent custom endpoint and key updates", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-ai-runtime-"));
+    temporaryRoots.push(root);
+    const requests: Array<{ url: string; authorization: string | null }> = [];
+    let releaseFirst!: () => void;
+    let signalFirstStarted!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+      signalFirstStarted = resolve;
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const headers = new Headers(init?.headers);
+      requests.push({ url, authorization: headers.get("authorization") });
+      if (requests.length === 1) {
+        signalFirstStarted();
+        await new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        });
+      }
+      const modelId = url.includes("gateway-a") ? "model-a" : "model-b";
+      return new Response(JSON.stringify({ data: [{ id: modelId }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    try {
+      const authPath = join(root, "ai-auth.json");
+      const customConfigPath = join(root, "ai-providers.json");
+      const firstRuntime = createAiRuntime({ authPath, customConfigPath });
+      const secondRuntime = createAiRuntime({ authPath, customConfigPath });
+
+      const first = firstRuntime.configureCustomProvider(
+        { baseUrl: "http://127.0.0.1:58788/gateway-a" },
+        "gateway-a-secret",
+      );
+      await firstStarted;
+
+      const second = secondRuntime.configureCustomProvider(
+        { baseUrl: "http://127.0.0.1:58788/gateway-b" },
+        "gateway-b-secret",
+      );
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(requests).toHaveLength(1);
+
+      releaseFirst();
+      await Promise.all([first, second]);
+
+      expect(requests).toEqual([
+        {
+          url: "http://127.0.0.1:58788/gateway-a/models",
+          authorization: "Bearer gateway-a-secret",
+        },
+        {
+          url: "http://127.0.0.1:58788/gateway-b/models",
+          authorization: "Bearer gateway-b-secret",
+        },
+      ]);
+      expect(await secondRuntime.credentials.read("custom-openai")).toEqual({
+        type: "api_key",
+        key: "gateway-b-secret",
+      });
     } finally {
       fetchMock.mockRestore();
     }
@@ -499,6 +565,9 @@ describe("PiAiRuntime", () => {
     await expect(
       runtime.configureCustomProvider({ baseUrl: "http://127.0.0.1:58788/v1?api_key=secret" }),
     ).rejects.toThrow("must not contain query parameters");
+    await expect(
+      runtime.configureCustomProvider({ baseUrl: "http://gateway.example/v1" }),
+    ).rejects.toThrow("must use https unless it targets loopback");
   });
 
   it("falls back to a singular /model endpoint for compatible proxies", async () => {
