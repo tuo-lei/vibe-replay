@@ -364,6 +364,53 @@ export function redactSensitiveText(text: string, exactSecrets: readonly string[
   return result;
 }
 
+export interface SensitiveTextStreamRedactor {
+  push(text: string): string;
+  flush(): string;
+}
+
+/**
+ * Redact exact credentials without releasing a partial secret split across
+ * provider stream events. Pattern-based redaction still runs on every stable
+ * chunk and the final response is redacted again by the normal run boundary.
+ */
+export function createSensitiveTextStreamRedactor(
+  exactSecrets: readonly string[] = [],
+): SensitiveTextStreamRedactor {
+  const secrets = [...new Set(exactSecrets)].filter((secret) => secret.length > 0);
+  let pending = "";
+
+  const stableLength = (text: string): number => {
+    let firstPossibleSecretStart = text.length;
+    const maxSecretLength = secrets.reduce((max, secret) => Math.max(max, secret.length), 0);
+    const firstStart = Math.max(0, text.length - maxSecretLength + 1);
+    for (let start = firstStart; start < text.length; start++) {
+      const suffix = text.slice(start);
+      if (secrets.some((secret) => suffix.length < secret.length && secret.startsWith(suffix))) {
+        firstPossibleSecretStart = start;
+        break;
+      }
+    }
+    return firstPossibleSecretStart;
+  };
+
+  return {
+    push(text: string): string {
+      pending += text;
+      const length = stableLength(pending);
+      if (length === 0) return "";
+      const stable = pending.slice(0, length);
+      pending = pending.slice(length);
+      return redactSensitiveText(stable, secrets);
+    },
+    flush(): string {
+      const remaining = pending;
+      pending = "";
+      return redactSensitiveText(remaining, secrets);
+    },
+  };
+}
+
 function redactUnknown(value: unknown, exactSecrets: readonly string[]): unknown {
   if (typeof value === "string") return redactSensitiveText(value, exactSecrets);
   if (Array.isArray(value)) return value.map((entry) => redactUnknown(entry, exactSecrets));
@@ -736,6 +783,7 @@ export interface AiRuntime {
   login(providerId: string, type: AuthType, interaction: AuthInteraction): Promise<Credential>;
   logout(providerId: string, signal?: AbortSignal): Promise<void>;
   getSafeErrorMessage(error: unknown): Promise<string>;
+  createSensitiveTextStreamRedactor(): Promise<SensitiveTextStreamRedactor>;
   runAgent(options: PiAgentRunOptions): Promise<PiAgentRunResult>;
 }
 
@@ -1360,6 +1408,10 @@ export class PiAiRuntime implements AiRuntime {
     return redactSensitiveText(message, await this.getSecretValues());
   }
 
+  async createSensitiveTextStreamRedactor(): Promise<SensitiveTextStreamRedactor> {
+    return createSensitiveTextStreamRedactor(await this.getSecretValues());
+  }
+
   async runAgent(options: PiAgentRunOptions): Promise<PiAgentRunResult> {
     const operationController = new AbortController();
     let timedOut = false;
@@ -1463,9 +1515,7 @@ export class PiAiRuntime implements AiRuntime {
           : {}),
       });
 
-      unsubscribe = agent.subscribe((event) => {
-        options.onEvent?.(event);
-      });
+      unsubscribe = agent.subscribe((event) => options.onEvent?.(event));
       await raceWithAbortSignal(agent.prompt(options.prompt), operationController.signal);
       if (timedOut) {
         throw new Error(`AI Studio operation timed out after ${options.timeoutMs}ms`);

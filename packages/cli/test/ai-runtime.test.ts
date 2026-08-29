@@ -14,6 +14,7 @@ import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  createSensitiveTextStreamRedactor,
   createAiRuntime,
   createBrowserAuthInteraction,
   FileCredentialStore,
@@ -302,6 +303,16 @@ describe("FileCredentialStore", () => {
     await expect(new FileCredentialStore(path).read("openai")).rejects.toThrow(
       "Invalid AI credential for provider openai",
     );
+  });
+});
+
+describe("streaming credential redaction", () => {
+  it("holds an exact secret until a split stream value can be classified", () => {
+    const redactor = createSensitiveTextStreamRedactor(["my-secret-key"]);
+
+    expect(redactor.push("prefix my-")).toBe("prefix ");
+    expect(redactor.push("secret-key suffix")).toBe("[REDACTED] suffix");
+    expect(redactor.flush()).toBe("");
   });
 });
 
@@ -683,7 +694,13 @@ describe("PiAiRuntime", () => {
       systemPrompt: "Return the result through the tool.",
       prompt: "Return ok=true.",
       resultTool,
-      onEvent: (event) => events.push(event.type),
+      onEvent: async (event) => {
+        events.push(event.type);
+        if (event.type === "agent_end") {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          events.push("agent_end_listener_finished");
+        }
+      },
     });
 
     expect(result).toMatchObject({
@@ -698,6 +715,7 @@ describe("PiAiRuntime", () => {
     expect(events).toContain("tool_execution_start");
     expect(events).toContain("tool_execution_end");
     expect(events).toContain("agent_end");
+    expect(events.at(-1)).toBe("agent_end_listener_finished");
   });
 
   it("runs additional domain tools and returns the final assistant message", async () => {

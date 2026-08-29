@@ -1969,7 +1969,9 @@ export async function startServer(
       });
 
       try {
-        const result = await getAiRuntime().runAgent({
+        const runtime = getAiRuntime();
+        const textRedactor = await runtime.createSensitiveTextStreamRedactor();
+        const result = await runtime.runAgent({
           providerId: ai.selection.providerId,
           modelId: ai.selection.modelId,
           systemPrompt: LOCAL_ASSISTANT_SYSTEM_PROMPT,
@@ -1980,6 +1982,14 @@ export async function startServer(
           timeoutMs: 180_000,
           maxToolCalls: 8,
           onEvent: async (event: AgentEvent) => {
+            if (
+              event.type === "message_update" &&
+              event.assistantMessageEvent.type === "text_delta"
+            ) {
+              const delta = textRedactor.push(event.assistantMessageEvent.delta);
+              if (delta) await send({ type: "message_delta", delta });
+              return;
+            }
             if (event.type === "tool_execution_start") {
               await send({
                 type: "tool_start",
@@ -2004,6 +2014,9 @@ export async function startServer(
             });
           },
         });
+
+        const finalDelta = textRedactor.flush();
+        if (finalDelta) await send({ type: "message_delta", delta: finalDelta });
 
         await send({
           type: "done",

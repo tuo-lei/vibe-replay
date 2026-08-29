@@ -45,6 +45,7 @@ type ToolEvent = { toolName: string; summary?: string; error?: boolean };
 type ChatMessage = {
   role: "user" | "assistant";
   content: string;
+  streaming?: boolean;
   remoteDataUsed?: boolean;
   toolEvents?: ToolEvent[];
   citations?: Citation[];
@@ -57,6 +58,27 @@ interface Props {
 }
 
 const CHAT_STORAGE_KEY = "vibe-replay-local-assistant-v1";
+const CHAT_SIZE_STORAGE_KEY = "vibe-replay-local-assistant-size-v1";
+const DEFAULT_PANEL_SIZE = { width: 520, height: 720 };
+
+type PanelSize = typeof DEFAULT_PANEL_SIZE;
+
+function readPanelSize(): PanelSize {
+  try {
+    const raw = localStorage.getItem(CHAT_SIZE_STORAGE_KEY);
+    if (!raw) return DEFAULT_PANEL_SIZE;
+    const value = JSON.parse(raw) as Partial<PanelSize>;
+    if (typeof value.width !== "number" || typeof value.height !== "number") {
+      return DEFAULT_PANEL_SIZE;
+    }
+    return {
+      width: Math.max(320, Math.round(value.width)),
+      height: Math.max(360, Math.round(value.height)),
+    };
+  } catch {
+    return DEFAULT_PANEL_SIZE;
+  }
+}
 
 function readStoredMessages(): ChatMessage[] {
   try {
@@ -207,7 +229,12 @@ export default function LocalChatAssistant({ context }: Props) {
   const [switchOpen, setSwitchOpen] = useState(false);
   const [allowRemoteData, setAllowRemoteData] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [panelSize, setPanelSize] = useState<PanelSize>(DEFAULT_PANEL_SIZE);
+  const [resizing, setResizing] = useState(false);
   const controllerRef = useRef<AbortController | null>(null);
+  const resizeStartRef = useRef<
+    { x: number; y: number; width: number; height: number } | undefined
+  >(undefined);
   const scrollRef = useRef<HTMLDivElement>(null);
   const providerSettings = useAiProviderSettings(true);
   const selectedProvider = providerSettings.aiProviders.find(
@@ -232,6 +259,42 @@ export default function LocalChatAssistant({ context }: Props) {
     ? "Open provider settings →"
     : "Set up an AI provider →";
   const remoteSession = Boolean(context.currentSession?.targetId);
+
+  useEffect(() => {
+    setPanelSize(readPanelSize());
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CHAT_SIZE_STORAGE_KEY, JSON.stringify(panelSize));
+    } catch {
+      // The size is a convenience; storage failures must not block chat.
+    }
+  }, [panelSize]);
+
+  useEffect(() => {
+    if (!resizing) return;
+    const onPointerMove = (event: PointerEvent) => {
+      const start = resizeStartRef.current;
+      if (!start) return;
+      const maxWidth = Math.max(320, window.innerWidth - 32);
+      const maxHeight = Math.max(360, window.innerHeight - 32);
+      setPanelSize({
+        width: Math.min(maxWidth, Math.max(320, start.width - (event.clientX - start.x))),
+        height: Math.min(maxHeight, Math.max(360, start.height - (event.clientY - start.y))),
+      });
+    };
+    const stopResizing = () => {
+      resizeStartRef.current = undefined;
+      setResizing(false);
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", stopResizing, { once: true });
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", stopResizing);
+    };
+  }, [resizing]);
 
   useEffect(() => {
     // A selection can change in AI Studio or Settings while Ask Replay stays
@@ -327,6 +390,16 @@ export default function LocalChatAssistant({ context }: Props) {
             error: payload.error === true,
           });
           setActiveTool(null);
+        } else if (payload.type === "message_delta") {
+          const delta = typeof payload.delta === "string" ? payload.delta : "";
+          if (!delta) return;
+          setMessages((current) => {
+            const last = current[current.length - 1];
+            if (last?.role === "assistant" && last.streaming) {
+              return [...current.slice(0, -1), { ...last, content: last.content + delta }];
+            }
+            return [...current, { role: "assistant", content: delta, streaming: true }];
+          });
         } else if (payload.type === "error") {
           throw new Error(
             typeof payload.message === "string" ? payload.message : "Assistant failed",
@@ -342,16 +415,31 @@ export default function LocalChatAssistant({ context }: Props) {
               : undefined,
             actions: Array.isArray(payload.actions) ? payload.actions.filter(isAction) : undefined,
           };
-          setMessages((current) => [...current, assistantMessage].slice(-40));
+          setMessages((current) => {
+            const last = current[current.length - 1];
+            if (last?.role === "assistant" && last.streaming) {
+              return [...current.slice(0, -1), assistantMessage].slice(-40);
+            }
+            return [...current, assistantMessage].slice(-40);
+          });
         }
       });
     } catch (err) {
       if (controller.signal.aborted) {
-        setMessages((current) => [
-          ...current,
-          { role: "assistant", content: "Request cancelled.", error: true },
-        ]);
+        setMessages((current) => {
+          const last = current[current.length - 1];
+          if (last?.role === "assistant" && last.streaming) {
+            return [...current.slice(0, -1), { ...last, streaming: false, error: true }];
+          }
+          return [...current, { role: "assistant", content: "Request cancelled.", error: true }];
+        });
       } else {
+        setMessages((current) => {
+          const last = current[current.length - 1];
+          return last?.role === "assistant" && last.streaming
+            ? [...current.slice(0, -1), { ...last, streaming: false, error: true }]
+            : current;
+        });
         setError(err instanceof Error ? err.message : "Assistant request failed");
       }
     } finally {
@@ -373,9 +461,17 @@ export default function LocalChatAssistant({ context }: Props) {
   const cancel = () => controllerRef.current?.abort();
 
   return (
-    <div className="fixed right-4 bottom-4 z-[60] font-sans">
+    <div className={`fixed right-4 bottom-4 z-[60] font-sans ${resizing ? "select-none" : ""}`}>
       {open && (
-        <aside className="mb-3 flex h-[min(640px,calc(100vh-6rem))] w-[min(420px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-terminal-border-subtle bg-terminal-bg shadow-layer-xl">
+        <aside
+          className="relative mb-3 flex max-h-[calc(100vh-2rem)] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-terminal-border-subtle bg-terminal-bg shadow-layer-xl"
+          style={{
+            width: panelSize.width,
+            height: panelSize.height,
+            minWidth: "min(320px, calc(100vw - 2rem))",
+            minHeight: "min(360px, calc(100vh - 2rem))",
+          }}
+        >
           <header className="flex shrink-0 items-center justify-between border-b border-terminal-border-subtle bg-terminal-surface/70 px-4 py-3 backdrop-blur-md">
             <div className="min-w-0">
               <div className="flex items-center gap-2 text-sm font-semibold text-terminal-text">
@@ -513,7 +609,14 @@ export default function LocalChatAssistant({ context }: Props) {
                   }`}
                 >
                   {message.role === "assistant" ? (
-                    <AssistantMarkdown content={message.content} />
+                    <>
+                      <AssistantMarkdown content={message.content} />
+                      {message.streaming && (
+                        <span className="animate-pulse text-terminal-green" aria-hidden="true">
+                          ▌
+                        </span>
+                      )}
+                    </>
                   ) : (
                     <div className="whitespace-pre-wrap text-sm text-terminal-text">
                       {message.content}
@@ -583,7 +686,7 @@ export default function LocalChatAssistant({ context }: Props) {
             {running && (
               <div className="flex items-center gap-2 text-xs font-mono text-terminal-dim">
                 <span className="h-2 w-2 animate-pulse rounded-full bg-terminal-green" />
-                {activeTool ? toolLabel(activeTool) : "Thinking"}…
+                {activeTool ? toolLabel(activeTool) : "Streaming"}…
               </div>
             )}
             {error && (
@@ -683,6 +786,24 @@ export default function LocalChatAssistant({ context }: Props) {
                 Open provider settings
               </button>
             </div>
+            <button
+              type="button"
+              aria-label="Resize Ask Replay"
+              title="Drag to resize"
+              onPointerDown={(event) => {
+                event.preventDefault();
+                resizeStartRef.current = {
+                  x: event.clientX,
+                  y: event.clientY,
+                  width: panelSize.width,
+                  height: panelSize.height,
+                };
+                setResizing(true);
+              }}
+              className="absolute bottom-1 left-1 h-5 w-5 cursor-nesw-resize rounded text-terminal-dimmer hover:text-terminal-text"
+            >
+              <span aria-hidden="true">◢</span>
+            </button>
           </form>
         </aside>
       )}
