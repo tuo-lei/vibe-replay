@@ -292,8 +292,13 @@ async function resolveAiSelection(
     providerId = defaultSelection?.providerId;
     defaultModelId = defaultSelection?.modelId;
     if (!providerId) {
+      const hasUsableProvider = providers.some(
+        (provider) => provider.configured && provider.models.length > 0,
+      );
       throw new Error(
-        "No usable AI provider is configured. Set up a provider and model in AI Studio.",
+        hasUsableProvider
+          ? "No AI provider/model is selected. Choose a provider and model in AI Studio."
+          : "No usable AI provider is configured. Set up a provider and model in AI Studio.",
       );
     }
   }

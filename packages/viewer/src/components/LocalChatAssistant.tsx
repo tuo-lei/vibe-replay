@@ -669,7 +669,11 @@ export default function LocalChatAssistant({ context }: Props) {
             <div className="mt-2 flex items-center justify-between text-[9px] font-mono text-terminal-dimmer">
               <span>
                 Read-only ·{" "}
-                {remoteSession || allowRemoteData ? "SSH consent granted" : "local sessions only"}
+                {allowRemoteData
+                  ? "SSH consent granted"
+                  : remoteSession
+                    ? "SSH consent required"
+                    : "local sessions only"}
               </span>
               <button
                 type="button"
