@@ -62,6 +62,7 @@ const CHAT_SIZE_STORAGE_KEY = "vibe-replay-local-assistant-size-v1";
 const DEFAULT_PANEL_SIZE = { width: 520, height: 720 };
 
 type PanelSize = typeof DEFAULT_PANEL_SIZE;
+type ResizeEdges = { left?: boolean; right?: boolean; top?: boolean; bottom?: boolean };
 
 function readPanelSize(): PanelSize {
   try {
@@ -233,7 +234,7 @@ export default function LocalChatAssistant({ context }: Props) {
   const [resizing, setResizing] = useState(false);
   const controllerRef = useRef<AbortController | null>(null);
   const resizeStartRef = useRef<
-    { x: number; y: number; width: number; height: number } | undefined
+    { x: number; y: number; width: number; height: number; edges: ResizeEdges } | undefined
   >(undefined);
   const scrollRef = useRef<HTMLDivElement>(null);
   const providerSettings = useAiProviderSettings(true);
@@ -279,9 +280,13 @@ export default function LocalChatAssistant({ context }: Props) {
       if (!start) return;
       const maxWidth = Math.max(320, window.innerWidth - 32);
       const maxHeight = Math.max(360, window.innerHeight - 32);
+      const deltaX = event.clientX - start.x;
+      const deltaY = event.clientY - start.y;
+      const widthDelta = start.edges.left ? -deltaX : start.edges.right ? deltaX : 0;
+      const heightDelta = start.edges.top ? -deltaY : start.edges.bottom ? deltaY : 0;
       setPanelSize({
-        width: Math.min(maxWidth, Math.max(320, start.width - (event.clientX - start.x))),
-        height: Math.min(maxHeight, Math.max(360, start.height - (event.clientY - start.y))),
+        width: Math.min(maxWidth, Math.max(320, start.width + widthDelta)),
+        height: Math.min(maxHeight, Math.max(360, start.height + heightDelta)),
       });
     };
     const stopResizing = () => {
@@ -290,11 +295,28 @@ export default function LocalChatAssistant({ context }: Props) {
     };
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", stopResizing, { once: true });
+    window.addEventListener("pointercancel", stopResizing, { once: true });
     return () => {
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", stopResizing);
+      window.removeEventListener("pointercancel", stopResizing);
     };
   }, [resizing]);
+
+  const beginResize = (
+    event: { clientX: number; clientY: number; preventDefault: () => void },
+    edges: ResizeEdges,
+  ) => {
+    event.preventDefault();
+    resizeStartRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      width: panelSize.width,
+      height: panelSize.height,
+      edges,
+    };
+    setResizing(true);
+  };
 
   useEffect(() => {
     // A selection can change in AI Studio or Settings while Ask Replay stays
@@ -788,19 +810,54 @@ export default function LocalChatAssistant({ context }: Props) {
             </div>
             <button
               type="button"
-              aria-label="Resize Ask Replay"
+              aria-label="Resize Ask Replay from the top-left corner"
               title="Drag to resize"
-              onPointerDown={(event) => {
-                event.preventDefault();
-                resizeStartRef.current = {
-                  x: event.clientX,
-                  y: event.clientY,
-                  width: panelSize.width,
-                  height: panelSize.height,
-                };
-                setResizing(true);
-              }}
-              className="absolute right-1 bottom-1 h-5 w-5 cursor-nwse-resize rounded text-terminal-dimmer hover:text-terminal-text"
+              onPointerDown={(event) => beginResize(event, { left: true, top: true })}
+              className="absolute top-0 left-0 z-10 h-4 w-4 cursor-nwse-resize touch-none rounded text-terminal-dimmer hover:text-terminal-text"
+            >
+              <span aria-hidden="true">⋰</span>
+            </button>
+            <button
+              type="button"
+              aria-label="Resize Ask Replay from the top edge"
+              onPointerDown={(event) => beginResize(event, { top: true })}
+              className="absolute top-0 right-4 left-4 z-10 h-2 cursor-ns-resize touch-none"
+            />
+            <button
+              type="button"
+              aria-label="Resize Ask Replay from the top-right corner"
+              onPointerDown={(event) => beginResize(event, { right: true, top: true })}
+              className="absolute top-0 right-0 z-10 h-4 w-4 cursor-nesw-resize touch-none rounded"
+            />
+            <button
+              type="button"
+              aria-label="Resize Ask Replay from the left edge"
+              onPointerDown={(event) => beginResize(event, { left: true })}
+              className="absolute top-4 bottom-4 left-0 z-10 w-2 cursor-ew-resize touch-none"
+            />
+            <button
+              type="button"
+              aria-label="Resize Ask Replay from the right edge"
+              onPointerDown={(event) => beginResize(event, { right: true })}
+              className="absolute top-4 right-0 bottom-4 z-10 w-2 cursor-ew-resize touch-none"
+            />
+            <button
+              type="button"
+              aria-label="Resize Ask Replay from the bottom-left corner"
+              onPointerDown={(event) => beginResize(event, { left: true, bottom: true })}
+              className="absolute bottom-0 left-0 z-10 h-4 w-4 cursor-nesw-resize touch-none rounded"
+            />
+            <button
+              type="button"
+              aria-label="Resize Ask Replay from the bottom edge"
+              onPointerDown={(event) => beginResize(event, { bottom: true })}
+              className="absolute right-4 bottom-0 left-4 z-10 h-2 cursor-ns-resize touch-none"
+            />
+            <button
+              type="button"
+              aria-label="Resize Ask Replay from the bottom-right corner"
+              onPointerDown={(event) => beginResize(event, { right: true, bottom: true })}
+              className="absolute right-0 bottom-0 z-10 h-4 w-4 cursor-nwse-resize touch-none rounded text-terminal-dimmer hover:text-terminal-text"
             >
               <span aria-hidden="true">⋰</span>
             </button>
