@@ -150,8 +150,10 @@ describe("FileCredentialStore", () => {
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
       openrouter: { type: "api_key", key: "secret-api-key" },
     });
-    expect((await stat(join(root, "nested"))).mode & 0o777).toBe(0o700);
-    expect((await stat(path)).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect((await stat(join(root, "nested"))).mode & 0o777).toBe(0o700);
+      expect((await stat(path)).mode & 0o777).toBe(0o600);
+    }
   });
 
   it("serializes concurrent read-modify-write operations", async () => {
@@ -393,7 +395,9 @@ describe("PiAiRuntime", () => {
           baseUrl: "http://127.0.0.1:58788/v1",
         },
       });
-      expect((await stat(join(root, "ai-providers.json"))).mode & 0o777).toBe(0o600);
+      if (process.platform !== "win32") {
+        expect((await stat(join(root, "ai-providers.json"))).mode & 0o777).toBe(0o600);
+      }
       expect((await runtime.credentials.read("custom-openai"))?.type).toBe("api_key");
     } finally {
       fetchMock.mockRestore();
