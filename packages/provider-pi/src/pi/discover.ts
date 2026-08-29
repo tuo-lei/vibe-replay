@@ -8,6 +8,8 @@ import { readGitRepo } from "@vibe-replay/provider-core/utils";
 import { getPiSessionsDir } from "./config.js";
 const PROMPT_SCAN_LIMIT = 2;
 
+const decodedProjectDirCache = new Map<string, string | Promise<string>>();
+
 interface PiSessionHeader {
   type: "session";
   version?: number;
@@ -187,7 +189,7 @@ async function extractPiSessionInfo(
   const sessionId = header?.id || basename(filePath, ".jsonl");
   if (!sessionId) return null;
 
-  const cwd = header?.cwd || decodeProjectDir(encodedProjectDir);
+  const cwd = header?.cwd || (await decodeProjectDir(encodedProjectDir));
   const gitRepo = resolveGitRepo ? await readGitRepo(cwd) : undefined;
   const slug = basename(filePath, ".jsonl").replace(/^\d{4}-\d{2}-\d{2}T[^_]+_/, "");
   const fallbackTimestamp =
@@ -222,11 +224,93 @@ async function extractPiSessionInfo(
   };
 }
 
-function decodeProjectDir(encoded: string): string {
+export async function decodeProjectDir(encoded: string): Promise<string> {
+  const cached = decodedProjectDirCache.get(encoded);
+  if (cached !== undefined) return cached;
+  const promise = decodeProjectDirUncached(encoded)
+    .catch((error) => {
+      decodedProjectDirCache.delete(encoded);
+      throw error;
+    })
+    .then((value) => {
+      decodedProjectDirCache.set(encoded, value);
+      return value;
+    });
+  decodedProjectDirCache.set(encoded, promise);
+  return promise;
+}
+
+async function decodeProjectDirUncached(encoded: string): Promise<string> {
   if (encoded.startsWith("--") && encoded.endsWith("--")) {
-    return `/${encoded.slice(2, -2).replace(/-/g, "/")}`;
+    const inner = encoded.slice(2, -2);
+    const parts = inner.split("-");
+    const resolved = await resolveEncodedProjectParts(parts, 0, "");
+    if (resolved) return joinUnresolvedRemainder(resolved, parts, "/");
+    return `/${inner.replace(/-/g, "/")}`;
   }
   return encoded;
+}
+
+export function clearDecodedProjectDirCache(): void {
+  decodedProjectDirCache.clear();
+}
+
+interface PartialResolution {
+  path: string;
+  nextIdx: number;
+}
+
+function joinUnresolvedRemainder(
+  resolved: PartialResolution,
+  parts: string[],
+  separator: string,
+): string {
+  if (resolved.nextIdx >= parts.length) return resolved.path;
+  const remainder = parts.slice(resolved.nextIdx).join("-");
+  return resolved.path.endsWith(separator)
+    ? `${resolved.path}${remainder}`
+    : `${resolved.path}${separator}${remainder}`;
+}
+
+async function resolveEncodedProjectParts(
+  parts: string[],
+  idx: number,
+  current: string,
+): Promise<PartialResolution | null> {
+  if (idx >= parts.length) {
+    const candidate = current || "/";
+    const currentStat = await stat(candidate).catch(() => null);
+    return currentStat?.isDirectory() ? { path: candidate, nextIdx: idx } : null;
+  }
+
+  const probePath = current || "/";
+  const entries = await readdir(probePath, { withFileTypes: true }).catch(() => []);
+  if (entries.length === 0) return null;
+
+  const dirNames = new Set(
+    entries
+      .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+      .map((entry) => entry.name),
+  );
+
+  let deepest: PartialResolution | null = null;
+
+  for (let end = idx + 1; end <= parts.length; end++) {
+    const candidate = parts.slice(idx, end).join("-");
+    const actual = dirNames.has(candidate)
+      ? candidate
+      : dirNames.has(`.${candidate}`)
+        ? `.${candidate}`
+        : null;
+    const candidatePath = join(probePath, actual ?? candidate);
+    if (!actual) continue;
+    const resolved = await resolveEncodedProjectParts(parts, end, candidatePath);
+    if (resolved?.nextIdx === parts.length) return resolved;
+    const best = resolved ?? { path: candidatePath, nextIdx: end };
+    if (!deepest || best.nextIdx > deepest.nextIdx) deepest = best;
+  }
+
+  return deepest;
 }
 
 function extractText(content: unknown): string {
