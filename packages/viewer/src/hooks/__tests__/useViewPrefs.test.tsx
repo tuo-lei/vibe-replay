@@ -124,4 +124,22 @@ describe("useViewPrefs", () => {
     act(() => result.current.togglePref("displayMode" as any));
     expect(result.current.prefs.displayMode).toBe(before);
   });
+
+  it("handles storage quota error without crashing (safeStorageSet)", () => {
+    const { result } = renderHook(() => useViewPrefs());
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("QuotaExceeded");
+    });
+    // should not throw
+    act(() => result.current.updatePref("displayMode", "all"));
+    expect(result.current.prefs.displayMode).toBe("all");
+  });
+
+  it("handles storage getItem throw on load (safeStorageGet)", () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    const { result } = renderHook(() => useViewPrefs());
+    expect(result.current.prefs.displayMode).toBe("compact");
+  });
 });

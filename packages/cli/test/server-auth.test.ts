@@ -291,6 +291,22 @@ describe("createAuthSession", () => {
           : (headers2 as unknown as Record<string, string>)["Cookie"];
       expect(cookie2).toBe(`${getSessionCookieName(DEV)}=d1`);
     });
+
+    it("returns true when fetch returns 200 but json() throws (offline-friendly)", async () => {
+      writeAuthStore({ [PROD]: { token: "t1", user: { id: "u1", name: "A" } } });
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: () => Promise.reject(new Error("bad json")),
+          headers: new Headers(),
+        } as unknown as Response),
+      );
+      const s = createAuthSession(PROD);
+      expect(await s.isAuthValid()).toBe(true);
+      expect(s.readLocalAuthSession()).not.toBeNull();
+    });
   });
 
   describe("clearLocalAuthSession", () => {

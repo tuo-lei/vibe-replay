@@ -213,4 +213,10 @@ describe("estimateActiveDuration", () => {
     const timestamps = ["2026-03-25T10:03:00Z", "2026-03-25T10:00:00Z", "2026-03-25T10:01:00Z"];
     expect(estimateActiveDuration(timestamps)).toBe(3 * 60 * 1000);
   });
+
+  it("returns undefined for duplicate timestamps (zero total gap)", () => {
+    expect(
+      estimateActiveDuration(["2026-03-25T10:00:00Z", "2026-03-25T10:00:00Z"]),
+    ).toBeUndefined();
+  });
 });
