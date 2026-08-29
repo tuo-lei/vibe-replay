@@ -26,6 +26,20 @@ beforeEach(() => {
       if (url.endsWith("/api/settings")) {
         return jsonResponse({ remoteSources: [source] });
       }
+      if (url.endsWith("/api/ai/providers")) {
+        return jsonResponse({
+          providers: [
+            {
+              id: "openai",
+              name: "OpenAI",
+              configured: false,
+              authMethods: [{ type: "api_key", label: "OpenAI API key", subscription: false }],
+              models: [],
+            },
+          ],
+          defaultProvider: { id: "openai" },
+        });
+      }
       if (url.endsWith("/api/settings/remote-sources/test")) {
         return jsonResponse({ ok: true, message: "Connected to ROS devspace." });
       }
@@ -54,6 +68,8 @@ describe("SettingsPanel", () => {
     expect(screen.getByText("remote-devspace")).toBeDefined();
     expect(screen.getByText("dev.ros.example")).toBeDefined();
     expect(screen.getByText("Codex")).toBeDefined();
+    expect(screen.getByText("AI providers")).toBeDefined();
+    expect(screen.getByLabelText("Custom AI endpoint")).toBeDefined();
   });
 
   it("tests an SSH source without exposing credentials", async () => {

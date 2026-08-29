@@ -1,4 +1,3 @@
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { type FSWatcher, watch as fsWatch } from "node:fs";
 import {
@@ -12,7 +11,6 @@ import {
 } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { promisify } from "node:util";
 import { serve } from "@hono/node-server";
 import chalk from "chalk";
 import { type Context, Hono } from "hono";
@@ -25,12 +23,12 @@ import { readFileCache, writeFileCache } from "./cache.js";
 import { cleanPromptText, previewPrompt } from "./clean-prompt.js";
 import { computeDaysUntilCleanup, getClaudeCodeCleanupPeriod } from "./cleanup-warning.js";
 import {
-  detectFeedbackTools,
+  type AiSelection,
   generateFeedback,
   generateToneAdjustment,
   generateTranslation,
-  runWithFeedbackToolFallback,
 } from "./feedback.js";
+import { createBrowserAuthInteraction, getAiRuntime } from "./ai-runtime.js";
 import { generateGitHubGif } from "./formatters/gif.js";
 import { generateGitHubMarkdown, generateGitHubSvg } from "./formatters/github.js";
 import { generateOutput, injectDataScript, loadViewerHtml } from "./generator.js";
@@ -174,6 +172,67 @@ function isSameOriginSettingsRequest(c: Context): boolean {
   return (
     !fetchSite || fetchSite === "same-origin" || fetchSite === "same-site" || fetchSite === "none"
   );
+}
+
+function parseAiSelectionBody(body: unknown): AiSelection | undefined {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return undefined;
+  const value = body as {
+    providerId?: unknown;
+    modelId?: unknown;
+    toolName?: unknown;
+  };
+  const providerId = value.providerId ?? value.toolName;
+  const modelId = value.modelId;
+  if (providerId === undefined && modelId === undefined) return undefined;
+  if (typeof providerId !== "string" || !providerId.trim()) {
+    throw new Error("providerId is required");
+  }
+  if (modelId !== undefined && typeof modelId !== "string") {
+    throw new Error("modelId must be a string");
+  }
+  return {
+    providerId: providerId.trim(),
+    ...(typeof modelId === "string" && modelId.trim() ? { modelId: modelId.trim() } : {}),
+  };
+}
+
+async function resolveAiSelection(
+  body: unknown,
+  signal?: AbortSignal,
+): Promise<{
+  selection: AiSelection;
+  providerName: string;
+  modelId: string;
+  authType: string;
+  authSubscription: boolean;
+  authSource?: string;
+}> {
+  const runtime = getAiRuntime();
+  const requested = parseAiSelectionBody(body);
+  let providerId = requested?.providerId;
+  if (!providerId) {
+    const providers = await runtime.listProviders({ signal });
+    providerId = providers.find((provider) => provider.configured)?.id;
+    if (!providerId) {
+      throw new Error(
+        "No AI provider is configured. Set up a built-in provider or an OpenAI-compatible endpoint in AI Studio.",
+      );
+    }
+  }
+
+  const resolved = await runtime.resolveModel(providerId, requested?.modelId, { signal });
+  return {
+    selection: {
+      providerId: resolved.provider.id,
+      modelId: resolved.model.id,
+    },
+    providerName: resolved.provider.name,
+    modelId: resolved.model.id,
+    authType: resolved.auth.type,
+    authSubscription:
+      resolved.auth.type === "oauth" && resolved.provider.auth.oauth?.isSubscription === true,
+    authSource: resolved.auth.source,
+  };
 }
 
 const replayGitRepoByProjectCache = new Map<string, string | undefined>();
@@ -2852,150 +2911,42 @@ export async function startServer(
     });
   });
 
-  // System checks — detect available tools for publishing & AI feedback
+  // System checks — AI Studio is powered by the embedded Pi runtime.
   app.get("/api/system-checks", async (c) => {
-    const exec = promisify(execFile);
-
-    const TOOL_CHECK_TIMEOUT_MS = 3000;
-    const CHECK_TIMEOUT_MARKER = "__check_timeout__" as const;
-    const CHECK_TIMEOUT_DETAIL = "check timeout";
-
-    interface ToolCheck {
-      name: string;
-      label: string;
-      purpose: string;
-      installed: boolean;
-      version?: string;
-      detail?: string;
+    const requested = c.req.query("tool");
+    if (requested && requested !== "pi") {
+      return c.json({ error: `Unknown tool: ${requested}` }, 400);
     }
 
-    interface CommandRunResult {
-      ok: boolean;
-      stdout: string;
-      timedOut: boolean;
-    }
-
-    type ExtraCheckResult = string | typeof CHECK_TIMEOUT_MARKER | undefined;
-    type RunCommand = (cmd: string, args: string[]) => Promise<CommandRunResult>;
-
-    function isTimeoutError(err: unknown): boolean {
-      if (!(err instanceof Error)) return false;
-      const timeoutErr = err as Error & { code?: string; killed?: boolean; signal?: string };
-      return (
-        timeoutErr.code === "ETIMEDOUT" ||
-        timeoutErr.killed === true ||
-        timeoutErr.signal === "SIGTERM"
-      );
-    }
-
-    const runCommand: RunCommand = async (cmd, args) => {
-      try {
-        const { stdout } = await exec(cmd, args, {
-          timeout: TOOL_CHECK_TIMEOUT_MS,
-          maxBuffer: 1024 * 1024,
-        });
-        return { ok: true, stdout, timedOut: false };
-      } catch (err) {
-        return { ok: false, stdout: "", timedOut: isTimeoutError(err) };
-      }
-    };
-
-    async function checkCli(
-      name: string,
-      label: string,
-      purpose: string,
-      cmd: string,
-      versionArgs: string[] = ["--version"],
-      extraCheck?: (run: RunCommand) => Promise<ExtraCheckResult>,
-    ): Promise<ToolCheck> {
-      // Windows has no `which`; `where` is the builtin equivalent.
-      const locator = process.platform === "win32" ? "where" : "which";
-      const whichResult = await runCommand(locator, [cmd]);
-      if (!whichResult.ok) {
-        if (whichResult.timedOut) {
-          return { name, label, purpose, installed: false, detail: CHECK_TIMEOUT_DETAIL };
-        }
-        return { name, label, purpose, installed: false };
-      }
-
-      let version: string | undefined;
-      const versionResult = await runCommand(cmd, versionArgs);
-      if (versionResult.timedOut) {
-        return { name, label, purpose, installed: false, detail: CHECK_TIMEOUT_DETAIL };
-      }
-      if (versionResult.ok) {
-        version = versionResult.stdout.trim().split("\n")[0];
-      }
-
-      const detail = extraCheck ? await extraCheck(runCommand) : undefined;
-      if (detail === CHECK_TIMEOUT_MARKER) {
-        return { name, label, purpose, installed: false, version, detail: CHECK_TIMEOUT_DETAIL };
-      }
-
-      return { name, label, purpose, installed: true, version, detail };
-    }
-
-    const toolChecks: Record<string, () => Promise<ToolCheck>> = {
-      claude: () =>
-        checkCli(
-          "claude",
-          "Claude Code",
-          "AI feedback via headless mode",
-          "claude",
-          ["--version"],
-          async (run) => {
-            const auth = await run("claude", ["auth", "status"]);
-            if (auth.timedOut) return CHECK_TIMEOUT_MARKER;
-            if (!auth.ok) return "not logged in";
-
-            try {
-              const info = JSON.parse(auth.stdout) as {
-                loggedIn?: boolean;
-                email?: string;
-                authMethod?: string;
-              };
-              if (info.loggedIn) return `${info.email || info.authMethod || "logged in"}`;
-            } catch {
-              // Non-JSON output still means command completed; keep non-blocking fallback detail.
-            }
-
-            return "not logged in";
-          },
-        ),
-      cursor: () =>
-        checkCli("cursor", "Cursor CLI", "AI feedback via AI Studio", "cursor", [
-          "agent",
-          "--version",
-        ]),
-      opencode: () =>
-        checkCli(
-          "opencode",
-          "OpenCode",
-          "AI feedback via headless mode",
-          "opencode",
-          ["--version"],
-          async (run) => {
-            const auth = await run("opencode", ["auth", "list"]);
-            if (auth.timedOut) return CHECK_TIMEOUT_MARKER;
-            if (!auth.ok) return undefined;
-            return auth.stdout.includes("0 credentials") ? "no credentials" : "configured";
-          },
-        ),
-      hermes: () =>
-        checkCli("hermes", "Hermes", "AI feedback via headless mode", "hermes", ["--version"]),
-    };
-
-    const requestedTool = c.req.query("tool");
-    if (requestedTool) {
-      const checker = toolChecks[requestedTool];
-      if (!checker) return c.json({ error: `Unknown tool: ${requestedTool}` }, 400);
-      const check = await checker();
+    try {
+      const runtime = getAiRuntime();
+      const providers = await runtime.listProviders({ signal: c.req.raw.signal });
+      const configured = providers.filter((provider) => provider.configured).length;
+      const check = {
+        name: "pi",
+        label: "Pi AI",
+        purpose: "Embedded provider and agent runtime for AI Studio",
+        installed: true,
+        version: "embedded",
+        detail:
+          configured > 0
+            ? `${configured} provider${configured === 1 ? "" : "s"} configured`
+            : "no provider configured",
+      };
       return c.json({ checks: [check] });
+    } catch (err) {
+      return c.json({
+        checks: [
+          {
+            name: "pi",
+            label: "Pi AI",
+            purpose: "Embedded provider and agent runtime for AI Studio",
+            installed: false,
+            detail: await getAiRuntime().getSafeErrorMessage(err),
+          },
+        ],
+      });
     }
-
-    const checks = await Promise.all(Object.values(toolChecks).map((check) => check()));
-
-    return c.json({ checks });
   });
 
   // Gist info for a session (requires slug)
@@ -3303,21 +3254,157 @@ export async function startServer(
     }
   });
 
-  // AI Feedback — detect available CLI tools
+  // AI Studio — embedded Pi provider registry and authentication.
+  const getAiProvidersResponse = async (signal?: AbortSignal) => {
+    const providers = await getAiRuntime().listProviders({ signal });
+    const defaultProvider =
+      providers.find((provider) => provider.configured) || providers[0] || null;
+    return {
+      available: providers.some((provider) => provider.configured),
+      providers,
+      defaultProvider: defaultProvider
+        ? { id: defaultProvider.id, name: defaultProvider.name }
+        : null,
+    };
+  };
+
+  app.get("/api/ai/providers", async (c) => {
+    try {
+      return c.json(await getAiProvidersResponse(c.req.raw.signal));
+    } catch (err) {
+      return c.json(
+        { available: false, providers: [], error: await getAiRuntime().getSafeErrorMessage(err) },
+        500,
+      );
+    }
+  });
+
+  // Keep the old endpoint name as a compatibility alias for existing viewers.
   app.get("/api/feedback/detect", async (c) => {
     try {
-      const detected = await detectFeedbackTools();
-      if (detected.tools.length > 0 && detected.defaultTool) {
-        return c.json({
-          available: true,
-          tool: { name: detected.defaultTool.name },
-          tools: detected.tools.map((t) => ({ name: t.name })),
-          defaultTool: { name: detected.defaultTool.name },
-        });
+      const response = await getAiProvidersResponse(c.req.raw.signal);
+      const defaultProvider = response.defaultProvider;
+      return c.json({
+        ...response,
+        tool: defaultProvider ? { name: defaultProvider.id } : undefined,
+        tools: response.providers.map((provider) => ({
+          name: provider.id,
+          label: provider.name,
+        })),
+        defaultTool: defaultProvider ? { name: defaultProvider.id } : undefined,
+      });
+    } catch (err) {
+      return c.json(
+        { available: false, providers: [], error: await getAiRuntime().getSafeErrorMessage(err) },
+        500,
+      );
+    }
+  });
+
+  app.post("/api/ai/custom", async (c) => {
+    if (!isSameOriginSettingsRequest(c)) {
+      return c.json({ error: "AI provider requests must be same-origin" }, 403);
+    }
+
+    const body = await c.req.json().catch(() => undefined);
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return c.json({ error: "Request body must be an object" }, 400);
+    }
+    const value = body as {
+      name?: unknown;
+      baseUrl?: unknown;
+      apiKey?: unknown;
+    };
+    if (typeof value.baseUrl !== "string" || !value.baseUrl.trim()) {
+      return c.json({ error: "baseUrl is required" }, 400);
+    }
+    if (value.name !== undefined && typeof value.name !== "string") {
+      return c.json({ error: "name must be a string" }, 400);
+    }
+    if (value.apiKey !== undefined && typeof value.apiKey !== "string") {
+      return c.json({ error: "apiKey must be a string" }, 400);
+    }
+
+    try {
+      const runtime = getAiRuntime();
+      await runtime.configureCustomProvider(
+        {
+          baseUrl: value.baseUrl,
+          ...(typeof value.name === "string" ? { name: value.name } : {}),
+        },
+        typeof value.apiKey === "string" ? value.apiKey : undefined,
+        c.req.raw.signal,
+      );
+      return c.json({ ok: true, ...(await getAiProvidersResponse(c.req.raw.signal)) });
+    } catch (err) {
+      return c.json({ error: await getAiRuntime().getSafeErrorMessage(err) }, 400);
+    }
+  });
+
+  app.delete("/api/ai/custom", async (c) => {
+    if (!isSameOriginSettingsRequest(c)) {
+      return c.json({ error: "AI provider requests must be same-origin" }, 403);
+    }
+    try {
+      const runtime = getAiRuntime();
+      await runtime.removeCustomProvider(c.req.raw.signal);
+      return c.json({ ok: true, ...(await getAiProvidersResponse(c.req.raw.signal)) });
+    } catch (err) {
+      return c.json({ error: await getAiRuntime().getSafeErrorMessage(err) }, 400);
+    }
+  });
+
+  app.post("/api/ai/auth", async (c) => {
+    if (!isSameOriginSettingsRequest(c)) {
+      return c.json({ error: "AI authentication requests must be same-origin" }, 403);
+    }
+
+    const body = await c.req.json().catch(() => undefined);
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return c.json({ error: "Request body must be an object" }, 400);
+    }
+
+    const value = body as {
+      providerId?: unknown;
+      method?: unknown;
+      apiKey?: unknown;
+    };
+    if (typeof value.providerId !== "string" || !value.providerId.trim()) {
+      return c.json({ error: "providerId is required" }, 400);
+    }
+    if (value.method !== "api_key" && value.method !== "oauth") {
+      return c.json({ error: "method must be api_key or oauth" }, 400);
+    }
+
+    try {
+      const runtime = getAiRuntime();
+      const providerId = value.providerId.trim();
+      if (value.method === "api_key") {
+        if (typeof value.apiKey !== "string") {
+          return c.json({ error: "apiKey is required for API-key authentication" }, 400);
+        }
+        await runtime.saveApiKey(providerId, value.apiKey, c.req.raw.signal);
+      } else {
+        await runtime.login(providerId, "oauth", createBrowserAuthInteraction(c.req.raw.signal));
       }
-      return c.json({ available: false });
-    } catch {
-      return c.json({ available: false });
+      return c.json({ ok: true, ...(await getAiProvidersResponse(c.req.raw.signal)) });
+    } catch (err) {
+      return c.json({ error: await getAiRuntime().getSafeErrorMessage(err) }, 400);
+    }
+  });
+
+  app.delete("/api/ai/auth", async (c) => {
+    if (!isSameOriginSettingsRequest(c)) {
+      return c.json({ error: "AI authentication requests must be same-origin" }, 403);
+    }
+    const providerId = c.req.query("providerId")?.trim();
+    if (!providerId) return c.json({ error: "providerId is required" }, 400);
+    try {
+      const runtime = getAiRuntime();
+      await runtime.logout(providerId, c.req.raw.signal);
+      return c.json({ ok: true, ...(await getAiProvidersResponse(c.req.raw.signal)) });
+    } catch (err) {
+      return c.json({ error: await getAiRuntime().getSafeErrorMessage(err) }, 400);
     }
   });
 
@@ -3329,36 +3416,15 @@ export async function startServer(
     if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
 
     try {
-      const body: { toolName?: string } = await c.req
-        .json<{ toolName?: string }>()
-        .catch(() => ({}));
-      const requestedToolName = typeof body.toolName === "string" ? body.toolName : undefined;
-      const detected = await detectFeedbackTools();
-      if (detected.tools.length === 0) {
-        return c.json(
-          { error: "No AI CLI tool available (claude, agent, opencode, or hermes)" },
-          400,
-        );
-      }
-      const preferredTool = requestedToolName
-        ? detected.tools.find((t) => t.name === requestedToolName) || null
-        : detected.defaultTool;
-      if (!preferredTool) {
-        return c.json(
-          { error: `Requested AI Coach tool is not available: ${requestedToolName}` },
-          400,
-        );
-      }
+      const body = await c.req.json().catch(() => ({}));
+      const ai = await resolveAiSelection(body, c.req.raw.signal);
 
       const targetSession = await loadSessionFromDisk(baseDir, result.slug, targetId);
 
-      const fallbackResult = await runWithFeedbackToolFallback(
-        detected.tools,
-        preferredTool.name,
-        (tool, signal) => generateFeedback(targetSession, tool, { signal }),
-        { signal: c.req.raw.signal },
-      );
-      const fb = fallbackResult.result;
+      const fb = await generateFeedback(targetSession, ai.selection, {
+        signal: c.req.raw.signal,
+      });
+      if (!fb) return c.json({ error: "AI Coach returned no feedback" }, 422);
 
       const existingAnns = targetSession.annotations ?? [];
       const newAnnotations = [
@@ -3379,12 +3445,15 @@ export async function startServer(
         itemCount: fb.result.feedbackItems.length,
         outcome: fb.result.outcome,
         sessionGoal: fb.result.sessionGoal,
-        toolName: fallbackResult.tool.name,
-        attemptedTools: fallbackResult.attemptedTools,
-        fallbackUsed: fallbackResult.fallbackUsed,
+        providerId: ai.selection.providerId,
+        providerName: ai.providerName,
+        modelId: ai.modelId,
+        authType: ai.authType,
+        authSubscription: ai.authSubscription,
+        authSource: ai.authSource,
       });
     } catch (err) {
-      return c.json({ error: getErrorMessage(err) }, 500);
+      return c.json({ error: await getAiRuntime().getSafeErrorMessage(err) }, 500);
     }
   });
 
@@ -3409,23 +3478,14 @@ export async function startServer(
     if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
 
     try {
-      const body: { toolName?: string; targetLang?: string; sourceLang?: string } = await c.req
-        .json<{ toolName?: string; targetLang?: string; sourceLang?: string }>()
-        .catch(() => ({}));
-      const detected = await detectFeedbackTools();
-      if (detected.tools.length === 0) {
-        return c.json(
-          { error: "No AI CLI tool available (claude, agent, opencode, or hermes)" },
-          400,
-        );
-      }
-      const toolName = typeof body.toolName === "string" ? body.toolName : undefined;
-      const preferredTool = toolName
-        ? detected.tools.find((t) => t.name === toolName) || null
-        : detected.defaultTool;
-      if (!preferredTool) {
-        return c.json({ error: `Requested tool is not available: ${toolName}` }, 400);
-      }
+      const body = (await c.req.json().catch(() => ({}))) as {
+        providerId?: unknown;
+        modelId?: unknown;
+        toolName?: unknown;
+        targetLang?: unknown;
+        sourceLang?: unknown;
+      };
+      const ai = await resolveAiSelection(body, c.req.raw.signal);
 
       const targetSession = await loadSessionFromDisk(baseDir, result.slug, targetId);
       const targetLang = typeof body.targetLang === "string" ? body.targetLang : "English";
@@ -3438,14 +3498,13 @@ export async function startServer(
       const chainBase: SessionOverlays = { version: 1, overlays: nonTranslateOverlays };
       const effectiveSession = sessionWithEffectiveContent(targetSession, chainBase);
 
-      const fallbackResult = await runWithFeedbackToolFallback(
-        detected.tools,
-        preferredTool.name,
-        (tool, signal) =>
-          generateTranslation(effectiveSession, tool, { targetLang, sourceLang }, { signal }),
+      const translationResult = await generateTranslation(
+        effectiveSession,
+        ai.selection,
+        { targetLang, sourceLang },
         { signal: c.req.raw.signal },
       );
-      const translationResult = fallbackResult.result;
+      if (!translationResult) return c.json({ error: "Translation returned no result" }, 422);
       // Restore true originalValue from the unmodified session
       fixOriginalValues(translationResult.overlays, targetSession);
       const merged: SessionOverlays = {
@@ -3457,12 +3516,15 @@ export async function startServer(
       return c.json({
         overlays: merged,
         stats: translationResult.stats,
-        toolName: fallbackResult.tool.name,
-        attemptedTools: fallbackResult.attemptedTools,
-        fallbackUsed: fallbackResult.fallbackUsed,
+        providerId: ai.selection.providerId,
+        providerName: ai.providerName,
+        modelId: ai.modelId,
+        authType: ai.authType,
+        authSubscription: ai.authSubscription,
+        authSource: ai.authSource,
       });
     } catch (err) {
-      return c.json({ error: getErrorMessage(err) }, 500);
+      return c.json({ error: await getAiRuntime().getSafeErrorMessage(err) }, 500);
     }
   });
 
@@ -3474,23 +3536,13 @@ export async function startServer(
     if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
 
     try {
-      const body: { toolName?: string; style?: string } = await c.req
-        .json<{ toolName?: string; style?: string }>()
-        .catch(() => ({}));
-      const detected = await detectFeedbackTools();
-      if (detected.tools.length === 0) {
-        return c.json(
-          { error: "No AI CLI tool available (claude, agent, opencode, or hermes)" },
-          400,
-        );
-      }
-      const toolName = typeof body.toolName === "string" ? body.toolName : undefined;
-      const preferredTool = toolName
-        ? detected.tools.find((t) => t.name === toolName) || null
-        : detected.defaultTool;
-      if (!preferredTool) {
-        return c.json({ error: `Requested tool is not available: ${toolName}` }, 400);
-      }
+      const body = (await c.req.json().catch(() => ({}))) as {
+        providerId?: unknown;
+        modelId?: unknown;
+        toolName?: unknown;
+        style?: unknown;
+      };
+      const ai = await resolveAiSelection(body, c.req.raw.signal);
 
       const targetSession = await loadSessionFromDisk(baseDir, result.slug, targetId);
       const style =
@@ -3506,13 +3558,13 @@ export async function startServer(
       const chainBase: SessionOverlays = { version: 1, overlays: nonToneOverlays };
       const effectiveSession = sessionWithEffectiveContent(targetSession, chainBase);
 
-      const fallbackResult = await runWithFeedbackToolFallback(
-        detected.tools,
-        preferredTool.name,
-        (tool, signal) => generateToneAdjustment(effectiveSession, tool, { style }, { signal }),
+      const toneResult = await generateToneAdjustment(
+        effectiveSession,
+        ai.selection,
+        { style },
         { signal: c.req.raw.signal },
       );
-      const toneResult = fallbackResult.result;
+      if (!toneResult) return c.json({ error: "Tone adjustment returned no result" }, 422);
       // Restore true originalValue from the unmodified session
       fixOriginalValues(toneResult.overlays, targetSession);
       const merged: SessionOverlays = {
@@ -3524,12 +3576,15 @@ export async function startServer(
       return c.json({
         overlays: merged,
         stats: toneResult.stats,
-        toolName: fallbackResult.tool.name,
-        attemptedTools: fallbackResult.attemptedTools,
-        fallbackUsed: fallbackResult.fallbackUsed,
+        providerId: ai.selection.providerId,
+        providerName: ai.providerName,
+        modelId: ai.modelId,
+        authType: ai.authType,
+        authSubscription: ai.authSubscription,
+        authSource: ai.authSource,
       });
     } catch (err) {
-      return c.json({ error: getErrorMessage(err) }, 500);
+      return c.json({ error: await getAiRuntime().getSafeErrorMessage(err) }, 500);
     }
   });
 

@@ -411,15 +411,17 @@ export default function App() {
         {/* Tabs (editor) */}
         {isEditor && (
           <nav className="hidden md:inline-flex items-center rounded-xl bg-terminal-surface p-0.5 shadow-layer-sm shrink-0">
-            {(["home", "sessions", "replays", "projects", "insights"] as const).map((t) => (
-              <button
-                key={t}
-                onClick={() => navigateTo({ view: "dashboard", session: null, tab: t })}
-                className="px-3.5 py-1.5 text-xs font-sans font-semibold rounded-lg text-terminal-dim hover:text-terminal-text transition-all duration-200 ease-material"
-              >
-                {t.charAt(0).toUpperCase() + t.slice(1)}
-              </button>
-            ))}
+            {(["home", "sessions", "replays", "projects", "insights", "settings"] as const).map(
+              (t) => (
+                <button
+                  key={t}
+                  onClick={() => navigateTo({ view: "dashboard", session: null, tab: t })}
+                  className="px-3.5 py-1.5 text-xs font-sans font-semibold rounded-lg text-terminal-dim hover:text-terminal-text transition-all duration-200 ease-material"
+                >
+                  {t.charAt(0).toUpperCase() + t.slice(1)}
+                </button>
+              ),
+            )}
           </nav>
         )}
         {/* Session title */}
@@ -655,6 +657,18 @@ export default function App() {
                     </button>
                   )}
                 </div>
+              )}
+              {isEditor && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    navigateTo({ view: "dashboard", session: null, tab: "settings" });
+                  }}
+                  className="w-full rounded-lg border border-terminal-border-subtle bg-terminal-surface px-3 py-2 text-left text-xs font-mono text-terminal-dim transition-colors hover:text-terminal-text"
+                >
+                  Open Settings
+                </button>
               )}
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-sans font-medium text-terminal-dim">Theme</span>

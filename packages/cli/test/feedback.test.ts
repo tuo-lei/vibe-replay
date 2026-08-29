@@ -1,20 +1,14 @@
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { ReplaySession, Scene } from "@vibe-replay/types";
 import { describe, expect, it } from "vitest";
 import {
   __testables,
   buildSessionDigest,
   extractJson,
-  type FeedbackTool,
   type FeedbackResult,
   feedbackToAnnotations,
   findBalancedJson,
   parseFeedbackResponse,
   repairTruncatedJson,
-  runWithFeedbackToolFallback,
-  stripAnsi,
 } from "../src/feedback.js";
 
 // ─── Test fixtures ─────────────────────────────────────────
@@ -72,137 +66,6 @@ function makeValidFeedbackJson(overrides?: Record<string, any>): string {
     ...overrides,
   });
 }
-
-// ─── AI tool fallback ─────────────────────────────────────
-
-describe("runWithFeedbackToolFallback", () => {
-  const tools: FeedbackTool[] = [
-    { name: "agent", command: "/fake/agent" },
-    { name: "claude", command: "/fake/claude" },
-    { name: "opencode", command: "/fake/opencode" },
-  ];
-
-  it("falls back from Cursor Agent to the next available tool", async () => {
-    const calls: string[] = [];
-    const fallback = await runWithFeedbackToolFallback(tools, "agent", async (tool) => {
-      calls.push(tool.name);
-      if (tool.name === "agent") throw new Error("authentication required");
-      return { translated: 1 };
-    });
-
-    expect(calls).toEqual(["agent", "claude"]);
-    expect(fallback.result).toEqual({ translated: 1 });
-    expect(fallback.tool.name).toBe("claude");
-    expect(fallback.attemptedTools).toEqual(["agent", "claude"]);
-    expect(fallback.fallbackUsed).toBe(true);
-  });
-
-  it("falls back when a tool returns invalid output", async () => {
-    const fallback = await runWithFeedbackToolFallback(tools, "agent", async (tool) =>
-      tool.name === "agent" ? null : "valid output",
-    );
-
-    expect(fallback.result).toBe("valid output");
-    expect(fallback.tool.name).toBe("claude");
-  });
-
-  it("honors an explicitly preferred tool before priority order", async () => {
-    const calls: string[] = [];
-    const fallback = await runWithFeedbackToolFallback(tools, "opencode", async (tool) => {
-      calls.push(tool.name);
-      return "ok";
-    });
-
-    expect(calls).toEqual(["opencode"]);
-    expect(fallback.tool.name).toBe("opencode");
-    expect(fallback.fallbackUsed).toBe(false);
-  });
-
-  it("reports every attempted tool when all tools fail", async () => {
-    await expect(
-      runWithFeedbackToolFallback(tools, "agent", async (tool) => {
-        throw new Error(`${tool.name} failed`);
-      }),
-    ).rejects.toThrow(
-      "All available AI CLI tools failed (agent: agent failed; claude: claude failed; opencode: opencode failed)",
-    );
-  });
-
-  it("stops fallback attempts when the operation-wide deadline expires", async () => {
-    const calls: string[] = [];
-    await expect(
-      runWithFeedbackToolFallback(
-        tools,
-        "agent",
-        (tool, signal) => {
-          calls.push(tool.name);
-          return new Promise((_, reject) => {
-            signal.addEventListener("abort", () => reject(signal.reason), { once: true });
-          });
-        },
-        { timeoutMs: 20 },
-      ),
-    ).rejects.toThrow("AI Studio operation timed out after 20ms");
-    expect(calls).toEqual(["agent"]);
-  });
-
-  it.skipIf(process.platform === "win32")(
-    "retries Claude with a positional prompt when a launcher drops stdin",
-    async () => {
-      const dir = await mkdtemp(join(tmpdir(), "vibe-feedback-test-"));
-      const fakeClaude = join(dir, "claude");
-      const script = `#!/usr/bin/env node
-const args = process.argv.slice(2);
-const promptIndex = args.indexOf("-p");
-if (args[promptIndex + 1] === "--output-format") {
-  process.stdout.write("Error: Input must be provided either through stdin or as a prompt argument when using --print\\n");
-  process.stderr.write("Session exited with code 1\\n");
-  process.exit(1);
-}
-process.stdout.write(JSON.stringify({ result: '{"ok":true}' }) + "\\u001B[?25h");
-`;
-
-      try {
-        await writeFile(fakeClaude, script, "utf-8");
-        await chmod(fakeClaude, 0o755);
-
-        await expect(__testables.runClaude("translate this", fakeClaude)).resolves.toBe(
-          '{"ok":true}',
-        );
-      } finally {
-        await rm(dir, { recursive: true, force: true });
-      }
-    },
-  );
-
-  it.skipIf(process.platform === "win32")(
-    "detects the dropped-stdin diagnostic on Claude stderr",
-    async () => {
-      const dir = await mkdtemp(join(tmpdir(), "vibe-feedback-test-"));
-      const fakeClaude = join(dir, "claude");
-      const script = `#!/usr/bin/env node
-const args = process.argv.slice(2);
-const promptIndex = args.indexOf("-p");
-if (args[promptIndex + 1] === "--output-format") {
-  process.stderr.write("Error: Input must be provided either through stdin or as a prompt argument when using --print\\n");
-  process.exit(1);
-}
-process.stdout.write(JSON.stringify({ result: '{"ok":true}' }));
-`;
-
-      try {
-        await writeFile(fakeClaude, script, "utf-8");
-        await chmod(fakeClaude, 0o755);
-
-        await expect(__testables.runClaude("translate this", fakeClaude)).resolves.toBe(
-          '{"ok":true}',
-        );
-      } finally {
-        await rm(dir, { recursive: true, force: true });
-      }
-    },
-  );
-});
 
 describe("aggregateOverlayBatches", () => {
   const batch = {
@@ -1172,50 +1035,5 @@ describe("feedbackToAnnotations", () => {
     for (const ann of annotations) {
       expect(ann.createdAt).toBe(ann.updatedAt);
     }
-  });
-});
-
-// ─── stripAnsi ─────────────────────────────────────────────
-
-describe("stripAnsi", () => {
-  it("returns plain text unchanged", () => {
-    expect(stripAnsi("hello world")).toBe("hello world");
-  });
-
-  it("returns empty string for empty input", () => {
-    expect(stripAnsi("")).toBe("");
-  });
-
-  it("strips basic color codes", () => {
-    expect(stripAnsi("\x1B[31mred text\x1B[0m")).toBe("red text");
-  });
-
-  it("strips bold and underline codes", () => {
-    expect(stripAnsi("\x1B[1mbold\x1B[0m \x1B[4munderline\x1B[0m")).toBe("bold underline");
-  });
-
-  it("strips multiple color codes", () => {
-    expect(stripAnsi("\x1B[32mgreen\x1B[0m and \x1B[34mblue\x1B[0m")).toBe("green and blue");
-  });
-
-  it("strips 256-color codes", () => {
-    expect(stripAnsi("\x1B[38;5;196mred\x1B[0m")).toBe("red");
-  });
-
-  it("strips OSC sequences", () => {
-    expect(stripAnsi("\x1B]0;window title\x07text")).toBe("text");
-  });
-
-  it("strips OSC sequences terminated by ST", () => {
-    expect(stripAnsi("\x1B]0;window title\x1B\\text")).toBe("text");
-  });
-
-  it("strips private terminal mode sequences appended by managed launchers", () => {
-    expect(stripAnsi('{"result":"ok"}\x1B[?25h')).toBe('{"result":"ok"}');
-  });
-
-  it("handles mixed ANSI and OSC sequences", () => {
-    const input = "\x1B]0;title\x07\x1B[1m\x1B[32mcolored bold\x1B[0m";
-    expect(stripAnsi(input)).toBe("colored bold");
   });
 });

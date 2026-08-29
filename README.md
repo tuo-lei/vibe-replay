@@ -191,6 +191,12 @@ The CLI auto-discovers sessions on your machine, parses conversation data from a
 
 **After generation:**
 - **Open in Editor** — annotate scenes, get AI feedback, export to multiple formats
+- **AI Studio** — configure Pi once from the global Settings page or the reusable Manage Providers
+  dialog in AI Studio, then analyze, translate, or professionalize sessions with
+  OpenAI, ChatGPT/Codex subscription, OpenRouter, or OpenCode Zen. No Claude, OpenCode, or other
+  headless CLI is required. You can also add an OpenAI-compatible proxy (including LiteLLM) in
+  the editor; AI Studio discovers models from its `/models` endpoint and sends Chat Completions
+  requests to the configured local or remote API root.
 - **Quick preview** — open in browser instantly
 - **Publish to Gist** — shareable link on [vibe-replay.com](https://vibe-replay.com)
 - **Export for GitHub** — markdown + animated SVG for PRs
@@ -208,7 +214,15 @@ The CLI auto-discovers sessions on your machine, parses conversation data from a
 - **Self-contained HTML** — generated replay files embed viewer assets inline and make no automatic external requests when opened from disk. Remote image URLs are blocked until you explicitly choose to load an individual image. (Gist/cloud-backed replays fetch data from GitHub or the vibe-replay API on load.)
 - **Secret redaction** — API keys, tokens, PEM keys, and sensitive paths are automatically detected and redacted before generation
 - **Local by default** — vibe-replay reads session files from your machine and generates a local HTML file. Data only leaves your machine when you explicitly publish (Gist or cloud upload), or if you log in — in which case aggregated local session insights (counts, durations, costs — no conversation content) sync daily to the cloud. Remote SSH session aggregates stay local.
-- **No wrappers, no proxies** — vibe-replay does not modify, intercept, or wrap Claude Code or Cursor. It reads existing session logs after the fact
+- **Local AI setup** — AI Studio uses the embedded Pi provider and agent runtime. Credentials stay
+  outside replay files and cloud uploads; AI requests only run after you select and configure a provider
+  in the editor. Provider keys and OAuth refresh tokens are stored in
+  `~/.vibe-replay/ai-auth.json` with restricted permissions (`VIBE_REPLAY_AI_AUTH` can override the path).
+  Custom endpoint metadata is stored separately in `~/.vibe-replay/ai-providers.json` with the
+  same local-only permissions; the endpoint file never contains the custom API key. Enter a base
+  URL such as `http://127.0.0.1:58788/v1` in Settings or the AI Studio provider dialog, not
+  `/models` or `/chat/completions`. The selected provider/model is remembered automatically as a
+  browser-local preference; model lists are searchable rather than hardcoded.
 
 ## Development
 
@@ -220,7 +234,7 @@ pnpm dev              # Viewer (Vite HMR) + CLI (auto-restart) — full HMR
 pnpm dev:website      # Website (Astro HMR) + Viewer (Vite HMR)
 ```
 
-CLI usage requires Node.js >= 20. The `website` package uses Astro 6 and requires Node.js >= 22.12.0. When `nvm` is available, `website` scripts will try `nvm use` from `website/.nvmrc` automatically.
+CLI usage requires Node.js >= 22.19.0. The `website` package uses Astro 6 and requires Node.js >= 22.12.0. When `nvm` is available, `website` scripts will try `nvm use` from `website/.nvmrc` automatically. If a global package-manager shim selects an older Node for child commands, verify `corepack pnpm exec node -v` and use `corepack pnpm ...` after selecting a compatible Node version; see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for architecture details and development workflow.
 

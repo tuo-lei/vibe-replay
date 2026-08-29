@@ -11,8 +11,22 @@ pnpm install
 pnpm build
 ```
 
-Requires Node.js >= 20 and pnpm.
+Requires Node.js >= 22.19.0 and pnpm.
 Website scripts use Astro 6 and require Node.js >= 22.12.0 inside `website/`. When `nvm` is available, they will try `nvm use` from `website/.nvmrc` automatically.
+
+Before running the repository commands, verify the Node runtime used by the
+package manager as well as the shell default:
+
+```bash
+node -v
+corepack pnpm exec node -v
+```
+
+Both versions must be at least `22.19.0`. Some global package-manager shims
+(notably a Volta-pinned `pnpm`) can run `pnpm exec` under an older globally
+pinned Node even when `node -v` is newer. If the versions differ, select Node
+22.19.0 or newer with your version manager and use `corepack pnpm ...` (or
+reinstall/re-pin pnpm for that Node) until both checks agree.
 
 ## Development
 
@@ -43,8 +57,17 @@ pnpm monorepo with shared foundations, provider packages, and app layers:
 - **`packages/provider-*`** — Provider-owned discovery and parsing for Claude, Codex, Cursor, OpenCode, Hermes, and Pi.
 - **`packages/providers-default`** — Default provider registry and cross-provider discovery deduplication.
 - **`packages/replay-core`** — Provider-neutral scene transformation, redaction, token estimates, and pricing.
+- **AI Studio** — `packages/cli/src/ai-runtime.ts` embeds Pi's provider/auth runtime and
+  `packages/cli/src/feedback.ts` runs structured Coach, Translate, and Tone jobs through Pi Agent Core.
+  `packages/viewer/src/components/AiProviderSettings.tsx` is the shared provider settings surface:
+  it renders inline in global Settings and inside the AI Studio Manage Providers modal. The editor
+  also supports a user-configured OpenAI-compatible endpoint: endpoint metadata is stored in a
+  separate restricted file, its API key remains in the credential store, and dynamic models are
+  discovered from `/models` (with a `/model` fallback). Model selection uses the shared searchable
+  picker and a browser-local remembered selection; it must not be written to replay data or
+  credentials.
 - **`packages/cli`** — CLI tool published as `vibe-replay` on npm. Discovers sessions, generates replays, and serves the local dashboard/editor.
-- **`packages/viewer`** — React app built into a single HTML file (~920KB) via `vite-plugin-singlefile`. Handles playback, annotations, insights, theming, and search.
+- **`packages/viewer`** — React app built into a single HTML file (~1.0MB) via `vite-plugin-singlefile`. Handles playback, annotations, insights, theming, and search.
 
 ### Data flow
 
@@ -108,20 +131,24 @@ packages/cli/src/
 ├── types.ts              # CLI-specific types + re-exports from @vibe-replay/types
 ├── transform.ts          # Turns → Scenes, secret redaction, cost estimation
 ├── generator.ts          # Inject JSON into viewer HTML
+├── ai-runtime.ts         # Embedded Pi provider/auth runtime for AI Studio
 ├── server.ts             # Editor mode: Hono localhost server
 ├── feedback.ts           # AI Coach integration
 ├── scan.ts               # Secret detection in output
 ├── clean-prompt.ts       # Strip system boilerplate from prompts
 ├── version.ts            # CLI_VERSION from package.json
 ├── providers/
-│   ├── types.ts          # Provider interface (discover + parse)
-│   ├── index.ts          # Provider registry
-│   ├── claude-code/      # Claude Code: JSONL parser
-│   └── cursor/           # Cursor: SQLite + global state + JSONL
+│   ├── types.ts          # CLI provider compatibility types
+│   ├── index.ts          # Provider registry bridge
+│   └── pi/               # Pi session discovery and parser adapters
 └── publishers/
     ├── local.ts          # Open in browser
     └── gist.ts           # GitHub Gist publishing
 ```
+
+Provider-owned discovery and parsing lives in the top-level `packages/provider-*` packages;
+the CLI's `src/providers/` directory retains app-specific adapters used by the server and
+legacy parsing paths.
 
 ### Viewer structure
 
@@ -190,7 +217,7 @@ The viewer is built once, then the CLI embeds it. The final HTML output is the v
 
 - **pnpm** only — no npm/yarn
 - **TypeScript strict mode**, ESM throughout
-- **Viewer must stay under 1MB** after build (currently ~920KB)
+- **Viewer bundle**: The viewer is shipped as a self-contained HTML artifact; there is no hard size cap. Keep an eye on bundle size and runtime performance as features grow.
 - **Output HTML must be fully self-contained** — no automatic external requests; remote media requires explicit user consent
 - **Shared types** live in `packages/types` (`@vibe-replay/types`) — CLI and viewer re-export from there
 - **Secret redaction**: `transform.ts` strips API keys, tokens, PEM keys, paths. `scan.ts` does a second pass on the final output.

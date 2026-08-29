@@ -1,6 +1,22 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Provider, SessionInfo } from "@vibe-replay/provider-contract";
 import { discoverProvidersSafely } from "../src/provider-discovery.js";
+
+let testConfigRoot: string | undefined;
+
+beforeEach(async () => {
+  testConfigRoot = await mkdtemp(join(tmpdir(), "vibe-provider-discovery-"));
+  vi.stubEnv("VIBE_REPLAY_CONFIG", join(testConfigRoot, "missing-config.json"));
+});
+
+afterEach(async () => {
+  vi.unstubAllEnvs();
+  if (testConfigRoot) await rm(testConfigRoot, { recursive: true, force: true });
+  testConfigRoot = undefined;
+});
 
 function session(provider: string, sessionId: string): SessionInfo {
   return {

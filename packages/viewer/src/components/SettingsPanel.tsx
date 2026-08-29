@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { providerDisplayName } from "./dashboard-utils";
+import { AiProviderSettings } from "./AiProviderSettings";
+import { useAiProviderSettings } from "../hooks/useAiProviderSettings";
 
 type RemoteProvider = "claude-code" | "codex" | "pi";
 
@@ -114,6 +116,7 @@ function sourceForDraft(draft: RemoteSourceDraft): { source?: RemoteSource; erro
 }
 
 export default function SettingsPanel() {
+  const aiProviderSettings = useAiProviderSettings(true);
   const [sources, setSources] = useState<RemoteSource[]>([]);
   const [draft, setDraft] = useState<RemoteSourceDraft | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -573,6 +576,10 @@ export default function SettingsPanel() {
               {refreshing ? "Refreshing…" : "Refresh sources now"}
             </button>
           </div>
+        </section>
+
+        <section>
+          <AiProviderSettings actions={aiProviderSettings} variant="inline" />
         </section>
 
         <section className="rounded-xl border border-dashed border-terminal-border-subtle bg-terminal-surface/50 p-5 md:p-6">
