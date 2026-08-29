@@ -282,7 +282,7 @@ function sessionInfoFromRow(
     sessionId: row.id,
     slug: row.id,
     title: row.title || undefined,
-    project: shortenPath(row.cwd || ""),
+    project: row.cwd ? shortenPath(row.cwd) : "Hermes",
     cwd: row.cwd || "",
     version,
     gitBranch: row.git_branch || undefined,
