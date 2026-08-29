@@ -203,7 +203,7 @@ The viewer is built once, then the CLI embeds it. The final HTML output is the v
 
 - **pnpm** only — no npm/yarn
 - **TypeScript strict mode**, ESM throughout
-- **Viewer must stay under 1MB** after build (currently ~920KB)
+- **Viewer bundle**: The viewer is shipped as a self-contained HTML artifact; there is no hard size cap. Keep an eye on bundle size and runtime performance as features grow.
 - **Output HTML must be fully self-contained** — no automatic external requests; remote media requires explicit user consent
 - **Shared types** live in `packages/types` (`@vibe-replay/types`) — CLI and viewer re-export from there
 - **Secret redaction**: `transform.ts` strips API keys, tokens, PEM keys, paths. `scan.ts` does a second pass on the final output.

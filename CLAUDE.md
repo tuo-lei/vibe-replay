@@ -51,7 +51,7 @@ pnpm db:migrate:remote    # Apply to production D1 (requires auth)
 - **`</` escaping**: JSON in `<script>` tags MUST escape `</` as `<\/` — browsers close the tag otherwise (see `generator.ts`)
 - **`lastIndexOf("</head>")`**: Use `lastIndexOf`, not `indexOf` — minified JS in the viewer bundle may contain the string `</head>`
 - **Shared types**: `Scene`, `Annotation`, `DataSourceInfo`, `ReplaySession` live in `packages/types` (`@vibe-replay/types`). CLI and viewer re-export from there. Provider-specific and viewer-specific types remain in their respective packages.
-- **Viewer size limit**: Keep under 1MB after build (current build is ~915KB on Tailwind v4). This is why we use `marked` instead of `react-markdown`. Watch for size regressions when adding features.
+- **Viewer bundle**: The viewer ships as a self-contained HTML artifact. There is no hard size cap; keep an eye on bundle size and runtime performance as features grow.
 - **Viewer styling**: Tailwind **v4** via the `@tailwindcss/vite` plugin (no `postcss.config`/autoprefixer). The terminal theme lives in `packages/viewer/tailwind.config.js`, loaded from `src/styles/index.css` via `@config` (v4's legacy-config bridge). The website is also on v4.
 - **Self-contained HTML**: Output must make zero automatic external requests. Viewer assets are inlined; remote replay images follow the explicit-consent rule below.
 - **Remote replay images**: `ReplayImage` renders `data:image/*` sources immediately, but HTTP(S) images require an explicit per-image click and use `no-referrer`. Never attach an external URL to `<img src>` before consent.
