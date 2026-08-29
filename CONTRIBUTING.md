@@ -14,6 +14,20 @@ pnpm build
 Requires Node.js >= 22.19.0 and pnpm.
 Website scripts use Astro 6 and require Node.js >= 22.12.0 inside `website/`. When `nvm` is available, they will try `nvm use` from `website/.nvmrc` automatically.
 
+Before running the repository commands, verify the Node runtime used by the
+package manager as well as the shell default:
+
+```bash
+node -v
+corepack pnpm exec node -v
+```
+
+Both versions must be at least `22.19.0`. Some global package-manager shims
+(notably a Volta-pinned `pnpm`) can run `pnpm exec` under an older globally
+pinned Node even when `node -v` is newer. If the versions differ, select Node
+22.19.0 or newer with your version manager and use `corepack pnpm ...` (or
+reinstall/re-pin pnpm for that Node) until both checks agree.
+
 ## Development
 
 ```bash

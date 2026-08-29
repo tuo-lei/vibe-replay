@@ -405,6 +405,51 @@ describe("PiAiRuntime", () => {
     }
   });
 
+  it("does not reuse a custom API key when the endpoint changes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-ai-runtime-"));
+    temporaryRoots.push(root);
+    const requests: Array<{ url: string; authorization: string | null }> = [];
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const headers = new Headers(init?.headers);
+      requests.push({ url: String(input), authorization: headers.get("authorization") });
+      return new Response(JSON.stringify({ data: [{ id: "proxy-model" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    try {
+      const runtime = createAiRuntime({
+        authPath: join(root, "ai-auth.json"),
+        customConfigPath: join(root, "ai-providers.json"),
+      });
+
+      await runtime.configureCustomProvider(
+        { baseUrl: "http://old-gateway.example/v1" },
+        "old-gateway-secret",
+      );
+      await runtime.configureCustomProvider({ baseUrl: "http://old-gateway.example/v1" });
+      await runtime.configureCustomProvider({ baseUrl: "http://new-gateway.example/v1" });
+
+      expect(requests).toEqual([
+        {
+          url: "http://old-gateway.example/v1/models",
+          authorization: "Bearer old-gateway-secret",
+        },
+        {
+          url: "http://old-gateway.example/v1/models",
+          authorization: "Bearer old-gateway-secret",
+        },
+        {
+          url: "http://new-gateway.example/v1/models",
+          authorization: null,
+        },
+      ]);
+      expect(await runtime.credentials.read("custom-openai")).toBeUndefined();
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
   it("shares an in-flight custom model refresh across concurrent resolutions", async () => {
     const root = await mkdtemp(join(tmpdir(), "vibe-ai-runtime-"));
     temporaryRoots.push(root);
@@ -930,9 +975,18 @@ describe("PiAiRuntime", () => {
     });
     const models = createModels({ credentials });
     models.setProvider(faux.provider);
+    const other = fauxProvider({
+      provider: "other-provider",
+      models: [{ id: "other-model", name: "Other model" }],
+    });
+    models.setProvider(other.provider);
     await credentials.modify("test-provider", async () => ({
       type: "api_key",
       key: "custom-secret-key-123",
+    }));
+    await credentials.modify("other-provider", async () => ({
+      type: "api_key",
+      key: "other-secret-key-456",
     }));
     const runtime = new PiAiRuntime(models, credentials);
 
@@ -958,7 +1012,7 @@ describe("PiAiRuntime", () => {
 
     faux.setResponses([
       fauxAssistantMessage(
-        "The credential was custom-secret-key-123 and sk-abcdefghijklmnopqrstuvwxyz",
+        "The credentials were custom-secret-key-123, other-secret-key-456, and sk-abcdefghijklmnopqrstuvwxyz",
       ),
     ]);
     const resultTool: AgentTool = {
@@ -980,6 +1034,7 @@ describe("PiAiRuntime", () => {
       resultTool,
     });
     expect(result.output).not.toContain("custom-secret-key-123");
+    expect(result.output).not.toContain("other-secret-key-456");
     expect(result.output).not.toContain("sk-abcdefghijklmnopqrstuvwxyz");
   });
 

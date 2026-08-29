@@ -1090,6 +1090,14 @@ export class PiAiRuntime implements AiRuntime {
     }
     if (apiKey !== undefined && !apiKey.trim()) apiKey = undefined;
 
+    const previousConfig = await this.customConfigStore.read({ signal });
+    const endpointChanged = previousConfig?.baseUrl !== config.baseUrl;
+    // Never send a key saved for one gateway to a newly configured gateway.
+    // Delete it before publishing the new endpoint so a partial failure leaves
+    // the new endpoint unauthenticated rather than leaking the old key.
+    if (endpointChanged) {
+      await this.credentials.delete(CUSTOM_OPENAI_PROVIDER_ID, { signal });
+    }
     await this.customConfigStore.write(config, { signal });
     if (apiKey !== undefined) {
       const key = apiKey.trim();
@@ -1319,7 +1327,10 @@ export class PiAiRuntime implements AiRuntime {
         throw new Error("AI Studio operation cancelled");
       }
 
-      const exactSecrets = await this.getSecretValues(provider.id);
+      // A provider response can contain replay content or echoed request data;
+      // redact every configured credential, not only the key used for this
+      // request, before returning model output to the caller.
+      const exactSecrets = await this.getSecretValues();
       const rawResult = result;
       const output =
         rawResult === undefined ? assistantText(agent.state.messages) : JSON.stringify(rawResult);

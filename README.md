@@ -234,7 +234,7 @@ pnpm dev              # Viewer (Vite HMR) + CLI (auto-restart) — full HMR
 pnpm dev:website      # Website (Astro HMR) + Viewer (Vite HMR)
 ```
 
-CLI usage requires Node.js >= 22.19.0. The `website` package uses Astro 6 and requires Node.js >= 22.12.0. When `nvm` is available, `website` scripts will try `nvm use` from `website/.nvmrc` automatically.
+CLI usage requires Node.js >= 22.19.0. The `website` package uses Astro 6 and requires Node.js >= 22.12.0. When `nvm` is available, `website` scripts will try `nvm use` from `website/.nvmrc` automatically. If a global package-manager shim selects an older Node for child commands, verify `corepack pnpm exec node -v` and use `corepack pnpm ...` after selecting a compatible Node version; see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for architecture details and development workflow.
 
