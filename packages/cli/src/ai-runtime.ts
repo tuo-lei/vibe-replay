@@ -117,11 +117,16 @@ export interface PiAgentRunOptions {
   modelId?: string;
   systemPrompt: string;
   prompt: string;
-  resultTool: AgentTool;
+  /** Additional domain tools available to the agent. */
+  tools?: AgentTool[];
+  /** Optional structured result tool used by the existing AI Studio flows. */
+  resultTool?: AgentTool;
   signal?: AbortSignal;
   timeoutMs?: number;
+  /** Maximum number of domain-tool calls allowed in one agent run. */
+  maxToolCalls?: number;
   sessionId?: string;
-  onEvent?: (event: AgentEvent) => void;
+  onEvent?: (event: AgentEvent) => void | Promise<void>;
 }
 
 export interface PiAgentRunResult {
@@ -310,7 +315,7 @@ const AI_AUTH_ENV_VARS = ["OPENAI_API_KEY", "OPENROUTER_API_KEY", "OPENCODE_API_
  * Exact credential values are supplied separately because OAuth refresh tokens
  * do not necessarily have a recognizable prefix.
  */
-function redactSensitiveText(text: string, exactSecrets: readonly string[] = []): string {
+export function redactSensitiveText(text: string, exactSecrets: readonly string[] = []): string {
   let result = text;
 
   for (const secret of [...new Set(exactSecrets)].sort((a, b) => b.length - a.length)) {
@@ -357,6 +362,53 @@ function redactSensitiveText(text: string, exactSecrets: readonly string[] = [])
     else result = result.replace(pattern, "[REDACTED]");
   }
   return result;
+}
+
+export interface SensitiveTextStreamRedactor {
+  push(text: string): string;
+  flush(): string;
+}
+
+/**
+ * Redact exact credentials without releasing a partial secret split across
+ * provider stream events. Pattern-based redaction still runs on every stable
+ * chunk and the final response is redacted again by the normal run boundary.
+ */
+export function createSensitiveTextStreamRedactor(
+  exactSecrets: readonly string[] = [],
+): SensitiveTextStreamRedactor {
+  const secrets = [...new Set(exactSecrets)].filter((secret) => secret.length > 0);
+  let pending = "";
+
+  const stableLength = (text: string): number => {
+    let firstPossibleSecretStart = text.length;
+    const maxSecretLength = secrets.reduce((max, secret) => Math.max(max, secret.length), 0);
+    const firstStart = Math.max(0, text.length - maxSecretLength + 1);
+    for (let start = firstStart; start < text.length; start++) {
+      const suffix = text.slice(start);
+      if (secrets.some((secret) => suffix.length < secret.length && secret.startsWith(suffix))) {
+        firstPossibleSecretStart = start;
+        break;
+      }
+    }
+    return firstPossibleSecretStart;
+  };
+
+  return {
+    push(text: string): string {
+      pending += text;
+      const length = stableLength(pending);
+      if (length === 0) return "";
+      const stable = pending.slice(0, length);
+      pending = pending.slice(length);
+      return redactSensitiveText(stable, secrets);
+    },
+    flush(): string {
+      const remaining = pending;
+      pending = "";
+      return redactSensitiveText(remaining, secrets);
+    },
+  };
 }
 
 function redactUnknown(value: unknown, exactSecrets: readonly string[]): unknown {
@@ -665,6 +717,53 @@ export function getAiConfigPath(): string {
   return process.env.VIBE_REPLAY_AI_CONFIG?.trim() || DEFAULT_AI_CONFIG_PATH;
 }
 
+export interface AiDefaultSelection {
+  providerId?: string;
+  modelId?: string;
+  /** Provider identity used to map Pi custom gateways to Vibe Replay. */
+  baseUrl?: string;
+}
+
+/**
+ * Pi keeps the user's provider/model preference in a non-secret settings file.
+ * Reuse that preference when the embedded runtime can map it to one of the
+ * providers available to Vibe Replay (for example, a local gateway model).
+ */
+export async function readPiDefaultAiSelection(): Promise<AiDefaultSelection | undefined> {
+  const agentDir = process.env.PI_CODING_AGENT_DIR?.trim() || join(homedir(), ".pi", "agent");
+  try {
+    const raw = await readFile(join(agentDir, "settings.json"), "utf8");
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    const providerId =
+      typeof value.defaultProvider === "string" ? value.defaultProvider : undefined;
+    const modelId = typeof value.defaultModel === "string" ? value.defaultModel : undefined;
+    if (!providerId && !modelId) return undefined;
+    let baseUrl: string | undefined;
+    if (providerId) {
+      try {
+        const modelsRaw = await readFile(join(agentDir, "models.json"), "utf8");
+        const modelsConfig = JSON.parse(modelsRaw) as unknown;
+        const providers = isRecord(modelsConfig) ? modelsConfig.providers : undefined;
+        const provider = isRecord(providers) ? providers[providerId] : undefined;
+        baseUrl =
+          isRecord(provider) && typeof provider.baseUrl === "string" ? provider.baseUrl : undefined;
+      } catch {
+        // settings.json is sufficient for built-in Pi providers; models.json
+        // is only needed to identify a separately named custom gateway.
+      }
+    }
+    return {
+      ...(providerId ? { providerId } : {}),
+      ...(modelId ? { modelId } : {}),
+      ...(baseUrl ? { baseUrl } : {}),
+    };
+  } catch {
+    // Pi is optional; a missing or malformed settings file should not affect
+    // the built-in provider registry.
+    return undefined;
+  }
+}
+
 export interface AiRuntime {
   readonly models: Models;
   readonly credentials: CredentialStore;
@@ -684,6 +783,7 @@ export interface AiRuntime {
   login(providerId: string, type: AuthType, interaction: AuthInteraction): Promise<Credential>;
   logout(providerId: string, signal?: AbortSignal): Promise<void>;
   getSafeErrorMessage(error: unknown): Promise<string>;
+  createSensitiveTextStreamRedactor(): Promise<SensitiveTextStreamRedactor>;
   runAgent(options: PiAgentRunOptions): Promise<PiAgentRunResult>;
 }
 
@@ -750,7 +850,7 @@ function assistantFailure(messages: readonly unknown[]): string | undefined {
   return undefined;
 }
 
-function requireToolPayload(payload: unknown): unknown {
+function requireToolPayload(payload: unknown, required: boolean): unknown {
   if (!isRecord(payload) || !Array.isArray(payload.tools) || payload.tools.length === 0) {
     return payload;
   }
@@ -758,7 +858,7 @@ function requireToolPayload(payload: unknown): unknown {
   // the agent one result tool. This prevents a model that emits an empty
   // assistant message from making an otherwise healthy request look like a
   // provider failure.
-  return { ...payload, tool_choice: "required" };
+  return required ? { ...payload, tool_choice: "required" } : payload;
 }
 
 function customEndpointUrl(baseUrl: string, endpoint: "models" | "model"): string {
@@ -1308,6 +1408,10 @@ export class PiAiRuntime implements AiRuntime {
     return redactSensitiveText(message, await this.getSecretValues());
   }
 
+  async createSensitiveTextStreamRedactor(): Promise<SensitiveTextStreamRedactor> {
+    return createSensitiveTextStreamRedactor(await this.getSecretValues());
+  }
+
   async runAgent(options: PiAgentRunOptions): Promise<PiAgentRunResult> {
     const operationController = new AbortController();
     let timedOut = false;
@@ -1334,15 +1438,28 @@ export class PiAiRuntime implements AiRuntime {
         : undefined;
 
     let result: unknown;
+    const maxToolCalls =
+      options.maxToolCalls && options.maxToolCalls > 0
+        ? Math.min(Math.floor(options.maxToolCalls), 64)
+        : undefined;
+    let toolCallCount = 0;
 
-    const resultTool: AgentTool = {
-      ...options.resultTool,
-      execute: async (toolCallId, params, signal, onUpdate) => {
-        signal?.throwIfAborted();
-        result = clone(params);
-        return options.resultTool.execute(toolCallId, params, signal, onUpdate);
-      },
-    };
+    const resultTool = options.resultTool
+      ? {
+          ...options.resultTool,
+          execute: async (
+            toolCallId: string,
+            params: any,
+            signal?: AbortSignal,
+            onUpdate?: any,
+          ) => {
+            signal?.throwIfAborted();
+            result = clone(params);
+            return options.resultTool!.execute(toolCallId, params, signal, onUpdate);
+          },
+        }
+      : undefined;
+    const tools = [...(options.tools || []), ...(resultTool ? [resultTool] : [])];
 
     try {
       const resolved = await this.resolveModel(options.providerId, options.modelId, {
@@ -1356,7 +1473,7 @@ export class PiAiRuntime implements AiRuntime {
           systemPrompt: options.systemPrompt,
           model,
           thinkingLevel: "off",
-          tools: [resultTool],
+          tools,
           messages: [],
         },
         // Agent-core 0.84 does not forward maxRetries from AgentOptions to
@@ -1376,18 +1493,29 @@ export class PiAiRuntime implements AiRuntime {
                     const replaced = streamOptions?.onPayload
                       ? await streamOptions.onPayload(payload, payloadModel)
                       : payload;
-                    return requireToolPayload(replaced ?? payload);
+                    return requireToolPayload(replaced ?? payload, !!options.resultTool);
                   },
                 }
               : {}),
           }),
         sessionId: options.sessionId || randomUUID(),
         toolExecution: "sequential",
+        ...(maxToolCalls
+          ? {
+              beforeToolCall: async () => {
+                if (toolCallCount >= maxToolCalls) {
+                  const reason = `AI tool-call budget exceeded (${maxToolCalls})`;
+                  abortOperation(new Error(reason));
+                  return { block: true, terminate: true, reason };
+                }
+                toolCallCount++;
+                return undefined;
+              },
+            }
+          : {}),
       });
 
-      unsubscribe = agent.subscribe((event) => {
-        options.onEvent?.(event);
-      });
+      unsubscribe = agent.subscribe((event) => options.onEvent?.(event));
       await raceWithAbortSignal(agent.prompt(options.prompt), operationController.signal);
       if (timedOut) {
         throw new Error(`AI Studio operation timed out after ${options.timeoutMs}ms`);

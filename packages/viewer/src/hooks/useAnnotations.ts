@@ -393,7 +393,7 @@ export function useAnnotations(
   }, []);
 
   const runAiCoach =
-    isEditor && aiProviderId
+    isEditor && aiProviderId && aiModelId
       ? async () => {
           const controller = new AbortController();
           aiCoachAbortRef.current = controller;

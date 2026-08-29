@@ -14,6 +14,7 @@ import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  createSensitiveTextStreamRedactor,
   createAiRuntime,
   createBrowserAuthInteraction,
   FileCredentialStore,
@@ -302,6 +303,16 @@ describe("FileCredentialStore", () => {
     await expect(new FileCredentialStore(path).read("openai")).rejects.toThrow(
       "Invalid AI credential for provider openai",
     );
+  });
+});
+
+describe("streaming credential redaction", () => {
+  it("holds an exact secret until a split stream value can be classified", () => {
+    const redactor = createSensitiveTextStreamRedactor(["my-secret-key"]);
+
+    expect(redactor.push("prefix my-")).toBe("prefix ");
+    expect(redactor.push("secret-key suffix")).toBe("[REDACTED] suffix");
+    expect(redactor.flush()).toBe("");
   });
 });
 
@@ -683,7 +694,13 @@ describe("PiAiRuntime", () => {
       systemPrompt: "Return the result through the tool.",
       prompt: "Return ok=true.",
       resultTool,
-      onEvent: (event) => events.push(event.type),
+      onEvent: async (event) => {
+        events.push(event.type);
+        if (event.type === "agent_end") {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          events.push("agent_end_listener_finished");
+        }
+      },
     });
 
     expect(result).toMatchObject({
@@ -698,6 +715,80 @@ describe("PiAiRuntime", () => {
     expect(events).toContain("tool_execution_start");
     expect(events).toContain("tool_execution_end");
     expect(events).toContain("agent_end");
+    expect(events.at(-1)).toBe("agent_end_listener_finished");
+  });
+
+  it("runs additional domain tools and returns the final assistant message", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-ai-runtime-"));
+    temporaryRoots.push(root);
+    const credentials = new FileCredentialStore(join(root, "ai-auth.json"));
+    const faux = fauxProvider({
+      provider: "test-provider",
+      models: [{ id: "test-model", name: "Test model" }],
+    });
+    const models = createModels({ credentials });
+    models.setProvider(faux.provider);
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("read_session", { query: "auth" })),
+      fauxAssistantMessage("I found one authentication session."),
+    ]);
+
+    const readTool: AgentTool = {
+      name: "read_session",
+      label: "Read session",
+      description: "Read a session without changing it",
+      parameters: Type.Object({ query: Type.String() }),
+      execute: async (_toolCallId, params) => ({
+        content: [{ type: "text", text: `Found results for ${params.query}` }],
+        details: { readOnly: true },
+      }),
+    };
+    const runtime = new PiAiRuntime(models, credentials);
+
+    const result = await runtime.runAgent({
+      providerId: "test-provider",
+      modelId: "test-model",
+      systemPrompt: "Use the read-only tool, then answer the user.",
+      prompt: "Find authentication sessions.",
+      tools: [readTool],
+    });
+
+    expect(result.output).toBe("I found one authentication session.");
+    expect(result.result).toBeUndefined();
+  });
+
+  it("stops a domain-tool run when its call budget is exhausted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-ai-runtime-"));
+    temporaryRoots.push(root);
+    const credentials = new FileCredentialStore(join(root, "ai-auth.json"));
+    const faux = fauxProvider({
+      provider: "budget-provider",
+      models: [{ id: "test-model", name: "Test model" }],
+    });
+    const models = createModels({ credentials });
+    models.setProvider(faux.provider);
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("read_session", { query: "first" })),
+      fauxAssistantMessage(fauxToolCall("read_session", { query: "second" })),
+    ]);
+    const readTool: AgentTool = {
+      name: "read_session",
+      label: "Read session",
+      description: "Read a session without changing it",
+      parameters: Type.Object({ query: Type.String() }),
+      execute: async () => ({ content: [{ type: "text", text: "Found results" }] }),
+    };
+
+    await expect(
+      new PiAiRuntime(models, credentials).runAgent({
+        providerId: "budget-provider",
+        modelId: "test-model",
+        systemPrompt: "Use the read-only tool.",
+        prompt: "Read two sessions.",
+        tools: [readTool],
+        maxToolCalls: 1,
+      }),
+    ).rejects.toThrow("tool-call budget exceeded (1)");
   });
 
   it("requires the result tool for OpenAI-compatible AI Studio requests", async () => {

@@ -88,7 +88,7 @@ import {
   hasRichScanMetrics,
   ReadinessRow,
   SessionDataPipeline,
-  SessionLoadingToast,
+  SessionLoadingBanner,
   sessionDataState,
 } from "./SessionDataProgress";
 import { formatDuration } from "./StatsPanel";
@@ -3473,12 +3473,12 @@ function SessionsPanel() {
         </div>
 
         {showInitialLoading ? (
-          <SessionLoadingToast
+          <SessionLoadingBanner
             title="Fetching sessions"
             description="Reading cached session lists first, then refreshing configured sources in the background."
           />
         ) : refreshing ? (
-          <SessionLoadingToast
+          <SessionLoadingBanner
             title="Scanning latest sessions"
             description={
               staleCachedAt
@@ -3487,7 +3487,7 @@ function SessionsPanel() {
             }
           />
         ) : enrichmentStatus?.running && enrichmentStatus.total > 0 ? (
-          <SessionLoadingToast
+          <SessionLoadingBanner
             status={enrichmentStatus}
             title="Loading richer details for visible sessions"
             description="Visible cards update in place as local data is enriched."
@@ -5303,7 +5303,7 @@ function ReplaysPanel() {
   );
 }
 
-// ─── Global scan toast (fixed bottom-right, no layout shift) ────────
+// ─── Global scan status (top-right; bottom-right is reserved for Ask Replay) ───
 
 function ScanToast() {
   const { scanStatus } = useScanInsightsContext();
@@ -5337,12 +5337,10 @@ function ScanToast() {
         ? `Scanning ${displayStatus.scanned}/${displayStatus.total}`
         : "Preparing scan...";
 
-  const pct =
-    displayStatus.total > 0 ? Math.round((displayStatus.scanned / displayStatus.total) * 100) : 0;
-
   return (
     <div
-      className={`fixed bottom-4 right-4 z-50 flex items-center gap-2.5 rounded-lg px-3.5 py-2.5 text-xs font-mono bg-terminal-surface border border-terminal-border shadow-layer-md transition-all duration-300 ${
+      aria-live="polite"
+      className={`fixed top-16 right-4 z-50 flex items-center gap-2.5 rounded-lg px-3.5 py-2.5 text-xs font-mono bg-terminal-surface border border-terminal-border shadow-layer-md transition-all duration-300 ${
         exiting
           ? "opacity-0 translate-y-2"
           : "opacity-100 translate-y-0 animate-in fade-in slide-in-from-bottom-2 duration-300"
@@ -5351,12 +5349,13 @@ function ScanToast() {
       <span className="w-1.5 h-1.5 rounded-full bg-terminal-purple animate-pulse shrink-0" />
       <span className="text-terminal-dim">{label}</span>
       {displayStatus.total > 0 && (
-        <div className="w-16 h-1 rounded-full bg-terminal-surface-2 overflow-hidden">
-          <div
-            className="h-full bg-terminal-purple rounded-full transition-all duration-300"
-            style={{ width: `${pct}%` }}
-          />
-        </div>
+        <progress
+          value={displayStatus.scanned}
+          max={displayStatus.total}
+          aria-label="Session scan progress"
+          className="w-16 h-1 rounded-full bg-terminal-surface-2 overflow-hidden"
+          style={{ accentColor: "var(--purple)" }}
+        />
       )}
     </div>
   );

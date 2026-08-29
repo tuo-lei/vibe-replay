@@ -66,6 +66,10 @@ pnpm monorepo with shared foundations, provider packages, and app layers:
   discovered from `/models` (with a `/model` fallback). Model selection uses the shared searchable
   picker and a browser-local remembered selection; it must not be written to replay data or
   credentials.
+- **Ask Replay** — `packages/cli/src/local-assistant.ts` exposes bounded, read-only session, replay,
+  scene, usage, insight, and navigation tools to the local assistant. `packages/cli/src/server.ts`
+  owns the SSE transport and provider-selection boundary; no shell, filesystem, arbitrary network,
+  publishing, or mutation tools are exposed. SSH content requires explicit per-request consent.
 - **`packages/cli`** — CLI tool published as `vibe-replay` on npm. Discovers sessions, generates replays, and serves the local dashboard/editor.
 - **`packages/viewer`** — React app built into a single HTML file (~1.0MB) via `vite-plugin-singlefile`. Handles playback, annotations, insights, theming, and search.
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Dashboard from "./components/Dashboard";
 import { navigateTo } from "./components/dashboard-utils";
+import LocalChatAssistant from "./components/LocalChatAssistant";
 import Player from "./components/Player";
 import type { ActiveView } from "./components/ViewTabBar";
 import { useOutsideClick } from "./hooks/useOutsideClick";
@@ -345,6 +346,7 @@ export default function App() {
             </div>
           }
         />
+        <LocalChatAssistant context={{ mode: "dashboard" }} />
       </div>
     );
   }
@@ -711,6 +713,19 @@ export default function App() {
         returnToLandingRef={returnToLandingRef}
         live={live}
       />
+      {isEditor && (
+        <LocalChatAssistant
+          context={{
+            mode: "replay",
+            currentSession: {
+              slug: meta.slug,
+              provider: meta.provider,
+              title: meta.title,
+              targetId: meta.location?.kind === "ssh" ? meta.location.id : undefined,
+            },
+          }}
+        />
+      )}
     </div>
   );
 }

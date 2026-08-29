@@ -197,6 +197,9 @@ The CLI auto-discovers sessions on your machine, parses conversation data from a
   headless CLI is required. You can also add an OpenAI-compatible proxy (including LiteLLM) in
   the editor; AI Studio discovers models from its `/models` endpoint and sends Chat Completions
   requests to the configured local or remote API root.
+- **Ask Replay** — ask read-only questions about local sessions, replay scenes, usage, and
+  insights from the Dashboard or Editor. Answers include citations and explicit navigation actions;
+  SSH-backed data stays hidden unless you enable the per-chat consent toggle.
 - **Quick preview** — open in browser instantly
 - **Publish to Gist** — shareable link on [vibe-replay.com](https://vibe-replay.com)
 - **Export for GitHub** — markdown + animated SVG for PRs
@@ -214,9 +217,11 @@ The CLI auto-discovers sessions on your machine, parses conversation data from a
 - **Self-contained HTML** — generated replay files embed viewer assets inline and make no automatic external requests when opened from disk. Remote image URLs are blocked until you explicitly choose to load an individual image. (Gist/cloud-backed replays fetch data from GitHub or the vibe-replay API on load.)
 - **Secret redaction** — API keys, tokens, PEM keys, and sensitive paths are automatically detected and redacted before generation
 - **Local by default** — vibe-replay reads session files from your machine and generates a local HTML file. Data only leaves your machine when you explicitly publish (Gist or cloud upload), or if you log in — in which case aggregated local session insights (counts, durations, costs — no conversation content) sync daily to the cloud. Remote SSH session aggregates stay local.
-- **Local AI setup** — AI Studio uses the embedded Pi provider and agent runtime. Credentials stay
-  outside replay files and cloud uploads; AI requests only run after you select and configure a provider
-  in the editor. Provider keys and OAuth refresh tokens are stored in
+- **Local AI setup** — AI Studio and Ask Replay use the embedded Pi provider and agent runtime.
+  Credentials stay outside replay files and cloud uploads; AI requests only run after a configured
+  provider and usable model are selected. When Pi's `settings.json` defines a default provider/model,
+  Vibe Replay honors it only when the provider identity (provider id or configured endpoint) and exact
+  model are both verified; it never silently chooses the first catalog entry. Provider keys and OAuth refresh tokens are stored in
   `~/.vibe-replay/ai-auth.json` with restricted permissions (`VIBE_REPLAY_AI_AUTH` can override the path).
   Custom endpoint metadata is stored separately in `~/.vibe-replay/ai-providers.json` with the
   same local-only permissions; the endpoint file never contains the custom API key. Enter a base
