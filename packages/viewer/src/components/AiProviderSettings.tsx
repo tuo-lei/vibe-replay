@@ -264,7 +264,7 @@ export function AiProviderSettings({
     type: "success" | "error";
     text: string;
   } | null>(null);
-  const [customName, setCustomName] = useState("Local LiteLLM");
+  const [customName, setCustomName] = useState("Custom gateway");
   const [customBaseUrl, setCustomBaseUrl] = useState("http://127.0.0.1:58788/v1");
   const [customApiKey, setCustomApiKey] = useState("");
   const [customRunning, setCustomRunning] = useState(false);
@@ -619,7 +619,9 @@ export function AiProviderSettings({
         </div>
         <p className="text-[10px] font-mono leading-relaxed text-terminal-dimmer">
           Discover models from <code>/models</code> (or <code>/model</code>) and use Chat
-          Completions. LiteLLM and local OpenAI-compatible gateways work here.
+          Completions. Any OpenAI-compatible gateway works — local LiteLLM / Ollama / vLLM or remote{" "}
+          <code>https://</code> endpoint. Plain <code>http://</code> is only allowed for loopback (
+          <code>127.0.0.1</code> / <code>localhost</code>).
         </p>
         <input
           aria-label="Custom AI provider name"

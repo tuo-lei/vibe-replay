@@ -267,6 +267,7 @@ export default function LocalChatAssistant({ context }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [panelSize, setPanelSize] = useState<PanelSize>(DEFAULT_PANEL_SIZE);
   const [resizing, setResizing] = useState(false);
+  const [nudge, setNudge] = useState(false);
   const controllerRef = useRef<AbortController | null>(null);
   const resizeStartRef = useRef<
     { x: number; y: number; width: number; height: number; edges: ResizeEdges } | undefined
@@ -299,6 +300,18 @@ export default function LocalChatAssistant({ context }: Props) {
   useEffect(() => {
     setPanelSize(readPanelSize());
   }, []);
+
+  // Subtle periodic nudge so first-time users notice the FAB is tappable.
+  // Respects prefers-reduced-motion and pauses while open/hovered.
+  useEffect(() => {
+    if (open) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    const id = window.setInterval(() => {
+      setNudge(true);
+      window.setTimeout(() => setNudge(false), 650);
+    }, 5200);
+    return () => window.clearInterval(id);
+  }, [open]);
 
   useEffect(() => {
     try {
@@ -904,14 +917,19 @@ export default function LocalChatAssistant({ context }: Props) {
         <button
           type="button"
           onClick={() => setOpen(true)}
+          onMouseEnter={() => setNudge(false)}
           aria-label="Ask Replay"
           title="Ask Replay — local assistant"
-          className="flex items-center gap-1 rounded-full border border-terminal-green/30 bg-terminal-surface/85 px-2.5 py-1.5 text-[11px] font-semibold tracking-tight text-terminal-text shadow-layer-md backdrop-blur-md transition-all hover:border-terminal-green/60 hover:bg-terminal-surface hover:text-terminal-green"
+          className={`flex items-center gap-1 rounded-full border bg-terminal-surface/85 px-2.5 py-1.5 text-[11px] font-semibold tracking-tight shadow-layer-md backdrop-blur-md transition-all duration-300 hover:border-terminal-green/60 hover:bg-terminal-surface hover:text-terminal-green ${nudge ? "scale-[1.04] border-terminal-green/55 shadow-[0_0_0_3px_rgba(16,185,129,0.14)]" : "scale-100 border-terminal-green/30 text-terminal-text"}`}
         >
-          <span className="text-terminal-green leading-none">✦</span>
+          <span
+            className={`leading-none transition-transform ${nudge ? "scale-110" : ""} text-terminal-green`}
+          >
+            ✦
+          </span>
           <span className="leading-none">Ask</span>
           <span
-            className="ml-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-terminal-green/80"
+            className={`ml-0.5 h-1.5 w-1.5 shrink-0 rounded-full ${nudge ? "animate-ping bg-terminal-green" : "bg-terminal-green/80"}`}
             aria-hidden="true"
           />
         </button>
