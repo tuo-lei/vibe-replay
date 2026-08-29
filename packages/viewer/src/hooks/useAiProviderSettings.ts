@@ -215,6 +215,7 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
     mountedRef.current = true;
     if (enabled) refreshAiProviders().catch(() => {});
     return () => {
+      refreshSequenceRef.current += 1;
       mountedRef.current = false;
       authAbortRef.current?.abort();
     };

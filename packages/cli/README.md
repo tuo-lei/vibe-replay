@@ -43,7 +43,8 @@ npx vibe-replay --session ~/.claude/projects/<project>/<session>.jsonl
 AI Studio stores provider keys and OAuth refresh tokens outside replay files in
 `~/.vibe-replay/ai-auth.json` (override with `VIBE_REPLAY_AI_AUTH`). Custom endpoint metadata is
 stored separately in `~/.vibe-replay/ai-providers.json` (override with `VIBE_REPLAY_AI_CONFIG`),
-and models are discovered from the configured endpoint's `/models` or `/model` response.
+and models are discovered from the configured endpoint's `/models` or `/model` response. HTTP
+endpoints are allowed only for loopback gateways; use HTTPS for remote endpoints.
 
 ## Output
 

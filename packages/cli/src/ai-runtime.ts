@@ -9,6 +9,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
+import { isIP } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import open from "open";
@@ -527,6 +528,9 @@ export function normalizeCustomAiBaseUrl(rawBaseUrl: string): string {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("Custom AI endpoint must use http or https");
   }
+  if (url.protocol === "http:" && !isLoopbackHostname(url.hostname)) {
+    throw new Error("Custom AI endpoint must use https unless it targets loopback");
+  }
   if (url.username || url.password) {
     throw new Error("Custom AI endpoint must not contain credentials in the URL");
   }
@@ -557,6 +561,17 @@ function normalizeCustomAiProviderConfig(
     name,
     baseUrl: normalizeCustomAiBaseUrl(input.baseUrl),
   };
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname
+    .replace(/^\[|\]$/g, "")
+    .toLowerCase()
+    .replace(/\.$/, "");
+  if (normalized === "localhost" || normalized === "::1") return true;
+  if (isIP(normalized) !== 4) return false;
+  const firstOctet = Number.parseInt(normalized.split(".")[0] || "", 10);
+  return firstOctet === 127;
 }
 
 /** Stores only the custom endpoint metadata; API keys stay in FileCredentialStore. */
@@ -940,6 +955,8 @@ function customProvider(config: CustomAiProviderConfig): Provider {
 
 export class PiAiRuntime implements AiRuntime {
   private readonly customConfigStore?: CustomAiProviderConfigStore;
+  private readonly customConfigMutationLockPath?: string;
+  private customConfigMutationChain: Promise<void> = Promise.resolve();
   private customConfig?: CustomAiProviderConfig;
   private customModelError?: string;
   private customRefresh?: Promise<void>;
@@ -948,8 +965,39 @@ export class PiAiRuntime implements AiRuntime {
     public readonly models: MutableModels,
     public readonly credentials: CredentialStore,
     customConfigStore?: CustomAiProviderConfigStore,
+    customConfigMutationLockPath?: string,
   ) {
     this.customConfigStore = customConfigStore;
+    this.customConfigMutationLockPath = customConfigMutationLockPath;
+  }
+
+  private async withCustomConfigMutationLock<T>(
+    signal: AbortSignal | undefined,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    if (!this.customConfigMutationLockPath) return operation();
+    const release = await acquireFileLock(this.customConfigMutationLockPath, signal);
+    try {
+      return await operation();
+    } finally {
+      await release();
+    }
+  }
+
+  private enqueueCustomConfigMutation<T>(
+    signal: AbortSignal | undefined,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const run = async () => {
+      signal?.throwIfAborted();
+      return this.withCustomConfigMutationLock(signal, operation);
+    };
+    const queued = this.customConfigMutationChain.then(run, run);
+    this.customConfigMutationChain = queued.then(
+      () => undefined,
+      () => undefined,
+    );
+    return raceWithAbortSignal(queued, signal);
   }
 
   private async ensureCustomProvider(signal?: AbortSignal): Promise<Provider | undefined> {
@@ -1080,7 +1128,8 @@ export class PiAiRuntime implements AiRuntime {
     apiKey?: string,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (!this.customConfigStore) {
+    const customConfigStore = this.customConfigStore;
+    if (!customConfigStore) {
       throw new Error("Custom AI provider configuration is unavailable");
     }
     signal?.throwIfAborted();
@@ -1088,61 +1137,74 @@ export class PiAiRuntime implements AiRuntime {
     if (apiKey !== undefined && apiKey.trim().length > 8_192) {
       throw new Error("Custom AI API key is too long");
     }
-    if (apiKey !== undefined && !apiKey.trim()) apiKey = undefined;
+    const normalizedApiKey = apiKey?.trim() || undefined;
 
-    const previousConfig = await this.customConfigStore.read({ signal });
-    const endpointChanged = previousConfig?.baseUrl !== config.baseUrl;
-    // Never send a key saved for one gateway to a newly configured gateway.
-    // Delete it before publishing the new endpoint so a partial failure leaves
-    // the new endpoint unauthenticated rather than leaking the old key.
-    if (endpointChanged) {
-      await this.credentials.delete(CUSTOM_OPENAI_PROVIDER_ID, { signal });
-    }
-    await this.customConfigStore.write(config, { signal });
-    if (apiKey !== undefined) {
-      const key = apiKey.trim();
-      await this.credentials.modify(
-        CUSTOM_OPENAI_PROVIDER_ID,
-        async () => ({ type: "api_key", key }),
-        { signal },
-      );
-    }
-    await this.ensureCustomProvider(signal);
-    await this.refreshCustomProvider(signal);
+    await this.enqueueCustomConfigMutation(signal, async () => {
+      const previousConfig = await customConfigStore.read({ signal });
+      const endpointChanged = previousConfig?.baseUrl !== config.baseUrl;
+      // Never send a key saved for one gateway to a newly configured gateway.
+      // Delete it before publishing the new endpoint so a partial failure leaves
+      // the new endpoint unauthenticated rather than leaking the old key.
+      if (endpointChanged) {
+        await this.credentials.delete(CUSTOM_OPENAI_PROVIDER_ID, { signal });
+      }
+      await customConfigStore.write(config, { signal });
+      if (normalizedApiKey !== undefined) {
+        await this.credentials.modify(
+          CUSTOM_OPENAI_PROVIDER_ID,
+          async () => ({ type: "api_key", key: normalizedApiKey }),
+          { signal },
+        );
+      }
+      await this.ensureCustomProvider(signal);
+      await this.refreshCustomProvider(signal);
+    });
   }
 
   async removeCustomProvider(signal?: AbortSignal): Promise<void> {
-    if (!this.customConfigStore) {
+    const customConfigStore = this.customConfigStore;
+    if (!customConfigStore) {
       throw new Error("Custom AI provider configuration is unavailable");
     }
-    signal?.throwIfAborted();
-    await this.customConfigStore.delete({ signal });
-    await this.credentials.delete(CUSTOM_OPENAI_PROVIDER_ID, { signal });
-    this.models.deleteProvider(CUSTOM_OPENAI_PROVIDER_ID);
-    this.customConfig = undefined;
-    this.customModelError = undefined;
+    await this.enqueueCustomConfigMutation(signal, async () => {
+      signal?.throwIfAborted();
+      await customConfigStore.delete({ signal });
+      await this.credentials.delete(CUSTOM_OPENAI_PROVIDER_ID, { signal });
+      this.models.deleteProvider(CUSTOM_OPENAI_PROVIDER_ID);
+      this.customConfig = undefined;
+      this.customModelError = undefined;
+    });
   }
 
   async saveApiKey(providerId: string, apiKey: string, signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted();
-    if (providerId === CUSTOM_OPENAI_PROVIDER_ID) await this.ensureCustomProvider(signal);
-    const provider = this.models.getProvider(providerId);
-    if (!provider) throw new Error(`Unknown AI provider: ${providerId}`);
-    if (!provider.auth.apiKey) {
-      throw new Error(`${provider.name} does not support API-key authentication`);
-    }
     const key = apiKey.trim();
     if (!key) throw new Error("API key must not be empty");
     if (key.length > 8_192) throw new Error("API key is too long");
 
-    await this.credentials.modify(
-      providerId,
-      async () => ({
-        type: "api_key",
-        key,
-      }),
-      { signal },
-    );
+    const save = async () => {
+      if (providerId === CUSTOM_OPENAI_PROVIDER_ID) await this.ensureCustomProvider(signal);
+      const provider = this.models.getProvider(providerId);
+      if (!provider) throw new Error(`Unknown AI provider: ${providerId}`);
+      if (!provider.auth.apiKey) {
+        throw new Error(`${provider.name} does not support API-key authentication`);
+      }
+
+      await this.credentials.modify(
+        providerId,
+        async () => ({
+          type: "api_key",
+          key,
+        }),
+        { signal },
+      );
+    };
+
+    if (providerId === CUSTOM_OPENAI_PROVIDER_ID) {
+      await this.enqueueCustomConfigMutation(signal, save);
+    } else {
+      await save();
+    }
   }
 
   async login(
@@ -1192,11 +1254,18 @@ export class PiAiRuntime implements AiRuntime {
 
   async logout(providerId: string, signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted();
-    if (providerId === CUSTOM_OPENAI_PROVIDER_ID) await this.ensureCustomProvider(signal);
-    if (!this.models.getProvider(providerId)) {
-      throw new Error(`Unknown AI provider: ${providerId}`);
+    const logout = async () => {
+      if (providerId === CUSTOM_OPENAI_PROVIDER_ID) await this.ensureCustomProvider(signal);
+      if (!this.models.getProvider(providerId)) {
+        throw new Error(`Unknown AI provider: ${providerId}`);
+      }
+      await this.models.logout(providerId, { signal });
+    };
+    if (providerId === CUSTOM_OPENAI_PROVIDER_ID) {
+      await this.enqueueCustomConfigMutation(signal, logout);
+    } else {
+      await logout();
     }
-    await this.models.logout(providerId, { signal });
   }
 
   private async getSecretValues(providerId?: string): Promise<string[]> {
@@ -1376,16 +1445,16 @@ export class PiAiRuntime implements AiRuntime {
 export function createAiRuntime(
   options: { authPath?: string; customConfigPath?: string } = {},
 ): AiRuntime {
-  const credentials = new FileCredentialStore(options.authPath || getAiAuthPath());
-  const customConfig = new FileCustomProviderConfigStore(
-    options.customConfigPath || getAiConfigPath(),
-  );
+  const authPath = options.authPath || getAiAuthPath();
+  const customConfigPath = options.customConfigPath || getAiConfigPath();
+  const credentials = new FileCredentialStore(authPath);
+  const customConfig = new FileCustomProviderConfigStore(customConfigPath);
   const models = createModels({ credentials });
   models.setProvider(openaiProvider());
   models.setProvider(openaiCodexProvider());
   models.setProvider(openrouterProvider());
   models.setProvider(opencodeProvider());
-  return new PiAiRuntime(models, credentials, customConfig);
+  return new PiAiRuntime(models, credentials, customConfig, `${customConfigPath}.transaction`);
 }
 
 let defaultRuntime: AiRuntime | undefined;
