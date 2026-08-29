@@ -56,10 +56,12 @@ export interface AiProviderSettingsActions {
 }
 
 const AI_SELECTION_STORAGE_KEY = "vibe-replay-ai-selection-v1";
+const AI_SELECTION_CHANGE_EVENT = "vibe-replay-ai-selection-change";
 
 interface AiSelectionPreference {
   providerId: string;
   modelId: string;
+  source?: "user" | "server";
 }
 
 function readAiSelectionPreference(): AiSelectionPreference | null {
@@ -69,19 +71,30 @@ function readAiSelectionPreference(): AiSelectionPreference | null {
     if (!raw) return null;
     const value = JSON.parse(raw) as Partial<AiSelectionPreference>;
     if (typeof value.providerId !== "string" || typeof value.modelId !== "string") return null;
-    return { providerId: value.providerId, modelId: value.modelId };
+    return {
+      providerId: value.providerId,
+      modelId: value.modelId,
+      ...(value.source === "user" || value.source === "server" ? { source: value.source } : {}),
+    };
   } catch {
     return null;
   }
 }
 
 function writeAiSelectionPreference(value: AiSelectionPreference): void {
+  if (typeof window === "undefined") return;
   try {
-    if (typeof window === "undefined") return;
     window.localStorage.setItem(AI_SELECTION_STORAGE_KEY, JSON.stringify(value));
   } catch {
     // Private browsing and storage quotas should not block AI configuration.
   }
+  // `storage` does not fire in the same tab. Settings/AI Studio and Ask
+  // Replay each own a hook instance, so broadcast the change locally too.
+  window.dispatchEvent(
+    new CustomEvent<AiSelectionPreference>(AI_SELECTION_CHANGE_EVENT, {
+      detail: value,
+    }),
+  );
 }
 
 function parseAiProviders(value: unknown): AiProviderInfo[] {
@@ -109,11 +122,13 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
   const [selection, setSelection] = useState<{
     providerId: string | null;
     modelId: string | null;
+    source?: AiSelectionPreference["source"];
   }>(() => {
     const storedPreference = readAiSelectionPreference();
     return {
       providerId: storedPreference?.providerId || null,
       modelId: storedPreference?.modelId || null,
+      source: storedPreference?.source,
     };
   });
   const [defaultSelection, setDefaultSelection] = useState<AiSelectionPreference | null>(() =>
@@ -128,12 +143,66 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
   const mountedRef = useRef(true);
 
   const updateSelection = useCallback(
-    (next: { providerId: string | null; modelId: string | null }) => {
+    (next: {
+      providerId: string | null;
+      modelId: string | null;
+      source?: AiSelectionPreference["source"];
+    }) => {
       selectionRef.current = next;
       if (mountedRef.current) setSelection(next);
     },
     [],
   );
+
+  // Keep independently mounted AI surfaces (AI Studio, Settings, and Ask
+  // Replay) on the same provider/model without requiring a page reload.
+  useEffect(() => {
+    if (!enabled || typeof window === "undefined") return;
+
+    const applyPreference = (preference: AiSelectionPreference | null) => {
+      if (!preference) return;
+      updateSelection(preference);
+      if (mountedRef.current) setDefaultSelection(preference);
+    };
+    const onSelectionChange = (event: Event) => {
+      const preference = (event as CustomEvent<AiSelectionPreference>).detail;
+      if (
+        preference &&
+        typeof preference.providerId === "string" &&
+        typeof preference.modelId === "string"
+      ) {
+        applyPreference(preference);
+      }
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== AI_SELECTION_STORAGE_KEY) return;
+      try {
+        const value = event.newValue
+          ? (JSON.parse(event.newValue) as Partial<AiSelectionPreference>)
+          : null;
+        applyPreference(
+          value && typeof value.providerId === "string" && typeof value.modelId === "string"
+            ? {
+                providerId: value.providerId,
+                modelId: value.modelId,
+                ...(value.source === "user" || value.source === "server"
+                  ? { source: value.source }
+                  : {}),
+              }
+            : null,
+        );
+      } catch {
+        // Ignore malformed or unavailable preferences.
+      }
+    };
+
+    window.addEventListener(AI_SELECTION_CHANGE_EVENT, onSelectionChange);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(AI_SELECTION_CHANGE_EVENT, onSelectionChange);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [enabled, updateSelection]);
 
   // Provider/model selection is a local preference, not replay or credential
   // data. Remember it as soon as the user changes it so reopening AI Studio
@@ -142,9 +211,13 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
   // callers that want to save the current choice deliberately.
   const rememberSelection = useCallback(
     (next: { providerId: string | null; modelId: string | null }) => {
-      updateSelection(next);
+      updateSelection({ ...next, source: "user" });
       if (!next.providerId || !next.modelId) return;
-      const preference = { providerId: next.providerId, modelId: next.modelId };
+      const preference = {
+        providerId: next.providerId,
+        modelId: next.modelId,
+        source: "user" as const,
+      };
       writeAiSelectionPreference(preference);
       if (mountedRef.current) setDefaultSelection(preference);
     },
@@ -167,7 +240,7 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
         });
         const data = (await response.json().catch(() => null)) as {
           providers?: unknown;
-          defaultProvider?: { id?: unknown } | null;
+          defaultProvider?: { id?: unknown; modelId?: unknown } | null;
           error?: string;
         } | null;
         if (!response.ok) throw new Error(data?.error || "AI providers could not be loaded");
@@ -176,22 +249,53 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
         if (!mountedRef.current || !isCurrentRefresh()) return;
         providersRef.current = nextProviders;
         const current = selectionRef.current;
-        const nextProviderId =
-          current.providerId && nextProviders.some((provider) => provider.id === current.providerId)
-            ? current.providerId
-            : typeof data?.defaultProvider?.id === "string" &&
-                nextProviders.some((provider) => provider.id === data.defaultProvider?.id)
-              ? data.defaultProvider.id
-              : nextProviders[0]?.id || null;
+        const currentProvider = nextProviders.find(
+          (provider) => provider.id === current.providerId,
+        );
+        const usableProviders = nextProviders.filter(
+          (provider) => provider.configured && provider.models.length > 0,
+        );
+        const defaultProviderId =
+          typeof data?.defaultProvider?.id === "string" ? data.defaultProvider.id : null;
+        const defaultModelId =
+          typeof data?.defaultProvider?.modelId === "string" ? data.defaultProvider.modelId : null;
+        // Preferences written before source metadata existed are treated as
+        // legacy defaults. Only an explicit user selection is authoritative;
+        // this lets a newly discovered server/Pi default replace an old
+        // first-catalog-entry fallback without overriding deliberate choices.
+        const useServerDefault = current.source !== "user" || !currentProvider;
+        const nextProviderId = !useServerDefault
+          ? (currentProvider?.id ?? null)
+          : defaultProviderId &&
+              usableProviders.some((provider) => provider.id === defaultProviderId)
+            ? defaultProviderId
+            : null;
         const selectedProvider = nextProviders.find((provider) => provider.id === nextProviderId);
         const nextModelId =
-          current.modelId && selectedProvider?.models.some((model) => model.id === current.modelId)
+          !useServerDefault &&
+          current.modelId &&
+          selectedProvider?.models.some((model) => model.id === current.modelId)
             ? current.modelId
-            : selectedProvider?.models[0]?.id || null;
+            : nextProviderId === defaultProviderId &&
+                defaultModelId &&
+                selectedProvider?.models.some((model) => model.id === defaultModelId)
+              ? defaultModelId
+              : null;
 
         if (mountedRef.current && isCurrentRefresh()) {
           setAiProviders(nextProviders);
-          updateSelection({ providerId: nextProviderId, modelId: nextModelId });
+          updateSelection({
+            providerId: nextProviderId,
+            modelId: nextModelId,
+            source: useServerDefault && nextProviderId && nextModelId ? "server" : current.source,
+          });
+          if (useServerDefault && nextProviderId && nextModelId) {
+            writeAiSelectionPreference({
+              providerId: nextProviderId,
+              modelId: nextModelId,
+              source: "server",
+            });
+          }
         }
       } catch (error) {
         if (
@@ -241,7 +345,11 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
     ? () => {
         const current = selectionRef.current;
         if (!current.providerId || !current.modelId) return;
-        const next = { providerId: current.providerId, modelId: current.modelId };
+        const next = {
+          providerId: current.providerId,
+          modelId: current.modelId,
+          source: "user" as const,
+        };
         writeAiSelectionPreference(next);
         updateSelection(next);
         if (mountedRef.current) setDefaultSelection(next);

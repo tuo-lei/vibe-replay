@@ -700,6 +700,79 @@ describe("PiAiRuntime", () => {
     expect(events).toContain("agent_end");
   });
 
+  it("runs additional domain tools and returns the final assistant message", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-ai-runtime-"));
+    temporaryRoots.push(root);
+    const credentials = new FileCredentialStore(join(root, "ai-auth.json"));
+    const faux = fauxProvider({
+      provider: "test-provider",
+      models: [{ id: "test-model", name: "Test model" }],
+    });
+    const models = createModels({ credentials });
+    models.setProvider(faux.provider);
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("read_session", { query: "auth" })),
+      fauxAssistantMessage("I found one authentication session."),
+    ]);
+
+    const readTool: AgentTool = {
+      name: "read_session",
+      label: "Read session",
+      description: "Read a session without changing it",
+      parameters: Type.Object({ query: Type.String() }),
+      execute: async (_toolCallId, params) => ({
+        content: [{ type: "text", text: `Found results for ${params.query}` }],
+        details: { readOnly: true },
+      }),
+    };
+    const runtime = new PiAiRuntime(models, credentials);
+
+    const result = await runtime.runAgent({
+      providerId: "test-provider",
+      modelId: "test-model",
+      systemPrompt: "Use the read-only tool, then answer the user.",
+      prompt: "Find authentication sessions.",
+      tools: [readTool],
+    });
+
+    expect(result.output).toBe("I found one authentication session.");
+    expect(result.result).toBeUndefined();
+  });
+
+  it("stops a domain-tool run when its call budget is exhausted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "vibe-ai-runtime-"));
+    temporaryRoots.push(root);
+    const credentials = new FileCredentialStore(join(root, "ai-auth.json"));
+    const faux = fauxProvider({
+      provider: "budget-provider",
+      models: [{ id: "test-model", name: "Test model" }],
+    });
+    const models = createModels({ credentials });
+    models.setProvider(faux.provider);
+    faux.setResponses([
+      fauxAssistantMessage(fauxToolCall("read_session", { query: "first" })),
+      fauxAssistantMessage(fauxToolCall("read_session", { query: "second" })),
+    ]);
+    const readTool: AgentTool = {
+      name: "read_session",
+      label: "Read session",
+      description: "Read a session without changing it",
+      parameters: Type.Object({ query: Type.String() }),
+      execute: async () => ({ content: [{ type: "text", text: "Found results" }] }),
+    };
+
+    await expect(
+      new PiAiRuntime(models, credentials).runAgent({
+        providerId: "budget-provider",
+        modelId: "test-model",
+        systemPrompt: "Use the read-only tool.",
+        prompt: "Read two sessions.",
+        tools: [readTool],
+        maxToolCalls: 1,
+      }),
+    ).rejects.toThrow("tool-call budget exceeded (1)");
+  });
+
   it("requires the result tool for OpenAI-compatible AI Studio requests", async () => {
     const root = await mkdtemp(join(tmpdir(), "vibe-ai-runtime-"));
     temporaryRoots.push(root);

@@ -49,6 +49,15 @@ export default defineConfig({
       "/api": {
         target: `http://127.0.0.1:${process.env.VITE_API_PORT || "13456"}`,
         changeOrigin: true,
+        configure(proxy) {
+          // The CLI server protects settings/AI routes with an Origin check.
+          // A browser request is same-origin to Vite, but the proxy forwards
+          // it to a different API origin; mark this trusted local dev hop so
+          // the CLI can distinguish it from a direct cross-origin request.
+          proxy.on("proxyReq", (proxyReq) => {
+            proxyReq.setHeader("x-vibe-replay-dev-proxy", "1");
+          });
+        },
       },
     },
   },

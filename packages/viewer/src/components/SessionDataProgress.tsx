@@ -252,18 +252,15 @@ export function SessionDataPipeline({
           );
         })}
       </div>
-      <div
+      <progress
+        value={fillPct}
+        max={100}
+        aria-label={active ? "Loading richer local session data" : "Local session data status"}
         className={`mt-1.5 h-1 overflow-hidden rounded-full bg-terminal-bg ${
           compact ? "max-w-32" : "w-full"
         }`}
-      >
-        <div
-          className={`h-full rounded-full transition-all duration-500 ${
-            active ? "bg-terminal-blue animate-pulse" : "bg-terminal-green"
-          }`}
-          style={{ width: `${fillPct}%` }}
-        />
-      </div>
+        style={{ accentColor: active ? "var(--blue)" : "var(--green)" }}
+      />
       {!compact && (
         <div className="mt-1 text-[10px] font-mono text-terminal-dimmer">
           {active ? "Fetching richer local session data..." : state.description}
@@ -284,7 +281,6 @@ export function SessionLoadingRibbon({
 }) {
   const total = status?.total ?? 0;
   const processed = status?.processed ?? 0;
-  const pct = total > 0 ? Math.max(4, Math.min(100, Math.round((processed / total) * 100))) : 35;
 
   return (
     <div className="rounded-lg border border-terminal-blue/20 bg-terminal-blue-subtle/95 px-3 py-2 text-terminal-blue shadow-layer-md backdrop-blur-sm">
@@ -302,26 +298,37 @@ export function SessionLoadingRibbon({
           <div className="mt-0.5 text-[10px] font-mono text-terminal-blue/70 leading-relaxed">
             {description}
           </div>
-          <div className="mt-2 h-1 overflow-hidden rounded-full bg-terminal-bg/60">
-            <div
-              className="h-full rounded-full bg-terminal-blue transition-all duration-500 animate-pulse"
-              style={{ width: `${pct}%` }}
-            />
-          </div>
+          <progress
+            value={total > 0 ? processed : undefined}
+            max={total > 0 ? total : undefined}
+            aria-label={title}
+            className="mt-2 h-1 overflow-hidden rounded-full bg-terminal-bg/60"
+            style={{ accentColor: "var(--blue)" }}
+          />
         </div>
       </div>
     </div>
   );
 }
 
-export function SessionLoadingToast(props: {
+/**
+ * Page-level progress banner. Long-running data work belongs in the page flow,
+ * not in the bottom-right notification/assistant dock.
+ */
+export function SessionLoadingBanner(props: {
   status?: SourcesEnrichmentStatus | null;
   title: string;
   description: string;
 }) {
   return (
-    <div className="fixed right-4 bottom-20 z-50 w-[calc(100vw-2rem)] max-w-sm pointer-events-none animate-in fade-in slide-in-from-bottom-2 duration-300">
+    <div
+      aria-live="polite"
+      className="mb-3 w-full animate-in fade-in slide-in-from-top-2 duration-300"
+    >
       <SessionLoadingRibbon {...props} />
     </div>
   );
 }
+
+/** @deprecated Use SessionLoadingBanner; retained for callers outside the dashboard. */
+export const SessionLoadingToast = SessionLoadingBanner;

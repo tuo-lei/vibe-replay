@@ -29,7 +29,7 @@ import {
 } from "./dashboard-utils";
 import { ContributionHeatmap } from "./InsightsPage";
 import { useScanInsightsContext } from "./InsightsPanel";
-import { DataLevelBadge, SessionLoadingToast, sessionDataState } from "./SessionDataProgress";
+import { DataLevelBadge, SessionLoadingBanner, sessionDataState } from "./SessionDataProgress";
 import { formatDuration } from "./StatsPanel";
 import { mergeProjectIdentities, projectIdentityKey } from "@vibe-replay/types";
 
@@ -1330,7 +1330,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     return (
       <div className="flex-1 overflow-auto animate-in fade-in duration-500">
         <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 space-y-6">
-          <SessionLoadingToast
+          <SessionLoadingBanner
             title="Fetching sessions"
             description="Loading cached sessions first, then enriching recent details in place."
           />
@@ -1536,7 +1536,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
         </div>
 
         {(loadingSources || (enrichmentStatus?.running && enrichmentStatus.total > 0)) && (
-          <SessionLoadingToast
+          <SessionLoadingBanner
             status={enrichmentStatus?.running ? enrichmentStatus : null}
             title={
               loadingSources

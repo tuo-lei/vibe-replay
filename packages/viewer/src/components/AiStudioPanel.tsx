@@ -139,8 +139,10 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
   const providerId = aiProviderId || studioProviderId;
   const modelId = aiModelId || studioModelId;
   const selectedProvider = providers.find((provider) => provider.id === providerId) || null;
+  const selectedModel = selectedProvider?.models.find((model) => model.id === modelId) || null;
   const providerConfigured = selectedProvider?.configured === true;
-  const providerReady = providerConfigured && (selectedProvider?.models.length || 0) > 0;
+  const providerHasModels = (selectedProvider?.models.length || 0) > 0;
+  const providerReady = providerConfigured && selectedModel !== null;
   const hasAiCoach = providerReady && !!runAiCoach;
 
   useEffect(() => {
@@ -318,9 +320,7 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
               <div className="text-xs font-mono text-terminal-dim">Provider</div>
               <div className="mt-1 truncate text-xs font-mono font-semibold text-terminal-text">
                 {selectedProvider?.name || "Select a provider"}
-                {selectedProvider?.models.length
-                  ? ` · ${modelId || selectedProvider.models[0].id}`
-                  : ""}
+                {modelId ? ` · ${modelId}` : ""}
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
@@ -372,8 +372,9 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
           )}
           {providerConfigured && !providerReady && (
             <div className="rounded-xl border border-terminal-orange/30 bg-terminal-orange-subtle px-4 py-3 text-xs font-mono leading-relaxed text-terminal-orange">
-              No usable models were discovered for this endpoint. Check its <code>/models</code>{" "}
-              response and try Discover again.
+              {providerHasModels
+                ? "Select a model above to enable AI Coach, Translate, and Soften Tone."
+                : "No usable models were discovered for this endpoint. Check its /models response and try Discover again."}
             </div>
           )}
 

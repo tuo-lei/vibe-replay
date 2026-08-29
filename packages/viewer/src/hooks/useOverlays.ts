@@ -259,7 +259,7 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
 
   const runTranslate = useMemo(
     () =>
-      isEditor && studioProviderId
+      isEditor && studioProviderId && studioModelId
         ? async (opts: { targetLang: string; sourceLang?: string }) => {
             const controller = new AbortController();
             abortRef.current = controller;
@@ -298,7 +298,7 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
 
   const runTone = useMemo(
     () =>
-      isEditor && studioProviderId
+      isEditor && studioProviderId && studioModelId
         ? async (opts: { style: "professional" | "neutral" | "friendly" }) => {
             const controller = new AbortController();
             abortRef.current = controller;

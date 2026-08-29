@@ -224,7 +224,7 @@ function ModelPicker({
         }}
         className="flex w-full items-center justify-between gap-2 rounded-lg border border-terminal-border bg-terminal-surface px-2.5 py-2 text-left text-xs font-mono text-terminal-text outline-none transition-colors hover:border-terminal-purple/40 disabled:opacity-50"
       >
-        <span className="min-w-0 truncate">{selected?.name || value}</span>
+        <span className="min-w-0 truncate">{selected?.name || value || "Select a model"}</span>
         <span className="shrink-0 text-terminal-dimmer">⌄</span>
       </button>
       {menu}
@@ -484,7 +484,7 @@ export function AiProviderSettings({
               <span className="text-xs font-mono text-terminal-dim">Model</span>
               <ModelPicker
                 models={selectedProvider.models}
-                value={modelId || selectedProvider.models[0].id}
+                value={modelId || ""}
                 onChange={handleModelChange}
                 disabled={selectionLocked}
               />
