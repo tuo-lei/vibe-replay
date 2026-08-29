@@ -973,7 +973,7 @@ async function runAiStudioBatches<T, R>(
   const batchSignal = signal
     ? AbortSignal.any([signal, batchController.signal])
     : batchController.signal;
-  const results = new Map<number, R>();
+  const results: R[] = [];
   let nextIndex = 0;
   let firstError: unknown;
 
@@ -981,10 +981,9 @@ async function runAiStudioBatches<T, R>(
     while (true) {
       batchSignal.throwIfAborted();
       const index = nextIndex++;
-      const batch = batches[index];
-      if (batch === undefined) return;
+      if (index >= batches.length) return;
       try {
-        results.set(index, await worker(batch, batchSignal));
+        results[index] = await worker(batches[index], batchSignal);
       } catch (error) {
         firstError ??= error;
         batchController.abort(error);
@@ -1003,7 +1002,7 @@ async function runAiStudioBatches<T, R>(
     throw firstError ?? error;
   }
 
-  return batches.map((_, index) => results.get(index)!);
+  return results;
 }
 
 /**

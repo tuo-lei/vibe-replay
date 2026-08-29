@@ -117,20 +117,24 @@ packages/cli/src/
 ├── types.ts              # CLI-specific types + re-exports from @vibe-replay/types
 ├── transform.ts          # Turns → Scenes, secret redaction, cost estimation
 ├── generator.ts          # Inject JSON into viewer HTML
+├── ai-runtime.ts         # Embedded Pi provider/auth runtime for AI Studio
 ├── server.ts             # Editor mode: Hono localhost server
 ├── feedback.ts           # AI Coach integration
 ├── scan.ts               # Secret detection in output
 ├── clean-prompt.ts       # Strip system boilerplate from prompts
 ├── version.ts            # CLI_VERSION from package.json
 ├── providers/
-│   ├── types.ts          # Provider interface (discover + parse)
-│   ├── index.ts          # Provider registry
-│   ├── claude-code/      # Claude Code: JSONL parser
-│   └── cursor/           # Cursor: SQLite + global state + JSONL
+│   ├── types.ts          # CLI provider compatibility types
+│   ├── index.ts          # Provider registry bridge
+│   └── pi/               # Pi session discovery and parser adapters
 └── publishers/
     ├── local.ts          # Open in browser
     └── gist.ts           # GitHub Gist publishing
 ```
+
+Provider-owned discovery and parsing lives in the top-level `packages/provider-*` packages;
+the CLI's `src/providers/` directory retains app-specific adapters used by the server and
+legacy parsing paths.
 
 ### Viewer structure
 

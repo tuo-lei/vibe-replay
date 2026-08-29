@@ -120,6 +120,7 @@ function ModelPicker({
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
+        event.stopPropagation();
         setOpen(false);
       }
     };

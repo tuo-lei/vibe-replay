@@ -124,6 +124,7 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
   const providersRef = useRef<AiProviderInfo[]>([]);
   const selectionRef = useRef(selection);
   const authAbortRef = useRef<AbortController | null>(null);
+  const refreshSequenceRef = useRef(0);
   const mountedRef = useRef(true);
 
   const updateSelection = useCallback(
@@ -153,6 +154,8 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
   const refreshAiProviders = useCallback(
     async (signal?: AbortSignal) => {
       if (!enabled) return;
+      const refreshSequence = ++refreshSequenceRef.current;
+      const isCurrentRefresh = () => refreshSequenceRef.current === refreshSequence;
       if (mountedRef.current) {
         setAiProvidersLoading(true);
         setAiProvidersError(null);
@@ -170,6 +173,7 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
         if (!response.ok) throw new Error(data?.error || "AI providers could not be loaded");
 
         const nextProviders = parseAiProviders(data?.providers);
+        if (!mountedRef.current || !isCurrentRefresh()) return;
         providersRef.current = nextProviders;
         const current = selectionRef.current;
         const nextProviderId =
@@ -185,19 +189,23 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
             ? current.modelId
             : selectedProvider?.models[0]?.id || null;
 
-        if (mountedRef.current) {
+        if (mountedRef.current && isCurrentRefresh()) {
           setAiProviders(nextProviders);
           updateSelection({ providerId: nextProviderId, modelId: nextModelId });
         }
       } catch (error) {
-        if (mountedRef.current && !(error instanceof DOMException && error.name === "AbortError")) {
+        if (
+          mountedRef.current &&
+          isCurrentRefresh() &&
+          !(error instanceof DOMException && error.name === "AbortError")
+        ) {
           setAiProvidersError(
             error instanceof Error ? error.message : "AI providers could not be loaded",
           );
         }
         throw error;
       } finally {
-        if (mountedRef.current) setAiProvidersLoading(false);
+        if (mountedRef.current && isCurrentRefresh()) setAiProvidersLoading(false);
       }
     },
     [enabled, updateSelection],

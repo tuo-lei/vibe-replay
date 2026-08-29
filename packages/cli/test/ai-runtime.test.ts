@@ -21,6 +21,7 @@ import {
 } from "../src/ai-runtime.js";
 
 const temporaryRoots: string[] = [];
+const POSIX_FILE_MODES = process.platform !== "win32";
 
 const credentialWorkerSource = `
 import { FileCredentialStore } from ${JSON.stringify(new URL("../src/ai-runtime.ts", import.meta.url).href)};
@@ -150,7 +151,7 @@ describe("FileCredentialStore", () => {
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
       openrouter: { type: "api_key", key: "secret-api-key" },
     });
-    if (process.platform !== "win32") {
+    if (POSIX_FILE_MODES) {
       expect((await stat(join(root, "nested"))).mode & 0o777).toBe(0o700);
       expect((await stat(path)).mode & 0o777).toBe(0o600);
     }
@@ -395,7 +396,7 @@ describe("PiAiRuntime", () => {
           baseUrl: "http://127.0.0.1:58788/v1",
         },
       });
-      if (process.platform !== "win32") {
+      if (POSIX_FILE_MODES) {
         expect((await stat(join(root, "ai-providers.json"))).mode & 0o777).toBe(0o600);
       }
       expect((await runtime.credentials.read("custom-openai"))?.type).toBe("api_key");
@@ -422,6 +423,7 @@ describe("PiAiRuntime", () => {
         customConfigPath: join(root, "ai-providers.json"),
       });
       await runtime.configureCustomProvider({ baseUrl: "http://127.0.0.1:58788/v1" });
+      expect(modelRequests).toBe(1);
       runtime.models.deleteProvider("custom-openai");
 
       const resolutions = await Promise.all([

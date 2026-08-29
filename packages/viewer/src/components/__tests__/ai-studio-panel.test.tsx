@@ -226,6 +226,21 @@ describe("AiStudioPanel", () => {
     expect(saveDefault).toHaveBeenCalledTimes(1);
   });
 
+  it("closes the model picker before the provider modal on Escape", () => {
+    const actions = makeActions([provider()]);
+
+    render(<AiStudioPanel {...actions} />);
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }));
+    fireEvent.click(screen.getByRole("button", { name: "AI model" }));
+    fireEvent.keyDown(screen.getByLabelText("Filter AI models"), { key: "Escape" });
+
+    expect(screen.queryByLabelText("Filter AI models")).toBeNull();
+    expect(screen.getByRole("dialog")).toBeDefined();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("can open the full Settings page from AI Studio", () => {
     const actions = makeActions([provider()]);
 
