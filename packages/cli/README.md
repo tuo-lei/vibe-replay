@@ -80,14 +80,23 @@ https://your-host/viewer.html?url=https://example.com/replay.json
 ## Options
 
 ```
-Usage: vibe-replay [options]
+Usage: vibe-replay [options] [command]
 
 Options:
-  -s, --session <path>    Path to a specific JSONL session file
-  -p, --provider <name>   Provider name (default: claude-code; supports pi)
-  --dev                   Write demo.json for HMR development
   -V, --version           Output the version number
-  -h, --help              Display help
+  -s, --session <path>    Path to a specific JSONL session file
+  -p, --provider <name>   Provider name (default: claude-code)
+  -t, --title <name>      Custom title for the replay
+  -d, --dashboard         Open dashboard directly (skip picker)
+  --open                  After generation, open in browser and exit
+  --github                Generate GitHub export and exit
+  -h, --help              Display help for command
+
+Commands:
+  sessions [options]      Search local sessions (agent-friendly)
+  auth                    Manage authentication
+  share [options] [path]  Share a replay via cloud
+  live [options]          Watch a running session live
 ```
 
 ## Search Local Sessions
