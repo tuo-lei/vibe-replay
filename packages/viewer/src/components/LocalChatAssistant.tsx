@@ -800,9 +800,9 @@ export default function LocalChatAssistant({ context }: Props) {
                 };
                 setResizing(true);
               }}
-              className="absolute bottom-1 left-1 h-5 w-5 cursor-nesw-resize rounded text-terminal-dimmer hover:text-terminal-text"
+              className="absolute right-1 bottom-1 h-5 w-5 cursor-nwse-resize rounded text-terminal-dimmer hover:text-terminal-text"
             >
-              <span aria-hidden="true">◢</span>
+              <span aria-hidden="true">⋰</span>
             </button>
           </form>
         </aside>
