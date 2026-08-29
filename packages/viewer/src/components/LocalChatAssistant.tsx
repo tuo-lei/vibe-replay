@@ -518,7 +518,7 @@ export default function LocalChatAssistant({ context }: Props) {
   const cancel = () => controllerRef.current?.abort();
 
   return (
-    <div className={`fixed right-4 bottom-4 z-[60] font-sans ${resizing ? "select-none" : ""}`}>
+    <div className={`fixed right-3 bottom-3 z-[60] font-sans ${resizing ? "select-none" : ""}`}>
       {open && (
         <aside
           className="relative mb-3 flex max-h-[calc(100vh-2rem)] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-terminal-border-subtle bg-terminal-bg shadow-layer-xl"
@@ -904,13 +904,16 @@ export default function LocalChatAssistant({ context }: Props) {
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="flex items-center gap-2 rounded-full border border-terminal-green/35 bg-terminal-surface/90 px-3.5 py-2.5 text-xs font-semibold text-terminal-text shadow-layer-lg backdrop-blur-md transition-all hover:border-terminal-green/70 hover:text-terminal-green"
+          aria-label="Ask Replay"
+          title="Ask Replay — local assistant"
+          className="flex items-center gap-1 rounded-full border border-terminal-green/30 bg-terminal-surface/85 px-2.5 py-1.5 text-[11px] font-semibold tracking-tight text-terminal-text shadow-layer-md backdrop-blur-md transition-all hover:border-terminal-green/60 hover:bg-terminal-surface hover:text-terminal-green"
         >
-          <span className="text-terminal-green">✦</span>
-          Ask Replay
-          <span className="rounded-full bg-terminal-green-subtle px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider text-terminal-green">
-            Local
-          </span>
+          <span className="text-terminal-green leading-none">✦</span>
+          <span className="leading-none">Ask</span>
+          <span
+            className="ml-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-terminal-green/80"
+            aria-hidden="true"
+          />
         </button>
       )}
     </div>
