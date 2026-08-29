@@ -9,7 +9,14 @@ import {
 } from "../engine";
 import type { Annotation, ReplaySession, SessionLocation } from "../types";
 import { apiUrl } from "../utils/api";
+import {
+  useAiProviderSettings,
+  type AiProviderInfo,
+  type CustomAiProviderInput,
+} from "./useAiProviderSettings";
 import type { ViewerMode } from "./useSessionLoader";
+
+export type { AiProviderInfo, CustomAiProviderInput } from "./useAiProviderSettings";
 
 export interface AnnotationActions {
   annotations: Annotation[];
@@ -52,22 +59,46 @@ export interface AnnotationActions {
   gistPublishing: boolean;
   htmlExporting: boolean;
   githubExporting: boolean;
-  /** Editor mode: detected AI Coach tool info (null if unavailable) */
-  aiCoachTool: { name: string } | null;
-  /** Editor mode: available AI Coach tool options */
-  aiCoachTools: Array<{ name: string }>;
-  /** Editor mode: selected AI Coach tool name */
-  aiCoachToolName: string | null;
-  /** Editor mode: update selected AI Coach tool */
-  setAiCoachToolName: ((toolName: string) => void) | null;
+  /** Editor mode: embedded Pi AI provider information */
+  aiProviders: AiProviderInfo[];
+  /** Editor mode: selected AI provider */
+  aiProviderId: string | null;
+  /** Editor mode: selected model within the provider */
+  aiModelId: string | null;
+  /** Editor mode: update the selected AI provider */
+  setAiProviderId: ((providerId: string) => void) | null;
+  /** Editor mode: update the selected AI model */
+  setAiModelId: ((modelId: string) => void) | null;
+  /** Refresh provider/model/auth status */
+  refreshAiProviders: (() => Promise<void>) | null;
+  /** Save an API key or complete a provider-owned OAuth login */
+  authenticateAiProvider:
+    | ((providerId: string, method: "api_key" | "oauth", apiKey?: string) => Promise<void>)
+    | null;
+  /** Cancel a pending provider-owned auth or custom-endpoint discovery request */
+  cancelAiAuthentication: (() => void) | null;
+  /** Remove the stored credential for a provider */
+  logoutAiProvider: ((providerId: string) => Promise<void>) | null;
+  /** Configure the local OpenAI-compatible proxy and discover its models. */
+  configureAiCustomProvider: ((config: CustomAiProviderInput) => Promise<void>) | null;
+  /** Remove the custom endpoint and its stored API key. */
+  removeAiCustomProvider: (() => Promise<void>) | null;
+  /** Provider catalog request state for shared Settings/modal surfaces. */
+  aiProvidersLoading: boolean;
+  aiProvidersError: string | null;
+  defaultAiProviderId: string | null;
+  defaultAiModelId: string | null;
+  saveAiSelectionAsDefault: (() => void) | null;
   /** Editor mode: run AI Coach to generate feedback annotations */
   runAiCoach:
     | (() => Promise<{
         score: number;
         itemCount: number;
-        toolName: string;
-        attemptedTools: string[];
-        fallbackUsed: boolean;
+        providerId: string;
+        providerName: string;
+        modelId: string;
+        authType: string;
+        authSubscription: boolean;
       }>)
     | null;
   /** Editor mode: cancel a running AI Coach operation */
@@ -333,35 +364,36 @@ export function useAnnotations(
     : null;
 
   // AI Coach (editor mode)
-  const [aiCoachTools, setAiCoachTools] = useState<Array<{ name: string }>>([]);
-  const [aiCoachToolName, setAiCoachToolNameState] = useState<string | null>(null);
+  const aiProviderSettings = useAiProviderSettings(isEditor);
+  const {
+    aiProviders,
+    aiProviderId,
+    aiModelId,
+    setAiProviderId,
+    setAiModelId,
+    refreshAiProviders,
+    authenticateAiProvider,
+    cancelAiAuthentication,
+    logoutAiProvider,
+    configureAiCustomProvider,
+    removeAiCustomProvider,
+    aiProvidersLoading,
+    aiProvidersError,
+    defaultAiProviderId,
+    defaultAiModelId,
+    saveAiSelectionAsDefault,
+  } = aiProviderSettings;
   const [aiCoachRunning, setAiCoachRunning] = useState(false);
   const aiCoachAbortRef = useRef<AbortController | null>(null);
-  const aiCoachTool = useMemo(
-    () => (aiCoachToolName ? aiCoachTools.find((t) => t.name === aiCoachToolName) || null : null),
-    [aiCoachToolName, aiCoachTools],
-  );
 
   useEffect(() => {
-    if (!isEditor) return;
-    fetch(apiUrl("/api/feedback/detect"))
-      .then((r) => r.json())
-      .then((data) => {
-        if (!data.available) return;
-        const tools: Array<{ name: string }> = Array.isArray(data.tools)
-          ? data.tools
-          : data.tool
-            ? [data.tool]
-            : [];
-        setAiCoachTools(tools);
-        const defaultToolName = data.defaultTool?.name || data.tool?.name || tools[0]?.name || null;
-        setAiCoachToolNameState(defaultToolName);
-      })
-      .catch(() => {});
-  }, [isEditor]);
+    return () => {
+      aiCoachAbortRef.current?.abort();
+    };
+  }, []);
 
   const runAiCoach =
-    isEditor && aiCoachToolName
+    isEditor && aiProviderId
       ? async () => {
           const controller = new AbortController();
           aiCoachAbortRef.current = controller;
@@ -377,7 +409,10 @@ export function useAnnotations(
             const resp = await fetch(apiUrl("/api/feedback/generate"), {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ toolName: aiCoachToolName }),
+              body: JSON.stringify({
+                providerId: aiProviderId,
+                ...(aiModelId ? { modelId: aiModelId } : {}),
+              }),
               signal: controller.signal,
             });
             const data = await resp.json();
@@ -387,22 +422,18 @@ export function useAnnotations(
             return {
               score: data.score as number,
               itemCount: data.itemCount as number,
-              toolName: data.toolName as string,
-              attemptedTools: data.attemptedTools as string[],
-              fallbackUsed: data.fallbackUsed as boolean,
+              providerId: data.providerId as string,
+              providerName: data.providerName as string,
+              modelId: data.modelId as string,
+              authType: data.authType as string,
+              authSubscription: data.authSubscription as boolean,
             };
           } finally {
-            aiCoachAbortRef.current = null;
+            if (aiCoachAbortRef.current === controller) aiCoachAbortRef.current = null;
             setAiCoachRunning(false);
           }
         }
       : null;
-
-  const setAiCoachToolName = isEditor
-    ? (toolName: string) => {
-        setAiCoachToolNameState(toolName);
-      }
-    : null;
 
   const cancelAiCoach = isEditor
     ? () => {
@@ -487,10 +518,22 @@ export function useAnnotations(
     gistPublishing,
     htmlExporting,
     githubExporting,
-    aiCoachTool,
-    aiCoachTools,
-    aiCoachToolName,
-    setAiCoachToolName,
+    aiProviders,
+    aiProviderId,
+    aiModelId,
+    setAiProviderId,
+    setAiModelId,
+    refreshAiProviders,
+    authenticateAiProvider,
+    cancelAiAuthentication,
+    logoutAiProvider,
+    configureAiCustomProvider,
+    removeAiCustomProvider,
+    aiProvidersLoading,
+    aiProvidersError,
+    defaultAiProviderId,
+    defaultAiModelId,
+    saveAiSelectionAsDefault,
     runAiCoach,
     cancelAiCoach,
     aiCoachRunning,

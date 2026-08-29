@@ -1,44 +1,26 @@
 /**
- * vibe-feedback: AI-powered prompting feedback for coding sessions.
+ * AI Studio operations backed by Pi's provider registry and agent loop.
  *
- * Detects available AI CLI tools (claude, agent, opencode) and runs them headlessly
- * to analyze a replay session and generate structured feedback on the user's
- * prompting technique. Feedback is returned as Annotation[] that merges
- * directly into the replay.
+ * The agent is intentionally given one structured result tool and no filesystem,
+ * network, or MCP tools. That lets all AI Studio features share the same provider
+ * setup while keeping replay analysis read-only.
  *
- * Experimental feature — output quality depends on the model behind the CLI.
+ * Output quality depends on the selected provider/model.
  */
 
-import { type ChildProcessByStdio, spawn, type SpawnOptions } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import type { Readable, Writable } from "node:stream";
+import { Type } from "@earendil-works/pi-ai";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
+import { getAiRuntime } from "./ai-runtime.js";
 import type { Annotation, OverlaySource, ReplaySession, Scene, SceneOverlay } from "./types.js";
-
-const IS_WINDOWS = process.platform === "win32";
-
-type PipedChild = ChildProcessByStdio<Writable, Readable, Readable>;
-
-/**
- * Spawn an external AI CLI cross-platform. On Windows these tools are installed
- * as `.cmd`/`.ps1` shims that `spawn()` cannot exec directly, so route through
- * the shell (quoting the command path, which may contain spaces). All callers
- * use piped stdio, so the return is typed as a fully-piped child process.
- */
-function spawnTool(command: string, args: string[], options: SpawnOptions): PipedChild {
-  if (IS_WINDOWS) {
-    const quoted = /\s/.test(command) ? `"${command}"` : command;
-    return spawn(quoted, args, { ...options, shell: true }) as PipedChild;
-  }
-  return spawn(command, args, options) as PipedChild;
-}
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export interface FeedbackTool {
-  name: "claude" | "agent" | "opencode" | "hermes";
-  command: string;
+export interface AiSelection {
+  providerId: string;
+  modelId?: string;
 }
 
 export interface FeedbackItem {
@@ -77,120 +59,7 @@ export interface FeedbackResult {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Detection
-// ---------------------------------------------------------------------------
-
-const TOOL_PRIORITY: FeedbackTool["name"][] = ["agent", "claude", "opencode", "hermes"];
-
-/** Detect available AI CLI tools and pick a default by priority. */
-export async function detectFeedbackTools(): Promise<{
-  tools: FeedbackTool[];
-  defaultTool: FeedbackTool | null;
-}> {
-  // Skip claude when running inside a Claude Code session (nested sessions crash)
-  const insideClaude = !!process.env.CLAUDECODE;
-
-  const candidates: { name: FeedbackTool["name"]; cmd: string }[] = [
-    { name: "agent" as const, cmd: "agent" },
-    ...(!insideClaude ? [{ name: "claude" as const, cmd: "claude" }] : []),
-    { name: "opencode" as const, cmd: "opencode" },
-    { name: "hermes" as const, cmd: "hermes" },
-  ];
-
-  const tools: FeedbackTool[] = [];
-  for (const tool of candidates) {
-    try {
-      const located = await locateCommand(tool.cmd);
-      if (located) tools.push({ name: tool.name, command: located });
-    } catch {
-      /* not found */
-    }
-  }
-
-  const defaultTool =
-    TOOL_PRIORITY.map((name) => tools.find((t) => t.name === name)).find(
-      (tool): tool is FeedbackTool => !!tool,
-    ) || null;
-
-  return { tools, defaultTool };
-}
-
-export interface FeedbackToolFallbackResult<T> {
-  result: T;
-  tool: FeedbackTool;
-  attemptedTools: FeedbackTool["name"][];
-  fallbackUsed: boolean;
-}
-
 const AI_STUDIO_OPERATION_TIMEOUT_MS = 600_000;
-
-/**
- * Run an AI Studio operation with the preferred tool first, then each remaining
- * detected tool in priority order. A thrown error or null result advances to
- * the next tool; no partial result is persisted by this helper.
- */
-export async function runWithFeedbackToolFallback<T>(
-  tools: FeedbackTool[],
-  preferredToolName: FeedbackTool["name"] | undefined,
-  run: (tool: FeedbackTool, signal: AbortSignal) => Promise<T | null>,
-  options: { timeoutMs?: number; signal?: AbortSignal } = {},
-): Promise<FeedbackToolFallbackResult<T>> {
-  if (tools.length === 0) throw new Error("No AI CLI tools are available");
-
-  const preferredTool = preferredToolName
-    ? tools.find((tool) => tool.name === preferredToolName)
-    : tools[0];
-  if (!preferredTool) {
-    throw new Error(`Requested AI CLI tool is not available: ${preferredToolName}`);
-  }
-
-  const orderedTools = [preferredTool, ...tools.filter((tool) => tool !== preferredTool)];
-  const attemptedTools: FeedbackTool["name"][] = [];
-  const failures: string[] = [];
-  const timeoutMs = Math.max(1, options.timeoutMs ?? AI_STUDIO_OPERATION_TIMEOUT_MS);
-  const controller = new AbortController();
-  const cancelFromCaller = () => controller.abort(options.signal?.reason);
-  if (options.signal?.aborted) cancelFromCaller();
-  else options.signal?.addEventListener("abort", cancelFromCaller, { once: true });
-  const deadline = setTimeout(
-    () => controller.abort(new Error("operation deadline exceeded")),
-    timeoutMs,
-  );
-
-  try {
-    for (const tool of orderedTools) {
-      if (controller.signal.aborted) break;
-      attemptedTools.push(tool.name);
-      try {
-        const result = await run(tool, controller.signal);
-        if (controller.signal.aborted) break;
-        if (result !== null) {
-          return {
-            result,
-            tool,
-            attemptedTools,
-            fallbackUsed: attemptedTools.length > 1,
-          };
-        }
-        failures.push(`${tool.name}: invalid output`);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "unknown error";
-        failures.push(`${tool.name}: ${message.replace(/\s+/g, " ").trim()}`);
-        if (controller.signal.aborted) break;
-      }
-    }
-  } finally {
-    clearTimeout(deadline);
-    options.signal?.removeEventListener("abort", cancelFromCaller);
-  }
-
-  if (controller.signal.aborted) {
-    const outcome = options.signal?.aborted ? "cancelled" : `timed out after ${timeoutMs}ms`;
-    throw new Error(`AI Studio operation ${outcome} (${failures.join("; ")})`);
-  }
-  throw new Error(`All available AI CLI tools failed (${failures.join("; ")})`);
-}
 
 // ---------------------------------------------------------------------------
 // Session digest — condense session for AI consumption
@@ -418,7 +287,8 @@ For each user prompt, consider:
 6. **Tool-usage** — Did the user leverage the AI's capabilities (search, test, etc.)?
 
 ## Required Output
-Respond with ONLY a valid JSON object. No markdown code fences. No explanation before or after.
+Call the provided submit_feedback tool exactly once with the complete result.
+Do not emit a prose answer outside that tool call.
 
 Schema:
 ${FEEDBACK_SCHEMA}
@@ -427,8 +297,8 @@ Example (for reference only — analyze the ACTUAL session above):
 ${FEEDBACK_EXAMPLE}
 
 CRITICAL RULES:
-- DO NOT use any tools, file reads, or web searches. Analyze ONLY the transcript above.
-- Output ONLY the JSON object — no other text
+- Do not use filesystem, network, or MCP tools. Analyze ONLY the transcript above.
+- Call submit_feedback exactly once; do not output prose outside the tool call
 - sceneIndex MUST be one of: [${userPromptIndices.join(", ")}]
 - Provide feedback for the most impactful prompts (at least ${Math.min(userPromptIndices.length, 3)}, up to ${Math.min(userPromptIndices.length, 10)})
 - score: 1 = very poor, 5 = average, 8 = strong, 10 = expert
@@ -441,175 +311,107 @@ CRITICAL RULES:
 // Execution
 // ---------------------------------------------------------------------------
 
+const FEEDBACK_RESULT_SCHEMA = Type.Object({
+  sessionGoal: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  outcome: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  frictionPoints: Type.Optional(
+    Type.Union([
+      Type.Array(
+        Type.Object({
+          type: Type.String(),
+          description: Type.String(),
+          turn: Type.Number(),
+        }),
+      ),
+      Type.Null(),
+    ]),
+  ),
+  aiPerformance: Type.Optional(
+    Type.Union([
+      Type.Object({
+        rating: Type.String(),
+        strengths: Type.Array(Type.String()),
+        weaknesses: Type.Array(Type.String()),
+      }),
+      Type.Null(),
+    ]),
+  ),
+  summary: Type.String(),
+  score: Type.Number(),
+  strengths: Type.Array(Type.String()),
+  improvements: Type.Array(Type.String()),
+  feedbackItems: Type.Array(
+    Type.Object({
+      sceneIndex: Type.Number(),
+      title: Type.String(),
+      feedback: Type.String(),
+      category: Type.String(),
+      improvedPrompt: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    }),
+  ),
+});
+
+const TRANSLATION_RESULT_SCHEMA = Type.Object({
+  translations: Type.Array(
+    Type.Object({
+      sceneIndex: Type.Number(),
+      translated: Type.String(),
+      unchanged: Type.Optional(Type.Boolean()),
+    }),
+  ),
+});
+
+const TONE_RESULT_SCHEMA = Type.Object({
+  adjustments: Type.Array(
+    Type.Object({
+      sceneIndex: Type.Number(),
+      adjusted: Type.String(),
+      unchanged: Type.Optional(Type.Boolean()),
+    }),
+  ),
+});
+
+const PI_AGENT_SYSTEM_PROMPT = `You are the Vibe Replay AI Studio agent.
+
+You analyze the transcript supplied in the user prompt. You do not need or have
+access to files, the network, MCP servers, or any other tools. The only tool
+available to you records the final structured result.
+
+Always call the provided result tool exactly once with the complete answer.
+Do not answer with prose outside that tool call.`;
+
+function createResultTool(name: string, parameters: AgentTool["parameters"]): AgentTool {
+  return {
+    name,
+    label: "Record AI Studio result",
+    description:
+      "Record the complete structured result. Call this exactly once after finishing the analysis.",
+    parameters,
+    execute: async () => ({
+      content: [{ type: "text", text: "Result recorded." }],
+      details: {},
+      terminate: true,
+    }),
+  };
+}
+
 async function executeFeedback(
   prompt: string,
-  tool: FeedbackTool,
+  selection: AiSelection,
+  resultTool: AgentTool,
   signal?: AbortSignal,
 ): Promise<string> {
-  if (tool.name === "claude") {
-    return runClaude(prompt, tool.command, signal);
-  }
-  if (tool.name === "agent") {
-    return runAgent(prompt, tool.command, signal);
-  }
-  if (tool.name === "hermes") {
-    return runHermes(prompt, tool.command, signal);
-  }
-  return runOpencode(prompt, tool.command, signal);
-}
-
-function runClaude(prompt: string, cmd: string, signal?: AbortSignal): Promise<string> {
-  return runClaudeAttempt(prompt, cmd, false, signal);
-}
-
-function runClaudeAttempt(
-  prompt: string,
-  cmd: string,
-  promptAsArgument: boolean,
-  signal?: AbortSignal,
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const args = promptAsArgument
-      ? ["-p", prompt, "--output-format", "json"]
-      : ["-p", "--output-format", "json"];
-    const proc = spawnTool(cmd, args, {
-      env: { ...process.env, NO_COLOR: "1" },
-      signal,
-      timeout: 600_000,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (d) => (stdout += d.toString()));
-    proc.stderr.on("data", (d) => (stderr += d.toString()));
-
-    proc.on("close", (code) => {
-      const cleanStdout = stripAnsi(stdout).trim();
-      const cleanStderr = stripAnsi(stderr).trim();
-      if (code === 0) {
-        try {
-          const parsed = JSON.parse(cleanStdout);
-          resolve(parsed.result || cleanStdout);
-        } catch {
-          resolve(cleanStdout);
-        }
-      } else if (
-        !IS_WINDOWS &&
-        !signal?.aborted &&
-        !promptAsArgument &&
-        `${cleanStdout}\n${cleanStderr}`.includes(
-          "Input must be provided either through stdin or as a prompt argument",
-        )
-      ) {
-        // Some managed Claude launchers do not forward stdin to the child CLI.
-        // Retry with Claude's supported positional prompt form. Keep stdin as
-        // the default so large prompts do not hit command-line length limits
-        // on normal installations. Windows launchers use a shell, so dynamic
-        // prompt arguments are intentionally excluded there.
-        resolve(runClaudeAttempt(prompt, cmd, true, signal));
-      } else {
-        reject(new Error(`claude exited ${code}: ${stderr.slice(0, 500)}`));
-      }
-    });
-
-    proc.on("error", (err) => reject(new Error(`Failed to start claude: ${err.message}`)));
-
-    if (!promptAsArgument) proc.stdin.write(prompt);
-    proc.stdin.end();
+  const result = await getAiRuntime().runAgent({
+    providerId: selection.providerId,
+    modelId: selection.modelId,
+    systemPrompt: PI_AGENT_SYSTEM_PROMPT,
+    prompt,
+    resultTool,
+    signal,
+    sessionId: `vibe-replay-ai-${randomUUID()}`,
+    timeoutMs: AI_STUDIO_OPERATION_TIMEOUT_MS,
   });
-}
-
-function runOpencode(prompt: string, cmd: string, signal?: AbortSignal): Promise<string> {
-  return new Promise((resolve, reject) => {
-    // Use stdin pipe: opencode reads from stdin when run without message args
-    const proc = spawnTool(cmd, ["run"], {
-      env: { ...process.env, NO_COLOR: "1", TERM: "dumb" },
-      signal,
-      timeout: 600_000,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (d) => (stdout += d.toString()));
-    proc.stderr.on("data", (d) => (stderr += d.toString()));
-
-    proc.on("close", (code) => {
-      if (code === 0) {
-        resolve(stripAnsi(stdout));
-      } else {
-        reject(new Error(`opencode exited ${code}: ${stripAnsi(stderr).slice(0, 500)}`));
-      }
-    });
-
-    proc.on("error", (err) => reject(new Error(`Failed to start opencode: ${err.message}`)));
-
-    proc.stdin.write(prompt);
-    proc.stdin.end();
-  });
-}
-
-function runHermes(prompt: string, cmd: string, signal?: AbortSignal): Promise<string> {
-  return new Promise((resolve, reject) => {
-    // `hermes chat -q` runs a single query non-interactively; `-Q` (quiet)
-    // suppresses the banner/spinner so stdout is the final response only.
-    const proc = spawnTool(cmd, ["chat", "-q", prompt, "-Q", "--no-restore-cwd"], {
-      env: { ...process.env, NO_COLOR: "1", TERM: "dumb" },
-      signal,
-      timeout: 600_000,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (d) => (stdout += d.toString()));
-    proc.stderr.on("data", (d) => (stderr += d.toString()));
-
-    proc.on("close", (code) => {
-      if (code === 0) {
-        resolve(stripAnsi(stdout).trim());
-      } else {
-        reject(new Error(`hermes exited ${code}: ${stripAnsi(stderr).slice(0, 500)}`));
-      }
-    });
-
-    proc.on("error", (err) => reject(new Error(`Failed to start hermes: ${err.message}`)));
-  });
-}
-
-function runAgent(prompt: string, cmd: string, signal?: AbortSignal): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const proc = spawnTool(cmd, ["-p", "--output-format", "json", "--mode", "ask", "--trust"], {
-      env: { ...process.env, NO_COLOR: "1" },
-      signal,
-      timeout: 600_000,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (d) => (stdout += d.toString()));
-    proc.stderr.on("data", (d) => (stderr += d.toString()));
-
-    proc.on("close", (code) => {
-      if (code === 0) {
-        try {
-          const parsed = JSON.parse(stdout);
-          resolve(typeof parsed.result === "string" ? parsed.result : stdout);
-        } catch {
-          resolve(stdout);
-        }
-      } else {
-        reject(new Error(`agent exited ${code}: ${stderr.slice(0, 500)}`));
-      }
-    });
-
-    proc.on("error", (err) => reject(new Error(`Failed to start agent: ${err.message}`)));
-
-    proc.stdin.write(prompt);
-    proc.stdin.end();
-  });
+  return result.output;
 }
 
 // ---------------------------------------------------------------------------
@@ -1037,15 +839,11 @@ export function feedbackToAnnotations(feedback: FeedbackResult): Annotation[] {
 // Main entry
 // ---------------------------------------------------------------------------
 
-/**
- * Generate AI feedback for a replay session.
- * Returns annotations + parsed result, or null on failure.
- * Set debug=true to write raw output to /tmp for troubleshooting.
- */
+/** Generate AI feedback for a replay session. */
 export async function generateFeedback(
   session: ReplaySession,
-  tool: FeedbackTool,
-  { debug = false, signal }: { debug?: boolean; signal?: AbortSignal } = {},
+  selection: AiSelection,
+  { signal }: { signal?: AbortSignal } = {},
 ): Promise<{ annotations: Annotation[]; result: FeedbackResult } | null> {
   if (session.meta.stats.userPrompts === 0) {
     return null;
@@ -1054,17 +852,12 @@ export async function generateFeedback(
   const digest = buildSessionDigest(session);
   const prompt = buildFeedbackPrompt(digest, session);
 
-  if (debug) {
-    const { writeFileSync } = await import("node:fs");
-    writeFileSync("/tmp/vibe-feedback-prompt.txt", prompt);
-  }
-
-  const output = await executeFeedback(prompt, tool, signal);
-
-  if (debug) {
-    const { writeFileSync } = await import("node:fs");
-    writeFileSync("/tmp/vibe-feedback-raw-output.txt", output);
-  }
+  const output = await executeFeedback(
+    prompt,
+    selection,
+    createResultTool("submit_feedback", FEEDBACK_RESULT_SCHEMA),
+    signal,
+  );
 
   const result = parseFeedbackResponse(output, session);
 
@@ -1116,7 +909,8 @@ function buildTranslationPrompt(
 ${scenesBlock}
 
 ## Required Output
-Respond with ONLY a valid JSON object. No markdown code fences. No explanation before or after.
+Call the provided submit_translation tool exactly once with the complete result.
+Do not emit a prose answer outside that tool call.
 
 Schema:
 {
@@ -1130,8 +924,8 @@ Schema:
 }
 
 CRITICAL RULES:
-- DO NOT use any tools, file reads, or web searches
-- Output ONLY the JSON object — no other text
+- Do not use filesystem, network, or MCP tools
+- Call submit_translation exactly once; do not output prose outside the tool call
 - You MUST include an entry for every scene index: [${translatableScenes.map((s) => s.index).join(", ")}]
 - Preserve all code blocks and inline code exactly as-is`;
 
@@ -1167,6 +961,50 @@ function aggregateOverlayBatches(
 
 /** Max scenes per batch to avoid LLM output truncation */
 const TRANSLATE_BATCH_SIZE = 30;
+/** Avoid overwhelming local gateways when a session spans many batches. */
+const AI_STUDIO_BATCH_CONCURRENCY = 2;
+
+async function runAiStudioBatches<T, R>(
+  batches: readonly T[],
+  worker: (batch: T, signal: AbortSignal) => Promise<R>,
+  signal?: AbortSignal,
+): Promise<R[]> {
+  const batchController = new AbortController();
+  const batchSignal = signal
+    ? AbortSignal.any([signal, batchController.signal])
+    : batchController.signal;
+  const results = new Map<number, R>();
+  let nextIndex = 0;
+  let firstError: unknown;
+
+  const runWorker = async () => {
+    while (true) {
+      batchSignal.throwIfAborted();
+      const index = nextIndex++;
+      const batch = batches[index];
+      if (batch === undefined) return;
+      try {
+        results.set(index, await worker(batch, batchSignal));
+      } catch (error) {
+        firstError ??= error;
+        batchController.abort(error);
+        throw error;
+      }
+    }
+  };
+
+  try {
+    await Promise.all(
+      Array.from({ length: Math.min(AI_STUDIO_BATCH_CONCURRENCY, batches.length) }, () =>
+        runWorker(),
+      ),
+    );
+  } catch (error) {
+    throw firstError ?? error;
+  }
+
+  return batches.map((_, index) => results.get(index)!);
+}
 
 /**
  * Parse a single batch of translation output into overlays.
@@ -1225,7 +1063,7 @@ function parseTranslationBatch(
 
 export async function generateTranslation(
   session: ReplaySession,
-  tool: FeedbackTool,
+  selection: AiSelection,
   opts: { targetLang: string; sourceLang?: string },
   execution: { signal?: AbortSignal } = {},
 ): Promise<TranslationResult | null> {
@@ -1244,16 +1082,22 @@ export async function generateTranslation(
 
   const now = new Date().toISOString();
 
-  // Run all batches in parallel
-  const batchResults = await Promise.all(
-    batches.map(async (batch) => {
+  const batchResults = await runAiStudioBatches(
+    batches,
+    async (batch, signal) => {
       const { prompt } = buildTranslationPrompt(
         { ...session, scenes: rebuildScenesForBatch(session.scenes, batch) },
         opts,
       );
-      const output = await executeFeedback(prompt, tool, execution.signal);
+      const output = await executeFeedback(
+        prompt,
+        selection,
+        createResultTool("submit_translation", TRANSLATION_RESULT_SCHEMA),
+        signal,
+      );
       return parseTranslationBatch(output, batch, opts, now);
-    }),
+    },
+    execution.signal,
   );
 
   const aggregate = aggregateOverlayBatches(batchResults);
@@ -1321,7 +1165,8 @@ ${styleGuide[opts.style]}
 ${scenesBlock}
 
 ## Required Output
-Respond with ONLY a valid JSON object. No markdown code fences. No explanation before or after.
+Call the provided submit_tone_adjustments tool exactly once with the complete result.
+Do not emit a prose answer outside that tool call.
 
 Schema:
 {
@@ -1335,8 +1180,8 @@ Schema:
 }
 
 CRITICAL RULES:
-- DO NOT use any tools, file reads, or web searches
-- Output ONLY the JSON object — no other text
+- Do not use filesystem, network, or MCP tools
+- Call submit_tone_adjustments exactly once; do not output prose outside the tool call
 - You MUST include an entry for every scene index: [${userPromptScenes.map((s) => s.index).join(", ")}]
 - Preserve all code blocks and inline code exactly as-is`;
 
@@ -1421,7 +1266,7 @@ function rebuildScenesForToneBatch(
 
 export async function generateToneAdjustment(
   session: ReplaySession,
-  tool: FeedbackTool,
+  selection: AiSelection,
   opts: { style: "professional" | "neutral" | "friendly" },
   execution: { signal?: AbortSignal } = {},
 ): Promise<ToneResult | null> {
@@ -1442,16 +1287,22 @@ export async function generateToneAdjustment(
 
   const now = new Date().toISOString();
 
-  // Run all batches in parallel
-  const batchResults = await Promise.all(
-    batches.map(async (batch) => {
+  const batchResults = await runAiStudioBatches(
+    batches,
+    async (batch, signal) => {
       const { prompt } = buildTonePrompt(
         { ...session, scenes: rebuildScenesForToneBatch(session.scenes, batch) },
         opts,
       );
-      const output = await executeFeedback(prompt, tool, execution.signal);
+      const output = await executeFeedback(
+        prompt,
+        selection,
+        createResultTool("submit_tone_adjustments", TONE_RESULT_SCHEMA),
+        signal,
+      );
       return parseToneBatch(output, batch, opts, now);
-    }),
+    },
+    execution.signal,
   );
 
   const aggregate = aggregateOverlayBatches(batchResults);
@@ -1466,35 +1317,4 @@ export async function generateToneAdjustment(
 // Helpers
 // ---------------------------------------------------------------------------
 
-/* eslint-disable no-control-regex -- ANSI sequences intentionally contain control characters. */
-export function stripAnsi(str: string): string {
-  return str
-    .replace(/\x1B\[[0-9;?]*[ -/]*[@-~]/g, "")
-    .replace(/\x1B\][\s\S]*?(?:\x07|\x1B\\)/g, "");
-}
-/* eslint-enable no-control-regex */
-
-/**
- * Resolve a command to its absolute path, cross-platform. Uses `where` on
- * Windows and `which` elsewhere. Returns the first match, or `null` if not
- * found. Both locators are real executables on PATH, so no shell is needed.
- */
-function locateCommand(cmd: string): Promise<string | null> {
-  return new Promise((resolve, reject) => {
-    const locator = IS_WINDOWS ? "where" : "which";
-    const proc = spawn(locator, [cmd], { timeout: 5000 });
-    let out = "";
-    proc.stdout.on("data", (d) => (out += d.toString()));
-    proc.on("close", (code) => {
-      if (code !== 0) {
-        resolve(null);
-        return;
-      }
-      const first = out.split(/\r?\n/).find((line) => line.trim());
-      resolve(first ? first.trim() : null);
-    });
-    proc.on("error", reject);
-  });
-}
-
-export const __testables = { aggregateOverlayBatches, runClaude };
+export const __testables = { aggregateOverlayBatches };

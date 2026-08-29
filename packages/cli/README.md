@@ -36,6 +36,14 @@ npx vibe-replay --session ~/.claude/projects/<project>/<session>.jsonl
 - Keyboard shortcuts (Space, arrows, n/p for turn navigation)
 - Screenshot/image display from tool results
 - Secret redaction (API keys, tokens, credentials)
+- Embedded Pi AI Studio with reusable provider settings in the global Settings page and the
+  AI Studio Manage Providers dialog for OpenAI, ChatGPT/Codex, OpenRouter, OpenCode Zen, and
+  user-configured OpenAI-compatible proxies such as LiteLLM
+
+AI Studio stores provider keys and OAuth refresh tokens outside replay files in
+`~/.vibe-replay/ai-auth.json` (override with `VIBE_REPLAY_AI_AUTH`). Custom endpoint metadata is
+stored separately in `~/.vibe-replay/ai-providers.json` (override with `VIBE_REPLAY_AI_CONFIG`),
+and models are discovered from the configured endpoint's `/models` or `/model` response.
 
 ## Output
 
@@ -104,7 +112,7 @@ pnpm start
 
 ## Requirements
 
-- Node.js >= 20
+- Node.js >= 22.19.0
 
 ## License
 

@@ -818,10 +818,7 @@ interface TC {
 }
 
 const SYSTEM_TOOLS: Array<Pick<TC, "name" | "label" | "purpose">> = [
-  { name: "claude", label: "Claude Code", purpose: "AI feedback via headless mode" },
-  { name: "cursor", label: "Cursor CLI", purpose: "AI feedback via AI Studio" },
-  { name: "opencode", label: "OpenCode", purpose: "AI feedback via headless mode" },
-  { name: "hermes", label: "Hermes", purpose: "AI feedback via headless mode" },
+  { name: "pi", label: "Pi AI", purpose: "Embedded provider and agent runtime" },
 ];
 
 function SystemChecksSection() {

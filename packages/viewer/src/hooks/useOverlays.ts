@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReplaySession, SceneOverlay, SessionOverlays } from "../types";
 import { apiUrl } from "../utils/api";
+import { useAiProviderSettings, type AiProviderInfo } from "./useAiProviderSettings";
 import type { ViewerMode } from "./useSessionLoader";
 
 export interface OverlayActions {
@@ -33,11 +34,13 @@ export interface OverlayActions {
   showAllOriginals: boolean;
   /** Toggle all scenes between original and modified */
   toggleAllOriginals: () => void;
-  /** AI Studio tool info */
-  studioTools: Array<{ name: string }>;
-  studioToolName: string | null;
-  setStudioToolName: ((name: string) => void) | null;
-  studioToolsAvailable: boolean;
+  /** AI Studio provider information */
+  studioProviders: AiProviderInfo[];
+  studioProviderId: string | null;
+  studioModelId: string | null;
+  setStudioProviderId: ((providerId: string) => void) | null;
+  setStudioModelId: ((modelId: string) => void) | null;
+  refreshStudioProviders: (() => Promise<void>) | null;
   /** Running states */
   translating: boolean;
   toningDown: boolean;
@@ -48,9 +51,11 @@ export interface OverlayActions {
     | ((opts: { targetLang: string; sourceLang?: string }) => Promise<{
         translated: number;
         skipped: number;
-        toolName: string;
-        attemptedTools: string[];
-        fallbackUsed: boolean;
+        providerId: string;
+        providerName: string;
+        modelId: string;
+        authType: string;
+        authSubscription: boolean;
       }>)
     | null;
   /** Run tone adjustment */
@@ -58,9 +63,11 @@ export interface OverlayActions {
     | ((opts: { style: "professional" | "neutral" | "friendly" }) => Promise<{
         adjusted: number;
         skipped: number;
-        toolName: string;
-        attemptedTools: string[];
-        fallbackUsed: boolean;
+        providerId: string;
+        providerName: string;
+        modelId: string;
+        authType: string;
+        authSubscription: boolean;
       }>)
     | null;
 }
@@ -73,9 +80,16 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
   const [showOriginal, setShowOriginal] = useState<Set<number>>(new Set());
   const [showAllOriginals, setShowAllOriginals] = useState(false);
 
-  // Tool detection (same endpoint as AI Coach, reused)
-  const [studioTools, setStudioTools] = useState<Array<{ name: string }>>([]);
-  const [studioToolName, setStudioToolNameState] = useState<string | null>(null);
+  // AI provider discovery is shared with all AI Studio operations.
+  const aiProviderSettings = useAiProviderSettings(isEditor);
+  const {
+    aiProviders: studioProviders,
+    aiProviderId: studioProviderId,
+    aiModelId: studioModelId,
+    setAiProviderId: setStudioProviderId,
+    setAiModelId: setStudioModelId,
+    refreshAiProviders: refreshStudioProviders,
+  } = aiProviderSettings;
 
   // Running states
   const [translating, setTranslating] = useState(false);
@@ -109,25 +123,6 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
       if (abortRef.current) abortRef.current.abort();
     };
   }, []);
-
-  // Detect tools
-  useEffect(() => {
-    if (!isEditor) return;
-    fetch(apiUrl("/api/feedback/detect"))
-      .then((r) => r.json())
-      .then((data) => {
-        if (!data.available) return;
-        const tools: Array<{ name: string }> = Array.isArray(data.tools)
-          ? data.tools
-          : data.tool
-            ? [data.tool]
-            : [];
-        setStudioTools(tools);
-        const defaultName = data.defaultTool?.name || data.tool?.name || tools[0]?.name || null;
-        setStudioToolNameState(defaultName);
-      })
-      .catch(() => {});
-  }, [isEditor]);
 
   // Debounced save to server (skip initial load to avoid redundant POST)
   useEffect(() => {
@@ -252,11 +247,6 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
     setShowAllOriginals((prev) => !prev);
   }, []);
 
-  const setStudioToolName = useMemo(
-    () => (isEditor ? (name: string) => setStudioToolNameState(name) : null),
-    [isEditor],
-  );
-
   const cancelStudio = useMemo(
     () =>
       isEditor
@@ -269,7 +259,7 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
 
   const runTranslate = useMemo(
     () =>
-      isEditor && studioToolName
+      isEditor && studioProviderId
         ? async (opts: { targetLang: string; sourceLang?: string }) => {
             const controller = new AbortController();
             abortRef.current = controller;
@@ -279,7 +269,8 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                  toolName: studioToolName,
+                  providerId: studioProviderId,
+                  ...(studioModelId ? { modelId: studioModelId } : {}),
                   targetLang: opts.targetLang,
                   sourceLang: opts.sourceLang,
                 }),
@@ -290,9 +281,11 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
               if (data.overlays) setOverlaysState(data.overlays as SessionOverlays);
               return {
                 ...(data.stats as { translated: number; skipped: number }),
-                toolName: data.toolName as string,
-                attemptedTools: data.attemptedTools as string[],
-                fallbackUsed: data.fallbackUsed as boolean,
+                providerId: data.providerId as string,
+                providerName: data.providerName as string,
+                modelId: data.modelId as string,
+                authType: data.authType as string,
+                authSubscription: data.authSubscription as boolean,
               };
             } finally {
               abortRef.current = null;
@@ -300,12 +293,12 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
             }
           }
         : null,
-    [isEditor, studioToolName],
+    [isEditor, studioModelId, studioProviderId],
   );
 
   const runTone = useMemo(
     () =>
-      isEditor && studioToolName
+      isEditor && studioProviderId
         ? async (opts: { style: "professional" | "neutral" | "friendly" }) => {
             const controller = new AbortController();
             abortRef.current = controller;
@@ -315,7 +308,8 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                  toolName: studioToolName,
+                  providerId: studioProviderId,
+                  ...(studioModelId ? { modelId: studioModelId } : {}),
                   style: opts.style,
                 }),
                 signal: controller.signal,
@@ -325,9 +319,11 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
               if (data.overlays) setOverlaysState(data.overlays as SessionOverlays);
               return {
                 ...(data.stats as { adjusted: number; skipped: number }),
-                toolName: data.toolName as string,
-                attemptedTools: data.attemptedTools as string[],
-                fallbackUsed: data.fallbackUsed as boolean,
+                providerId: data.providerId as string,
+                providerName: data.providerName as string,
+                modelId: data.modelId as string,
+                authType: data.authType as string,
+                authSubscription: data.authSubscription as boolean,
               };
             } finally {
               abortRef.current = null;
@@ -335,7 +331,7 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
             }
           }
         : null,
-    [isEditor, studioToolName],
+    [isEditor, studioModelId, studioProviderId],
   );
 
   return {
@@ -354,10 +350,12 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
     toggleOriginal,
     showAllOriginals,
     toggleAllOriginals,
-    studioTools,
-    studioToolName,
-    setStudioToolName,
-    studioToolsAvailable: studioTools.length > 0,
+    studioProviders,
+    studioProviderId,
+    studioModelId,
+    setStudioProviderId,
+    setStudioModelId,
+    refreshStudioProviders,
     translating,
     toningDown,
     cancelStudio,

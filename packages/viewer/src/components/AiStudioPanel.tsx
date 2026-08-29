@@ -1,6 +1,8 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { AnnotationActions } from "../hooks/useAnnotations";
 import type { OverlayActions } from "../hooks/useOverlays";
+import { navigateTo } from "./dashboard-utils";
+import { AiProviderSettingsModal } from "./AiProviderSettings";
 
 interface Props {
   annotationActions: AnnotationActions;
@@ -44,92 +46,19 @@ function Spinner({ className = "" }: { className?: string }) {
   );
 }
 
-function toolLabel(toolName: string): string {
-  if (toolName === "agent") return "Cursor Agent";
-  if (toolName === "claude") return "Claude Code";
-  if (toolName === "opencode") return "OpenCode";
-  if (toolName === "hermes") return "Hermes";
-  return toolName;
-}
-
-function toolRunSuffix(result: {
-  toolName: string;
-  attemptedTools: string[];
-  fallbackUsed: boolean;
+function providerRunSuffix(result: {
+  providerId: string;
+  providerName: string;
+  modelId: string;
+  authType: string;
+  authSubscription: boolean;
 }): string {
-  if (!result.toolName) return "";
-  if (!result.fallbackUsed) return ` via ${toolLabel(result.toolName)}`;
-  const firstTool = result.attemptedTools[0];
-  return ` via ${toolLabel(result.toolName)} (fallback${firstTool ? ` from ${toolLabel(firstTool)}` : ""})`;
-}
-
-function ToolExplainer({ toolName }: { toolName: string | null }) {
-  if (toolName === "claude") {
-    return (
-      <div className="mt-2 text-xs font-mono text-terminal-dim leading-relaxed space-y-1">
-        <p>
-          Runs{" "}
-          <code className="px-1 py-0.5 rounded bg-terminal-surface-inset text-terminal-text">
-            claude -p
-          </code>{" "}
-          locally with your prompt piped to stdin. Uses your existing auth and token quota.
-        </p>
-        <p className="text-terminal-dimmer">
-          Auth issues? Run{" "}
-          <code className="px-1 py-0.5 rounded bg-terminal-surface-inset text-terminal-text">
-            claude
-          </code>{" "}
-          in your terminal to re-login.
-        </p>
-      </div>
-    );
-  }
-  if (toolName === "agent") {
-    return (
-      <div className="mt-2 text-xs font-mono text-terminal-dim leading-relaxed space-y-1">
-        <p>
-          Runs{" "}
-          <code className="px-1 py-0.5 rounded bg-terminal-surface-inset text-terminal-text">
-            agent -p
-          </code>{" "}
-          locally with your prompt piped to stdin. Uses your Cursor subscription or API key.
-        </p>
-        <p className="text-terminal-dimmer">
-          Auth issues? Check Cursor IDE settings or run{" "}
-          <code className="px-1 py-0.5 rounded bg-terminal-surface-inset text-terminal-text">
-            agent
-          </code>{" "}
-          in your terminal.
-        </p>
-      </div>
-    );
-  }
-  if (toolName === "opencode") {
-    return (
-      <div className="mt-2 text-xs font-mono text-terminal-dim leading-relaxed space-y-1">
-        <p>
-          Runs{" "}
-          <code className="px-1 py-0.5 rounded bg-terminal-surface-inset text-terminal-text">
-            opencode run
-          </code>{" "}
-          locally with your prompt piped to stdin. Uses your existing OpenCode configuration.
-        </p>
-        <p className="text-terminal-dimmer">
-          Not working? Run{" "}
-          <code className="px-1 py-0.5 rounded bg-terminal-surface-inset text-terminal-text">
-            opencode
-          </code>{" "}
-          in your terminal to verify setup.
-        </p>
-      </div>
-    );
-  }
-  return (
-    <p className="mt-2 text-xs font-mono text-terminal-dim leading-relaxed">
-      Runs <span className="text-terminal-text font-medium">{toolName}</span> locally on your
-      machine using your existing auth.
-    </p>
-  );
+  const billing = result.authSubscription
+    ? "subscription"
+    : result.authType === "oauth"
+      ? "OAuth"
+      : "API key";
+  return ` via ${result.providerName || result.providerId} · ${result.modelId} · ${billing}`;
 }
 
 const TARGET_LANGUAGES = [
@@ -153,10 +82,11 @@ const TONE_STYLES = [
 
 export default function AiStudioPanel({ annotationActions, overlayActions }: Props) {
   const {
-    studioTools,
-    studioToolName,
-    setStudioToolName,
-    studioToolsAvailable,
+    studioProviders,
+    studioProviderId,
+    studioModelId,
+    setStudioProviderId,
+    setStudioModelId,
     translating,
     toningDown,
     cancelStudio,
@@ -170,12 +100,14 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
     runAiCoach,
     aiCoachRunning,
     cancelAiCoach,
-    aiCoachTools,
-    aiCoachToolName,
-    setAiCoachToolName,
+    aiProviders,
+    aiProviderId,
+    aiModelId,
+    aiProvidersLoading,
+    setAiProviderId,
+    setAiModelId,
   } = annotationActions;
 
-  const hasAiCoach = !!runAiCoach;
   const hasAiFeedback = annotationActions.annotations.some((a) => a.author === "vibe-feedback");
 
   // Feature states
@@ -197,12 +129,50 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
   const [showRerunConfirm, setShowRerunConfirm] = useState<"coach" | "translate" | "tone" | null>(
     null,
   );
+  const [providerSettingsOpen, setProviderSettingsOpen] = useState(false);
 
   const isAnyRunning = aiCoachRunning || translating || toningDown;
 
-  // All tools from both sources (they share the same detection)
-  const tools = studioTools.length > 0 ? studioTools : aiCoachTools;
-  const toolName = studioToolName || aiCoachToolName;
+  // Both hooks discover the same provider registry. Keep the annotation hook as
+  // the source for setup/status and synchronize the selection into overlays.
+  const providers = aiProviders.length > 0 ? aiProviders : studioProviders;
+  const providerId = aiProviderId || studioProviderId;
+  const modelId = aiModelId || studioModelId;
+  const selectedProvider = providers.find((provider) => provider.id === providerId) || null;
+  const providerConfigured = selectedProvider?.configured === true;
+  const providerReady = providerConfigured && (selectedProvider?.models.length || 0) > 0;
+  const hasAiCoach = providerReady && !!runAiCoach;
+
+  useEffect(() => {
+    if (aiProviderId && aiProviderId !== studioProviderId) {
+      setStudioProviderId?.(aiProviderId);
+    }
+    if (aiModelId && aiModelId !== studioModelId) {
+      setStudioModelId?.(aiModelId);
+    }
+  }, [
+    aiModelId,
+    aiProviderId,
+    setStudioModelId,
+    setStudioProviderId,
+    studioModelId,
+    studioProviderId,
+  ]);
+
+  const handleProviderChange = (nextProviderId: string) => {
+    setAiProviderId?.(nextProviderId);
+    setStudioProviderId?.(nextProviderId);
+  };
+
+  const handleModelChange = (nextModelId: string) => {
+    setAiModelId?.(nextModelId);
+    setStudioModelId?.(nextModelId);
+  };
+
+  const openFullSettings = useCallback(() => {
+    setProviderSettingsOpen(false);
+    navigateTo({ view: "dashboard", session: null, tab: "settings" });
+  }, []);
 
   const handleRunCoach = useCallback(async () => {
     if (!runAiCoach) return;
@@ -212,7 +182,7 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
       const result = await runAiCoach();
       setCoachStatus({
         type: "success",
-        text: `Score ${result.score}/10 \u2014 ${result.itemCount} comment(s)${toolRunSuffix(result)}`,
+        text: `Score ${result.score}/10 \u2014 ${result.itemCount} comment(s)${providerRunSuffix(result)}`,
       });
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
@@ -228,7 +198,7 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
       const result = await runTranslate({ targetLang });
       setTranslateStatus({
         type: "success",
-        text: `${result.translated} message(s) translated, ${result.skipped} unchanged${toolRunSuffix(result)}`,
+        text: `${result.translated} message(s) translated, ${result.skipped} unchanged${providerRunSuffix(result)}`,
       });
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
@@ -247,7 +217,7 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
       const result = await runTone({ style: toneStyle });
       setToneStatus({
         type: "success",
-        text: `${result.adjusted} prompt(s) adjusted, ${result.skipped} unchanged${toolRunSuffix(result)}`,
+        text: `${result.adjusted} prompt(s) adjusted, ${result.skipped} unchanged${providerRunSuffix(result)}`,
       });
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
@@ -279,8 +249,8 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
     else void handleRunTone();
   };
 
-  // Null state: no tools available
-  if (!studioToolsAvailable && aiCoachTools.length === 0) {
+  // This should only happen if the embedded Pi runtime could not initialize.
+  if (providers.length === 0) {
     return (
       <div className="flex flex-col h-full">
         <div className="px-4 py-2.5 border-b border-terminal-border-subtle flex items-center gap-2">
@@ -309,40 +279,12 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
             </svg>
           </div>
           <div className="text-sm font-sans font-semibold text-terminal-text mb-1">
-            No AI tools detected
+            {aiProvidersLoading ? "Loading AI providers…" : "Pi AI runtime unavailable"}
           </div>
-          <p className="text-xs font-mono text-terminal-dim mb-4 leading-relaxed">
-            AI Studio requires a local CLI tool. Install one of the following:
-          </p>
-          <div className="w-full space-y-2 text-left">
-            {[
-              {
-                name: "Cursor Agent",
-                cmd: 'Bundled with Cursor IDE (run "agent login")',
-                rec: true,
-              },
-              { name: "Claude Code", cmd: "pnpm add --global @anthropic-ai/claude-code" },
-              { name: "OpenCode", cmd: "go install github.com/opencode-ai/opencode@latest" },
-            ].map((t) => (
-              <div
-                key={t.name}
-                className="px-3 py-2 rounded-lg bg-terminal-surface border border-terminal-border-subtle"
-              >
-                <div className="text-xs font-sans font-medium text-terminal-text flex items-center gap-1.5">
-                  {t.name}
-                  {t.rec && (
-                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-green-subtle text-terminal-green">
-                      recommended
-                    </span>
-                  )}
-                </div>
-                <div className="text-xs font-mono text-terminal-dim mt-0.5 break-all">{t.cmd}</div>
-              </div>
-            ))}
-          </div>
-          <p className="mt-4 text-xs font-mono text-terminal-dimmer leading-relaxed text-center">
-            AI Studio runs the CLI tool in headless mode,{" "}
-            <span className="text-terminal-green font-medium">locally</span> on your machine.
+          <p className="text-xs font-mono text-terminal-dim leading-relaxed">
+            {aiProvidersLoading
+              ? "Fetching the local provider catalog."
+              : "Restart vibe-replay and check the local AI runtime diagnostics."}
           </p>
         </div>
       </div>
@@ -370,36 +312,71 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {/* Tool status */}
-        <div className="px-4 py-3 border-b border-terminal-border-subtle bg-terminal-surface/30">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-mono text-terminal-dim">Tool</span>
-            {tools.length > 1 && setStudioToolName ? (
-              <select
-                value={toolName || ""}
-                onChange={(e) => {
-                  setStudioToolName(e.target.value);
-                  if (setAiCoachToolName) setAiCoachToolName(e.target.value);
-                }}
-                className="bg-terminal-surface border border-terminal-border rounded-lg px-2 py-0.5 text-xs font-mono text-terminal-text outline-none cursor-pointer hover:border-terminal-purple/30 transition-colors"
+        <div className="border-b border-terminal-border-subtle bg-terminal-surface/30 px-4 py-3 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-xs font-mono text-terminal-dim">Provider</div>
+              <div className="mt-1 truncate text-xs font-mono font-semibold text-terminal-text">
+                {selectedProvider?.name || "Select a provider"}
+                {selectedProvider?.models.length
+                  ? ` · ${modelId || selectedProvider.models[0].id}`
+                  : ""}
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setProviderSettingsOpen(true)}
+                disabled={isAnyRunning}
+                className="rounded-lg bg-terminal-purple-subtle px-2.5 py-1.5 text-[10px] font-mono font-semibold text-terminal-purple transition-colors hover:bg-terminal-purple/20 disabled:opacity-40"
               >
-                {tools.map((t) => (
-                  <option key={t.name} value={t.name}>
-                    {toolLabel(t.name)}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <span className="text-xs font-mono font-medium text-terminal-text px-2 py-0.5 rounded-lg bg-terminal-surface border border-terminal-border">
-                {toolName ? toolLabel(toolName) : ""}
-              </span>
-            )}
+                Manage
+              </button>
+              <button
+                type="button"
+                onClick={openFullSettings}
+                disabled={isAnyRunning}
+                className="rounded-lg bg-terminal-surface-2 px-2.5 py-1.5 text-[10px] font-mono text-terminal-dim transition-colors hover:text-terminal-text disabled:opacity-40"
+              >
+                Settings
+              </button>
+            </div>
           </div>
-          <ToolExplainer toolName={toolName} />
+          <p className="text-[10px] font-mono leading-relaxed text-terminal-dimmer">
+            Choose a provider and model, or open Manage to connect a key, OAuth account, or local
+            OpenAI-compatible gateway.
+          </p>
+          {annotationActions.aiProvidersError && (
+            <div role="alert" className="text-[10px] font-mono leading-relaxed text-terminal-red">
+              {annotationActions.aiProvidersError}
+            </div>
+          )}
         </div>
+
+        <AiProviderSettingsModal
+          open={providerSettingsOpen}
+          onClose={() => setProviderSettingsOpen(false)}
+          actions={annotationActions}
+          busy={isAnyRunning}
+          onProviderChange={handleProviderChange}
+          onModelChange={handleModelChange}
+          onOpenSettings={openFullSettings}
+        />
 
         {/* Feature cards */}
         <div className="p-4 space-y-3">
+          {!providerConfigured && (
+            <div className="rounded-xl border border-terminal-orange/30 bg-terminal-orange-subtle px-4 py-3 text-xs font-mono leading-relaxed text-terminal-orange">
+              Connect the selected provider above to enable AI Coach, Translate, and Soften Tone.
+            </div>
+          )}
+          {providerConfigured && !providerReady && (
+            <div className="rounded-xl border border-terminal-orange/30 bg-terminal-orange-subtle px-4 py-3 text-xs font-mono leading-relaxed text-terminal-orange">
+              No usable models were discovered for this endpoint. Check its <code>/models</code>{" "}
+              response and try Discover again.
+            </div>
+          )}
+
           {/* AI Coach */}
           {hasAiCoach && (
             <FeatureCard
@@ -443,7 +420,7 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
           )}
 
           {/* Translate */}
-          {runTranslate && (
+          {providerReady && runTranslate && (
             <FeatureCard
               title="Translate"
               preview={
@@ -499,7 +476,7 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
           )}
 
           {/* Soften Tone */}
-          {runTone && (
+          {providerReady && runTone && (
             <FeatureCard
               title="Soften Tone"
               preview={
