@@ -19,9 +19,12 @@ type Citation = {
   type: "session" | "scene" | "insight";
   label: string;
   slug?: string;
+  provider?: string;
+  sessionId?: string;
   targetId?: string;
   sceneIndex?: number;
   project?: string;
+  replayAvailable?: boolean;
 };
 
 type Action =
@@ -163,6 +166,38 @@ function navigateAction(action: Action): void {
 }
 
 function navigateCitation(citation: Citation): void {
+  if (citation.type === "session") {
+    if (citation.replayAvailable !== false && citation.slug) {
+      navigateTo({
+        session: citation.slug,
+        targetId: citation.targetId || null,
+        s: citation.sceneIndex === undefined ? null : String(citation.sceneIndex),
+      });
+      return;
+    }
+    if (citation.slug) {
+      window.dispatchEvent(
+        new CustomEvent("vibe-open-session", {
+          detail: {
+            slug: citation.slug,
+            provider: citation.provider,
+            sessionId: citation.sessionId,
+            location: citation.targetId
+              ? { kind: "ssh", id: citation.targetId, label: citation.targetId }
+              : undefined,
+          },
+        }),
+      );
+      return;
+    }
+    navigateTo({
+      view: "dashboard",
+      session: null,
+      tab: "sessions",
+      targetId: citation.targetId || null,
+    });
+    return;
+  }
   if (citation.slug) {
     navigateTo({
       session: citation.slug,

@@ -48,9 +48,13 @@ export interface LocalAssistantCitation {
   type: "session" | "scene" | "insight";
   label: string;
   slug?: string;
+  provider?: string;
+  sessionId?: string;
   targetId?: string;
   sceneIndex?: number;
   project?: string;
+  /** False when the citation points to a source session that has no replay yet. */
+  replayAvailable?: boolean;
 }
 
 export type LocalAssistantAction =
@@ -266,11 +270,20 @@ function sessionCitation(
   sceneIndex?: number,
 ): LocalAssistantCitation {
   const ref = recordRef(record);
+  const sourceSlug =
+    record.source?.slug || record.scan?.slug || sourceString(record.replay?.sourceSlug);
+  const replayAvailable = Boolean(ref);
   return {
     type: sceneIndex === undefined ? "session" : "scene",
     label: `${recordTitle(record)} · ${recordProvider(record)}`,
-    ...(ref ? ref : {}),
+    ...(ref || (sourceSlug ? { slug: sourceSlug } : {})),
+    provider: recordProvider(record),
+    ...(recordSessionId(record) ? { sessionId: recordSessionId(record) } : {}),
+    ...(ref?.targetId || recordTargetId(record)
+      ? { targetId: ref?.targetId || recordTargetId(record) }
+      : {}),
     ...(sceneIndex === undefined ? {} : { sceneIndex }),
+    replayAvailable,
   };
 }
 

@@ -96,6 +96,33 @@ function makeRemoteData(replay: ReplaySession) {
   };
 }
 
+function makeSourceOnlyData() {
+  return {
+    listSources: async () => [
+      {
+        provider: "cursor",
+        slug: "cursor-source-session",
+        sessionId: "cursor-session-1",
+        title: "Cursor source session",
+        project: "~/Code/app",
+        timestamp: "2026-05-10T10:00:00.000Z",
+        fileSize: 100,
+        lineCount: 4,
+        firstPrompt: "Investigate the gateway",
+        filePaths: [],
+        existingReplay: null,
+      },
+    ],
+    listReplays: async () => [],
+    getSession: async () => {
+      throw new Error("source-only session has no generated replay");
+    },
+    getScanResults: () => [],
+    getUserInsights: async () => null,
+    getProjectInsights: async () => null,
+  };
+}
+
 describe("local assistant tools", () => {
   it("searches replay metadata without changing local data", async () => {
     const replay = makeReplay();
@@ -112,6 +139,25 @@ describe("local assistant tools", () => {
     expect(result.content[0]).toMatchObject({
       type: "text",
       text: expect.stringContaining('"slug":"fix-auth"'),
+    });
+  });
+
+  it("cites source-only sessions for the Sessions view instead of Insights", async () => {
+    const tools = createLocalAssistantTools(makeSourceOnlyData(), { mode: "dashboard" });
+    const search = tools.find((tool) => tool.name === "search_sessions");
+
+    const result = await search!.execute("source-search", { query: "gateway" });
+
+    expect(result.details).toMatchObject({
+      citations: [
+        {
+          type: "session",
+          slug: "cursor-source-session",
+          provider: "cursor",
+          sessionId: "cursor-session-1",
+          replayAvailable: false,
+        },
+      ],
     });
   });
 
