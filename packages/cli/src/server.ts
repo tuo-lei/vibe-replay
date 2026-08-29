@@ -189,12 +189,28 @@ function isSameOriginSettingsRequest(c: Context): boolean {
     (!fetchSite || fetchSite === "same-origin" || fetchSite === "none");
   if (origin) {
     try {
-      if (new URL(origin).origin !== new URL(c.req.url).origin && !trustedDevProxy) return false;
+      const requestOrigin = new URL(origin);
+      const apiOrigin = new URL(c.req.url);
+      if (!equivalentLocalOrigin(requestOrigin, apiOrigin) && !trustedDevProxy) return false;
     } catch {
       return false;
     }
   }
   return true;
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1";
+}
+
+/** Treat loopback aliases as the same local host, but preserve port isolation. */
+function equivalentLocalOrigin(left: URL, right: URL): boolean {
+  if (left.protocol !== right.protocol || left.port !== right.port) return false;
+  return (
+    left.hostname === right.hostname ||
+    (isLoopbackHostname(left.hostname) && isLoopbackHostname(right.hostname))
+  );
 }
 
 function parseAiSelectionBody(body: unknown): AiSelection | undefined {

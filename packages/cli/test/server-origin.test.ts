@@ -40,6 +40,32 @@ describe("same-origin API protection", () => {
     ).toBe(true);
   });
 
+  it("accepts localhost and 127.0.0.1 aliases on the same API port", () => {
+    delete process.env.VIBE_REPLAY_DEV_MENU;
+
+    expect(
+      __testables.isSameOriginSettingsRequest(
+        context({
+          origin: "http://localhost:13456",
+          "sec-fetch-site": "same-origin",
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps different loopback ports isolated without the dev proxy", () => {
+    delete process.env.VIBE_REPLAY_DEV_MENU;
+
+    expect(
+      __testables.isSameOriginSettingsRequest(
+        context({
+          origin: "http://localhost:13457",
+          "sec-fetch-site": "same-origin",
+        }),
+      ),
+    ).toBe(false);
+  });
+
   it("rejects an unmarked cross-origin request", () => {
     process.env.VIBE_REPLAY_DEV_MENU = "1";
 
