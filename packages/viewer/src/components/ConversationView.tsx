@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { findContextDrops, getContextScale, getTurnStat } from "../engine";
 import type { OverlayActions } from "../hooks/useOverlays";
 import type { LiveCursorDiagnostics } from "../hooks/useSessionLoader";
 import type { EffectivePrefs } from "../hooks/useViewPrefs";
@@ -29,6 +30,7 @@ interface Props {
   state?: string;
   overlayActions?: OverlayActions;
   turnStats?: TurnStat[];
+  contextLimit?: number;
   /** When set, the session is being streamed live and the trailing "the end"
    *  card is replaced with a state-aware indicator. */
   isLive?: boolean;
@@ -87,6 +89,7 @@ export default function ConversationView({
   state,
   overlayActions,
   turnStats,
+  contextLimit,
   isLive,
   liveSessionState,
   liveCursorDiagnostics,
@@ -308,6 +311,7 @@ export default function ConversationView({
                     onAnnotationClick={onAnnotationClick}
                     overlayActions={overlayActions}
                     turnStats={turnStats}
+                    contextLimit={contextLimit}
                   />
                 </>
               );
@@ -656,6 +660,7 @@ const GroupCard = memo(function GroupCard({
   onAnnotationClick,
   overlayActions,
   turnStats,
+  contextLimit,
 }: {
   group: TurnGroup;
   currentIndex: number;
@@ -668,31 +673,21 @@ const GroupCard = memo(function GroupCard({
   onAnnotationClick?: (annotationId: string) => void;
   overlayActions?: OverlayActions;
   turnStats?: TurnStat[];
+  contextLimit?: number;
 }) {
   const [hovered, setHovered] = useState(false);
 
-  // Infer the effective context ceiling from peak tokens and compaction drops.
-  // If compaction is detected (>50% context drop), the pre-drop peak reveals the limit.
-  // Otherwise default to 200K, or 1M if any turn exceeds 200K.
+  // Use the configured/provider-supplied limit when available. The display
+  // ceiling only controls the bar's visual scale; it must not turn an
+  // observed peak into a fabricated 1M context limit.
   const contextCeiling = useMemo(() => {
-    if (!turnStats?.length) return 200_000;
-    const peak = Math.max(...turnStats.map((t) => t.contextTokens || 0));
-    // Detect compaction: find the highest context value right before a >50% drop
-    let compactionPeak = 0;
-    for (let i = 0; i < turnStats.length - 1; i++) {
-      const cur = turnStats[i]?.contextTokens || 0;
-      const next = turnStats[i + 1]?.contextTokens || 0;
-      if (cur > 0 && next > 0 && next < cur * 0.5 && cur > compactionPeak) {
-        compactionPeak = cur;
-      }
-    }
-    if (compactionPeak > 0) {
-      // Compaction at ~170K → ceiling ~200K; at ~850K → ceiling ~1M
-      return compactionPeak > 200_000 ? 1_000_000 : 200_000;
-    }
-    // No compaction: if peak > 200K, must be 1M window
-    return peak > 200_000 ? 1_000_000 : 200_000;
-  }, [turnStats]);
+    return getContextScale(turnStats || [], contextLimit).displayMax;
+  }, [contextLimit, turnStats]);
+
+  const turnStatsByIndex = useMemo(
+    () => new Map((turnStats || []).map((stat) => [stat.turnIndex, stat])),
+    [turnStats],
+  );
 
   // Render every scene in the group — no longer gated by visibleCount.
   // Playback advance still updates currentIndex (used for the focus
@@ -774,20 +769,23 @@ const GroupCard = memo(function GroupCard({
         {group.turnNumber !== undefined &&
           turnStats &&
           (() => {
-            const ts = turnStats[group.turnNumber! - 1];
+            const ts = turnStatsByIndex.get(group.turnNumber! - 1);
             if (!ts?.contextTokens) return null;
-            const pct = Math.min((ts.contextTokens / contextCeiling) * 100, 100);
-            const ratio = ts.contextTokens / contextCeiling;
-            const barColor =
-              ratio >= 0.85
+            const semanticLimit = contextLimit || contextCeiling;
+            const pct = Math.min((ts.contextTokens / semanticLimit) * 100, 100);
+            const ratio = contextLimit ? ts.contextTokens / semanticLimit : 0;
+            const barColor = !contextLimit
+              ? "bg-terminal-cyan"
+              : ratio >= 0.85
                 ? "bg-terminal-red"
                 : ratio >= 0.7
                   ? "bg-terminal-orange"
                   : ratio >= 0.5
                     ? "bg-yellow-400"
                     : "bg-terminal-green";
-            const textColor =
-              ratio >= 0.85
+            const textColor = !contextLimit
+              ? "text-terminal-cyan"
+              : ratio >= 0.85
                 ? "text-terminal-red"
                 : ratio >= 0.7
                   ? "text-terminal-orange"
@@ -802,7 +800,10 @@ const GroupCard = memo(function GroupCard({
                 </div>
                 <span className={`text-[9px] font-mono tabular-nums ${textColor}`}>
                   {fmtNum(ts.contextTokens)}
-                  <span className="text-terminal-dimmer ml-1">context window</span>
+                  {contextLimit ? ` / ${fmtNum(contextLimit)}` : ""}
+                  <span className="text-terminal-dimmer ml-1">
+                    {contextLimit ? "reported prompt tokens" : "reported prompt footprint"}
+                  </span>
                 </span>
               </div>
             );
@@ -866,16 +867,14 @@ const GroupCard = memo(function GroupCard({
     const compactionTokens = (() => {
       if (!turnStats || turnStats.length < 2 || group.turnNumber === undefined) return undefined;
       const center = group.turnNumber - 1;
-      const start = Math.max(0, center - 2);
-      const end = Math.min(turnStats.length - 1, center + 2);
-      for (let i = start; i < end; i++) {
-        const cur = turnStats[i]?.contextTokens || 0;
-        const next = turnStats[i + 1]?.contextTokens || 0;
-        if (cur > 0 && next > 0 && next < cur * 0.5) {
-          return { before: cur, after: next, freed: cur - next };
-        }
-      }
-      return undefined;
+      const drop = findContextDrops(turnStats).find(
+        (candidate) =>
+          Math.abs(candidate.beforeTurnIndex - center) <= 2 ||
+          Math.abs(candidate.afterTurnIndex - center) <= 2,
+      );
+      return drop
+        ? { before: drop.before, after: drop.after, freed: drop.before - drop.after }
+        : undefined;
     })();
 
     return (
@@ -988,7 +987,7 @@ const GroupCard = memo(function GroupCard({
         onAnnotationClick={onAnnotationClick}
         overlayActions={overlayActions}
         turnDurationMs={
-          group.turnNumber ? turnStats?.[group.turnNumber - 1]?.durationMs : undefined
+          group.turnNumber ? getTurnStat(turnStats, group.turnNumber - 1)?.durationMs : undefined
         }
       />
     );

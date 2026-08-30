@@ -69,7 +69,8 @@ import { localDayKey, shortenPath } from "./utils.js";
 // summary detection.
 // v33: reject Cursor request-relative timing values as session timestamps.
 // v34: persist provider/session diagnostic events and Pi compaction evidence.
-export const SCANNER_VERSION = 34;
+// v35: retain Pi usage from assistant records without visible replay content.
+export const SCANNER_VERSION = 35;
 
 // Keep per-invocation detail bounded in the durable insight store. The full
 // event set is still used to compute usageSummary below; only the retained

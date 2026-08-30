@@ -1310,6 +1310,58 @@ describe("Pi parser", () => {
     );
   });
 
+  it("keeps usage from assistant records without visible content", async () => {
+    await withPiFixture(
+      [
+        {
+          type: "session",
+          version: 3,
+          id: "pi-usage-only",
+          timestamp: "2026-01-01T00:00:00.000Z",
+          cwd: "/Users/test/project",
+        },
+        {
+          type: "message",
+          id: "user1",
+          parentId: null,
+          timestamp: "2026-01-01T00:00:01.000Z",
+          message: { role: "user", content: [{ type: "text", text: "Inspect usage" }] },
+        },
+        {
+          type: "message",
+          id: "assistant1",
+          parentId: "user1",
+          timestamp: "2026-01-01T00:00:02.000Z",
+          message: {
+            role: "assistant",
+            model: "gpt-5.5",
+            content: [],
+            stopReason: "length",
+            usage: { input: 96, output: 512, cacheRead: 755, cacheWrite: 854 },
+          },
+        },
+      ],
+      async (path) => {
+        const parsed = await parsePiSession(path);
+        expect(parsed.tokenUsage).toEqual({
+          inputTokens: 96,
+          outputTokens: 512,
+          cacheCreationTokens: 854,
+          cacheReadTokens: 755,
+        });
+        expect(parsed.turns).toHaveLength(1);
+        expect(parsed.turnStats).toBeUndefined();
+        expect(parsed.dataSourceInfo?.notes).toContain(
+          "1 assistant records had usage but no visible content; their tokens are included in session totals but omitted from replay scenes.",
+        );
+
+        const replay = transformToReplay(parsed, "pi", "~/project");
+        expect(replay.scenes).toHaveLength(1);
+        expect(replay.meta.stats.tokenUsage).toEqual(parsed.tokenUsage);
+      },
+    );
+  });
+
   it.each([
     { pairs: 15, expectedScenes: 30 },
     { pairs: 250, expectedScenes: 500 },

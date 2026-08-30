@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { TurnStat } from "../../types";
-import { computeCacheHitRate, computeContextLayers, turnCacheHitRate } from "../context-chart";
+import {
+  computeCacheHitRate,
+  computeContextLayers,
+  findContextDrops,
+  getContextScale,
+  getTurnStat,
+  orderedTurnStats,
+  turnCacheHitRate,
+} from "../context-chart";
 
 function ts(partial: Partial<TurnStat> = {}): TurnStat {
   return { turnIndex: 0, ...partial } as TurnStat;
@@ -87,6 +95,49 @@ describe("computeContextLayers", () => {
     ]);
     expect(layer.rawCr).toBe(800_000);
     expect(layer.rawSum).toBe(1_000_000);
+  });
+});
+
+describe("turn-stat joins and context drops", () => {
+  it("orders sparse stats by turnIndex and looks them up by semantic index", () => {
+    const stats = [
+      ts({ turnIndex: 3, contextTokens: 300 }),
+      ts({ turnIndex: 1, contextTokens: 100 }),
+    ];
+
+    expect(orderedTurnStats(stats).map((stat) => stat.turnIndex)).toEqual([1, 3]);
+    expect(getTurnStat(stats, 1)?.contextTokens).toBe(100);
+    expect(getTurnStat(stats, 2)).toBeUndefined();
+  });
+
+  it("only reports drops between adjacent observed turns", () => {
+    expect(
+      findContextDrops([
+        ts({ turnIndex: 0, contextTokens: 1000 }),
+        ts({ turnIndex: 1, contextTokens: 400 }),
+        ts({ turnIndex: 3, contextTokens: 100 }),
+      ]),
+    ).toEqual([
+      {
+        position: 0,
+        beforeTurnIndex: 0,
+        afterTurnIndex: 1,
+        before: 1000,
+        after: 400,
+      },
+    ]);
+  });
+
+  it("uses the configured limit as the semantic limit while keeping an over-limit peak visible", () => {
+    expect(getContextScale([ts({ contextTokens: 415_242 })], 272_000)).toEqual({
+      peak: 415_242,
+      limit: 272_000,
+      displayMax: 415_242,
+    });
+    expect(getContextScale([ts({ contextTokens: 150_000 })])).toEqual({
+      peak: 150_000,
+      displayMax: 150_000,
+    });
   });
 });
 

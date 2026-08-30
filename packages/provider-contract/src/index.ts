@@ -307,7 +307,7 @@ export interface ProviderParseResult {
    */
   reportedCostUsd?: number;
   compactions?: Compaction[];
-  /** Per-turn metrics (indexed by user-prompt turn, 0-based) */
+  /** Per-turn metrics identified by their 0-based user-prompt turnIndex. */
   turnStats?: TurnStat[];
   /** Provider-reported context window limit for the primary model, if available */
   contextLimit?: number;

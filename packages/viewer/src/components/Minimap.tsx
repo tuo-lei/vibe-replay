@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { getTurnStat } from "../engine";
 import type { OverlayActions } from "../hooks/useOverlays";
 import type { Scene, TurnStat } from "../types";
 import { formatDuration } from "./StatsPanel";
@@ -186,7 +187,7 @@ export default function Minimap({
                 </span>
               )}
               {(() => {
-                const ts = turnStats?.[item.turnNumber - 1];
+                const ts = getTurnStat(turnStats, item.turnNumber - 1);
                 if (!ts?.durationMs) return null;
                 return (
                   <span className="text-[10px] font-mono text-terminal-dimmer">
