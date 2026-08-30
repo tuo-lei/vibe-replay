@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import type {
+  AiAuthMethodInfo,
   AiModelInfo,
   AiProviderInfo,
   AiProviderSettingsActions,
@@ -30,14 +31,66 @@ function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
-function providerStatus(provider: AiProviderInfo): string {
-  if (!provider.configured) return "not configured";
+function providerStatus(provider: AiProviderInfo, method?: AiAuthMethodInfo["type"]): string {
+  if (!provider.configured || (method && provider.authType !== method)) return "not configured";
   if (provider.authType === "oauth") {
-    return provider.authMethods.find((method) => method.type === "oauth")?.subscription
+    return provider.authMethods.find((candidate) => candidate.type === "oauth")?.subscription
       ? "subscription / OAuth"
       : "OAuth";
   }
   return provider.authSource || "API key";
+}
+
+function authMethodKind(method: AiAuthMethodInfo): string {
+  return method.type === "oauth" ? "Account login" : "API key";
+}
+
+function ProviderAuthCard({
+  provider,
+  method,
+  selected,
+  disabled,
+  onSelect,
+}: {
+  provider: AiProviderInfo;
+  method: AiAuthMethodInfo;
+  selected: boolean;
+  disabled: boolean;
+  onSelect: () => void;
+}) {
+  const configured = provider.configured && provider.authType === method.type;
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      disabled={disabled}
+      className={`rounded-lg border p-3 text-left transition-colors disabled:opacity-50 ${
+        selected
+          ? "border-terminal-purple/50 bg-terminal-purple-subtle"
+          : "border-terminal-border-subtle bg-terminal-bg hover:border-terminal-purple/30"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <span className="min-w-0 truncate text-xs font-mono font-semibold text-terminal-text">
+          {provider.name}
+        </span>
+        <span
+          className={`shrink-0 text-[9px] font-mono ${
+            configured ? "text-terminal-green" : "text-terminal-orange"
+          }`}
+        >
+          {configured ? "ready" : "setup"}
+        </span>
+      </div>
+      <div className="mt-1 text-[10px] font-mono text-terminal-dimmer">
+        {provider.models.length} model{provider.models.length === 1 ? "" : "s"}
+      </div>
+      <div className="mt-2 text-[10px] font-mono text-terminal-purple">
+        {authMethodKind(method)}
+        {method.subscription ? " · subscription" : ""}
+      </div>
+    </button>
+  );
 }
 
 function ModelPicker({
@@ -258,6 +311,10 @@ export function AiProviderSettings({
     saveAiSelectionAsDefault,
   } = actions;
   const [authMethod, setAuthMethod] = useState<"api_key" | "oauth">("api_key");
+  const authMethodOverrideRef = useRef<{
+    providerId: string;
+    method: AiAuthMethodInfo["type"];
+  } | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [authRunning, setAuthRunning] = useState(false);
   const [authStatus, setAuthStatus] = useState<{
@@ -274,15 +331,35 @@ export function AiProviderSettings({
   } | null>(null);
 
   const selectedProvider = providers.find((provider) => provider.id === providerId) || null;
+  const selectedAuthMethod = selectedProvider?.authMethods.find(
+    (method) => method.type === authMethod,
+  );
+  const selectedProviderAuthStatus = selectedProvider
+    ? providerStatus(selectedProvider, authMethod)
+    : "not configured";
+  const selectedAuthConfigured =
+    selectedProvider?.id === "custom-openai" || selectedProviderAuthStatus !== "not configured";
+  const apiKeyProviders = providers.filter((provider) =>
+    provider.authMethods.some((method) => method.type === "api_key"),
+  );
+  const accountProviders = providers.filter((provider) =>
+    provider.authMethods.some((method) => method.type === "oauth"),
+  );
   const customProvider = providers.find((provider) => provider.id === "custom-openai") || null;
   const selectionLocked = busy || authRunning || customRunning;
 
   useEffect(() => {
-    const preferred =
-      selectedProvider?.authType ||
-      selectedProvider?.authMethods.find((method) => method.subscription)?.type ||
-      selectedProvider?.authMethods[0]?.type;
-    if (preferred) setAuthMethod(preferred);
+    const override = authMethodOverrideRef.current;
+    const hasOverride = override?.providerId === selectedProvider?.id;
+    if (override && !hasOverride) authMethodOverrideRef.current = null;
+    setAuthMethod(
+      hasOverride && override
+        ? override.method
+        : selectedProvider?.authType ||
+            selectedProvider?.authMethods.find((method) => method.subscription)?.type ||
+            selectedProvider?.authMethods[0]?.type ||
+            "api_key",
+    );
     setAuthStatus(null);
   }, [selectedProvider]);
 
@@ -306,6 +383,15 @@ export function AiProviderSettings({
       onModelChange?.(nextModelId);
     },
     [onModelChange, setAiModelId],
+  );
+
+  const handleAuthMethodChange = useCallback(
+    (nextProviderId: string, method: AiAuthMethodInfo["type"]) => {
+      authMethodOverrideRef.current = { providerId: nextProviderId, method };
+      setAuthMethod(method);
+      handleProviderChange(nextProviderId);
+    },
+    [handleProviderChange],
   );
 
   const handleAuthenticate = useCallback(async () => {
@@ -412,8 +498,9 @@ export function AiProviderSettings({
         <div>
           <h2 className="text-lg font-sans font-semibold text-terminal-text">AI providers</h2>
           <p className="mt-1 max-w-2xl text-[10px] font-sans leading-relaxed text-terminal-dim">
-            Configure built-in providers or connect an OpenAI-compatible gateway. Keys stay in the
-            local credential store and are never included in provider metadata.
+            Configure built-in providers or connect an OpenAI-compatible gateway. API keys and
+            account sign-ins are shown separately; credentials stay in the local store and are never
+            included in provider metadata.
           </p>
         </div>
         {refreshAiProviders && (
@@ -447,65 +534,65 @@ export function AiProviderSettings({
         </div>
       ) : (
         <>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {providers.map((provider) => (
-              <button
-                key={provider.id}
-                type="button"
-                onClick={() => handleProviderChange(provider.id)}
-                disabled={selectionLocked}
-                className={`rounded-lg border p-3 text-left transition-colors disabled:opacity-50 ${
-                  provider.id === providerId
-                    ? "border-terminal-purple/50 bg-terminal-purple-subtle"
-                    : "border-terminal-border-subtle bg-terminal-bg hover:border-terminal-purple/30"
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <span className="min-w-0 truncate text-xs font-mono font-semibold text-terminal-text">
-                    {provider.name}
-                  </span>
-                  <span
-                    className={`shrink-0 text-[9px] font-mono ${
-                      provider.configured ? "text-terminal-green" : "text-terminal-orange"
-                    }`}
-                  >
-                    {provider.configured ? "ready" : "setup"}
+          <div className="space-y-4">
+            {accountProviders.length > 0 && (
+              <div>
+                <div className="mb-2 flex items-baseline justify-between gap-3">
+                  <h3 className="text-xs font-sans font-semibold text-terminal-text">Accounts</h3>
+                  <span className="text-[10px] font-mono text-terminal-dimmer">
+                    Sign in through the provider
                   </span>
                 </div>
-                <div className="mt-1 text-[10px] font-mono text-terminal-dimmer">
-                  {provider.models.length} model{provider.models.length === 1 ? "" : "s"}
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {accountProviders.map((provider) => {
+                    const method = provider.authMethods.find(
+                      (candidate) => candidate.type === "oauth",
+                    );
+                    if (!method) return null;
+                    return (
+                      <ProviderAuthCard
+                        key={`${provider.id}:oauth`}
+                        provider={provider}
+                        method={method}
+                        selected={provider.id === providerId && authMethod === "oauth"}
+                        disabled={selectionLocked}
+                        onSelect={() => handleAuthMethodChange(provider.id, "oauth")}
+                      />
+                    );
+                  })}
                 </div>
-              </button>
-            ))}
-          </div>
+              </div>
+            )}
 
-          {selectedProvider && selectedProvider.models.length > 0 && (
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-mono text-terminal-dim">Model</span>
-              <ModelPicker
-                models={selectedProvider.models}
-                value={modelId || ""}
-                onChange={handleModelChange}
-                disabled={selectionLocked}
-              />
-              {saveAiSelectionAsDefault && (
-                <button
-                  type="button"
-                  onClick={saveAiSelectionAsDefault}
-                  disabled={selectionLocked || !modelId}
-                  className={`shrink-0 rounded-lg px-2 py-1.5 text-[10px] font-mono transition-colors disabled:opacity-40 ${
-                    providerId === defaultAiProviderId && modelId === defaultAiModelId
-                      ? "bg-terminal-green-subtle text-terminal-green"
-                      : "bg-terminal-surface-2 text-terminal-dim hover:text-terminal-text"
-                  }`}
-                >
-                  {providerId === defaultAiProviderId && modelId === defaultAiModelId
-                    ? "Default"
-                    : "Set default"}
-                </button>
-              )}
-            </div>
-          )}
+            {apiKeyProviders.length > 0 && (
+              <div>
+                <div className="mb-2 flex items-baseline justify-between gap-3">
+                  <h3 className="text-xs font-sans font-semibold text-terminal-text">API keys</h3>
+                  <span className="text-[10px] font-mono text-terminal-dimmer">
+                    Use a provider-issued key
+                  </span>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {apiKeyProviders.map((provider) => {
+                    const method = provider.authMethods.find(
+                      (candidate) => candidate.type === "api_key",
+                    );
+                    if (!method) return null;
+                    return (
+                      <ProviderAuthCard
+                        key={`${provider.id}:api_key`}
+                        provider={provider}
+                        method={method}
+                        selected={provider.id === providerId && authMethod === "api_key"}
+                        disabled={selectionLocked}
+                        onSelect={() => handleAuthMethodChange(provider.id, "api_key")}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
 
           {selectedProvider && selectedProvider.id !== "custom-openai" && (
             <div className="rounded-lg border border-terminal-border-subtle bg-terminal-bg p-3 space-y-2">
@@ -513,28 +600,22 @@ export function AiProviderSettings({
                 <span className="text-xs font-mono text-terminal-dim">Authentication</span>
                 <span
                   className={`text-[10px] font-mono ${
-                    selectedProvider.configured ? "text-terminal-green" : "text-terminal-orange"
+                    selectedProviderAuthStatus === "not configured"
+                      ? "text-terminal-orange"
+                      : "text-terminal-green"
                   }`}
                 >
-                  {providerStatus(selectedProvider)}
+                  {selectedProviderAuthStatus}
                 </span>
               </div>
 
-              {selectedProvider.authMethods.length > 1 && (
-                <select
-                  aria-label="AI authentication method"
-                  value={authMethod}
-                  onChange={(event) => setAuthMethod(event.target.value as "api_key" | "oauth")}
-                  disabled={selectionLocked}
-                  className={INPUT_CLASS}
-                >
-                  {selectedProvider.authMethods.map((method) => (
-                    <option key={method.type} value={method.type}>
-                      {method.label}
-                      {method.subscription ? " (subscription)" : ""}
-                    </option>
-                  ))}
-                </select>
+              {selectedAuthMethod && (
+                <div className="flex flex-wrap items-center gap-2 text-[10px] font-mono">
+                  <span className="rounded-md bg-terminal-purple-subtle px-2 py-1 text-terminal-purple">
+                    {authMethodKind(selectedAuthMethod)}
+                  </span>
+                  <span className="text-terminal-dimmer">{selectedAuthMethod.label}</span>
+                </div>
               )}
 
               {authMethod === "api_key" &&
@@ -584,7 +665,8 @@ export function AiProviderSettings({
               {selectedProvider.configured &&
                 logoutAiProvider &&
                 (selectedProvider.authType === "oauth" ||
-                  selectedProvider.authSource === "stored credential") && (
+                  selectedProvider.authSource === "stored credential") &&
+                (!selectedAuthMethod || selectedProvider.authType === selectedAuthMethod.type) && (
                   <button
                     type="button"
                     onClick={() => void handleLogout()}
@@ -607,6 +689,45 @@ export function AiProviderSettings({
               )}
             </div>
           )}
+
+          {selectedProvider &&
+            selectedProvider.models.length > 0 &&
+            (selectedAuthConfigured ? (
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-mono text-terminal-dim">Model</span>
+                <ModelPicker
+                  models={selectedProvider.models}
+                  value={modelId || ""}
+                  onChange={handleModelChange}
+                  disabled={selectionLocked}
+                />
+                {saveAiSelectionAsDefault && (
+                  <button
+                    type="button"
+                    onClick={saveAiSelectionAsDefault}
+                    disabled={selectionLocked || !modelId}
+                    className={`shrink-0 rounded-lg px-2 py-1.5 text-[10px] font-mono transition-colors disabled:opacity-40 ${
+                      providerId === defaultAiProviderId && modelId === defaultAiModelId
+                        ? "bg-terminal-green-subtle text-terminal-green"
+                        : "bg-terminal-surface-2 text-terminal-dim hover:text-terminal-text"
+                    }`}
+                  >
+                    {providerId === defaultAiProviderId && modelId === defaultAiModelId
+                      ? "Default"
+                      : "Set default"}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-terminal-border-subtle bg-terminal-bg px-3 py-2.5 text-[10px] font-mono">
+                <div className="text-terminal-dim">Connect first to choose a model.</div>
+                <div className="mt-1 text-terminal-dimmer">
+                  Complete{" "}
+                  {selectedAuthMethod ? authMethodKind(selectedAuthMethod) : "authentication"} for{" "}
+                  {selectedProvider.name} above.
+                </div>
+              </div>
+            ))}
         </>
       )}
 

@@ -531,6 +531,7 @@ export function navigateTo(
 
 export const DASHBOARD_PARAMS = [
   "tab",
+  "settingsSection",
   "project",
   "targetId",
   "q",

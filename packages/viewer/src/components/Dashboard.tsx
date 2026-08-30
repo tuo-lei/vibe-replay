@@ -5445,6 +5445,7 @@ export default function Dashboard({
     // Reset cross-tab list state to avoid landing on empty views due to stale project/filter params.
     navigateTo({
       tab: id,
+      settingsSection: null,
       project: null,
       q: null,
       archived: null,
