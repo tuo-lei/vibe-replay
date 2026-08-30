@@ -427,6 +427,7 @@ export default function LocalChatAssistant({ context }: Props) {
   >(undefined);
   const scrollRef = useRef<HTMLDivElement>(null);
   const providerSettings = useAiProviderSettings(true);
+  const { refreshAiProviders } = providerSettings;
   const availableProviders = providerSettings.aiProviders.filter(
     (provider) => provider.configured && provider.models.length > 0,
   );
@@ -462,6 +463,14 @@ export default function LocalChatAssistant({ context }: Props) {
     ? "Open provider settings"
     : "Set up an AI provider";
   const remoteSession = Boolean(context.currentSession?.targetId);
+  const retryProviderSetup = useCallback(async () => {
+    try {
+      await refreshAiProviders?.();
+    } catch {
+      // The provider hook exposes the error state; retry should not create an
+      // unhandled rejection in the chat surface.
+    }
+  }, [refreshAiProviders]);
 
   useEffect(() => {
     setPanelSize(readPanelSize());
@@ -845,7 +854,7 @@ export default function LocalChatAssistant({ context }: Props) {
                   hasAvailableProvider={availableProviders.length > 0}
                   onOpenSettings={openProviderSettings}
                   onChooseModel={() => setSwitchOpen(true)}
-                  onRetry={() => void providerSettings.refreshAiProviders?.()}
+                  onRetry={retryProviderSetup}
                 />
               ) : (
                 <div className="pt-8 text-center">
@@ -997,7 +1006,7 @@ export default function LocalChatAssistant({ context }: Props) {
                   type="button"
                   onClick={() => {
                     if (providerSettings.aiProvidersError) {
-                      void providerSettings.refreshAiProviders?.();
+                      void retryProviderSetup();
                     } else if (canChooseModel) {
                       setSwitchOpen(true);
                     } else {
