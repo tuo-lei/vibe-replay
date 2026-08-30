@@ -182,6 +182,7 @@ export function parsePiLines(
   let currentProvider: string | undefined;
   let firstTimestamp: string | undefined;
   let lastTimestamp: string | undefined;
+  let usageOnlyAssistantRecords = 0;
   // Summarization requests are billed on top of the messages they replace, so
   // Pi counts them separately from any assistant message usage.
   const summaryUsages: { usage: TokenUsage; model?: string }[] = [];
@@ -337,21 +338,24 @@ export function parsePiLines(
           ...(compactionFailure?.evidence ? { evidence: compactionFailure.evidence } : {}),
         });
       }
+      const msgModel = message.model || currentModel;
+      let hasUsage = false;
+      if (message.usage && entry.id && hasValidUsageValues(message.usage)) {
+        const usage = normalizeUsage(message.usage);
+        if (tokenUsageTotal(usage) > 0) {
+          usageByMessageId.set(entry.id, {
+            usage,
+            model: msgModel,
+            contextTokens: usage.inputTokens + usage.cacheCreationTokens + usage.cacheReadTokens,
+          });
+          hasUsage = true;
+        }
+      }
+      if (hasUsage && blocks.length === 0) usageOnlyAssistantRecords++;
       if (blocks.length > 0) {
-        const msgModel = message.model || currentModel;
         if (msgModel) {
           model = model || msgModel;
           currentModel = msgModel;
-        }
-        if (message.usage && entry.id && hasValidUsageValues(message.usage)) {
-          const usage = normalizeUsage(message.usage);
-          if (tokenUsageTotal(usage) > 0) {
-            usageByMessageId.set(entry.id, {
-              usage,
-              model: msgModel,
-              contextTokens: usage.inputTokens + usage.cacheCreationTokens + usage.cacheReadTokens,
-            });
-          }
         }
         turns.push({
           role: "assistant",
@@ -384,6 +388,16 @@ export function parsePiLines(
   const sourcePath = options.sourcePath || options.sessionInfo?.filePath || "";
   const slug = options.sessionInfo?.slug || basename(sourcePath || sessionId, ".jsonl");
   const cwd = header?.cwd || options.sessionInfo?.cwd || options.sessionInfo?.project || "";
+  const dataSourceNotes = [
+    ...(branchSelection.abandonedEntries > 0
+      ? [`${branchSelection.abandonedEntries} off-branch Pi entries were omitted.`]
+      : []),
+    ...(usageOnlyAssistantRecords > 0
+      ? [
+          `${usageOnlyAssistantRecords} assistant records had usage but no visible content; their tokens are included in session totals but omitted from replay scenes.`,
+        ]
+      : []),
+  ];
 
   return {
     sessionId,
@@ -406,9 +420,7 @@ export function parsePiLines(
     dataSourceInfo: {
       primary: "jsonl",
       sources: [shortenPath(options.sessionsDir || getPiSessionsDir())],
-      ...(branchSelection.abandonedEntries > 0
-        ? { notes: [`${branchSelection.abandonedEntries} off-branch Pi entries were omitted.`] }
-        : {}),
+      ...(dataSourceNotes.length > 0 ? { notes: dataSourceNotes } : {}),
     },
     ...(model ? contextLimitForModel(model, options.modelContextWindows) : {}),
     ...(parseWarnings.length > 0 ? { parseWarnings } : {}),

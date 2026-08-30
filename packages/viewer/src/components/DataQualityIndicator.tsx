@@ -31,10 +31,25 @@ export function getSessionDataQualityNotes(meta: ReplaySession["meta"]): string[
   ) {
     notes.unshift("Some Cursor metrics are best-effort estimates and may be incomplete.");
   }
+  if (meta.provider === "pi" && meta.dataSource === "jsonl" && meta.stats.durationMs) {
+    notes.push("Pi duration is an active-time estimate; long idle gaps are trimmed.");
+  }
+  if (meta.provider === "pi" && meta.dataSource === "jsonl" && meta.contextLimit) {
+    notes.push(
+      "Pi's configured context limit comes from the current model configuration; the session JSONL does not persist the historical limit.",
+    );
+  }
   if (!meta.stats.tokenUsage) {
     notes.push("Token and cost metrics may be unavailable.");
   } else if (meta.stats.costEstimate === undefined) {
     notes.push("Cost estimate is unavailable because model pricing or attribution is unknown.");
+  }
+
+  const turnStatCount = meta.stats.turnStats?.length;
+  if (turnStatCount !== undefined && turnStatCount < meta.stats.userPrompts) {
+    notes.push(
+      `Per-turn metrics are available for ${turnStatCount}/${meta.stats.userPrompts} turns; missing rows are shown as no data.`,
+    );
   }
 
   return [...new Set(notes)];

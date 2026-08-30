@@ -39,7 +39,10 @@ export interface TurnStat {
   model?: string;
   durationMs?: number;
   tokenUsage?: TokenUsage;
-  /** Total prompt tokens (input + cacheRead + cacheCreation) — the context window usage for this turn */
+  /**
+   * Provider-reported prompt footprint (input + cacheRead + cacheCreation).
+   * This is not guaranteed to equal the model's actual context-window size.
+   */
   contextTokens?: number;
 }
 

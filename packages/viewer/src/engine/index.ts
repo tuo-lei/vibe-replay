@@ -7,9 +7,15 @@ export {
   updateAnnotation,
 } from "./annotation-store";
 export {
+  type ContextDrop,
   type ContextLayer,
+  type ContextScale,
   computeCacheHitRate,
   computeContextLayers,
+  findContextDrops,
+  getContextScale,
+  getTurnStat,
+  orderedTurnStats,
   turnCacheHitRate,
 } from "./context-chart";
 export {

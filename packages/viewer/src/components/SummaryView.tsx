@@ -1,5 +1,13 @@
 import { useCallback, useMemo, useRef, useState } from "react";
-import { computeCacheHitRate, computeContextLayers, turnCacheHitRate } from "../engine";
+import {
+  computeCacheHitRate,
+  computeContextLayers,
+  findContextDrops,
+  getContextScale,
+  getTurnStat,
+  orderedTurnStats,
+  turnCacheHitRate,
+} from "../engine";
 import type { ReplaySession, TurnStat } from "../types";
 import { getToolDiffs } from "../utils/sceneDiffs";
 import { formatReplaySourceLabel } from "../utils/format";
@@ -94,6 +102,7 @@ function useChartHover(turnCount: number) {
 
 export default function SummaryView({ session }: Props) {
   const { meta, scenes } = session;
+  const durationIsEstimate = meta.provider === "pi" && meta.dataSource === "jsonl";
   const dataQualityNotes = useMemo(() => getSessionDataQualityNotes(meta), [meta]);
   const metricQuality = useMemo(() => getSessionMetricQuality(meta), [meta]);
   // File table merges edited + read-only into one component
@@ -481,7 +490,7 @@ export default function SummaryView({ session }: Props) {
             )}
             {(stats.durationMs || metricQuality.duration) && (
               <div>
-                Duration:{" "}
+                {durationIsEstimate ? "Active duration estimate" : "Duration"}:{" "}
                 <span className="text-terminal-text">
                   {stats.durationMs ? formatDuration(stats.durationMs) : "unavailable"}
                 </span>
@@ -553,7 +562,12 @@ export default function SummaryView({ session }: Props) {
               costEstimate={meta.stats.costEstimate}
               turnLabels={turnLabels}
             />
-            <ContextWindowChart turnStats={meta.stats.turnStats!} turnLabels={turnLabels} />
+            <ContextWindowChart
+              turnStats={meta.stats.turnStats!}
+              contextLimit={meta.contextLimit}
+              persistedCompactionCount={meta.compactions?.length}
+              turnLabels={turnLabels}
+            />
             {stats.turns.length >= 2 && (
               <ToolActivityChart turns={stats.turns} turnLabels={turnLabels} />
             )}
@@ -943,9 +957,10 @@ function TokenBurnCurve({
   costEstimate?: number;
   turnLabels?: string[];
 }) {
+  const orderedStats = orderedTurnStats(turnStats);
   const cumulative: number[] = [];
   let sum = 0;
-  for (const ts of turnStats) {
+  for (const ts of orderedStats) {
     sum += ts.tokenUsage?.outputTokens || 0;
     cumulative.push(sum);
   }
@@ -968,7 +983,9 @@ function TokenBurnCurve({
 
   return (
     <div>
-      <div className="ui-section-title mb-1">Token Burn{costEstimate ? " & Cost" : ""}</div>
+      <div className="ui-section-title mb-1">
+        Turn Output Burn{costEstimate !== undefined ? " & Session Cost" : ""}
+      </div>
       <div className="relative">
         <svg
           ref={ref}
@@ -1008,16 +1025,16 @@ function TokenBurnCurve({
         <ChartTooltip visible={hovered !== null} x={hoveredX}>
           {hovered !== null && (
             <>
-              <div className="text-terminal-green">Turn {hovered + 1}</div>
-              {turnLabels?.[hovered] && (
+              <div className="text-terminal-green">Turn {orderedStats[hovered].turnIndex + 1}</div>
+              {turnLabels?.[orderedStats[hovered].turnIndex] && (
                 <div className="text-terminal-dim truncate max-w-[200px]">
-                  {turnLabels[hovered]}
+                  {turnLabels[orderedStats[hovered].turnIndex]}
                 </div>
               )}
               <div>cumulative: {fmtNum(cumulative[hovered])} tokens</div>
-              {turnStats[hovered]?.tokenUsage && (
+              {orderedStats[hovered]?.tokenUsage && (
                 <div className="text-terminal-dimmer">
-                  this turn: +{fmtNum(turnStats[hovered].tokenUsage!.outputTokens)} out
+                  this turn: +{fmtNum(orderedStats[hovered].tokenUsage!.outputTokens)} out
                 </div>
               )}
             </>
@@ -1025,18 +1042,18 @@ function TokenBurnCurve({
         </ChartTooltip>
       </div>
       <div className="flex justify-between text-[10px] font-mono text-terminal-dimmer mt-0.5">
-        <span>Turn 1</span>
+        <span>Turn {orderedStats[0].turnIndex + 1}</span>
         <span>
           {fmtNum(max)} tokens
-          {costEstimate
-            ? ` ($${costEstimate < 1 ? costEstimate.toFixed(2) : costEstimate.toFixed(0)})`
+          {costEstimate !== undefined
+            ? ` (session estimate $${costEstimate < 1 ? costEstimate.toFixed(2) : costEstimate.toFixed(0)})`
             : ""}
         </span>
-        <span>Turn {n}</span>
+        <span>Turn {orderedStats[n - 1].turnIndex + 1}</span>
       </div>
       {/* Cache efficiency sparkline */}
-      {turnStats.some((t) => t.tokenUsage?.cacheReadTokens) && (
-        <CacheEfficiencyLine turnStats={turnStats} />
+      {orderedStats.some((t) => t.tokenUsage?.cacheReadTokens) && (
+        <CacheEfficiencyLine turnStats={orderedStats} />
       )}
     </div>
   );
@@ -1086,37 +1103,30 @@ function CacheEfficiencyLine({ turnStats }: { turnStats: TurnStat[] }) {
 
 function ContextWindowChart({
   turnStats,
+  contextLimit,
+  persistedCompactionCount,
   turnLabels,
 }: {
   turnStats: TurnStat[];
+  contextLimit?: number;
+  persistedCompactionCount?: number;
   turnLabels?: string[];
 }) {
-  const contextSizes = turnStats.map((t) => t.contextTokens || 0);
+  const orderedStats = orderedTurnStats(turnStats);
+  const contextSizes = orderedStats.map((t) => t.contextTokens || 0);
   const n = contextSizes.length;
   const { hovered, ref, onMouseMove, onMouseLeave } = useChartHover(n);
 
   if (!contextSizes.some((c) => c > 0)) return null;
 
-  const peak = Math.max(...contextSizes);
+  const { peak, limit, displayMax } = getContextScale(orderedStats, contextLimit);
 
   // Per-turn breakdown: pure layer math lives in ../engine/context-chart.ts
   // where it's unit-tested. See computeContextLayers for the scaling rules.
-  const hasBreakdown = turnStats.some((t) => t.tokenUsage);
-  const layers = computeContextLayers(turnStats);
-
-  // Infer ceiling from compaction data and peak
-  let compactionPeak = 0;
-  for (let i = 0; i < contextSizes.length - 1; i++) {
-    if (
-      contextSizes[i] > 0 &&
-      contextSizes[i + 1] > 0 &&
-      contextSizes[i + 1] < contextSizes[i] * 0.5
-    ) {
-      compactionPeak = Math.max(compactionPeak, contextSizes[i]);
-    }
-  }
-  const effectiveLimit = compactionPeak > 200_000 || peak > 200_000 ? 1_000_000 : 200_000;
-  const max = effectiveLimit > peak ? effectiveLimit : peak;
+  const hasBreakdown = orderedStats.some((t) => t.tokenUsage);
+  const layers = computeContextLayers(orderedStats);
+  const contextDrops = findContextDrops(orderedStats);
+  const max = displayMax || peak || 1;
   const h = 60;
   const w = 100;
 
@@ -1168,15 +1178,6 @@ function ContextWindowChart({
   const hasNoDataTurns = noDataPolygons.length > 0;
 
   // Detect compaction points
-  const compactionTurns: number[] = [];
-  for (let i = 0; i < contextSizes.length - 1; i++) {
-    const cur = contextSizes[i];
-    const next = contextSizes[i + 1];
-    if (cur > 0 && next > 0 && next < cur * 0.5) {
-      compactionTurns.push(i);
-    }
-  }
-
   // Cache efficiency (overall): delegated to the tested engine helper.
   const cacheHitRate = computeCacheHitRate(layers);
   const totalRawSum = layers.reduce((a, l) => a + l.rawSum, 0);
@@ -1184,15 +1185,20 @@ function ContextWindowChart({
   const hoveredX = hovered !== null ? (n === 1 ? 0.5 : hovered / (n - 1)) : 0;
 
   // Context limit Y position for the limit line
-  const limitY = effectiveLimit ? toY(effectiveLimit) : undefined;
+  const limitY = limit ? toY(limit) : undefined;
 
   const hoveredCacheRate = hovered !== null ? turnCacheHitRate(layers[hovered]) : 0;
 
   return (
     <div>
       <div className="ui-section-title mb-1 flex items-center gap-2">
-        <span>Context Window Usage</span>
+        <span>Reported Prompt Footprint</span>
         <span className="font-mono text-terminal-cyan">peak {fmtNum(peak)}</span>
+        {limit && peak > limit && (
+          <span className="font-mono text-terminal-red">
+            {Math.round((peak / limit) * 100)}% of configured limit
+          </span>
+        )}
       </div>
       <div className="relative">
         <svg
@@ -1252,17 +1258,17 @@ function ContextWindowChart({
             strokeLinejoin="round"
             vectorEffect="non-scaling-stroke"
           />
-          {/* Compaction markers */}
-          {compactionTurns.map((ti) => {
-            const x = toX(ti);
+          {/* Observed context-drop markers (not proof of a persisted compaction) */}
+          {contextDrops.map((drop) => {
+            const x = toX(drop.position);
             return (
               <line
-                key={ti}
+                key={`${drop.beforeTurnIndex}-${drop.afterTurnIndex}`}
                 x1={x}
                 y1="0"
                 x2={x}
                 y2={h}
-                style={{ stroke: "var(--red)" }}
+                style={{ stroke: "var(--orange)" }}
                 strokeWidth="1"
                 strokeDasharray="2,1"
                 vectorEffect="non-scaling-stroke"
@@ -1287,13 +1293,13 @@ function ContextWindowChart({
         <ChartTooltip visible={hovered !== null} x={hoveredX}>
           {hovered !== null && (
             <>
-              <div className="text-terminal-cyan">Turn {hovered + 1}</div>
-              {turnLabels?.[hovered] && (
+              <div className="text-terminal-cyan">Turn {orderedStats[hovered].turnIndex + 1}</div>
+              {turnLabels?.[orderedStats[hovered].turnIndex] && (
                 <div className="text-terminal-dim truncate max-w-[200px]">
-                  {turnLabels[hovered]}
+                  {turnLabels[orderedStats[hovered].turnIndex]}
                 </div>
               )}
-              <div>{fmtNum(contextSizes[hovered])} tokens</div>
+              <div>{fmtNum(contextSizes[hovered])} reported prompt tokens</div>
               {hasBreakdown && layers[hovered].rawSum > 0 && (
                 <div className="mt-0.5 border-t border-terminal-border-subtle pt-0.5 space-y-px">
                   <div className="flex items-center gap-1">
@@ -1313,7 +1319,7 @@ function ContextWindowChart({
                       {fmtNum(
                         layers[hovered].rawSum -
                           layers[hovered].rawCr -
-                          (turnStats[hovered].tokenUsage?.cacheCreationTokens || 0),
+                          (orderedStats[hovered].tokenUsage?.cacheCreationTokens || 0),
                       )}
                     </span>
                   </div>
@@ -1323,7 +1329,8 @@ function ContextWindowChart({
                       style={{ background: "var(--orange)" }}
                     />
                     <span>
-                      cache write {fmtNum(turnStats[hovered].tokenUsage?.cacheCreationTokens || 0)}
+                      cache write{" "}
+                      {fmtNum(orderedStats[hovered].tokenUsage?.cacheCreationTokens || 0)}
                     </span>
                   </div>
                   <div className="text-terminal-dim">{hoveredCacheRate.toFixed(0)}% cache hit</div>
@@ -1334,19 +1341,31 @@ function ContextWindowChart({
         </ChartTooltip>
       </div>
       <div className="flex justify-between text-[10px] font-mono text-terminal-dimmer mt-0.5">
-        <span>Turn 1</span>
-        <span>{effectiveLimit ? `limit ${fmtNum(effectiveLimit)}` : `peak ${fmtNum(peak)}`}</span>
-        <span>Turn {n}</span>
+        <span>Turn {orderedStats[0].turnIndex + 1}</span>
+        <span>{limit ? `configured limit ${fmtNum(limit)}` : `limit unavailable`}</span>
+        <span>Turn {orderedStats[n - 1].turnIndex + 1}</span>
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
-        {compactionTurns.length > 0 && (
+        {persistedCompactionCount !== undefined && persistedCompactionCount > 0 && (
           <div className="flex items-center gap-1">
             <span
               className="inline-block w-3 border-t border-dashed"
               style={{ borderColor: "var(--red)" }}
             />
             <span className="text-[10px] font-mono text-terminal-dimmer">
-              {compactionTurns.length} compaction{compactionTurns.length !== 1 ? "s" : ""}
+              {persistedCompactionCount} recorded compaction
+              {persistedCompactionCount !== 1 ? "s" : ""}
+            </span>
+          </div>
+        )}
+        {contextDrops.length > 0 && (
+          <div className="flex items-center gap-1">
+            <span
+              className="inline-block w-3 border-t border-dashed"
+              style={{ borderColor: "var(--orange)" }}
+            />
+            <span className="text-[10px] font-mono text-terminal-dimmer">
+              {contextDrops.length} observed context drop{contextDrops.length !== 1 ? "s" : ""}
             </span>
           </div>
         )}
@@ -1399,7 +1418,8 @@ function TurnDurationChart({
   turnStats: TurnStat[];
   turnLabels?: string[];
 }) {
-  const durations = turnStats.map((t) => t.durationMs || 0);
+  const orderedStats = orderedTurnStats(turnStats);
+  const durations = orderedStats.map((t) => t.durationMs || 0);
   const max = Math.max(...durations, 1);
   const hasDurations = durations.some((d) => d > 0);
   const [hovered, setHovered] = useState<number | null>(null);
@@ -1435,10 +1455,10 @@ function TurnDurationChart({
         >
           {hovered !== null && (
             <>
-              <div className="text-terminal-blue">Turn {hovered + 1}</div>
-              {turnLabels?.[hovered] && (
+              <div className="text-terminal-blue">Turn {orderedStats[hovered].turnIndex + 1}</div>
+              {turnLabels?.[orderedStats[hovered].turnIndex] && (
                 <div className="text-terminal-dim truncate max-w-[200px]">
-                  {turnLabels[hovered]}
+                  {turnLabels[orderedStats[hovered].turnIndex]}
                 </div>
               )}
               <div>{durations[hovered] > 0 ? formatDuration(durations[hovered]) : "no data"}</div>
@@ -1447,9 +1467,9 @@ function TurnDurationChart({
         </ChartTooltip>
       </div>
       <div className="flex justify-between text-[10px] font-mono text-terminal-dimmer mt-0.5">
-        <span>Turn 1</span>
+        <span>Turn {orderedStats[0].turnIndex + 1}</span>
         <span>max {formatDuration(max)}</span>
-        <span>Turn {durations.length}</span>
+        <span>Turn {orderedStats[orderedStats.length - 1].turnIndex + 1}</span>
       </div>
     </div>
   );
@@ -1664,30 +1684,19 @@ const TURN_TABLE_COLLAPSE = 20;
 function TurnTable({ turns, turnStats }: { turns: TurnInfo[]; turnStats?: TurnStat[] }) {
   const [expanded, setExpanded] = useState(false);
 
-  // Merge turn info with turnStats by index
-  const { rows, compactionAfter } = useMemo(() => {
+  const { rows, contextDropAfter } = useMemo(() => {
+    const orderedStats = orderedTurnStats(turnStats || []);
     const maxTools = Math.max(...turns.map((t) => t.toolCount), 1);
-    const maxDuration = Math.max(...(turnStats?.map((t) => t.durationMs || 0) || [0]), 1);
-    const maxContext = Math.max(...(turnStats?.map((t) => t.contextTokens || 0) || [0]), 1);
-    const maxOutput = Math.max(
-      ...(turnStats?.map((t) => t.tokenUsage?.outputTokens || 0) || [0]),
-      1,
+    const maxDuration = Math.max(...orderedStats.map((t) => t.durationMs || 0), 1);
+    const maxContext = Math.max(...orderedStats.map((t) => t.contextTokens || 0), 1);
+    const maxOutput = Math.max(...orderedStats.map((t) => t.tokenUsage?.outputTokens || 0), 1);
+
+    const contextDropTurns = new Set(
+      findContextDrops(orderedStats).map((drop) => drop.beforeTurnIndex),
     );
 
-    // Detect compaction: context drops > 50% between consecutive turns
-    const compSet = new Set<number>();
-    if (turnStats) {
-      for (let i = 0; i < turnStats.length - 1; i++) {
-        const cur = turnStats[i]?.contextTokens || 0;
-        const next = turnStats[i + 1]?.contextTokens || 0;
-        if (cur > 0 && next > 0 && next < cur * 0.5) {
-          compSet.add(i); // compaction happened after turn i
-        }
-      }
-    }
-
     const mapped = turns.map((t, i) => {
-      const ts = turnStats?.[i];
+      const ts = getTurnStat(turnStats, i);
       return {
         ...t,
         durationMs: ts?.durationMs,
@@ -1700,7 +1709,7 @@ function TurnTable({ turns, turnStats }: { turns: TurnInfo[]; turnStats?: TurnSt
       };
     });
 
-    return { rows: mapped, compactionAfter: compSet };
+    return { rows: mapped, contextDropAfter: contextDropTurns };
   }, [turns, turnStats]);
 
   const hasStats = turnStats && turnStats.length > 0;
@@ -1730,7 +1739,7 @@ function TurnTable({ turns, turnStats }: { turns: TurnInfo[]; turnStats?: TurnSt
             </tr>
           </thead>
           <tbody>
-            {visibleRows.map((r, i) => (
+            {visibleRows.map((r) => (
               <TurnRow
                 key={r.sceneIndex}
                 row={r}
@@ -1738,7 +1747,7 @@ function TurnTable({ turns, turnStats }: { turns: TurnInfo[]; turnStats?: TurnSt
                 hasContext={!!hasContext}
                 hasTokens={!!hasTokens}
                 colCount={colCount}
-                showCompaction={compactionAfter.has(i)}
+                showContextDrop={contextDropAfter.has(r.index)}
               />
             ))}
           </tbody>
@@ -1771,7 +1780,7 @@ function TurnRow({
   hasContext,
   hasTokens,
   colCount,
-  showCompaction,
+  showContextDrop,
 }: {
   row: {
     index: number;
@@ -1791,7 +1800,7 @@ function TurnRow({
   hasContext: boolean;
   hasTokens: boolean;
   colCount: number;
-  showCompaction: boolean;
+  showContextDrop: boolean;
 }) {
   return (
     <>
@@ -1838,16 +1847,16 @@ function TurnRow({
           </td>
         )}
       </tr>
-      {showCompaction && (
+      {showContextDrop && (
         <tr>
           {/* oxlint-disable-next-line jsx-a11y/control-has-associated-label -- false positive: oxlint misattributes <td> inside a JSX conditional as a control */}
           <td colSpan={colCount} className="px-0 py-0">
-            <div className="flex items-center gap-2 px-2 py-0.5 bg-terminal-red/5">
-              <div className="flex-1 border-t border-dashed border-terminal-red/40" />
-              <span className="text-[10px] font-mono text-terminal-red/70 shrink-0">
-                context compacted
+            <div className="flex items-center gap-2 px-2 py-0.5 bg-terminal-orange/5">
+              <div className="flex-1 border-t border-dashed border-terminal-orange/40" />
+              <span className="text-[10px] font-mono text-terminal-orange/70 shrink-0">
+                observed context drop
               </span>
-              <div className="flex-1 border-t border-dashed border-terminal-red/40" />
+              <div className="flex-1 border-t border-dashed border-terminal-orange/40" />
             </div>
           </td>
         </tr>

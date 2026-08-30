@@ -131,6 +131,7 @@ export default function StatsPanel({ session }: Props) {
   const { meta } = session;
   const displayProject = rollupProject(meta.project);
   const isWorktree = displayProject !== meta.project;
+  const durationIsEstimate = meta.provider === "pi" && meta.dataSource === "jsonl";
   const dataQualityNotes = useMemo(() => getSessionDataQualityNotes(meta), [meta]);
   const metricQuality = useMemo(() => getSessionMetricQuality(meta), [meta]);
 
@@ -226,7 +227,7 @@ export default function StatsPanel({ session }: Props) {
         <div className="text-terminal-dim space-y-0.5">
           {(stats.durationMs || metricQuality.duration) && (
             <div>
-              Duration:{" "}
+              {durationIsEstimate ? "Active duration estimate" : "Duration"}:{" "}
               <span className="text-terminal-text">
                 {stats.durationMs ? formatDuration(stats.durationMs) : "unavailable"}
               </span>
@@ -320,9 +321,15 @@ export default function StatsPanel({ session }: Props) {
       {/* Peak context */}
       {stats.peakContextTokens !== undefined && (
         <div className="text-terminal-dim">
-          Peak context:{" "}
+          Reported prompt footprint:{" "}
           <span className="text-terminal-cyan">{fmtNum(stats.peakContextTokens)}</span>
           <span className="text-terminal-dimmer"> tokens</span>
+          {meta.contextLimit && (
+            <span className="text-terminal-dimmer">
+              {" "}
+              / configured limit {fmtNum(meta.contextLimit)}
+            </span>
+          )}
         </div>
       )}
 
@@ -474,7 +481,7 @@ export default function StatsPanel({ session }: Props) {
       {stats.compactions && stats.compactions.length > 0 && (
         <div>
           <div className="ui-section-title mb-2">
-            Context Compactions ({stats.compactions.length})
+            Recorded Compactions ({stats.compactions.length})
           </div>
           <div className="space-y-1">
             {stats.compactions.map((c, i) => (
@@ -485,7 +492,7 @@ export default function StatsPanel({ session }: Props) {
                 <span className="text-terminal-orange">●</span>
                 <span>
                   {c.accuracy === "lower-bound" ? "at least " : ""}
-                  {c.trigger}
+                  {c.trigger === "pi" ? "recorded" : c.trigger}
                 </span>
                 {c.preTokens && (
                   <span className="text-terminal-text">{fmtNum(c.preTokens)} tokens</span>

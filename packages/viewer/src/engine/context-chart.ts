@@ -1,5 +1,88 @@
 import type { TurnStat } from "../types";
 
+export interface ContextDrop {
+  /** Position in the ordered turn-stat list immediately before the drop. */
+  position: number;
+  beforeTurnIndex: number;
+  afterTurnIndex: number;
+  before: number;
+  after: number;
+}
+
+/**
+ * Return turn stats in their semantic prompt order without mutating the
+ * provider-owned array. Older providers may omit turns, so callers must use
+ * `turnIndex` rather than the array position when joining these stats to
+ * rendered prompts.
+ */
+export function orderedTurnStats(turnStats: readonly TurnStat[]): TurnStat[] {
+  return [...turnStats].sort((a, b) => a.turnIndex - b.turnIndex);
+}
+
+/** Look up a turn's metrics without assuming that every turn has a stat row. */
+export function getTurnStat(
+  turnStats: readonly TurnStat[] | undefined,
+  turnIndex: number,
+): TurnStat | undefined {
+  return turnStats?.find((stat) => stat.turnIndex === turnIndex);
+}
+
+/**
+ * Find large context drops between adjacent, observed turn stats.
+ *
+ * These are deliberately called context drops rather than compactions: a
+ * provider may persist compaction events without exposing enough per-turn
+ * data for a drop, and a drop alone does not prove that compaction occurred.
+ */
+export function findContextDrops(turnStats: readonly TurnStat[]): ContextDrop[] {
+  const ordered = orderedTurnStats(turnStats);
+  const drops: ContextDrop[] = [];
+  for (let i = 0; i < ordered.length - 1; i++) {
+    const current = ordered[i];
+    const next = ordered[i + 1];
+    const before = current.contextTokens || 0;
+    const after = next.contextTokens || 0;
+    // Do not infer across an omitted turn. The missing row may contain the
+    // actual reset or may make two unrelated observations look adjacent.
+    if (
+      next.turnIndex === current.turnIndex + 1 &&
+      before > 0 &&
+      after > 0 &&
+      after < before * 0.5
+    ) {
+      drops.push({
+        position: i,
+        beforeTurnIndex: current.turnIndex,
+        afterTurnIndex: next.turnIndex,
+        before,
+        after,
+      });
+    }
+  }
+  return drops;
+}
+
+export interface ContextScale {
+  peak: number;
+  /** The configured/provider-supplied limit, if one is available. */
+  limit?: number;
+  /** Y-axis ceiling used only to keep all observed values visible. */
+  displayMax: number;
+}
+
+export function getContextScale(
+  turnStats: readonly TurnStat[],
+  contextLimit?: number,
+): ContextScale {
+  const peak = Math.max(...turnStats.map((stat) => stat.contextTokens || 0), 0);
+  const limit = contextLimit && contextLimit > 0 ? contextLimit : undefined;
+  return {
+    peak,
+    ...(limit ? { limit } : {}),
+    displayMax: Math.max(peak, limit || 0),
+  };
+}
+
 export interface ContextLayer {
   /** Scaled cache-read component (sums to contextTokens alongside siblings). */
   cacheRead: number;

@@ -926,7 +926,9 @@ export default function Player({
                         )}
                         {meta.stats.durationMs && (
                           <div>
-                            {formatDuration(meta.stats.durationMs)}
+                            {meta.provider === "pi" && meta.dataSource === "jsonl"
+                              ? `active ${formatDuration(meta.stats.durationMs)}`
+                              : formatDuration(meta.stats.durationMs)}
                             {meta.stats.costEstimate !== undefined && (
                               <span>
                                 {" / "}
@@ -954,7 +956,14 @@ export default function Player({
                           if (peak <= 0) return null;
                           return (
                             <div className="text-terminal-dim mt-0.5">
-                              peak ctx: <span className="text-terminal-cyan">{fmtNum(peak)}</span>
+                              peak prompt:{" "}
+                              <span className="text-terminal-cyan">{fmtNum(peak)}</span>
+                              {meta.contextLimit && (
+                                <span className="text-terminal-dimmer">
+                                  {" "}
+                                  / limit {fmtNum(meta.contextLimit)}
+                                </span>
+                              )}
                             </div>
                           );
                         })()}
@@ -1008,6 +1017,7 @@ export default function Player({
                     state={state}
                     overlayActions={overlayActions}
                     turnStats={session.meta.stats.turnStats}
+                    contextLimit={session.meta.contextLimit}
                     isLive={isLive}
                     liveCursorDiagnostics={live?.cursorDiagnostics}
                     liveCursorProbeAt={live?.lastCursorProbe}
