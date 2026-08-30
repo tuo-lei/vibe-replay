@@ -7,7 +7,7 @@ import type { Annotation, Scene, TurnStat } from "../types";
 import { textHighlightsByScene, type TextHighlight } from "../utils/annotation-highlights";
 import { displayToolName } from "../utils/toolName";
 import CompactionSummaryBlock from "./CompactionSummaryBlock";
-import { fmtNum, formatDuration, formatTokens, formatToolDuration } from "./StatsPanel";
+import { fmtNum, formatTokens, formatToolDuration } from "./StatsPanel";
 import TextResponseBlock from "./TextResponseBlock";
 import ThinkingBlock from "./ThinkingBlock";
 import ToolCallBlock from "./ToolCallBlock";
@@ -72,6 +72,87 @@ function formatTime(iso?: string): string {
   } catch {
     return "";
   }
+}
+
+function turnStatForNumber(
+  turnStats: TurnStat[] | undefined,
+  turnNumber?: number,
+): TurnStat | undefined {
+  if (!turnStats || turnNumber === undefined) return undefined;
+  const turnIndex = turnNumber - 1;
+  // Prefer the explicit index because providers may omit stats for a turn
+  // that has no assistant output. Only use the positional fallback for legacy
+  // replays whose stats predate `turnIndex`; otherwise a sparse array could
+  // assign another turn's metrics to this card.
+  const hasExplicitIndexes = turnStats.every((stat) => Number.isInteger(stat.turnIndex));
+  return hasExplicitIndexes ? getTurnStat(turnStats, turnIndex) : turnStats[turnIndex];
+}
+
+function turnDurationFromScenes(scenes: { scene: Scene }[]): number | undefined {
+  const firstTimestamp = scenes[0]?.scene.timestamp;
+  const lastTimestamp = scenes[scenes.length - 1]?.scene.timestamp;
+  if (!firstTimestamp || !lastTimestamp) return undefined;
+  const durationMs = Date.parse(lastTimestamp) - Date.parse(firstTimestamp);
+  return durationMs > 0 ? durationMs : undefined;
+}
+
+function totalTurnTokens(usage: TurnStat["tokenUsage"]): number | undefined {
+  if (!usage) return undefined;
+  const total =
+    usage.inputTokens + usage.outputTokens + usage.cacheCreationTokens + usage.cacheReadTokens;
+  return total > 0 ? total : undefined;
+}
+
+function tokenUsageTitle(usage: NonNullable<TurnStat["tokenUsage"]>): string {
+  const promptTokens = usage.inputTokens + usage.cacheCreationTokens + usage.cacheReadTokens;
+  const totalTokens = promptTokens + usage.outputTokens;
+  const parts = [
+    `${totalTokens.toLocaleString("en-US")} total`,
+    `${promptTokens.toLocaleString("en-US")} prompt`,
+    `${usage.outputTokens.toLocaleString("en-US")} output`,
+  ];
+  if (usage.inputTokens > 0) {
+    parts.push(`${usage.inputTokens.toLocaleString("en-US")} uncached input`);
+  }
+  if (usage.cacheReadTokens > 0) {
+    parts.push(`${usage.cacheReadTokens.toLocaleString("en-US")} cache read`);
+  }
+  if (usage.cacheCreationTokens > 0) {
+    parts.push(`${usage.cacheCreationTokens.toLocaleString("en-US")} cache write`);
+  }
+  return `Recorded token usage for this assistant turn: ${parts.join(" · ")}`;
+}
+
+function AssistantTurnMetrics({
+  turnStat,
+  fallbackDurationMs,
+}: {
+  turnStat?: TurnStat;
+  fallbackDurationMs?: number;
+}) {
+  const durationMs = turnStat?.durationMs ?? fallbackDurationMs;
+  const durationLabel = formatToolDuration(durationMs);
+  const tokenCount = totalTurnTokens(turnStat?.tokenUsage);
+  if (!durationLabel && !tokenCount) return null;
+
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[10px] font-mono text-terminal-dimmer">
+      {durationLabel && (
+        <span
+          title={
+            turnStat?.durationMs
+              ? "Recorded or timestamp-derived active time for this assistant turn"
+              : "Estimated active time from the assistant scene timestamps"
+          }
+        >
+          · {durationLabel}
+        </span>
+      )}
+      {tokenCount && turnStat?.tokenUsage && (
+        <span title={tokenUsageTitle(turnStat.tokenUsage)}>· {formatTokens(tokenCount)} tok</span>
+      )}
+    </span>
+  );
 }
 
 export default function ConversationView({
@@ -693,6 +774,8 @@ const GroupCard = memo(function GroupCard({
   // Playback advance still updates currentIndex (used for the focus
   // indicator + scroll-follow), but never hides content.
   const groupScenes = group.scenes;
+  const turnStat = turnStatForNumber(turnStats, group.turnNumber);
+  const fallbackTurnDurationMs = useMemo(() => turnDurationFromScenes(groupScenes), [groupScenes]);
 
   const groupHasCurrent = groupScenes.some(({ index }) => index === currentIndex);
   const groupHasFocusedTarget =
@@ -988,9 +1071,7 @@ const GroupCard = memo(function GroupCard({
         onComment={onComment}
         onAnnotationClick={onAnnotationClick}
         overlayActions={overlayActions}
-        turnDurationMs={
-          group.turnNumber ? getTurnStat(turnStats, group.turnNumber - 1)?.durationMs : undefined
-        }
+        turnStat={turnStat}
       />
     );
   }
@@ -1013,6 +1094,9 @@ const GroupCard = memo(function GroupCard({
           <span className="text-[10px] font-mono text-terminal-dimmer">
             {formatTime(group.timestamp)}
           </span>
+        )}
+        {group.type === "assistant" && (
+          <AssistantTurnMetrics turnStat={turnStat} fallbackDurationMs={fallbackTurnDurationMs} />
         )}
         <div className="flex-1" />
         {groupHasFocusedTarget ? (
@@ -1067,7 +1151,7 @@ function CompactAssistantGroup({
   onComment,
   onAnnotationClick,
   overlayActions,
-  turnDurationMs,
+  turnStat,
 }: {
   /** All scenes in the group — used for stable stats (not affected by playback progress) */
   allScenes: { scene: Scene; index: number }[];
@@ -1083,7 +1167,7 @@ function CompactAssistantGroup({
   onComment?: (sceneIndex: number) => void;
   onAnnotationClick?: (annotationId: string) => void;
   overlayActions?: OverlayActions;
-  turnDurationMs?: number;
+  turnStat?: TurnStat;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -1125,14 +1209,7 @@ function CompactAssistantGroup({
       } else if (scene.type === "text-response") responses++;
       else if (scene.type === "thinking") thinking++;
     }
-    // Compute turn duration from scene timestamps
-    let turnDurationMs: number | undefined;
-    const firstTs = allScenes[0]?.scene.timestamp;
-    const lastTs = allScenes[allScenes.length - 1]?.scene.timestamp;
-    if (firstTs && lastTs) {
-      const diff = Date.parse(lastTs) - Date.parse(firstTs);
-      if (diff > 0) turnDurationMs = diff;
-    }
+    const turnDurationMs = turnDurationFromScenes(allScenes);
 
     return {
       totalTools,
@@ -1240,11 +1317,7 @@ function CompactAssistantGroup({
             {formatTime(timestamp)}
           </span>
         )}
-        {(turnDurationMs || stats.turnDurationMs) && (
-          <span className="text-[10px] font-mono text-terminal-dimmer">
-            · {formatDuration(turnDurationMs ?? stats.turnDurationMs)}
-          </span>
-        )}
+        <AssistantTurnMetrics turnStat={turnStat} fallbackDurationMs={stats.turnDurationMs} />
         <div className="flex-1" />
         {groupHasFocusedTarget ? (
           <span className="ui-pill-compact bg-terminal-blue-emphasis text-terminal-blue">

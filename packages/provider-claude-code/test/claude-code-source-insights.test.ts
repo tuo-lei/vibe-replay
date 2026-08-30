@@ -54,6 +54,12 @@ describe("Claude Code source insights: isMeta as context-injection", () => {
     expect(regularTurns).toHaveLength(2);
   });
 
+  it("does not assign context injections their own turn stats index", async () => {
+    const result = await parseClaudeCodeSession(FIXTURE);
+
+    expect(result.turnStats?.map((stat) => stat.turnIndex)).toEqual([0, 1]);
+  });
+
   it("transforms context-injection to scene with specific injectionType", async () => {
     const parsed = await parseClaudeCodeSession(FIXTURE);
     const replay = transformToReplay(parsed, "claude-code", "~/test");

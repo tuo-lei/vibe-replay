@@ -861,15 +861,17 @@ function buildTurnStats(
 ): TurnStat[] {
   if (usageByMsgId.size === 0 && turnDurations.length === 0) return [];
 
-  // Group assistant messageIds by user-turn index (0-based)
-  // A user turn boundary = where role === "user" and subtype is not compaction-summary
+  // Group assistant messageIds by user-turn index (0-based).
+  // Only ordinary user prompts are turn boundaries. Context injections and
+  // compaction summaries are persisted as user-role records, but do not start
+  // a new user turn in the replay UI.
   const turnGroups: Array<{ msgIds: string[]; startTimestamp: string; endTimestamp: string }> = [];
   let currentMsgIds: string[] = [];
   let lastTimestamp = "";
   let turnStartTimestamp = "";
 
   for (const turn of finalTurns) {
-    if (turn.role === "user" && turn.subtype !== "compaction-summary") {
+    if (turn.role === "user" && !turn.subtype) {
       if (turnGroups.length > 0 || currentMsgIds.length > 0) {
         // Close previous turn group
         turnGroups.push({
