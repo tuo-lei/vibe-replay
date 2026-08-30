@@ -337,6 +337,8 @@ export function AiProviderSettings({
   const selectedProviderAuthStatus = selectedProvider
     ? providerStatus(selectedProvider, authMethod)
     : "not configured";
+  const selectedAuthConfigured =
+    selectedProvider?.id === "custom-openai" || selectedProviderAuthStatus !== "not configured";
   const apiKeyProviders = providers.filter((provider) =>
     provider.authMethods.some((method) => method.type === "api_key"),
   );
@@ -592,34 +594,6 @@ export function AiProviderSettings({
             )}
           </div>
 
-          {selectedProvider && selectedProvider.models.length > 0 && (
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-mono text-terminal-dim">Model</span>
-              <ModelPicker
-                models={selectedProvider.models}
-                value={modelId || ""}
-                onChange={handleModelChange}
-                disabled={selectionLocked}
-              />
-              {saveAiSelectionAsDefault && (
-                <button
-                  type="button"
-                  onClick={saveAiSelectionAsDefault}
-                  disabled={selectionLocked || !modelId}
-                  className={`shrink-0 rounded-lg px-2 py-1.5 text-[10px] font-mono transition-colors disabled:opacity-40 ${
-                    providerId === defaultAiProviderId && modelId === defaultAiModelId
-                      ? "bg-terminal-green-subtle text-terminal-green"
-                      : "bg-terminal-surface-2 text-terminal-dim hover:text-terminal-text"
-                  }`}
-                >
-                  {providerId === defaultAiProviderId && modelId === defaultAiModelId
-                    ? "Default"
-                    : "Set default"}
-                </button>
-              )}
-            </div>
-          )}
-
           {selectedProvider && selectedProvider.id !== "custom-openai" && (
             <div className="rounded-lg border border-terminal-border-subtle bg-terminal-bg p-3 space-y-2">
               <div className="flex items-center justify-between gap-2">
@@ -715,6 +689,45 @@ export function AiProviderSettings({
               )}
             </div>
           )}
+
+          {selectedProvider &&
+            selectedProvider.models.length > 0 &&
+            (selectedAuthConfigured ? (
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-mono text-terminal-dim">Model</span>
+                <ModelPicker
+                  models={selectedProvider.models}
+                  value={modelId || ""}
+                  onChange={handleModelChange}
+                  disabled={selectionLocked}
+                />
+                {saveAiSelectionAsDefault && (
+                  <button
+                    type="button"
+                    onClick={saveAiSelectionAsDefault}
+                    disabled={selectionLocked || !modelId}
+                    className={`shrink-0 rounded-lg px-2 py-1.5 text-[10px] font-mono transition-colors disabled:opacity-40 ${
+                      providerId === defaultAiProviderId && modelId === defaultAiModelId
+                        ? "bg-terminal-green-subtle text-terminal-green"
+                        : "bg-terminal-surface-2 text-terminal-dim hover:text-terminal-text"
+                    }`}
+                  >
+                    {providerId === defaultAiProviderId && modelId === defaultAiModelId
+                      ? "Default"
+                      : "Set default"}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-terminal-border-subtle bg-terminal-bg px-3 py-2.5 text-[10px] font-mono">
+                <div className="text-terminal-dim">Connect first to choose a model.</div>
+                <div className="mt-1 text-terminal-dimmer">
+                  Complete{" "}
+                  {selectedAuthMethod ? authMethodKind(selectedAuthMethod) : "authentication"} for{" "}
+                  {selectedProvider.name} above.
+                </div>
+              </div>
+            ))}
         </>
       )}
 

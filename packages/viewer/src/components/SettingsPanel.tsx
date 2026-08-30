@@ -249,6 +249,7 @@ export default function SettingsPanel() {
   const contentRef = useRef<HTMLElement>(null);
   const initialSectionRef = useRef<SettingsSectionId>(getSettingsSectionFromUrl());
   const initialScrollDoneRef = useRef(false);
+  const programmaticSectionRef = useRef<{ section: SettingsSectionId; until: number } | null>(null);
   const [activeSection, setActiveSection] = useState<SettingsSectionId>(initialSectionRef.current);
 
   const updateSectionUrl = useCallback((section: SettingsSectionId, replace: boolean) => {
@@ -267,6 +268,7 @@ export default function SettingsPanel() {
   const handleSectionSelect = useCallback(
     (section: SettingsSectionId) => {
       initialScrollDoneRef.current = true;
+      programmaticSectionRef.current = { section, until: Date.now() + 1_000 };
       setActiveSection(section);
       updateSectionUrl(section, false);
       scrollToSection(section, "smooth");
@@ -309,6 +311,10 @@ export default function SettingsPanel() {
     const timer = window.setTimeout(() => {
       if (initialScrollDoneRef.current) return;
       initialScrollDoneRef.current = true;
+      programmaticSectionRef.current = {
+        section: initialSectionRef.current,
+        until: Date.now() + 1_000,
+      };
       setActiveSection(initialSectionRef.current);
       scrollToSection(initialSectionRef.current, "auto");
     }, 0);
@@ -318,6 +324,7 @@ export default function SettingsPanel() {
   useEffect(() => {
     const handlePopState = () => {
       const section = getSettingsSectionFromUrl();
+      programmaticSectionRef.current = { section, until: Date.now() + 1_000 };
       initialScrollDoneRef.current = true;
       setActiveSection(section);
       window.setTimeout(() => scrollToSection(section, "auto"), 0);
@@ -334,21 +341,47 @@ export default function SettingsPanel() {
 
     const updateActiveSection = () => {
       if (!initialScrollDoneRef.current) return;
-      const rootTop = root.getBoundingClientRect().top;
+      const programmatic = programmaticSectionRef.current;
+      if (programmatic) {
+        if (Date.now() < programmatic.until) {
+          setActiveSection((current) =>
+            current === programmatic.section ? current : programmatic.section,
+          );
+          updateSectionUrl(programmatic.section, true);
+          return;
+        }
+        programmaticSectionRef.current = null;
+      }
+
+      const rootRect = root.getBoundingClientRect();
       let next: SettingsSectionId = "ai";
+      let lastVisible: SettingsSectionId | undefined;
       for (const section of SETTINGS_SECTIONS) {
         const element = document.getElementById(settingsSectionElementId(section.id));
-        if (element && element.getBoundingClientRect().top - rootTop <= 144) {
-          next = section.id;
-        }
+        if (!element) continue;
+        const rect = element.getBoundingClientRect();
+        const top = rect.top - rootRect.top;
+        if (top <= 144) next = section.id;
+        if (top < root.clientHeight && rect.bottom > rootRect.top) lastVisible = section.id;
       }
+      if (next === "ai" && lastVisible) next = lastVisible;
       setActiveSection((current) => (current === next ? current : next));
       updateSectionUrl(next, true);
     };
 
+    const cancelProgrammaticScroll = () => {
+      programmaticSectionRef.current = null;
+    };
+
     updateActiveSection();
     root.addEventListener("scroll", updateActiveSection, { passive: true });
-    return () => root.removeEventListener("scroll", updateActiveSection);
+    root.addEventListener("wheel", cancelProgrammaticScroll, { passive: true });
+    root.addEventListener("touchstart", cancelProgrammaticScroll, { passive: true });
+    return () => {
+      root.removeEventListener("scroll", updateActiveSection);
+      root.removeEventListener("wheel", cancelProgrammaticScroll);
+      root.removeEventListener("touchstart", cancelProgrammaticScroll);
+    };
   }, [
     aiProviderSettings.aiProviders.length,
     aiProviderSettings.aiProvidersLoading,

@@ -129,6 +129,23 @@ describe("AiStudioPanel", () => {
     expect(screen.queryByText("opencode run")).toBeNull();
   });
 
+  it("requires authentication before model selection", () => {
+    const actions = makeActions([
+      provider({
+        configured: false,
+        authType: undefined,
+        authSource: undefined,
+      }),
+    ]);
+
+    render(<AiStudioPanel {...actions} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }));
+    expect(screen.getByText("Connect first to choose a model.")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "AI model" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Set default" })).toBeNull();
+  });
+
   it("keeps API-key and account authentication choices in separate groups", () => {
     const actions = makeActions([
       provider({
