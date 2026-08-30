@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import type {
   AiAuthMethodInfo,
@@ -51,45 +58,61 @@ function ProviderAuthCard({
   selected,
   disabled,
   onSelect,
+  children,
 }: {
   provider: AiProviderInfo;
   method: AiAuthMethodInfo;
   selected: boolean;
   disabled: boolean;
   onSelect: () => void;
+  children?: ReactNode;
 }) {
   const configured = provider.configured && provider.authType === method.type;
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      disabled={disabled}
-      className={`rounded-lg border p-3 text-left transition-colors disabled:opacity-50 ${
+    <div
+      className={`overflow-hidden rounded-lg border transition-colors ${
         selected
           ? "border-terminal-purple/50 bg-terminal-purple-subtle"
-          : "border-terminal-border-subtle bg-terminal-bg hover:border-terminal-purple/30"
+          : "border-terminal-border-subtle bg-terminal-bg"
       }`}
     >
-      <div className="flex items-start justify-between gap-2">
-        <span className="min-w-0 truncate text-xs font-mono font-semibold text-terminal-text">
-          {provider.name}
-        </span>
-        <span
-          className={`shrink-0 text-[9px] font-mono ${
-            configured ? "text-terminal-green" : "text-terminal-orange"
-          }`}
-        >
-          {configured ? "ready" : "setup"}
-        </span>
-      </div>
-      <div className="mt-1 text-[10px] font-mono text-terminal-dimmer">
-        {provider.models.length} model{provider.models.length === 1 ? "" : "s"}
-      </div>
-      <div className="mt-2 text-[10px] font-mono text-terminal-purple">
-        {authMethodKind(method)}
-        {method.subscription ? " · subscription" : ""}
-      </div>
-    </button>
+      <button
+        type="button"
+        onClick={onSelect}
+        disabled={disabled}
+        aria-pressed={selected}
+        className={`w-full cursor-pointer p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-terminal-purple/60 disabled:cursor-not-allowed disabled:opacity-50 ${
+          selected
+            ? "hover:bg-terminal-purple/10"
+            : "hover:bg-terminal-surface-hover hover:border-terminal-purple/30"
+        }`}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <span className="min-w-0 truncate text-xs font-mono font-semibold text-terminal-text">
+            {provider.name}
+          </span>
+          <span
+            className={`shrink-0 text-[9px] font-mono ${
+              configured ? "text-terminal-green" : "text-terminal-orange"
+            }`}
+          >
+            {configured ? "ready" : "setup"}
+          </span>
+        </div>
+        <div className="mt-1 text-[10px] font-mono text-terminal-dimmer">
+          {provider.models.length} model{provider.models.length === 1 ? "" : "s"}
+        </div>
+        <div className="mt-2 text-[10px] font-mono text-terminal-purple">
+          {authMethodKind(method)}
+          {method.subscription ? " · subscription" : ""}
+        </div>
+      </button>
+      {selected && children && (
+        <div className="border-t border-terminal-purple/20 bg-terminal-surface/30 px-3 pb-3 pt-3">
+          {children}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -233,7 +256,7 @@ function ModelPicker({
                       setOpen(false);
                       setQuery("");
                     }}
-                    className={`flex w-full items-start justify-between gap-3 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-terminal-purple-subtle ${
+                    className={`flex w-full cursor-pointer items-start justify-between gap-3 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-terminal-purple-subtle ${
                       model.id === value
                         ? "bg-terminal-purple-subtle text-terminal-text"
                         : "text-terminal-dim"
@@ -275,12 +298,69 @@ function ModelPicker({
           setOpen((current) => !current);
           setQuery("");
         }}
-        className="flex w-full items-center justify-between gap-2 rounded-lg border border-terminal-border bg-terminal-surface px-2.5 py-2 text-left text-xs font-mono text-terminal-text outline-none transition-colors hover:border-terminal-purple/40 disabled:opacity-50"
+        className="flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg border border-terminal-border bg-terminal-surface px-2.5 py-2 text-left text-xs font-mono text-terminal-text outline-none transition-colors hover:border-terminal-purple/40 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-terminal-purple/60"
       >
         <span className="min-w-0 truncate">{selected?.name || value || "Select a model"}</span>
         <span className="shrink-0 text-terminal-dimmer">⌄</span>
       </button>
       {menu}
+    </div>
+  );
+}
+
+function ProviderModelSelection({
+  provider,
+  authConfigured,
+  authMethod,
+  modelId,
+  onModelChange,
+  disabled,
+  saveAiSelectionAsDefault,
+  isDefault,
+}: {
+  provider: AiProviderInfo;
+  authConfigured: boolean;
+  authMethod: AiAuthMethodInfo;
+  modelId: string | null;
+  onModelChange: (modelId: string) => void;
+  disabled: boolean;
+  saveAiSelectionAsDefault: (() => void) | null;
+  isDefault: boolean;
+}) {
+  if (provider.models.length === 0) return null;
+
+  return authConfigured ? (
+    <div className="border-t border-terminal-border-subtle pt-3">
+      <div className="flex items-center gap-2">
+        <span className="shrink-0 text-[10px] font-mono text-terminal-dim">Model</span>
+        <ModelPicker
+          models={provider.models}
+          value={modelId || ""}
+          onChange={onModelChange}
+          disabled={disabled}
+        />
+        {saveAiSelectionAsDefault && (
+          <button
+            type="button"
+            onClick={() => saveAiSelectionAsDefault()}
+            disabled={disabled || !modelId || isDefault}
+            className={`shrink-0 cursor-pointer rounded-lg px-2 py-1.5 text-[10px] font-mono transition-colors disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-purple/60 ${
+              isDefault
+                ? "bg-terminal-green-subtle text-terminal-green"
+                : "bg-terminal-surface-2 text-terminal-dim hover:bg-terminal-purple-subtle hover:text-terminal-purple"
+            }`}
+          >
+            {isDefault ? "Default" : "Set default"}
+          </button>
+        )}
+      </div>
+    </div>
+  ) : (
+    <div className="border-t border-terminal-border-subtle pt-3 text-[10px] font-mono">
+      <div className="text-terminal-dim">Connect first to choose a model.</div>
+      <div className="mt-1 text-terminal-dimmer">
+        Complete {authMethodKind(authMethod)} for {provider.name} above.
+      </div>
     </div>
   );
 }
@@ -331,14 +411,6 @@ export function AiProviderSettings({
   } | null>(null);
 
   const selectedProvider = providers.find((provider) => provider.id === providerId) || null;
-  const selectedAuthMethod = selectedProvider?.authMethods.find(
-    (method) => method.type === authMethod,
-  );
-  const selectedProviderAuthStatus = selectedProvider
-    ? providerStatus(selectedProvider, authMethod)
-    : "not configured";
-  const selectedAuthConfigured =
-    selectedProvider?.id === "custom-openai" || selectedProviderAuthStatus !== "not configured";
   const apiKeyProviders = providers.filter((provider) =>
     provider.authMethods.some((method) => method.type === "api_key"),
   );
@@ -346,6 +418,9 @@ export function AiProviderSettings({
     provider.authMethods.some((method) => method.type === "oauth"),
   );
   const customProvider = providers.find((provider) => provider.id === "custom-openai") || null;
+  const defaultProvider = providers.find((provider) => provider.id === defaultAiProviderId) || null;
+  const defaultModel =
+    defaultProvider?.models.find((model) => model.id === defaultAiModelId) || null;
   const selectionLocked = busy || authRunning || customRunning;
 
   useEffect(() => {
@@ -492,6 +567,107 @@ export function AiProviderSettings({
     }
   }, [removeAiCustomProvider]);
 
+  const renderInlineProviderSetup = (provider: AiProviderInfo, method: AiAuthMethodInfo) => {
+    if (provider.id === "custom-openai") return null;
+    const authConfigured = provider.configured && provider.authType === method.type;
+    const status = providerStatus(provider, method.type);
+
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[10px] font-mono text-terminal-dim">
+            {method.type === "api_key" ? "API key" : "Account access"}
+          </span>
+          <span
+            className={`text-[10px] font-mono ${
+              authConfigured ? "text-terminal-green" : "text-terminal-orange"
+            }`}
+          >
+            {status}
+          </span>
+        </div>
+
+        {method.type === "api_key" && (
+          <div className="flex gap-2">
+            <input
+              aria-label="AI API key"
+              name={`ai-api-key-${provider.id}`}
+              type="password"
+              value={apiKey}
+              onChange={(event) => setApiKey(event.target.value)}
+              placeholder={authConfigured ? "Enter a new API key…" : "Paste API key…"}
+              autoComplete="off"
+              disabled={selectionLocked}
+              className={`min-w-0 flex-1 ${INPUT_CLASS}`}
+            />
+            <button
+              type="button"
+              onClick={() => (authRunning ? cancelAiAuthentication?.() : void handleAuthenticate())}
+              disabled={busy || (authRunning ? !cancelAiAuthentication : !apiKey.trim())}
+              className="shrink-0 cursor-pointer rounded-lg bg-terminal-purple-subtle px-2.5 py-1.5 text-[10px] font-mono font-semibold text-terminal-purple transition-colors hover:bg-terminal-purple/20 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-purple/60"
+            >
+              {authRunning ? "Cancel" : "Save key"}
+            </button>
+          </div>
+        )}
+
+        {method.type === "oauth" && (
+          <div className="space-y-2">
+            <div className="text-[10px] font-mono text-terminal-dimmer">{method.label}</div>
+            <button
+              type="button"
+              onClick={() => (authRunning ? cancelAiAuthentication?.() : void handleAuthenticate())}
+              disabled={busy || (authRunning ? !cancelAiAuthentication : false)}
+              className="w-full cursor-pointer rounded-lg bg-terminal-blue-subtle px-3 py-2 text-xs font-mono font-semibold text-terminal-blue transition-colors hover:bg-terminal-blue/20 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-blue/60"
+            >
+              {authRunning
+                ? "Cancel browser sign-in"
+                : authConfigured
+                  ? "Sign in again"
+                  : "Sign in with provider"}
+            </button>
+          </div>
+        )}
+
+        {provider.configured &&
+          logoutAiProvider &&
+          (provider.authType === "oauth" || provider.authSource === "stored credential") &&
+          provider.authType === method.type && (
+            <button
+              type="button"
+              onClick={() => void handleLogout()}
+              disabled={selectionLocked}
+              className="cursor-pointer text-[10px] font-mono text-terminal-dimmer transition-colors hover:text-terminal-red disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-red/50"
+            >
+              Sign out this provider
+            </button>
+          )}
+
+        {authStatus && (
+          <div
+            role={authStatus.type === "error" ? "alert" : "status"}
+            className={`text-[10px] font-mono leading-relaxed ${
+              authStatus.type === "error" ? "text-terminal-red" : "text-terminal-green"
+            }`}
+          >
+            {authStatus.text}
+          </div>
+        )}
+
+        <ProviderModelSelection
+          provider={provider}
+          authConfigured={authConfigured}
+          authMethod={method}
+          modelId={modelId}
+          onModelChange={handleModelChange}
+          disabled={selectionLocked}
+          saveAiSelectionAsDefault={saveAiSelectionAsDefault}
+          isDefault={providerId === defaultAiProviderId && modelId === defaultAiModelId}
+        />
+      </div>
+    );
+  };
+
   const settingsBody = (
     <div className="space-y-5">
       <div className="flex items-start justify-between gap-3">
@@ -500,7 +676,8 @@ export function AiProviderSettings({
           <p className="mt-1 max-w-2xl text-[10px] font-sans leading-relaxed text-terminal-dim">
             Configure built-in providers or connect an OpenAI-compatible gateway. API keys and
             account sign-ins are shown separately; credentials stay in the local store and are never
-            included in provider metadata.
+            included in provider metadata. The default model is shown below and is shared by Ask
+            Replay and AI Studio.
           </p>
         </div>
         {refreshAiProviders && (
@@ -508,7 +685,7 @@ export function AiProviderSettings({
             type="button"
             onClick={() => void handleRefresh()}
             disabled={selectionLocked || aiProvidersLoading}
-            className="shrink-0 rounded-lg bg-terminal-surface-2 px-2.5 py-1.5 text-[10px] font-mono text-terminal-dim transition-colors hover:text-terminal-text disabled:opacity-40"
+            className="shrink-0 cursor-pointer rounded-lg bg-terminal-surface-2 px-2.5 py-1.5 text-[10px] font-mono text-terminal-dim transition-colors hover:text-terminal-text disabled:cursor-not-allowed disabled:opacity-40"
           >
             {aiProvidersLoading ? "Refreshing…" : "Refresh"}
           </button>
@@ -523,6 +700,39 @@ export function AiProviderSettings({
           {aiProvidersError}
         </div>
       )}
+
+      <div className="rounded-xl border border-terminal-green/25 bg-terminal-green-subtle/20 px-3 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[10px] font-mono uppercase tracking-[0.14em] text-terminal-green">
+              Default for Ask Replay & AI Studio
+            </div>
+            <div className="mt-1 truncate text-sm font-mono font-semibold text-terminal-text">
+              {defaultProvider && defaultModel
+                ? `${defaultProvider.name} · ${defaultModel.name || defaultModel.id}`
+                : "No default model selected"}
+            </div>
+          </div>
+          <span
+            className={`shrink-0 text-[9px] font-mono ${
+              defaultProvider?.configured && defaultModel
+                ? "text-terminal-green"
+                : "text-terminal-orange"
+            }`}
+          >
+            {defaultProvider && defaultModel
+              ? defaultProvider.configured
+                ? "active"
+                : "needs setup"
+              : "select below"}
+          </span>
+        </div>
+        <p className="mt-2 text-[10px] font-mono leading-relaxed text-terminal-dim">
+          {defaultProvider && defaultModel
+            ? "This is the provider and model used by default. Selecting another card below does not change it."
+            : "Select a provider and model below, then choose Set default to use it across AI features."}
+        </p>
+      </div>
 
       {providers.length === 0 && aiProvidersLoading ? (
         <div className="rounded-lg bg-terminal-bg px-3 py-4 text-center text-[10px] font-mono text-terminal-dimmer">
@@ -549,15 +759,19 @@ export function AiProviderSettings({
                       (candidate) => candidate.type === "oauth",
                     );
                     if (!method) return null;
+                    const selected = provider.id === providerId && authMethod === "oauth";
                     return (
-                      <ProviderAuthCard
-                        key={`${provider.id}:oauth`}
-                        provider={provider}
-                        method={method}
-                        selected={provider.id === providerId && authMethod === "oauth"}
-                        disabled={selectionLocked}
-                        onSelect={() => handleAuthMethodChange(provider.id, "oauth")}
-                      />
+                      <div key={`${provider.id}:oauth`} className={selected ? "sm:col-span-2" : ""}>
+                        <ProviderAuthCard
+                          provider={provider}
+                          method={method}
+                          selected={selected}
+                          disabled={selectionLocked}
+                          onSelect={() => handleAuthMethodChange(provider.id, "oauth")}
+                        >
+                          {renderInlineProviderSetup(provider, method)}
+                        </ProviderAuthCard>
+                      </div>
                     );
                   })}
                 </div>
@@ -578,156 +792,28 @@ export function AiProviderSettings({
                       (candidate) => candidate.type === "api_key",
                     );
                     if (!method) return null;
+                    const selected = provider.id === providerId && authMethod === "api_key";
                     return (
-                      <ProviderAuthCard
+                      <div
                         key={`${provider.id}:api_key`}
-                        provider={provider}
-                        method={method}
-                        selected={provider.id === providerId && authMethod === "api_key"}
-                        disabled={selectionLocked}
-                        onSelect={() => handleAuthMethodChange(provider.id, "api_key")}
-                      />
+                        className={selected ? "sm:col-span-2" : ""}
+                      >
+                        <ProviderAuthCard
+                          provider={provider}
+                          method={method}
+                          selected={selected}
+                          disabled={selectionLocked}
+                          onSelect={() => handleAuthMethodChange(provider.id, "api_key")}
+                        >
+                          {renderInlineProviderSetup(provider, method)}
+                        </ProviderAuthCard>
+                      </div>
                     );
                   })}
                 </div>
               </div>
             )}
           </div>
-
-          {selectedProvider && selectedProvider.id !== "custom-openai" && (
-            <div className="rounded-lg border border-terminal-border-subtle bg-terminal-bg p-3 space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-mono text-terminal-dim">Authentication</span>
-                <span
-                  className={`text-[10px] font-mono ${
-                    selectedProviderAuthStatus === "not configured"
-                      ? "text-terminal-orange"
-                      : "text-terminal-green"
-                  }`}
-                >
-                  {selectedProviderAuthStatus}
-                </span>
-              </div>
-
-              {selectedAuthMethod && (
-                <div className="flex flex-wrap items-center gap-2 text-[10px] font-mono">
-                  <span className="rounded-md bg-terminal-purple-subtle px-2 py-1 text-terminal-purple">
-                    {authMethodKind(selectedAuthMethod)}
-                  </span>
-                  <span className="text-terminal-dimmer">{selectedAuthMethod.label}</span>
-                </div>
-              )}
-
-              {authMethod === "api_key" &&
-                selectedProvider.authMethods.some((method) => method.type === "api_key") && (
-                  <div className="flex gap-2">
-                    <input
-                      aria-label="AI API key"
-                      type="password"
-                      value={apiKey}
-                      onChange={(event) => setApiKey(event.target.value)}
-                      placeholder="Paste API key"
-                      autoComplete="off"
-                      disabled={selectionLocked}
-                      className={`min-w-0 flex-1 ${INPUT_CLASS}`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() =>
-                        authRunning ? cancelAiAuthentication?.() : void handleAuthenticate()
-                      }
-                      disabled={busy || (authRunning ? !cancelAiAuthentication : !apiKey.trim())}
-                      className="shrink-0 rounded-lg bg-terminal-purple-subtle px-2.5 py-1.5 text-[10px] font-mono font-semibold text-terminal-purple transition-colors hover:bg-terminal-purple/20 disabled:opacity-40"
-                    >
-                      {authRunning ? "Cancel" : "Save key"}
-                    </button>
-                  </div>
-                )}
-
-              {authMethod === "oauth" &&
-                selectedProvider.authMethods.some((method) => method.type === "oauth") && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      authRunning ? cancelAiAuthentication?.() : void handleAuthenticate()
-                    }
-                    disabled={busy || (authRunning ? !cancelAiAuthentication : false)}
-                    className="w-full rounded-lg bg-terminal-blue-subtle px-3 py-2 text-xs font-mono font-semibold text-terminal-blue transition-colors hover:bg-terminal-blue/20 disabled:opacity-40"
-                  >
-                    {authRunning
-                      ? "Cancel browser sign-in"
-                      : selectedProvider.configured && selectedProvider.authType === "oauth"
-                        ? "Sign in again"
-                        : "Sign in with provider"}
-                  </button>
-                )}
-
-              {selectedProvider.configured &&
-                logoutAiProvider &&
-                (selectedProvider.authType === "oauth" ||
-                  selectedProvider.authSource === "stored credential") &&
-                (!selectedAuthMethod || selectedProvider.authType === selectedAuthMethod.type) && (
-                  <button
-                    type="button"
-                    onClick={() => void handleLogout()}
-                    disabled={selectionLocked}
-                    className="text-[10px] font-mono text-terminal-dimmer transition-colors hover:text-terminal-red disabled:opacity-40"
-                  >
-                    Sign out this provider
-                  </button>
-                )}
-
-              {authStatus && (
-                <div
-                  role={authStatus.type === "error" ? "alert" : "status"}
-                  className={`text-[10px] font-mono leading-relaxed ${
-                    authStatus.type === "error" ? "text-terminal-red" : "text-terminal-green"
-                  }`}
-                >
-                  {authStatus.text}
-                </div>
-              )}
-            </div>
-          )}
-
-          {selectedProvider &&
-            selectedProvider.models.length > 0 &&
-            (selectedAuthConfigured ? (
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-mono text-terminal-dim">Model</span>
-                <ModelPicker
-                  models={selectedProvider.models}
-                  value={modelId || ""}
-                  onChange={handleModelChange}
-                  disabled={selectionLocked}
-                />
-                {saveAiSelectionAsDefault && (
-                  <button
-                    type="button"
-                    onClick={saveAiSelectionAsDefault}
-                    disabled={selectionLocked || !modelId}
-                    className={`shrink-0 rounded-lg px-2 py-1.5 text-[10px] font-mono transition-colors disabled:opacity-40 ${
-                      providerId === defaultAiProviderId && modelId === defaultAiModelId
-                        ? "bg-terminal-green-subtle text-terminal-green"
-                        : "bg-terminal-surface-2 text-terminal-dim hover:text-terminal-text"
-                    }`}
-                  >
-                    {providerId === defaultAiProviderId && modelId === defaultAiModelId
-                      ? "Default"
-                      : "Set default"}
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="rounded-lg border border-dashed border-terminal-border-subtle bg-terminal-bg px-3 py-2.5 text-[10px] font-mono">
-                <div className="text-terminal-dim">Connect first to choose a model.</div>
-                <div className="mt-1 text-terminal-dimmer">
-                  Complete{" "}
-                  {selectedAuthMethod ? authMethodKind(selectedAuthMethod) : "authentication"} for{" "}
-                  {selectedProvider.name} above.
-                </div>
-              </div>
-            ))}
         </>
       )}
 
@@ -780,7 +866,7 @@ export function AiProviderSettings({
               customRunning ? cancelAiAuthentication?.() : void handleConfigureCustomProvider()
             }
             disabled={busy || (customRunning ? !cancelAiAuthentication : !customBaseUrl.trim())}
-            className="shrink-0 rounded-lg bg-terminal-purple-subtle px-2.5 py-1.5 text-[10px] font-mono font-semibold text-terminal-purple transition-colors hover:bg-terminal-purple/20 disabled:opacity-40"
+            className="shrink-0 cursor-pointer rounded-lg bg-terminal-purple-subtle px-2.5 py-1.5 text-[10px] font-mono font-semibold text-terminal-purple transition-colors hover:bg-terminal-purple/20 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {customRunning ? "Cancel" : customProvider ? "Update" : "Discover"}
           </button>
@@ -795,7 +881,7 @@ export function AiProviderSettings({
             type="button"
             onClick={() => void handleRemoveCustomProvider()}
             disabled={selectionLocked}
-            className="text-[10px] font-mono text-terminal-dimmer transition-colors hover:text-terminal-red disabled:opacity-40"
+            className="cursor-pointer text-[10px] font-mono text-terminal-dimmer transition-colors hover:text-terminal-red disabled:cursor-not-allowed disabled:opacity-40"
           >
             Remove custom endpoint and key
           </button>
@@ -809,6 +895,24 @@ export function AiProviderSettings({
           >
             {customStatus.text}
           </div>
+        )}
+        {selectedProvider?.id === "custom-openai" && (
+          <ProviderModelSelection
+            provider={selectedProvider}
+            authConfigured
+            authMethod={
+              selectedProvider.authMethods[0] || {
+                type: "api_key",
+                label: "Custom endpoint",
+                subscription: false,
+              }
+            }
+            modelId={modelId}
+            onModelChange={handleModelChange}
+            disabled={selectionLocked}
+            saveAiSelectionAsDefault={saveAiSelectionAsDefault}
+            isDefault={providerId === defaultAiProviderId && modelId === defaultAiModelId}
+          />
         )}
       </div>
     </div>
@@ -850,7 +954,7 @@ export function AiProviderSettingsModal({
       <button
         type="button"
         aria-label="Close AI provider settings"
-        className="absolute inset-0 bg-black/50"
+        className="absolute inset-0 cursor-pointer bg-black/50 transition-colors hover:bg-black/60"
         onClick={onClose}
       />
       <dialog
@@ -871,7 +975,7 @@ export function AiProviderSettingsModal({
               <button
                 type="button"
                 onClick={onOpenSettings}
-                className="rounded-lg px-2 py-1 text-[10px] font-mono text-terminal-dim transition-colors hover:text-terminal-text"
+                className="cursor-pointer rounded-lg px-2 py-1 text-[10px] font-mono text-terminal-dim transition-colors hover:text-terminal-text"
               >
                 Open full Settings
               </button>
@@ -879,7 +983,7 @@ export function AiProviderSettingsModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg px-2 py-1 text-sm text-terminal-dim transition-colors hover:text-terminal-text"
+              className="cursor-pointer rounded-lg px-2 py-1 text-sm text-terminal-dim transition-colors hover:text-terminal-text"
             >
               ×
             </button>

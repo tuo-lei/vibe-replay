@@ -67,6 +67,158 @@ const DEFAULT_PANEL_SIZE = { width: 520, height: 720 };
 type PanelSize = typeof DEFAULT_PANEL_SIZE;
 type ResizeEdges = { left?: boolean; right?: boolean; top?: boolean; bottom?: boolean };
 
+type ProviderSetupEmptyStateProps = {
+  loading: boolean;
+  error: string | null;
+  hasConfiguredProvider: boolean;
+  hasAvailableProvider: boolean;
+  onOpenSettings: () => void;
+  onChooseModel: () => void;
+  onRetry: () => void;
+};
+
+function ProviderSetupEmptyState({
+  loading,
+  error,
+  hasConfiguredProvider,
+  hasAvailableProvider,
+  onOpenSettings,
+  onChooseModel,
+  onRetry,
+}: ProviderSetupEmptyStateProps) {
+  if (loading) {
+    return (
+      <output
+        className="flex min-h-full items-center justify-center py-10 text-xs font-mono text-terminal-dim"
+        aria-live="polite"
+      >
+        <span
+          className="mr-2 h-2 w-2 animate-pulse rounded-full bg-terminal-green"
+          aria-hidden="true"
+        />
+        Checking provider setup…
+      </output>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex min-h-full items-center justify-center py-10">
+        <div className="w-full max-w-[360px] rounded-2xl border border-terminal-red/25 bg-terminal-red-subtle/40 p-5">
+          <div className="flex items-start gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-terminal-red/15 text-lg text-terminal-red">
+              <span aria-hidden="true">!</span>
+            </div>
+            <div>
+              <div className="text-[10px] font-mono uppercase tracking-[0.16em] text-terminal-red">
+                Provider setup unavailable
+              </div>
+              <h2 className="mt-1 text-base font-semibold text-terminal-text">
+                We couldn’t check your provider
+              </h2>
+            </div>
+          </div>
+          <p className="mt-3 text-xs leading-relaxed text-terminal-dim">
+            Ask Replay can’t start until your local provider settings are available. Try again or
+            open settings to check the configuration.
+          </p>
+          <div className="mt-5 flex gap-2">
+            <button
+              type="button"
+              onClick={onRetry}
+              className="flex-1 cursor-pointer rounded-lg border border-terminal-border-subtle bg-terminal-surface px-3 py-2 text-xs font-semibold text-terminal-text transition-colors hover:border-terminal-green/50 hover:text-terminal-green focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-green/50"
+            >
+              Retry
+            </button>
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="flex-1 cursor-pointer rounded-lg bg-terminal-green px-3 py-2 text-xs font-semibold text-terminal-bg transition-colors hover:bg-terminal-green/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-green/50"
+            >
+              Open Settings
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const needsConnection = !hasConfiguredProvider;
+  const needsModel = hasConfiguredProvider && !hasAvailableProvider;
+
+  return (
+    <div className="flex min-h-full items-center justify-center py-10">
+      <div className="w-full max-w-[360px]">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-terminal-orange/30 bg-terminal-orange-subtle text-xl text-terminal-orange">
+            <span aria-hidden="true">✦</span>
+          </div>
+          <div className="min-w-0 pt-0.5">
+            <div className="text-[10px] font-mono uppercase tracking-[0.16em] text-terminal-orange">
+              {needsConnection ? "Setup required" : needsModel ? "Almost ready" : "One step left"}
+            </div>
+            <h2 className="mt-1 text-base font-semibold text-terminal-text [text-wrap:balance]">
+              {needsConnection
+                ? "Connect a provider to start"
+                : needsModel
+                  ? "Finish your provider setup"
+                  : "Choose a provider & model"}
+            </h2>
+          </div>
+        </div>
+
+        <p className="mt-4 text-xs leading-relaxed text-terminal-dim">
+          {needsConnection
+            ? "Ask Replay needs an AI provider before it can search your local sessions or explain usage data."
+            : needsModel
+              ? "Your provider is connected, but Ask Replay still needs a usable model before you can ask questions."
+              : "Choose which configured provider and model should power this chat."}
+        </p>
+
+        {needsConnection && (
+          <ol className="mt-5 space-y-2.5">
+            {[
+              ["1", "Connect a provider", "Use an API key, OAuth, or a local runtime."],
+              ["2", "Choose a model", "Pick the model you want to use for this chat."],
+              ["3", "Start asking", "Search sessions, inspect replays, and explain usage."],
+            ].map(([step, title, description]) => (
+              <li key={step} className="flex items-start gap-2.5">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-terminal-border-subtle bg-terminal-surface text-[10px] font-mono text-terminal-dim">
+                  {step}
+                </span>
+                <div className="min-w-0 text-xs">
+                  <div className="font-medium text-terminal-text">{title}</div>
+                  <div className="mt-0.5 leading-relaxed text-terminal-dim">{description}</div>
+                </div>
+              </li>
+            ))}
+          </ol>
+        )}
+
+        <button
+          type="button"
+          onClick={needsConnection || needsModel ? onOpenSettings : onChooseModel}
+          className="mt-6 flex w-full cursor-pointer items-center justify-between rounded-xl bg-terminal-green px-3.5 py-3 text-left text-xs font-semibold text-terminal-bg transition-colors hover:bg-terminal-green/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-green/60 focus-visible:ring-offset-2 focus-visible:ring-offset-terminal-bg"
+        >
+          <span>
+            {needsConnection
+              ? "Set Up an AI Provider"
+              : needsModel
+                ? "Open Provider Settings"
+                : "Choose Provider & Model"}
+          </span>
+          <span aria-hidden="true" className="text-sm">
+            →
+          </span>
+        </button>
+        <p className="mt-3 text-center text-[10px] leading-relaxed font-mono text-terminal-dimmer">
+          Credentials stay in the local provider store. Ask Replay is read-only.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function readPanelSize(): PanelSize {
   try {
     const raw = localStorage.getItem(CHAT_SIZE_STORAGE_KEY);
@@ -275,28 +427,50 @@ export default function LocalChatAssistant({ context }: Props) {
   >(undefined);
   const scrollRef = useRef<HTMLDivElement>(null);
   const providerSettings = useAiProviderSettings(true);
-  const selectedProvider = providerSettings.aiProviders.find(
-    (provider) => provider.id === providerSettings.aiProviderId,
-  );
+  const { refreshAiProviders } = providerSettings;
   const availableProviders = providerSettings.aiProviders.filter(
     (provider) => provider.configured && provider.models.length > 0,
   );
-  const selectedModel = selectedProvider?.models.find(
-    (model) => model.id === providerSettings.aiModelId,
+  const defaultProvider = providerSettings.aiProviders.find(
+    (provider) => provider.id === providerSettings.defaultAiProviderId,
   );
+  const defaultModel = defaultProvider?.models.find(
+    (model) => model.id === providerSettings.defaultAiModelId,
+  );
+  const defaultSelectionReady = Boolean(defaultProvider?.configured && defaultModel);
+  const chatProviderId = defaultSelectionReady
+    ? providerSettings.defaultAiProviderId
+    : providerSettings.aiProviderId;
+  const chatModelId = defaultSelectionReady
+    ? providerSettings.defaultAiModelId
+    : providerSettings.aiModelId;
+  const selectedProvider = providerSettings.aiProviders.find(
+    (provider) => provider.id === chatProviderId,
+  );
+  const selectedModel = selectedProvider?.models.find((model) => model.id === chatModelId);
   const providerReady = Boolean(selectedProvider?.configured && selectedModel);
   const hasConfiguredProvider = providerSettings.aiProviders.some(
     (provider) => provider.configured,
   );
-  const providerSetupMessage = !hasConfiguredProvider
-    ? "No AI provider is configured yet."
-    : availableProviders.length === 0
-      ? "Your configured provider has no usable model yet."
-      : "Select a provider and model in AI Studio.";
+  const providerSetupMessage = providerSettings.aiProvidersError
+    ? "Provider setup is unavailable."
+    : !hasConfiguredProvider
+      ? "Set up an AI provider to continue."
+      : availableProviders.length === 0
+        ? "Choose a usable model to continue."
+        : "Choose a provider and model to continue.";
   const providerSetupAction = hasConfiguredProvider
-    ? "Open provider settings →"
-    : "Set up an AI provider →";
+    ? "Open provider settings"
+    : "Set up an AI provider";
   const remoteSession = Boolean(context.currentSession?.targetId);
+  const retryProviderSetup = useCallback(async () => {
+    try {
+      await refreshAiProviders?.();
+    } catch {
+      // The provider hook exposes the error state; retry should not create an
+      // unhandled rejection in the chat surface.
+    }
+  }, [refreshAiProviders]);
 
   useEffect(() => {
     setPanelSize(readPanelSize());
@@ -371,7 +545,7 @@ export default function LocalChatAssistant({ context }: Props) {
     // A selection can change in AI Studio or Settings while Ask Replay stays
     // mounted. Do not keep showing the model used by an older answer.
     setProviderLabel(null);
-  }, [providerSettings.aiModelId, providerSettings.aiProviderId]);
+  }, [chatModelId, chatProviderId]);
 
   useEffect(() => {
     setAllowRemoteData(false);
@@ -431,8 +605,8 @@ export default function LocalChatAssistant({ context }: Props) {
           tab: params.get("tab") || undefined,
           project: params.get("project") || undefined,
         },
-        ...(providerSettings.aiProviderId ? { providerId: providerSettings.aiProviderId } : {}),
-        ...(providerSettings.aiModelId ? { modelId: providerSettings.aiModelId } : {}),
+        ...(chatProviderId ? { providerId: chatProviderId } : {}),
+        ...(chatModelId ? { modelId: chatModelId } : {}),
       };
       const response = await fetch("/api/assistant/chat", {
         method: "POST",
@@ -449,7 +623,7 @@ export default function LocalChatAssistant({ context }: Props) {
         if (payload.type === "start") {
           const name = typeof payload.providerName === "string" ? payload.providerName : null;
           const model = typeof payload.modelId === "string" ? payload.modelId : null;
-          setProviderLabel(name && model ? `${name} · ${model}` : name);
+          setProviderLabel(name && model ? `Default · ${name} · ${model}` : name);
         } else if (payload.type === "tool_start") {
           const name = typeof payload.toolName === "string" ? payload.toolName : "tool";
           setActiveTool(name);
@@ -524,12 +698,39 @@ export default function LocalChatAssistant({ context }: Props) {
     input,
     messages,
     providerReady,
-    providerSettings.aiModelId,
-    providerSettings.aiProviderId,
+    chatModelId,
+    chatProviderId,
     running,
   ]);
 
   const cancel = () => controllerRef.current?.abort();
+  const openProviderSettings = () =>
+    navigateTo({ view: "dashboard", session: null, tab: "settings" });
+  const providerStatus = providerSettings.aiProvidersLoading
+    ? "Checking provider setup…"
+    : providerSettings.aiProvidersError
+      ? "Provider setup unavailable"
+      : providerReady && selectedProvider && selectedModel
+        ? `${defaultSelectionReady ? "Default" : "Selected"} · ${selectedProvider.name} · ${selectedModel.name || selectedModel.id}`
+        : !hasConfiguredProvider
+          ? "Setup required"
+          : availableProviders.length === 0
+            ? "Model setup required"
+            : "Choose provider & model";
+  const canChooseModel = availableProviders.length > 0;
+
+  const chooseDefaultProvider = (providerId: string) => {
+    const provider = availableProviders.find((candidate) => candidate.id === providerId);
+    const modelId = provider?.models[0]?.id;
+    if (!modelId) return;
+    providerSettings.saveAiSelectionAsDefault?.({ providerId, modelId });
+    setProviderLabel(null);
+  };
+  const chooseDefaultModel = (modelId: string) => {
+    if (!chatProviderId) return;
+    providerSettings.saveAiSelectionAsDefault?.({ providerId: chatProviderId, modelId });
+    setProviderLabel(null);
+  };
 
   return (
     <div className={`fixed right-3 bottom-3 z-[60] font-sans ${resizing ? "select-none" : ""}`}>
@@ -552,40 +753,49 @@ export default function LocalChatAssistant({ context }: Props) {
                   Local
                 </span>
               </div>
-              <div className="mt-1 truncate text-[10px] font-mono text-terminal-dim">
-                {providerLabel ||
-                  (providerReady && selectedProvider && selectedModel
-                    ? `${selectedProvider.name} · ${selectedModel.name || selectedModel.id}`
-                    : null) ||
-                  (providerSettings.aiProvidersLoading
-                    ? "Loading provider…"
-                    : providerSettings.aiProvidersError
-                      ? "Provider settings unavailable"
-                      : providerSetupMessage)}
+              <div
+                className={`mt-1 flex items-center gap-1.5 truncate text-[10px] font-mono ${providerReady ? "text-terminal-dim" : "text-terminal-orange"}`}
+                aria-live="polite"
+              >
+                {!providerReady && !providerSettings.aiProvidersLoading && (
+                  <span
+                    className="h-1.5 w-1.5 shrink-0 rounded-full bg-terminal-orange"
+                    aria-hidden="true"
+                  />
+                )}
+                <span className="truncate">
+                  {providerReady && providerLabel ? providerLabel : providerStatus}
+                </span>
               </div>
             </div>
             <div className="flex items-center gap-1">
               <button
                 type="button"
-                onClick={() => setSwitchOpen((current) => !current)}
-                disabled={providerSettings.aiProvidersLoading || availableProviders.length === 0}
-                className="rounded-md px-2 py-1 text-[10px] font-mono text-terminal-dim transition-colors hover:bg-terminal-surface-hover hover:text-terminal-text disabled:cursor-not-allowed disabled:opacity-40"
-                aria-expanded={switchOpen}
+                onClick={() => {
+                  if (canChooseModel) {
+                    setSwitchOpen((current) => !current);
+                  } else {
+                    openProviderSettings();
+                  }
+                }}
+                disabled={providerSettings.aiProvidersLoading}
+                className="cursor-pointer rounded-md px-2 py-1 text-[10px] font-mono text-terminal-dim transition-colors hover:bg-terminal-surface-hover hover:text-terminal-text disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-green/50"
+                aria-expanded={canChooseModel ? switchOpen : undefined}
               >
-                Switch model
+                {canChooseModel ? (providerReady ? "Switch model" : "Choose model") : "Set up"}
               </button>
               <button
                 type="button"
                 onClick={clearConversation}
                 disabled={running || messages.length === 0}
-                className="rounded-md px-2 py-1 text-[10px] font-mono text-terminal-dim transition-colors hover:bg-terminal-surface-hover hover:text-terminal-text disabled:cursor-not-allowed disabled:opacity-40"
+                className="cursor-pointer rounded-md px-2 py-1 text-[10px] font-mono text-terminal-dim transition-colors hover:bg-terminal-surface-hover hover:text-terminal-text disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-green/50"
               >
                 Clear
               </button>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="rounded-md px-2 py-1 text-terminal-dim transition-colors hover:bg-terminal-surface-hover hover:text-terminal-text"
+                className="cursor-pointer rounded-md px-2 py-1 text-terminal-dim transition-colors hover:bg-terminal-surface-hover hover:text-terminal-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-green/50"
                 aria-label="Close Ask Replay"
               >
                 ×
@@ -598,12 +808,11 @@ export default function LocalChatAssistant({ context }: Props) {
               <div className="flex gap-2">
                 <select
                   aria-label="AI provider"
-                  value={providerSettings.aiProviderId || ""}
+                  value={chatProviderId || ""}
                   onChange={(event) => {
-                    providerSettings.setAiProviderId?.(event.target.value);
-                    setProviderLabel(null);
+                    chooseDefaultProvider(event.target.value);
                   }}
-                  className="min-w-0 flex-1 rounded-lg border border-terminal-border-subtle bg-terminal-bg px-2 py-1.5 text-[10px] font-mono text-terminal-text outline-none focus:border-terminal-green/50"
+                  className="min-w-0 flex-1 cursor-pointer rounded-lg border border-terminal-border-subtle bg-terminal-bg px-2 py-1.5 text-[10px] font-mono text-terminal-text outline-none focus:border-terminal-green/50"
                 >
                   {availableProviders.map((provider) => (
                     <option key={provider.id} value={provider.id}>
@@ -613,12 +822,11 @@ export default function LocalChatAssistant({ context }: Props) {
                 </select>
                 <select
                   aria-label="AI model"
-                  value={providerSettings.aiModelId || ""}
+                  value={chatModelId || ""}
                   onChange={(event) => {
-                    providerSettings.setAiModelId?.(event.target.value);
-                    setProviderLabel(null);
+                    chooseDefaultModel(event.target.value);
                   }}
-                  className="min-w-0 flex-[1.4] rounded-lg border border-terminal-border-subtle bg-terminal-bg px-2 py-1.5 text-[10px] font-mono text-terminal-text outline-none focus:border-terminal-green/50"
+                  className="min-w-0 flex-[1.4] cursor-pointer rounded-lg border border-terminal-border-subtle bg-terminal-bg px-2 py-1.5 text-[10px] font-mono text-terminal-text outline-none focus:border-terminal-green/50"
                 >
                   {(selectedProvider?.models || []).map((model) => (
                     <option key={model.id} value={model.id}>
@@ -628,42 +836,56 @@ export default function LocalChatAssistant({ context }: Props) {
                 </select>
               </div>
               <div className="text-[9px] font-mono text-terminal-dimmer">
-                Selection is remembered locally. Credentials stay in the local provider store.
+                Default model is shared across Ask Replay and AI Studio. Credentials stay in the
+                local provider store.
               </div>
             </div>
           )}
 
           <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
-            {messages.length === 0 && (
-              <div className="pt-8 text-center">
-                <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-terminal-green-subtle text-xl text-terminal-green">
-                  ✦
+            {messages.length === 0 &&
+              (providerSettings.aiProvidersLoading ||
+              providerSettings.aiProvidersError ||
+              !providerReady ? (
+                <ProviderSetupEmptyState
+                  loading={providerSettings.aiProvidersLoading}
+                  error={providerSettings.aiProvidersError}
+                  hasConfiguredProvider={hasConfiguredProvider}
+                  hasAvailableProvider={availableProviders.length > 0}
+                  onOpenSettings={openProviderSettings}
+                  onChooseModel={() => setSwitchOpen(true)}
+                  onRetry={retryProviderSetup}
+                />
+              ) : (
+                <div className="pt-8 text-center">
+                  <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-terminal-green-subtle text-xl text-terminal-green">
+                    <span aria-hidden="true">✦</span>
+                  </div>
+                  <h2 className="text-sm font-semibold text-terminal-text [text-wrap:balance]">
+                    What would you like to find?
+                  </h2>
+                  <div className="mx-auto mt-2 max-w-[280px] text-xs leading-relaxed text-terminal-dim">
+                    Search local sessions, explain usage data, read replay scenes, and open the
+                    relevant view.
+                  </div>
+                  <div className="mt-5 space-y-2 text-left">
+                    {[
+                      "Find my most recent sessions",
+                      "Why was my last session expensive?",
+                      "Show sessions with compaction",
+                    ].map((suggestion) => (
+                      <button
+                        key={suggestion}
+                        type="button"
+                        onClick={() => setInput(suggestion)}
+                        className="block w-full cursor-pointer rounded-lg border border-terminal-border-subtle bg-terminal-surface/50 px-3 py-2 text-left text-xs text-terminal-dim transition-colors hover:border-terminal-green/40 hover:text-terminal-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-green/50"
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div className="text-sm font-semibold text-terminal-text">
-                  What would you like to find?
-                </div>
-                <div className="mx-auto mt-2 max-w-[280px] text-xs leading-relaxed text-terminal-dim">
-                  I can search local sessions, explain usage data, read replay scenes, and open the
-                  relevant view.
-                </div>
-                <div className="mt-5 space-y-2 text-left">
-                  {[
-                    "Find my most recent sessions",
-                    "Why was my last session expensive?",
-                    "Show sessions with compaction",
-                  ].map((suggestion) => (
-                    <button
-                      key={suggestion}
-                      type="button"
-                      onClick={() => setInput(suggestion)}
-                      className="block w-full rounded-lg border border-terminal-border-subtle bg-terminal-surface/50 px-3 py-2 text-left text-xs text-terminal-dim transition-colors hover:border-terminal-green/40 hover:text-terminal-text"
-                    >
-                      {suggestion}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+              ))}
 
             {messages.map((message, index) => (
               <div
@@ -726,7 +948,7 @@ export default function LocalChatAssistant({ context }: Props) {
                           key={`${citation.label}-${citationIndex}`}
                           type="button"
                           onClick={() => navigateCitation(citation)}
-                          className="max-w-full truncate rounded-full border border-terminal-blue/25 bg-terminal-blue-subtle px-2 py-1 text-[10px] font-mono text-terminal-blue transition-colors hover:border-terminal-blue/50"
+                          className="max-w-full cursor-pointer truncate rounded-full border border-terminal-blue/25 bg-terminal-blue-subtle px-2 py-1 text-[10px] font-mono text-terminal-blue transition-colors hover:border-terminal-blue/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-blue/50"
                           title={citation.label}
                         >
                           {citation.type === "scene" ? "scene · " : ""}
@@ -743,7 +965,7 @@ export default function LocalChatAssistant({ context }: Props) {
                           key={`${action.type}-${actionIndex}`}
                           type="button"
                           onClick={() => navigateAction(action)}
-                          className="rounded-lg bg-terminal-green px-2.5 py-1.5 text-[10px] font-semibold text-terminal-bg transition-colors hover:bg-terminal-green/80"
+                          className="cursor-pointer rounded-lg bg-terminal-green px-2.5 py-1.5 text-[10px] font-semibold text-terminal-bg transition-colors hover:bg-terminal-green/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-green/50"
                         >
                           {action.label}
                         </button>
@@ -774,20 +996,38 @@ export default function LocalChatAssistant({ context }: Props) {
               void sendMessage();
             }}
           >
-            {!providerSettings.aiProvidersLoading && !providerReady && (
-              <div className="mb-2 rounded-lg border border-terminal-orange/30 bg-terminal-orange-subtle px-3 py-2.5 text-[10px] font-mono leading-relaxed text-terminal-orange">
-                <div>{providerSetupMessage}</div>
+            {messages.length > 0 && !providerSettings.aiProvidersLoading && !providerReady && (
+              <output
+                className="mb-2 flex items-center justify-between gap-3 rounded-lg border border-terminal-orange/30 bg-terminal-orange-subtle px-3 py-2.5 text-[10px] font-mono leading-relaxed text-terminal-orange"
+                aria-live="polite"
+              >
+                <span className="min-w-0">{providerSetupMessage}</span>
                 <button
                   type="button"
-                  onClick={() => navigateTo({ view: "dashboard", session: null, tab: "settings" })}
-                  className="mt-1 font-semibold underline underline-offset-2 transition-colors hover:text-terminal-text"
+                  onClick={() => {
+                    if (providerSettings.aiProvidersError) {
+                      void retryProviderSetup();
+                    } else if (canChooseModel) {
+                      setSwitchOpen(true);
+                    } else {
+                      openProviderSettings();
+                    }
+                  }}
+                  className="shrink-0 cursor-pointer font-semibold underline underline-offset-2 transition-colors hover:text-terminal-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-green/50"
                 >
-                  {providerSetupAction}
+                  {providerSettings.aiProvidersError
+                    ? "Retry"
+                    : canChooseModel
+                      ? "Choose model"
+                      : providerSetupAction}
                 </button>
-              </div>
+              </output>
             )}
-            <div className="flex items-end gap-2 rounded-xl border border-terminal-border-subtle bg-terminal-bg px-3 py-2 focus-within:border-terminal-green/50">
+            <div className="flex items-end gap-2 rounded-xl border border-terminal-border-subtle bg-terminal-bg px-3 py-2 focus-within:border-terminal-green/50 focus-within:ring-1 focus-within:ring-terminal-green/20">
               <textarea
+                name="assistant-question"
+                autoComplete="off"
+                aria-label="Ask about your sessions"
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
                 onKeyDown={(event) => {
@@ -801,9 +1041,13 @@ export default function LocalChatAssistant({ context }: Props) {
                 placeholder={
                   providerReady
                     ? "Ask about your sessions…"
-                    : hasConfiguredProvider
-                      ? "Choose a provider and model first…"
-                      : "Set up an AI provider first…"
+                    : providerSettings.aiProvidersLoading
+                      ? "Checking provider setup…"
+                      : providerSettings.aiProvidersError
+                        ? "Provider setup unavailable…"
+                        : hasConfiguredProvider
+                          ? "Choose a provider and model to start…"
+                          : "Set up a provider to start…"
                 }
                 className="max-h-28 min-h-10 flex-1 resize-none bg-transparent text-sm text-terminal-text outline-none placeholder:text-terminal-dimmer disabled:opacity-50"
               />
@@ -811,7 +1055,7 @@ export default function LocalChatAssistant({ context }: Props) {
                 <button
                   type="button"
                   onClick={cancel}
-                  className="rounded-lg bg-terminal-red-subtle px-2.5 py-1.5 text-[10px] font-semibold text-terminal-red"
+                  className="cursor-pointer rounded-lg bg-terminal-red-subtle px-2.5 py-1.5 text-[10px] font-semibold text-terminal-red transition-colors hover:bg-terminal-red/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-red/50"
                 >
                   Stop
                 </button>
@@ -819,13 +1063,13 @@ export default function LocalChatAssistant({ context }: Props) {
                 <button
                   type="submit"
                   disabled={!input.trim() || !providerReady}
-                  className="rounded-lg bg-terminal-green px-2.5 py-1.5 text-[10px] font-semibold text-terminal-bg transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
+                  className="cursor-pointer rounded-lg bg-terminal-green px-2.5 py-1.5 text-[10px] font-semibold text-terminal-bg transition-colors hover:bg-terminal-green/80 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-green/50"
                 >
                   Ask
                 </button>
               )}
             </div>
-            {(remoteSession || context.mode === "dashboard") && (
+            {providerReady && (remoteSession || context.mode === "dashboard") && (
               <label className="mt-2 flex items-start gap-2 rounded-lg border border-terminal-yellow/25 bg-terminal-yellow-subtle px-2.5 py-2 text-[9px] leading-relaxed font-mono text-terminal-yellow">
                 <input
                   type="checkbox"
@@ -843,18 +1087,20 @@ export default function LocalChatAssistant({ context }: Props) {
             <div className="mt-2 flex items-center justify-between text-[9px] font-mono text-terminal-dimmer">
               <span>
                 Read-only ·{" "}
-                {allowRemoteData
-                  ? "SSH consent granted"
-                  : remoteSession
-                    ? "SSH consent required"
-                    : "local sessions only"}
+                {!providerReady
+                  ? "provider setup required"
+                  : allowRemoteData
+                    ? "SSH consent granted"
+                    : remoteSession
+                      ? "SSH consent required"
+                      : "local sessions only"}
               </span>
               <button
                 type="button"
-                onClick={() => navigateTo({ view: "dashboard", session: null, tab: "settings" })}
-                className="transition-colors hover:text-terminal-text"
+                onClick={openProviderSettings}
+                className="cursor-pointer transition-colors hover:text-terminal-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-green/50"
               >
-                Open provider settings
+                Provider settings
               </button>
             </div>
             <button
@@ -921,7 +1167,7 @@ export default function LocalChatAssistant({ context }: Props) {
           onMouseEnter={() => setNudge(false)}
           aria-label="Ask Replay"
           title="Ask Replay — local assistant"
-          className={`flex items-center gap-1 rounded-full border bg-terminal-surface/85 px-2.5 py-1.5 text-[11px] font-semibold tracking-tight shadow-layer-md backdrop-blur-md transition-all duration-300 hover:border-terminal-green/60 hover:bg-terminal-surface hover:text-terminal-green ${nudge ? "scale-[1.04] border-terminal-green/55 shadow-[0_0_0_3px_rgba(16,185,129,0.14)]" : "scale-100 border-terminal-green/30 text-terminal-text"}`}
+          className={`flex cursor-pointer items-center gap-1 rounded-full border bg-terminal-surface/85 px-2.5 py-1.5 text-[11px] font-semibold tracking-tight shadow-layer-md backdrop-blur-md transition-[transform,box-shadow,border-color,background-color,color] duration-300 hover:border-terminal-green/60 hover:bg-terminal-surface hover:text-terminal-green focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-green/50 ${nudge ? "scale-[1.04] border-terminal-green/55 shadow-[0_0_0_3px_rgba(16,185,129,0.14)]" : "scale-100 border-terminal-green/30 text-terminal-text"}`}
         >
           <span
             className={`leading-none transition-transform ${nudge ? "scale-110" : ""} text-terminal-green`}

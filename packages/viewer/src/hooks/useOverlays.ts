@@ -89,7 +89,14 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
     setAiProviderId: setStudioProviderId,
     setAiModelId: setStudioModelId,
     refreshAiProviders: refreshStudioProviders,
+    defaultAiProviderId,
+    defaultAiModelId,
   } = aiProviderSettings;
+  const defaultProvider = studioProviders.find((provider) => provider.id === defaultAiProviderId);
+  const defaultModel = defaultProvider?.models.find((model) => model.id === defaultAiModelId);
+  const defaultSelectionReady = Boolean(defaultProvider?.configured && defaultModel);
+  const effectiveStudioProviderId = defaultSelectionReady ? defaultAiProviderId : studioProviderId;
+  const effectiveStudioModelId = defaultSelectionReady ? defaultAiModelId : studioModelId;
 
   // Running states
   const [translating, setTranslating] = useState(false);
@@ -259,7 +266,7 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
 
   const runTranslate = useMemo(
     () =>
-      isEditor && studioProviderId && studioModelId
+      isEditor && effectiveStudioProviderId && effectiveStudioModelId
         ? async (opts: { targetLang: string; sourceLang?: string }) => {
             const controller = new AbortController();
             abortRef.current = controller;
@@ -269,8 +276,8 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                  providerId: studioProviderId,
-                  ...(studioModelId ? { modelId: studioModelId } : {}),
+                  providerId: effectiveStudioProviderId,
+                  ...(effectiveStudioModelId ? { modelId: effectiveStudioModelId } : {}),
                   targetLang: opts.targetLang,
                   sourceLang: opts.sourceLang,
                 }),
@@ -293,12 +300,12 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
             }
           }
         : null,
-    [isEditor, studioModelId, studioProviderId],
+    [effectiveStudioModelId, effectiveStudioProviderId, isEditor],
   );
 
   const runTone = useMemo(
     () =>
-      isEditor && studioProviderId && studioModelId
+      isEditor && effectiveStudioProviderId && effectiveStudioModelId
         ? async (opts: { style: "professional" | "neutral" | "friendly" }) => {
             const controller = new AbortController();
             abortRef.current = controller;
@@ -308,8 +315,8 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                  providerId: studioProviderId,
-                  ...(studioModelId ? { modelId: studioModelId } : {}),
+                  providerId: effectiveStudioProviderId,
+                  ...(effectiveStudioModelId ? { modelId: effectiveStudioModelId } : {}),
                   style: opts.style,
                 }),
                 signal: controller.signal,
@@ -331,7 +338,7 @@ export function useOverlays(session: ReplaySession, mode: ViewerMode = "embedded
             }
           }
         : null,
-    [isEditor, studioModelId, studioProviderId],
+    [effectiveStudioModelId, effectiveStudioProviderId, isEditor],
   );
 
   return {

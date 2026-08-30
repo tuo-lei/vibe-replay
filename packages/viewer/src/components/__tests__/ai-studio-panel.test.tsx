@@ -267,7 +267,39 @@ describe("AiStudioPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /GPT Test/ }));
     fireEvent.click(screen.getByRole("button", { name: "Set default" }));
 
-    expect(saveDefault).toHaveBeenCalledTimes(1);
+    expect(saveDefault).toHaveBeenCalledWith();
+  });
+
+  it("keeps the shared default visible while another provider is only a draft", () => {
+    const actions = makeActions(
+      [
+        provider(),
+        provider({
+          id: "openrouter",
+          name: "OpenRouter",
+          models: [
+            {
+              id: "router-test",
+              name: "Router Test",
+              api: "openai-completions",
+              reasoning: false,
+              input: ["text"],
+            },
+          ],
+        }),
+      ],
+      {
+        aiProviderId: "openrouter",
+        aiModelId: "router-test",
+        defaultAiProviderId: "openai",
+        defaultAiModelId: "gpt-test",
+      },
+    );
+
+    render(<AiStudioPanel {...actions} />);
+
+    expect(screen.getByText("Default model")).toBeDefined();
+    expect(screen.getByText("OpenAI · GPT Test")).toBeDefined();
   });
 
   it("closes the model picker before the provider modal on Escape", () => {

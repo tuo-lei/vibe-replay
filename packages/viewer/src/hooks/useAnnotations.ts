@@ -383,6 +383,11 @@ export function useAnnotations(
     defaultAiModelId,
     saveAiSelectionAsDefault,
   } = aiProviderSettings;
+  const defaultProvider = aiProviders.find((candidate) => candidate.id === defaultAiProviderId);
+  const defaultModel = defaultProvider?.models.find((model) => model.id === defaultAiModelId);
+  const defaultSelectionReady = Boolean(defaultProvider?.configured && defaultModel);
+  const effectiveAiProviderId = defaultSelectionReady ? defaultAiProviderId : aiProviderId;
+  const effectiveAiModelId = defaultSelectionReady ? defaultAiModelId : aiModelId;
   const [aiCoachRunning, setAiCoachRunning] = useState(false);
   const aiCoachAbortRef = useRef<AbortController | null>(null);
 
@@ -393,7 +398,7 @@ export function useAnnotations(
   }, []);
 
   const runAiCoach =
-    isEditor && aiProviderId && aiModelId
+    isEditor && effectiveAiProviderId && effectiveAiModelId
       ? async () => {
           const controller = new AbortController();
           aiCoachAbortRef.current = controller;
@@ -410,8 +415,8 @@ export function useAnnotations(
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                providerId: aiProviderId,
-                ...(aiModelId ? { modelId: aiModelId } : {}),
+                providerId: effectiveAiProviderId,
+                ...(effectiveAiModelId ? { modelId: effectiveAiModelId } : {}),
               }),
               signal: controller.signal,
             });

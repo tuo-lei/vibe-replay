@@ -106,6 +106,8 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
     aiProvidersLoading,
     setAiProviderId,
     setAiModelId,
+    defaultAiProviderId,
+    defaultAiModelId,
   } = annotationActions;
 
   const hasAiFeedback = annotationActions.annotations.some((a) => a.author === "vibe-feedback");
@@ -136,8 +138,11 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
   // Both hooks discover the same provider registry. Keep the annotation hook as
   // the source for setup/status and synchronize the selection into overlays.
   const providers = aiProviders.length > 0 ? aiProviders : studioProviders;
-  const providerId = aiProviderId || studioProviderId;
-  const modelId = aiModelId || studioModelId;
+  const defaultProvider = providers.find((provider) => provider.id === defaultAiProviderId);
+  const defaultModel = defaultProvider?.models.find((model) => model.id === defaultAiModelId);
+  const defaultSelectionReady = Boolean(defaultProvider?.configured && defaultModel);
+  const providerId = defaultSelectionReady ? defaultAiProviderId : aiProviderId || studioProviderId;
+  const modelId = defaultSelectionReady ? defaultAiModelId : aiModelId || studioModelId;
   const selectedProvider = providers.find((provider) => provider.id === providerId) || null;
   const selectedModel = selectedProvider?.models.find((model) => model.id === modelId) || null;
   const providerConfigured = selectedProvider?.configured === true;
@@ -306,7 +311,7 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
         {overlayCount > 0 && (
           <button
             onClick={revertAll}
-            className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-red-subtle hover:text-terminal-red transition-colors"
+            className="cursor-pointer text-[10px] font-mono px-1.5 py-0.5 rounded bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-red-subtle hover:text-terminal-red transition-colors"
           >
             Revert All ({overlayCount})
           </button>
@@ -317,10 +322,12 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
         <div className="border-b border-terminal-border-subtle bg-terminal-surface/30 px-4 py-3 space-y-3">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-xs font-mono text-terminal-dim">Provider</div>
+              <div className="text-xs font-mono text-terminal-dim">
+                {defaultSelectionReady ? "Default model" : "Provider"}
+              </div>
               <div className="mt-1 truncate text-xs font-mono font-semibold text-terminal-text">
                 {selectedProvider?.name || "Select a provider"}
-                {modelId ? ` · ${modelId}` : ""}
+                {selectedModel ? ` · ${selectedModel.name || selectedModel.id}` : ""}
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
@@ -328,7 +335,7 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
                 type="button"
                 onClick={() => setProviderSettingsOpen(true)}
                 disabled={isAnyRunning}
-                className="rounded-lg bg-terminal-purple-subtle px-2.5 py-1.5 text-[10px] font-mono font-semibold text-terminal-purple transition-colors hover:bg-terminal-purple/20 disabled:opacity-40"
+                className="cursor-pointer rounded-lg bg-terminal-purple-subtle px-2.5 py-1.5 text-[10px] font-mono font-semibold text-terminal-purple transition-colors hover:bg-terminal-purple/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Manage
               </button>
@@ -336,7 +343,7 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
                 type="button"
                 onClick={openFullSettings}
                 disabled={isAnyRunning}
-                className="rounded-lg bg-terminal-surface-2 px-2.5 py-1.5 text-[10px] font-mono text-terminal-dim transition-colors hover:text-terminal-text disabled:opacity-40"
+                className="cursor-pointer rounded-lg bg-terminal-surface-2 px-2.5 py-1.5 text-[10px] font-mono text-terminal-dim transition-colors hover:text-terminal-text disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Settings
               </button>
@@ -463,7 +470,7 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
                     value={targetLang}
                     onChange={(e) => setTargetLang(e.target.value)}
                     disabled={isAnyRunning}
-                    className="flex-1 bg-terminal-surface border border-terminal-border rounded px-2 py-1 text-xs font-mono text-terminal-text outline-none disabled:opacity-50"
+                    className="flex-1 cursor-pointer bg-terminal-surface border border-terminal-border rounded px-2 py-1 text-xs font-mono text-terminal-text outline-none disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {TARGET_LANGUAGES.map((lang) => (
                       <option key={lang} value={lang}>
@@ -521,7 +528,7 @@ export default function AiStudioPanel({ annotationActions, overlayActions }: Pro
                       setToneStyle(e.target.value as "professional" | "neutral" | "friendly")
                     }
                     disabled={isAnyRunning}
-                    className="flex-1 bg-terminal-surface border border-terminal-border rounded px-2 py-1 text-xs font-mono text-terminal-text outline-none disabled:opacity-50"
+                    className="flex-1 cursor-pointer bg-terminal-surface border border-terminal-border rounded px-2 py-1 text-xs font-mono text-terminal-text outline-none disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {TONE_STYLES.map((s) => (
                       <option key={s.value} value={s.value}>
@@ -594,7 +601,7 @@ function FeatureCard({
           <button
             onClick={onRun}
             disabled={disabled}
-            className="px-3.5 py-1.5 text-xs font-mono rounded-lg bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis transition-colors disabled:opacity-40 flex items-center gap-1.5"
+            className="cursor-pointer px-3.5 py-1.5 text-xs font-mono rounded-lg bg-terminal-purple-subtle text-terminal-purple hover:bg-terminal-purple-emphasis transition-colors disabled:cursor-not-allowed disabled:opacity-40 flex items-center gap-1.5"
           >
             {running ? (
               <>
@@ -608,7 +615,7 @@ function FeatureCard({
           {running && onCancel && (
             <button
               onClick={onCancel}
-              className="text-xs font-mono text-terminal-dim hover:text-terminal-text transition-colors"
+              className="cursor-pointer text-xs font-mono text-terminal-dim hover:text-terminal-text transition-colors"
             >
               Cancel
             </button>
@@ -621,13 +628,13 @@ function FeatureCard({
             <span className="text-terminal-orange flex-1">{rerunWarning}</span>
             <button
               onClick={onCancelRerun}
-              className="text-terminal-dim hover:text-terminal-text transition-colors"
+              className="cursor-pointer text-terminal-dim hover:text-terminal-text transition-colors"
             >
               Cancel
             </button>
             <button
               onClick={onConfirmRerun}
-              className="text-terminal-purple hover:text-terminal-text transition-colors font-medium"
+              className="cursor-pointer text-terminal-purple hover:text-terminal-text transition-colors font-medium"
             >
               Continue
             </button>
