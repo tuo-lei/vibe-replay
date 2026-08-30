@@ -1258,7 +1258,7 @@ function ContextWindowChart({
             strokeLinejoin="round"
             vectorEffect="non-scaling-stroke"
           />
-          {/* Compaction markers */}
+          {/* Observed context-drop markers (not proof of a persisted compaction) */}
           {contextDrops.map((drop) => {
             const x = toX(drop.position);
             return (
@@ -1268,7 +1268,7 @@ function ContextWindowChart({
                 y1="0"
                 x2={x}
                 y2={h}
-                style={{ stroke: "var(--red)" }}
+                style={{ stroke: "var(--orange)" }}
                 strokeWidth="1"
                 strokeDasharray="2,1"
                 vectorEffect="non-scaling-stroke"
