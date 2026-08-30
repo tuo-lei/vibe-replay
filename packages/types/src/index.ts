@@ -43,6 +43,39 @@ export interface TurnStat {
   contextTokens?: number;
 }
 
+/**
+ * A privacy-preserving event used to explain provider/session failures.
+ *
+ * `compaction` events describe both completed and explicitly failed
+ * compaction requests. `assistant-api-error` is intentionally separate: an
+ * ordinary model/API failure must never be presented as a compaction failure
+ * just because it happened near a compaction boundary.
+ */
+export type SessionDiagnosticKind = "compaction" | "assistant-api-error";
+export type SessionDiagnosticOutcome = "succeeded" | "failed";
+export type SessionDiagnosticTrigger = "manual" | "automatic-context" | "unknown";
+export type SessionDiagnosticConfidence = "exact" | "inferred" | "unknown";
+
+export interface SessionDiagnostic {
+  kind: SessionDiagnosticKind;
+  outcome: SessionDiagnosticOutcome;
+  timestamp: string;
+  confidence: SessionDiagnosticConfidence;
+  /** Trigger is present for compaction events; it is absent for API errors. */
+  trigger?: SessionDiagnosticTrigger;
+  entryId?: string;
+  model?: string;
+  provider?: string;
+  preTokens?: number;
+  contextLimit?: number;
+  statusCode?: number;
+  /** Normalized error category; raw provider error text stays in the replay scene. */
+  errorType?: string;
+  retryAttempt?: number;
+  /** Short, non-content evidence supporting an inferred classification. */
+  evidence?: string[];
+}
+
 export interface PrLink {
   prNumber: number;
   prUrl: string;
@@ -395,6 +428,8 @@ export interface SessionInsight {
   subAgentCount: number;
   apiErrorCount: number;
   compactionCount: number;
+  diagnostics?: SessionDiagnostic[];
+  diagnosticNotes?: string[];
 
   // Session context
   entrypoint?: string;
@@ -459,6 +494,8 @@ export interface SessionScanWireData {
   usageSummary?: SessionUsageSummary;
   usageIndexed?: boolean;
   compactionCount: number;
+  diagnostics?: SessionDiagnostic[];
+  diagnosticNotes?: string[];
   dataSource?: DataSource;
   dataQualityNotes?: string[];
   turnStatCount?: number;
@@ -500,6 +537,10 @@ export interface ReplaySession {
     };
     /** Max context window tokens for the primary model (e.g. 200000 for Claude) */
     contextLimit?: number;
+    /** Provider/session diagnostic events, kept separate from ordinary API errors. */
+    diagnostics?: SessionDiagnostic[];
+    /** Limitations or quality notes for interpreting diagnostic events. */
+    diagnosticNotes?: string[];
     tokenUsageByModel?: Record<string, TokenUsage>;
     prLinks?: PrLink[];
     compactions?: Array<{

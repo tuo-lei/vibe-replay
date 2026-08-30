@@ -130,6 +130,8 @@ export function scanResultToInsight(scan: SessionScanResult): SessionInsight {
     subAgentCount: scan.subAgentCount,
     apiErrorCount: scan.apiErrorCount,
     compactionCount: scan.compactionCount,
+    diagnostics: scan.diagnostics,
+    diagnosticNotes: scan.diagnosticNotes,
     entrypoint: scan.entrypoint,
     permissionMode: scan.permissionMode,
     firstPrompt: scan.firstPrompt,

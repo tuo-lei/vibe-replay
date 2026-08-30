@@ -111,6 +111,7 @@ function toolLabel(name: string): string {
     get_scene: "Reading replay scene",
     get_insights: "Reading local insights",
     get_usage_breakdown: "Reading usage breakdown",
+    get_compaction_diagnostics: "Diagnosing compaction events",
     open_replay: "Preparing replay navigation",
     open_dashboard: "Preparing dashboard navigation",
   };

@@ -221,6 +221,72 @@ describe("scanSession", () => {
     expect(result.model).toBe("claude-sonnet-4-20250514");
   });
 
+  it("persists structured Pi compaction diagnostics in scan results", async () => {
+    const piPath = join(tmpDir, "pi-diagnostics.jsonl");
+    await writeFile(
+      piPath,
+      [
+        {
+          type: "session",
+          version: 3,
+          id: "pi-scan-diagnostics",
+          timestamp: "2026-01-01T00:00:00.000Z",
+          cwd: "/Users/test/project",
+        },
+        {
+          type: "message",
+          id: "user1",
+          parentId: null,
+          timestamp: "2026-01-01T00:00:01.000Z",
+          message: { role: "user", content: [{ type: "text", text: "Long task" }] },
+        },
+        {
+          type: "message",
+          id: "assistant1",
+          parentId: "user1",
+          timestamp: "2026-01-01T00:00:02.000Z",
+          message: {
+            role: "assistant",
+            model: "gpt-5.5",
+            content: [{ type: "text", text: "Truncated" }],
+            stopReason: "length",
+          },
+        },
+        {
+          type: "compaction",
+          id: "compact1",
+          parentId: "assistant1",
+          timestamp: "2026-01-01T00:00:03.000Z",
+          summary: "Earlier work condensed.",
+          tokensBefore: 90_000,
+        },
+      ]
+        .map((line) => JSON.stringify(line))
+        .join("\n"),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "pi-scan-diagnostics",
+      provider: "pi",
+      project: "/Users/test/project",
+      slug: "pi-diagnostics",
+      filePaths: [piPath],
+    });
+
+    expect(result.diagnostics).toMatchObject([
+      {
+        kind: "compaction",
+        outcome: "succeeded",
+        trigger: "automatic-context",
+        confidence: "inferred",
+      },
+    ]);
+    expect(result.diagnosticNotes).toContain(
+      "Pi JSONL persists completed compaction entries, but not compaction_start/compaction_end or session_compact_failed lifecycle events.",
+    );
+  });
+
   it("marks an otherwise ordinary session as usage-indexed even when it has no usage", async () => {
     const path = join(tmpDir, "usage-empty.jsonl");
     await writeFile(

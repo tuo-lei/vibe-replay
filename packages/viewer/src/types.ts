@@ -14,6 +14,7 @@ export type {
   ReplaySession,
   Scene,
   SceneOverlay,
+  SessionDiagnostic,
   SessionOverlays,
   SessionUsageSummary,
   SessionLocation,
@@ -29,6 +30,7 @@ export type {
 import type {
   ProjectIdentity,
   ReplaySession,
+  SessionDiagnostic,
   SessionLocation,
   SessionTranscriptStatus,
 } from "@vibe-replay/types";
@@ -52,6 +54,8 @@ export interface SessionSummary {
   endTime?: string;
   stats: ReplaySession["meta"]["stats"];
   compactionCount?: number;
+  diagnostics?: SessionDiagnostic[];
+  diagnosticNotes?: string[];
   hasAnnotations: boolean;
   annotationCount: number;
   firstMessage?: string;

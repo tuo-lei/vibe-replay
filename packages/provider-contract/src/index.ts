@@ -9,6 +9,7 @@ import type {
   PrLink,
   ProviderCoverage,
   SessionLocation,
+  SessionDiagnostic,
   SessionTranscriptStatus,
   SubAgent,
   TokenUsage,
@@ -18,6 +19,7 @@ import type {
 } from "@vibe-replay/types";
 
 export type { DataSource, DataSourceInfo, SessionLocation, TokenUsage };
+export type { SessionDiagnostic };
 export type { SessionTranscriptStatus };
 export type {
   MetricCoverage,
@@ -309,6 +311,10 @@ export interface ProviderParseResult {
   turnStats?: TurnStat[];
   /** Provider-reported context window limit for the primary model, if available */
   contextLimit?: number;
+  /** Provider/session diagnostic events, kept separate from ordinary API errors. */
+  diagnostics?: SessionDiagnostic[];
+  /** Limitations or quality notes for interpreting diagnostic events. */
+  diagnosticNotes?: string[];
   /** PR links associated with the session */
   prLinks?: PrLink[];
   /** Summary of subagents used in this session */

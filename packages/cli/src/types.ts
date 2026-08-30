@@ -38,6 +38,7 @@ export type {
   Provider,
   ProviderParseResult,
   RawMessage,
+  SessionDiagnostic,
   SessionInfo,
   ToolResultContent,
 } from "@vibe-replay/provider-contract";

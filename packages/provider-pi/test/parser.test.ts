@@ -802,6 +802,248 @@ describe("Pi parser", () => {
     );
   });
 
+  it("separates inferred automatic compactions, explicit compaction failures, and API errors", async () => {
+    const lines = [
+      {
+        type: "session",
+        version: 3,
+        id: "pi-compaction-diagnostics",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        cwd: "/Users/test/project",
+      },
+      {
+        type: "message",
+        id: "user1",
+        parentId: null,
+        timestamp: "2026-01-01T00:00:01.000Z",
+        message: { role: "user", content: [{ type: "text", text: "Do a long task" }] },
+      },
+      {
+        type: "message",
+        id: "assistant-length",
+        parentId: "user1",
+        timestamp: "2026-01-01T00:00:02.000Z",
+        message: {
+          role: "assistant",
+          provider: "openai",
+          model: "gpt-5.5",
+          content: [{ type: "text", text: "The response was truncated." }],
+          stopReason: "length",
+        },
+      },
+      {
+        type: "compaction",
+        id: "compact1",
+        parentId: "assistant-length",
+        timestamp: "2026-01-01T00:00:03.000Z",
+        summary: "Earlier work condensed.",
+        tokensBefore: 90_000,
+      },
+      {
+        type: "message",
+        id: "assistant-api-error",
+        parentId: "compact1",
+        timestamp: "2026-01-01T00:00:04.000Z",
+        message: {
+          role: "assistant",
+          provider: "openai",
+          model: "gpt-5.5",
+          content: [],
+          stopReason: "error",
+          errorMessage: "OpenAI API error (500): 500 status code (no body)",
+        },
+      },
+      {
+        type: "message",
+        id: "assistant-compaction-error",
+        parentId: "assistant-api-error",
+        timestamp: "2026-01-01T00:00:05.000Z",
+        message: {
+          role: "assistant",
+          provider: "openai",
+          model: "gpt-5.5",
+          content: [],
+          stopReason: "error",
+          errorMessage: "Auto-compaction failed: Connection error.",
+        },
+      },
+      {
+        type: "message",
+        id: "assistant-manual-compaction-error",
+        parentId: "assistant-compaction-error",
+        timestamp: "2026-01-01T00:00:06.000Z",
+        message: {
+          role: "assistant",
+          provider: "openai",
+          model: "gpt-5.5",
+          content: [],
+          stopReason: "error",
+          errorMessage: "Manual compaction failed: user cancelled.",
+        },
+      },
+    ];
+
+    await withPiFixture(lines, async (path) => {
+      const parsed = await parsePiSession(path);
+      expect(parsed.diagnostics).toMatchObject([
+        {
+          kind: "compaction",
+          outcome: "succeeded",
+          trigger: "automatic-context",
+          confidence: "inferred",
+          preTokens: 90_000,
+        },
+        {
+          kind: "assistant-api-error",
+          outcome: "failed",
+          statusCode: 500,
+          errorType: "server_error",
+        },
+        {
+          kind: "compaction",
+          outcome: "failed",
+          trigger: "automatic-context",
+          errorType: "connection_error",
+        },
+        {
+          kind: "compaction",
+          outcome: "failed",
+          trigger: "manual",
+          errorType: "aborted",
+        },
+      ]);
+      expect(parsed.diagnostics?.filter((event) => event.kind === "compaction")).toHaveLength(3);
+      expect(
+        parsed.diagnostics?.filter((event) => event.kind === "assistant-api-error"),
+      ).toHaveLength(1);
+      expect(JSON.stringify(parsed.diagnostics)).not.toContain("OpenAI API error");
+      expect(parsed.diagnosticNotes).toContain(
+        "Pi JSONL persists completed compaction entries, but not compaction_start/compaction_end or session_compact_failed lifecycle events.",
+      );
+    });
+  });
+
+  it("does not invent a compaction trigger when persisted evidence is insufficient", async () => {
+    const lines = [
+      {
+        type: "session",
+        version: 3,
+        id: "pi-compaction-unknown-trigger",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        cwd: "/Users/test/project",
+      },
+      {
+        type: "message",
+        id: "user1",
+        parentId: null,
+        timestamp: "2026-01-01T00:00:01.000Z",
+        message: { role: "user", content: [{ type: "text", text: "Compact this session" }] },
+      },
+      {
+        type: "message",
+        id: "assistant1",
+        parentId: "user1",
+        timestamp: "2026-01-01T00:00:02.000Z",
+        message: {
+          role: "assistant",
+          provider: "openai",
+          model: "unknown-model",
+          content: [{ type: "text", text: "The work is complete." }],
+          stopReason: "stop",
+        },
+      },
+      {
+        type: "compaction",
+        id: "compact1",
+        parentId: "assistant1",
+        timestamp: "2026-01-01T00:00:03.000Z",
+        summary: "Earlier work condensed.",
+        tokensBefore: 1_000,
+      },
+    ];
+
+    await withPiFixture(lines, async (path) => {
+      const parsed = await parsePiSession(path);
+      expect(parsed.diagnostics).toMatchObject([
+        {
+          kind: "compaction",
+          outcome: "succeeded",
+          trigger: "unknown",
+          confidence: "unknown",
+        },
+      ]);
+    });
+  });
+
+  it("preserves explicit compaction details and retry metadata when persisted", async () => {
+    const lines = [
+      {
+        type: "session",
+        version: 3,
+        id: "pi-compaction-explicit-details",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        cwd: "/Users/test/project",
+      },
+      {
+        type: "model_change",
+        id: "model1",
+        parentId: null,
+        timestamp: "2026-01-01T00:00:01.000Z",
+        provider: "openai",
+        modelId: "gpt-5.5",
+      },
+      {
+        type: "message",
+        id: "user1",
+        parentId: "model1",
+        timestamp: "2026-01-01T00:00:02.000Z",
+        message: { role: "user", content: [{ type: "text", text: "Compact this session" }] },
+      },
+      {
+        type: "compaction",
+        id: "compact1",
+        parentId: "user1",
+        timestamp: "2026-01-01T00:00:03.000Z",
+        summary: "Earlier work condensed.",
+        tokensBefore: 1_000,
+        details: { reason: "manual" },
+      },
+      {
+        type: "message",
+        id: "assistant-error",
+        parentId: "compact1",
+        timestamp: "2026-01-01T00:00:04.000Z",
+        message: {
+          role: "assistant",
+          provider: "openai",
+          model: "gpt-5.5",
+          content: [],
+          stopReason: "error",
+          retryAttempt: 2,
+          errorMessage: "OpenAI API error (500): 500 status code (no body)",
+        },
+      },
+    ];
+
+    await withPiFixture(lines, async (path) => {
+      const parsed = await parsePiSession(path);
+      expect(parsed.diagnostics).toMatchObject([
+        {
+          kind: "compaction",
+          trigger: "manual",
+          confidence: "exact",
+          provider: "openai",
+        },
+        {
+          kind: "assistant-api-error",
+          retryAttempt: 2,
+          provider: "openai",
+        },
+      ]);
+      expect(parsed.apiErrors).toMatchObject([{ statusCode: 500, retryAttempt: 2 }]);
+    });
+  });
+
   it("reports the last selected model so discovery and replay agree", async () => {
     const lines = [
       {
