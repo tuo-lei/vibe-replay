@@ -1168,7 +1168,12 @@ export async function startServer(
           (hasReplay &&
             (replay.slug !== s.existingReplay ||
               replay.title !== s.replay?.title ||
-              replay.sourceSlug !== s.replay?.sourceSlug))
+              replay.sourceSlug !== s.replay?.sourceSlug ||
+              replay.compactionCount !== s.replay?.compactionCount ||
+              JSON.stringify(replay.compactions) !== JSON.stringify(s.replay?.compactions) ||
+              JSON.stringify(replay.apiErrors) !== JSON.stringify(s.replay?.apiErrors) ||
+              JSON.stringify(replay.diagnostics) !== JSON.stringify(s.replay?.diagnostics) ||
+              JSON.stringify(replay.diagnosticNotes) !== JSON.stringify(s.replay?.diagnosticNotes)))
         ) {
           changed = true;
         }

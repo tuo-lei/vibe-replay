@@ -17,6 +17,7 @@ const MAX_SEARCH_RESULTS = 20;
 const MAX_CONTENT_CHARS = 18_000;
 const MAX_SCENE_CHARS = 2_400;
 const MAX_USAGE_ENTRIES = 12;
+const MAX_DIAGNOSTIC_EVENTS = 50;
 
 type LocalAssistantTool = AgentTool<any, LocalAssistantToolDetails>;
 
@@ -408,7 +409,10 @@ function diagnosticCounts(events: readonly SessionDiagnostic[]) {
       (event) => event.kind === "compaction" && event.outcome === "succeeded",
     ).length,
     automaticContextCompactions: events.filter(
-      (event) => event.kind === "compaction" && event.trigger === "automatic-context",
+      (event) =>
+        event.kind === "compaction" &&
+        event.outcome === "succeeded" &&
+        event.trigger === "automatic-context",
     ).length,
     unknownCompactions: events.filter(
       (event) => event.kind === "compaction" && event.trigger === "unknown",
@@ -422,6 +426,8 @@ function diagnosticCounts(events: readonly SessionDiagnostic[]) {
 
 function diagnosticRecord(record: AssistantSessionRecord) {
   const { events, notes } = diagnosticsForRecord(record);
+  const visibleEvents = events.slice(-MAX_DIAGNOSTIC_EVENTS);
+  const omittedEventCount = events.length - visibleEvents.length;
   return {
     title: recordTitle(record),
     provider: recordProvider(record),
@@ -433,7 +439,8 @@ function diagnosticRecord(record: AssistantSessionRecord) {
     startTime: recordTimestamp(record),
     model: record.replay?.model || record.source?.model || record.scan?.model,
     counts: diagnosticCounts(events),
-    events,
+    events: visibleEvents,
+    ...(omittedEventCount > 0 ? { eventsTruncated: true, omittedEventCount } : {}),
     notes,
   };
 }
@@ -1058,8 +1065,6 @@ export function createLocalAssistantTools(
       const records = allRecords
         .filter((record) => context.allowRemoteData || !isRemoteRecord(record))
         .filter((record) => !args.targetId || recordTargetId(record) === args.targetId)
-        .filter((record) => !args.provider || recordProvider(record) === args.provider)
-        .filter((record) => !args.project || recordProject(record) === args.project)
         .filter((record) => searchMatches(record, args))
         .filter((record) => diagnosticsForRecord(record).events.length > 0)
         .sort((a, b) => (recordTimestamp(b) || "").localeCompare(recordTimestamp(a) || ""));
@@ -1067,7 +1072,7 @@ export function createLocalAssistantTools(
       const selected = records.slice(0, limit);
       const totals = {
         sessions: records.length,
-        ...selected
+        ...records
           .map((record) => diagnosticCounts(diagnosticsForRecord(record).events))
           .reduce(
             (sum, counts) => ({

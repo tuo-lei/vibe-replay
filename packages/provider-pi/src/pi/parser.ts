@@ -301,6 +301,9 @@ export function parsePiLines(
       const blocks = buildAssistantBlocks(message.content, toolResults, entry.timestamp);
       if (message.errorMessage) {
         blocks.push({ type: "text", text: message.errorMessage });
+        // Keep the lower-level API error stream backward-compatible; the
+        // structured diagnostic below is what distinguishes compaction
+        // failures from ordinary assistant/API errors.
         apiErrors.push({
           timestamp: entry.timestamp || new Date().toISOString(),
           ...parseApiErrorMessage(message.errorMessage),

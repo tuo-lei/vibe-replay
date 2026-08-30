@@ -90,7 +90,10 @@ export default function StatsPanel({ session }: Props) {
             (event) => event.kind === "compaction" && event.outcome === "succeeded",
           ).length,
           automaticContextCompactions: diagnostics.filter(
-            (event) => event.kind === "compaction" && event.trigger === "automatic-context",
+            (event) =>
+              event.kind === "compaction" &&
+              event.outcome === "succeeded" &&
+              event.trigger === "automatic-context",
           ).length,
           inferredAutomaticCompactions: diagnostics.filter(
             (event) =>

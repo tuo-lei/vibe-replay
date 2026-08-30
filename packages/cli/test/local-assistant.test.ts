@@ -339,7 +339,7 @@ describe("local assistant tools", () => {
     const tools = createLocalAssistantTools(data, { mode: "dashboard" });
     const diagnose = tools.find((tool) => tool.name === "get_compaction_diagnostics");
 
-    const allResult = await diagnose!.execute("all-diagnostics", { provider: "pi", limit: 2 });
+    const allResult = await diagnose!.execute("all-diagnostics", { provider: "pi", limit: 1 });
     const allPayload = JSON.parse((allResult.content[0] as { text: string }).text) as {
       totals: { sessions: number; successfulCompactions: number; assistantApiErrors: number };
       sessions: unknown[];
@@ -349,7 +349,7 @@ describe("local assistant tools", () => {
       successfulCompactions: 1,
       assistantApiErrors: 1,
     });
-    expect(allPayload.sessions).toHaveLength(2);
+    expect(allPayload.sessions).toHaveLength(1);
 
     const filteredResult = await diagnose!.execute("filtered-diagnostics", {
       provider: "pi",
@@ -359,6 +359,32 @@ describe("local assistant tools", () => {
       totals: { sessions: number; assistantApiErrors: number };
     };
     expect(filteredPayload.totals).toMatchObject({ sessions: 1, assistantApiErrors: 1 });
+  });
+
+  it("bounds diagnostic event payloads without changing counts", async () => {
+    const replay = makeReplay();
+    replay.meta.diagnostics = Array.from({ length: 55 }, (_, index) => ({
+      kind: "compaction" as const,
+      outcome: "succeeded" as const,
+      timestamp: `2026-05-10T10:${String(index).padStart(2, "0")}:00.000Z`,
+      confidence: "unknown" as const,
+      trigger: "unknown" as const,
+    }));
+
+    const tools = createLocalAssistantTools(makeData(replay), { mode: "dashboard" });
+    const diagnose = tools.find((tool) => tool.name === "get_compaction_diagnostics");
+    const result = await diagnose!.execute("bounded-diagnostics", { slug: "fix-auth" });
+    const payload = JSON.parse((result.content[0] as { text: string }).text) as {
+      counts: { successfulCompactions: number };
+      events: unknown[];
+      eventsTruncated?: boolean;
+      omittedEventCount?: number;
+    };
+
+    expect(payload.counts.successfulCompactions).toBe(55);
+    expect(payload.events).toHaveLength(50);
+    expect(payload.eventsTruncated).toBe(true);
+    expect(payload.omittedEventCount).toBe(5);
   });
 
   it("keeps SSH session content behind explicit consent", async () => {
