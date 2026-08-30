@@ -37,6 +37,11 @@ jobs:
   windows-smoke:
     runs-on: windows-latest
     steps:
+      # The agent-instructions test intentionally requires the tracked skill
+      # entries to remain symlinks. Set this before checkout so Git does not
+      # materialize them as ordinary target-text files.
+      - name: Enable symlinks before checkout
+        run: git config --global core.symlinks true
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
