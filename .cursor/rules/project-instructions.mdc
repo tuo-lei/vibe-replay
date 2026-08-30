@@ -1,0 +1,15 @@
+---
+description: Where vibe-replay's project instructions live
+alwaysApply: true
+---
+
+Project conventions, commands, gotchas, and release rules for this repo live in
+`AGENTS.md` at the repository root. Read it before making changes.
+
+Current Cursor versions load root and nested `AGENTS.md` natively, so this rule
+is only a pointer for older versions — it deliberately carries no project
+knowledge of its own. Do not copy rules from `AGENTS.md` into this file; keep
+`AGENTS.md` the single source of truth.
+
+`CLAUDE.md` is a shim that imports `AGENTS.md` for Claude Code. Never record
+project knowledge there.

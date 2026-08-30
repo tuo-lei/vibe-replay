@@ -12,6 +12,14 @@ pnpm build
 ```
 
 Requires Node.js >= 22.19.0 and pnpm.
+
+If you clone on Windows, enable symlinks so the shared skill directories resolve
+(see [Working with a coding agent](#working-with-a-coding-agent)):
+
+```bash
+git config core.symlinks true   # then re-checkout
+```
+
 Website scripts use Astro 6 and require Node.js >= 22.12.0 inside `website/`. When `nvm` is available, they will try `nvm use` from `website/.nvmrc` automatically.
 
 Before running the repository commands, verify the Node runtime used by the
@@ -47,6 +55,40 @@ and should `afterEach(cleanup)` so window listeners don't leak between tests.
 See `src/hooks/__tests__/usePlayback.test.tsx` for the pattern.
 
 **Daily workflow**: Run `pnpm dev`, open `http://localhost:5173`. Viewer changes hot-reload instantly via Vite HMR. CLI/API changes auto-restart via `tsx watch`. No manual rebuild or restart needed.
+
+## Working with a coding agent
+
+This repo is agent-agnostic. Claude Code, Codex, Cursor, Pi, and opencode all read
+the same instructions from **`AGENTS.md`** at the repository root — project
+conventions, commands, provider gotchas, and the release checklist live there and
+nowhere else.
+
+Only the plumbing differs per agent:
+
+| Agent | Instructions | Skills |
+|-------|--------------|--------|
+| Codex | `AGENTS.md` | `.agents/skills/` |
+| Cursor | `AGENTS.md` + `.cursor/rules/` | — |
+| Pi | `AGENTS.md` | `.agents/skills/` |
+| opencode | `AGENTS.md` | — |
+| Claude Code | `CLAUDE.md`, a shim that imports `AGENTS.md` | `.claude/skills/` |
+
+Claude Code does not read `AGENTS.md`, so `CLAUDE.md` is a real file whose first
+line is `@AGENTS.md`, followed by Claude-Code-specific notes only. The replay
+skill has one real copy at `skills/replay/`; `.claude/skills/replay` and
+`.agents/skills/replay` are symlinks into it.
+
+When you add project knowledge, **put it in `AGENTS.md`**. Do not add it to
+`CLAUDE.md` or `.cursor/rules/` — the other four agents would never see it.
+`packages/cli/test/agent-instructions.test.ts` guards the wiring and fails if the
+import is dropped, a skill symlink breaks, or `AGENTS.md` exceeds 32 KiB (Codex's
+default `project_doc_max_bytes`, past which it silently truncates the file).
+`AGENTS.md` explains how to split into nested per-package files when it gets full.
+
+Formatting is enforced for every agent by the lefthook `pre-commit` hook, which
+runs `oxlint --fix` and `oxfmt` on staged files. Claude Code additionally formats
+each file right after editing it via the `PostToolUse` hook in
+`.claude/settings.json`; with other agents, run `pnpm lint` before you finish.
 
 ## Architecture
 

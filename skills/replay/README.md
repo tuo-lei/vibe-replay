@@ -105,7 +105,14 @@ curl -o ~/.claude/skills/replay/SKILL.md \
 
 ### For vibe-replay contributors
 
-The project has a symlink at `.claude/skills/replay` → `skills/replay/`, so the skill is always loaded from source when working in this repo.
+`skills/replay/` is the only real copy. Each agent's discovery directory is a symlink into it, so the skill is always loaded from source when working in this repo:
+
+| Symlink | Read by |
+|---------|---------|
+| `.claude/skills/replay` | Claude Code |
+| `.agents/skills/replay` | Codex, Pi |
+
+See **Agent setup** in `AGENTS.md` at the repo root. `packages/cli/test/agent-instructions.test.ts` fails if either link breaks or turns into a copy.
 
 ## CLI flags used by the skill
 
