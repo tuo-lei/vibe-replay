@@ -39,22 +39,61 @@ export function spawnTsx(scriptArgs, options = {}) {
   });
 }
 
+function hasExited(child) {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+function waitForChildExit(child, timeoutMs) {
+  if (!child?.pid || hasExited(child)) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let timer;
+    const finish = (exited) => {
+      clearTimeout(timer);
+      child.removeListener("exit", onExit);
+      child.removeListener("error", onError);
+      resolve(exited);
+    };
+    const onExit = () => finish(true);
+    const onError = () => finish(true);
+    child.once("exit", onExit);
+    child.once("error", onError);
+    timer = setTimeout(() => finish(hasExited(child)), timeoutMs);
+  });
+}
+
 /**
  * Signal a launcher child and all of its descendants. Dev commands often
  * spawn through pnpm, so killing only the direct child can leave Vite/Astro
  * listening after the launcher exits.
  */
 export function killProcessTree(child, signal = "SIGTERM") {
-  if (!child?.pid) return;
+  if (!child?.pid) return Promise.resolve();
   if (IS_WINDOWS) {
-    try {
-      child.kill(signal);
-    } catch {}
-    spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
-      stdio: "ignore",
-      windowsHide: true,
-    }).unref();
-    return;
+    return new Promise((resolve) => {
+      let taskkill;
+      const fallback = () => {
+        try {
+          child.kill(signal);
+        } catch {}
+      };
+      try {
+        taskkill = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+          stdio: "ignore",
+          windowsHide: true,
+        });
+        taskkill.once("error", () => {
+          fallback();
+          resolve();
+        });
+        taskkill.once("exit", (code) => {
+          if (code !== 0) fallback();
+          resolve();
+        });
+      } catch {
+        fallback();
+        resolve();
+      }
+    });
   }
   try {
     process.kill(-child.pid, signal);
@@ -63,11 +102,16 @@ export function killProcessTree(child, signal = "SIGTERM") {
       child.kill(signal);
     } catch {}
   }
+  return Promise.resolve();
 }
 
 /** Wait for a detached child process group to exit, then force-kill it. */
 export async function waitForProcessTree(child, timeoutMs = 1_000) {
-  if (!child?.pid || IS_WINDOWS) return;
+  if (!child?.pid) return;
+  if (IS_WINDOWS) {
+    if (!(await waitForChildExit(child, timeoutMs))) await killProcessTree(child, "SIGKILL");
+    return;
+  }
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {

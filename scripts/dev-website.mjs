@@ -85,8 +85,7 @@ async function shutdown(exitCode) {
   if (shuttingDown) return;
   shuttingDown = true;
   try {
-    killProcessTree(astro);
-    killProcessTree(vite);
+    await Promise.all([killProcessTree(astro), killProcessTree(vite)]);
     await Promise.all([waitForProcessTree(astro), waitForProcessTree(vite)]);
     await Promise.all(reservations.map(({ release }) => release()));
   } finally {
@@ -129,7 +128,7 @@ try {
     },
   });
   astro.on("exit", (code) => {
-    if (!shuttingDown) void shutdown(code ?? 0);
+    if (!shuttingDown) void shutdown(code ?? 1);
   });
   await waitForPortBound(astroPort, astro, "Astro");
 } catch (error) {

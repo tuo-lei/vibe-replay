@@ -141,7 +141,7 @@ function startCli() {
 }
 
 function killCli() {
-  killProcessTree(cli);
+  return killProcessTree(cli);
 }
 
 function restartCli() {
@@ -161,8 +161,7 @@ async function shutdown(exitCode) {
   if (shuttingDown) return;
   shuttingDown = true;
   try {
-    killProcessTree(cli);
-    killProcessTree(vite);
+    await Promise.all([killProcessTree(cli), killProcessTree(vite)]);
     await Promise.all([waitForProcessTree(cli), waitForProcessTree(vite)]);
     await Promise.all(reservations.map(({ release }) => release()));
   } finally {
