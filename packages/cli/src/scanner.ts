@@ -38,6 +38,7 @@ import type {
   ProjectIdentity,
   PrLink,
   SessionInfo,
+  SessionDiagnostic,
   SessionLocation,
   SessionTranscriptStatus,
   SessionUsageSummary,
@@ -67,7 +68,8 @@ import { localDayKey, shortenPath } from "./utils.js";
 // v32: add provider coverage reporting, rich Claude scans, and Cursor compaction
 // summary detection.
 // v33: reject Cursor request-relative timing values as session timestamps.
-export const SCANNER_VERSION = 33;
+// v34: persist provider/session diagnostic events and Pi compaction evidence.
+export const SCANNER_VERSION = 34;
 
 // Keep per-invocation detail bounded in the durable insight store. The full
 // event set is still used to compute usageSummary below; only the retained
@@ -117,6 +119,10 @@ export interface SessionScanResult {
 
   // Errors
   apiErrorCount: number;
+
+  // Provider/session diagnostics (bounded metadata only; no prompt/tool payloads)
+  diagnostics?: SessionDiagnostic[];
+  diagnosticNotes?: string[];
 
   // Meta
   entrypoint?: string;
@@ -1827,6 +1833,8 @@ function buildScanResultFromParsed(
     subAgentCount: parsedSubAgentCount || derivedSubAgentCount,
     apiErrorCount: parsed.apiErrors?.length || 0,
     compactionCount: parsed.compactions?.length || 0,
+    diagnostics: parsed.diagnostics,
+    diagnosticNotes: parsed.diagnosticNotes,
     entrypoint: parsed.entrypoint,
     permissionMode: parsed.permissionMode,
     skillsUsed: skillsUsed.size > 0 ? [...skillsUsed].sort() : undefined,

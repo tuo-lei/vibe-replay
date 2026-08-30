@@ -82,6 +82,35 @@ export default function StatsPanel({ session }: Props) {
         : undefined,
       costEstimate: meta.stats.costEstimate,
       compactions: meta.compactions,
+      diagnostics: meta.diagnostics,
+      diagnosticSummary: (() => {
+        const diagnostics = meta.diagnostics || [];
+        return {
+          successfulCompactions: diagnostics.filter(
+            (event) => event.kind === "compaction" && event.outcome === "succeeded",
+          ).length,
+          automaticContextCompactions: diagnostics.filter(
+            (event) =>
+              event.kind === "compaction" &&
+              event.outcome === "succeeded" &&
+              event.trigger === "automatic-context",
+          ).length,
+          inferredAutomaticCompactions: diagnostics.filter(
+            (event) =>
+              event.kind === "compaction" &&
+              event.trigger === "automatic-context" &&
+              event.confidence === "inferred",
+          ).length,
+          unknownCompactions: diagnostics.filter(
+            (event) => event.kind === "compaction" && event.trigger === "unknown",
+          ).length,
+          compactionFailures: diagnostics.filter(
+            (event) => event.kind === "compaction" && event.outcome === "failed",
+          ).length,
+          assistantApiErrors: diagnostics.filter((event) => event.kind === "assistant-api-error")
+            .length,
+        };
+      })(),
       peakContextTokens: (() => {
         if (!meta.stats.turnStats?.length) return undefined;
         const peak = Math.max(...meta.stats.turnStats.map((t) => t.contextTokens || 0));
@@ -337,6 +366,65 @@ export default function StatsPanel({ session }: Props) {
               </span>
             );
           })()}
+        </div>
+      )}
+
+      {/* Provider/session diagnostics */}
+      {stats.diagnostics && stats.diagnostics.length > 0 && (
+        <div>
+          <div className="ui-section-title mb-2 flex items-center gap-1.5">
+            Diagnostics
+            {meta.diagnosticNotes && meta.diagnosticNotes.length > 0 && (
+              <DataQualityIndicator title={meta.diagnosticNotes.join("\n")} />
+            )}
+          </div>
+          <div className="text-terminal-dim space-y-0.5">
+            {stats.diagnosticSummary.successfulCompactions > 0 && (
+              <div>
+                Compactions succeeded:{" "}
+                <span className="text-terminal-green">
+                  {fmtNum(stats.diagnosticSummary.successfulCompactions)}
+                </span>
+              </div>
+            )}
+            {stats.diagnosticSummary.automaticContextCompactions > 0 && (
+              <div>
+                Automatic context:{" "}
+                <span className="text-terminal-cyan">
+                  {fmtNum(stats.diagnosticSummary.automaticContextCompactions)}
+                </span>
+                {stats.diagnosticSummary.inferredAutomaticCompactions > 0 && (
+                  <span className="text-terminal-dimmer">
+                    {` (${fmtNum(stats.diagnosticSummary.inferredAutomaticCompactions)} inferred)`}
+                  </span>
+                )}
+              </div>
+            )}
+            {stats.diagnosticSummary.unknownCompactions > 0 && (
+              <div>
+                Unknown compaction trigger:{" "}
+                <span className="text-terminal-orange">
+                  {fmtNum(stats.diagnosticSummary.unknownCompactions)}
+                </span>
+              </div>
+            )}
+            {stats.diagnosticSummary.compactionFailures > 0 && (
+              <div>
+                Compaction failures:{" "}
+                <span className="text-terminal-red">
+                  {fmtNum(stats.diagnosticSummary.compactionFailures)}
+                </span>
+              </div>
+            )}
+            {stats.diagnosticSummary.assistantApiErrors > 0 && (
+              <div>
+                Assistant/API errors:{" "}
+                <span className="text-terminal-red">
+                  {fmtNum(stats.diagnosticSummary.assistantApiErrors)}
+                </span>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

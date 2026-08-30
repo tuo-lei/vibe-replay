@@ -346,6 +346,12 @@ export function transformToReplay(
       ...(parsed.contextLimit || parsed.model
         ? { contextLimit: parsed.contextLimit || getModelContextLimit(parsed.model || "") }
         : {}),
+      ...(parsed.diagnostics && parsed.diagnostics.length > 0
+        ? { diagnostics: parsed.diagnostics }
+        : {}),
+      ...(parsed.diagnosticNotes && parsed.diagnosticNotes.length > 0
+        ? { diagnosticNotes: parsed.diagnosticNotes }
+        : {}),
       ...(parsed.tokenUsageByModel ? { tokenUsageByModel: parsed.tokenUsageByModel } : {}),
       ...(parsed.prLinks && parsed.prLinks.length > 0 ? { prLinks: parsed.prLinks } : {}),
       compactions: parsed.compactions,

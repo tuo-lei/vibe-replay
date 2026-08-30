@@ -574,6 +574,10 @@ async function scanSessionsFromDir(baseDir: string): Promise<ReplaySummary[]> {
         endTime: session.meta.endTime,
         stats: session.meta.stats,
         compactionCount: session.meta.compactions?.length || 0,
+        compactions: session.meta.compactions,
+        apiErrors: session.meta.apiErrors,
+        diagnostics: session.meta.diagnostics,
+        diagnosticNotes: session.meta.diagnosticNotes,
         replaySize: Buffer.byteLength(raw, "utf-8"),
         generatorVersion,
         replayOutdated,
@@ -947,6 +951,10 @@ async function buildSourcesResult(
             endTime: replay.endTime,
             stats: replay.stats,
             compactionCount: replay.compactionCount,
+            compactions: replay.compactions,
+            apiErrors: replay.apiErrors,
+            diagnostics: replay.diagnostics,
+            diagnosticNotes: replay.diagnosticNotes,
             hasAnnotations: replay.hasAnnotations,
             annotationCount: replay.annotationCount,
             firstMessage: replay.firstMessage,
@@ -1160,7 +1168,12 @@ export async function startServer(
           (hasReplay &&
             (replay.slug !== s.existingReplay ||
               replay.title !== s.replay?.title ||
-              replay.sourceSlug !== s.replay?.sourceSlug))
+              replay.sourceSlug !== s.replay?.sourceSlug ||
+              replay.compactionCount !== s.replay?.compactionCount ||
+              JSON.stringify(replay.compactions) !== JSON.stringify(s.replay?.compactions) ||
+              JSON.stringify(replay.apiErrors) !== JSON.stringify(s.replay?.apiErrors) ||
+              JSON.stringify(replay.diagnostics) !== JSON.stringify(s.replay?.diagnostics) ||
+              JSON.stringify(replay.diagnosticNotes) !== JSON.stringify(s.replay?.diagnosticNotes)))
         ) {
           changed = true;
         }
@@ -1181,6 +1194,10 @@ export async function startServer(
                 endTime: replay.endTime,
                 stats: replay.stats,
                 compactionCount: replay.compactionCount,
+                compactions: replay.compactions,
+                apiErrors: replay.apiErrors,
+                diagnostics: replay.diagnostics,
+                diagnosticNotes: replay.diagnosticNotes,
                 hasAnnotations: replay.hasAnnotations,
                 annotationCount: replay.annotationCount,
                 firstMessage: replay.firstMessage,

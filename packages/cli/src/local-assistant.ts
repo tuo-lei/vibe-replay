@@ -11,12 +11,13 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { redactSensitiveText } from "./ai-runtime.js";
 import type { CachedSourceRecord, ReplaySummary } from "./server-types.js";
 import type { ProjectInsights, SessionScanResult, UserInsights } from "./scanner.js";
-import type { ReplaySession, Scene, SessionLocation } from "./types.js";
+import type { ReplaySession, Scene, SessionDiagnostic, SessionLocation } from "./types.js";
 
 const MAX_SEARCH_RESULTS = 20;
 const MAX_CONTENT_CHARS = 18_000;
 const MAX_SCENE_CHARS = 2_400;
 const MAX_USAGE_ENTRIES = 12;
+const MAX_DIAGNOSTIC_EVENTS = 50;
 
 type LocalAssistantTool = AgentTool<any, LocalAssistantToolDetails>;
 
@@ -123,6 +124,16 @@ interface UsageArgs {
   slug?: string;
   targetId?: string;
   project?: string;
+}
+
+interface DiagnosticArgs {
+  slug?: string;
+  targetId?: string;
+  project?: string;
+  provider?: string;
+  since?: string;
+  until?: string;
+  limit?: number;
 }
 
 interface OpenReplayArgs extends SessionRef {
@@ -330,9 +341,114 @@ function resultStats(record: AssistantSessionRecord) {
   };
 }
 
+function fallbackDiagnostics(session: ReplaySession | ReplaySummary): SessionDiagnostic[] {
+  const diagnostics: SessionDiagnostic[] = [];
+  const compactions = "meta" in session ? session.meta.compactions : session.compactions;
+  const apiErrors = "meta" in session ? session.meta.apiErrors : session.apiErrors;
+  for (const compaction of compactions || []) {
+    diagnostics.push({
+      kind: "compaction",
+      outcome: "succeeded",
+      timestamp: compaction.timestamp,
+      confidence: "unknown",
+      trigger: "unknown",
+      ...(compaction.preTokens !== undefined ? { preTokens: compaction.preTokens } : {}),
+      evidence: [
+        "This replay predates structured diagnostic events; only the persisted compaction entry is available.",
+      ],
+    });
+  }
+  for (const error of apiErrors || []) {
+    diagnostics.push({
+      kind: "assistant-api-error",
+      outcome: "failed",
+      timestamp: error.timestamp,
+      confidence: "unknown",
+      ...(error.statusCode !== undefined ? { statusCode: error.statusCode } : {}),
+      ...(error.errorType ? { errorType: error.errorType } : {}),
+      ...(error.retryAttempt !== undefined ? { retryAttempt: error.retryAttempt } : {}),
+      evidence: [
+        "This replay predates structured diagnostic events; the error was not attributed to compaction.",
+      ],
+    });
+  }
+  return diagnostics;
+}
+
+function diagnosticsForRecord(record: AssistantSessionRecord): {
+  events: SessionDiagnostic[];
+  notes: string[];
+} {
+  if (record.replay?.diagnostics?.length) {
+    return {
+      events: record.replay.diagnostics,
+      notes: record.replay.diagnosticNotes || [],
+    };
+  }
+  if (record.scan?.diagnostics?.length) {
+    return {
+      events: record.scan.diagnostics,
+      notes: record.scan.diagnosticNotes || [],
+    };
+  }
+  if (record.replay) {
+    return {
+      events: fallbackDiagnostics(record.replay),
+      notes: record.replay.diagnosticNotes || [],
+    };
+  }
+  return {
+    events: [],
+    notes: record.scan?.diagnosticNotes || [],
+  };
+}
+
+function diagnosticCounts(events: readonly SessionDiagnostic[]) {
+  return {
+    successfulCompactions: events.filter(
+      (event) => event.kind === "compaction" && event.outcome === "succeeded",
+    ).length,
+    automaticContextCompactions: events.filter(
+      (event) =>
+        event.kind === "compaction" &&
+        event.outcome === "succeeded" &&
+        event.trigger === "automatic-context",
+    ).length,
+    unknownCompactions: events.filter(
+      (event) => event.kind === "compaction" && event.trigger === "unknown",
+    ).length,
+    compactionFailures: events.filter(
+      (event) => event.kind === "compaction" && event.outcome === "failed",
+    ).length,
+    assistantApiErrors: events.filter((event) => event.kind === "assistant-api-error").length,
+  };
+}
+
+function diagnosticRecord(record: AssistantSessionRecord) {
+  const { events, notes } = diagnosticsForRecord(record);
+  const visibleEvents = events.slice(-MAX_DIAGNOSTIC_EVENTS);
+  const omittedEventCount = events.length - visibleEvents.length;
+  return {
+    title: recordTitle(record),
+    provider: recordProvider(record),
+    project: recordProject(record),
+    location: locationFor(record),
+    sessionId: recordSessionId(record),
+    slug: recordRef(record)?.slug || record.source?.slug || record.scan?.slug,
+    targetId: recordTargetId(record),
+    startTime: recordTimestamp(record),
+    model: record.replay?.model || record.source?.model || record.scan?.model,
+    counts: diagnosticCounts(events),
+    events: visibleEvents,
+    ...(omittedEventCount > 0 ? { eventsTruncated: true, omittedEventCount } : {}),
+    notes,
+  };
+}
+
 function searchableText(record: AssistantSessionRecord): string {
   const source = record.source;
   const scan = record.scan;
+  const diagnostics = diagnosticsForRecord(record).events;
   return [
     recordTitle(record),
     recordProject(record),
@@ -350,6 +466,12 @@ function searchableText(record: AssistantSessionRecord): string {
     ...(scan?.filesModified || []).map((file) => file.file),
     ...sourceStrings(scan?.skillsUsed),
     ...sourceStrings(scan?.mcpServersUsed),
+    ...diagnostics.flatMap((event) => [
+      event.kind,
+      event.outcome,
+      event.trigger || "",
+      event.errorType || "",
+    ]),
   ]
     .filter((value): value is string => typeof value === "string")
     .join("\n")
@@ -412,6 +534,7 @@ function resultRecord(record: AssistantSessionRecord) {
       record.source?.transcriptStatus ||
       record.scan?.transcriptStatus,
     dataQualityNotes: record.scan?.dataQualityNotes,
+    diagnostics: diagnosticCounts(diagnosticsForRecord(record).events),
     firstPrompt: compact(
       record.replay?.firstMessage ||
         sourceString(record.source?.firstPrompt) ||
@@ -486,6 +609,12 @@ function sessionSummary(session: ReplaySession, record: AssistantSessionRecord) 
     endTime: session.meta.endTime,
     stats: session.meta.stats,
     compactions: session.meta.compactions || [],
+    diagnostics:
+      (session.meta.diagnostics?.length ?? 0) > 0
+        ? session.meta.diagnostics
+        : fallbackDiagnostics(session),
+    diagnosticNotes: session.meta.diagnosticNotes || [],
+    apiErrors: session.meta.apiErrors || [],
     sceneCount: session.scenes.length,
     prompts: promptScenes,
     toolCounts,
@@ -894,6 +1023,97 @@ export function createLocalAssistantTools(
     },
   };
 
+  const getCompactionDiagnostics: LocalAssistantTool = {
+    name: "get_compaction_diagnostics",
+    label: "Diagnose compaction events",
+    description:
+      "Explain persisted compaction outcomes and ordinary assistant/API errors for one session or matching local sessions. Pi's JSONL format does not persist failed compaction lifecycle events, so absence of a failure is reported as inconclusive rather than treated as success.",
+    parameters: Type.Object({
+      slug: Type.Optional(Type.String({ description: "Generated replay or source session slug" })),
+      targetId: Type.Optional(
+        Type.String({ description: "SSH source id when the session is remote" }),
+      ),
+      provider: Type.Optional(
+        Type.String({ description: "Provider filter; use pi for Pi session diagnostics" }),
+      ),
+      project: Type.Optional(Type.String({ description: "Project path filter" })),
+      since: Type.Optional(
+        Type.String({ description: "ISO date/time or relative form such as 7d" }),
+      ),
+      until: Type.Optional(Type.String({ description: "ISO date/time upper bound" })),
+      limit: Type.Optional(Type.Number({ description: "Maximum sessions, from 1 to 20" })),
+    }),
+    execute: async (_toolCallId, rawArgs) => {
+      const args = rawArgs as DiagnosticArgs;
+      const allRecords = await buildSessionRecords(data);
+      if (args.slug) {
+        const record = findRecord(allRecords, { slug: args.slug, targetId: args.targetId });
+        if (!record) throw new Error(`Session not found: ${args.slug}`);
+        assertRecordAccess(record, context);
+        const diagnostics = diagnosticRecord(record);
+        return toolResult(
+          "get_compaction_diagnostics",
+          `Diagnosed ${recordTitle(record)}`,
+          diagnostics,
+          {
+            citations: [sessionCitation(record)],
+            remoteData: isRemoteRecord(record),
+          },
+        );
+      }
+
+      const records = allRecords
+        .filter((record) => context.allowRemoteData || !isRemoteRecord(record))
+        .filter((record) => !args.targetId || recordTargetId(record) === args.targetId)
+        .filter((record) => searchMatches(record, args))
+        .filter((record) => diagnosticsForRecord(record).events.length > 0)
+        .sort((a, b) => (recordTimestamp(b) || "").localeCompare(recordTimestamp(a) || ""));
+      const limit = Math.max(1, Math.min(20, Math.floor(args.limit || 12)));
+      const selected = records.slice(0, limit);
+      const totals = {
+        sessions: records.length,
+        ...records
+          .map((record) => diagnosticCounts(diagnosticsForRecord(record).events))
+          .reduce(
+            (sum, counts) => ({
+              successfulCompactions: sum.successfulCompactions + counts.successfulCompactions,
+              automaticContextCompactions:
+                sum.automaticContextCompactions + counts.automaticContextCompactions,
+              unknownCompactions: sum.unknownCompactions + counts.unknownCompactions,
+              compactionFailures: sum.compactionFailures + counts.compactionFailures,
+              assistantApiErrors: sum.assistantApiErrors + counts.assistantApiErrors,
+            }),
+            {
+              successfulCompactions: 0,
+              automaticContextCompactions: 0,
+              unknownCompactions: 0,
+              compactionFailures: 0,
+              assistantApiErrors: 0,
+            },
+          ),
+      };
+      const payload = {
+        provider: args.provider || "all",
+        project: args.project,
+        totals,
+        sessions: selected.map(diagnosticRecord),
+        truncated: records.length > limit,
+        remoteSessionsHidden: context.allowRemoteData
+          ? undefined
+          : allRecords.filter(isRemoteRecord).length || undefined,
+      };
+      return toolResult(
+        "get_compaction_diagnostics",
+        `Diagnosed ${selected.length} session${selected.length === 1 ? "" : "s"}`,
+        payload,
+        {
+          citations: selected.map((record) => sessionCitation(record)),
+          remoteData: context.allowRemoteData && selected.some(isRemoteRecord),
+        },
+      );
+    },
+  };
+
   const openReplay: LocalAssistantTool = {
     name: "open_replay",
     label: "Open replay",
@@ -979,6 +1199,7 @@ export function createLocalAssistantTools(
     getScene,
     getInsights,
     getUsageBreakdown,
+    getCompactionDiagnostics,
     openReplay,
     openDashboard,
   ];

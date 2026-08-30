@@ -7,6 +7,7 @@
 import type {
   ProjectIdentity,
   ReplaySession,
+  SessionDiagnostic,
   SessionLocation,
   SessionTranscriptStatus,
 } from "./types.js";
@@ -54,6 +55,10 @@ export interface ReplaySummary {
   endTime?: string;
   stats: ReplaySession["meta"]["stats"];
   compactionCount?: number;
+  compactions?: ReplaySession["meta"]["compactions"];
+  apiErrors?: ReplaySession["meta"]["apiErrors"];
+  diagnostics?: SessionDiagnostic[];
+  diagnosticNotes?: string[];
   replaySize: number;
   generatorVersion?: string;
   replayOutdated: boolean;

@@ -59,6 +59,10 @@ function makeData(replay: ReplaySession) {
         startTime: replay.meta.startTime,
         endTime: replay.meta.endTime,
         stats: replay.meta.stats,
+        compactions: replay.meta.compactions,
+        apiErrors: replay.meta.apiErrors,
+        diagnostics: replay.meta.diagnostics,
+        diagnosticNotes: replay.meta.diagnosticNotes,
         replaySize: 123,
         replayOutdated: false,
         hasAnnotations: false,
@@ -202,11 +206,193 @@ describe("local assistant tools", () => {
     });
   });
 
+  it("reports compaction outcomes separately from ordinary API errors", async () => {
+    const replay = makeReplay();
+    replay.meta.diagnostics = [
+      {
+        kind: "compaction",
+        outcome: "succeeded",
+        timestamp: "2026-05-10T10:01:00.000Z",
+        confidence: "inferred",
+        trigger: "automatic-context",
+      },
+      {
+        kind: "assistant-api-error",
+        outcome: "failed",
+        timestamp: "2026-05-10T10:02:00.000Z",
+        confidence: "exact",
+        statusCode: 500,
+        errorType: "server_error",
+      },
+      {
+        kind: "compaction",
+        outcome: "failed",
+        timestamp: "2026-05-10T10:03:00.000Z",
+        confidence: "exact",
+        trigger: "automatic-context",
+        errorType: "connection_error",
+      },
+    ];
+    replay.meta.diagnosticNotes = [
+      "Pi JSONL persists completed compaction entries, but not compaction_start/compaction_end or session_compact_failed lifecycle events.",
+    ];
+
+    const tools = createLocalAssistantTools(makeData(replay), { mode: "replay" });
+    const diagnose = tools.find((tool) => tool.name === "get_compaction_diagnostics");
+
+    expect(diagnose).toBeDefined();
+    const result = await diagnose!.execute("diagnostics-1", { slug: "fix-auth" });
+    expect(result.details).toMatchObject({
+      toolName: "get_compaction_diagnostics",
+      citations: [{ type: "session", slug: "fix-auth" }],
+    });
+    expect(result.content[0]).toMatchObject({
+      type: "text",
+      text: expect.stringContaining('"compactionFailures":1'),
+    });
+    expect(result.content[0]).toMatchObject({
+      text: expect.stringContaining('"assistantApiErrors":1'),
+    });
+  });
+
+  it("falls back to inconclusive diagnostics for legacy replays", async () => {
+    const replay = makeReplay();
+    replay.meta.compactions = [
+      {
+        timestamp: "2026-05-10T10:01:00.000Z",
+        trigger: "pi",
+        preTokens: 123_000,
+      },
+    ];
+    replay.meta.apiErrors = [
+      {
+        timestamp: "2026-05-10T10:02:00.000Z",
+        statusCode: 500,
+        errorType: "server_error",
+      },
+    ];
+    replay.meta.diagnostics = undefined;
+    replay.meta.diagnosticNotes = undefined;
+
+    const tools = createLocalAssistantTools(makeData(replay), { mode: "dashboard" });
+    const diagnose = tools.find((tool) => tool.name === "get_compaction_diagnostics");
+    const result = await diagnose!.execute("legacy-diagnostics", { slug: "fix-auth" });
+    const payload = JSON.parse((result.content[0] as { text: string }).text) as {
+      counts: { successfulCompactions: number; compactionFailures: number };
+      events: Array<{ confidence: string; trigger?: string; evidence?: string[] }>;
+    };
+
+    expect(payload.counts).toEqual({
+      successfulCompactions: 1,
+      automaticContextCompactions: 0,
+      unknownCompactions: 1,
+      compactionFailures: 0,
+      assistantApiErrors: 1,
+    });
+    expect(payload.events).toMatchObject([
+      { kind: "compaction", confidence: "unknown", trigger: "unknown" },
+      { kind: "assistant-api-error", confidence: "unknown" },
+    ]);
+    expect(payload.events[0]?.evidence?.[0]).toContain(
+      "This replay predates structured diagnostic events",
+    );
+  });
+
+  it("aggregates diagnostic sessions and applies date filters", async () => {
+    const first = makeReplay();
+    first.meta.diagnostics = [
+      {
+        kind: "compaction",
+        outcome: "succeeded",
+        timestamp: "2026-05-10T10:01:00.000Z",
+        confidence: "inferred",
+        trigger: "automatic-context",
+      },
+    ];
+    const second = makeReplay();
+    second.meta.sessionId = "session-2";
+    second.meta.slug = "fix-logging";
+    second.meta.title = "Fix logging";
+    second.meta.startTime = "2026-05-12T10:00:00.000Z";
+    second.meta.diagnostics = [
+      {
+        kind: "assistant-api-error",
+        outcome: "failed",
+        timestamp: "2026-05-12T10:01:00.000Z",
+        confidence: "exact",
+        errorType: "server_error",
+      },
+    ];
+    const data = makeData(first);
+    const replays = await data.listReplays();
+    data.listReplays = async () => [
+      replays[0]!,
+      {
+        ...replays[0]!,
+        slug: second.meta.slug,
+        sessionId: second.meta.sessionId,
+        title: second.meta.title,
+        startTime: second.meta.startTime,
+        diagnostics: second.meta.diagnostics,
+      },
+    ];
+    const tools = createLocalAssistantTools(data, { mode: "dashboard" });
+    const diagnose = tools.find((tool) => tool.name === "get_compaction_diagnostics");
+
+    const allResult = await diagnose!.execute("all-diagnostics", { provider: "pi", limit: 1 });
+    const allPayload = JSON.parse((allResult.content[0] as { text: string }).text) as {
+      totals: { sessions: number; successfulCompactions: number; assistantApiErrors: number };
+      sessions: unknown[];
+    };
+    expect(allPayload.totals).toMatchObject({
+      sessions: 2,
+      successfulCompactions: 1,
+      assistantApiErrors: 1,
+    });
+    expect(allPayload.sessions).toHaveLength(1);
+
+    const filteredResult = await diagnose!.execute("filtered-diagnostics", {
+      provider: "pi",
+      since: "2026-05-11T00:00:00.000Z",
+    });
+    const filteredPayload = JSON.parse((filteredResult.content[0] as { text: string }).text) as {
+      totals: { sessions: number; assistantApiErrors: number };
+    };
+    expect(filteredPayload.totals).toMatchObject({ sessions: 1, assistantApiErrors: 1 });
+  });
+
+  it("bounds diagnostic event payloads without changing counts", async () => {
+    const replay = makeReplay();
+    replay.meta.diagnostics = Array.from({ length: 55 }, (_, index) => ({
+      kind: "compaction" as const,
+      outcome: "succeeded" as const,
+      timestamp: `2026-05-10T10:${String(index).padStart(2, "0")}:00.000Z`,
+      confidence: "unknown" as const,
+      trigger: "unknown" as const,
+    }));
+
+    const tools = createLocalAssistantTools(makeData(replay), { mode: "dashboard" });
+    const diagnose = tools.find((tool) => tool.name === "get_compaction_diagnostics");
+    const result = await diagnose!.execute("bounded-diagnostics", { slug: "fix-auth" });
+    const payload = JSON.parse((result.content[0] as { text: string }).text) as {
+      counts: { successfulCompactions: number };
+      events: unknown[];
+      eventsTruncated?: boolean;
+      omittedEventCount?: number;
+    };
+
+    expect(payload.counts.successfulCompactions).toBe(55);
+    expect(payload.events).toHaveLength(50);
+    expect(payload.eventsTruncated).toBe(true);
+    expect(payload.omittedEventCount).toBe(5);
+  });
+
   it("keeps SSH session content behind explicit consent", async () => {
     const replay = makeReplay();
     const tools = createLocalAssistantTools(makeRemoteData(replay), { mode: "dashboard" });
     const search = tools.find((tool) => tool.name === "search_sessions");
     const summary = tools.find((tool) => tool.name === "get_session_summary");
+    const diagnostics = tools.find((tool) => tool.name === "get_compaction_diagnostics");
 
     const searchResult = await search!.execute("remote-search", { query: "authentication" });
     expect(searchResult.content[0]).toMatchObject({
@@ -218,6 +404,9 @@ describe("local assistant tools", () => {
     });
     await expect(
       summary!.execute("remote-summary", { slug: "fix-auth", targetId: "remote-dev" }),
+    ).rejects.toThrow("Enable SSH session data");
+    await expect(
+      diagnostics!.execute("remote-diagnostics", { slug: "fix-auth", targetId: "remote-dev" }),
     ).rejects.toThrow("Enable SSH session data");
   });
 

@@ -2,7 +2,12 @@ import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { estimateActiveDuration } from "@vibe-replay/provider-core/duration";
 import { shortenPath } from "@vibe-replay/provider-core/utils";
-import type { ContentBlock, ParsedTurn, SessionInfo } from "@vibe-replay/provider-contract";
+import type {
+  ContentBlock,
+  ParsedTurn,
+  SessionDiagnostic,
+  SessionInfo,
+} from "@vibe-replay/provider-contract";
 import type { ProviderParseResult, TokenUsage } from "@vibe-replay/provider-contract";
 import { addParseWarning } from "@vibe-replay/provider-contract/warnings";
 import { getPiSessionsDir, readPiModelContextWindows } from "./config.js";
@@ -36,6 +41,7 @@ interface PiMessage {
   usage?: PiUsage;
   stopReason?: string;
   errorMessage?: string;
+  retryAttempt?: number;
   toolCallId?: string;
   toolName?: string;
   isError?: boolean;
@@ -169,16 +175,18 @@ export function parsePiLines(
   const allTimestamps: string[] = [];
   const compactions: NonNullable<ProviderParseResult["compactions"]> = [];
   const apiErrors: NonNullable<ProviderParseResult["apiErrors"]> = [];
+  const diagnostics: SessionDiagnostic[] = [];
   let title = options.sessionInfo?.title;
   let model: string | undefined = options.sessionInfo?.model;
   let currentModel: string | undefined = model;
+  let currentProvider: string | undefined;
   let firstTimestamp: string | undefined;
   let lastTimestamp: string | undefined;
   // Summarization requests are billed on top of the messages they replace, so
   // Pi counts them separately from any assistant message usage.
   const summaryUsages: { usage: TokenUsage; model?: string }[] = [];
 
-  for (const entry of branchEntries) {
+  for (const [entryIndex, entry] of branchEntries.entries()) {
     if (entry.timestamp) {
       allTimestamps.push(entry.timestamp);
       if (!firstTimestamp || entry.timestamp < firstTimestamp) firstTimestamp = entry.timestamp;
@@ -193,16 +201,26 @@ export function parsePiLines(
     }
 
     if (entry.type === "model_change") {
-      const nextModel = (entry as { modelId?: unknown }).modelId;
+      const modelChange = entry as { modelId?: unknown; provider?: unknown };
+      const nextModel = modelChange.modelId;
       if (typeof nextModel === "string" && nextModel) {
         currentModel = nextModel;
         model = nextModel;
+      }
+      if (typeof modelChange.provider === "string" && modelChange.provider) {
+        currentProvider = modelChange.provider;
       }
       continue;
     }
 
     if (entry.type === "compaction") {
-      const compaction = entry as { summary?: unknown; tokensBefore?: unknown; timestamp?: string };
+      const compaction = entry as {
+        summary?: unknown;
+        tokensBefore?: unknown;
+        timestamp?: string;
+        fromHook?: unknown;
+        details?: unknown;
+      };
       const summary = typeof compaction.summary === "string" ? compaction.summary : "";
       if (summary) {
         turns.push({
@@ -220,6 +238,19 @@ export function parsePiLines(
           ? { preTokens: compaction.tokensBefore }
           : {}),
       });
+      diagnostics.push(
+        classifySuccessfulCompaction(
+          branchEntries,
+          entryIndex,
+          typeof compaction.tokensBefore === "number" ? compaction.tokensBefore : undefined,
+          currentModel,
+          currentProvider,
+          options.modelContextWindows,
+          entry.id,
+          compaction.fromHook === true,
+          compaction.details,
+        ),
+      );
       continue;
     }
 
@@ -266,12 +297,44 @@ export function parsePiLines(
     }
 
     if (message.role === "assistant") {
+      if (message.provider) currentProvider = message.provider;
       const blocks = buildAssistantBlocks(message.content, toolResults, entry.timestamp);
       if (message.errorMessage) {
         blocks.push({ type: "text", text: message.errorMessage });
+        // Keep the lower-level API error stream backward-compatible; the
+        // structured diagnostic below is what distinguishes compaction
+        // failures from ordinary assistant/API errors.
         apiErrors.push({
           timestamp: entry.timestamp || new Date().toISOString(),
           ...parseApiErrorMessage(message.errorMessage),
+          ...(typeof message.retryAttempt === "number"
+            ? { retryAttempt: message.retryAttempt }
+            : {}),
+        });
+      }
+      if (message.errorMessage || message.stopReason === "error") {
+        const compactionFailure = message.errorMessage
+          ? parseCompactionFailure(message.errorMessage)
+          : undefined;
+        const error = message.errorMessage
+          ? parseDiagnosticError(message.errorMessage)
+          : { errorType: "assistant_error" };
+        diagnostics.push({
+          kind: compactionFailure ? "compaction" : "assistant-api-error",
+          outcome: "failed",
+          timestamp: entry.timestamp || new Date().toISOString(),
+          confidence: "exact",
+          ...(compactionFailure ? { trigger: compactionFailure.trigger } : {}),
+          ...(entry.id ? { entryId: entry.id } : {}),
+          ...(message.model || currentModel ? { model: message.model || currentModel } : {}),
+          ...(message.provider || currentProvider
+            ? { provider: message.provider || currentProvider }
+            : {}),
+          ...(typeof message.retryAttempt === "number"
+            ? { retryAttempt: message.retryAttempt }
+            : {}),
+          ...error,
+          ...(compactionFailure?.evidence ? { evidence: compactionFailure.evidence } : {}),
         });
       }
       if (blocks.length > 0) {
@@ -337,6 +400,8 @@ export function parsePiLines(
     ...(turnStats.length > 0 ? { turnStats } : {}),
     ...(compactions.length > 0 ? { compactions } : {}),
     ...(apiErrors.length > 0 ? { apiErrors } : {}),
+    ...(diagnostics.length > 0 ? { diagnostics } : {}),
+    diagnosticNotes: piDiagnosticNotes(),
     dataSource: "jsonl",
     dataSourceInfo: {
       primary: "jsonl",
@@ -348,6 +413,212 @@ export function parsePiLines(
     ...(model ? contextLimitForModel(model, options.modelContextWindows) : {}),
     ...(parseWarnings.length > 0 ? { parseWarnings } : {}),
   };
+}
+
+function classifySuccessfulCompaction(
+  entries: PiEntryBase[],
+  entryIndex: number,
+  preTokens: number | undefined,
+  model: string | undefined,
+  provider: string | undefined,
+  modelContextWindows: ReadonlyMap<string, number> | undefined,
+  entryId: string | undefined,
+  fromHook: boolean,
+  details: unknown,
+): SessionDiagnostic {
+  const contextLimit = model ? modelContextWindows?.get(model) : undefined;
+  const previousAssistant = previousAssistantEntry(entries, entryIndex);
+  const previousMessage = previousAssistant?.message;
+  const explicitTrigger = compactionTriggerFromDetails(details);
+
+  if (explicitTrigger) {
+    return {
+      kind: "compaction",
+      outcome: "succeeded",
+      timestamp: entries[entryIndex]?.timestamp || new Date().toISOString(),
+      confidence: "exact",
+      trigger: explicitTrigger.trigger,
+      ...(entryId ? { entryId } : {}),
+      ...(model ? { model } : {}),
+      ...(provider ? { provider } : {}),
+      ...(contextLimit ? { contextLimit } : {}),
+      ...(preTokens !== undefined ? { preTokens } : {}),
+      evidence: [explicitTrigger.evidence],
+    };
+  }
+
+  // Pi's v3 JSONL format does not persist the compaction reason. A preceding
+  // length-stopped assistant response is the strongest durable signal that
+  // Pi's automatic overflow/threshold path admitted this compaction.
+  if (previousMessage?.stopReason === "length") {
+    return {
+      kind: "compaction",
+      outcome: "succeeded",
+      timestamp: entries[entryIndex]?.timestamp || new Date().toISOString(),
+      confidence: "inferred",
+      trigger: "automatic-context",
+      ...(entryId ? { entryId } : {}),
+      ...(model ? { model } : {}),
+      ...(provider ? { provider } : {}),
+      ...(contextLimit ? { contextLimit } : {}),
+      ...(preTokens !== undefined ? { preTokens } : {}),
+      evidence: ['Nearest preceding assistant response ended with stopReason "length".'],
+    };
+  }
+
+  // A context estimate near the configured window is useful corroboration,
+  // but is deliberately weaker than an explicit runtime event. In
+  // particular, a user may manually compact a large session.
+  if (preTokens !== undefined && contextLimit && preTokens >= contextLimit * 0.8) {
+    return {
+      kind: "compaction",
+      outcome: "succeeded",
+      timestamp: entries[entryIndex]?.timestamp || new Date().toISOString(),
+      confidence: "inferred",
+      trigger: "automatic-context",
+      ...(entryId ? { entryId } : {}),
+      ...(model ? { model } : {}),
+      ...(provider ? { provider } : {}),
+      contextLimit,
+      preTokens,
+      evidence: [
+        `Persisted pre-compaction estimate (${preTokens.toLocaleString("en-US")} tokens) was at least 80% of the configured context window.`,
+      ],
+    };
+  }
+
+  return {
+    kind: "compaction",
+    outcome: "succeeded",
+    timestamp: entries[entryIndex]?.timestamp || new Date().toISOString(),
+    confidence: "unknown",
+    trigger: "unknown",
+    ...(entryId ? { entryId } : {}),
+    ...(model ? { model } : {}),
+    ...(provider ? { provider } : {}),
+    ...(contextLimit ? { contextLimit } : {}),
+    ...(preTokens !== undefined ? { preTokens } : {}),
+    evidence: [
+      fromHook
+        ? "The persisted compaction entry was supplied by a Pi extension hook; its request trigger is not recorded."
+        : "Pi v3 JSONL persisted the completed compaction but not the request trigger.",
+    ],
+  };
+}
+
+function compactionTriggerFromDetails(
+  details: unknown,
+): { trigger: "manual" | "automatic-context"; evidence: string } | undefined {
+  if (!details || typeof details !== "object" || Array.isArray(details)) return undefined;
+  const value = details as Record<string, unknown>;
+  const reason = value.reason || value.trigger;
+  if (reason === "manual") {
+    return {
+      trigger: "manual",
+      evidence: "The persisted compaction details explicitly recorded a manual trigger.",
+    };
+  }
+  if (reason === "threshold" || reason === "overflow" || reason === "automatic") {
+    return {
+      trigger: "automatic-context",
+      evidence: `The persisted compaction details explicitly recorded an automatic ${String(reason)} trigger.`,
+    };
+  }
+  return undefined;
+}
+
+function previousAssistantEntry(
+  entries: PiEntryBase[],
+  entryIndex: number,
+): PiMessageEntry | undefined {
+  for (let index = entryIndex - 1; index >= 0; index--) {
+    const entry = entries[index];
+    if (entry?.type !== "message") continue;
+    const message = (entry as PiMessageEntry).message;
+    if (message?.role === "assistant") return entry as PiMessageEntry;
+    // A user message starts a new turn. Do not attribute a later manual
+    // compaction to an older length-stopped assistant response.
+    if (message?.role === "user") return undefined;
+  }
+  return undefined;
+}
+
+function parseCompactionFailure(message: string):
+  | {
+      trigger: "manual" | "automatic-context" | "unknown";
+      evidence: string[];
+    }
+  | undefined {
+  if (/context overflow recovery failed/i.test(message)) {
+    return {
+      trigger: "automatic-context",
+      evidence: ["Pi persisted an explicit context overflow recovery failure."],
+    };
+  }
+  if (/auto(?:matic)?[- ]compaction failed/i.test(message)) {
+    return {
+      trigger: "automatic-context",
+      evidence: ["Pi persisted an explicit automatic compaction failure."],
+    };
+  }
+  if (/manual[- ]compaction failed/i.test(message)) {
+    return {
+      trigger: "manual",
+      evidence: ["Pi persisted an explicit manual compaction failure."],
+    };
+  }
+  if (
+    /\bcompaction failed\b|\bcompaction cancell?ed\b|\bsummarization (?:failed|aborted)\b/i.test(
+      message,
+    )
+  ) {
+    return {
+      trigger: "unknown",
+      evidence: ["Pi persisted an explicit compaction/summarization failure message."],
+    };
+  }
+  return undefined;
+}
+
+function parseDiagnosticError(message: string): {
+  statusCode?: number;
+  errorType?: string;
+} {
+  const parsed = parseApiErrorMessage(message);
+  return {
+    ...(parsed.statusCode !== undefined ? { statusCode: parsed.statusCode } : {}),
+    errorType: normalizedPiErrorType(message),
+  };
+}
+
+function normalizedPiErrorType(message: string): string {
+  const statusCode = parseApiErrorMessage(message).statusCode;
+  if (/context.{0,30}(?:overflow|window)|(?:overflow|window).{0,30}context/i.test(message)) {
+    return "context_overflow";
+  }
+  if (/rate[_ -]?limit|too many requests/i.test(message) || statusCode === 429) {
+    return "rate_limit_error";
+  }
+  if (/timeout|timed out/i.test(message) || statusCode === 408 || statusCode === 504) {
+    return "timeout";
+  }
+  if (/connection|network|fetch failed/i.test(message)) return "connection_error";
+  if (
+    /overloaded|\b5\d\d\b|server error|no body/i.test(message) ||
+    (statusCode !== undefined && statusCode >= 500 && statusCode <= 599)
+  ) {
+    return "server_error";
+  }
+  if (/aborted|cancelled|canceled/i.test(message)) return "aborted";
+  return "assistant_error";
+}
+
+function piDiagnosticNotes(): string[] {
+  return [
+    "Pi JSONL persists completed compaction entries, but not compaction_start/compaction_end or session_compact_failed lifecycle events.",
+    "Pi JSONL also does not persist auto_retry or summarization-retry lifecycle events.",
+    "A missing compaction-failure event is inconclusive; ordinary assistant/API errors are not attributed to compaction without explicit evidence.",
+  ];
 }
 
 function parseApiErrorMessage(message: string): { statusCode?: number; errorType?: string } {
