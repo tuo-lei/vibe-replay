@@ -1856,7 +1856,7 @@ function TurnRow({
               <span className="text-[10px] font-mono text-terminal-orange/70 shrink-0">
                 observed context drop
               </span>
-              <div className="flex-1 border-t border-dashed border-terminal-red/40" />
+              <div className="flex-1 border-t border-dashed border-terminal-orange/40" />
             </div>
           </td>
         </tr>
