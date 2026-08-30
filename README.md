@@ -244,6 +244,10 @@ CLI usage requires Node.js >= 22.19.0. The `website` package uses Astro 6 and re
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for architecture details and development workflow.
 
+Contributing with a coding agent? Project instructions live in
+[AGENTS.md](./AGENTS.md), which Claude Code, Codex, Cursor, Pi, and opencode all
+read. See [Working with a coding agent](./CONTRIBUTING.md#working-with-a-coding-agent).
+
 ## License
 
 [MIT](./LICENSE)
