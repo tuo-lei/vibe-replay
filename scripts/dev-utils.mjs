@@ -2,7 +2,7 @@
  * Shared utilities for dev launcher scripts.
  */
 import { spawn } from "node:child_process";
-import { lstat, unlink } from "node:fs/promises";
+import { lstat, mkdir, rmdir, unlink } from "node:fs/promises";
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -46,7 +46,6 @@ function hasExited(child) {
 function waitForChildExit(child, timeoutMs) {
   if (!child?.pid || hasExited(child)) return Promise.resolve(true);
   return new Promise((resolve) => {
-    let timer;
     const finish = (exited) => {
       clearTimeout(timer);
       child.removeListener("exit", onExit);
@@ -57,7 +56,7 @@ function waitForChildExit(child, timeoutMs) {
     const onError = () => finish(true);
     child.once("exit", onExit);
     child.once("error", onError);
-    timer = setTimeout(() => finish(hasExited(child)), timeoutMs);
+    const timer = setTimeout(() => finish(hasExited(child)), timeoutMs);
   });
 }
 
@@ -109,19 +108,27 @@ export function killProcessTree(child, signal = "SIGTERM") {
 export async function waitForProcessTree(child, timeoutMs = 1_000) {
   if (!child?.pid) return;
   if (IS_WINDOWS) {
-    if (!(await waitForChildExit(child, timeoutMs))) await killProcessTree(child, "SIGKILL");
+    if (await waitForChildExit(child, timeoutMs)) return;
+    await killProcessTree(child, "SIGKILL");
+    await waitForChildExit(child, timeoutMs);
     return;
   }
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      process.kill(-child.pid, 0);
-    } catch {
-      return;
+  const waitForGroupExit = async (waitMs) => {
+    const deadline = Date.now() + waitMs;
+    while (Date.now() < deadline) {
+      try {
+        process.kill(-child.pid, 0);
+      } catch (error) {
+        if (error?.code !== "EPERM") return true;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
     }
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  killProcessTree(child, "SIGKILL");
+    return false;
+  };
+
+  if (await waitForGroupExit(timeoutMs)) return;
+  await killProcessTree(child, "SIGKILL");
+  await waitForGroupExit(timeoutMs);
 }
 
 /** Cross-platform temp log path for the backgrounded Vite viewer. */
@@ -133,6 +140,10 @@ function portLockPath(port) {
   return IS_WINDOWS
     ? `\\\\.\\pipe\\vibe-replay-port-${port}`
     : join(tmpdir(), `vibe-replay-port-${port}.sock`);
+}
+
+function portClaimPath(port) {
+  return join(tmpdir(), `vibe-replay-port-${port}.claim`);
 }
 
 /** Validate a user-supplied TCP port. Port 0 is intentionally not accepted. */
@@ -196,6 +207,32 @@ function closeLockServer(server) {
   });
 }
 
+/**
+ * Serialize attempts to create or reclaim one port's live socket. The claim
+ * is intentionally not stale-reclaimed: skipping a candidate after a crash
+ * is safer than deleting a claim another process may have just acquired.
+ */
+async function tryAcquirePortClaim(port) {
+  const claimPath = portClaimPath(port);
+  try {
+    await mkdir(claimPath);
+  } catch (error) {
+    if (error?.code === "EEXIST") return null;
+    throw error;
+  }
+
+  let released = false;
+  return async () => {
+    if (released) return;
+    released = true;
+    try {
+      await rmdir(claimPath);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  };
+}
+
 function isLockAlive(lockPath) {
   return new Promise((resolve) => {
     let settled = false;
@@ -238,35 +275,49 @@ async function removeStaleLock(lockPath) {
  */
 async function tryAcquirePortLock(port) {
   const lockPath = portLockPath(port);
+  const releaseClaim = await tryAcquirePortClaim(port);
+  if (!releaseClaim) return null;
 
-  while (true) {
-    const lockServer = createServer((socket) => socket.end());
-    const acquired = await new Promise((resolve, reject) => {
-      const onError = (error) => {
-        lockServer.removeListener("error", onError);
-        if (error?.code === "EADDRINUSE") resolve(false);
-        else reject(error);
-      };
-      lockServer.once("error", onError);
-      lockServer.listen(lockPath, () => {
-        lockServer.removeListener("error", onError);
-        resolve(true);
+  let claimReleased = false;
+  const releaseClaimOnce = async () => {
+    if (claimReleased) return;
+    claimReleased = true;
+    await releaseClaim();
+  };
+
+  try {
+    while (true) {
+      const lockServer = createServer((socket) => socket.end());
+      const acquired = await new Promise((resolve, reject) => {
+        const onError = (error) => {
+          lockServer.removeListener("error", onError);
+          if (error?.code === "EADDRINUSE") resolve(false);
+          else reject(error);
+        };
+        lockServer.once("error", onError);
+        lockServer.listen(lockPath, () => {
+          lockServer.removeListener("error", onError);
+          resolve(true);
+        });
       });
-    });
 
-    if (acquired) {
-      lockServer.unref();
-      let released = false;
-      return async () => {
-        if (released) return;
-        released = true;
-        await closeLockServer(lockServer);
-      };
+      if (acquired) {
+        lockServer.unref();
+        await releaseClaimOnce();
+        let released = false;
+        return async () => {
+          if (released) return;
+          released = true;
+          await closeLockServer(lockServer);
+        };
+      }
+
+      await closeLockServer(lockServer);
+      if (await isLockAlive(lockPath)) return null;
+      if (!(await removeStaleLock(lockPath))) return null;
     }
-
-    await closeLockServer(lockServer);
-    if (await isLockAlive(lockPath)) return null;
-    if (!(await removeStaleLock(lockPath))) return null;
+  } finally {
+    await releaseClaimOnce();
   }
 }
 
@@ -284,14 +335,19 @@ export async function reservePort(port, label = "Port") {
   return { port: parsedPort, release: releaseLock };
 }
 
-/** Find and reserve a free port starting from `preferred`, incrementing on conflict. */
-export async function reserveFreePort(preferred, range = 100) {
+/**
+ * Find and reserve a free port starting from `preferred`, incrementing on
+ * conflict and skipping ports selected by another launcher component.
+ */
+export async function reserveFreePort(preferred, range = 100, excludedPorts = []) {
   const firstPort = parsePort(preferred, "Preferred port");
   if (!Number.isInteger(range) || range < 1) {
     throw new Error("Port search range must be a positive integer");
   }
+  const excluded = new Set(excludedPorts);
   const lastPort = Math.min(65535, firstPort + range - 1);
   for (let port = firstPort; port <= lastPort; port++) {
+    if (excluded.has(port)) continue;
     const releaseLock = await tryAcquirePortLock(port);
     if (!releaseLock) continue;
     if (await isPortFree(port)) return { port, release: releaseLock };

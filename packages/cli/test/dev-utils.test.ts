@@ -38,6 +38,16 @@ describe("dev port utilities", () => {
     );
   });
 
+  it("skips ports reserved for another launcher component", async () => {
+    const preferred = 35_000 + Math.floor(Math.random() * 5_000);
+    const reservation = await reserveFreePort(preferred, 5, [preferred]);
+    try {
+      expect(reservation.port).not.toBe(preferred);
+    } finally {
+      await reservation.release();
+    }
+  });
+
   it("rejects conflicting port aliases", () => {
     const originalApiPort = process.env.VIBE_API_PORT;
     const originalViteApiPort = process.env.VITE_API_PORT;
@@ -76,6 +86,53 @@ describe("dev port utilities", () => {
       );
     } finally {
       await first.release();
+    }
+  });
+
+  it("reclaims a reservation after its owner is killed", async () => {
+    const initial = await reserveFreePort(40_000 + Math.floor(Math.random() * 5_000));
+    const port = initial.port;
+    await initial.release();
+
+    const utilityUrl = new URL("../../../scripts/dev-utils.mjs", import.meta.url).href;
+    const holderSource = `
+      import { reservePort } from ${JSON.stringify(utilityUrl)};
+      await reservePort(${port}, "Holder port");
+      process.stdout.write("ready\\n");
+      setInterval(() => {}, 1000);
+    `;
+    const holder = spawn(process.execPath, ["--input-type=module", "-e", holderSource], {
+      detached: process.platform !== "win32",
+      stdio: ["ignore", "pipe", "inherit"],
+    });
+
+    try {
+      await new Promise((resolve, reject) => {
+        let output = "";
+        const timer = setTimeout(
+          () => reject(new Error(`holder did not reserve: ${output}`)),
+          5_000,
+        );
+        holder.stdout.on("data", (chunk) => {
+          output += chunk;
+          if (output.includes("ready")) {
+            clearTimeout(timer);
+            resolve();
+          }
+        });
+        holder.once("error", (error) => {
+          clearTimeout(timer);
+          reject(error);
+        });
+      });
+
+      await killProcessTree(holder, "SIGKILL");
+      await waitForProcessTree(holder, 2_000);
+      const reclaimed = await reservePort(port, "Reclaimed port");
+      await reclaimed.release();
+    } finally {
+      await killProcessTree(holder, "SIGKILL");
+      await waitForProcessTree(holder, 2_000);
     }
   });
 

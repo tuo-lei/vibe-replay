@@ -35,12 +35,16 @@ try {
   viteReservation =
     vitePortOverride !== undefined
       ? await reservePort(vitePortOverride, "Viewer port")
-      : await reserveFreePort(VITE_PREFERRED);
+      : await reserveFreePort(
+          VITE_PREFERRED,
+          100,
+          astroPortOverride !== undefined ? [astroPortOverride] : [],
+        );
   reservations.push(viteReservation);
   astroReservation =
     astroPortOverride !== undefined
       ? await reservePort(astroPortOverride, "Website port")
-      : await reserveFreePort(ASTRO_PREFERRED);
+      : await reserveFreePort(ASTRO_PREFERRED, 100, [viteReservation.port]);
   reservations.push(astroReservation);
 } catch (error) {
   await Promise.all(reservations.map(({ release }) => release()));
@@ -52,10 +56,20 @@ const astroPort = astroReservation.port;
 
 console.log();
 console.log(
-  `[vibe-replay] Viewer port:  ${vitePort}${vitePort !== VITE_PREFERRED ? ` (${VITE_PREFERRED} was busy)` : ""}`,
+  `[vibe-replay] Viewer port:  ${vitePort}${
+    vitePortOverride === undefined &&
+    vitePort !== VITE_PREFERRED &&
+    astroPortOverride !== VITE_PREFERRED
+      ? ` (${VITE_PREFERRED} was busy)`
+      : ""
+  }`,
 );
 console.log(
-  `[vibe-replay] Website port: ${astroPort}${astroPort !== ASTRO_PREFERRED ? ` (${ASTRO_PREFERRED} was busy)` : ""}`,
+  `[vibe-replay] Website port: ${astroPort}${
+    astroPortOverride === undefined && astroPort !== ASTRO_PREFERRED && vitePort !== ASTRO_PREFERRED
+      ? ` (${ASTRO_PREFERRED} was busy)`
+      : ""
+  }`,
 );
 console.log(`[vibe-replay] Website:      http://localhost:${astroPort}  (Astro HMR)`);
 console.log(`[vibe-replay] Viewer:       http://localhost:${vitePort}  (Vite HMR)`);
@@ -63,19 +77,17 @@ console.log(`[vibe-replay] /view/  →     redirects to Vite viewer`);
 console.log();
 
 // Start Vite viewer dev (backgrounded, logs to file)
-let vite;
 let astro;
 let shuttingDown = false;
-let logStream;
 
-vite = spawnPnpm(["--filter", "@vibe-replay/viewer", "dev"], {
+const vite = spawnPnpm(["--filter", "@vibe-replay/viewer", "dev"], {
   stdio: ["ignore", "pipe", "pipe"],
   env: { ...process.env, VITE_PORT: String(vitePort) },
 });
 
 const { createWriteStream } = await import("node:fs");
 const logPath = viewerLogPath(vitePort);
-logStream = createWriteStream(logPath);
+const logStream = createWriteStream(logPath);
 vite.stdout.pipe(logStream);
 vite.stderr.pipe(logStream);
 console.log(`[vibe-replay] Viewer logs:  ${logPath}`);
