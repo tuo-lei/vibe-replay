@@ -179,4 +179,26 @@ describe("Cursor transcript metadata discovery", () => {
 
     expect(session?.firstPrompt).toBe("Inspect the delayed prompt");
   });
+
+  it("counts user prompts regardless of JSON whitespace", async () => {
+    const root = await makeTempRoot();
+    const transcript = join(root, "session.jsonl");
+    const prompt =
+      '{ "role" : "user", "message": { "content": [{ "type": "text", "text": "Count this prompt" }] } }';
+    await writeFile(transcript, `${JSON.stringify({ role: "assistant" })}\n${prompt}\n`, "utf8");
+    const fileStat = await stat(transcript);
+
+    const session = await __testables.extractSessionInfo(
+      transcript,
+      fileStat.size,
+      Date.now(),
+      root,
+      [],
+    );
+
+    expect(session).toMatchObject({
+      firstPrompt: "Count this prompt",
+      promptCount: 1,
+    });
+  });
 });

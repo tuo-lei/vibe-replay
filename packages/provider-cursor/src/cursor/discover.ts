@@ -431,10 +431,7 @@ async function extractSessionInfo(
         } catch {}
       }
 
-      if (
-        (line.includes('"role":"user"') || line.includes('"role": "user"')) &&
-        !line.includes('"tool_result"')
-      ) {
+      if (userRoleRe.test(line) && !line.includes('"tool_result"')) {
         promptCount++;
       }
       const toolMatches = line.match(toolUseRe);

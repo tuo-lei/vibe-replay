@@ -1055,8 +1055,8 @@ export async function startServer(
   // extracts, so serving the previous run's results would show stale facets
   // until the next scan happened to finish.
   const scanResultsCacheKey = `dashboard-scan-results-v${SCANNER_VERSION}-${cacheKeySuffix}`;
-  // v4 → v5: invalidate persisted project labels after workflow disambiguation.
-  const insightsCacheKey = `dashboard-insights-v5-${cacheKeySuffix}`;
+  // v5 → v6: project lastActivity now uses session end times when available.
+  const insightsCacheKey = `dashboard-insights-v6-${cacheKeySuffix}`;
   const readSourcesCatalogCache = async (): Promise<NormalizedSourceSessionCatalogCache | null> =>
     normalizeSourceSessionCatalogCache(
       await readFileCache<SourceSessionCatalogCache | CachedSourceRecord[]>(sourcesCacheKey),
