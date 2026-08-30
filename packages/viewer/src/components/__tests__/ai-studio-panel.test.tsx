@@ -129,6 +129,33 @@ describe("AiStudioPanel", () => {
     expect(screen.queryByText("opencode run")).toBeNull();
   });
 
+  it("keeps API-key and account authentication choices in separate groups", () => {
+    const actions = makeActions([
+      provider({
+        id: "openrouter",
+        name: "OpenRouter",
+        configured: false,
+        authType: undefined,
+        authSource: undefined,
+        authMethods: [
+          { type: "api_key", label: "OpenRouter API key", subscription: false },
+          { type: "oauth", label: "Sign in with OpenRouter", subscription: false },
+        ],
+      }),
+    ]);
+
+    render(<AiStudioPanel {...actions} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }));
+    const authHeadings = screen
+      .getAllByRole("heading")
+      .map((heading) => heading.textContent)
+      .filter((text): text is string => text === "Accounts" || text === "API keys");
+    expect(authHeadings).toEqual(["Accounts", "API keys"]);
+    fireEvent.click(screen.getByRole("button", { name: /OpenRouter.*Account login/ }));
+    expect(screen.getByRole("button", { name: "Sign in with provider" })).toBeDefined();
+  });
+
   it("saves an API key through the provider auth action", async () => {
     const authenticate = vi.fn(async () => {});
     const actions = makeActions([provider()], {

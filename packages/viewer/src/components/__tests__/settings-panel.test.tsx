@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import SettingsPanel from "../SettingsPanel";
+import SettingsPanel, { getSettingsSectionFromUrl } from "../SettingsPanel";
 
 const source = {
   id: "remote-devspace",
@@ -70,6 +70,64 @@ describe("SettingsPanel", () => {
     expect(screen.getByText("Codex")).toBeDefined();
     expect(screen.getByText("AI providers")).toBeDefined();
     expect(screen.getByLabelText("Custom AI endpoint")).toBeDefined();
+  });
+
+  it("follows the settings section URL and updates it from the left menu", async () => {
+    window.history.replaceState({}, "", "/?view=dashboard&tab=settings&settingsSection=remote");
+    const scrollIntoView = vi.fn();
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: function (this: HTMLElement) {
+        const topById: Record<string, number> = {
+          "settings-ai": 200,
+          "settings-remote": 0,
+          "settings-more": 200,
+        };
+        const top = topById[this.id];
+        if (top === undefined) return originalGetBoundingClientRect.call(this);
+        return {
+          bottom: top + 100,
+          height: 100,
+          left: 0,
+          right: 100,
+          top,
+          width: 100,
+          x: 0,
+          y: top,
+          toJSON: () => ({}),
+        } as DOMRect;
+      },
+    });
+
+    try {
+      expect(getSettingsSectionFromUrl()).toBe("remote");
+      render(<SettingsPanel />);
+
+      await waitFor(() => expect(screen.getByText("ROS devspace")).toBeDefined());
+      expect(screen.getByRole("button", { name: /^Remote SSH/ }).getAttribute("aria-current")).toBe(
+        "location",
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /^AI/ }));
+      expect(new URLSearchParams(window.location.search).get("settingsSection")).toBe("ai");
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+    } finally {
+      Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+        configurable: true,
+        value: originalScrollIntoView,
+      });
+      Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+        configurable: true,
+        value: originalGetBoundingClientRect,
+      });
+      window.history.replaceState({}, "", "/");
+    }
   });
 
   it("tests an SSH source without exposing credentials", async () => {
