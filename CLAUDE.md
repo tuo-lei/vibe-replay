@@ -18,6 +18,6 @@
 - Editing a file triggers the `PostToolUse` hook in `.claude/settings.json`,
   which runs `oxlint --fix` and `oxfmt` on that file. Do not also run `pnpm lint`
   on a file you just edited — it is already formatted.
-- `.claude/skills/` holds symlinks into `.agents/skills/`, the shared skill
-  directory Codex and Pi read. Add new skills there, not here — see
-  **Agent setup** in `AGENTS.md`.
+- Add new skills under `skills/<name>`, then create discovery symlinks under
+  `.agents/skills/` and `.claude/skills/` as described in **Agent setup** in
+  `AGENTS.md`. Do not create the canonical skill in either discovery directory.
