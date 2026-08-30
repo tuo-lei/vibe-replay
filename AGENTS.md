@@ -173,8 +173,8 @@ because it discovers skills under `.claude/skills/` while Codex and Pi use
 - The replay skill has exactly one real copy, at `skills/replay/` — the published
   path that `.claude-plugin/plugin.json` and the README install command point at.
   `.agents/skills/replay` and `.claude/skills/replay` are both symlinks into it.
-  On a Windows clone without symlink support, run `git config core.symlinks true`
-  and re-checkout, or copy the directory locally.
+  On a Windows clone, run `git config core.symlinks true` and re-checkout before
+  running the tests; the wiring guard intentionally rejects a copied directory.
 
 `test/agent-instructions.test.ts` in `packages/cli` guards this wiring. It fails
 if `CLAUDE.md` stops importing `AGENTS.md`, if either skill symlink breaks or
