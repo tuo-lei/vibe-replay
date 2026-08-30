@@ -9,7 +9,17 @@
  *   node scripts/dev.mjs --menu     # interactive CLI menu mode
  */
 import { watch } from "node:fs";
-import { findFreePort, spawnPnpm, spawnTsx, viewerLogPath } from "./dev-utils.mjs";
+import {
+  readPortOverride,
+  killProcessTree,
+  reserveFreePort,
+  reservePort,
+  spawnPnpm,
+  spawnTsx,
+  waitForProcessTree,
+  waitForPortBound,
+  viewerLogPath,
+} from "./dev-utils.mjs";
 
 const VITE_PREFERRED = 5173;
 const API_PREFERRED = 13456;
@@ -18,9 +28,41 @@ const forceDashboard = process.argv.includes("-d");
 const menuMode = process.argv.includes("--menu");
 const dashboardMode = forceDashboard || !menuMode;
 
-// Find two non-colliding free ports
-const apiPort = await findFreePort(API_PREFERRED);
-const vitePort = await findFreePort(VITE_PREFERRED);
+const apiPortOverride = readPortOverride(["VIBE_API_PORT", "VITE_API_PORT"], "API port");
+const vitePortOverride = readPortOverride(["VIBE_VIEWER_PORT", "VITE_PORT"], "Viewer port");
+if (apiPortOverride !== undefined && apiPortOverride === vitePortOverride) {
+  throw new Error(`API port and viewer port must be different (both are ${apiPortOverride})`);
+}
+
+// Keep reservations for the entire launcher lifetime. A free-port probe alone
+// has a check-then-bind race when two worktrees start at the same time; the
+// lock prevents another launcher from selecting the same port during startup
+// and during CLI HMR restarts.
+const reservations = [];
+let apiReservation;
+let viteReservation;
+let vite;
+let cli;
+
+try {
+  apiReservation =
+    apiPortOverride !== undefined
+      ? await reservePort(apiPortOverride, "API port")
+      : await reserveFreePort(API_PREFERRED);
+  reservations.push(apiReservation);
+
+  viteReservation =
+    vitePortOverride !== undefined
+      ? await reservePort(vitePortOverride, "Viewer port")
+      : await reserveFreePort(VITE_PREFERRED);
+  reservations.push(viteReservation);
+} catch (error) {
+  await Promise.all(reservations.map(({ release }) => release()));
+  throw error;
+}
+
+const apiPort = apiReservation.port;
+const vitePort = viteReservation.port;
 
 console.log();
 console.log(
@@ -38,9 +80,14 @@ console.log();
 
 // Start Vite dev server (backgrounded) — port + strictPort via env vars in vite.config.ts
 const cloudApiUrl = process.env.VIBE_REPLAY_API_URL || "http://localhost:8787";
-const vite = spawnPnpm(["--filter", "@vibe-replay/viewer", "dev"], {
+vite = spawnPnpm(["--filter", "@vibe-replay/viewer", "dev"], {
   stdio: ["ignore", "pipe", "pipe"],
-  env: { ...process.env, VITE_PORT: String(vitePort), VITE_API_PORT: String(apiPort), VITE_CLOUD_API_URL: cloudApiUrl },
+  env: {
+    ...process.env,
+    VITE_PORT: String(vitePort),
+    VITE_API_PORT: String(apiPort),
+    VITE_CLOUD_API_URL: cloudApiUrl,
+  },
 });
 
 // Pipe Vite output to a log file
@@ -67,10 +114,10 @@ const cliEnv = {
 const cliScript = "packages/cli/src/index.ts";
 const cliExtraArgs = dashboardMode ? ["-d"] : [];
 
-let cli;
 let restarting = false;
 let shuttingDown = false;
 let hasOpenedBrowser = false;
+let startingCli = false;
 
 function startCli() {
   // Run tsx via `node --import tsx` (see spawnTsx) instead of the
@@ -88,14 +135,13 @@ function startCli() {
   hasOpenedBrowser = true;
 
   cli.on("exit", (code, signal) => {
-    if (restarting) return; // will be respawned by the watcher
-    cleanup();
-    process.exit(code ?? (signal === "SIGINT" ? 130 : 0));
+    if (restarting || startingCli || shuttingDown) return; // handled by the caller
+    void shutdown(code ?? (signal === "SIGINT" ? 130 : 1));
   });
 }
 
 function killCli() {
-  try { cli.kill("SIGTERM"); } catch {}
+  killProcessTree(cli);
 }
 
 function restartCli() {
@@ -104,14 +150,61 @@ function restartCli() {
   console.log("\n[dev] change detected — restarting CLI...\n");
   cli.on("exit", () => {
     restarting = false;
+    if (shuttingDown) return;
     startCli();
   });
   killCli();
 }
 
-startCli();
+// Cleanup on exit
+async function shutdown(exitCode) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  try {
+    killProcessTree(cli);
+    killProcessTree(vite);
+    await Promise.all([waitForProcessTree(cli), waitForProcessTree(vite)]);
+    await Promise.all(reservations.map(({ release }) => release()));
+  } finally {
+    logStream.end();
+    process.exit(exitCode);
+  }
+}
 
-// Watch CLI source + shared types for changes
+vite.on("exit", (code) => {
+  if (!shuttingDown) {
+    void shutdown(code ?? 1);
+  }
+});
+
+process.on("SIGINT", () => {
+  void shutdown(130);
+});
+
+process.on("SIGTERM", () => {
+  void shutdown(143);
+});
+
+process.on("SIGHUP", () => {
+  void shutdown(129);
+});
+
+// Start Vite first so the CLI can safely open the viewer when its API binds.
+try {
+  await waitForPortBound(vitePort, vite, "Vite");
+  startingCli = true;
+  startCli();
+  if (dashboardMode) await waitForPortBound(apiPort, cli, "CLI API");
+  startingCli = false;
+} catch (error) {
+  startingCli = false;
+  console.error(`[vibe-replay] Dev server startup failed: ${error.message}`);
+  await shutdown(1);
+}
+
+// Watch CLI source + shared types for changes after the initial child has
+// started. This avoids handling a file event before `cli` exists while Vite
+// or the dashboard API is still becoming ready.
 // Note: fs.watch({ recursive: true }) works on macOS/Windows natively.
 // On Linux it requires Node 22+; older Node only watches the top-level dir.
 let debounce;
@@ -122,22 +215,3 @@ for (const dir of ["packages/cli/src", "packages/types/src"]) {
     debounce = setTimeout(restartCli, 200);
   });
 }
-
-// Cleanup on exit
-function cleanup() {
-  shuttingDown = true;
-  try { vite.kill("SIGTERM"); } catch {}
-}
-
-process.on("SIGINT", () => {
-  cleanup();
-  killCli();
-  // Give children a moment to exit, then force quit
-  setTimeout(() => process.exit(130), 500);
-});
-
-process.on("SIGTERM", () => {
-  cleanup();
-  killCli();
-  setTimeout(() => process.exit(143), 500);
-});

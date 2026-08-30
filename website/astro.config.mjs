@@ -6,6 +6,7 @@ import { defineConfig } from "astro/config";
 const viewerDevUrl = process.env.DEV_VIEWER_URL;
 // In dev, proxy /api/* to the local Cloudflare Worker so auth + cloud APIs work
 const workerDevUrl = process.env.DEV_WORKER_URL || "http://localhost:8787";
+const strictDevPort = process.env.DEV_STRICT_PORT === "1";
 
 // Pages excluded from sitemap (private / dynamic-only / requires auth).
 // Keep in sync with the noindex meta tags on these routes.
@@ -44,6 +45,7 @@ export default defineConfig({
   ],
   vite: {
     server: {
+      strictPort: strictDevPort,
       proxy: {
         "/api": {
           target: workerDevUrl,

@@ -54,7 +54,15 @@ DOM by adding `// @vitest-environment jsdom` as the first line of the test file,
 and should `afterEach(cleanup)` so window listeners don't leak between tests.
 See `src/hooks/__tests__/usePlayback.test.tsx` for the pattern.
 
-**Daily workflow**: Run `pnpm dev`, open `http://localhost:5173`. Viewer changes hot-reload instantly via Vite HMR. CLI/API changes auto-restart via `tsx watch`. No manual rebuild or restart needed.
+**Daily workflow**: Run `pnpm dev`, then open the viewer URL printed by the
+launcher (usually `http://localhost:5173`). Viewer changes hot-reload instantly
+via Vite HMR. CLI/API changes auto-restart via `tsx watch`. No manual rebuild
+or restart needed.
+
+The dev launchers reserve ports across their entire lifetime, including CLI
+restart windows. This allows multiple worktrees to run concurrently. For fixed
+ports, set `VIBE_API_PORT` and `VIBE_VIEWER_PORT` for `pnpm dev`, or
+`VIBE_VIEWER_PORT` and `VIBE_WEBSITE_PORT` for `pnpm dev:website`.
 
 ## Working with a coding agent
 
