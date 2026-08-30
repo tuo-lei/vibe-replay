@@ -125,7 +125,7 @@ export default function ConversationView({
           type,
           timestamp: scene.timestamp,
           scenes: [{ scene, index: i }],
-          turnNumber: type === "user" ? turnCount : undefined,
+          turnNumber: type === "user" || type === "compaction" ? turnCount : undefined,
         } as TurnGroup);
         current = null;
       } else {
@@ -863,7 +863,9 @@ const GroupCard = memo(function GroupCard({
     const scene = groupScenes[0]?.scene;
     if (!scene || scene.type !== "compaction-summary") return null;
 
-    // Find compaction token impact from turnStats (context drop > 50%) near this group's position
+    // Find observed context-drop impact from turnStats near this recorded
+    // compaction's preceding user turn. A missing drop is not evidence that
+    // the recorded compaction did not happen.
     const compactionTokens = (() => {
       if (!turnStats || turnStats.length < 2 || group.turnNumber === undefined) return undefined;
       const center = group.turnNumber - 1;
@@ -897,10 +899,10 @@ const GroupCard = memo(function GroupCard({
             </span>
           )}
           {compactionTokens && (
-            <span className="text-[10px] font-mono text-terminal-green">
+            <span className="text-[10px] font-mono text-terminal-orange">
               {fmtNum(compactionTokens.before)} → {fmtNum(compactionTokens.after)}
-              <span className="text-terminal-green/70 ml-1">
-                (-{fmtNum(compactionTokens.freed)} freed)
+              <span className="text-terminal-orange/70 ml-1">
+                (observed drop, -{fmtNum(compactionTokens.freed)} tokens)
               </span>
             </span>
           )}

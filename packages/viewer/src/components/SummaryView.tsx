@@ -1684,7 +1684,7 @@ const TURN_TABLE_COLLAPSE = 20;
 function TurnTable({ turns, turnStats }: { turns: TurnInfo[]; turnStats?: TurnStat[] }) {
   const [expanded, setExpanded] = useState(false);
 
-  const { rows, compactionAfter } = useMemo(() => {
+  const { rows, contextDropAfter } = useMemo(() => {
     const orderedStats = orderedTurnStats(turnStats || []);
     const maxTools = Math.max(...turns.map((t) => t.toolCount), 1);
     const maxDuration = Math.max(...orderedStats.map((t) => t.durationMs || 0), 1);
@@ -1709,7 +1709,7 @@ function TurnTable({ turns, turnStats }: { turns: TurnInfo[]; turnStats?: TurnSt
       };
     });
 
-    return { rows: mapped, compactionAfter: contextDropTurns };
+    return { rows: mapped, contextDropAfter: contextDropTurns };
   }, [turns, turnStats]);
 
   const hasStats = turnStats && turnStats.length > 0;
@@ -1747,7 +1747,7 @@ function TurnTable({ turns, turnStats }: { turns: TurnInfo[]; turnStats?: TurnSt
                 hasContext={!!hasContext}
                 hasTokens={!!hasTokens}
                 colCount={colCount}
-                showCompaction={compactionAfter.has(r.index)}
+                showContextDrop={contextDropAfter.has(r.index)}
               />
             ))}
           </tbody>
@@ -1780,7 +1780,7 @@ function TurnRow({
   hasContext,
   hasTokens,
   colCount,
-  showCompaction,
+  showContextDrop,
 }: {
   row: {
     index: number;
@@ -1800,7 +1800,7 @@ function TurnRow({
   hasContext: boolean;
   hasTokens: boolean;
   colCount: number;
-  showCompaction: boolean;
+  showContextDrop: boolean;
 }) {
   return (
     <>
@@ -1847,14 +1847,14 @@ function TurnRow({
           </td>
         )}
       </tr>
-      {showCompaction && (
+      {showContextDrop && (
         <tr>
           {/* oxlint-disable-next-line jsx-a11y/control-has-associated-label -- false positive: oxlint misattributes <td> inside a JSX conditional as a control */}
           <td colSpan={colCount} className="px-0 py-0">
-            <div className="flex items-center gap-2 px-2 py-0.5 bg-terminal-red/5">
-              <div className="flex-1 border-t border-dashed border-terminal-red/40" />
-              <span className="text-[10px] font-mono text-terminal-red/70 shrink-0">
-                context compacted
+            <div className="flex items-center gap-2 px-2 py-0.5 bg-terminal-orange/5">
+              <div className="flex-1 border-t border-dashed border-terminal-orange/40" />
+              <span className="text-[10px] font-mono text-terminal-orange/70 shrink-0">
+                observed context drop
               </span>
               <div className="flex-1 border-t border-dashed border-terminal-red/40" />
             </div>
