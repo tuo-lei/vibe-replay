@@ -240,6 +240,18 @@ pnpm dev              # Viewer (Vite HMR) + CLI (auto-restart) — full HMR
 pnpm dev:website      # Website (Astro HMR) + Viewer (Vite HMR)
 ```
 
+The dev launchers reserve their selected ports for the lifetime of the
+launcher, so multiple worktrees can start at the same time without selecting
+the same port during startup. To choose a fixed pair explicitly, use
+`VIBE_API_PORT` and `VIBE_VIEWER_PORT`:
+
+```bash
+VIBE_API_PORT=13457 VIBE_VIEWER_PORT=5174 pnpm dev
+VIBE_VIEWER_PORT=5175 VIBE_WEBSITE_PORT=4322 pnpm dev:website
+```
+
+The requested ports must be free and different within the same launcher.
+
 CLI usage requires Node.js >= 22.19.0. The `website` package uses Astro 6 and requires Node.js >= 22.12.0. When `nvm` is available, `website` scripts will try `nvm use` from `website/.nvmrc` automatically. If a global package-manager shim selects an older Node for child commands, verify `corepack pnpm exec node -v` and use `corepack pnpm ...` after selecting a compatible Node version; see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for architecture details and development workflow.
