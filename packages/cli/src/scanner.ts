@@ -2419,7 +2419,10 @@ export function aggregateUserInsights(scans: SessionScanResult[]): UserInsights 
       ps.prUrls.add(`${identity.key}#${identity.prNumber}`);
     }
     const ts = s.startTime || "";
-    if (ts && (!ps.lastActivity || ts > ps.lastActivity)) ps.lastActivity = ts;
+    const activityTs = s.endTime || ts;
+    if (activityTs && (!ps.lastActivity || activityTs > ps.lastActivity)) {
+      ps.lastActivity = activityTs;
+    }
     if (ts && (!first || ts < first)) first = ts;
     if (ts && (!last || ts > last)) last = ts;
 

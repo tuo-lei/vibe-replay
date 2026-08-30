@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildSourceSessionCatalogCache } from "../src/server-source-catalog.js";
-import type { NormalizedSourceSessionCatalogCache } from "../src/server-types.js";
+import {
+  buildSourceSessionCatalogCache,
+  cachedReplaySummary,
+  cachedReplaySummaryChanged,
+} from "../src/server-source-catalog.js";
+import type { NormalizedSourceSessionCatalogCache, ReplaySummary } from "../src/server-types.js";
 
 const source = (provider: string, sessionId: string) => ({
   provider,
@@ -71,5 +75,43 @@ describe("buildSourceSessionCatalogCache", () => {
     );
 
     expect(catalog.sessions).toEqual([source("cursor", "local-new"), remote]);
+  });
+});
+
+describe("cached replay summaries", () => {
+  it("detects nested replay changes even when identity stays the same", () => {
+    const replay: ReplaySummary = {
+      slug: "session",
+      baseDir: "/tmp/replays",
+      sessionId: "session-id",
+      provider: "opencode",
+      project: "/repo",
+      startTime: "2026-08-20T00:00:00.000Z",
+      stats: {
+        sceneCount: 1,
+        userPrompts: 1,
+        toolCalls: 0,
+        durationMs: 1000,
+        tokenUsage: {
+          inputTokens: 5,
+          outputTokens: 5,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+        },
+        costEstimate: 0,
+      },
+      replaySize: 100,
+      replayOutdated: false,
+      hasAnnotations: false,
+      annotationCount: 0,
+    };
+    const previous = cachedReplaySummary(replay);
+    const regenerated = cachedReplaySummary({
+      ...replay,
+      stats: { ...replay.stats, userPrompts: 2 },
+    });
+
+    expect(cachedReplaySummaryChanged(previous, regenerated)).toBe(true);
+    expect(cachedReplaySummaryChanged(previous, previous)).toBe(false);
   });
 });

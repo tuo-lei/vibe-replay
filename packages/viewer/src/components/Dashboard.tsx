@@ -17,6 +17,7 @@ import {
   matchesProjectFacet,
   matchesProviderFacet,
   matchesRepoFacet,
+  matchesUsageFacetsExcept,
   mergeCompactionCounts,
   NO_REPO_FILTER,
   replayCompactionCount,
@@ -252,6 +253,24 @@ export function shouldIncludeSessionForProject(
   }
   return (
     selectedProjectKey === ALL_PROJECTS ||
+    matchesProjectFacet(session, selectedProjectKey, ALL_PROJECTS, rollupProject, selectedLocation)
+  );
+}
+
+/**
+ * Base visibility for facet derivation. Automated workspaces stay hidden by
+ * default, except that selecting their canonical project must still reveal
+ * them even while the explicit agent-run toggle is off.
+ */
+export function shouldIncludeSessionForFacets(
+  session: Pick<SourceSession, "project" | "projectIdentity" | "location">,
+  selectedProjectKey: string,
+  showAgentRuns: boolean,
+  selectedLocation?: SessionLocation | "local",
+): boolean {
+  if (showAgentRuns || !isAgentRunWorkspace(session.project, session.projectIdentity)) return true;
+  return (
+    selectedProjectKey !== ALL_PROJECTS &&
     matchesProjectFacet(session, selectedProjectKey, ALL_PROJECTS, rollupProject, selectedLocation)
   );
 }
@@ -2563,23 +2582,31 @@ function SessionsPanel() {
       .filter((s) => isAgentRunWorkspace(s.project, s.projectIdentity))
       .map((s) => s.project),
   ).size;
-  const visibleSources = useMemo(
+  // Keep project selection out of the source set used to calculate facet
+  // entries. Otherwise choosing project A removes project B from the sidebar
+  // and forces the user through "All projects" before another project can be
+  // selected.
+  const facetVisibleSources = useMemo(
     () =>
       rangeUnarchivedSources.filter((s) =>
-        shouldIncludeSessionForProject(s, selectedProjectKey, showAgentRuns, selectedLocation),
+        shouldIncludeSessionForFacets(s, selectedProjectKey, showAgentRuns, selectedLocation),
       ),
     [rangeUnarchivedSources, selectedLocation, selectedProjectKey, showAgentRuns],
   );
   const baseSourceCount = useMemo(
     () =>
       unarchivedSources.filter((s) =>
-        shouldIncludeSessionForProject(s, selectedProjectKey, showAgentRuns, selectedLocation),
+        shouldIncludeSessionForFacets(s, selectedProjectKey, showAgentRuns, selectedLocation),
       ).length,
     [selectedLocation, selectedProjectKey, showAgentRuns, unarchivedSources],
   );
 
   const selectedProviderSet = new Set(selectedProviders);
   const selectedRepoSet = new Set(selectedRepos);
+  const selectedToolSet = new Set(selectedTools);
+  const selectedMcpServerSet = new Set(selectedMcpServers);
+  const selectedMcpToolSet = new Set(selectedMcpTools);
+  const selectedSkillSet = new Set(selectedSkills);
   const query = filter.trim().toLowerCase();
 
   const matchesProviderFilter = (s: SourceSession) => matchesProviderFacet(s, selectedProviderSet);
@@ -2588,7 +2615,7 @@ function SessionsPanel() {
     matchesProjectFacet(s, selectedProjectKey, ALL_PROJECTS, rollupProject, selectedLocation);
   const searchMatchedSources = useMemo(
     () =>
-      visibleSources.filter((s) => {
+      facetVisibleSources.filter((s) => {
         if (!query) return true;
         const scanData = findSessionScanData(s, scanResultsIndex);
         const displayTitle = sourceDisplayTitle(s, scanData);
@@ -2620,7 +2647,7 @@ function SessionsPanel() {
           .filter(Boolean)
           .some((value) => String(value).toLowerCase().includes(query));
       }),
-    [query, scanResultsIndex, visibleSources],
+    [facetVisibleSources, query, scanResultsIndex],
   );
   const usageEnrichedSources = useMemo(
     () =>
@@ -2657,13 +2684,24 @@ function SessionsPanel() {
   const projectFacetSources = compactionMatchedSources.filter(
     (s) => matchesProviderFilter(s) && matchesRepoFilter(s),
   );
-  const usageFacetSources = usageEnrichedSources.filter(
+  const usageFacetBaseSources = usageEnrichedSources.filter(
     (s) =>
       matchesProviderFilter(s) &&
       matchesRepoFilter(s) &&
       matchesProjectFilter(s) &&
       matchesCompactionFacet(s, compactionsOnly),
   );
+  const usageFacetSources = (excluded: "tools" | "mcpServers" | "mcpTools" | "skills") =>
+    usageFacetBaseSources.filter((s) =>
+      matchesUsageFacetsExcept(
+        s,
+        excluded,
+        selectedToolSet,
+        selectedMcpServerSet,
+        selectedMcpToolSet,
+        selectedSkillSet,
+      ),
+    );
   const compactionFacetSources = usageMatchedSources.filter(
     (s) => matchesProviderFilter(s) && matchesRepoFilter(s) && matchesProjectFilter(s),
   );
@@ -2673,16 +2711,16 @@ function SessionsPanel() {
   );
   const repoEntries = sortedFacetEntries(facetCountMap(repoFacetSources, repoFilterValue));
   const toolEntries = sortedFacetEntries(
-    multiFacetCountMap(usageFacetSources, (source) => source.tools),
+    multiFacetCountMap(usageFacetSources("tools"), (source) => source.tools),
   );
   const mcpServerEntries = sortedFacetEntries(
-    multiFacetCountMap(usageFacetSources, (source) => source.mcpServers),
+    multiFacetCountMap(usageFacetSources("mcpServers"), (source) => source.mcpServers),
   );
   const mcpToolEntries = sortedFacetEntries(
-    multiFacetCountMap(usageFacetSources, (source) => source.mcpTools),
+    multiFacetCountMap(usageFacetSources("mcpTools"), (source) => source.mcpTools),
   );
   const skillEntries = sortedFacetEntries(
-    multiFacetCountMap(usageFacetSources, (source) => source.skills),
+    multiFacetCountMap(usageFacetSources("skills"), (source) => source.skills),
   );
   const compactedSessionCount = compactionFacetSources.filter(
     (source) => (source.compactionCount ?? 0) > 0,
@@ -4443,12 +4481,20 @@ function ReplaysPanel() {
       .filter((s) => isAgentRunWorkspace(s.project, s.projectIdentity))
       .map((s) => s.project),
   ).size;
-  const visibleSessions = unarchivedSessions.filter((s) =>
-    shouldIncludeSessionForProject(s, selectedProjectKey, showAgentRuns, selectedLocation),
+  // Calculate facet options from all visible projects. Applying the selected
+  // project before this point would make every other project disappear from
+  // the selector until the user clears the current project.
+  const facetVisibleSessions = unarchivedSessions.filter((s) =>
+    shouldIncludeSessionForFacets(s, selectedProjectKey, showAgentRuns, selectedLocation),
   );
+  const visibleSessions = facetVisibleSessions;
 
   const selectedProviderSet = new Set(selectedProviders);
   const selectedRepoSet = new Set(selectedRepos);
+  const selectedToolSet = new Set(selectedTools);
+  const selectedMcpServerSet = new Set(selectedMcpServers);
+  const selectedMcpToolSet = new Set(selectedMcpTools);
+  const selectedSkillSet = new Set(selectedSkills);
   const query = filter.trim().toLowerCase();
 
   const matchesProviderFilter = (s: SessionSummary) => matchesProviderFacet(s, selectedProviderSet);
@@ -4477,7 +4523,7 @@ function ReplaysPanel() {
       .some((value) => String(value).toLowerCase().includes(query));
   };
 
-  const searchMatchedSessions = visibleSessions.filter(matchesSearchFilter);
+  const searchMatchedSessions = facetVisibleSessions.filter(matchesSearchFilter);
   const usageMatchedSessions = applyDashboardFacetFilters(searchMatchedSessions, {
     selectedProviders: [],
     selectedRepos: [],
@@ -4501,13 +4547,24 @@ function ReplaysPanel() {
   const projectFacetSessions = compactionMatchedSessions.filter(
     (s) => matchesProviderFilter(s) && matchesRepoFilter(s),
   );
-  const usageFacetSessions = searchMatchedSessions.filter(
+  const usageFacetBaseSessions = searchMatchedSessions.filter(
     (s) =>
       matchesProviderFilter(s) &&
       matchesRepoFilter(s) &&
       matchesProjectFilter(s) &&
       matchesCompactionFacet(s, compactionsOnly),
   );
+  const usageFacetSessions = (excluded: "tools" | "mcpServers" | "mcpTools" | "skills") =>
+    usageFacetBaseSessions.filter((s) =>
+      matchesUsageFacetsExcept(
+        s,
+        excluded,
+        selectedToolSet,
+        selectedMcpServerSet,
+        selectedMcpToolSet,
+        selectedSkillSet,
+      ),
+    );
   const compactionFacetSessions = usageMatchedSessions.filter(
     (s) => matchesProviderFilter(s) && matchesRepoFilter(s) && matchesProjectFilter(s),
   );
@@ -4517,16 +4574,16 @@ function ReplaysPanel() {
   );
   const repoEntries = sortedFacetEntries(facetCountMap(repoFacetSessions, repoFilterValue));
   const toolEntries = sortedFacetEntries(
-    multiFacetCountMap(usageFacetSessions, (session) => session.tools),
+    multiFacetCountMap(usageFacetSessions("tools"), (session) => session.tools),
   );
   const mcpServerEntries = sortedFacetEntries(
-    multiFacetCountMap(usageFacetSessions, (session) => session.mcpServers),
+    multiFacetCountMap(usageFacetSessions("mcpServers"), (session) => session.mcpServers),
   );
   const mcpToolEntries = sortedFacetEntries(
-    multiFacetCountMap(usageFacetSessions, (session) => session.mcpTools),
+    multiFacetCountMap(usageFacetSessions("mcpTools"), (session) => session.mcpTools),
   );
   const skillEntries = sortedFacetEntries(
-    multiFacetCountMap(usageFacetSessions, (session) => session.skills),
+    multiFacetCountMap(usageFacetSessions("skills"), (session) => session.skills),
   );
   const compactedSessionCount = compactionFacetSessions.filter(
     (session) => (session.compactionCount ?? 0) > 0,

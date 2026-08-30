@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -148,5 +148,35 @@ describe("duplicate Cursor transcript discovery", () => {
       "/cursor/b/same-session.jsonl",
     ]);
     expect(merged[0].toolPaths).toEqual(["/cursor/a/tool-1.txt", "/cursor/b/tool-2.txt"]);
+  });
+});
+
+describe("Cursor transcript metadata discovery", () => {
+  afterEach(async () => {
+    await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  });
+
+  it("finds a prompt after metadata records", async () => {
+    const root = await makeTempRoot();
+    const transcript = join(root, "session.jsonl");
+    const metadata = Array.from({ length: 11 }, (_, index) =>
+      JSON.stringify({ role: "assistant", id: `metadata-${index}` }),
+    );
+    const prompt = JSON.stringify({
+      role: "user",
+      message: { content: [{ type: "text", text: "Inspect the delayed prompt" }] },
+    });
+    await writeFile(transcript, `${metadata.join("\n")}\n${prompt}\n`, "utf8");
+    const fileStat = await stat(transcript);
+
+    const session = await __testables.extractSessionInfo(
+      transcript,
+      fileStat.size,
+      Date.now(),
+      root,
+      [],
+    );
+
+    expect(session?.firstPrompt).toBe("Inspect the delayed prompt");
   });
 });

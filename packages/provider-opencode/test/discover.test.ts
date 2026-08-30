@@ -112,6 +112,54 @@ describe("opencode discover", () => {
     }
   });
 
+  it("concatenates text parts and skips malformed first parts", async () => {
+    const db = await buildOpencodeDb({
+      session: [{ id: "ses_parts", slug: "parts", directory: "/Users/test/project" }],
+      messages: [
+        {
+          id: "m_parts",
+          sessionId: "ses_parts",
+          role: "user",
+          timeCreated: 1_800_000_010_000,
+          parts: [],
+        },
+      ],
+    });
+
+    // Simulate a malformed JSON part followed by a valid part in the first
+    // user message. The discovery query reads raw SQLite data, so this cannot
+    // be represented by JSON.stringify in the normal seed helper.
+    db.run("INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?,?,?,?,?)", [
+      "prt_malformed",
+      "m_parts",
+      "ses_parts",
+      1_800_000_010_000,
+      "{not-json",
+    ]);
+    db.run("INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?,?,?,?,?)", [
+      "prt_valid_1",
+      "m_parts",
+      "ses_parts",
+      1_800_000_010_000,
+      JSON.stringify({ type: "text", text: "First part" }),
+    ]);
+    db.run("INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?,?,?,?,?)", [
+      "prt_valid_2",
+      "m_parts",
+      "ses_parts",
+      1_800_000_010_000,
+      JSON.stringify({ type: "text", text: "second part" }),
+    ]);
+
+    try {
+      const sessions = listSessionsFromDb(db);
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].firstPrompt).toBe("First part second part");
+    } finally {
+      db.close();
+    }
+  });
+
   it("indexes context compactions during discovery", async () => {
     const db = await buildOpencodeDb({
       session: [{ id: "ses_compacted", slug: "compacted", directory: "/Users/test/project" }],

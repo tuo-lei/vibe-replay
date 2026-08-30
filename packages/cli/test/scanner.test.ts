@@ -1904,6 +1904,15 @@ describe("aggregateUserInsights", () => {
     expect(insights.topProjects[0].sessions).toBe(1);
   });
 
+  it("uses session end time for project last activity", () => {
+    const endTime = "2025-03-21T15:30:00Z";
+    const insights = aggregateUserInsights([{ ...scans[0], endTime }]);
+
+    expect(insights.topProjects[0].lastActivity).toBe(endTime);
+    expect(insights.timeRange.first).toBe(scans[0].startTime);
+    expect(insights.timeRange.last).toBe(scans[0].startTime);
+  });
+
   it("counts identical project identities separately per location", () => {
     const local = { ...scans[0], sessionId: "local-session" };
     const remoteA = {

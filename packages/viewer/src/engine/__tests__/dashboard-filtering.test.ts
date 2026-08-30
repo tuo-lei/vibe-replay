@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyDashboardFacetFilters,
   matchesProjectFacet,
+  matchesUsageFacetsExcept,
   mergeCompactionCounts,
   replayCompactionCount,
 } from "../dashboard-filtering";
@@ -83,6 +84,44 @@ describe("dashboard facet filtering", () => {
     });
 
     expect(filtered.map((session) => session.slug)).toEqual(["cursor-1"]);
+  });
+
+  it("keeps other usage selections when calculating a facet", () => {
+    const readAndReview = {
+      tools: ["Read"],
+      mcpServers: [],
+      mcpTools: [],
+      skills: ["review"],
+    };
+    const shellAndReplay = {
+      tools: ["Shell"],
+      mcpServers: [],
+      mcpTools: [],
+      skills: ["replay"],
+    };
+    const selectedTools = new Set(["Read"]);
+    const selectedSkills = new Set(["review"]);
+
+    expect(
+      matchesUsageFacetsExcept(
+        readAndReview,
+        "tools",
+        selectedTools,
+        new Set(),
+        new Set(),
+        selectedSkills,
+      ),
+    ).toBe(true);
+    expect(
+      matchesUsageFacetsExcept(
+        shellAndReplay,
+        "tools",
+        selectedTools,
+        new Set(),
+        new Set(),
+        selectedSkills,
+      ),
+    ).toBe(false);
   });
 
   it("filters to sessions with indexed compactions", () => {
