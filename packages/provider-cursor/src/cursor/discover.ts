@@ -399,17 +399,27 @@ async function extractSessionInfo(
     let editCountEst = 0;
     let model: string | undefined;
     let lineCount = 0;
-    let promptScanCount = 0;
+    let userPromptCandidateCount = 0;
     const toolUseRe = /"type"\s*:\s*"tool_use"/g;
     const editToolRe = /"name"\s*:\s*"(edit_file|file_edit|create_file)"/;
     const modelRe = /"model(?:Id)?"\s*:\s*"([^"]+)"/;
+    const userRoleRe = /"role"\s*:\s*"user"/;
     for (const rawLine of content.split("\n")) {
       const line = rawLine.trim();
       if (!line) continue;
       lineCount++;
 
-      if (!firstPrompt && promptScanCount < 10) {
-        promptScanCount++;
+      // Cursor may prepend many metadata/assistant records before the first
+      // user turn. Bound the expensive JSON parsing by user candidates rather
+      // than raw lines, otherwise eleven harmless records make a valid
+      // session disappear from discovery.
+      if (
+        !firstPrompt &&
+        userPromptCandidateCount < 10 &&
+        userRoleRe.test(line) &&
+        !line.includes('"tool_result"')
+      ) {
+        userPromptCandidateCount++;
         try {
           const obj = JSON.parse(line);
           if (obj.role === "user") {
@@ -421,10 +431,7 @@ async function extractSessionInfo(
         } catch {}
       }
 
-      if (
-        (line.includes('"role":"user"') || line.includes('"role": "user"')) &&
-        !line.includes('"tool_result"')
-      ) {
+      if (userRoleRe.test(line) && !line.includes('"tool_result"')) {
         promptCount++;
       }
       const toolMatches = line.match(toolUseRe);
@@ -565,5 +572,6 @@ async function mapLimit<T, R>(
 
 export const __testables = {
   decodeProjectDir,
+  extractSessionInfo,
   mergeDuplicateTranscriptSessions,
 };

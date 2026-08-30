@@ -9,6 +9,7 @@ import Dashboard, {
   findSessionScanData,
   getSessionRangeTimestamp,
   type SessionScanData,
+  shouldIncludeSessionForFacets,
   shouldIncludeSessionForProject,
   usageFacetValues,
 } from "../Dashboard";
@@ -115,6 +116,13 @@ describe("automated project visibility", () => {
 
   it("shows all automated workspaces when the explicit toggle is enabled", () => {
     expect(shouldIncludeSessionForProject(source, ALL_PROJECTS, true)).toBe(true);
+  });
+
+  it("keeps a selected automated project visible while deriving facets", () => {
+    expect(
+      shouldIncludeSessionForFacets(source, "cursor-sdk:github-pr-review:Roblox/ros", false),
+    ).toBe(true);
+    expect(shouldIncludeSessionForFacets(source, ALL_PROJECTS, false)).toBe(false);
   });
 });
 

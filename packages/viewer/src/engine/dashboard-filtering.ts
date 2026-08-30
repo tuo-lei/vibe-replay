@@ -1,6 +1,7 @@
 import type { ProjectIdentity, SessionLocation } from "@vibe-replay/types";
 
 export const NO_REPO_FILTER = "__no_repo__";
+const EMPTY_FACET_SET: ReadonlySet<string> = new Set();
 
 export interface DashboardFilterItem {
   provider: string;
@@ -69,11 +70,35 @@ export function matchesUsageFacets(
   selectedMcpTools: ReadonlySet<string>,
   selectedSkills: ReadonlySet<string>,
 ): boolean {
+  return matchesUsageFacetsExcept(
+    item,
+    undefined,
+    selectedTools,
+    selectedMcpServers,
+    selectedMcpTools,
+    selectedSkills,
+  );
+}
+
+export function matchesUsageFacetsExcept(
+  item: Pick<DashboardFilterItem, "tools" | "mcpServers" | "mcpTools" | "skills">,
+  excluded: "tools" | "mcpServers" | "mcpTools" | "skills" | undefined,
+  selectedTools: ReadonlySet<string>,
+  selectedMcpServers: ReadonlySet<string>,
+  selectedMcpTools: ReadonlySet<string>,
+  selectedSkills: ReadonlySet<string>,
+): boolean {
   return (
-    matchesMultiValueFacet(item.tools, selectedTools) &&
-    matchesMultiValueFacet(item.mcpServers, selectedMcpServers) &&
-    matchesMultiValueFacet(item.mcpTools, selectedMcpTools) &&
-    matchesMultiValueFacet(item.skills, selectedSkills)
+    matchesMultiValueFacet(item.tools, excluded === "tools" ? EMPTY_FACET_SET : selectedTools) &&
+    matchesMultiValueFacet(
+      item.mcpServers,
+      excluded === "mcpServers" ? EMPTY_FACET_SET : selectedMcpServers,
+    ) &&
+    matchesMultiValueFacet(
+      item.mcpTools,
+      excluded === "mcpTools" ? EMPTY_FACET_SET : selectedMcpTools,
+    ) &&
+    matchesMultiValueFacet(item.skills, excluded === "skills" ? EMPTY_FACET_SET : selectedSkills)
   );
 }
 

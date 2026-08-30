@@ -89,6 +89,8 @@ import {
 } from "./server-enrichment.js";
 import {
   buildSourceSessionCatalogCache,
+  cachedReplaySummary,
+  cachedReplaySummaryChanged,
   getStaleSourceProviders,
   mergeSourceCatalogSessionUpdates,
   normalizeSourceSessionCatalogCache,
@@ -935,35 +937,7 @@ async function buildSourcesResult(
       projectExists:
         s.location?.kind === "ssh" ? undefined : (projectExistsMap.get(s.project) ?? false),
       isGitRepo: s.location?.kind === "ssh" ? undefined : (projectIsGitMap.get(s.project) ?? false),
-      replay: replay
-        ? {
-            slug: replay.slug,
-            sourceSlug: replay.sourceSlug,
-            sessionId: replay.sessionId,
-            title: replay.title,
-            provider: replay.provider,
-            location: replay.location,
-            transcriptStatus: replay.transcriptStatus,
-            model: replay.model,
-            gitRepo: replay.gitRepo,
-            project: replay.project,
-            startTime: replay.startTime,
-            endTime: replay.endTime,
-            stats: replay.stats,
-            compactionCount: replay.compactionCount,
-            compactions: replay.compactions,
-            apiErrors: replay.apiErrors,
-            diagnostics: replay.diagnostics,
-            diagnosticNotes: replay.diagnosticNotes,
-            hasAnnotations: replay.hasAnnotations,
-            annotationCount: replay.annotationCount,
-            firstMessage: replay.firstMessage,
-            messages: replay.messages,
-            replaySize: replay.replaySize,
-            gist: replay.gist,
-            cloud: replay.cloud,
-          }
-        : undefined,
+      replay: replay ? cachedReplaySummary(replay) : undefined,
     };
   });
 }
@@ -1081,8 +1055,8 @@ export async function startServer(
   // extracts, so serving the previous run's results would show stale facets
   // until the next scan happened to finish.
   const scanResultsCacheKey = `dashboard-scan-results-v${SCANNER_VERSION}-${cacheKeySuffix}`;
-  // v4 → v5: invalidate persisted project labels after workflow disambiguation.
-  const insightsCacheKey = `dashboard-insights-v5-${cacheKeySuffix}`;
+  // v5 → v6: project lastActivity now uses session end times when available.
+  const insightsCacheKey = `dashboard-insights-v6-${cacheKeySuffix}`;
   const readSourcesCatalogCache = async (): Promise<NormalizedSourceSessionCatalogCache | null> =>
     normalizeSourceSessionCatalogCache(
       await readFileCache<SourceSessionCatalogCache | CachedSourceRecord[]>(sourcesCacheKey),
@@ -1161,52 +1135,20 @@ export async function startServer(
       let changed = false;
       const updated = cached.sessions.map((s) => {
         const replay = findReplayForSource(s, replayMaps, sourceSlugCounts);
+        const nextReplay = replay ? cachedReplaySummary(replay) : undefined;
         const hadReplay = !!s.existingReplay;
         const hasReplay = !!replay;
         if (
           hadReplay !== hasReplay ||
           (hasReplay &&
-            (replay.slug !== s.existingReplay ||
-              replay.title !== s.replay?.title ||
-              replay.sourceSlug !== s.replay?.sourceSlug ||
-              replay.compactionCount !== s.replay?.compactionCount ||
-              JSON.stringify(replay.compactions) !== JSON.stringify(s.replay?.compactions) ||
-              JSON.stringify(replay.apiErrors) !== JSON.stringify(s.replay?.apiErrors) ||
-              JSON.stringify(replay.diagnostics) !== JSON.stringify(s.replay?.diagnostics) ||
-              JSON.stringify(replay.diagnosticNotes) !== JSON.stringify(s.replay?.diagnosticNotes)))
+            (replay.slug !== s.existingReplay || cachedReplaySummaryChanged(s.replay, nextReplay)))
         ) {
           changed = true;
         }
         return {
           ...s,
           existingReplay: replay ? replay.slug : null,
-          replay: replay
-            ? {
-                slug: replay.slug,
-                sourceSlug: replay.sourceSlug,
-                sessionId: replay.sessionId,
-                title: replay.title,
-                provider: replay.provider,
-                location: replay.location,
-                model: replay.model,
-                project: replay.project,
-                startTime: replay.startTime,
-                endTime: replay.endTime,
-                stats: replay.stats,
-                compactionCount: replay.compactionCount,
-                compactions: replay.compactions,
-                apiErrors: replay.apiErrors,
-                diagnostics: replay.diagnostics,
-                diagnosticNotes: replay.diagnosticNotes,
-                hasAnnotations: replay.hasAnnotations,
-                annotationCount: replay.annotationCount,
-                firstMessage: replay.firstMessage,
-                messages: replay.messages,
-                replaySize: replay.replaySize,
-                gist: replay.gist,
-                cloud: replay.cloud,
-              }
-            : undefined,
+          replay: nextReplay,
         };
       });
 

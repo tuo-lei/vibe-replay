@@ -14,10 +14,50 @@ import type {
   CachedSourceRecord,
   NormalizedSourceSessionCatalogCache,
   ProviderDiscoveryState,
+  ReplaySummary,
   SourceProviderFreshnessProbe,
   SourceSessionCatalogCache,
   SourceSummaryRecord,
 } from "./server-types.js";
+
+/** Strip server-only replay fields before embedding a replay in the sources cache. */
+export function cachedReplaySummary(replay: ReplaySummary): CachedSourceRecord["replay"] {
+  return {
+    slug: replay.slug,
+    sourceSlug: replay.sourceSlug,
+    sessionId: replay.sessionId,
+    title: replay.title,
+    provider: replay.provider,
+    location: replay.location,
+    transcriptStatus: replay.transcriptStatus,
+    model: replay.model,
+    gitRepo: replay.gitRepo,
+    project: replay.project,
+    startTime: replay.startTime,
+    endTime: replay.endTime,
+    stats: replay.stats,
+    compactionCount: replay.compactionCount,
+    compactions: replay.compactions,
+    apiErrors: replay.apiErrors,
+    diagnostics: replay.diagnostics,
+    diagnosticNotes: replay.diagnosticNotes,
+    hasAnnotations: replay.hasAnnotations,
+    annotationCount: replay.annotationCount,
+    firstMessage: replay.firstMessage,
+    messages: replay.messages,
+    replaySize: replay.replaySize,
+    gist: replay.gist,
+    cloud: replay.cloud,
+  };
+}
+
+/** Compare the complete nested replay snapshot, not just its identity fields. */
+export function cachedReplaySummaryChanged(
+  previous: CachedSourceRecord["replay"],
+  next: CachedSourceRecord["replay"],
+): boolean {
+  return JSON.stringify(previous) !== JSON.stringify(next);
+}
 
 export function isSourceSessionCatalogCache(value: unknown): value is SourceSessionCatalogCache {
   return (

@@ -126,13 +126,15 @@ function buildSessionStats(db: Database): Map<string, SessionStats> {
       SELECT m.session_id, count(DISTINCT m.id) AS c
       FROM part p
       JOIN message m ON m.id = p.message_id
-      WHERE json_extract(m.data, '$.role') = 'user'
-        AND json_extract(p.data, '$.type') = 'text'
+      WHERE CASE WHEN json_valid(m.data) THEN json_extract(m.data, '$.role') END = 'user'
+        AND CASE WHEN json_valid(p.data) THEN json_extract(p.data, '$.type') END = 'text'
         AND NOT EXISTS (
           SELECT 1
           FROM part compact
           WHERE compact.message_id = m.id
-            AND json_extract(compact.data, '$.type') = 'compaction'
+            AND CASE
+              WHEN json_valid(compact.data) THEN json_extract(compact.data, '$.type')
+            END = 'compaction'
         )
       GROUP BY m.session_id
     `,
@@ -142,7 +144,7 @@ function buildSessionStats(db: Database): Map<string, SessionStats> {
     `
       SELECT session_id, count(*) AS c
       FROM part
-      WHERE json_extract(data, '$.type') = 'tool'
+      WHERE CASE WHEN json_valid(data) THEN json_extract(data, '$.type') END = 'tool'
       GROUP BY session_id
     `,
   );
@@ -151,8 +153,8 @@ function buildSessionStats(db: Database): Map<string, SessionStats> {
     `
       SELECT session_id, count(*) AS c
       FROM part
-      WHERE json_extract(data, '$.type') = 'tool'
-        AND json_extract(data, '$.tool') IN ('edit', 'write', 'patch')
+      WHERE CASE WHEN json_valid(data) THEN json_extract(data, '$.type') END = 'tool'
+        AND CASE WHEN json_valid(data) THEN json_extract(data, '$.tool') END IN ('edit', 'write', 'patch')
       GROUP BY session_id
     `,
   );
@@ -162,8 +164,8 @@ function buildSessionStats(db: Database): Map<string, SessionStats> {
       SELECT m.session_id, count(DISTINCT m.id) AS c
       FROM part p
       JOIN message m ON m.id = p.message_id
-      WHERE json_extract(m.data, '$.role') = 'user'
-        AND json_extract(p.data, '$.type') = 'compaction'
+      WHERE CASE WHEN json_valid(m.data) THEN json_extract(m.data, '$.role') END = 'user'
+        AND CASE WHEN json_valid(p.data) THEN json_extract(p.data, '$.type') END = 'compaction'
       GROUP BY m.session_id
     `,
   );
@@ -221,38 +223,72 @@ function countBySession(db: Database, sql: string): Map<string, number> {
   return map;
 }
 
-/** Map session_id → the first user text prompt (earliest by message time). */
+/**
+ * Map session_id → the first user text prompt (earliest by message time).
+ *
+ * A user message can have several text parts, and individual parts can be
+ * malformed while a later part in the same message remains readable. Keep
+ * the message boundary while walking the ordered rows so one bad part does
+ * not reserve an empty first prompt or discard the rest of the message.
+ */
 function firstUserPrompts(db: Database): Map<string, string> {
   const map = new Map<string, string>();
   const rows = rowValues(
     db,
     `
-      SELECT m.session_id, m.time_created, p.data
+      SELECT m.session_id, m.id AS message_id, m.time_created, p.id AS part_id, p.data
       FROM part p
       JOIN message m ON m.id = p.message_id
-      WHERE json_extract(m.data, '$.role') = 'user'
-        AND json_extract(p.data, '$.type') = 'text'
+      WHERE CASE WHEN json_valid(m.data) THEN json_extract(m.data, '$.role') END = 'user'
+        AND CASE WHEN json_valid(p.data) THEN json_extract(p.data, '$.type') END = 'text'
         AND NOT EXISTS (
           SELECT 1
           FROM part compact
           WHERE compact.message_id = m.id
-            AND json_extract(compact.data, '$.type') = 'compaction'
+            AND CASE
+              WHEN json_valid(compact.data) THEN json_extract(compact.data, '$.type')
+            END = 'compaction'
         )
-      ORDER BY m.session_id ASC, m.time_created ASC
+      ORDER BY m.session_id ASC, m.time_created ASC, m.id ASC, p.id ASC
     `,
   );
+
+  let pendingSessionId = "";
+  let pendingMessageId = "";
+  let pendingTextParts: string[] = [];
+
+  const commitPending = (): void => {
+    if (!pendingSessionId || map.has(pendingSessionId)) return;
+    const text = pendingTextParts.join("\n").trim();
+    if (text) map.set(pendingSessionId, text);
+  };
+
   for (const row of rows) {
     const sessionId = String(row.session_id ?? "");
-    if (!sessionId || map.has(sessionId)) continue;
-    let text = "";
+    const messageId = String(row.message_id ?? "");
+    if (!sessionId || !messageId || map.has(sessionId)) continue;
+
+    if (sessionId !== pendingSessionId || messageId !== pendingMessageId) {
+      commitPending();
+      if (map.has(sessionId)) continue;
+      pendingSessionId = sessionId;
+      pendingMessageId = messageId;
+      pendingTextParts = [];
+    }
+
     try {
       const parsed = JSON.parse(row.data as string) as { text?: string };
-      text = typeof parsed.text === "string" ? parsed.text : "";
+      if (typeof parsed.text === "string" && parsed.text.trim()) {
+        pendingTextParts.push(parsed.text);
+      }
     } catch {
-      // Skip malformed parts and keep looking for the next valid user text.
+      // Keep the message open so a later valid part can still supply its
+      // prompt. If the whole message is malformed, commitPending() leaves it
+      // empty and the next user message gets a chance.
     }
-    if (text.trim()) map.set(sessionId, text);
   }
+
+  commitPending();
   return map;
 }
 
