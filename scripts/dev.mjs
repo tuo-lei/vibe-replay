@@ -41,20 +41,23 @@ if (apiPortOverride !== undefined && apiPortOverride === vitePortOverride) {
 const reservations = [];
 let apiReservation;
 let viteReservation;
-let vite;
 let cli;
 
 try {
   apiReservation =
     apiPortOverride !== undefined
       ? await reservePort(apiPortOverride, "API port")
-      : await reserveFreePort(API_PREFERRED);
+      : await reserveFreePort(
+          API_PREFERRED,
+          100,
+          vitePortOverride !== undefined ? [vitePortOverride] : [],
+        );
   reservations.push(apiReservation);
 
   viteReservation =
     vitePortOverride !== undefined
       ? await reservePort(vitePortOverride, "Viewer port")
-      : await reserveFreePort(VITE_PREFERRED);
+      : await reserveFreePort(VITE_PREFERRED, 100, [apiReservation.port]);
   reservations.push(viteReservation);
 } catch (error) {
   await Promise.all(reservations.map(({ release }) => release()));
@@ -66,10 +69,18 @@ const vitePort = viteReservation.port;
 
 console.log();
 console.log(
-  `[vibe-replay] API port:    ${apiPort}${apiPort !== API_PREFERRED ? ` (${API_PREFERRED} was busy)` : ""}`,
+  `[vibe-replay] API port:    ${apiPort}${
+    apiPortOverride === undefined && apiPort !== API_PREFERRED && vitePortOverride !== API_PREFERRED
+      ? ` (${API_PREFERRED} was busy)`
+      : ""
+  }`,
 );
 console.log(
-  `[vibe-replay] Viewer port: ${vitePort}${vitePort !== VITE_PREFERRED ? ` (${VITE_PREFERRED} was busy)` : ""}`,
+  `[vibe-replay] Viewer port: ${vitePort}${
+    vitePortOverride === undefined && vitePort !== VITE_PREFERRED && apiPort !== VITE_PREFERRED
+      ? ` (${VITE_PREFERRED} was busy)`
+      : ""
+  }`,
 );
 console.log(`[vibe-replay] Viewer:      http://localhost:${vitePort}  (HMR enabled)`);
 console.log(`[vibe-replay] CLI watch:   auto-restarts on packages/cli/src changes`);
@@ -80,7 +91,7 @@ console.log();
 
 // Start Vite dev server (backgrounded) — port + strictPort via env vars in vite.config.ts
 const cloudApiUrl = process.env.VIBE_REPLAY_API_URL || "http://localhost:8787";
-vite = spawnPnpm(["--filter", "@vibe-replay/viewer", "dev"], {
+const vite = spawnPnpm(["--filter", "@vibe-replay/viewer", "dev"], {
   stdio: ["ignore", "pipe", "pipe"],
   env: {
     ...process.env,
