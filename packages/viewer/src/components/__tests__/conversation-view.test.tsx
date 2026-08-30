@@ -37,6 +37,26 @@ const scenes: Scene[] = [
   },
 ];
 
+const multiTurnScenes: Scene[] = [
+  ...scenes,
+  {
+    type: "context-injection",
+    content: "A skill was loaded",
+    timestamp: "2026-08-30T10:00:05.000Z",
+    injectionType: "skill:demo",
+  },
+  {
+    type: "user-prompt",
+    content: "Now apply it",
+    timestamp: "2026-08-30T10:00:06.000Z",
+  },
+  {
+    type: "text-response",
+    content: "Applied.",
+    timestamp: "2026-08-30T10:00:08.000Z",
+  },
+];
+
 function prefs(compactAssistant: boolean): EffectivePrefs {
   return {
     hideThinking: false,
@@ -88,6 +108,49 @@ describe("ConversationView assistant metrics", () => {
     );
 
     expect(screen.getByText(/4\.2s/)).toBeTruthy();
+    expect(screen.queryByText(/tok/)).toBeNull();
+  });
+
+  it("matches metrics to each real turn across context injections", () => {
+    render(
+      <ConversationView
+        scenes={multiTurnScenes}
+        visibleCount={multiTurnScenes.length}
+        currentIndex={4}
+        effectivePrefs={prefs(false)}
+        turnStats={[
+          turnStat,
+          {
+            turnIndex: 1,
+            durationMs: 8_100,
+            tokenUsage: {
+              inputTokens: 1_000,
+              outputTokens: 1_000,
+              cacheCreationTokens: 0,
+              cacheReadTokens: 0,
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText(/4\.2s/)).toBeTruthy();
+    expect(screen.getByText(/8\.1s/)).toBeTruthy();
+    expect(screen.getByText(/2\.0K tok/)).toBeTruthy();
+  });
+
+  it("does not fall back by position for sparse indexed stats", () => {
+    render(
+      <ConversationView
+        scenes={multiTurnScenes}
+        visibleCount={multiTurnScenes.length}
+        currentIndex={4}
+        effectivePrefs={prefs(false)}
+        turnStats={[{ turnIndex: 1, durationMs: 2_200 }]}
+      />,
+    );
+
+    expect(screen.getByText(/2\.2s/)).toBeTruthy();
     expect(screen.queryByText(/tok/)).toBeNull();
   });
 });
