@@ -52,11 +52,21 @@ afterEach(() => {
 });
 
 describe("useAiProviderSettings", () => {
-  it("remembers a manually selected model across remounts", async () => {
+  it("keeps a draft model separate until it is made the default", async () => {
     const { result, unmount } = renderHook(() => useAiProviderSettings(true));
 
     await waitFor(() => expect(result.current.aiModelId).toBe("model-a"));
     act(() => result.current.setAiModelId?.("model-b"));
+
+    expect(result.current.aiModelId).toBe("model-b");
+    expect(result.current.defaultAiModelId).toBe("model-a");
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) || "null")).toEqual({
+      providerId: "custom-openai",
+      modelId: "model-a",
+      source: "server",
+    });
+
+    act(() => result.current.saveAiSelectionAsDefault?.());
 
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY) || "null")).toEqual({
       providerId: "custom-openai",
@@ -71,7 +81,7 @@ describe("useAiProviderSettings", () => {
     second.unmount();
   });
 
-  it("synchronizes model changes across mounted AI surfaces", async () => {
+  it("synchronizes explicit default changes across mounted AI surfaces", async () => {
     const first = renderHook(() => useAiProviderSettings(true));
     const second = renderHook(() => useAiProviderSettings(true));
 
@@ -81,6 +91,9 @@ describe("useAiProviderSettings", () => {
     });
 
     act(() => first.result.current.setAiModelId?.("model-b"));
+    expect(second.result.current.aiModelId).toBe("model-a");
+
+    act(() => first.result.current.saveAiSelectionAsDefault?.());
 
     await waitFor(() => expect(second.result.current.aiModelId).toBe("model-b"));
     first.unmount();

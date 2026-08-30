@@ -34,6 +34,11 @@ export interface CustomAiProviderInput {
   apiKey?: string;
 }
 
+export interface AiSelection {
+  providerId: string;
+  modelId: string;
+}
+
 export interface AiProviderSettingsActions {
   aiProviders: AiProviderInfo[];
   aiProviderId: string | null;
@@ -52,7 +57,7 @@ export interface AiProviderSettingsActions {
   aiProvidersError: string | null;
   defaultAiProviderId: string | null;
   defaultAiModelId: string | null;
-  saveAiSelectionAsDefault: (() => void) | null;
+  saveAiSelectionAsDefault: ((selection?: AiSelection) => void) | null;
 }
 
 const AI_SELECTION_STORAGE_KEY = "vibe-replay-ai-selection-v1";
@@ -63,6 +68,8 @@ interface AiSelectionPreference {
   modelId: string;
   source?: "user" | "server";
 }
+
+type AiSelectionSource = AiSelectionPreference["source"] | "draft";
 
 function readAiSelectionPreference(): AiSelectionPreference | null {
   try {
@@ -122,7 +129,7 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
   const [selection, setSelection] = useState<{
     providerId: string | null;
     modelId: string | null;
-    source?: AiSelectionPreference["source"];
+    source?: AiSelectionSource;
   }>(() => {
     const storedPreference = readAiSelectionPreference();
     return {
@@ -143,11 +150,7 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
   const mountedRef = useRef(true);
 
   const updateSelection = useCallback(
-    (next: {
-      providerId: string | null;
-      modelId: string | null;
-      source?: AiSelectionPreference["source"];
-    }) => {
+    (next: { providerId: string | null; modelId: string | null; source?: AiSelectionSource }) => {
       selectionRef.current = next;
       if (mountedRef.current) setSelection(next);
     },
@@ -204,22 +207,11 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
     };
   }, [enabled, updateSelection]);
 
-  // Provider/model selection is a local preference, not replay or credential
-  // data. Remember it as soon as the user changes it so reopening AI Studio
-  // does not silently fall back to the first discovered model. The explicit
-  // "Set default" action remains available as a visible confirmation and for
-  // callers that want to save the current choice deliberately.
-  const rememberSelection = useCallback(
+  // Provider/model changes are drafts. Only the explicit "Set default" action
+  // writes the shared preference used by Ask Replay and the AI tools.
+  const updateDraftSelection = useCallback(
     (next: { providerId: string | null; modelId: string | null }) => {
-      updateSelection({ ...next, source: "user" });
-      if (!next.providerId || !next.modelId) return;
-      const preference = {
-        providerId: next.providerId,
-        modelId: next.modelId,
-        source: "user" as const,
-      };
-      writeAiSelectionPreference(preference);
-      if (mountedRef.current) setDefaultSelection(preference);
+      updateSelection({ ...next, source: "draft" });
     },
     [updateSelection],
   );
@@ -263,7 +255,9 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
         // legacy defaults. Only an explicit user selection is authoritative;
         // this lets a newly discovered server/Pi default replace an old
         // first-catalog-entry fallback without overriding deliberate choices.
-        const useServerDefault = current.source !== "user" || !currentProvider;
+        const preserveCurrentSelection =
+          (current.source === "user" || current.source === "draft") && Boolean(currentProvider);
+        const useServerDefault = !preserveCurrentSelection;
         const nextProviderId = !useServerDefault
           ? (currentProvider?.id ?? null)
           : defaultProviderId &&
@@ -328,7 +322,7 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
   const setAiProviderId = enabled
     ? (providerId: string) => {
         const provider = providersRef.current.find((candidate) => candidate.id === providerId);
-        rememberSelection({
+        updateDraftSelection({
           providerId,
           modelId: provider?.models[0]?.id || null,
         });
@@ -337,13 +331,13 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
 
   const setAiModelId = enabled
     ? (modelId: string) => {
-        rememberSelection({ ...selectionRef.current, modelId });
+        updateDraftSelection({ ...selectionRef.current, modelId });
       }
     : null;
 
   const saveAiSelectionAsDefault = enabled
-    ? () => {
-        const current = selectionRef.current;
+    ? (nextSelection?: AiSelection) => {
+        const current = nextSelection || selectionRef.current;
         if (!current.providerId || !current.modelId) return;
         const next = {
           providerId: current.providerId,
