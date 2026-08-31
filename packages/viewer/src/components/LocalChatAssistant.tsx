@@ -466,6 +466,7 @@ export default function LocalChatAssistant({ context }: Props) {
     : "Set up an AI provider";
   const remoteSession = Boolean(context.currentSession?.targetId);
   const remoteDataAvailable = remoteSession || hasConfiguredRemoteSource;
+  const remoteDataEnabled = allowRemoteData && remoteDataAvailable;
   const retryProviderSetup = useCallback(async () => {
     try {
       await refreshAiProviders?.();
@@ -596,14 +597,14 @@ export default function LocalChatAssistant({ context }: Props) {
       const params = new URLSearchParams(window.location.search);
       const body = {
         messages: nextMessages
-          .filter((message) => allowRemoteData || !message.remoteDataUsed)
+          .filter((message) => remoteDataEnabled || !message.remoteDataUsed)
           .map(({ role, content: messageContent }) => ({
             role,
             content: messageContent,
           })),
         context: {
           ...context,
-          allowRemoteData,
+          allowRemoteData: remoteDataEnabled,
           tab: params.get("tab") || undefined,
           project: params.get("project") || undefined,
         },
@@ -696,13 +697,13 @@ export default function LocalChatAssistant({ context }: Props) {
     }
   }, [
     context,
-    allowRemoteData,
     input,
     messages,
     providerReady,
     chatModelId,
     chatProviderId,
     running,
+    remoteDataEnabled,
   ]);
 
   const cancel = () => controllerRef.current?.abort();
@@ -1071,7 +1072,7 @@ export default function LocalChatAssistant({ context }: Props) {
                 </button>
               )}
             </div>
-            {providerReady && remoteDataAvailable && !allowRemoteData && (
+            {providerReady && remoteDataAvailable && !remoteDataEnabled && (
               <div className="mt-2 flex items-start justify-between gap-3 rounded-lg border border-terminal-yellow/25 bg-terminal-yellow-subtle px-2.5 py-2 text-[9px] leading-relaxed font-mono text-terminal-yellow">
                 <span>
                   {remoteSession
@@ -1094,10 +1095,8 @@ export default function LocalChatAssistant({ context }: Props) {
                   ? "provider setup required"
                   : remoteSourcesLoading && !remoteSession
                     ? "checking source settings"
-                    : allowRemoteData
-                      ? remoteDataAvailable
-                        ? "SSH data enabled"
-                        : "local sessions only"
+                    : remoteDataEnabled
+                      ? "SSH data enabled"
                       : remoteDataAvailable
                         ? "SSH data hidden"
                         : "local sessions only"}

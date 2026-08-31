@@ -104,7 +104,11 @@ export function useRemoteDataConsent(
     let cancelled = false;
     setRemoteSourcesLoading(true);
     void fetch(apiUrl("/api/settings"), { cache: "no-store" })
-      .then((response) => response.json().catch(() => null))
+      .then(async (response) => {
+        const data = await response.json().catch(() => null);
+        if (!response.ok) throw new Error("Settings could not be loaded");
+        return data;
+      })
       .then((data) => {
         if (cancelled) return;
         const hasSource = parseHasConfiguredRemoteSource(data);
