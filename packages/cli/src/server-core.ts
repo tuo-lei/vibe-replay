@@ -1,6 +1,6 @@
-import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { basename } from "node:path";
+import { shortenPath } from "@vibe-replay/provider-core/utils";
 import type { ReplaySession, SessionInfo, SessionLocation } from "./types.js";
 
 /** Sanitize slug to prevent path traversal — rejects anything that isn't a simple name */
@@ -25,8 +25,7 @@ export function getErrorMessage(err: unknown): string {
 }
 
 function normalizeProjectPath(project: string): string {
-  const home = homedir();
-  return project.startsWith(home) ? `~${project.slice(home.length)}` : project;
+  return shortenPath(project);
 }
 
 // Keep cloud sync requests comfortably below the current D1 bind / batch ceiling.

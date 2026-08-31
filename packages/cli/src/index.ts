@@ -41,7 +41,7 @@ import { startDashboard, startServer } from "./server.js";
 import { formatSessionQueryText, queryLocalSessions } from "./session-query.js";
 import { transformToReplay } from "./transform.js";
 import type { ParseWarning, ReplaySession, SessionInfo } from "./types.js";
-import { expandUserPath, normalizeTitle } from "./utils.js";
+import { expandUserPath, normalizeTitle, shortenPath } from "./utils.js";
 import { CLI_VERSION } from "./version.js";
 
 setFileCacheAppVersion(CLI_VERSION);
@@ -521,9 +521,7 @@ program
       spinner.text = "Transforming to replay...";
 
       const rawProject = sessionInfo?.project || parsed.cwd;
-      const project = rawProject.startsWith(home)
-        ? `~${rawProject.slice(home.length)}`
-        : rawProject;
+      const project = shortenPath(rawProject, home);
       const gitRepo =
         sessionInfo?.gitRepo ||
         (sessionInfo?.location?.kind === "ssh" ? undefined : await readGitRepo(rawProject));
