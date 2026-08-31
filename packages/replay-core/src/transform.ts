@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { getTimestampBounds } from "@vibe-replay/provider-core/duration";
+import { shortenPath } from "@vibe-replay/provider-core/utils";
 import { estimateCostIfKnown, estimateCostSimpleIfKnown, getModelContextLimit } from "./pricing.js";
 import { normalizeSubAgentType, type ProviderParseResult } from "@vibe-replay/provider-contract";
 import { compactWarningSample } from "@vibe-replay/provider-contract/warnings";
@@ -22,8 +23,7 @@ const HOME = homedir();
 
 /** Replace absolute home dir path with ~ to avoid leaking username */
 function redactPath(s: string): string {
-  if (!HOME) return s;
-  return s.replaceAll(HOME, "~");
+  return shortenPath(s);
 }
 
 /**

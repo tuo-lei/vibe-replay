@@ -1,12 +1,6 @@
 import { homedir } from "node:os";
 import { posix, win32 } from "node:path";
-
-/** Replace $HOME prefix with `~` for display. */
-export function shortenPath(path: string): string {
-  const home = homedir();
-  if (path.startsWith(home)) return `~${path.slice(home.length)}`;
-  return path;
-}
+export { shortenPath } from "@vibe-replay/provider-core/utils";
 
 /** Expand a user-home path passed directly by a shell or CLI client. */
 export function expandUserPath(

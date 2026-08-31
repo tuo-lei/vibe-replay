@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { normalizeGitUrl, readGitRepo } from "../src/utils.js";
+import { normalizeGitUrl, readGitRepo, shortenPath } from "../src/utils.js";
 
 describe("normalizeGitUrl", () => {
   it.each([
@@ -51,5 +51,27 @@ describe("readGitRepo", () => {
     );
 
     await expect(readGitRepo(project)).resolves.toBe("org/worktree-repo");
+  });
+});
+
+describe("shortenPath", () => {
+  it("redacts Windows home paths across separators and casing", () => {
+    const home = "C:\\Users\\TuoLei";
+
+    expect(shortenPath("C:/Users/TuoLei/project", home, "win32")).toBe("~/project");
+    expect(shortenPath("c:\\users\\tuolei\\project", home, "win32")).toBe("~\\project");
+  });
+
+  it("does not redact a Windows sibling path with the same prefix", () => {
+    const home = "C:\\Users\\TuoLei";
+
+    expect(shortenPath("C:/Users/TuoLei2/project", home, "win32")).toBe("C:/Users/TuoLei2/project");
+  });
+
+  it("preserves POSIX case sensitivity and separators", () => {
+    const home = "/home/TuoLei";
+
+    expect(shortenPath("/home/TuoLei/project", home, "linux")).toBe("~/project");
+    expect(shortenPath("/home/tuolei/project", home, "linux")).toBe("/home/tuolei/project");
   });
 });
