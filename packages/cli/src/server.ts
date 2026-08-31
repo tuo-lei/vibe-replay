@@ -18,7 +18,7 @@ import { streamSSE } from "hono/streaming";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import open from "open";
 import type { AgentEvent } from "@earendil-works/pi-agent-core";
-import { readGitRepo } from "@vibe-replay/provider-core/utils";
+import { readGitRepo, shortenPath } from "@vibe-replay/provider-core/utils";
 import { classifyProject } from "@vibe-replay/types";
 import { readFileCache, writeFileCache } from "./cache.js";
 import { cleanPromptText, previewPrompt } from "./clean-prompt.js";
@@ -704,17 +704,17 @@ interface PersistedInsightsCache {
 }
 
 function normalizeSessionProjectsForHome(sessions: SessionInfo[], home: string): SessionInfo[] {
-  return sessions.map((session) =>
-    session.project.startsWith(home)
-      ? { ...session, project: `~${session.project.slice(home.length)}` }
-      : { ...session },
-  );
+  return sessions.map((session) => ({
+    ...session,
+    project: shortenPath(session.project, home),
+  }));
 }
 
 function isFilesystemProjectKey(project: string): boolean {
   return (
     project === "~" ||
     project.startsWith("~/") ||
+    project.startsWith("~\\") ||
     project.startsWith("/") ||
     /^[A-Za-z]:[\\/]/.test(project)
   );
@@ -831,9 +831,7 @@ async function buildSourcesResult(
 ): Promise<SourceSummaryRecord[]> {
   // Normalize project paths: /Users/xxx/... → ~/...
   for (const s of merged) {
-    if (s.project.startsWith(home)) {
-      s.project = `~${s.project.slice(home.length)}`;
-    }
+    s.project = shortenPath(s.project, home);
   }
 
   // Check which project directories still exist on disk + are git repos
@@ -1716,9 +1714,7 @@ export async function startServer(
         // Normalize project paths
         const home = homedir();
         for (const s of merged) {
-          if (s.project.startsWith(home)) {
-            s.project = `~${s.project.slice(home.length)}`;
-          }
+          s.project = shortenPath(s.project, home);
         }
         lastDiscoveredMergedSessions = merged.map((session) => ({ ...session }));
 
@@ -2094,8 +2090,7 @@ export async function startServer(
       }
 
       const home = homedir();
-      const projectFor = (info: SessionInfo): string =>
-        info.project.startsWith(home) ? `~${info.project.slice(home.length)}` : info.project;
+      const projectFor = (info: SessionInfo): string => shortenPath(info.project, home);
 
       const watchers: FSWatcher[] = [];
       const watchedPaths = new Set<string>();
@@ -2790,9 +2785,7 @@ export async function startServer(
 
       const home = homedir();
       const rawProject = body.sessionProject || parsed.cwd;
-      const project = rawProject.startsWith(home)
-        ? `~${rawProject.slice(home.length)}`
-        : rawProject;
+      const project = shortenPath(rawProject, home);
       const gitRepo =
         resolved.value.sessionInfo?.gitRepo ||
         (resolved.value.sessionInfo?.location?.kind === "ssh"
@@ -2924,9 +2917,7 @@ export async function startServer(
         const paths = [...sessionInfo.filePaths, ...(sessionInfo.toolPaths || [])];
         const parsed = await provider.parse(paths, sessionInfo);
         const home = homedir();
-        const project = sessionInfo.project.startsWith(home)
-          ? `~${sessionInfo.project.slice(home.length)}`
-          : sessionInfo.project;
+        const project = shortenPath(sessionInfo.project, home);
 
         const replay = transformToReplay(parsed, providerName, project, {
           generator: {
@@ -4062,7 +4053,9 @@ export const __testables = {
   getStaleSourceProviders,
   findReplayForSource,
   isSameOriginSettingsRequest,
+  isFilesystemProjectKey,
   mergeSourceCatalogSessionUpdates,
+  normalizeSessionProjectsForHome,
   normalizeSourceSessionCatalogCache,
   pickSourceRecordForSession,
   providerSessionKey,
