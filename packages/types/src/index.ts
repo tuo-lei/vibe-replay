@@ -36,6 +36,12 @@ export function deriveTokenUsageMetrics(usage: TokenUsage): TokenUsageMetrics {
 
 export interface TurnStat {
   turnIndex: number;
+  /**
+   * Optional assistant-segment index within the session. Providers that split
+   * one user prompt at a compaction or context-injection boundary can use this
+   * to keep each rendered assistant card's metrics separate.
+   */
+  segmentIndex?: number;
   model?: string;
   durationMs?: number;
   tokenUsage?: TokenUsage;

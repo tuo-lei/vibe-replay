@@ -19,7 +19,7 @@ const turnStat: TurnStat = {
   tokenUsage: {
     inputTokens: 900,
     outputTokens: 800,
-    cacheCreationTokens: 0,
+    cacheCreationTokens: 300,
     cacheReadTokens: 1_500,
   },
 };
@@ -57,6 +57,21 @@ const multiTurnScenes: Scene[] = [
   },
 ];
 
+const compactionScenes: Scene[] = [
+  scenes[0],
+  scenes[1],
+  {
+    type: "compaction-summary",
+    content: "Earlier work condensed.",
+    timestamp: "2026-08-30T10:00:05.000Z",
+  },
+  {
+    type: "text-response",
+    content: "Continuing after compaction.",
+    timestamp: "2026-08-30T10:00:06.000Z",
+  },
+];
+
 function prefs(compactAssistant: boolean): EffectivePrefs {
   return {
     hideThinking: false,
@@ -83,8 +98,12 @@ describe("ConversationView assistant metrics", () => {
     renderConversation(compact);
 
     expect(screen.getByText(/4\.2s/)).toBeTruthy();
-    expect(screen.getByText(/3\.2K tok/)).toBeTruthy();
-    expect(screen.getByTitle(/2,400 prompt.*800 output/)).toBeTruthy();
+    expect(screen.getByText(/900\s+in/)).toBeTruthy();
+    expect(screen.getByText(/800\s+out/)).toBeTruthy();
+    expect(screen.getByText(/1\.5K\s+cache read/)).toBeTruthy();
+    expect(screen.queryByText(/300\s+cache write/)).toBeNull();
+    expect(screen.getByTitle(/2,700 prompt.*800 output/)).toBeTruthy();
+    expect(screen.getByTitle(/300 prompt cache created.*not necessarily billable/)).toBeTruthy();
   });
 
   it("uses scene timestamps for duration when per-turn duration is unavailable", () => {
@@ -136,7 +155,45 @@ describe("ConversationView assistant metrics", () => {
 
     expect(screen.getByText(/4\.2s/)).toBeTruthy();
     expect(screen.getByText(/8\.1s/)).toBeTruthy();
-    expect(screen.getByText(/2\.0K tok/)).toBeTruthy();
+    expect(screen.getByText(/1\.0K\s+in/)).toBeTruthy();
+    expect(screen.getByText(/1\.0K\s+out/)).toBeTruthy();
+  });
+
+  it("keeps assistant metrics separate across a compaction boundary", () => {
+    render(
+      <ConversationView
+        scenes={compactionScenes}
+        visibleCount={compactionScenes.length}
+        currentIndex={3}
+        effectivePrefs={prefs(false)}
+        turnStats={[
+          {
+            turnIndex: 0,
+            segmentIndex: 0,
+            tokenUsage: {
+              inputTokens: 100,
+              outputTokens: 10,
+              cacheCreationTokens: 0,
+              cacheReadTokens: 50,
+            },
+          },
+          {
+            turnIndex: 0,
+            segmentIndex: 1,
+            tokenUsage: {
+              inputTokens: 200,
+              outputTokens: 20,
+              cacheCreationTokens: 0,
+              cacheReadTokens: 80,
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getAllByLabelText("Cumulative token usage by category")).toHaveLength(2);
+    expect(screen.getByTitle(/150 prompt.*10 output/)).toBeTruthy();
+    expect(screen.getByTitle(/280 prompt.*20 output/)).toBeTruthy();
   });
 
   it("does not fall back by position for sparse indexed stats", () => {

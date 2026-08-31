@@ -128,6 +128,23 @@ describe("turn-stat joins and context drops", () => {
     ]);
   });
 
+  it("reports a context drop across assistant segments split by compaction", () => {
+    expect(
+      findContextDrops([
+        ts({ turnIndex: 0, segmentIndex: 0, contextTokens: 1000 }),
+        ts({ turnIndex: 0, segmentIndex: 1, contextTokens: 400 }),
+      ]),
+    ).toEqual([
+      {
+        position: 0,
+        beforeTurnIndex: 0,
+        afterTurnIndex: 0,
+        before: 1000,
+        after: 400,
+      },
+    ]);
+  });
+
   it("uses the configured limit as the semantic limit while keeping an over-limit peak visible", () => {
     expect(getContextScale([ts({ contextTokens: 415_242 })], 272_000)).toEqual({
       peak: 415_242,

@@ -13,10 +13,13 @@ export interface ContextDrop {
  * Return turn stats in their semantic prompt order without mutating the
  * provider-owned array. Older providers may omit turns, so callers must use
  * `turnIndex` rather than the array position when joining these stats to
- * rendered prompts.
+ * rendered prompts. Providers that expose `segmentIndex` use that for
+ * ordering continuation segments within one user prompt.
  */
 export function orderedTurnStats(turnStats: readonly TurnStat[]): TurnStat[] {
-  return [...turnStats].sort((a, b) => a.turnIndex - b.turnIndex);
+  return [...turnStats].sort(
+    (a, b) => (a.segmentIndex ?? a.turnIndex) - (b.segmentIndex ?? b.turnIndex),
+  );
 }
 
 /** Look up a turn's metrics without assuming that every turn has a stat row. */
@@ -42,14 +45,13 @@ export function findContextDrops(turnStats: readonly TurnStat[]): ContextDrop[] 
     const next = ordered[i + 1];
     const before = current.contextTokens || 0;
     const after = next.contextTokens || 0;
-    // Do not infer across an omitted turn. The missing row may contain the
-    // actual reset or may make two unrelated observations look adjacent.
-    if (
-      next.turnIndex === current.turnIndex + 1 &&
-      before > 0 &&
-      after > 0 &&
-      after < before * 0.5
-    ) {
+    // Do not infer across an omitted turn/segment. The missing row may contain
+    // the actual reset or may make two unrelated observations look adjacent.
+    const adjacent =
+      current.segmentIndex !== undefined && next.segmentIndex !== undefined
+        ? next.segmentIndex === current.segmentIndex + 1
+        : next.turnIndex === current.turnIndex + 1;
+    if (adjacent && before > 0 && after > 0 && after < before * 0.5) {
       drops.push({
         position: i,
         beforeTurnIndex: current.turnIndex,

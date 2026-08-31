@@ -51,6 +51,7 @@ interface TurnGroup {
   timestamp?: string;
   scenes: { scene: Scene; index: number }[];
   turnNumber?: number;
+  assistantSegmentIndex?: number;
 }
 
 interface StickyPromptSummary {
@@ -88,19 +89,24 @@ function turnStatForNumber(
   return hasExplicitIndexes ? getTurnStat(turnStats, turnIndex) : turnStats[turnIndex];
 }
 
+function turnStatForGroup(
+  turnStats: TurnStat[] | undefined,
+  turnNumber: number | undefined,
+  assistantSegmentIndex: number | undefined,
+): TurnStat | undefined {
+  if (turnStats?.some((stat) => Number.isInteger(stat.segmentIndex))) {
+    if (assistantSegmentIndex === undefined) return undefined;
+    return turnStats.find((stat) => stat.segmentIndex === assistantSegmentIndex);
+  }
+  return turnStatForNumber(turnStats, turnNumber);
+}
+
 function turnDurationFromScenes(scenes: { scene: Scene }[]): number | undefined {
   const firstTimestamp = scenes[0]?.scene.timestamp;
   const lastTimestamp = scenes[scenes.length - 1]?.scene.timestamp;
   if (!firstTimestamp || !lastTimestamp) return undefined;
   const durationMs = Date.parse(lastTimestamp) - Date.parse(firstTimestamp);
   return durationMs > 0 ? durationMs : undefined;
-}
-
-function totalTurnTokens(usage: TurnStat["tokenUsage"]): number | undefined {
-  if (!usage) return undefined;
-  const total =
-    usage.inputTokens + usage.outputTokens + usage.cacheCreationTokens + usage.cacheReadTokens;
-  return total > 0 ? total : undefined;
 }
 
 function tokenUsageTitle(usage: NonNullable<TurnStat["tokenUsage"]>): string {
@@ -118,9 +124,11 @@ function tokenUsageTitle(usage: NonNullable<TurnStat["tokenUsage"]>): string {
     parts.push(`${usage.cacheReadTokens.toLocaleString("en-US")} cache read`);
   }
   if (usage.cacheCreationTokens > 0) {
-    parts.push(`${usage.cacheCreationTokens.toLocaleString("en-US")} cache write`);
+    parts.push(
+      `${usage.cacheCreationTokens.toLocaleString("en-US")} prompt cache created (not necessarily billable)`,
+    );
   }
-  return `Recorded token usage for this assistant turn: ${parts.join(" · ")}`;
+  return `Recorded cumulative token usage for this assistant turn: ${parts.join(" · ")}`;
 }
 
 function AssistantTurnMetrics({
@@ -132,8 +140,14 @@ function AssistantTurnMetrics({
 }) {
   const durationMs = turnStat?.durationMs ?? fallbackDurationMs;
   const durationLabel = formatToolDuration(durationMs);
-  const tokenCount = totalTurnTokens(turnStat?.tokenUsage);
-  if (!durationLabel && !tokenCount) return null;
+  const usage = turnStat?.tokenUsage;
+  const hasTokenUsage = usage
+    ? usage.inputTokens > 0 ||
+      usage.outputTokens > 0 ||
+      usage.cacheCreationTokens > 0 ||
+      usage.cacheReadTokens > 0
+    : false;
+  if (!durationLabel && !hasTokenUsage) return null;
 
   return (
     <span className="inline-flex items-center gap-1.5 text-[10px] font-mono text-terminal-dimmer">
@@ -148,8 +162,18 @@ function AssistantTurnMetrics({
           · {durationLabel}
         </span>
       )}
-      {tokenCount && turnStat?.tokenUsage && (
-        <span title={tokenUsageTitle(turnStat.tokenUsage)}>· {formatTokens(tokenCount)} tok</span>
+      {usage && hasTokenUsage && (
+        <span
+          className="inline-flex items-center gap-1.5"
+          title={tokenUsageTitle(usage)}
+          aria-label="Cumulative token usage by category"
+        >
+          {usage.inputTokens > 0 && <span>· {formatTokens(usage.inputTokens)} in</span>}
+          {usage.outputTokens > 0 && <span>· {formatTokens(usage.outputTokens)} out</span>}
+          {usage.cacheReadTokens > 0 && (
+            <span>· {formatTokens(usage.cacheReadTokens)} cache read</span>
+          )}
+        </span>
       )}
     </span>
   );
@@ -186,6 +210,7 @@ export default function ConversationView({
     const result: TurnGroup[] = [];
     let current: TurnGroup | null = null;
     let turnCount = 0;
+    let assistantSegmentCount = 0;
 
     for (let i = 0; i < scenes.length; i++) {
       const scene = scenes[i];
@@ -217,6 +242,7 @@ export default function ConversationView({
             timestamp: scene.timestamp,
             scenes: [],
             turnNumber: turnCount > 0 ? turnCount : undefined,
+            assistantSegmentIndex: assistantSegmentCount++,
           };
         }
         current.scenes.push({ scene, index: i });
@@ -765,16 +791,19 @@ const GroupCard = memo(function GroupCard({
     return getContextScale(turnStats || [], contextLimit).displayMax;
   }, [contextLimit, turnStats]);
 
-  const turnStatsByIndex = useMemo(
-    () => new Map((turnStats || []).map((stat) => [stat.turnIndex, stat])),
-    [turnStats],
-  );
+  const turnStatsByIndex = useMemo(() => {
+    const result = new Map<number, TurnStat>();
+    for (const stat of turnStats || []) {
+      if (!result.has(stat.turnIndex)) result.set(stat.turnIndex, stat);
+    }
+    return result;
+  }, [turnStats]);
 
   // Render every scene in the group — no longer gated by visibleCount.
   // Playback advance still updates currentIndex (used for the focus
   // indicator + scroll-follow), but never hides content.
   const groupScenes = group.scenes;
-  const turnStat = turnStatForNumber(turnStats, group.turnNumber);
+  const turnStat = turnStatForGroup(turnStats, group.turnNumber, group.assistantSegmentIndex);
   const fallbackTurnDurationMs = useMemo(() => turnDurationFromScenes(groupScenes), [groupScenes]);
 
   const groupHasCurrent = groupScenes.some(({ index }) => index === currentIndex);
