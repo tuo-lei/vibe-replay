@@ -11,6 +11,8 @@ const source = {
   connectTimeoutMs: 10_000,
 };
 
+let configuredSources = [source];
+
 function jsonResponse(data: unknown, ok = true) {
   return {
     ok,
@@ -19,12 +21,13 @@ function jsonResponse(data: unknown, ok = true) {
 }
 
 beforeEach(() => {
+  configuredSources = [source];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/api/settings")) {
-        return jsonResponse({ remoteSources: [source] });
+        return jsonResponse({ remoteSources: configuredSources });
       }
       if (url.endsWith("/api/ai/providers")) {
         return jsonResponse({
@@ -70,6 +73,33 @@ describe("SettingsPanel", () => {
     expect(screen.getByText("Codex")).toBeDefined();
     expect(screen.getByText("AI providers")).toBeDefined();
     expect(screen.getByLabelText("Custom AI endpoint")).toBeDefined();
+    expect(
+      screen.getByLabelText("Allow SSH session data to be sent to the configured AI provider"),
+    ).toBeDefined();
+  });
+
+  it("hides the SSH data setting when no SSH source is configured", async () => {
+    configuredSources = [];
+    render(<SettingsPanel />);
+
+    await waitFor(() =>
+      expect(screen.getByText("No remote SSH sources configured.")).toBeDefined(),
+    );
+    expect(
+      screen.queryByLabelText("Allow SSH session data to be sent to the configured AI provider"),
+    ).toBeNull();
+  });
+
+  it("persists the SSH data setting from Settings", async () => {
+    render(<SettingsPanel />);
+    await waitFor(() => expect(screen.getByText("ROS devspace")).toBeDefined());
+
+    const consent = screen.getByLabelText(
+      "Allow SSH session data to be sent to the configured AI provider",
+    );
+    expect((consent as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(consent);
+    expect((consent as HTMLInputElement).checked).toBe(true);
   });
 
   it("follows the settings section URL and updates it from the left menu", async () => {

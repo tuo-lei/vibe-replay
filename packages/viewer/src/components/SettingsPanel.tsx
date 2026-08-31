@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { navigateTo, providerDisplayName } from "./dashboard-utils";
 import { AiProviderSettings } from "./AiProviderSettings";
 import { useAiProviderSettings } from "../hooks/useAiProviderSettings";
+import { notifyRemoteSourcesChanged, useRemoteDataConsent } from "../hooks/useRemoteDataConsent";
 
 type RemoteProvider = "claude-code" | "codex" | "pi";
 
@@ -235,6 +236,7 @@ function sourceForDraft(draft: RemoteSourceDraft): { source?: RemoteSource; erro
 export default function SettingsPanel() {
   const aiProviderSettings = useAiProviderSettings(true);
   const [sources, setSources] = useState<RemoteSource[]>([]);
+  const { allowRemoteData, setAllowRemoteData } = useRemoteDataConsent(true, sources.length);
   const [draft, setDraft] = useState<RemoteSourceDraft | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -288,7 +290,9 @@ export default function SettingsPanel() {
       } | null;
       if (!response.ok) throw new Error(data?.error || "Settings could not be loaded");
       if (requestVersion === sourceRequestVersion.current) {
-        setSources(parseRemoteSources(data?.remoteSources));
+        const nextSources = parseRemoteSources(data?.remoteSources);
+        setSources(nextSources);
+        notifyRemoteSourcesChanged(nextSources.length > 0);
       }
     } catch (err) {
       if (requestVersion === sourceRequestVersion.current) {
@@ -407,7 +411,9 @@ export default function SettingsPanel() {
       } | null;
       if (!response.ok) throw new Error(data?.error || "SSH settings could not be saved");
       if (requestVersion === sourceRequestVersion.current) {
-        setSources(parseRemoteSources(data?.remoteSources));
+        const nextSources = parseRemoteSources(data?.remoteSources);
+        setSources(nextSources);
+        notifyRemoteSourcesChanged(nextSources.length > 0);
         setTestResults({});
         setMessage(successMessage);
         setDraft(null);
@@ -496,6 +502,7 @@ export default function SettingsPanel() {
         setMessage("Source discovery finished. Sessions and Insights will use the new catalog.");
         const refreshedSettings = parseRemoteSources(data?.remoteSources);
         setSources(refreshedSettings);
+        notifyRemoteSourcesChanged(refreshedSettings.length > 0);
       }
     } catch (err) {
       if (requestVersion === sourceRequestVersion.current) {
@@ -571,6 +578,36 @@ export default function SettingsPanel() {
                 + Add SSH source
               </button>
             </div>
+
+            {!loading && sources.length > 0 && (
+              <div className="mt-5 rounded-lg border border-terminal-yellow/25 bg-terminal-yellow-subtle/60 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-sans font-semibold text-terminal-text">
+                      Ask Replay SSH data
+                    </h3>
+                    <p className="mt-1 max-w-2xl text-xs font-sans leading-relaxed text-terminal-dim">
+                      Allow Ask Replay to include SSH session metadata and content in requests to
+                      your configured AI provider. This applies to the dashboard and SSH replays.
+                    </p>
+                  </div>
+                  <label className="flex shrink-0 cursor-pointer items-center gap-2 rounded-lg border border-terminal-yellow/30 bg-terminal-bg px-3 py-2 text-xs font-mono text-terminal-yellow">
+                    <input
+                      type="checkbox"
+                      aria-label="Allow SSH session data to be sent to the configured AI provider"
+                      checked={allowRemoteData}
+                      onChange={(event) => setAllowRemoteData(event.target.checked)}
+                      className="accent-terminal-yellow"
+                    />
+                    Allow SSH data
+                  </label>
+                </div>
+                <p className="mt-3 text-[10px] font-sans leading-relaxed text-terminal-dimmer">
+                  When disabled, SSH-backed sessions stay hidden from Ask Replay. You can change
+                  this at any time from Settings.
+                </p>
+              </div>
+            )}
 
             {loading ? (
               <div className="mt-5 rounded-lg bg-terminal-bg px-4 py-5 text-xs font-mono text-terminal-dimmer">

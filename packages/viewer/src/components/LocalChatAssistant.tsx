@@ -1,6 +1,7 @@
 import { marked } from "marked";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAiProviderSettings } from "../hooks/useAiProviderSettings";
+import { useRemoteDataConsent } from "../hooks/useRemoteDataConsent";
 import { navigateTo } from "./dashboard-utils";
 import { sanitizeHtml } from "../utils/sanitize";
 
@@ -416,7 +417,6 @@ export default function LocalChatAssistant({ context }: Props) {
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [providerLabel, setProviderLabel] = useState<string | null>(null);
   const [switchOpen, setSwitchOpen] = useState(false);
-  const [allowRemoteData, setAllowRemoteData] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [panelSize, setPanelSize] = useState<PanelSize>(DEFAULT_PANEL_SIZE);
   const [resizing, setResizing] = useState(false);
@@ -427,6 +427,8 @@ export default function LocalChatAssistant({ context }: Props) {
   >(undefined);
   const scrollRef = useRef<HTMLDivElement>(null);
   const providerSettings = useAiProviderSettings(true);
+  const { allowRemoteData, hasConfiguredRemoteSource, remoteSourcesLoading } =
+    useRemoteDataConsent(true);
   const { refreshAiProviders } = providerSettings;
   const availableProviders = providerSettings.aiProviders.filter(
     (provider) => provider.configured && provider.models.length > 0,
@@ -463,6 +465,8 @@ export default function LocalChatAssistant({ context }: Props) {
     ? "Open provider settings"
     : "Set up an AI provider";
   const remoteSession = Boolean(context.currentSession?.targetId);
+  const remoteDataAvailable = remoteSession || hasConfiguredRemoteSource;
+  const remoteDataEnabled = allowRemoteData && remoteDataAvailable;
   const retryProviderSetup = useCallback(async () => {
     try {
       await refreshAiProviders?.();
@@ -548,7 +552,6 @@ export default function LocalChatAssistant({ context }: Props) {
   }, [chatModelId, chatProviderId]);
 
   useEffect(() => {
-    setAllowRemoteData(false);
     setSwitchOpen(false);
   }, [context.currentSession?.slug, context.currentSession?.targetId]);
 
@@ -594,14 +597,14 @@ export default function LocalChatAssistant({ context }: Props) {
       const params = new URLSearchParams(window.location.search);
       const body = {
         messages: nextMessages
-          .filter((message) => allowRemoteData || !message.remoteDataUsed)
+          .filter((message) => remoteDataEnabled || !message.remoteDataUsed)
           .map(({ role, content: messageContent }) => ({
             role,
             content: messageContent,
           })),
         context: {
           ...context,
-          allowRemoteData,
+          allowRemoteData: remoteDataEnabled,
           tab: params.get("tab") || undefined,
           project: params.get("project") || undefined,
         },
@@ -694,13 +697,13 @@ export default function LocalChatAssistant({ context }: Props) {
     }
   }, [
     context,
-    allowRemoteData,
     input,
     messages,
     providerReady,
     chatModelId,
     chatProviderId,
     running,
+    remoteDataEnabled,
   ]);
 
   const cancel = () => controllerRef.current?.abort();
@@ -1069,31 +1072,34 @@ export default function LocalChatAssistant({ context }: Props) {
                 </button>
               )}
             </div>
-            {providerReady && (remoteSession || context.mode === "dashboard") && (
-              <label className="mt-2 flex items-start gap-2 rounded-lg border border-terminal-yellow/25 bg-terminal-yellow-subtle px-2.5 py-2 text-[9px] leading-relaxed font-mono text-terminal-yellow">
-                <input
-                  type="checkbox"
-                  checked={allowRemoteData}
-                  onChange={(event) => setAllowRemoteData(event.target.checked)}
-                  className="mt-0.5 accent-terminal-yellow"
-                />
+            {providerReady && remoteDataAvailable && !remoteDataEnabled && (
+              <div className="mt-2 flex items-start justify-between gap-3 rounded-lg border border-terminal-yellow/25 bg-terminal-yellow-subtle px-2.5 py-2 text-[9px] leading-relaxed font-mono text-terminal-yellow">
                 <span>
                   {remoteSession
-                    ? "This replay came from SSH. Allow its session content to be sent to your configured AI provider for this chat."
-                    : "Allow SSH session metadata and content to be sent to your configured AI provider for this chat."}
+                    ? "This SSH replay is hidden from Ask Replay until SSH data is enabled in Settings."
+                    : "SSH session data is hidden from Ask Replay until enabled in Settings."}
                 </span>
-              </label>
+                <button
+                  type="button"
+                  onClick={openProviderSettings}
+                  className="shrink-0 cursor-pointer font-semibold underline underline-offset-2 transition-colors hover:text-terminal-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-green/50"
+                >
+                  Open Settings
+                </button>
+              </div>
             )}
             <div className="mt-2 flex items-center justify-between text-[9px] font-mono text-terminal-dimmer">
               <span>
                 Read-only ·{" "}
                 {!providerReady
                   ? "provider setup required"
-                  : allowRemoteData
-                    ? "SSH consent granted"
-                    : remoteSession
-                      ? "SSH consent required"
-                      : "local sessions only"}
+                  : remoteSourcesLoading && !remoteSession
+                    ? "checking source settings"
+                    : remoteDataEnabled
+                      ? "SSH data enabled"
+                      : remoteDataAvailable
+                        ? "SSH data hidden"
+                        : "local sessions only"}
               </span>
               <button
                 type="button"
