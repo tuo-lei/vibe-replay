@@ -162,7 +162,7 @@ function hintedDbPath(paths: string[], sessionInfo?: SessionInfo): string | unde
       if (dbPath) return dbPath;
     }
   }
-  const fp = (sessionInfo as unknown as { filePath?: string })?.filePath;
+  const fp = sessionInfo?.filePath;
   if (typeof fp === "string" && fp.includes("#session:")) {
     return fp.split("#session:")[0];
   }
