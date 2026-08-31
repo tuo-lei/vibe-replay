@@ -50,12 +50,61 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Check website
+        run: pnpm --filter @vibe-replay/website check
+      - name: Build website
+        run: pnpm --filter @vibe-replay/website build
       - name: Test CLI
         run: pnpm --filter vibe-replay test
       - name: Test viewer
         run: pnpm --filter @vibe-replay/viewer test
       - name: Build
         run: pnpm build
+      - name: Smoke-test dev launcher
+        shell: pwsh
+        run: |
+          $env:VIBE_API_PORT = "13496"
+          $env:VIBE_VIEWER_PORT = "51996"
+          $env:VIBE_REPLAY_NO_AUTO_OPEN = "1"
+          $process = Start-Process `
+            -FilePath "node.exe" `
+            -ArgumentList @("scripts/dev.mjs", "-d") `
+            -WorkingDirectory $PWD.Path `
+            -PassThru `
+            -NoNewWindow
+          try {
+            $deadline = (Get-Date).AddSeconds(45)
+            $ready = $false
+            while ((Get-Date) -lt $deadline) {
+              if ($process.HasExited) {
+                throw "Dev launcher exited with code $($process.ExitCode)"
+              }
+              try {
+                $viewer = Invoke-WebRequest `
+                  -UseBasicParsing `
+                  -TimeoutSec 2 `
+                  "http://127.0.0.1:$env:VIBE_VIEWER_PORT/"
+                $api = Invoke-WebRequest `
+                  -UseBasicParsing `
+                  -TimeoutSec 2 `
+                  "http://127.0.0.1:$env:VIBE_API_PORT/api/scan/status"
+                if ($viewer.StatusCode -eq 200 -and $api.StatusCode -eq 200) {
+                  $ready = $true
+                  break
+                }
+              } catch {
+                # The two child servers may still be starting.
+              }
+              Start-Sleep -Milliseconds 500
+            }
+            if (-not $ready) {
+              throw "Dev launcher did not serve the viewer and API within 45 seconds"
+            }
+          } finally {
+            if (-not $process.HasExited) {
+              taskkill /PID $process.Id /T /F | Out-Null
+            }
+          }
 
   build:
     runs-on: ubuntu-latest
