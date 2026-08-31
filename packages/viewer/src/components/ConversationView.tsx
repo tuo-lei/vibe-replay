@@ -51,6 +51,7 @@ interface TurnGroup {
   timestamp?: string;
   scenes: { scene: Scene; index: number }[];
   turnNumber?: number;
+  assistantSegmentIndex?: number;
 }
 
 interface StickyPromptSummary {
@@ -86,6 +87,18 @@ function turnStatForNumber(
   // assign another turn's metrics to this card.
   const hasExplicitIndexes = turnStats.every((stat) => Number.isInteger(stat.turnIndex));
   return hasExplicitIndexes ? getTurnStat(turnStats, turnIndex) : turnStats[turnIndex];
+}
+
+function turnStatForGroup(
+  turnStats: TurnStat[] | undefined,
+  turnNumber: number | undefined,
+  assistantSegmentIndex: number | undefined,
+): TurnStat | undefined {
+  if (turnStats?.some((stat) => Number.isInteger(stat.segmentIndex))) {
+    if (assistantSegmentIndex === undefined) return undefined;
+    return turnStats.find((stat) => stat.segmentIndex === assistantSegmentIndex);
+  }
+  return turnStatForNumber(turnStats, turnNumber);
 }
 
 function turnDurationFromScenes(scenes: { scene: Scene }[]): number | undefined {
@@ -197,6 +210,7 @@ export default function ConversationView({
     const result: TurnGroup[] = [];
     let current: TurnGroup | null = null;
     let turnCount = 0;
+    let assistantSegmentCount = 0;
 
     for (let i = 0; i < scenes.length; i++) {
       const scene = scenes[i];
@@ -228,6 +242,7 @@ export default function ConversationView({
             timestamp: scene.timestamp,
             scenes: [],
             turnNumber: turnCount > 0 ? turnCount : undefined,
+            assistantSegmentIndex: assistantSegmentCount++,
           };
         }
         current.scenes.push({ scene, index: i });
@@ -776,16 +791,19 @@ const GroupCard = memo(function GroupCard({
     return getContextScale(turnStats || [], contextLimit).displayMax;
   }, [contextLimit, turnStats]);
 
-  const turnStatsByIndex = useMemo(
-    () => new Map((turnStats || []).map((stat) => [stat.turnIndex, stat])),
-    [turnStats],
-  );
+  const turnStatsByIndex = useMemo(() => {
+    const result = new Map<number, TurnStat>();
+    for (const stat of turnStats || []) {
+      if (!result.has(stat.turnIndex)) result.set(stat.turnIndex, stat);
+    }
+    return result;
+  }, [turnStats]);
 
   // Render every scene in the group — no longer gated by visibleCount.
   // Playback advance still updates currentIndex (used for the focus
   // indicator + scroll-follow), but never hides content.
   const groupScenes = group.scenes;
-  const turnStat = turnStatForNumber(turnStats, group.turnNumber);
+  const turnStat = turnStatForGroup(turnStats, group.turnNumber, group.assistantSegmentIndex);
   const fallbackTurnDurationMs = useMemo(() => turnDurationFromScenes(groupScenes), [groupScenes]);
 
   const groupHasCurrent = groupScenes.some(({ index }) => index === currentIndex);

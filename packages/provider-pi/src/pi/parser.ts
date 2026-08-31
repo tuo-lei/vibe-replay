@@ -1013,27 +1013,36 @@ function buildTurnStats(
   usageByMessageId: Map<string, { usage: TokenUsage; model?: string; contextTokens?: number }>,
 ): NonNullable<ProviderParseResult["turnStats"]> {
   const stats: NonNullable<ProviderParseResult["turnStats"]> = [];
-  let current: { turnIndex: number; messageIds: string[] } | undefined;
+  let current: { turnIndex: number; segmentIndex: number; messageIds: string[] } | undefined;
   let turnIndex = -1;
+  let segmentIndex = 0;
+
+  const flushCurrent = () => {
+    if (current && current.messageIds.length > 0) {
+      stats.push(buildTurnStat(current, usageByMessageId));
+    }
+    current = undefined;
+  };
 
   for (const turn of turns) {
-    if (turn.role === "user" && !turn.subtype) {
-      if (current && current.messageIds.length > 0)
-        stats.push(buildTurnStat(current, usageByMessageId));
-      turnIndex++;
-      current = { turnIndex, messageIds: [] };
-    } else if (turn.role === "assistant" && turn.messageId && current) {
+    if (turn.role === "user") {
+      // A compaction/context-injection is not a new user prompt, but it does
+      // start a new assistant metric segment. Otherwise the cards before and
+      // after the boundary receive the same aggregate usage row.
+      flushCurrent();
+      if (!turn.subtype) turnIndex++;
+    } else if (turn.role === "assistant" && turn.messageId && turnIndex >= 0) {
+      current ??= { turnIndex, segmentIndex: segmentIndex++, messageIds: [] };
       current.messageIds.push(turn.messageId);
     }
   }
 
-  if (current && current.messageIds.length > 0)
-    stats.push(buildTurnStat(current, usageByMessageId));
+  flushCurrent();
   return stats;
 }
 
 function buildTurnStat(
-  turn: { turnIndex: number; messageIds: string[] },
+  turn: { turnIndex: number; segmentIndex: number; messageIds: string[] },
   usageByMessageId: Map<string, { usage: TokenUsage; model?: string; contextTokens?: number }>,
 ): NonNullable<ProviderParseResult["turnStats"]>[number] {
   const usages: TokenUsage[] = [];
@@ -1049,6 +1058,7 @@ function buildTurnStat(
   const tokenUsage = aggregateUsage(usages);
   return {
     turnIndex: turn.turnIndex,
+    segmentIndex: turn.segmentIndex,
     ...(model ? { model } : {}),
     ...(tokenUsage ? { tokenUsage } : {}),
     ...(contextTokens ? { contextTokens } : {}),

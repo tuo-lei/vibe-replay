@@ -715,7 +715,7 @@ describe("Pi parser", () => {
     });
   });
 
-  it("counts compaction summary usage and keeps turn stats unchanged", async () => {
+  it("counts compaction summary usage without changing the preceding turn stats", async () => {
     const buildLines = (compaction: Record<string, unknown>) => [
       {
         type: "session",
@@ -771,6 +771,7 @@ describe("Pi parser", () => {
         expect(parsed.turnStats).toEqual([
           {
             turnIndex: 0,
+            segmentIndex: 0,
             model: "gpt-5.5",
             tokenUsage: {
               inputTokens: 100,
@@ -798,6 +799,57 @@ describe("Pi parser", () => {
           cacheCreationTokens: 5,
           cacheReadTokens: 5,
         });
+      },
+    );
+
+    await withPiFixture(
+      [
+        ...buildLines({
+          timestamp: "2026-01-01T00:00:03.000Z",
+          summary: "Earlier work condensed.",
+          tokensBefore: 90_000,
+        }),
+        {
+          type: "message",
+          id: "assistant2",
+          parentId: "compact1",
+          timestamp: "2026-01-01T00:00:04.000Z",
+          message: {
+            role: "assistant",
+            model: "gpt-5.5",
+            content: [{ type: "text", text: "Continuing" }],
+            usage: { input: 200, output: 30, cacheRead: 80, cacheWrite: 10 },
+          },
+        },
+      ],
+      async (path) => {
+        const parsed = await parsePiSession(path);
+        expect(parsed.turnStats).toEqual([
+          {
+            turnIndex: 0,
+            segmentIndex: 0,
+            model: "gpt-5.5",
+            tokenUsage: {
+              inputTokens: 100,
+              outputTokens: 20,
+              cacheCreationTokens: 5,
+              cacheReadTokens: 5,
+            },
+            contextTokens: 110,
+          },
+          {
+            turnIndex: 0,
+            segmentIndex: 1,
+            model: "gpt-5.5",
+            tokenUsage: {
+              inputTokens: 200,
+              outputTokens: 30,
+              cacheCreationTokens: 10,
+              cacheReadTokens: 80,
+            },
+            contextTokens: 290,
+          },
+        ]);
       },
     );
   });
