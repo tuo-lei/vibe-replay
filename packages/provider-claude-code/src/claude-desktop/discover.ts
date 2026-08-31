@@ -2,16 +2,9 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { extractSessionInfo } from "../claude-code/discover.js";
+import { claudeDataDirs } from "../claude-data-paths.js";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
 import { readGitRepo } from "@vibe-replay/provider-core/utils";
-
-const DESKTOP_DIR = join(
-  homedir(),
-  "Library",
-  "Application Support",
-  "Claude",
-  "claude-code-sessions",
-);
 
 export const DEFAULT_CLAUDE_PROJECTS_DIR = join(homedir(), ".claude", "projects");
 
@@ -35,9 +28,27 @@ interface DesktopSessionJson {
 }
 
 export async function discoverClaudeDesktopSessions(): Promise<SessionInfo[]> {
-  // Claude Desktop stores sessions in ~/Library/Application Support (macOS-only path)
-  if (process.platform !== "darwin") return [];
-  return discoverFromDir(DESKTOP_DIR, DEFAULT_CLAUDE_PROJECTS_DIR);
+  const dataDirs = await claudeDataDirs();
+  return discoverFromDirs(
+    dataDirs.map((dataDir) => join(dataDir, "claude-code-sessions")),
+    DEFAULT_CLAUDE_PROJECTS_DIR,
+  );
+}
+
+export async function discoverFromDirs(
+  desktopDirs: string[],
+  claudeProjectsDir: string,
+): Promise<SessionInfo[]> {
+  const sessionsById = new Map<string, SessionInfo>();
+
+  for (const desktopDir of desktopDirs) {
+    const sessions = await discoverFromDir(desktopDir, claudeProjectsDir);
+    for (const session of sessions) {
+      if (!sessionsById.has(session.sessionId)) sessionsById.set(session.sessionId, session);
+    }
+  }
+
+  return Array.from(sessionsById.values()).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 }
 
 export async function discoverFromDir(
@@ -101,15 +112,24 @@ export async function extractDesktopSessionInfo(
 
     if (!desktop.cliSessionId || !desktop.cwd) return null;
 
-    // Encoding is identical to Claude Code's own project-dir scheme: replace every "/"
-    // with "-". This is inherently lossy for paths containing literal hyphens (e.g.
-    // "/Users/me/my-project" and "/Users/me/my/project" both encode to the same string),
-    // but it is the scheme Claude Code itself uses so we must match it exactly.
-    const encodedCwd = desktop.cwd.replace(/\/+$/, "").replace(/\//g, "-");
-    const jsonlPath = join(claudeProjectsDir, encodedCwd, `${desktop.cliSessionId}.jsonl`);
+    // Claude Code encodes Windows drive paths as `C--Users-...` and has also
+    // written `C:-Users-...` in older versions. Keep the candidates explicit
+    // so a backslash in the metadata never becomes a real path separator.
+    const encodedCwds = encodeClaudeProjectDirs(desktop.cwd);
+    let jsonlPath = "";
+    let jsonlStat: Awaited<ReturnType<typeof stat>> | null = null;
 
-    const jsonlStat = await stat(jsonlPath).catch(() => null);
-    if (!jsonlStat) return null;
+    for (const encodedCwd of encodedCwds) {
+      const candidatePath = join(claudeProjectsDir, encodedCwd, `${desktop.cliSessionId}.jsonl`);
+      const candidateStat = await stat(candidatePath).catch(() => null);
+      if (candidateStat) {
+        jsonlPath = candidatePath;
+        jsonlStat = candidateStat;
+        break;
+      }
+    }
+
+    if (!jsonlPath || !jsonlStat) return null;
 
     const info = await extractSessionInfo(jsonlPath, jsonlStat.size, desktop.cwd);
     if (!info) return null;
@@ -127,4 +147,15 @@ export async function extractDesktopSessionInfo(
   } catch {
     return null;
   }
+}
+
+function encodeClaudeProjectDirs(cwd: string): string[] {
+  const normalized = cwd.replaceAll("\\", "/").replace(/\/+$/, "");
+  const candidates = [
+    normalized.replace(/[/:]/g, "-"),
+    normalized.replace(/\//g, "-"),
+    `-${normalized.replace(/\//g, "-")}`,
+  ];
+
+  return Array.from(new Set(candidates));
 }

@@ -1,16 +1,16 @@
 import { createReadStream } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { isSystemGeneratedMessage, previewPrompt } from "@vibe-replay/provider-core/clean-prompt";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
 import { readGitRepo, TOOL_USE_RE } from "@vibe-replay/provider-core/utils";
+import { claudeDataDirs } from "../claude-data-paths.js";
 
 /**
  * Claude Desktop stores Cowork (autonomous agent mode) sessions separately from
  * the Code tab. Layout:
- *   ~/Library/Application Support/Claude/local-agent-mode-sessions/
+ *   <Claude data root>/local-agent-mode-sessions/
  *     {accountId}/
  *       {orgId}/
  *         local_{id}.json          ← session metadata
@@ -19,14 +19,6 @@ import { readGitRepo, TOOL_USE_RE } from "@vibe-replay/provider-core/utils";
  * Unlike Code-tab sessions, the transcript lives inside the Cowork directory
  * itself — we do not need to cross-reference ~/.claude/projects/.
  */
-const COWORK_DIR = join(
-  homedir(),
-  "Library",
-  "Application Support",
-  "Claude",
-  "local-agent-mode-sessions",
-);
-
 interface CoworkSessionJson {
   sessionId: string;
   cliSessionId?: string;
@@ -47,8 +39,17 @@ interface CoworkSessionJson {
 }
 
 export async function discoverClaudeCoworkSessions(): Promise<SessionInfo[]> {
-  if (process.platform !== "darwin") return [];
-  return discoverCoworkFromDir(COWORK_DIR);
+  const dataDirs = await claudeDataDirs();
+  const sessionsById = new Map<string, SessionInfo>();
+
+  for (const dataDir of dataDirs) {
+    const sessions = await discoverCoworkFromDir(join(dataDir, "local-agent-mode-sessions"));
+    for (const session of sessions) {
+      if (!sessionsById.has(session.sessionId)) sessionsById.set(session.sessionId, session);
+    }
+  }
+
+  return Array.from(sessionsById.values()).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 }
 
 export async function discoverCoworkFromDir(coworkDir: string): Promise<SessionInfo[]> {

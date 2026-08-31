@@ -2,7 +2,11 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
-import { discoverFromDir, extractDesktopSessionInfo } from "../src/claude-desktop/discover.js";
+import {
+  discoverFromDir,
+  discoverFromDirs,
+  extractDesktopSessionInfo,
+} from "../src/claude-desktop/discover.js";
 
 const fixture = (name: string) => join(__dirname, "fixtures", name);
 
@@ -164,6 +168,13 @@ describe("discoverFromDir", () => {
     }
   });
 
+  it("deduplicates sessions when multiple Claude data roots are visible", async () => {
+    const sessions = await discoverFromDirs([desktopDir, desktopDir], claudeProjectsDir);
+
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].sessionId).toBe("desktop-cli-session-001");
+  });
+
   it("skips non-local_*.json files (e.g. scheduled-tasks.json)", async () => {
     const { mkdir, copyFile, writeFile: wf } = await import("node:fs/promises");
 
@@ -185,6 +196,31 @@ describe("discoverFromDir", () => {
     const sessions = await discoverFromDir(desktopDir2, claudeProjectsDir);
 
     expect(sessions).toHaveLength(1);
+  });
+
+  it("resolves Windows drive paths to Claude project directories", async () => {
+    const { mkdir, copyFile } = await import("node:fs/promises");
+    const tmpDir = await mkdtemp(join(tmpdir(), "vr-desktop-windows-"));
+    const encodedDir = join(tmpDir, "C--Users-test-desktop-project");
+    await mkdir(encodedDir, { recursive: true });
+    await copyFile(JSONL_FIXTURE, join(encodedDir, "desktop-cli-session-001.jsonl"));
+
+    const jsonPath = join(tmpDir, "local_windows-session.json");
+    await writeFile(
+      jsonPath,
+      JSON.stringify({
+        sessionId: "local_windows-session",
+        cliSessionId: "desktop-cli-session-001",
+        cwd: "C:\\Users\\test\\desktop-project",
+        createdAt: 1750000000000,
+        lastActivityAt: 1750000150000,
+      }),
+    );
+
+    const info = await extractDesktopSessionInfo(jsonPath, tmpDir);
+
+    expect(info?.provider).toBe("claude-desktop");
+    expect(info?.sessionId).toBe("desktop-cli-session-001");
   });
 });
 
