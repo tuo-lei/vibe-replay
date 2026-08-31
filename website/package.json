@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bash ./scripts/run-with-required-node.sh dev",
-    "build": "bash ./scripts/run-with-required-node.sh build",
-    "preview": "bash ./scripts/run-with-required-node.sh preview",
-    "check": "bash ./scripts/run-with-required-node.sh check"
+    "dev": "node ./scripts/run-with-required-node.mjs dev",
+    "build": "node ./scripts/run-with-required-node.mjs build",
+    "preview": "node ./scripts/run-with-required-node.mjs preview",
+    "check": "node ./scripts/run-with-required-node.mjs check"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.9",

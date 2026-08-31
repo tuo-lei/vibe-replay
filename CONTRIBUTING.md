@@ -20,7 +20,10 @@ If you clone on Windows, enable symlinks so the shared skill directories resolve
 git config core.symlinks true   # then re-checkout
 ```
 
-Website scripts use Astro 6 and require Node.js >= 22.12.0 inside `website/`. When `nvm` is available, they will try `nvm use` from `website/.nvmrc` automatically.
+Website scripts use Astro 6 and require Node.js >= 22.12.0 inside `website/`.
+They launch through `scripts/run-with-required-node.mjs`, which works from
+Windows and POSIX shells and searches standard nvm-managed Node installations
+when the current runtime is too old.
 
 Before running the repository commands, verify the Node runtime used by the
 package manager as well as the shell default:
