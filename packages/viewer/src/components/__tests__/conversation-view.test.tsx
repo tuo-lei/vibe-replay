@@ -86,8 +86,9 @@ describe("ConversationView assistant metrics", () => {
     expect(screen.getByText(/900\s+in/)).toBeTruthy();
     expect(screen.getByText(/800\s+out/)).toBeTruthy();
     expect(screen.getByText(/1\.5K\s+cache read/)).toBeTruthy();
-    expect(screen.getByText(/300\s+cache write/)).toBeTruthy();
+    expect(screen.queryByText(/300\s+cache write/)).toBeNull();
     expect(screen.getByTitle(/2,700 prompt.*800 output/)).toBeTruthy();
+    expect(screen.getByTitle(/300 prompt cache created.*not necessarily billable/)).toBeTruthy();
   });
 
   it("uses scene timestamps for duration when per-turn duration is unavailable", () => {

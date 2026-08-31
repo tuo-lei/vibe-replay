@@ -111,7 +111,9 @@ function tokenUsageTitle(usage: NonNullable<TurnStat["tokenUsage"]>): string {
     parts.push(`${usage.cacheReadTokens.toLocaleString("en-US")} cache read`);
   }
   if (usage.cacheCreationTokens > 0) {
-    parts.push(`${usage.cacheCreationTokens.toLocaleString("en-US")} cache write`);
+    parts.push(
+      `${usage.cacheCreationTokens.toLocaleString("en-US")} prompt cache created (not necessarily billable)`,
+    );
   }
   return `Recorded cumulative token usage for this assistant turn: ${parts.join(" · ")}`;
 }
@@ -157,9 +159,6 @@ function AssistantTurnMetrics({
           {usage.outputTokens > 0 && <span>· {formatTokens(usage.outputTokens)} out</span>}
           {usage.cacheReadTokens > 0 && (
             <span>· {formatTokens(usage.cacheReadTokens)} cache read</span>
-          )}
-          {usage.cacheCreationTokens > 0 && (
-            <span>· {formatTokens(usage.cacheCreationTokens)} cache write</span>
           )}
         </span>
       )}
