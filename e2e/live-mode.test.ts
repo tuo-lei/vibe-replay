@@ -7,12 +7,14 @@
 // module-level `CLAUDE_DIR = join(homedir(), ...)` resolves to the temp dir.
 // Codex resolves homedir at discovery time, but shares the same fixture HOME.
 
-import { spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { type Browser, chromium } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { killProcessTree, spawnTsx } from "../scripts/dev-utils.mjs";
 
 interface ParsedSseEvent {
   data: any;
@@ -69,7 +71,7 @@ describe("Live mode SSE", () => {
   let tmpHome: string;
   let jsonlPath: string;
   let codexJsonlPath: string;
-  let serverProcess: ReturnType<typeof spawn> | null = null;
+  let serverProcess: ChildProcess | null = null;
   let serverPort: number | null = null;
   let browser: Browser | null = null;
 
@@ -156,18 +158,21 @@ describe("Live mode SSE", () => {
     // without going through `live` (which would auto-pick the wrong session).
     // startServer keeps the process alive on its own; we read the port from
     // stdout once it logs the listening URL.
-    const bootstrap = `
-      import { startServer } from "${join(import.meta.dirname, "..", "packages/cli/src/server.ts").replace(/\\\\/g, "/")}";
-      await startServer("${join(tmpHome, ".vibe-replay").replace(/\\\\/g, "/")}", {});
-    `;
+    const serverModule = pathToFileURL(
+      join(import.meta.dirname, "..", "packages/cli/src/server.ts"),
+    ).href;
+    const bootstrap = [
+      `import { startServer } from ${JSON.stringify(serverModule)};`,
+      `await startServer(${JSON.stringify(join(tmpHome, ".vibe-replay"))}, {});`,
+    ].join("\n");
     const bootstrapPath = join(tmpHome, "boot.mjs");
     await writeFile(bootstrapPath, bootstrap, "utf-8");
 
-    serverProcess = spawn("pnpm", ["exec", "tsx", bootstrapPath], {
+    serverProcess = spawnTsx([bootstrapPath], {
       env: {
         ...process.env,
         HOME: tmpHome,
-        USERPROFILE: tmpHome, // win compat (test still skipped on win)
+        USERPROFILE: tmpHome,
         VIBE_REPLAY_NO_AUTO_OPEN: "1",
       },
       cwd: join(import.meta.dirname, ".."),
@@ -204,11 +209,7 @@ describe("Live mode SSE", () => {
 
   afterAll(async () => {
     if (browser) await browser.close();
-    if (serverProcess && !serverProcess.killed) {
-      serverProcess.kill("SIGTERM");
-      // Give it a beat to clean up watchers
-      await new Promise((r) => setTimeout(r, 200));
-    }
+    if (serverProcess) await killProcessTree(serverProcess);
     if (tmpHome) {
       await rm(tmpHome, { recursive: true, force: true });
     }
