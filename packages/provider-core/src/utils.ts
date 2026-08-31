@@ -2,11 +2,22 @@ import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
-/** Replace $HOME prefix with `~` for display. */
-export function shortenPath(path: string): string {
-  const home = homedir();
-  if (path.startsWith(home)) return `~${path.slice(home.length)}`;
-  return path;
+/** Replace an OS home-directory prefix with `~` for display. */
+export function shortenPath(
+  path: string,
+  home = homedir(),
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const normalizedHome = home.replaceAll("\\", "/").replace(/\/+$/, "");
+  if (!normalizedHome) return path;
+
+  const escapedHome = normalizedHome
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replaceAll("/", platform === "win32" ? "[\\\\/]" : "/");
+  const flags = platform === "win32" ? "gi" : "g";
+  const homePattern = new RegExp(`(^|[^A-Za-z0-9._-])${escapedHome}(?![A-Za-z0-9._-])`, flags);
+
+  return path.replace(homePattern, (_match, prefix: string) => `${prefix}~`);
 }
 
 const MAX_TITLE_CHARS = 120;

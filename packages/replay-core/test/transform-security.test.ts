@@ -61,6 +61,43 @@ function transformRemote(parsed: ProviderParseResult, remoteHome: string): Repla
 // ---------------------------------------------------------------------------
 
 describe("path redaction", () => {
+  it.skipIf(process.platform !== "win32")(
+    "redacts Windows home paths across separators and casing",
+    () => {
+      const forwardSlashHome = HOME.replaceAll("\\", "/");
+      const lowerCaseHome = forwardSlashHome.toLowerCase();
+      const parsed = makeParsed([
+        {
+          role: "user",
+          blocks: [
+            {
+              type: "text",
+              text: `${forwardSlashHome}/project ${lowerCaseHome}\\other`,
+            },
+          ],
+        },
+      ]);
+      const replay = transform(parsed);
+      const scene = replay.scenes.find((s) => s.type === "user-prompt")!;
+
+      expect(scene.content).toContain("~/project");
+      expect(scene.content).toContain("~\\other");
+    },
+  );
+
+  it.skipIf(process.platform !== "win32")(
+    "does not redact a Windows sibling path with the same prefix",
+    () => {
+      const forwardSlashHome = HOME.replaceAll("\\", "/");
+      const sibling = `${forwardSlashHome}2/project`;
+      const parsed = makeParsed([{ role: "user", blocks: [{ type: "text", text: sibling }] }]);
+      const replay = transform(parsed);
+      const scene = replay.scenes.find((s) => s.type === "user-prompt")!;
+
+      expect(scene.content).toBe(sibling);
+    },
+  );
+
   it("redacts home dir in user prompt content", () => {
     const parsed = makeParsed([
       { role: "user", blocks: [{ type: "text", text: `Look at ${HOME}/secret/project` }] },
