@@ -2559,6 +2559,12 @@ function encodeProjectDir(
   return platform === "win32" ? resolved.replace(/[\\/:]/g, "-") : resolved.replace(/\//g, "-");
 }
 
+/**
+ * Load the Claude project-level CLAUDE.md and memory notes.
+ *
+ * The optional lookup arguments keep the filesystem operation testable with
+ * Windows and POSIX project roots without changing the production defaults.
+ */
 export async function readProjectMemory(
   project: string,
   projectsDir = CLAUDE_DIR,
