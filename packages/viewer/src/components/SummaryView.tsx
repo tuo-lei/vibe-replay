@@ -454,19 +454,21 @@ export default function SummaryView({ session }: Props) {
         <div>
           <div className="ui-section-title mb-3">Overview</div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <StatCard label="Turns" value={stats.userPrompts} color="text-terminal-green" />
-            <StatCard label="Tool Calls" value={stats.toolCalls} color="text-terminal-orange" />
+            <StatCard label="Turns" value={stats.userPrompts} color="text-terminal-user" />
+            <StatCard label="Tool Calls" value={stats.toolCalls} color="text-terminal-tool" />
             <StatCard
               label="Files Modified"
               value={stats.editedFiles.length}
-              color="text-terminal-blue"
+              color="text-terminal-response"
             />
             <StatCard label="Scenes" value={stats.totalScenes} color="text-terminal-text" />
           </div>
           {/* Delegated work callout */}
           {stats.totalDelegatedTools > 0 && (
-            <div className="mt-3 flex items-center gap-2 text-xs font-mono text-terminal-dim bg-green-500/5 border border-green-500/15 rounded-lg px-3 py-2">
-              <span className="text-green-300">+{stats.totalDelegatedTools} tools delegated</span>
+            <div className="mt-3 flex items-center gap-2 text-xs font-mono text-terminal-dim bg-terminal-thinking-subtle border border-terminal-thinking/15 rounded-lg px-3 py-2">
+              <span className="text-terminal-thinking">
+                +{stats.totalDelegatedTools} tools delegated
+              </span>
               <span className="text-terminal-dimmer">
                 to {stats.subAgents.length} sub-agent{stats.subAgents.length > 1 ? "s" : ""}
               </span>
@@ -518,19 +520,19 @@ export default function SummaryView({ session }: Props) {
               <>
                 <div>
                   In:{" "}
-                  <span className="text-terminal-blue">{fmtNum(stats.tokenUsage.inputTokens)}</span>
+                  <span className="text-terminal-user">{fmtNum(stats.tokenUsage.inputTokens)}</span>
                   {" / "}Out:{" "}
-                  <span className="text-terminal-green">
+                  <span className="text-terminal-response">
                     {fmtNum(stats.tokenUsage.outputTokens)}
                   </span>
                 </div>
                 <div>
                   Cache:{" "}
-                  <span className="text-terminal-purple">
+                  <span className="text-terminal-context">
                     {fmtNum(stats.tokenUsage.cacheReadTokens)}
                   </span>{" "}
                   read /{" "}
-                  <span className="text-terminal-orange">
+                  <span className="text-terminal-context">
                     {fmtNum(stats.tokenUsage.cacheCreationTokens)}
                   </span>{" "}
                   created
@@ -747,7 +749,7 @@ export default function SummaryView({ session }: Props) {
                   </span>
                   <div className="flex-1 h-2 rounded-full bg-terminal-surface overflow-hidden">
                     <div
-                      className="h-full rounded-full bg-terminal-orange"
+                      className="h-full rounded-full bg-terminal-tool"
                       style={{ width: `${(count / stats.topTools[0][1]) * 100}%` }}
                     />
                   </div>
@@ -807,13 +809,8 @@ export default function SummaryView({ session }: Props) {
 
 // --- Sub-Agent Summary ---
 
-const AGENT_TYPE_COLORS: Record<string, string> = {
-  Explore: "bg-blue-500/20 text-blue-300 border-blue-500/30",
-  Plan: "bg-purple-500/20 text-purple-300 border-purple-500/30",
-  Shell: "bg-cyan-500/20 text-cyan-300 border-cyan-500/30",
-  "general-purpose": "bg-green-500/20 text-green-300 border-green-500/30",
-  "claude-code-guide": "bg-amber-500/20 text-amber-300 border-amber-500/30",
-};
+const AGENT_TYPE_COLOR =
+  "bg-terminal-thinking-subtle text-terminal-thinking border-terminal-thinking/30";
 
 function SubAgentSummary({
   subAgents,
@@ -850,10 +847,11 @@ function SubAgentSummary({
       {/* Type breakdown */}
       <div className="flex flex-wrap gap-2 mb-3">
         {types.map(([type, data]) => {
-          const colors =
-            AGENT_TYPE_COLORS[type] || "bg-gray-500/20 text-gray-300 border-gray-500/30";
           return (
-            <span key={type} className={`text-[11px] px-2 py-1 rounded border font-mono ${colors}`}>
+            <span
+              key={type}
+              className={`text-[11px] px-2 py-1 rounded border font-mono ${AGENT_TYPE_COLOR}`}
+            >
               {type}{" "}
               <span className="opacity-70">
                 x{data.count} ({data.toolCalls} tools)
@@ -888,9 +886,7 @@ function SubAgentSummary({
             key={i}
             className="flex items-center gap-2 text-[10px] font-mono text-terminal-dim px-2 py-1 rounded bg-terminal-surface"
           >
-            <span
-              className={`px-1 py-0.5 rounded border text-[9px] ${AGENT_TYPE_COLORS[sa.agentType] || "bg-gray-500/20 text-gray-300 border-gray-500/30"}`}
-            >
+            <span className={`px-1 py-0.5 rounded border text-[9px] ${AGENT_TYPE_COLOR}`}>
               {sa.agentType}
             </span>
             <span className="truncate flex-1 text-terminal-text/70">
@@ -1082,7 +1078,7 @@ function CacheEfficiencyLine({ turnStats }: { turnStats: TurnStat[] }) {
     <div className="mt-1">
       <div className="flex items-center gap-2">
         <span className="ui-section-title">Cache Hit Rate</span>
-        <span className="text-[10px] font-mono text-terminal-purple">
+        <span className="text-[10px] font-mono text-terminal-context">
           avg {Math.round(avgRatio * 100)}%
         </span>
       </div>
@@ -1193,9 +1189,9 @@ function ContextWindowChart({
     <div>
       <div className="ui-section-title mb-1 flex items-center gap-2">
         <span>Reported Prompt Footprint</span>
-        <span className="font-mono text-terminal-cyan">peak {fmtNum(peak)}</span>
+        <span className="font-mono text-terminal-context">peak {fmtNum(peak)}</span>
         {limit && peak > limit && (
-          <span className="font-mono text-terminal-red">
+          <span className="font-mono text-terminal-error">
             {Math.round((peak / limit) * 100)}% of configured limit
           </span>
         )}
@@ -1293,7 +1289,9 @@ function ContextWindowChart({
         <ChartTooltip visible={hovered !== null} x={hoveredX}>
           {hovered !== null && (
             <>
-              <div className="text-terminal-cyan">Turn {orderedStats[hovered].turnIndex + 1}</div>
+              <div className="text-terminal-context">
+                Turn {orderedStats[hovered].turnIndex + 1}
+              </div>
               {turnLabels?.[orderedStats[hovered].turnIndex] && (
                 <div className="text-terminal-dim truncate max-w-[200px]">
                   {turnLabels[orderedStats[hovered].turnIndex]}
@@ -1455,7 +1453,9 @@ function TurnDurationChart({
         >
           {hovered !== null && (
             <>
-              <div className="text-terminal-blue">Turn {orderedStats[hovered].turnIndex + 1}</div>
+              <div className="text-terminal-response">
+                Turn {orderedStats[hovered].turnIndex + 1}
+              </div>
               {turnLabels?.[orderedStats[hovered].turnIndex] && (
                 <div className="text-terminal-dim truncate max-w-[200px]">
                   {turnLabels[orderedStats[hovered].turnIndex]}
@@ -1805,14 +1805,14 @@ function TurnRow({
   return (
     <>
       <tr className="border-t border-terminal-border-subtle hover:bg-terminal-surface-hover transition-colors">
-        <td className="px-2 py-1 text-terminal-green tabular-nums">
+        <td className="px-2 py-1 text-terminal-user tabular-nums">
           {String(r.index).padStart(2, "0")}
         </td>
         <td className="px-2 py-1 text-terminal-text max-w-0">
           <div className="truncate" title={r.text}>
             {r.text}
             {r.errorCount > 0 && (
-              <span className="text-terminal-red ml-1.5">{r.errorCount} err</span>
+              <span className="text-terminal-error ml-1.5">{r.errorCount} err</span>
             )}
           </div>
         </td>

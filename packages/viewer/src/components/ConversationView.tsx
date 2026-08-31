@@ -439,15 +439,15 @@ export default function ConversationView({
           <div className="pt-4 pb-12 flex items-center justify-center animate-in fade-in slide-in-from-bottom-2 duration-700 ease-out select-none">
             <div className="group/pause relative flex items-center gap-8 px-4 py-2 bg-transparent backdrop-blur-sm">
               {/* Ambient Glow */}
-              <div className="absolute inset-0 bg-terminal-orange/5 opacity-0 group-hover/pause:opacity-100 transition-opacity duration-700 blur-2xl -z-10" />
+              <div className="absolute inset-0 bg-terminal-tool/5 opacity-0 group-hover/pause:opacity-100 transition-opacity duration-700 blur-2xl -z-10" />
 
               {/* Left: Status Label */}
               <div className="flex items-center gap-2.5 pr-8 border-r border-terminal-border/20">
                 <div className="relative flex h-2 w-2">
-                  <div className="animate-ping absolute inline-flex h-full w-full rounded-full bg-terminal-orange opacity-40"></div>
-                  <div className="relative inline-flex rounded-full h-2 w-2 bg-terminal-orange/80 shadow-[0_0_8px_rgba(251,146,60,0.5)]"></div>
+                  <div className="animate-ping absolute inline-flex h-full w-full rounded-full bg-terminal-tool opacity-40"></div>
+                  <div className="relative inline-flex rounded-full h-2 w-2 bg-terminal-tool/80 shadow-[0_0_8px_rgba(251,146,60,0.5)]"></div>
                 </div>
-                <span className="ui-section-title text-terminal-orange drop-shadow-sm">Paused</span>
+                <span className="ui-section-title text-terminal-tool drop-shadow-sm">Paused</span>
               </div>
 
               {/* Right: Interaction Hints */}
@@ -511,9 +511,9 @@ export default function ConversationView({
               </button>
 
               <div className="flex items-center gap-3 opacity-20">
-                <div className="w-1 h-1 rounded-full bg-terminal-green" />
-                <div className="w-1 h-1 rounded-full bg-terminal-blue" />
-                <div className="w-1 h-1 rounded-full bg-terminal-orange" />
+                <div className="w-1 h-1 rounded-full bg-terminal-user" />
+                <div className="w-1 h-1 rounded-full bg-terminal-response" />
+                <div className="w-1 h-1 rounded-full bg-terminal-tool" />
               </div>
             </div>
           </div>
@@ -538,7 +538,7 @@ function ActiveStickyPrompt({ prompt }: { prompt: StickyPromptSummary | null }) 
   return (
     <div className="sticky top-0 z-30 h-0">
       <div
-        className="turn-sticky-summary pointer-events-none -translate-y-3 mx-auto flex max-w-4xl items-center gap-3 rounded-full border border-terminal-green/25 px-4 py-1.5 font-mono text-xs leading-5 text-terminal-green shadow-layer-md"
+        className="turn-sticky-summary pointer-events-none -translate-y-3 mx-auto flex max-w-4xl items-center gap-3 rounded-full border border-terminal-user/25 px-4 py-1.5 font-mono text-xs leading-5 text-terminal-user shadow-layer-md"
         title={prompt.content}
       >
         <span className="min-w-0 flex-1 truncate">{prompt.content}</span>
@@ -598,9 +598,9 @@ function LiveStateCard({
     return (
       <div className="pt-10 pb-24 flex flex-col items-center justify-center select-none">
         <div className="h-px w-8 bg-terminal-border-subtle mb-5" />
-        <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-terminal-blue-subtle/40 border border-terminal-blue/20">
-          <span className="relative inline-flex rounded-full h-2 w-2 bg-terminal-blue" />
-          <span className="text-[10px] font-mono font-bold text-terminal-blue uppercase tracking-[0.25em]">
+        <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-terminal-response-subtle/40 border border-terminal-response/20">
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-terminal-response" />
+          <span className="text-[10px] font-mono font-bold text-terminal-response uppercase tracking-[0.25em]">
             Cursor Live
           </span>
         </div>
@@ -642,9 +642,9 @@ function LiveStateCard({
     return (
       <div className="pt-10 pb-24 flex flex-col items-center justify-center select-none">
         <div className="h-px w-8 bg-terminal-border-subtle mb-5" />
-        <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-terminal-green-subtle/40 border border-terminal-green/20">
-          <span className="relative inline-flex rounded-full h-2 w-2 bg-terminal-green" />
-          <span className="text-[10px] font-mono font-bold text-terminal-green uppercase tracking-[0.25em]">
+        <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-terminal-user-subtle/40 border border-terminal-user/20">
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-terminal-user" />
+          <span className="text-[10px] font-mono font-bold text-terminal-user uppercase tracking-[0.25em]">
             Idle
           </span>
         </div>
@@ -659,12 +659,12 @@ function LiveStateCard({
   return (
     <div className="pt-10 pb-24 flex flex-col items-center justify-center select-none">
       <div className="h-px w-8 bg-terminal-border-subtle mb-5" />
-      <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-terminal-red-subtle/50 border border-terminal-red/20">
+      <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-terminal-error-subtle/50 border border-terminal-error/20">
         <span className="relative flex w-2 h-2">
-          <span className="absolute inline-flex h-full w-full rounded-full bg-terminal-red opacity-75 animate-ping" />
-          <span className="relative inline-flex rounded-full h-2 w-2 bg-terminal-red" />
+          <span className="absolute inline-flex h-full w-full rounded-full bg-terminal-error opacity-75 animate-ping" />
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-terminal-error" />
         </span>
-        <span className="text-[10px] font-mono font-bold text-terminal-red uppercase tracking-[0.25em]">
+        <span className="text-[10px] font-mono font-bold text-terminal-error uppercase tracking-[0.25em]">
           Busy
         </span>
       </div>
@@ -845,9 +845,9 @@ const GroupCard = memo(function GroupCard({
         data-scene-index={firstIndex}
         className={`group relative rounded-2xl px-5 py-4 transition-all duration-200 ease-material ml-4 md:ml-12 border ${
           groupHasFocusedTarget
-            ? "scene-nav-focused bg-terminal-green-emphasis border-terminal-green shadow-layer-lg"
+            ? "scene-nav-focused bg-terminal-user-emphasis border-terminal-user shadow-layer-lg"
             : groupHasCurrent
-              ? "bg-terminal-green-subtle border-terminal-green/30 shadow-layer-sm"
+              ? "bg-terminal-user-subtle border-terminal-user/30 shadow-layer-sm"
               : "bg-terminal-surface border-terminal-border-subtle shadow-sm"
         }`}
         onMouseEnter={() => setHovered(true)}
@@ -855,7 +855,7 @@ const GroupCard = memo(function GroupCard({
       >
         {userCommentButton}
         <div className="flex items-center gap-2 mb-2.5">
-          <span className="ui-section-title text-terminal-green">You</span>
+          <span className="ui-section-title text-terminal-user">You</span>
           {group.timestamp && (
             <span className="text-[10px] font-mono text-terminal-dimmer">
               {formatTime(group.timestamp)}
@@ -863,10 +863,10 @@ const GroupCard = memo(function GroupCard({
           )}
           <div className="flex-1" />
           {groupHasFocusedTarget ? (
-            <span className="ui-pill-compact bg-terminal-green text-terminal-bg">Jump Target</span>
+            <span className="ui-pill-compact bg-terminal-user text-terminal-bg">Jump Target</span>
           ) : (
             groupHasCurrent && (
-              <span className="ui-pill-compact bg-terminal-green-subtle text-terminal-green border border-terminal-green/20">
+              <span className="ui-pill-compact bg-terminal-user-subtle text-terminal-user border border-terminal-user/20">
                 Focused
               </span>
             )
@@ -887,20 +887,20 @@ const GroupCard = memo(function GroupCard({
             const pct = Math.min((ts.contextTokens / semanticLimit) * 100, 100);
             const ratio = contextLimit ? ts.contextTokens / semanticLimit : 0;
             const barColor = !contextLimit
-              ? "bg-terminal-cyan"
+              ? "bg-terminal-context"
               : ratio >= 0.85
-                ? "bg-terminal-red"
+                ? "bg-terminal-error"
                 : ratio >= 0.7
-                  ? "bg-terminal-orange"
+                  ? "bg-terminal-tool"
                   : ratio >= 0.5
-                    ? "bg-yellow-400"
-                    : "bg-terminal-green";
+                    ? "bg-terminal-tool"
+                    : "bg-terminal-user";
             const textColor = !contextLimit
-              ? "text-terminal-cyan"
+              ? "text-terminal-context"
               : ratio >= 0.85
-                ? "text-terminal-red"
+                ? "text-terminal-error"
                 : ratio >= 0.7
-                  ? "text-terminal-orange"
+                  ? "text-terminal-tool"
                   : "text-terminal-dim";
             return (
               <div className="mb-2 flex items-center gap-2">
@@ -997,23 +997,23 @@ const GroupCard = memo(function GroupCard({
         data-scene-index={firstIndex}
         className={`group relative rounded-xl px-5 py-3.5 transition-all duration-200 ease-material ${
           groupHasFocusedTarget
-            ? "scene-nav-focused bg-terminal-surface shadow-layer-sm"
+            ? "scene-nav-focused bg-terminal-context-subtle/70 border border-terminal-context/30 shadow-layer-sm"
             : groupHasCurrent
-              ? "bg-terminal-surface shadow-layer-sm"
-              : "bg-terminal-surface/50"
+              ? "bg-terminal-context-subtle/50 border border-terminal-context/20 shadow-layer-sm"
+              : "bg-terminal-surface/50 border border-terminal-context/10"
         }`}
       >
         <div className="flex items-center gap-2 mb-2">
-          <span className="ui-section-title">Context Compaction</span>
+          <span className="ui-section-title text-terminal-context">Context Compaction</span>
           {group.timestamp && (
             <span className="text-xs font-mono text-terminal-dimmer">
               {formatTime(group.timestamp)}
             </span>
           )}
           {compactionTokens && (
-            <span className="text-[10px] font-mono text-terminal-orange">
+            <span className="text-[10px] font-mono text-terminal-context">
               {fmtNum(compactionTokens.before)} → {fmtNum(compactionTokens.after)}
-              <span className="text-terminal-orange/70 ml-1">
+              <span className="text-terminal-context/70 ml-1">
                 (observed drop, -{fmtNum(compactionTokens.freed)} tokens)
               </span>
             </span>
@@ -1048,14 +1048,14 @@ const GroupCard = memo(function GroupCard({
         data-scene-index={firstIndex}
         className={`group relative rounded-xl px-5 py-3.5 transition-all duration-200 ease-material ${
           groupHasFocusedTarget
-            ? "scene-nav-focused bg-terminal-surface shadow-layer-sm"
+            ? "scene-nav-focused bg-terminal-context-subtle/70 border border-terminal-context/30 shadow-layer-sm"
             : groupHasCurrent
-              ? "bg-terminal-surface shadow-layer-sm"
-              : "bg-terminal-surface/50"
+              ? "bg-terminal-context-subtle/50 border border-terminal-context/20 shadow-layer-sm"
+              : "bg-terminal-surface/50 border border-terminal-context/10"
         }`}
       >
         <div className="flex items-center gap-2 mb-2">
-          <span className="ui-section-title text-blue-400/80">{label}</span>
+          <span className="ui-section-title text-terminal-context">{label}</span>
           {group.timestamp && (
             <span className="text-xs font-mono text-terminal-dimmer">
               {formatTime(group.timestamp)}
@@ -1111,14 +1111,14 @@ const GroupCard = memo(function GroupCard({
       data-scene-index={firstIndex}
       className={`relative rounded-xl px-5 py-4 transition-all duration-200 ease-material ${
         groupHasFocusedTarget
-          ? "scene-nav-focused bg-terminal-blue-subtle shadow-layer-lg"
+          ? "scene-nav-focused bg-terminal-response-subtle shadow-layer-lg"
           : groupHasCurrent
-            ? "bg-terminal-blue-subtle shadow-layer-sm"
+            ? "bg-terminal-response-subtle shadow-layer-sm"
             : "bg-terminal-surface shadow-layer-sm"
       }`}
     >
       <div className="flex items-center gap-2 mb-2">
-        <span className="ui-section-title text-terminal-blue">Assistant</span>
+        <span className="ui-section-title text-terminal-response">Assistant</span>
         {group.timestamp && (
           <span className="text-[10px] font-mono text-terminal-dimmer">
             {formatTime(group.timestamp)}
@@ -1129,12 +1129,12 @@ const GroupCard = memo(function GroupCard({
         )}
         <div className="flex-1" />
         {groupHasFocusedTarget ? (
-          <span className="ui-pill-compact bg-terminal-blue-emphasis text-terminal-blue">
+          <span className="ui-pill-compact bg-terminal-response-emphasis text-terminal-response">
             Jump Target
           </span>
         ) : (
           groupHasCurrent && (
-            <span className="ui-pill-compact bg-terminal-blue-subtle text-terminal-blue">
+            <span className="ui-pill-compact bg-terminal-response-subtle text-terminal-response">
               Focused
             </span>
           )
@@ -1308,9 +1308,9 @@ function CompactAssistantGroup({
       data-scene-index={firstIndex}
       className={`group relative rounded-xl px-5 py-4 transition-all duration-200 ease-material ${
         groupHasFocusedTarget
-          ? "scene-nav-focused bg-terminal-blue-subtle shadow-layer-lg"
+          ? "scene-nav-focused bg-terminal-response-subtle shadow-layer-lg"
           : groupHasCurrent
-            ? "bg-terminal-blue-subtle shadow-layer-sm"
+            ? "bg-terminal-response-subtle shadow-layer-sm"
             : "bg-terminal-surface shadow-layer-sm"
       }`}
       onMouseEnter={() => setHovered(true)}
@@ -1340,7 +1340,7 @@ function CompactAssistantGroup({
       )}
 
       <div className="flex items-center gap-2 mb-2">
-        <span className="ui-section-title text-terminal-blue">Assistant</span>
+        <span className="ui-section-title text-terminal-response">Assistant</span>
         {timestamp && (
           <span className="text-[10px] font-mono text-terminal-dimmer">
             {formatTime(timestamp)}
@@ -1349,12 +1349,12 @@ function CompactAssistantGroup({
         <AssistantTurnMetrics turnStat={turnStat} fallbackDurationMs={stats.turnDurationMs} />
         <div className="flex-1" />
         {groupHasFocusedTarget ? (
-          <span className="ui-pill-compact bg-terminal-blue-emphasis text-terminal-blue">
+          <span className="ui-pill-compact bg-terminal-response-emphasis text-terminal-response">
             Jump Target
           </span>
         ) : (
           groupHasCurrent && (
-            <span className="ui-pill-compact bg-terminal-blue-subtle text-terminal-blue">
+            <span className="ui-pill-compact bg-terminal-response-subtle text-terminal-response">
               Focused
             </span>
           )
@@ -1364,17 +1364,17 @@ function CompactAssistantGroup({
       {/* Compact stats bar — stable, computed from ALL scenes */}
       <div className="flex flex-wrap items-center gap-1.5 mb-3 text-[11px] font-mono">
         {stats.responses > 0 && (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-terminal-blue-subtle text-terminal-blue">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-terminal-response-subtle text-terminal-response">
             {stats.responses} response{stats.responses > 1 ? "s" : ""}
           </span>
         )}
         {stats.totalTools > 0 && (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-terminal-orange-subtle text-terminal-orange">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-terminal-tool-subtle text-terminal-tool">
             {stats.totalTools} tool{stats.totalTools > 1 ? "s" : ""}
           </span>
         )}
         {stats.subAgentCalls > 0 && (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-500/20 text-green-300">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-terminal-thinking-subtle text-terminal-thinking">
             {stats.subAgentCalls} agent{stats.subAgentCalls > 1 ? "s" : ""}
             {stats.subAgentTypes.length > 0 && (
               <span className="opacity-70 text-[10px]">({stats.subAgentTypes.join(", ")})</span>
@@ -1382,7 +1382,7 @@ function CompactAssistantGroup({
           </span>
         )}
         {stats.thinking > 0 && (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-terminal-purple-subtle text-terminal-purple">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-terminal-thinking-subtle text-terminal-thinking">
             {stats.thinking} thinking
           </span>
         )}
@@ -1394,7 +1394,7 @@ function CompactAssistantGroup({
                 key={name}
                 className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-terminal-surface-hover text-terminal-dim"
               >
-                <span className="text-terminal-orange">{name}</span>
+                <span className="text-terminal-tool">{name}</span>
                 {name === "Bash" && stats.bashCommands.length > 0 && (
                   <span className="text-terminal-dimmer">
                     ({stats.bashCommands.slice(0, 4).join(", ")}
@@ -1665,6 +1665,9 @@ function ToolBatch({
   }
   const batchTokenLabel = formatTokens(batchTokens);
   const batchDurationLabel = formatToolDuration(batchMs);
+  const batchHasError = batch.some(
+    ({ scene }) => scene.type === "tool-call" && scene.isError === true,
+  );
 
   return (
     <div
@@ -1674,12 +1677,18 @@ function ToolBatch({
       {/* Collapsed summary */}
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3.5 py-2.5 text-xs font-mono text-terminal-dim rounded-xl bg-terminal-surface hover:bg-terminal-surface-hover transition-all duration-200 ease-material cursor-pointer text-left shadow-layer-sm"
+        className={`w-full flex items-center gap-2 px-3.5 py-2.5 text-xs font-mono text-terminal-dim rounded-xl transition-all duration-200 ease-material cursor-pointer text-left shadow-layer-sm ${batchHasError ? "bg-terminal-error-subtle ring-1 ring-terminal-error/30" : "bg-terminal-surface hover:bg-terminal-surface-hover"}`}
       >
         <span className={`transition-transform text-xs ${expanded ? "rotate-90" : ""}`}>
           {"\u25B6"}
         </span>
-        <span className="text-terminal-orange font-semibold">{toolName}</span>
+        <span
+          className={
+            batchHasError ? "text-terminal-error font-semibold" : "text-terminal-tool font-semibold"
+          }
+        >
+          {toolName}
+        </span>
         <span className="text-terminal-dimmer">
           {batch.length} call{batch.length > 1 ? "s" : ""}
         </span>
@@ -1850,7 +1859,7 @@ const SceneBlock = memo(function SceneBlock({
             onHighlightClick={onHighlightClick}
           />
           {scene.isTruncated && (
-            <div className="mt-1 text-[10px] font-mono text-terminal-orange/70 italic">
+            <div className="mt-1 text-[10px] font-mono text-terminal-error/70 italic">
               Response truncated (max_tokens reached)
             </div>
           )}

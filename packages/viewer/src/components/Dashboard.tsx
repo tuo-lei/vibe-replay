@@ -786,7 +786,7 @@ export function SessionDetailPopup({
             {scanData?.skillsUsed?.map((skill) => (
               <span
                 key={skill}
-                className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400"
+                className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-terminal-context-subtle text-terminal-context"
               >
                 {skill}
               </span>
@@ -794,7 +794,7 @@ export function SessionDetailPopup({
             {scanData?.mcpServersUsed?.map((server) => (
               <span
                 key={normalizeMcpServerName(server)}
-                className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-purple-500/10 text-purple-400"
+                className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-terminal-tool-subtle text-terminal-tool"
               >
                 {normalizeMcpServerName(server)}
               </span>

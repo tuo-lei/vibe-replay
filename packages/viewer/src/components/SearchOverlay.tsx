@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Scene } from "../types";
+import { sceneToneTextClass } from "../utils/scene-colors";
 
 interface Props {
   scenes: Scene[];
@@ -57,15 +58,6 @@ const TYPE_LABELS: Record<string, string> = {
   thinking: "Thinking",
   "text-response": "Response",
   "tool-call": "Tool",
-};
-
-const TYPE_COLORS: Record<string, string> = {
-  "user-prompt": "text-terminal-green",
-  "compaction-summary": "text-terminal-dim",
-  "context-injection": "text-blue-400",
-  thinking: "text-terminal-purple",
-  "text-response": "text-terminal-blue",
-  "tool-call": "text-terminal-orange",
 };
 
 export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) {
@@ -202,9 +194,9 @@ export default function SearchOverlay({ scenes, open, onClose, onSeek }: Props) 
                 }`}
               >
                 <span
-                  className={`text-[10px] font-sans font-bold uppercase shrink-0 mt-0.5 tracking-wider ${
-                    TYPE_COLORS[r.type] || "text-terminal-dim"
-                  }`}
+                  className={`text-[10px] font-sans font-bold uppercase shrink-0 mt-0.5 tracking-wider ${sceneToneTextClass(
+                    scenes[r.sceneIndex],
+                  )}`}
                 >
                   {r.toolName || TYPE_LABELS[r.type] || r.type}
                 </span>

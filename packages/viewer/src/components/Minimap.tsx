@@ -120,13 +120,13 @@ export default function Minimap({
               aria-label={label}
               className={`text-left px-3 py-2 rounded-lg transition-all duration-200 ease-material ${
                 isActive
-                  ? "bg-terminal-surface shadow-layer-sm"
-                  : "hover:bg-terminal-surface-hover text-terminal-dimmer hover:text-terminal-dim"
+                  ? "bg-terminal-context-subtle text-terminal-context shadow-layer-sm"
+                  : "text-terminal-context/75 hover:bg-terminal-context-subtle hover:text-terminal-context"
               }`}
             >
               <div className="flex items-center gap-2">
-                <span className="text-xs font-mono text-terminal-dimmer shrink-0">{icon}</span>
-                <span className="text-xs font-mono text-terminal-dimmer italic truncate">
+                <span className="text-xs font-mono text-terminal-context shrink-0">{icon}</span>
+                <span className="text-xs font-mono text-terminal-context italic truncate">
                   {label}
                 </span>
               </div>
@@ -140,7 +140,7 @@ export default function Minimap({
             onClick={() => onSeek(item.promptIndex)}
             className={`group text-left px-3 py-2.5 rounded-xl transition-all duration-200 ease-material ${
               isActive
-                ? "bg-terminal-green-subtle shadow-layer-sm"
+                ? "bg-terminal-user-subtle shadow-layer-sm"
                 : isPast
                   ? "hover:bg-terminal-surface-hover text-terminal-dim hover:text-terminal-text"
                   : "hover:bg-terminal-surface-hover"
@@ -150,7 +150,7 @@ export default function Minimap({
             <div className="flex items-start gap-2">
               <span
                 className={`text-xs font-mono font-semibold shrink-0 mt-px tabular-nums ${
-                  isActive ? "text-terminal-green" : "text-terminal-dim"
+                  isActive ? "text-terminal-user" : "text-terminal-dim"
                 }`}
               >
                 {String(item.turnNumber).padStart(2, "0")}
@@ -167,22 +167,22 @@ export default function Minimap({
             {/* Summary line */}
             <div className="flex items-center gap-2 mt-1.5 ml-6 flex-wrap">
               {item.toolCalls > 0 && (
-                <span className="text-[10px] font-mono px-1.5 py-px rounded-full bg-terminal-orange-subtle text-terminal-orange">
+                <span className="text-[10px] font-mono px-1.5 py-px rounded-full bg-terminal-tool-subtle text-terminal-tool">
                   {item.toolCalls} tool{item.toolCalls > 1 ? "s" : ""}
                 </span>
               )}
               {item.subAgentCalls > 0 && (
-                <span className="text-[10px] font-mono px-1.5 py-px rounded-full bg-green-500/20 text-green-300">
+                <span className="text-[10px] font-mono px-1.5 py-px rounded-full bg-terminal-thinking-subtle text-terminal-thinking">
                   {item.subAgentCalls} agent{item.subAgentCalls > 1 ? "s" : ""}
                 </span>
               )}
               {item.textBlocks > 0 && (
-                <span className="text-[10px] font-mono px-1.5 py-px rounded-full bg-terminal-blue-subtle text-terminal-blue">
+                <span className="text-[10px] font-mono px-1.5 py-px rounded-full bg-terminal-response-subtle text-terminal-response">
                   {item.textBlocks} resp
                 </span>
               )}
               {item.thinkingBlocks > 0 && (
-                <span className="text-[10px] font-mono px-1.5 py-px rounded-full bg-terminal-purple-subtle text-terminal-purple">
+                <span className="text-[10px] font-mono px-1.5 py-px rounded-full bg-terminal-thinking-subtle text-terminal-thinking">
                   think
                 </span>
               )}

@@ -94,13 +94,13 @@ export default memo(function CodeDiffBlock({
 
   return (
     <div
-      className={`bg-terminal-surface rounded-xl overflow-hidden shadow-layer-sm ${isError ? "ring-1 ring-red-500/40" : ""}`}
+      className={`bg-terminal-surface rounded-xl overflow-hidden shadow-layer-sm ${isError ? "ring-1 ring-terminal-error/40" : ""}`}
     >
       <div
-        className={`flex items-center gap-2 px-3 py-2 bg-terminal-surface ${isError ? "bg-red-500/5" : ""}`}
+        className={`flex items-center gap-2 px-3 py-2 bg-terminal-surface ${isError ? "bg-terminal-error/5" : ""}`}
       >
         <span
-          className={`text-xs font-mono font-bold ${isError ? "text-red-400" : "text-terminal-orange"}`}
+          className={`text-xs font-mono font-bold ${isError ? "text-terminal-error" : "text-terminal-tool"}`}
         >
           {toolName}
         </span>

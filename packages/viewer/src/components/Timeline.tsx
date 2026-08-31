@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef } from "react";
 import type { Scene } from "../types";
+import { sceneTone, SCENE_TONE_CLASSES, type SceneTone } from "../utils/scene-colors";
 
 interface Props {
   scenes: Scene[];
@@ -29,22 +30,18 @@ export function timelineProgressPct(currentIndex: number, sceneCount: number): n
   return (completedScenes / sceneCount) * 100;
 }
 
-function sceneColor(type: Scene["type"]): string {
-  switch (type) {
-    case "user-prompt":
-      return "#3fb950";
-    case "compaction-summary":
-      return "#666666";
-    case "context-injection":
-      return "#4488cc";
-    case "thinking":
-      return "#b392f0";
-    case "text-response":
-      return "#79b8ff";
-    case "tool-call":
-      return "#d29922";
-  }
+function sceneColor(tone: SceneTone): string {
+  return SCENE_TONE_CLASSES[tone].color;
 }
+
+const TONE_PRIORITY: Record<SceneTone, number> = {
+  error: 6,
+  user: 5,
+  tool: 4,
+  response: 3,
+  context: 2,
+  thinking: 1,
+};
 
 export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes }: Props) {
   // For large sessions (>200 scenes), bucket into segments to avoid rendering 700+ divs
@@ -54,34 +51,27 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
       return scenes.map((s, i) => ({
         startIndex: i,
         endIndex: i,
-        type: s.type,
+        tone: sceneTone(s),
       }));
     }
 
     const bucketSize = scenes.length / maxSegments;
-    const result: { startIndex: number; endIndex: number; type: Scene["type"] }[] = [];
+    const result: { startIndex: number; endIndex: number; tone: SceneTone }[] = [];
     for (let b = 0; b < maxSegments; b++) {
       const start = Math.floor(b * bucketSize);
       const end = Math.floor((b + 1) * bucketSize) - 1;
-      // Use the most "interesting" type in the bucket (user > tool > text > thinking)
-      const typePriority: Record<Scene["type"], number> = {
-        "user-prompt": 4,
-        "compaction-summary": 1,
-        "context-injection": 1,
-        "tool-call": 3,
-        "text-response": 2,
-        thinking: 1,
-      };
-      let bestType = scenes[start].type;
-      let bestPriority = typePriority[bestType];
+      // Use the most informative semantic tone in the bucket.
+      let bestTone = sceneTone(scenes[start]);
+      let bestPriority = TONE_PRIORITY[bestTone];
       for (let i = start + 1; i <= end && i < scenes.length; i++) {
-        const p = typePriority[scenes[i].type];
+        const tone = sceneTone(scenes[i]);
+        const p = TONE_PRIORITY[tone];
         if (p > bestPriority) {
-          bestType = scenes[i].type;
+          bestTone = tone;
           bestPriority = p;
         }
       }
-      result.push({ startIndex: start, endIndex: end, type: bestType });
+      result.push({ startIndex: start, endIndex: end, tone: bestTone });
     }
     return result;
   }, [scenes]);
@@ -125,6 +115,16 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
     return dots;
   }, [scenes]);
 
+  const errorDots = useMemo(() => {
+    const dots: number[] = [];
+    for (let i = 0; i < scenes.length; i++) {
+      if (sceneTone(scenes[i]) === "error") {
+        dots.push(((i + 0.5) / scenes.length) * 100);
+      }
+    }
+    return dots;
+  }, [scenes]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "ArrowRight" || e.key === "ArrowUp") {
@@ -159,13 +159,13 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
       aria-valuenow={clampedCurrentIndex}
       tabIndex={0}
     >
-      {/* Annotation + compaction dots above timeline */}
-      {(annotationDots.length > 0 || compactionDots.length > 0) && (
+      {/* Annotation, context, and error markers above timeline */}
+      {(annotationDots.length > 0 || compactionDots.length > 0 || errorDots.length > 0) && (
         <div className="relative h-2 mb-0.5">
           {annotationDots.map((pct, i) => (
             <div
               key={`a-${i}`}
-              className="absolute w-1.5 h-1.5 rounded-full bg-terminal-blue shadow-layer-sm"
+              className="absolute w-1.5 h-1.5 rounded-full bg-terminal-thinking shadow-layer-sm"
               style={{ left: `${pct}%`, top: "50%", transform: "translate(-50%, -50%)" }}
             />
           ))}
@@ -176,12 +176,23 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
               role="img"
               aria-label="Compaction"
               title="Compaction"
-              className="absolute w-1.5 h-1.5 rounded-sm bg-terminal-red shadow-layer-sm"
+              className="absolute w-1.5 h-1.5 rounded-sm bg-terminal-context shadow-layer-sm"
               style={{
                 left: `${pct}%`,
                 top: "50%",
                 transform: "translate(-50%, -50%) rotate(45deg)",
               }}
+            />
+          ))}
+          {errorDots.map((pct, i) => (
+            <div
+              key={`e-${i}`}
+              // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- styled marker dot; not an image file
+              role="img"
+              aria-label="Error"
+              title="Error"
+              className="absolute h-1.5 w-1.5 rounded-full bg-terminal-error shadow-layer-sm"
+              style={{ left: `${pct}%`, top: "50%", transform: "translate(-50%, -50%)" }}
             />
           ))}
         </div>
@@ -195,7 +206,7 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
             key={i}
             className="flex-1 transition-opacity duration-150"
             style={{
-              backgroundColor: sceneColor(seg.type),
+              backgroundColor: sceneColor(seg.tone),
               opacity: seg.startIndex <= clampedCurrentIndex ? 1 : 0.15,
             }}
           />
@@ -204,7 +215,14 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
         {compactionDots.map((pct, i) => (
           <div
             key={`cl-${i}`}
-            className="absolute top-0 bottom-0 w-px bg-terminal-red/60"
+            className="absolute top-0 bottom-0 w-px bg-terminal-context/60"
+            style={{ left: `${pct}%` }}
+          />
+        ))}
+        {errorDots.map((pct, i) => (
+          <div
+            key={`el-${i}`}
+            className="absolute top-0 bottom-0 w-px bg-terminal-error/70"
             style={{ left: `${pct}%` }}
           />
         ))}

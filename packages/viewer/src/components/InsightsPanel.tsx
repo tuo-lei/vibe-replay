@@ -647,7 +647,7 @@ export function ProjectInsightsPanel({ insights }: { insights: ProjectInsights }
           <div className="flex items-center gap-4 flex-wrap text-xs font-mono">
             {insights.subAgentTotal > 0 && (
               <span className="text-terminal-dim">
-                Sub-agents: <span className="text-green-300">{insights.subAgentTotal}</span>
+                Sub-agents: <span className="text-terminal-thinking">{insights.subAgentTotal}</span>
               </span>
             )}
             {insights.apiErrorTotal > 0 && (
@@ -845,7 +845,7 @@ export function UserInsightsPanel({ insights }: { insights: UserInsights }) {
             )}
             {insights.subAgentTotal > 0 && (
               <span className="text-terminal-dim">
-                Sub-agents: <span className="text-green-300">{insights.subAgentTotal}</span>
+                Sub-agents: <span className="text-terminal-thinking">{insights.subAgentTotal}</span>
               </span>
             )}
             {insights.apiErrorTotal > 0 && (

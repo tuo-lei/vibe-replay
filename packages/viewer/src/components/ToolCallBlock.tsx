@@ -134,9 +134,9 @@ const THEME_CLASSES: Record<AgentTheme, { text: string; bgSubtle: string; pill: 
     pill: "bg-terminal-green-emphasis text-terminal-green",
   },
   orange: {
-    text: "text-terminal-orange",
-    bgSubtle: "bg-terminal-orange-subtle",
-    pill: "bg-terminal-orange-emphasis text-terminal-orange",
+    text: "text-terminal-tool",
+    bgSubtle: "bg-terminal-tool-subtle",
+    pill: "bg-terminal-tool-emphasis text-terminal-tool",
   },
 };
 
@@ -214,14 +214,14 @@ function SubAgentSceneItem({ scene }: { scene: Scene }) {
   if (scene.type === "thinking") {
     const tokenLabel = formatTokens(scene.tokens);
     return (
-      <div className="text-[10px] font-mono text-purple-400/80 pl-2 py-0.5">
-        <span className="text-purple-400/70 font-bold mr-1">[thinking]</span>
+      <div className="text-[10px] font-mono text-terminal-thinking/80 pl-2 py-0.5">
+        <span className="text-terminal-thinking/70 font-bold mr-1">[thinking]</span>
         {tokenLabel && (
-          <span className="text-purple-400/70 mr-1" title="Approximate thinking tokens">
+          <span className="text-terminal-thinking/70 mr-1" title="Approximate thinking tokens">
             ~{tokenLabel} tok
           </span>
         )}
-        <span className="text-purple-400/70">
+        <span className="text-terminal-thinking/70">
           {(scene.content || "").slice(0, 120)}
           {(scene.content || "").length > 120 ? "..." : ""}
         </span>
@@ -240,7 +240,7 @@ function SubAgentSceneItem({ scene }: { scene: Scene }) {
 
   if (scene.type === "tool-call") {
     const toolScene = scene as ToolScene;
-    const errorAccent = toolScene.isError ? "bg-red-500/5" : "";
+    const errorAccent = toolScene.isError ? "bg-terminal-error/5" : "";
     return (
       <div className={`pl-2 py-0.5 rounded-md ${errorAccent}`}>
         <button
@@ -248,7 +248,7 @@ function SubAgentSceneItem({ scene }: { scene: Scene }) {
           className="flex items-center gap-1 text-[10px] font-mono w-full text-left hover:bg-terminal-surface-hover/30 rounded px-1"
         >
           <span
-            className={`font-bold ${toolScene.isError ? "text-red-400" : "text-terminal-orange"}`}
+            className={`font-bold ${toolScene.isError ? "text-terminal-error" : "text-terminal-tool"}`}
           >
             {displayToolName(toolScene.toolName)}
           </span>
@@ -289,10 +289,12 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
   if (forceCollapse) {
     return (
       <div
-        className={`flex items-center gap-2 px-3 py-1 text-xs font-mono text-terminal-dim ${scene.isError ? "bg-red-500/5 ring-1 ring-red-500/30 rounded-md" : ""}`}
+        className={`flex items-center gap-2 px-3 py-1 text-xs font-mono text-terminal-dim ${scene.isError ? "bg-terminal-error/5 ring-1 ring-terminal-error/30 rounded-md" : ""}`}
       >
         <span>{toolIcon(scene.toolName)}</span>
-        <span className={`font-bold ${scene.isError ? "text-red-400" : "text-terminal-orange"}`}>
+        <span
+          className={`font-bold ${scene.isError ? "text-terminal-error" : "text-terminal-tool"}`}
+        >
           {displayToolName(scene.toolName)}
         </span>
         <span className="truncate flex-1">{summarizeInput(scene.toolName, scene.input)}</span>
@@ -418,8 +420,8 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
   }
 
   // Generic tool call
-  const errorRing = scene.isError ? "ring-1 ring-red-500/40" : "";
-  const errorBg = scene.isError ? "bg-red-500/5" : "";
+  const errorRing = scene.isError ? "ring-1 ring-terminal-error/40" : "";
+  const errorBg = scene.isError ? "bg-terminal-error/5" : "";
   return (
     <div>
       <div
@@ -431,7 +433,7 @@ export default memo(function ToolCallBlock({ scene, isActive, forceCollapse }: P
         >
           <span className="text-xs font-mono">{toolIcon(scene.toolName)}</span>
           <span
-            className={`text-xs font-mono font-bold ${scene.isError ? "text-red-400" : "text-terminal-orange"}`}
+            className={`text-xs font-mono font-bold ${scene.isError ? "text-terminal-error" : "text-terminal-tool"}`}
           >
             {displayToolName(scene.toolName)}
           </span>

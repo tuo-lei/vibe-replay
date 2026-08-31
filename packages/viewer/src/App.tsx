@@ -193,7 +193,7 @@ function DashboardAuthStatus({ isEditor }: { isEditor: boolean }) {
               });
               window.location.reload();
             }}
-            className="w-full text-left px-3 py-2 text-xs text-terminal-dim hover:text-red-400 hover:bg-terminal-surface-hover transition-colors cursor-pointer font-mono"
+            className="w-full text-left px-3 py-2 text-xs text-terminal-dim hover:text-terminal-error hover:bg-terminal-surface-hover transition-colors cursor-pointer font-mono"
           >
             Logout
           </button>

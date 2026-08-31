@@ -66,6 +66,26 @@ body {
   --cyan-subtle: rgba(86, 212, 221, 0.15);
   --cyan-emphasis: rgba(86, 212, 221, 0.25);
 
+  /* Semantic replay accents. Keep role colors separate from UI state colors. */
+  --accent-user: var(--green);
+  --accent-user-subtle: var(--green-subtle);
+  --accent-user-emphasis: var(--green-emphasis);
+  --accent-response: var(--blue);
+  --accent-response-subtle: var(--blue-subtle);
+  --accent-response-emphasis: var(--blue-emphasis);
+  --accent-tool: var(--orange);
+  --accent-tool-subtle: var(--orange-subtle);
+  --accent-tool-emphasis: var(--orange-emphasis);
+  --accent-context: var(--cyan);
+  --accent-context-subtle: var(--cyan-subtle);
+  --accent-context-emphasis: var(--cyan-emphasis);
+  --accent-thinking: var(--purple);
+  --accent-thinking-subtle: var(--purple-subtle);
+  --accent-thinking-emphasis: var(--purple-emphasis);
+  --accent-error: var(--red);
+  --accent-error-subtle: var(--red-subtle);
+  --accent-error-emphasis: var(--red-emphasis);
+
   /* Layered shadow color (hue-matched to dark bg) */
   --shadow-color: 215 28% 4%;
   --shadow-sm: 0 1px 2px hsl(var(--shadow-color) / 0.5);
