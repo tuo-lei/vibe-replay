@@ -19,7 +19,7 @@ const turnStat: TurnStat = {
   tokenUsage: {
     inputTokens: 900,
     outputTokens: 800,
-    cacheCreationTokens: 0,
+    cacheCreationTokens: 300,
     cacheReadTokens: 1_500,
   },
 };
@@ -83,8 +83,11 @@ describe("ConversationView assistant metrics", () => {
     renderConversation(compact);
 
     expect(screen.getByText(/4\.2s/)).toBeTruthy();
-    expect(screen.getByText(/3\.2K tok/)).toBeTruthy();
-    expect(screen.getByTitle(/2,400 prompt.*800 output/)).toBeTruthy();
+    expect(screen.getByText(/900\s+in/)).toBeTruthy();
+    expect(screen.getByText(/800\s+out/)).toBeTruthy();
+    expect(screen.getByText(/1\.5K\s+cache read/)).toBeTruthy();
+    expect(screen.getByText(/300\s+cache write/)).toBeTruthy();
+    expect(screen.getByTitle(/2,700 prompt.*800 output/)).toBeTruthy();
   });
 
   it("uses scene timestamps for duration when per-turn duration is unavailable", () => {
@@ -136,7 +139,8 @@ describe("ConversationView assistant metrics", () => {
 
     expect(screen.getByText(/4\.2s/)).toBeTruthy();
     expect(screen.getByText(/8\.1s/)).toBeTruthy();
-    expect(screen.getByText(/2\.0K tok/)).toBeTruthy();
+    expect(screen.getByText(/1\.0K\s+in/)).toBeTruthy();
+    expect(screen.getByText(/1\.0K\s+out/)).toBeTruthy();
   });
 
   it("does not fall back by position for sparse indexed stats", () => {

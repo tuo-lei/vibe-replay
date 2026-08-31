@@ -96,13 +96,6 @@ function turnDurationFromScenes(scenes: { scene: Scene }[]): number | undefined 
   return durationMs > 0 ? durationMs : undefined;
 }
 
-function totalTurnTokens(usage: TurnStat["tokenUsage"]): number | undefined {
-  if (!usage) return undefined;
-  const total =
-    usage.inputTokens + usage.outputTokens + usage.cacheCreationTokens + usage.cacheReadTokens;
-  return total > 0 ? total : undefined;
-}
-
 function tokenUsageTitle(usage: NonNullable<TurnStat["tokenUsage"]>): string {
   const promptTokens = usage.inputTokens + usage.cacheCreationTokens + usage.cacheReadTokens;
   const totalTokens = promptTokens + usage.outputTokens;
@@ -120,7 +113,7 @@ function tokenUsageTitle(usage: NonNullable<TurnStat["tokenUsage"]>): string {
   if (usage.cacheCreationTokens > 0) {
     parts.push(`${usage.cacheCreationTokens.toLocaleString("en-US")} cache write`);
   }
-  return `Recorded token usage for this assistant turn: ${parts.join(" · ")}`;
+  return `Recorded cumulative token usage for this assistant turn: ${parts.join(" · ")}`;
 }
 
 function AssistantTurnMetrics({
@@ -132,8 +125,14 @@ function AssistantTurnMetrics({
 }) {
   const durationMs = turnStat?.durationMs ?? fallbackDurationMs;
   const durationLabel = formatToolDuration(durationMs);
-  const tokenCount = totalTurnTokens(turnStat?.tokenUsage);
-  if (!durationLabel && !tokenCount) return null;
+  const usage = turnStat?.tokenUsage;
+  const hasTokenUsage = usage
+    ? usage.inputTokens > 0 ||
+      usage.outputTokens > 0 ||
+      usage.cacheCreationTokens > 0 ||
+      usage.cacheReadTokens > 0
+    : false;
+  if (!durationLabel && !hasTokenUsage) return null;
 
   return (
     <span className="inline-flex items-center gap-1.5 text-[10px] font-mono text-terminal-dimmer">
@@ -148,8 +147,21 @@ function AssistantTurnMetrics({
           · {durationLabel}
         </span>
       )}
-      {tokenCount && turnStat?.tokenUsage && (
-        <span title={tokenUsageTitle(turnStat.tokenUsage)}>· {formatTokens(tokenCount)} tok</span>
+      {usage && hasTokenUsage && (
+        <span
+          className="inline-flex items-center gap-1.5"
+          title={tokenUsageTitle(usage)}
+          aria-label="Cumulative token usage by category"
+        >
+          {usage.inputTokens > 0 && <span>· {formatTokens(usage.inputTokens)} in</span>}
+          {usage.outputTokens > 0 && <span>· {formatTokens(usage.outputTokens)} out</span>}
+          {usage.cacheReadTokens > 0 && (
+            <span>· {formatTokens(usage.cacheReadTokens)} cache read</span>
+          )}
+          {usage.cacheCreationTokens > 0 && (
+            <span>· {formatTokens(usage.cacheCreationTokens)} cache write</span>
+          )}
+        </span>
       )}
     </span>
   );
