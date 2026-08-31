@@ -1,9 +1,24 @@
 import { homedir } from "node:os";
+import { posix, win32 } from "node:path";
 
 /** Replace $HOME prefix with `~` for display. */
 export function shortenPath(path: string): string {
   const home = homedir();
   if (path.startsWith(home)) return `~${path.slice(home.length)}`;
+  return path;
+}
+
+/** Expand a user-home path passed directly by a shell or CLI client. */
+export function expandUserPath(
+  path: string,
+  home = homedir(),
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (path === "~") return home;
+  if (path.startsWith("~/") || path.startsWith("~\\")) {
+    const joinPath = platform === "win32" ? win32.join : posix.join;
+    return joinPath(home, path.slice(2));
+  }
   return path;
 }
 

@@ -41,7 +41,7 @@ import { startDashboard, startServer } from "./server.js";
 import { formatSessionQueryText, queryLocalSessions } from "./session-query.js";
 import { transformToReplay } from "./transform.js";
 import type { ParseWarning, ReplaySession, SessionInfo } from "./types.js";
-import { normalizeTitle } from "./utils.js";
+import { expandUserPath, normalizeTitle } from "./utils.js";
 import { CLI_VERSION } from "./version.js";
 
 setFileCacheAppVersion(CLI_VERSION);
@@ -281,7 +281,7 @@ program
     let providerName: string;
 
     if (opts.session) {
-      sessionPaths = opts.session;
+      sessionPaths = expandUserPath(opts.session);
       providerName = opts.provider;
     } else {
       // ─── Top-level menu ─────────────────────────────────
@@ -1077,7 +1077,7 @@ program
     let outputDir: string;
 
     if (pathArg) {
-      const abs = resolve(pathArg);
+      const abs = resolve(expandUserPath(pathArg));
       if (!existsSync(abs)) {
         console.error(chalk.red(`\n  ✗ Path not found: ${abs}\n`));
         process.exit(1);
