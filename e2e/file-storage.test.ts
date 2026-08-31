@@ -9,10 +9,11 @@
  */
 import { type ChildProcess, execSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Browser, chromium } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { killProcessTree, spawnPnpm } from "../scripts/dev-utils.mjs";
 
 const HAS_DEV_VARS = existsSync("cloudflare/.dev.vars");
 
@@ -34,7 +35,7 @@ function wranglerExec(sql: string) {
  * report SQLITE_BUSY_RECOVERY when a stale WAL/SHM is present (e.g. after a
  * crashed `wrangler dev`); a short retry loop makes the suite robust to it.
  */
-function migrateLocalD1(): void {
+async function migrateLocalD1(): Promise<void> {
   const MAX_ATTEMPTS = 3;
   let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -46,7 +47,7 @@ function migrateLocalD1(): void {
       if (attempt < MAX_ATTEMPTS) {
         console.warn(`db:migrate:local attempt ${attempt} failed — retrying`);
         // Give a lingering D1 connection time to checkpoint/release the lock.
-        execSync("sleep 1", { stdio: "pipe" });
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
       }
     }
   }
@@ -73,7 +74,7 @@ describeWorker("File serve via wrangler dev", () => {
   let wranglerProcess: ChildProcess;
 
   beforeAll(async () => {
-    migrateLocalD1();
+    await migrateLocalD1();
 
     // Seed test data directly into D1 + R2
     const gifBinary = Buffer.from(VALID_GIF_B64, "base64");
@@ -105,7 +106,6 @@ describeWorker("File serve via wrangler dev", () => {
 
     // Put actual files into local R2 via temp files (pipe can corrupt binary)
     const { writeFileSync, unlinkSync } = await import("node:fs");
-    const { tmpdir } = await import("node:os");
     const { join: pathJoin } = await import("node:path");
 
     const gifTmp = pathJoin(tmpdir(), "test-seed.gif");
@@ -130,16 +130,15 @@ describeWorker("File serve via wrangler dev", () => {
     unlinkSync(svgTmp);
 
     // Start wrangler dev
-    wranglerProcess = spawn("pnpm", ["wrangler", "dev", "--port", "8787"], {
+    wranglerProcess = spawnPnpm(["wrangler", "dev", "--port", "8787"], {
       cwd: "cloudflare",
       stdio: "pipe",
-      detached: false,
     });
     await waitForWorker(WORKER_URL);
   }, 25_000);
 
-  afterAll(() => {
-    wranglerProcess?.kill();
+  afterAll(async () => {
+    if (wranglerProcess) await killProcessTree(wranglerProcess);
   });
 
   // ─── AUTH GUARDS ─────────────────────────────
@@ -233,7 +232,7 @@ describe("Full flow via editor BFF", () => {
   beforeAll(async () => {
     if (!hasAuth) return;
 
-    serverProcess = spawn("node", ["packages/cli/dist/index.js", "-d"], {
+    serverProcess = spawn(process.execPath, ["packages/cli/dist/index.js", "-d"], {
       env: { ...process.env, VIBE_REPLAY_NO_AUTO_OPEN: "1" },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -259,8 +258,8 @@ describe("Full flow via editor BFF", () => {
     await new Promise((r) => setTimeout(r, 1000));
   }, 20_000);
 
-  afterAll(() => {
-    serverProcess?.kill("SIGTERM");
+  afterAll(async () => {
+    if (serverProcess) await killProcessTree(serverProcess);
   });
 
   it.skipIf(!hasAuth)("BFF proxies POST /api/files (upload GIF)", async () => {
@@ -343,7 +342,7 @@ describe("Viewer export UI", () => {
   let browser: Browser;
 
   beforeAll(async () => {
-    serverProcess = spawn("node", ["packages/cli/dist/index.js", "-d"], {
+    serverProcess = spawn(process.execPath, ["packages/cli/dist/index.js", "-d"], {
       env: { ...process.env, VIBE_REPLAY_NO_AUTO_OPEN: "1" },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -359,7 +358,7 @@ describe("Viewer export UI", () => {
           resolve(Number(match[1]));
         }
       });
-      serverProcess!.on("exit", (code) => {
+      serverProcess!.on("exit", () => {
         clearTimeout(timeout);
         reject(new Error(`Server exited. Output: ${output}`));
       });
@@ -370,7 +369,7 @@ describe("Viewer export UI", () => {
 
   afterAll(async () => {
     await browser?.close();
-    serverProcess?.kill("SIGTERM");
+    if (serverProcess) await killProcessTree(serverProcess);
   });
 
   it("export tab shows generate button for GIF+SVG", async () => {
@@ -407,7 +406,10 @@ describe("Viewer export UI", () => {
       }
     }
 
-    await page.screenshot({ path: "/tmp/vibe-file-share-export-tab.png", fullPage: true });
+    await page.screenshot({
+      path: join(tmpdir(), "vibe-file-share-export-tab.png"),
+      fullPage: true,
+    });
 
     // The generate button should be present somewhere on the page
     const pageText = await page.textContent("body");
@@ -455,7 +457,10 @@ describe("Viewer export UI", () => {
       await page.waitForTimeout(1000);
     }
 
-    await page.screenshot({ path: "/tmp/vibe-file-share-after-gen.png", fullPage: true });
+    await page.screenshot({
+      path: join(tmpdir(), "vibe-file-share-after-gen.png"),
+      fullPage: true,
+    });
 
     // If GIF card appeared, check for share button
     const gifCard = page.locator("text=Animated GIF");

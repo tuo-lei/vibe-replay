@@ -1,6 +1,7 @@
 import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { killProcessTree, spawnPnpm } from "../scripts/dev-utils.mjs";
 
 /**
  * Auth integration tests against wrangler dev.
@@ -45,18 +46,16 @@ describeAuth("Auth Worker E2E", () => {
     });
 
     // Start wrangler dev in background
-    const { spawn } = await import("node:child_process");
-    wranglerProcess = spawn("pnpm", ["wrangler", "dev", "--port", "8787"], {
+    wranglerProcess = spawnPnpm(["wrangler", "dev", "--port", "8787"], {
       cwd: "cloudflare",
       stdio: "pipe",
-      detached: false,
     });
 
     await waitForWorker(WORKER_URL);
   }, 20_000);
 
-  afterAll(() => {
-    wranglerProcess?.kill();
+  afterAll(async () => {
+    if (wranglerProcess) await killProcessTree(wranglerProcess);
   });
 
   // -----------------------------------------------------------------------
