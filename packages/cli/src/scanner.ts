@@ -2542,21 +2542,37 @@ const CLAUDE_DIR = join(homedir(), ".claude", "projects");
 /**
  * Encode a project path the way Claude Code does: path separators → hyphens.
  * e.g. "/Users/tuo/Code/my-project" → "-Users-tuo-Code-my-project"
+ * e.g. "C:\Users\tuo\Code\my-project" → "C--Users-tuo-Code-my-project"
  * e.g. "~/Code/my-project" → expand ~ first
  */
-function encodeProjectDir(project: string): string {
+function encodeProjectDir(
+  project: string,
+  platform: NodeJS.Platform = process.platform,
+  home = homedir(),
+): string {
   let resolved = project;
-  if (resolved.startsWith("~/")) {
-    resolved = join(homedir(), resolved.slice(2));
-  } else if (resolved === "~") {
-    resolved = homedir();
+  if (resolved === "~") {
+    resolved = home;
+  } else if (resolved.startsWith("~/") || resolved.startsWith("~\\")) {
+    resolved = join(home, resolved.slice(2));
   }
-  return resolved.replace(/\//g, "-");
+  return platform === "win32" ? resolved.replace(/[\\/:]/g, "-") : resolved.replace(/\//g, "-");
 }
 
-export async function readProjectMemory(project: string): Promise<ProjectMemory | null> {
-  const encoded = encodeProjectDir(project);
-  const projectDir = join(CLAUDE_DIR, encoded);
+/**
+ * Load the Claude project-level CLAUDE.md and memory notes.
+ *
+ * The optional lookup arguments keep the filesystem operation testable with
+ * Windows and POSIX project roots without changing the production defaults.
+ */
+export async function readProjectMemory(
+  project: string,
+  projectsDir = CLAUDE_DIR,
+  platform: NodeJS.Platform = process.platform,
+  home = homedir(),
+): Promise<ProjectMemory | null> {
+  const encoded = encodeProjectDir(project, platform, home);
+  const projectDir = join(projectsDir, encoded);
   const memoryDir = join(projectDir, "memory");
 
   const memoryFiles: ProjectMemory["memoryFiles"] = [];
