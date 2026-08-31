@@ -40,7 +40,7 @@ npx vibe-replay --session ~/.claude/projects/<project>/<session>.jsonl
   AI Studio Manage Providers dialog for OpenAI, ChatGPT/Codex, OpenRouter, OpenCode Zen, and
   user-configured OpenAI-compatible proxies such as LiteLLM
 - Read-only Ask Replay assistant for local sessions, replays, scenes, usage, and insights, with
-  citations, navigation actions, bounded tool access, and explicit SSH-data consent
+  citations, navigation actions, bounded tool access, and a browser-local SSH-data consent setting
 
 AI Studio stores provider keys and OAuth refresh tokens outside replay files in
 `~/.vibe-replay/ai-auth.json` (override with `VIBE_REPLAY_AI_AUTH`). Custom endpoint metadata is

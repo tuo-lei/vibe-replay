@@ -199,7 +199,8 @@ The CLI auto-discovers sessions on your machine, parses conversation data from a
   requests to the configured local or remote API root.
 - **Ask Replay** — ask read-only questions about local sessions, replay scenes, usage, and
   insights from the Dashboard or Editor. Answers include citations and explicit navigation actions;
-  SSH-backed data stays hidden unless you enable the per-chat consent toggle.
+  SSH-backed data stays hidden unless you enable it in Settings. The setting is browser-local and
+  can be changed at any time.
 - **Quick preview** — open in browser instantly
 - **Publish to Gist** — shareable link on [vibe-replay.com](https://vibe-replay.com)
 - **Export for GitHub** — markdown + animated SVG for PRs
