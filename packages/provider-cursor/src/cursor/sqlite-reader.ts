@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, join, posix } from "node:path";
+import { dirname, join, posix, win32 } from "node:path";
 import { promisify } from "node:util";
 import type { CursorSidecars, PrLink, TokenUsage, TurnStat } from "@vibe-replay/types";
 import { readFileCache, writeFileCache } from "@vibe-replay/provider-core/cache";
@@ -33,6 +33,8 @@ export { storeDbPath, workspaceHash } from "./sqlite-io.js";
 export { mapCursorToolName, mapToolArgs } from "./tool-mapping.js";
 
 export const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const WINDOWS_ABSOLUTE_PATH_RE = /^[A-Za-z]:\//;
+const UNC_PATH_RE = /^\/\//;
 
 const MIN_STORE_DB_SIZE = 8192;
 const MAX_CURSOR_REQUEST_CONTEXT_ROWS = 500;
@@ -154,10 +156,15 @@ let cachedComposerHeaders:
     }
   | undefined;
 
-function globalStateDbCandidates(): string[] {
+function globalStateDbCandidates(
+  platform: NodeJS.Platform = process.platform,
+  home = homedir(),
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  const joinPath = platform === "win32" ? win32.join : posix.join;
   const candidates = [
-    join(
-      homedir(),
+    joinPath(
+      home,
       "Library",
       "Application Support",
       "Cursor",
@@ -165,12 +172,23 @@ function globalStateDbCandidates(): string[] {
       "globalStorage",
       "state.vscdb",
     ),
-    join(homedir(), ".config", "Cursor", "User", "globalStorage", "state.vscdb"),
+    joinPath(home, ".config", "Cursor", "User", "globalStorage", "state.vscdb"),
   ];
-  const appData = process.env.APPDATA;
-  if (appData) {
-    candidates.push(join(appData, "Cursor", "User", "globalStorage", "state.vscdb"));
+
+  if (platform === "win32") {
+    const appData = env.APPDATA || joinPath(home, "AppData", "Roaming");
+    const localAppData = env.LOCALAPPDATA || joinPath(home, "AppData", "Local");
+    candidates.push(joinPath(appData, "Cursor", "User", "globalStorage", "state.vscdb"));
+    candidates.push(joinPath(localAppData, "Cursor", "User", "globalStorage", "state.vscdb"));
+  } else {
+    if (env.APPDATA) {
+      candidates.push(joinPath(env.APPDATA, "Cursor", "User", "globalStorage", "state.vscdb"));
+    }
+    if (env.LOCALAPPDATA) {
+      candidates.push(joinPath(env.LOCALAPPDATA, "Cursor", "User", "globalStorage", "state.vscdb"));
+    }
   }
+
   return [...new Set(candidates)];
 }
 
@@ -1118,24 +1136,58 @@ function hashWorkspacePaths(paths: string[]): string {
   return createHash("sha1").update(normalized).digest("hex").slice(0, 16);
 }
 
+function normalizeComposerPath(pathValue: string): string {
+  return pathValue
+    .replaceAll("\\", "/")
+    .replace(/\/{2,}/g, (slashes, offset) => (offset === 0 ? "//" : "/"))
+    .replace(/[)"',]+$/g, "");
+}
+
+function composerSearchableData(rawComposerData: string): string {
+  return rawComposerData.replaceAll("\\\\", "\\").replace(/\\"/g, '"').replace(/\\\//g, "/");
+}
+
+function isAbsoluteComposerPath(pathValue: string): boolean {
+  return pathValue.startsWith("/") || WINDOWS_ABSOLUTE_PATH_RE.test(pathValue);
+}
+
+function composerPathRoot(pathValue: string): string {
+  if (WINDOWS_ABSOLUTE_PATH_RE.test(pathValue)) return `${pathValue.slice(0, 2)}/`;
+  if (UNC_PATH_RE.test(pathValue)) {
+    const parts = pathValue.split("/").filter(Boolean);
+    if (parts.length >= 2) return `//${parts[0]}/${parts[1]}`;
+    return "//";
+  }
+  return "/";
+}
+
+function composerPathBasename(pathValue: string): string {
+  return posix.basename(normalizeComposerPath(pathValue));
+}
+
+function composerPathBasenameKey(pathValue: string): string {
+  const normalized = normalizeComposerPath(pathValue);
+  const value = composerPathBasename(normalized);
+  return /^[A-Za-z]:\/|^\/\//.test(normalized) ? value.toLowerCase() : value;
+}
+
 async function resolveProjectRootFromPath(rawPath: string): Promise<string | null> {
-  const candidate = rawPath
-    .replaceAll("\\\\", "/")
+  const candidate = normalizeComposerPath(rawPath)
     .replace(/\\n.*$/, "")
-    .replace(/["']+$/g, "")
-    .replace(/[),]+$/g, "");
-  if (!candidate.startsWith("/")) return null;
+    .replace(/["']+$/g, "");
+  if (!isAbsoluteComposerPath(candidate)) return null;
 
   const cached = resolvedProjectRootCache.get(candidate);
   if (cached) return cached;
 
   const resolving = (async () => {
     let current = candidate;
+    const root = composerPathRoot(candidate);
     const initial = await stat(current).catch(() => null);
     if (initial?.isFile()) current = dirname(current);
 
     let deepestExisting: string | null = null;
-    while (current && current !== "/") {
+    while (current && current !== root) {
       const dirStat = await stat(current).catch(() => null);
       if (dirStat?.isDirectory()) {
         if (!deepestExisting) deepestExisting = current;
@@ -1166,9 +1218,15 @@ async function inferProjectFromComposerData(
     if (resolved && !isLowSignalProjectRoot(resolved)) return resolved;
   }
 
+  const searchable = composerSearchableData(rawComposerData);
   const matches =
-    rawComposerData.match(/\/(?:Users|home|workspace|workspaces|tmp)\/[^"'\s,}{]{1,240}/g) || [];
-  for (const match of matches) {
+    searchable.match(/\/(?:Users|home|workspace|workspaces|tmp)\/[^"'\s,}{]{1,240}/g) || [];
+  const windowsMatches =
+    searchable.match(
+      /[A-Za-z]:[\\/](?:Users|home|workspace|workspaces|tmp)[\\/][^"'\s,}{]{1,240}/gi,
+    ) || [];
+  const uncMatches = searchable.match(/(?:\\\\|\/\/)[^"'\s,}{]+[\\/][^"'\s,}{]{1,240}/g) || [];
+  for (const match of [...matches, ...windowsMatches, ...uncMatches]) {
     const resolved = await resolveProjectRootFromPath(match);
     if (resolved && !isLowSignalProjectRoot(resolved)) return resolved;
   }
@@ -1183,10 +1241,17 @@ function inferProjectFromComposerDataFast(
     (a, b) => b.length - a.length,
   );
   for (const workspacePath of uniqueDecoded) {
-    const normalized = workspacePath.replaceAll("\\", "/");
+    const normalized = normalizeComposerPath(workspacePath);
+    const variants = [
+      workspacePath,
+      normalized,
+      normalized.replace(/^\//, ""),
+      workspacePath.replaceAll("\\", "\\\\"),
+    ];
+    const isWindowsPath = /^[A-Za-z]:[\\/]|^(?:\\\\|\/\/)/.test(workspacePath);
+    const source = isWindowsPath ? rawComposerData.toLowerCase() : rawComposerData;
     if (
-      rawComposerData.includes(normalized) ||
-      rawComposerData.includes(normalized.replace(/^\//, ""))
+      variants.some((variant) => source.includes(isWindowsPath ? variant.toLowerCase() : variant))
     ) {
       return workspacePath;
     }
@@ -1195,7 +1260,7 @@ function inferProjectFromComposerDataFast(
   const hintedRoots = extractComposerProjectRootHints(rawComposerData);
   const basenameMatches = new Map<string, string[]>();
   for (const workspacePath of uniqueDecoded) {
-    const key = basename(workspacePath);
+    const key = composerPathBasenameKey(workspacePath);
     if (!key) continue;
     const existing = basenameMatches.get(key) || [];
     existing.push(workspacePath);
@@ -1204,13 +1269,13 @@ function inferProjectFromComposerDataFast(
 
   const bestHint = hintedRoots.find((hint) => !isLowSignalProjectRoot(hint));
   if (bestHint) {
-    const matchingDecoded = basenameMatches.get(basename(bestHint)) || [];
+    const matchingDecoded = basenameMatches.get(composerPathBasenameKey(bestHint)) || [];
     if (matchingDecoded.length === 1) return matchingDecoded[0];
     if (canUseComposerProjectHintDirectly(bestHint)) return bestHint;
   }
 
   for (const hint of hintedRoots) {
-    const matchingDecoded = basenameMatches.get(basename(hint)) || [];
+    const matchingDecoded = basenameMatches.get(composerPathBasenameKey(hint)) || [];
     if (matchingDecoded.length === 1) return matchingDecoded[0];
 
     if (canUseComposerProjectHintDirectly(hint)) return hint;
@@ -1221,15 +1286,19 @@ function inferProjectFromComposerDataFast(
 }
 
 function extractComposerProjectRootHints(rawComposerData: string): string[] {
-  const searchable = `${rawComposerData}\n${rawComposerData
-    .replace(/\\"/g, '"')
-    .replace(/\\\//g, "/")}`;
+  const searchable = composerSearchableData(rawComposerData);
   const explicitCwdRoots = [...searchable.matchAll(/"cwd"\s*:\s*"([^"]+)"/g)]
     .map((match) => inferProjectRootFromPathHint(match[1], { allowWorkspaceRoot: true }))
     .filter((value): value is string => Boolean(value));
   const matches =
     searchable.match(/\/(?:Users|home|workspace|workspaces|tmp)\/[^"'\\\s,}{]{0,240}/g) || [];
-  const roots = matches
+  const windowsMatches =
+    searchable.match(
+      /[A-Za-z]:[\\/](?:Users|home|workspace|workspaces|tmp)[\\/][^"'\s,}{]{0,240}/gi,
+    ) || [];
+  const uncMatches =
+    searchable.match(/(?<![A-Za-z]:)(?:\\\\|\/\/)[^"'\s,}{]+[\\/][^"'\s,}{]{0,240}/g) || [];
+  const roots = [...matches, ...windowsMatches, ...uncMatches]
     .map((match) => inferProjectRootFromPathHint(match))
     .filter((value): value is string => Boolean(value));
   return [...new Set([...explicitCwdRoots, ...roots])].sort((a, b) => b.length - a.length);
@@ -1239,8 +1308,8 @@ function inferProjectRootFromPathHint(
   pathValue: string,
   options?: { allowWorkspaceRoot?: boolean },
 ): string | null {
-  const normalized = pathValue.replaceAll("\\", "/").replace(/[)"',]+$/g, "");
-  if (!normalized.startsWith("/")) return null;
+  const normalized = normalizeComposerPath(pathValue);
+  if (!isAbsoluteComposerPath(normalized)) return null;
 
   if (
     normalized.includes("/.config/") ||
@@ -1258,41 +1327,57 @@ function inferProjectRootFromPathHint(
     return root || null;
   }
 
-  const workspaceMatch = normalized.match(/^\/(workspace|workspaces)\/([^/]+)/);
-  if (workspaceMatch?.[2] && !workspaceMatch[2].startsWith(".")) {
-    return `/${workspaceMatch[1]}/${workspaceMatch[2]}`;
+  const workspaceMatch = normalized.match(/^(\/|[A-Za-z]:\/)(workspace|workspaces)\/([^/]+)/i);
+  if (workspaceMatch?.[3] && !workspaceMatch[3].startsWith(".")) {
+    return `${workspaceMatch[1]}${workspaceMatch[2]}/${workspaceMatch[3]}`;
   }
-  if (options?.allowWorkspaceRoot && /^\/workspaces?\/?$/.test(normalized)) {
+  if (options?.allowWorkspaceRoot && /^(?:\/|[A-Za-z]:\/)workspaces?\/?$/i.test(normalized)) {
     return normalized.replace(/\/$/, "");
   }
 
   const parts = normalized.split("/").filter(Boolean);
-  if (parts[0] === "Users" && parts.length >= 4) {
-    return `/${parts.slice(0, 4).join("/")}`;
+  const driveOffset = /^[A-Za-z]:$/.test(parts[0] || "") ? 1 : 0;
+  const namespace = parts[driveOffset]?.toLowerCase();
+  if (namespace === "users" && parts.length >= driveOffset + 4) {
+    const rootLength = driveOffset + 4;
+    return `${normalized.startsWith("//") ? "//" : driveOffset ? "" : "/"}${parts
+      .slice(0, rootLength)
+      .join("/")}`;
   }
-  if (parts[0] === "home" && parts.length >= 3 && !parts[2].startsWith(".")) {
-    return `/${parts.slice(0, 3).join("/")}`;
+  if (
+    namespace === "home" &&
+    parts.length >= driveOffset + 3 &&
+    !parts[driveOffset + 2]?.startsWith(".")
+  ) {
+    const rootLength = driveOffset + 3;
+    return `${normalized.startsWith("//") ? "//" : driveOffset ? "" : "/"}${parts
+      .slice(0, rootLength)
+      .join("/")}`;
+  }
+  if (normalized.startsWith("//") && parts.length >= 3) {
+    return `//${parts.slice(0, 3).join("/")}`;
   }
   return null;
 }
 
 function isLowSignalProjectRoot(pathValue: string): boolean {
+  const normalized = pathValue.replace(/^[A-Za-z]:/, "");
   return (
-    pathValue === "/home" ||
-    pathValue === "/tmp" ||
-    pathValue === "/workspace" ||
-    pathValue === "/workspaces" ||
-    /^\/home\/[^/]+$/.test(pathValue)
+    normalized === "/home" ||
+    normalized === "/tmp" ||
+    normalized === "/workspace" ||
+    normalized === "/workspaces" ||
+    /^\/home\/[^/]+$/i.test(normalized)
   );
 }
 
 function canUseComposerProjectHintDirectly(pathValue: string): boolean {
   return (
-    /^\/workspaces?$/.test(pathValue) ||
-    /^\/workspaces\/[^/]+$/.test(pathValue) ||
-    /^\/workspace\/[^/]+$/.test(pathValue) ||
-    /^\/home\/[^/]+\/[^/]+$/.test(pathValue) ||
-    /^\/Users\/[^/]+\/[^/]+\/[^/]+$/.test(pathValue)
+    /^(?:\/|[A-Za-z]:\/)workspaces?$/i.test(pathValue) ||
+    /^(?:\/|[A-Za-z]:\/)workspaces\/[^/]+$/i.test(pathValue) ||
+    /^(?:\/|[A-Za-z]:\/)workspace\/[^/]+$/i.test(pathValue) ||
+    /^(?:\/|[A-Za-z]:\/)home\/[^/]+\/[^/]+$/i.test(pathValue) ||
+    /^(?:\/|[A-Za-z]:\/)Users\/[^/]+\/[^/]+\/[^/]+$/i.test(pathValue)
   );
 }
 
@@ -3699,5 +3784,6 @@ export const __testables = {
   projectedCursorBubbleRowToBubble,
   projectedCursorBubbleSelectSql,
   cursorLiveDiagnosticsSignature,
+  globalStateDbCandidates,
   sqlKeyPrefixRange,
 };
