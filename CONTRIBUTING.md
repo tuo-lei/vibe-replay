@@ -39,7 +39,7 @@ reinstall/re-pin pnpm for that Node) until both checks agree.
 ## Development
 
 ```bash
-pnpm dev              # Viewer (Vite HMR) + CLI (tsx watch, auto-restart)
+pnpm dev              # Viewer (Vite HMR) + CLI (fs.watch + tsx auto-restart)
 pnpm dev:dashboard    # Same as above, opens dashboard directly
 pnpm dev:website      # Website (Astro HMR) + Viewer (Vite HMR)
 pnpm test             # Run tests
@@ -56,8 +56,9 @@ See `src/hooks/__tests__/usePlayback.test.tsx` for the pattern.
 
 **Daily workflow**: Run `pnpm dev`, then open the viewer URL printed by the
 launcher (usually `http://localhost:5173`). Viewer changes hot-reload instantly
-via Vite HMR. CLI/API changes auto-restart via `tsx watch`. No manual rebuild
-or restart needed.
+via Vite HMR. CLI/API changes auto-restart via the launcher's custom Node
+`fs.watch` watcher rather than `tsx watch`, which would intercept interactive
+stdin. No manual rebuild or restart needed.
 
 The dev launchers reserve ports across their entire lifetime, including CLI
 restart windows. This allows multiple worktrees to run concurrently. For fixed
