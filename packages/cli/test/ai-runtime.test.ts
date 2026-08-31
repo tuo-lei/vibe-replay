@@ -23,6 +23,7 @@ import {
 
 const temporaryRoots: string[] = [];
 const POSIX_FILE_MODES = process.platform !== "win32";
+const CREDENTIAL_WORKER_TEST_TIMEOUT_MS = process.platform === "win32" ? 15_000 : 5_000;
 
 const credentialWorkerSource = `
 import { FileCredentialStore } from ${JSON.stringify(new URL("../src/ai-runtime.ts", import.meta.url).href)};
@@ -204,39 +205,43 @@ describe("FileCredentialStore", () => {
     expect((await verifier.read("second"))?.type).toBe("api_key");
   });
 
-  it("serializes mutations across credential-store processes", async () => {
-    const root = await mkdtemp(join(tmpdir(), "vibe-ai-auth-"));
-    temporaryRoots.push(root);
-    const path = join(root, "ai-auth.json");
-    const first = startCredentialWorker(path, "hold");
-    const firstMonitor = monitorCredentialWorker(first, "locked");
-    let second: ChildProcessWithoutNullStreams | undefined;
-    try {
-      await firstMonitor.ready;
-      second = startCredentialWorker(path, "write");
-      const secondMonitor = monitorCredentialWorker(second, "done");
-      let secondExited = false;
-      void secondMonitor.exited.then(() => {
-        secondExited = true;
-      });
+  it(
+    "serializes mutations across credential-store processes",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "vibe-ai-auth-"));
+      temporaryRoots.push(root);
+      const path = join(root, "ai-auth.json");
+      const first = startCredentialWorker(path, "hold");
+      const firstMonitor = monitorCredentialWorker(first, "locked");
+      let second: ChildProcessWithoutNullStreams | undefined;
+      try {
+        await firstMonitor.ready;
+        second = startCredentialWorker(path, "write");
+        const secondMonitor = monitorCredentialWorker(second, "done");
+        let secondExited = false;
+        void secondMonitor.exited.then(() => {
+          secondExited = true;
+        });
 
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      expect(secondExited).toBe(false);
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        expect(secondExited).toBe(false);
 
-      first.stdin.end("release\n");
-      await expect(firstMonitor.exited).resolves.toMatchObject({ code: 0 });
-      await expect(secondMonitor.ready).resolves.toBeUndefined();
-      await expect(secondMonitor.exited).resolves.toMatchObject({ code: 0 });
+        first.stdin.end("release\n");
+        await expect(firstMonitor.exited).resolves.toMatchObject({ code: 0 });
+        await expect(secondMonitor.ready).resolves.toBeUndefined();
+        await expect(secondMonitor.exited).resolves.toMatchObject({ code: 0 });
 
-      const verifier = new FileCredentialStore(path);
-      expect((await verifier.read("first"))?.type).toBe("api_key");
-      expect((await verifier.read("second"))?.type).toBe("api_key");
-    } finally {
-      first.stdin.destroy();
-      await stopCredentialWorker(first);
-      if (second) await stopCredentialWorker(second);
-    }
-  });
+        const verifier = new FileCredentialStore(path);
+        expect((await verifier.read("first"))?.type).toBe("api_key");
+        expect((await verifier.read("second"))?.type).toBe("api_key");
+      } finally {
+        first.stdin.destroy();
+        await stopCredentialWorker(first);
+        if (second) await stopCredentialWorker(second);
+      }
+    },
+    CREDENTIAL_WORKER_TEST_TIMEOUT_MS,
+  );
 
   it("recovers a lock left by a crashed credential-store process", async () => {
     const root = await mkdtemp(join(tmpdir(), "vibe-ai-auth-"));

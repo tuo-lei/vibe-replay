@@ -244,6 +244,16 @@ async function decodeProjectDirUncached(encoded: string): Promise<string> {
   if (encoded.startsWith("--") && encoded.endsWith("--")) {
     const inner = encoded.slice(2, -2);
     const parts = inner.split("-");
+    if (process.platform === "win32" && /^[a-zA-Z]$/.test(parts[0] || "")) {
+      // Pi drops Windows drive colons and both slash styles when encoding cwd.
+      const root = `${parts[0].toUpperCase()}:\\`;
+      // The dropped colon and the first separator produce an empty segment
+      // after the drive letter (`C--Users-...`).
+      const startIdx = parts[1] === "" ? 2 : 1;
+      const resolved = await resolveEncodedProjectParts(parts, startIdx, root);
+      if (resolved) return joinUnresolvedRemainder(resolved, parts, "\\");
+      return parts.length === startIdx ? root : `${root}${parts.slice(startIdx).join("\\")}`;
+    }
     const resolved = await resolveEncodedProjectParts(parts, 0, "");
     if (resolved) return joinUnresolvedRemainder(resolved, parts, "/");
     return `/${inner.replace(/-/g, "/")}`;

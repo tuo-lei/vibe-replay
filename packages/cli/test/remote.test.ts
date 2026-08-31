@@ -232,7 +232,7 @@ describe("remote cache path safety and identity", () => {
     const outside = join(root, "outside");
     const cacheRoot = join(root, "cache");
     await mkdir(outside);
-    await symlink(outside, cacheRoot, "dir");
+    await symlink(outside, cacheRoot, process.platform === "win32" ? "junction" : "dir");
 
     await expect(
       __testables.inspectCachedPath(cacheRoot, ".codex/sessions/rollout.jsonl"),

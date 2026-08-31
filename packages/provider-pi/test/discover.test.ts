@@ -11,6 +11,10 @@ import {
 const originalSessionDir = process.env.PI_CODING_AGENT_SESSION_DIR;
 const tempDirs: string[] = [];
 
+function encodePiProjectPath(path: string): string {
+  return `--${path.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+}
+
 afterEach(async () => {
   if (originalSessionDir === undefined) delete process.env.PI_CODING_AGENT_SESSION_DIR;
   else process.env.PI_CODING_AGENT_SESSION_DIR = originalSessionDir;
@@ -137,25 +141,18 @@ describe("discoverPiSessions", () => {
     await mkdir(join(realProject, "Code", "tuo-lei-com"), { recursive: true });
 
     // Simulate Pi encoding: the directory name is the encoded path
-    // For /tmp/.../real-fs/Code/vibe-replay -> encode as --tmp-...-real-fs-Code-vibe-replay--
-    // But decodeProjectDir walks from / so we test the inner split logic directly
-    // by using a real path that exists under /
-    const decoded1 = await decodeProjectDir("--Users-tuo-Code-vibe-replay--");
-    // On this machine /Users/tuo/Code/vibe-replay exists, so it should resolve correctly
-    // If the filesystem walk fails (e.g. in CI without that path), fallback is naive
-    // At minimum it should not crash and should return a string starting with /
-    expect(typeof decoded1).toBe("string");
-    expect(decoded1.startsWith("/")).toBe(true);
+    // For /tmp/.../real-fs/Code/vibe-replay, Pi encodes the path by dropping
+    // the leading root and replacing separators (and Windows drive colons)
+    // with dashes.
+    const realWorkspace = join(realProject, "Code", "vibe-replay");
+    const encoded = encodePiProjectPath(realWorkspace);
+    await expect(decodeProjectDir(encoded)).resolves.toBe(realWorkspace);
 
     // Direct hyphen preservation: create a temp structure to test deterministically
-    const encoded = `--${realProject.replace(/^\//, "").replace(/\//g, "-")}--`;
     // Create the session dir structure Pi uses
     const sessionsRoot = await mkdtemp(join(tmpdir(), "vibe-pi-sessions-"));
     tempDirs.push(sessionsRoot);
-    const vibeProjectDir = join(
-      sessionsRoot,
-      `--${join(realProject, "Code", "vibe-replay").replace(/^\//, "").replace(/\//g, "-")}--`,
-    );
+    const vibeProjectDir = join(sessionsRoot, encoded);
     await mkdir(vibeProjectDir, { recursive: true });
     await writeFile(
       join(vibeProjectDir, "2026-01-01T00-00-00-000Z_test.jsonl"),
