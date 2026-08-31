@@ -39,7 +39,7 @@ reinstall/re-pin pnpm for that Node) until both checks agree.
 ## Development
 
 ```bash
-pnpm dev              # Viewer (Vite HMR) + CLI (fs.watch + tsx auto-restart)
+pnpm dev              # Viewer (Vite HMR) + CLI (Node fs.watch restarts plain tsx)
 pnpm dev:dashboard    # Same as above, opens dashboard directly
 pnpm dev:website      # Website (Astro HMR) + Viewer (Vite HMR)
 pnpm test             # Run tests
