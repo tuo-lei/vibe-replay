@@ -7,7 +7,7 @@ tool-specific file.
 
 ## What is this
 
-vibe-replay turns AI coding sessions into animated, interactive web replays as self-contained HTML files. Supports Claude Code, Cursor, Codex, OpenCode, Hermes, and Pi. The editor's AI Studio uses the embedded Pi provider registry and agent loop rather than requiring a separate AI CLI.
+vibe-replay turns AI coding sessions into animated, interactive web replays as self-contained HTML files. Supports Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, OpenCode, Hermes, and Pi. The editor's AI Studio uses the embedded Pi provider registry and agent loop rather than requiring a separate AI CLI.
 
 pnpm monorepo: `packages/cli` (npm: `vibe-replay`), `packages/viewer` (React → single HTML), `packages/types` (shared types), `website/` (Astro), `cloudflare/` (Workers API).
 
@@ -17,10 +17,11 @@ pnpm monorepo: `packages/cli` (npm: `vibe-replay`), `packages/viewer` (React →
 pnpm install               # Install deps
 pnpm build                 # Full build: viewer → cli
 pnpm start                 # Build + run interactive picker
-pnpm dev                   # Viewer (Vite HMR) + CLI (tsx watch) together
+pnpm dev                   # Viewer (Vite HMR) + CLI (tsx + Node fs.watch restarts) together
 pnpm dev:dashboard         # Dev mode with dashboard flag (-d)
 pnpm dev:website           # Website (Astro HMR) + Viewer (Vite HMR) together
 pnpm test                  # Run unit tests
+pnpm test:cloudflare       # Run Cloudflare worker tests
 pnpm test:e2e              # Run E2E tests (requires pnpm build first)
 pnpm lint                  # Lint + format (auto-fix)
 pnpm lint:check            # Lint check (no fix, for CI)
@@ -30,8 +31,9 @@ pnpm verify                # Sequential pre-PR gate: lint, types, tests, build
 
 When to use which:
 - `pnpm start` — validate full user flow (build + run)
-- `pnpm dev` — daily iteration with full HMR: viewer auto-reloads via Vite, CLI auto-restarts via `tsx watch`
+- `pnpm dev` — daily iteration with full HMR: viewer auto-reloads via Vite, and the CLI auto-restarts through the launcher's Node `fs.watch` watcher rather than `tsx watch` (which would intercept interactive stdin)
 - `pnpm dev:website` — website + viewer iteration: Astro HMR + `/view/` redirects to Vite viewer
+- Dev launchers reserve ports for their entire lifetime. If one component's port is explicitly overridden, automatic selection skips that port for the other component as well. Use `VIBE_API_PORT`/`VIBE_VIEWER_PORT` for `pnpm dev` and `VIBE_VIEWER_PORT`/`VIBE_WEBSITE_PORT` for `pnpm dev:website`.
 
 ## Database (D1 + Drizzle)
 
@@ -101,7 +103,7 @@ pnpm db:migrate:remote    # Apply to production D1 (requires auth)
 - **After changes**: update AGENTS.md / README.md / CONTRIBUTING.md if anything becomes outdated. Never edit `CLAUDE.md` to record project knowledge — it is a shim (see [Agent setup](#agent-setup)).
 - **Viewer changes** → `pnpm build` (rebuilds both packages)
 - **CLI-only changes** → `pnpm --filter vibe-replay build`
-- **Shared types changes** → edit `packages/types/src/index.ts`, both CLI and viewer pick them up automatically
+- **Shared types changes** → edit the relevant source under `packages/types/`; both CLI and viewer pick the changes up automatically
 - Test with both small (~30 scenes) and large (~500 scenes) sessions
 - **Test modification policy** — see `packages/cli/test/README.md` before changing any test
 
@@ -184,7 +186,7 @@ turns back into a copy, or if `AGENTS.md` outgrows the size limit below.
 
 Keep `AGENTS.md` **under 32 KiB** — Codex's default `project_doc_max_bytes`. Past
 it Codex truncates the file and silently stops reading later sections. The guard
-test enforces this. **Headroom is currently only ~4 KiB**, so a large addition
+test enforces this. **Headroom is currently roughly 3 KiB**, so a large addition
 needs a split rather than an append.
 
 To split, move a package's gotchas into a nested pair inside that package:
