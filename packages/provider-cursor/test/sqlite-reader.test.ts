@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { win32 } from "node:path";
 import {
   __testables,
   countComposerConversationHeaders,
@@ -109,6 +110,28 @@ describe("Cursor timestamp normalization", () => {
         timingInfo: { clientStartTime: 3568.9, clientEndTime: 1_754_501_490_954 },
       }),
     ).toBe("2025-08-06T17:31:30.954Z");
+  });
+});
+
+describe("Cursor global-state paths", () => {
+  it("includes the Windows local appdata global-state database", () => {
+    const localAppData = "C:\\Users\\TuoLei\\AppData\\Local";
+    const candidates = __testables.globalStateDbCandidates("win32", "C:\\Users\\TuoLei", {
+      APPDATA: "C:\\Users\\TuoLei\\AppData\\Roaming",
+      LOCALAPPDATA: localAppData,
+    });
+
+    expect(candidates).toContain(
+      win32.join(localAppData, "Cursor", "User", "globalStorage", "state.vscdb"),
+    );
+  });
+
+  it("uses Windows appdata fallbacks when environment variables are absent", () => {
+    const candidates = __testables.globalStateDbCandidates("win32", "C:\\Users\\TuoLei", {});
+
+    expect(candidates).toContain(
+      "C:\\Users\\TuoLei\\AppData\\Local\\Cursor\\User\\globalStorage\\state.vscdb",
+    );
   });
 });
 
@@ -741,6 +764,55 @@ describe("cursor sqlite metrics helpers", () => {
       __testables.inferProjectRootFromPathHint("/workspaces/.devcontainer/docker-compose.yml"),
     ).toBe("/workspaces");
     expect(__testables.inferProjectRootFromPathHint("/home/node/.config/git/config")).toBeNull();
+  });
+
+  it("extracts project roots from native Windows user paths", () => {
+    expect(
+      __testables.inferProjectRootFromPathHint(
+        "C:\\Users\\tlei\\Code\\ros\\src\\resolvers\\export.ts",
+      ),
+    ).toBe("C:/Users/tlei/Code/ros");
+  });
+
+  it("extracts project roots from UNC paths", () => {
+    expect(
+      __testables.inferProjectRootFromPathHint(
+        "\\\\build-server\\share\\ros\\src\\resolvers\\export.ts",
+      ),
+    ).toBe("//build-server/share/ros");
+  });
+
+  it("matches Windows composer paths with decoded workspace paths", () => {
+    expect(
+      __testables.inferProjectFromComposerDataFast(
+        JSON.stringify({
+          relevantFiles: ["C:\\Users\\tlei\\Code\\ros\\src\\index.ts"],
+        }),
+        ["C:\\Users\\tlei\\Code\\ros"],
+      ),
+    ).toBe("C:\\Users\\tlei\\Code\\ros");
+  });
+
+  it("extracts Windows project paths without decoded workspace metadata", () => {
+    expect(
+      __testables.inferProjectFromComposerDataFast(
+        JSON.stringify({
+          relevantFiles: ["C:\\Users\\tlei\\Code\\ros\\src\\index.ts"],
+        }),
+        [],
+      ),
+    ).toBe("C:/Users/tlei/Code/ros");
+  });
+
+  it("extracts UNC project paths without decoded workspace metadata", () => {
+    expect(
+      __testables.inferProjectFromComposerDataFast(
+        JSON.stringify({
+          currentFile: "\\\\build-server\\share\\ros\\src\\index.ts",
+        }),
+        [],
+      ),
+    ).toBe("//build-server/share/ros");
   });
 
   it("prefers direct high-confidence composer project hints before filesystem probing", async () => {
