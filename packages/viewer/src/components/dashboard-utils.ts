@@ -213,6 +213,11 @@ export function formatCompactDuration(ms: number): string {
   return remHours > 0 ? `${days}d ${remHours}h` : `${days}d`;
 }
 
+export function formatGenerationElapsed(ms: number): string {
+  if (ms < 60_000) return `${Math.max(1, Math.floor(ms / 1000))}s`;
+  return formatCompactDuration(ms);
+}
+
 export function formatSize(bytes: number): string {
   const kb = Math.round(bytes / 1024);
   return kb >= 1024 ? `${(kb / 1024).toFixed(1)}MB` : `${kb}KB`;

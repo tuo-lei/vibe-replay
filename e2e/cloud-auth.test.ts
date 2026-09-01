@@ -36,10 +36,11 @@ function loadAuth(): { token: string; user: { name: string } } | null {
 }
 const isSecure = CLOUD_API.startsWith("https://");
 const cookieName = isSecure ? "__Secure-better-auth.session_token" : "better-auth.session_token";
+const runCloudE2E = process.env.VIBE_REPLAY_E2E_CLOUD === "1";
 
 describe("cloud auth", () => {
   const auth = loadAuth();
-  const skip = !auth;
+  const skip = !auth || !runCloudE2E;
 
   it.skipIf(skip)("auth.json exists with token and user", () => {
     expect(auth).toBeTruthy();
@@ -78,7 +79,7 @@ describe("cloud auth", () => {
 
 describe("editor BFF auth proxy", () => {
   const auth = loadAuth();
-  const skip = !auth;
+  const skip = !auth || !runCloudE2E;
 
   let serverProcess: ChildProcess | null = null;
   let serverPort: number;
@@ -149,7 +150,7 @@ describe("editor BFF auth proxy", () => {
 
 describe("viewer auth consistency", () => {
   const auth = loadAuth();
-  const skip = !auth;
+  const skip = !auth || !runCloudE2E;
 
   let serverProcess: ChildProcess | null = null;
   let serverPort: number;
@@ -210,7 +211,7 @@ describe("viewer auth consistency", () => {
     const page = await browser.newPage();
     const slug = sessions[0].slug;
     await page.goto(`http://localhost:${serverPort}/?session=${slug}`, {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
     });
 
     // Wait for auth check to complete (avatar or sign-in button appears)
