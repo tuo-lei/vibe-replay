@@ -105,6 +105,11 @@ function RemoteSourceFailureNotice({ failures }: { failures: string[] }) {
   );
 }
 
+function formatGenerationElapsed(ms: number): string {
+  if (ms < 60_000) return `${Math.max(1, Math.floor(ms / 1000))}s`;
+  return formatCompactDuration(ms);
+}
+
 // ─── Data Fetching ───────────────────────────────────────────────────
 
 function useDashboardData() {
@@ -534,6 +539,7 @@ function RecentSessionsList({
   onViewReplay,
   onSessionClick,
   generatingSessionKey,
+  generationInProgress,
   generateErrorSessionKey,
 }: {
   sessions: SourceSession[];
@@ -543,6 +549,7 @@ function RecentSessionsList({
   onViewReplay: (slug: string, location?: SessionLocation) => void;
   onSessionClick: (source: SourceSession) => void;
   generatingSessionKey: string | null;
+  generationInProgress: boolean;
   generateErrorSessionKey: string | null;
 }) {
   if (sessions.length === 0) {
@@ -559,6 +566,7 @@ function RecentSessionsList({
     const hasReplay = !!s.existingReplay;
     const identity = sessionIdentityKey(s);
     const isGenerating = generatingSessionKey === identity;
+    const anotherGenerationInProgress = generationInProgress && !isGenerating;
     const hasError = generateErrorSessionKey === identity;
     const transcriptStatus = s.transcriptStatus;
     const sizeClass = featured ? "h-8 px-3.5" : "h-7 px-3";
@@ -586,8 +594,12 @@ function RecentSessionsList({
           e.stopPropagation();
           onGenerate(s);
         }}
-        disabled={isGenerating || !!transcriptStatus}
-        title={transcriptStatusDescription(transcriptStatus)}
+        disabled={isGenerating || anotherGenerationInProgress || !!transcriptStatus}
+        title={
+          anotherGenerationInProgress
+            ? "Another replay is being generated"
+            : transcriptStatusDescription(transcriptStatus)
+        }
         className={`${sizeClass} text-xs font-sans font-semibold rounded-md transition-all duration-200 disabled:opacity-50 flex items-center gap-1 shrink-0 ${
           hasError
             ? "bg-terminal-red-subtle text-terminal-red"
@@ -595,7 +607,7 @@ function RecentSessionsList({
         }`}
       >
         {isGenerating ? (
-          <span className="animate-pulse">{featured ? "Generating..." : "..."}</span>
+          <span className="animate-pulse">{featured ? "Generating..." : "Working..."}</span>
         ) : hasError ? (
           "Failed"
         ) : transcriptStatus ? (
@@ -979,6 +991,8 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   const insights = useMemo(() => computeInsights(sources, replays), [sources, replays]);
   const { userInsights } = useScanInsightsContext();
   const [generatingSessionKey, setGeneratingSessionKey] = useState<string | null>(null);
+  const [generationStartedAt, setGenerationStartedAt] = useState<number | null>(null);
+  const [generationElapsedMs, setGenerationElapsedMs] = useState(0);
   const [generateErrorSessionKey, setGenerateErrorSessionKey] = useState<string | null>(null);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const [selectedSessionKey, setSelectedSessionKey] = useState<string | null>(null);
@@ -991,6 +1005,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   const [, setTick] = useState(0);
   const [activityWindow, setActivityWindow] = useState<ActivityWindow>("today");
   const requestedEnrichmentSignatureRef = useRef("");
+  const activeGenerationRequestRef = useRef<number | null>(null);
   const syncPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const syncPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const legacySelectedSlugMatches = selectedSlug
@@ -1005,6 +1020,23 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     ? archiveSessionKey(selectedSession.slug, selectedSession.location)
     : null;
   const selectedIsArchived = selectedArchiveKey ? archivedSlugs.has(selectedArchiveKey) : false;
+  const generatingSource = generatingSessionKey
+    ? (sources.find((source) => sessionIdentityKey(source) === generatingSessionKey) ?? null)
+    : null;
+  const generatingTitle = generatingSource
+    ? sourceSuggestedTitle(generatingSource)
+    : "selected session";
+
+  useEffect(() => {
+    if (generationStartedAt === null) {
+      setGenerationElapsedMs(0);
+      return;
+    }
+    const updateElapsed = () => setGenerationElapsedMs(Date.now() - generationStartedAt);
+    updateElapsed();
+    const timer = setInterval(updateElapsed, 1000);
+    return () => clearInterval(timer);
+  }, [generationStartedAt]);
   useEffect(() => {
     let mounted = true;
     void fetch("/api/archived")
@@ -1072,8 +1104,12 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   };
 
   const handleGenerate = async (source: SourceSession) => {
+    if (activeGenerationRequestRef.current !== null) return;
     const identity = sessionIdentityKey(source);
+    const requestId = Date.now();
+    activeGenerationRequestRef.current = requestId;
     setGeneratingSessionKey(identity);
+    setGenerationStartedAt(Date.now());
     setGenerateErrorSessionKey(null);
     try {
       const title = sourceSuggestedTitle(source);
@@ -1105,15 +1141,23 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
         2000,
       );
     } finally {
-      setGeneratingSessionKey(null);
+      if (activeGenerationRequestRef.current === requestId) {
+        activeGenerationRequestRef.current = null;
+        setGeneratingSessionKey(null);
+        setGenerationStartedAt(null);
+      }
     }
   };
 
   const submitGenerateFromPopup = async (source: SourceSession, title: string) => {
+    if (activeGenerationRequestRef.current !== null) return;
     setSelectedSlug(null);
     setSelectedSessionKey(null);
     const identity = sessionIdentityKey(source);
+    const requestId = Date.now();
+    activeGenerationRequestRef.current = requestId;
     setGeneratingSessionKey(identity);
+    setGenerationStartedAt(Date.now());
     setGenerateErrorSessionKey(null);
     try {
       const resp = await fetchWithRetry("/api/generate", {
@@ -1144,7 +1188,11 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
         2000,
       );
     } finally {
-      setGeneratingSessionKey(null);
+      if (activeGenerationRequestRef.current === requestId) {
+        activeGenerationRequestRef.current = null;
+        setGeneratingSessionKey(null);
+        setGenerationStartedAt(null);
+      }
     }
   };
 
@@ -1551,6 +1599,13 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           />
         )}
 
+        {generatingSessionKey && (
+          <SessionLoadingBanner
+            title="Generating replay"
+            description={`${generatingTitle} — parsing the session and building the replay. Large sessions may take a while. Elapsed ${formatGenerationElapsed(generationElapsedMs)}. The replay will open automatically when it is ready.`}
+          />
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)] gap-3 items-stretch">
           <div className="bg-terminal-surface rounded-xl p-4 shadow-layer-sm flex flex-col">
             <div className="flex items-center justify-between mb-3">
@@ -1576,6 +1631,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
                   setSelectedSessionKey(sessionIdentityKey(s));
                 }}
                 generatingSessionKey={generatingSessionKey}
+                generationInProgress={generatingSessionKey !== null}
                 generateErrorSessionKey={generateErrorSessionKey}
               />
             </div>
@@ -1702,6 +1758,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           onTitleSave={handleTitleSave}
           onDeleteReplay={handleDeleteReplay}
           isGenerating={generatingSessionKey === sessionIdentityKey(selectedSession)}
+          generationInProgress={generatingSessionKey !== null}
           isArchived={selectedIsArchived}
         />
       )}

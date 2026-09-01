@@ -597,6 +597,7 @@ export function SessionDetailPopup({
   onDeleteReplay,
   onRawData,
   isGenerating,
+  generationInProgress = false,
   isArchived,
 }: {
   session: SourceSession;
@@ -609,6 +610,7 @@ export function SessionDetailPopup({
   onDeleteReplay: (slug: string, location?: SessionLocation) => void;
   onRawData?: (session: SourceSession, scanData: SessionScanData | null) => void;
   isGenerating: boolean;
+  generationInProgress?: boolean;
   isArchived: boolean;
 }) {
   const [scanData, setScanData] = useState<SessionScanData | null>(initialScanData);
@@ -1179,8 +1181,12 @@ export function SessionDetailPopup({
               <>
                 <button
                   onClick={() => onGenerate(s, titleValue)}
-                  disabled={isGenerating || !!transcriptStatus}
-                  title={transcriptStatusHelp}
+                  disabled={isGenerating || generationInProgress || !!transcriptStatus}
+                  title={
+                    generationInProgress
+                      ? "Another replay is being generated"
+                      : transcriptStatusHelp
+                  }
                   className="h-11 px-5 text-sm font-sans font-semibold rounded-xl bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200 flex items-center gap-2 disabled:opacity-50"
                 >
                   {isGenerating ? (
@@ -1227,8 +1233,10 @@ export function SessionDetailPopup({
             {!s.replay && (
               <button
                 onClick={handleGenerate}
-                disabled={isGenerating || !!transcriptStatus}
-                title={transcriptStatusHelp}
+                disabled={isGenerating || generationInProgress || !!transcriptStatus}
+                title={
+                  generationInProgress ? "Another replay is being generated" : transcriptStatusHelp
+                }
                 className="h-12 px-8 text-sm font-sans font-bold rounded-xl bg-terminal-green text-terminal-bg hover:brightness-110 transition-all duration-200 flex items-center gap-2 shadow-lg shadow-terminal-green/20 disabled:opacity-50"
               >
                 {isGenerating ? (
