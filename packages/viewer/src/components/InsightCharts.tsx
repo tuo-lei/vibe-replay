@@ -41,7 +41,7 @@ export function TurnDurationChart({ histogram }: { histogram: TurnDurationHistog
               <div className="absolute bottom-full mb-1 hidden group-hover:block z-10">
                 <div className="bg-terminal-surface-2 border border-terminal-border-subtle rounded-lg px-2 py-1 shadow-layer-md whitespace-nowrap">
                   <div className="text-[10px] font-mono text-terminal-dim">{bucket.label}</div>
-                  <div className="text-[10px] font-mono text-terminal-green font-bold">
+                  <div className="text-[10px] font-mono text-terminal-response font-bold">
                     {bucket.count} turn{bucket.count !== 1 ? "s" : ""} ({bucket.pct}%)
                   </div>
                 </div>
@@ -52,7 +52,7 @@ export function TurnDurationChart({ histogram }: { histogram: TurnDurationHistog
                 </div>
               )}
               <div
-                className="w-full rounded-md bg-terminal-green hover:opacity-90 transition-all"
+                className="w-full rounded-md bg-gradient-to-t from-terminal-response to-terminal-context hover:opacity-90 transition-all"
                 style={{
                   height: `${heightPct}%`,
                   minHeight: bucket.count > 0 ? "4px" : "0",
@@ -100,15 +100,18 @@ export function TurnDurationChart({ histogram }: { histogram: TurnDurationHistog
           {histogram.totalTurns.toLocaleString()} turns
         </span>
       </div>
+      <div className="text-[9px] font-mono text-terminal-dimmer">
+        Timing quality varies by provider; this combines recorded and estimated turn durations.
+      </div>
     </div>
   );
 }
 
 const TOKEN_COLORS = [
-  { key: "cacheRead", label: "Cache Read", color: "bg-terminal-purple" },
-  { key: "cacheCreation", label: "Cache Write", color: "bg-terminal-orange" },
-  { key: "output", label: "Output", color: "bg-terminal-green" },
-  { key: "input", label: "Input (uncached)", color: "bg-terminal-blue" },
+  { key: "cacheRead", label: "Cache Read", color: "bg-terminal-context" },
+  { key: "cacheCreation", label: "Cache Write", color: "bg-terminal-context-emphasis" },
+  { key: "output", label: "Output", color: "bg-terminal-response" },
+  { key: "input", label: "Input (uncached)", color: "bg-terminal-user" },
 ] as const;
 
 function formatTokenCount(value: number): string {
@@ -117,7 +120,14 @@ function formatTokenCount(value: number): string {
   return value.toString();
 }
 
-export function TokenBreakdownChart({ breakdown }: { breakdown: TokenBreakdownData }) {
+export function TokenBreakdownChart({
+  breakdown,
+  turnCount,
+}: {
+  breakdown: TokenBreakdownData;
+  /** Number of recorded turns used to calculate the optional average. */
+  turnCount?: number;
+}) {
   const total = breakdown.input + breakdown.output + breakdown.cacheRead + breakdown.cacheCreation;
   if (total === 0) return null;
   const tokenMetrics = deriveTokenUsageMetrics({
@@ -133,6 +143,10 @@ export function TokenBreakdownChart({ breakdown }: { breakdown: TokenBreakdownDa
     pct: (breakdown[token.key] / total) * 100,
   }));
   const visibleItems = items.filter((item) => item.value > 0);
+  const averagePromptPerTurn =
+    turnCount && turnCount > 0 ? tokenMetrics.promptTokens / turnCount : undefined;
+  const averageOutputPerTurn =
+    turnCount && turnCount > 0 ? breakdown.output / turnCount : undefined;
 
   return (
     <div className="space-y-4">
@@ -147,25 +161,25 @@ export function TokenBreakdownChart({ breakdown }: { breakdown: TokenBreakdownDa
       </div>
       <div className="grid grid-cols-2 gap-2 border-y border-terminal-border/20 py-3 sm:grid-cols-4">
         <div title="Uncached input + cache writes. Providers do not expose a universal miss counter.">
-          <div className="text-[11px] font-mono font-bold text-terminal-orange">
+          <div className="text-[11px] font-mono font-bold text-terminal-context">
             {formatTokenCount(tokenMetrics.cacheMissTokens)}
           </div>
           <div className="text-[10px] font-mono text-terminal-dimmer">uncached / miss</div>
         </div>
         <div title="Input + cache read + cache write tokens for the prompt context.">
-          <div className="text-[11px] font-mono font-bold text-terminal-blue">
+          <div className="text-[11px] font-mono font-bold text-terminal-user">
             {formatTokenCount(tokenMetrics.promptTokens)}
           </div>
           <div className="text-[10px] font-mono text-terminal-dimmer">prompt footprint</div>
         </div>
         <div title="Tokens served from the provider cache.">
-          <div className="text-[11px] font-mono font-bold text-terminal-purple">
+          <div className="text-[11px] font-mono font-bold text-terminal-context">
             {formatTokenCount(breakdown.cacheRead)}
           </div>
           <div className="text-[10px] font-mono text-terminal-dimmer">cache read</div>
         </div>
         <div title="Cache read divided by the prompt footprint; this is a cache-read share, not a provider billing guarantee.">
-          <div className="text-[11px] font-mono font-bold text-terminal-green">
+          <div className="text-[11px] font-mono font-bold text-terminal-context">
             {tokenMetrics.cacheReadShare !== undefined
               ? `${Math.round(tokenMetrics.cacheReadShare * 1000) / 10}%`
               : "—"}
@@ -197,6 +211,22 @@ export function TokenBreakdownChart({ breakdown }: { breakdown: TokenBreakdownDa
           </div>
         ))}
       </div>
+      {averagePromptPerTurn !== undefined && averageOutputPerTurn !== undefined && (
+        <div className="grid grid-cols-2 gap-2 rounded-lg border border-terminal-border/20 bg-terminal-surface-2/40 px-3 py-2.5">
+          <div title="Aggregate prompt footprint divided by recorded turns.">
+            <div className="text-[11px] font-mono font-bold text-terminal-context">
+              ~{formatTokenCount(averagePromptPerTurn)}
+            </div>
+            <div className="text-[9px] font-mono text-terminal-dimmer">prompt / turn</div>
+          </div>
+          <div title="Aggregate output tokens divided by recorded turns.">
+            <div className="text-[11px] font-mono font-bold text-terminal-response">
+              ~{formatTokenCount(averageOutputPerTurn)}
+            </div>
+            <div className="text-[9px] font-mono text-terminal-dimmer">output / turn</div>
+          </div>
+        </div>
+      )}
       <div className="flex items-center justify-between pt-2 border-t border-terminal-border/20">
         <span className="text-[10px] font-mono text-terminal-dimmer">Total</span>
         <span className="text-[11px] font-mono text-terminal-text font-bold tabular-nums">

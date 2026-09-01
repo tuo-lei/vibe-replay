@@ -1110,6 +1110,7 @@ export default function Player({
               onOpenSearch={() => setSearchOpen(true)}
               onOpenOutline={() => setMobileDrawerOpen(true)}
               onShowHelp={() => setShowHelp(true)}
+              reserveAssistantSpace={viewerMode === "editor"}
             />
           </div>
         )}

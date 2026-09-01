@@ -1559,7 +1559,7 @@ function ReplayCard({
         )}
         {compactionCount > 0 && (
           <span
-            className="text-terminal-orange"
+            className="text-terminal-context"
             title={`${compactionCount} context compaction${compactionCount !== 1 ? "s" : ""}`}
           >
             {compactionCount} compact{compactionCount !== 1 ? "s" : ""}
@@ -3252,7 +3252,7 @@ function SessionsPanel() {
             onClick={handleToggleCompactionsOnly}
             className={`w-full rounded-lg px-3 py-2.5 text-left text-sm font-sans shadow-layer-sm transition-colors ${
               compactionsOnly
-                ? "bg-terminal-orange-subtle text-terminal-orange"
+                ? "bg-terminal-context-subtle text-terminal-context"
                 : "bg-terminal-surface text-terminal-dim"
             }`}
           >
@@ -3918,7 +3918,7 @@ function SessionsPanel() {
                       )}
                       {compactionCount > 0 && (
                         <span
-                          className="text-terminal-orange"
+                          className="text-terminal-context"
                           title={`${compactionCount} context compaction${compactionCount !== 1 ? "s" : ""}`}
                         >
                           {compactionCount} compact{compactionCount !== 1 ? "s" : ""}
@@ -4978,7 +4978,7 @@ function ReplaysPanel() {
             onClick={handleToggleCompactionsOnly}
             className={`w-full rounded-lg px-3 py-2.5 text-left text-sm font-sans shadow-layer-sm transition-colors ${
               compactionsOnly
-                ? "bg-terminal-orange-subtle text-terminal-orange"
+                ? "bg-terminal-context-subtle text-terminal-context"
                 : "bg-terminal-surface text-terminal-dim"
             }`}
           >
