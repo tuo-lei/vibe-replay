@@ -1013,7 +1013,9 @@ function cursorContextBreakdown(composer: Record<string, any>): ContextBreakdown
     if (typeof category.id !== "string") continue;
     const estimatedTokens = optionalNonNegativeInt(category.estimatedTokens);
     if (estimatedTokens === undefined) continue;
-    const id = CURSOR_CONTEXT_COMPONENT_IDS[category.id] || "other";
+    const id = Object.prototype.hasOwnProperty.call(CURSOR_CONTEXT_COMPONENT_IDS, category.id)
+      ? CURSOR_CONTEXT_COMPONENT_IDS[category.id]
+      : "other";
     values.set(id, (values.get(id) || 0) + estimatedTokens);
   }
   if (values.size === 0) return undefined;
@@ -2931,7 +2933,7 @@ function mergeCursorParseResults(
   const mergedTokenUsage = primary.tokenUsage || enrichment.tokenUsage;
   const mergedTokenUsageByModel = primary.tokenUsageByModel || enrichment.tokenUsageByModel;
   const mergedContextBreakdown = primary.contextBreakdown || enrichment.contextBreakdown;
-  const mergedContextLimit = primary.contextLimit || enrichment.contextLimit;
+  const mergedContextLimit = primary.contextLimit ?? enrichment.contextLimit;
   const mergedTotalDurationMs =
     (preferEnrichmentDuration ? enrichment.totalDurationMs : undefined) ||
     primary.totalDurationMs ||
@@ -2952,7 +2954,7 @@ function mergeCursorParseResults(
     mergedDuration ||
     mergedTokens ||
     (!primary.contextBreakdown && !!enrichment.contextBreakdown) ||
-    (!primary.contextLimit && !!enrichment.contextLimit) ||
+    (primary.contextLimit === undefined && enrichment.contextLimit !== undefined) ||
     (!!enrichment.gitBranch && !primary.gitBranch) ||
     (!!enrichment.gitBranches?.length && !primary.gitBranches?.length) ||
     (!!enrichment.prLinks?.length && !primary.prLinks?.length) ||
@@ -2992,7 +2994,7 @@ function mergeCursorParseResults(
     ...(mergedTokenUsage ? { tokenUsage: mergedTokenUsage } : {}),
     ...(mergedTokenUsageByModel ? { tokenUsageByModel: mergedTokenUsageByModel } : {}),
     ...(mergedContextBreakdown ? { contextBreakdown: mergedContextBreakdown } : {}),
-    ...(mergedContextLimit ? { contextLimit: mergedContextLimit } : {}),
+    ...(mergedContextLimit !== undefined ? { contextLimit: mergedContextLimit } : {}),
     ...(mergedTurnStats ? { turnStats: mergedTurnStats } : {}),
     ...(mergedCompactions ? { compactions: mergedCompactions } : {}),
     ...(primary.gitBranch ? {} : enrichment.gitBranch ? { gitBranch: enrichment.gitBranch } : {}),
@@ -3628,7 +3630,9 @@ async function parseCursorGlobalStateDb(
       ...(metrics.tokenUsageByModel ? { tokenUsageByModel: metrics.tokenUsageByModel } : {}),
       ...(metrics.turnStats ? { turnStats: metrics.turnStats } : {}),
       ...(contextBreakdown ? { contextBreakdown } : {}),
-      ...(contextBreakdown?.contextLimit ? { contextLimit: contextBreakdown.contextLimit } : {}),
+      ...(contextBreakdown?.contextLimit !== undefined
+        ? { contextLimit: contextBreakdown.contextLimit }
+        : {}),
       ...(compactions ? { compactions } : {}),
       ...(branchMeta.gitBranch ? { gitBranch: branchMeta.gitBranch } : {}),
       ...(branchMeta.gitBranches ? { gitBranches: branchMeta.gitBranches } : {}),

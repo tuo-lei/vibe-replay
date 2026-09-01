@@ -111,6 +111,8 @@ describe("Cursor context composition metadata", () => {
             { id: "tools", label: "Tool definitions", estimatedTokens: 9_000 },
             { id: "mcp", label: "Private provider label", estimatedTokens: 2_500 },
             { id: "future_category", label: "Private future label", estimatedTokens: 50 },
+            { id: "__proto__", label: "Prototype key", estimatedTokens: 25 },
+            { id: "toString", label: "Inherited key", estimatedTokens: 25 },
           ],
         },
       }),
@@ -123,7 +125,7 @@ describe("Cursor context composition metadata", () => {
         { id: "system-prompt", estimatedTokens: 3_000 },
         { id: "tool-definitions", estimatedTokens: 9_000 },
         { id: "mcp-tool-definitions", estimatedTokens: 2_500 },
-        { id: "other", estimatedTokens: 50 },
+        { id: "other", estimatedTokens: 100 },
       ],
     });
   });
@@ -139,6 +141,17 @@ describe("Cursor context composition metadata", () => {
     });
 
     expect(breakdown).toBeUndefined();
+  });
+
+  it("preserves a provider-reported zero context limit", () => {
+    expect(
+      __testables.cursorContextBreakdown({
+        promptTokenBreakdown: {
+          maxTokens: 0,
+          categories: [{ id: "conversation", estimatedTokens: 10 }],
+        },
+      })?.contextLimit,
+    ).toBe(0);
   });
 });
 
@@ -1419,6 +1432,34 @@ describe("cursor sqlite metrics helpers", () => {
 
     expect(merged.contextBreakdown).toEqual(contextBreakdown);
     expect(merged.contextLimit).toBe(180_000);
+  });
+
+  it("preserves an explicitly reported zero context limit", () => {
+    const contextBreakdown = {
+      source: "cursor-prompt-token-breakdown" as const,
+      scope: "latest-snapshot" as const,
+      contextLimit: 0,
+      components: [{ id: "conversation" as const, estimatedTokens: 10 }],
+    };
+    const merged = __testables.mergeCursorParseResults(
+      {
+        sessionId: "sess-zero-limit",
+        slug: "sess-zero-limit",
+        cwd: "/workspace/project",
+        contextLimit: 0,
+        turns: [],
+      },
+      {
+        sessionId: "sess-zero-limit",
+        slug: "sess-zero-limit",
+        cwd: "/workspace/project",
+        contextLimit: 180_000,
+        contextBreakdown,
+        turns: [],
+      },
+    );
+
+    expect(merged.contextLimit).toBe(0);
   });
 
   it("does not add enrichment notes when primary metadata already exists", () => {

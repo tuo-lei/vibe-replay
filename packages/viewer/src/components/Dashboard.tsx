@@ -190,10 +190,16 @@ export interface SessionScanData {
   dataQualityNotes?: string[];
 }
 
-function contextFootprintSummary(breakdown: ContextBreakdown): string | undefined {
-  if (breakdown.totalEstimatedTokens !== undefined) {
-    const limit = breakdown.contextLimit ? ` / ${formatTokens(breakdown.contextLimit)}` : "";
-    return `${formatTokens(breakdown.totalEstimatedTokens)}${limit} tokens`;
+export function contextFootprintSummary(breakdown: ContextBreakdown): string | undefined {
+  const componentTokens = breakdown.components.reduce(
+    (total, component) => total + (component.estimatedTokens || 0),
+    0,
+  );
+  const estimatedTokens = breakdown.totalEstimatedTokens ?? componentTokens;
+  if (estimatedTokens > 0 || breakdown.totalEstimatedTokens !== undefined) {
+    const limit =
+      breakdown.contextLimit !== undefined ? ` / ${formatTokens(breakdown.contextLimit)}` : "";
+    return `${formatTokens(estimatedTokens)}${limit} tokens`;
   }
   const bytes = breakdown.components.reduce(
     (total, component) => total + (component.contentBytes || 0),

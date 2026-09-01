@@ -6,6 +6,7 @@ import type { SessionUsageSummary } from "../../types";
 import { stubBrowserAPIs } from "../../test-utils/jsdom-stubs";
 import Dashboard, {
   buildSessionScanIndex,
+  contextFootprintSummary,
   findSessionScanData,
   getSessionRangeTimestamp,
   type SessionScanData,
@@ -52,6 +53,22 @@ describe("Dashboard (smoke)", () => {
     // (The post-fetch view depends on each endpoint's exact response shape, so
     // asserting it is out of scope for this smoke test — the mount + load path
     // not throwing is the signal.)
+  });
+});
+
+describe("contextFootprintSummary", () => {
+  it("falls back to component tokens when the provider total is absent", () => {
+    expect(
+      contextFootprintSummary({
+        source: "cursor-prompt-token-breakdown",
+        scope: "latest-snapshot",
+        contextLimit: 100_000,
+        components: [
+          { id: "system-prompt", estimatedTokens: 3_000 },
+          { id: "conversation", estimatedTokens: 17_000 },
+        ],
+      }),
+    ).toBe("20K / 100K tokens");
   });
 });
 
