@@ -53,7 +53,8 @@ describe("ProjectPerformance", () => {
     expect(screen.getByText("P90")).toBeDefined();
     expect(screen.getByText("8s")).toBeDefined();
     expect(screen.getByText("Cache Read")).toBeDefined();
-    expect(screen.getAllByText("1k")).toHaveLength(4);
+    expect(screen.getByText("Total")).toBeDefined();
+    expect(screen.getAllByText("1k")).toHaveLength(2);
   });
 
   it("keeps zero token categories visible", () => {

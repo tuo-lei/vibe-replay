@@ -251,6 +251,8 @@ export type ContentBlock =
       _isError?: boolean;
       _subAgent?: SubAgent;
       _durationMs?: number;
+      /** Whether the internal duration is anchored at the tool start or result timestamp. */
+      _durationAnchor?: "start" | "end";
       _isPendingMarker?: boolean;
       /** Provider attribution retained for usage indexing; omitted from replay output. */
       _mcpServer?: string;

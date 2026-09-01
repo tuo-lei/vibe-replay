@@ -150,6 +150,38 @@ describe("Codex parser", () => {
     });
   });
 
+  it("anchors an orphan exec completion duration at its result timestamp", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-04-26T05:10:00.000Z",
+          type: "session_meta",
+          payload: { id: "codex-orphan-exec", cwd: "/Users/test/project" },
+        },
+        {
+          timestamp: "2026-04-26T05:10:05.000Z",
+          type: "event_msg",
+          payload: {
+            type: "exec_command_end",
+            call_id: "orphan-exec",
+            aggregated_output: "done",
+            exit_code: 0,
+            duration: { secs: 5, nanos: 0 },
+          },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    const tool = result.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.type === "tool_use");
+    expect(tool).toMatchObject({
+      type: "tool_use",
+      _durationMs: 5000,
+      _durationAnchor: "end",
+    });
+  });
+
   it("records malformed JSONL lines as parse warnings", () => {
     const result = parseCodexLines([...lines.slice(0, 2), "{not-json", ...lines.slice(2)]);
 

@@ -15,6 +15,8 @@ interface Props {
   onOpenSearch: () => void;
   onOpenOutline?: () => void;
   onShowHelp?: () => void;
+  /** Reserve room for the fixed Ask Replay launcher in editor mode. */
+  reserveAssistantSpace?: boolean;
 }
 
 const SPEEDS = [1, 5, 10];
@@ -33,6 +35,7 @@ export default function Controls({
   onOpenSearch,
   onOpenOutline,
   onShowHelp,
+  reserveAssistantSpace = false,
 }: Props) {
   const isPlaying = state === "playing";
   const playIcon = isPlaying ? "\u23F8" : "\u25B6";
@@ -56,7 +59,11 @@ export default function Controls({
   return (
     <>
       {/* Mobile controls — evenly distributed */}
-      <div className="flex md:hidden items-center justify-between px-3 py-1.5">
+      <div
+        className={`flex md:hidden items-center justify-between py-1.5 pl-3 ${
+          reserveAssistantSpace ? "pr-20" : "pr-3"
+        }`}
+      >
         <button
           onClick={() => {
             flash("play");
@@ -157,7 +164,11 @@ export default function Controls({
       </div>
 
       {/* Desktop controls */}
-      <div className="hidden md:flex items-center justify-between px-5 py-2.5">
+      <div
+        className={`hidden md:flex items-center justify-between py-2.5 pl-5 ${
+          reserveAssistantSpace ? "pr-32" : "pr-5"
+        }`}
+      >
         <div className="flex items-center gap-2">
           <button
             onClick={() => {

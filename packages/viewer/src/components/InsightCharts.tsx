@@ -1,5 +1,3 @@
-import { deriveTokenUsageMetrics } from "@vibe-replay/types";
-
 export interface TurnDurationHistogramData {
   buckets: Array<{ label: string; count: number; pct: number }>;
   percentiles: { p50Ms: number; p75Ms: number; p90Ms: number };
@@ -41,7 +39,7 @@ export function TurnDurationChart({ histogram }: { histogram: TurnDurationHistog
               <div className="absolute bottom-full mb-1 hidden group-hover:block z-10">
                 <div className="bg-terminal-surface-2 border border-terminal-border-subtle rounded-lg px-2 py-1 shadow-layer-md whitespace-nowrap">
                   <div className="text-[10px] font-mono text-terminal-dim">{bucket.label}</div>
-                  <div className="text-[10px] font-mono text-terminal-green font-bold">
+                  <div className="text-[10px] font-mono text-terminal-response font-bold">
                     {bucket.count} turn{bucket.count !== 1 ? "s" : ""} ({bucket.pct}%)
                   </div>
                 </div>
@@ -52,7 +50,7 @@ export function TurnDurationChart({ histogram }: { histogram: TurnDurationHistog
                 </div>
               )}
               <div
-                className="w-full rounded-md bg-terminal-green hover:opacity-90 transition-all"
+                className="w-full rounded-md bg-gradient-to-t from-terminal-response to-terminal-context hover:opacity-90 transition-all"
                 style={{
                   height: `${heightPct}%`,
                   minHeight: bucket.count > 0 ? "4px" : "0",
@@ -100,15 +98,18 @@ export function TurnDurationChart({ histogram }: { histogram: TurnDurationHistog
           {histogram.totalTurns.toLocaleString()} turns
         </span>
       </div>
+      <div className="text-[9px] font-mono text-terminal-dimmer">
+        Timing quality varies by provider; this combines recorded and estimated turn durations.
+      </div>
     </div>
   );
 }
 
 const TOKEN_COLORS = [
-  { key: "cacheRead", label: "Cache Read", color: "bg-terminal-purple" },
-  { key: "cacheCreation", label: "Cache Write", color: "bg-terminal-orange" },
-  { key: "output", label: "Output", color: "bg-terminal-green" },
-  { key: "input", label: "Input (uncached)", color: "bg-terminal-blue" },
+  { key: "cacheRead", label: "Cache Read", color: "bg-terminal-context" },
+  { key: "cacheCreation", label: "Cache Write", color: "bg-terminal-context-emphasis" },
+  { key: "output", label: "Output", color: "bg-terminal-response" },
+  { key: "input", label: "Input (uncached)", color: "bg-terminal-user" },
 ] as const;
 
 function formatTokenCount(value: number): string {
@@ -120,13 +121,6 @@ function formatTokenCount(value: number): string {
 export function TokenBreakdownChart({ breakdown }: { breakdown: TokenBreakdownData }) {
   const total = breakdown.input + breakdown.output + breakdown.cacheRead + breakdown.cacheCreation;
   if (total === 0) return null;
-  const tokenMetrics = deriveTokenUsageMetrics({
-    inputTokens: breakdown.input,
-    outputTokens: breakdown.output,
-    cacheReadTokens: breakdown.cacheRead,
-    cacheCreationTokens: breakdown.cacheCreation,
-  });
-
   const items = TOKEN_COLORS.map((token) => ({
     ...token,
     value: breakdown[token.key],
@@ -135,8 +129,12 @@ export function TokenBreakdownChart({ breakdown }: { breakdown: TokenBreakdownDa
   const visibleItems = items.filter((item) => item.value > 0);
 
   return (
-    <div className="space-y-4">
-      <div className="h-4 rounded-full bg-terminal-surface-2 overflow-hidden flex">
+    <div className="space-y-3">
+      <div className="flex items-center justify-between text-[10px] font-mono text-terminal-dimmer">
+        <span>Total</span>
+        <span className="font-bold text-terminal-text">{formatTokenCount(total)}</span>
+      </div>
+      <div className="h-3 rounded-full bg-terminal-surface-2 overflow-hidden flex">
         {visibleItems.map((item) => (
           <div
             key={item.key}
@@ -145,46 +143,23 @@ export function TokenBreakdownChart({ breakdown }: { breakdown: TokenBreakdownDa
           />
         ))}
       </div>
-      <div className="grid grid-cols-2 gap-2 border-y border-terminal-border/20 py-3 sm:grid-cols-4">
-        <div title="Uncached input + cache writes. Providers do not expose a universal miss counter.">
-          <div className="text-[11px] font-mono font-bold text-terminal-orange">
-            {formatTokenCount(tokenMetrics.cacheMissTokens)}
-          </div>
-          <div className="text-[10px] font-mono text-terminal-dimmer">uncached / miss</div>
-        </div>
-        <div title="Input + cache read + cache write tokens for the prompt context.">
-          <div className="text-[11px] font-mono font-bold text-terminal-blue">
-            {formatTokenCount(tokenMetrics.promptTokens)}
-          </div>
-          <div className="text-[10px] font-mono text-terminal-dimmer">prompt footprint</div>
-        </div>
-        <div title="Tokens served from the provider cache.">
-          <div className="text-[11px] font-mono font-bold text-terminal-purple">
-            {formatTokenCount(breakdown.cacheRead)}
-          </div>
-          <div className="text-[10px] font-mono text-terminal-dimmer">cache read</div>
-        </div>
-        <div title="Cache read divided by the prompt footprint; this is a cache-read share, not a provider billing guarantee.">
-          <div className="text-[11px] font-mono font-bold text-terminal-green">
-            {tokenMetrics.cacheReadShare !== undefined
-              ? `${Math.round(tokenMetrics.cacheReadShare * 1000) / 10}%`
-              : "—"}
-          </div>
-          <div className="text-[10px] font-mono text-terminal-dimmer">read share</div>
-        </div>
-      </div>
-      <div className="space-y-2">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
         {items.map((item) => (
-          <div key={item.key} className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className={`w-2.5 h-2.5 rounded-sm ${item.color}`} style={{ opacity: 0.7 }} />
-              <span className="text-[11px] font-mono text-terminal-dim">{item.label}</span>
+          <div
+            key={item.key}
+            className="min-w-0"
+            title={`${item.label}: ${formatTokenCount(item.value)} (${item.pct.toFixed(1)}%)`}
+          >
+            <div className="flex items-center gap-1.5">
+              <div
+                className={`h-2 w-2 shrink-0 rounded-sm ${item.color}`}
+                style={{ opacity: 0.7 }}
+              />
+              <span className="truncate text-[10px] font-mono text-terminal-dim">{item.label}</span>
             </div>
-            <div className="flex items-center gap-3">
-              <span className="text-[11px] font-mono text-terminal-text tabular-nums">
-                {formatTokenCount(item.value)}
-              </span>
-              <span className="text-[10px] font-mono text-terminal-dimmer tabular-nums w-10 text-right">
+            <div className="mt-0.5 text-[11px] font-mono text-terminal-text tabular-nums">
+              {formatTokenCount(item.value)}
+              <span className="ml-1 text-[9px] text-terminal-dimmer">
                 {item.value === 0
                   ? "0%"
                   : item.pct < 0.1
@@ -196,12 +171,6 @@ export function TokenBreakdownChart({ breakdown }: { breakdown: TokenBreakdownDa
             </div>
           </div>
         ))}
-      </div>
-      <div className="flex items-center justify-between pt-2 border-t border-terminal-border/20">
-        <span className="text-[10px] font-mono text-terminal-dimmer">Total</span>
-        <span className="text-[11px] font-mono text-terminal-text font-bold tabular-nums">
-          {formatTokenCount(total)}
-        </span>
       </div>
     </div>
   );
