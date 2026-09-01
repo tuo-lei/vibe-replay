@@ -14,12 +14,12 @@ const ACTIVITY_META: Record<
 > = {
   "llm-wait": {
     label: "LLM wait",
-    color: "bg-terminal-response",
-    textColor: "text-terminal-response",
+    color: "bg-terminal-thinking",
+    textColor: "text-terminal-thinking",
   },
   response: {
     label: "Response / generation",
-    color: "bg-terminal-response-emphasis",
+    color: "bg-terminal-response",
     textColor: "text-terminal-response",
   },
   tool: { label: "Tool execution", color: "bg-terminal-tool", textColor: "text-terminal-tool" },
@@ -134,8 +134,8 @@ export default function TurnActivityTimeline({ scenes }: { scenes: readonly Scen
         <div>
           <div className="ui-section-title-strong">Activity timeline</div>
           <p id={descriptionId} className="mt-1 text-[10px] font-mono text-terminal-dimmer">
-            Timestamp gaps and provider-recorded tool runtimes, excluding user idle, left to right.
-            Gap roles are inferred; compaction time is estimated from its preceding gap.
+            Agent time only: user idle is excluded; prompt-to-assistant gaps are LLM wait. Other gap
+            roles are inferred; compaction time is estimated from its preceding gap.
           </p>
         </div>
         {timing.totalMs > 0 && (

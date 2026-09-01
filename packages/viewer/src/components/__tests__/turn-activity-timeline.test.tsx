@@ -46,7 +46,9 @@ describe("TurnActivityTimeline", () => {
     expect(screen.getByText("Tool execution")).toBeDefined();
     expect(screen.getByText("Compaction / context")).toBeDefined();
     expect(screen.getByText(/from timestamp gaps/)).toBeDefined();
-    expect(screen.getByText(/Timestamp gaps and provider-recorded tool runtimes/)).toBeDefined();
+    expect(screen.getByText(/prompt-to-assistant gaps are LLM wait/)).toBeDefined();
     expect(screen.getByText(/estimated compaction time/)).toBeDefined();
+    expect(screen.getAllByTitle(/LLM wait/)[0].className).toContain("bg-terminal-thinking");
+    expect(screen.getByTitle(/Compaction boundary/).className).toContain("bg-terminal-context");
   });
 });
