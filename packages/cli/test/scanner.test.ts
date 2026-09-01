@@ -287,6 +287,63 @@ describe("scanSession", () => {
     );
   });
 
+  it("carries privacy-safe provider context metadata into scan results", async () => {
+    const piPath = join(tmpDir, "pi-context-breakdown.jsonl");
+    const tool = {
+      name: "search",
+      description: "Private MCP description",
+      inputSchema: { type: "object", properties: { query: { type: "string" } } },
+    };
+    await writeFile(
+      piPath,
+      [
+        makeLine({
+          type: "session",
+          version: 3,
+          id: "pi-context-breakdown",
+          timestamp: "2026-01-01T00:00:00.000Z",
+          cwd: "/tmp/project",
+        }),
+        makeLine({
+          type: "message",
+          id: "user-1",
+          parentId: null,
+          timestamp: "2026-01-01T00:00:01.000Z",
+          message: { role: "user", content: "Inspect context" },
+        }),
+        makeLine({
+          type: "message",
+          id: "result-1",
+          parentId: "user-1",
+          timestamp: "2026-01-01T00:00:02.000Z",
+          message: {
+            role: "toolResult",
+            toolCallId: "mcp-1",
+            toolName: "mcp",
+            content: "Tool found",
+            details: { tool },
+          },
+        }),
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "pi-context-breakdown",
+      provider: "pi",
+      project: "~/test/project",
+      slug: "pi-context-breakdown",
+      filePaths: [piPath],
+    });
+
+    expect(result.contextBreakdown).toMatchObject({
+      source: "pi-mcp-results",
+      scope: "observed",
+      components: [{ id: "mcp-tool-definitions", itemCount: 1 }],
+    });
+    expect(JSON.stringify(result.contextBreakdown)).not.toContain("Private");
+  });
+
   it("marks an otherwise ordinary session as usage-indexed even when it has no usage", async () => {
     const path = join(tmpDir, "usage-empty.jsonl");
     await writeFile(

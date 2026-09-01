@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 import { estimateActiveDuration } from "@vibe-replay/provider-core/duration";
+import { utf8ByteLength } from "@vibe-replay/provider-core/utils";
 import type { ContentBlock, ParsedTurn, SessionInfo } from "@vibe-replay/provider-contract";
 import type { Compaction, ProviderParseResult, TokenUsage } from "@vibe-replay/provider-contract";
 import { addParseWarning } from "@vibe-replay/provider-contract/warnings";
@@ -77,6 +78,9 @@ export function parseCodexLines(
   let permissionMode: string | undefined;
   let approvalPolicy: string | undefined;
   let memoryMode: string | undefined;
+  let baseInstructionsBytes = 0;
+  let developerContextBytes = 0;
+  let developerContextCount = 0;
 
   const turns: ParsedTurn[] = [];
   const allTimestamps: string[] = [];
@@ -125,6 +129,15 @@ export function parseCodexLines(
       if (gitBranch) pushUnique(gitBranches, gitBranch);
       entrypoint = entrypoint || p.originator || p.source;
       memoryMode = memoryMode || asOptionalString(p.memory_mode);
+      const baseInstructions =
+        typeof p.base_instructions === "string"
+          ? p.base_instructions
+          : p.base_instructions && typeof p.base_instructions === "object"
+            ? p.base_instructions.text
+            : undefined;
+      if (typeof baseInstructions === "string" && baseInstructions.trim()) {
+        baseInstructionsBytes = Math.max(baseInstructionsBytes, utf8ByteLength(baseInstructions));
+      }
       continue;
     }
 
@@ -347,6 +360,8 @@ export function parseCodexLines(
     if (p.type === "message" && p.role === "developer") {
       const text = contentText(p.content);
       if (text.trim()) {
+        developerContextBytes += utf8ByteLength(text);
+        developerContextCount++;
         turns.push({
           role: "user",
           subtype: "context-injection",
@@ -498,6 +513,21 @@ export function parseCodexLines(
     userPromptTurnCount > 0 && taskDurations.length >= userPromptTurnCount
       ? summedTaskDurationMs
       : undefined;
+  const contextComponents: NonNullable<ProviderParseResult["contextBreakdown"]>["components"] = [];
+  if (baseInstructionsBytes > 0) {
+    contextComponents.push({
+      id: "system-prompt",
+      contentBytes: baseInstructionsBytes,
+      itemCount: 1,
+    });
+  }
+  if (developerContextBytes > 0) {
+    contextComponents.push({
+      id: "developer-context",
+      contentBytes: developerContextBytes,
+      itemCount: developerContextCount,
+    });
+  }
 
   return {
     sessionId,
@@ -514,6 +544,15 @@ export function parseCodexLines(
     compactions: compactions.length > 0 ? compactions : undefined,
     turnStats: turnStats.length > 0 ? turnStats : undefined,
     contextLimit,
+    ...(contextComponents.length > 0
+      ? {
+          contextBreakdown: {
+            source: "codex-rollout",
+            scope: "session-metadata",
+            components: contextComponents,
+          } as const,
+        }
+      : {}),
     gitBranch,
     gitBranches: gitBranches.length > 1 ? gitBranches : undefined,
     entrypoint,

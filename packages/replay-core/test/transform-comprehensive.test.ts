@@ -851,6 +851,22 @@ describe("transform — metadata", () => {
     });
   });
 
+  it("passes privacy-safe context composition through to replay metadata", () => {
+    const contextBreakdown = {
+      source: "cursor-prompt-token-breakdown" as const,
+      scope: "latest-snapshot" as const,
+      totalEstimatedTokens: 42_000,
+      contextLimit: 180_000,
+      components: [
+        { id: "system-prompt" as const, estimatedTokens: 3_000 },
+        { id: "conversation" as const, estimatedTokens: 39_000 },
+      ],
+    };
+    const replay = transformToReplay(buildParsed({ contextBreakdown }), "cursor", "~/project");
+
+    expect(replay.meta.contextBreakdown).toEqual(contextBreakdown);
+  });
+
   it("stats count scenes correctly", () => {
     const replay = transformToReplay(
       buildParsed({

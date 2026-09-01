@@ -279,6 +279,84 @@ describe("Pi parser", () => {
     });
   });
 
+  it("summarizes unique MCP descriptors without retaining their content", async () => {
+    const tool = {
+      name: "sourcegraph_search",
+      originalName: "search",
+      description: "Private MCP tool description",
+      inputSchema: {
+        type: "object",
+        properties: { query: { type: "string", description: "Private query description" } },
+      },
+    };
+    const lines = [
+      {
+        type: "session",
+        version: 3,
+        id: "pi-mcp-context",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        cwd: "/Users/test/project",
+      },
+      {
+        type: "message",
+        id: "user1",
+        parentId: null,
+        timestamp: "2026-01-01T00:00:01.000Z",
+        message: { role: "user", content: "Inspect MCP metadata" },
+      },
+      {
+        type: "message",
+        id: "result1",
+        parentId: "user1",
+        timestamp: "2026-01-01T00:00:02.000Z",
+        message: {
+          role: "toolResult",
+          toolCallId: "mcp-1",
+          toolName: "mcp",
+          content: [{ type: "text", text: "Tool found" }],
+          details: { tool },
+        },
+      },
+      {
+        type: "message",
+        id: "result2",
+        parentId: "result1",
+        timestamp: "2026-01-01T00:00:03.000Z",
+        message: {
+          role: "toolResult",
+          toolCallId: "mcp-2",
+          toolName: "mcp",
+          content: [{ type: "text", text: "Same tool found again" }],
+          details: { tool },
+        },
+      },
+    ];
+
+    await withPiFixture(lines, async (path) => {
+      const parsed = await parsePiSession(path);
+      const definition = {
+        name: tool.name,
+        originalName: tool.originalName,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+      };
+      expect(parsed.contextBreakdown).toEqual({
+        source: "pi-mcp-results",
+        scope: "observed",
+        components: [
+          {
+            id: "mcp-tool-definitions",
+            contentBytes: Buffer.byteLength(JSON.stringify(definition)),
+            itemCount: 1,
+            descriptionBytes: Buffer.byteLength(tool.description),
+            schemaBytes: Buffer.byteLength(JSON.stringify(tool.inputSchema)),
+          },
+        ],
+      });
+      expect(JSON.stringify(parsed.contextBreakdown)).not.toContain("Private");
+    });
+  });
+
   it("maps harness exec_command and apply_patch tools into replay-native scenes", async () => {
     const patch = `*** Begin Patch
 *** Update File: src/auth.ts

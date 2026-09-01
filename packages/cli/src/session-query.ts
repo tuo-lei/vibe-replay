@@ -64,6 +64,7 @@ export interface SessionQueryScanSummary {
   editsPerPrompt?: number;
   medianTurnDurationMs?: number;
   tokenUsage?: SessionScanResult["tokenUsage"];
+  contextBreakdown?: SessionScanResult["contextBreakdown"];
   dataQualityNotes?: string[];
 }
 
@@ -286,6 +287,7 @@ function scanSummary(scan: SessionScanResult): SessionQueryScanSummary {
     editsPerPrompt: ratio(scan.editCount, promptCount),
     medianTurnDurationMs: median(scan.turnDurations),
     tokenUsage: scan.tokenUsage,
+    contextBreakdown: scan.contextBreakdown,
     dataQualityNotes: scan.dataQualityNotes,
   };
 }

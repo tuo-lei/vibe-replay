@@ -575,6 +575,7 @@ async function scanSessionsFromDir(baseDir: string): Promise<ReplaySummary[]> {
         startTime: session.meta.startTime,
         endTime: session.meta.endTime,
         stats: session.meta.stats,
+        contextBreakdown: session.meta.contextBreakdown,
         compactionCount: session.meta.compactions?.length || 0,
         compactions: session.meta.compactions,
         apiErrors: session.meta.apiErrors,

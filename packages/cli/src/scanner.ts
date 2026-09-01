@@ -33,6 +33,7 @@ import { parsePiSession } from "./providers/pi/parser.js";
 import type { ContentBlock } from "@vibe-replay/provider-contract";
 import type { ProviderParseResult } from "./providers/types.js";
 import type {
+  ContextBreakdown,
   DataSource,
   ParseWarning,
   ProjectIdentity,
@@ -70,7 +71,8 @@ import { localDayKey, shortenPath } from "./utils.js";
 // v33: reject Cursor request-relative timing values as session timestamps.
 // v34: persist provider/session diagnostic events and Pi compaction evidence.
 // v35: retain Pi usage from assistant records without visible replay content.
-export const SCANNER_VERSION = 35;
+// v36: index privacy-safe provider context composition metadata.
+export const SCANNER_VERSION = 36;
 
 // Keep per-invocation detail bounded in the durable insight store. The full
 // event set is still used to compute usageSummary below; only the retained
@@ -114,6 +116,7 @@ export interface SessionScanResult {
   // Token usage
   tokenUsage?: TokenUsage;
   costEstimate?: number;
+  contextBreakdown?: ContextBreakdown;
 
   // Subagents
   subAgentCount: number;
@@ -1831,6 +1834,7 @@ function buildScanResultFromParsed(
       .slice(0, 100),
     tokenUsage: parsed.tokenUsage,
     costEstimate,
+    contextBreakdown: parsed.contextBreakdown,
     subAgentCount: parsedSubAgentCount || derivedSubAgentCount,
     apiErrorCount: parsed.apiErrors?.length || 0,
     compactionCount: parsed.compactions?.length || 0,

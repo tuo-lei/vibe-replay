@@ -2,7 +2,21 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { normalizeGitUrl, readGitRepo, shortenPath } from "../src/utils.js";
+import {
+  jsonByteLength,
+  normalizeGitUrl,
+  readGitRepo,
+  shortenPath,
+  utf8ByteLength,
+} from "../src/utils.js";
+
+describe("privacy-safe payload sizes", () => {
+  it("counts UTF-8 text and JSON bytes without returning content", () => {
+    expect(utf8ByteLength("A✓")).toBe(4);
+    expect(jsonByteLength({ value: "✓" })).toBe(Buffer.byteLength(JSON.stringify({ value: "✓" })));
+    expect(jsonByteLength(undefined)).toBe(0);
+  });
+});
 
 describe("normalizeGitUrl", () => {
   it.each([

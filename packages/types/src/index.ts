@@ -25,6 +25,58 @@ export interface TokenUsageMetrics {
   cacheReadShare?: number;
 }
 
+/** Stable categories for privacy-safe context-footprint reporting. */
+export type ContextComponentId =
+  | "system-prompt"
+  | "developer-context"
+  | "tool-definitions"
+  | "rules"
+  | "skills"
+  | "mcp-tool-definitions"
+  | "subagent-definitions"
+  | "summarized-conversation"
+  | "conversation"
+  | "other";
+
+/**
+ * Aggregate size of one context component. Raw prompt and tool-definition
+ * content is intentionally excluded so this metadata is safe to index.
+ */
+export interface ContextComponentUsage {
+  id: ContextComponentId;
+  /** Provider-reported estimate, when the source persists one. */
+  estimatedTokens?: number;
+  /** UTF-8 bytes in the persisted text or canonical JSON payload. */
+  contentBytes?: number;
+  /** Number of definitions/messages represented by this component. */
+  itemCount?: number;
+  /** Total definitions available when itemCount is an enabled/observed subset. */
+  availableItemCount?: number;
+  /** Subset of contentBytes occupied by tool descriptions. */
+  descriptionBytes?: number;
+  /** Subset of contentBytes occupied by tool input schemas. */
+  schemaBytes?: number;
+}
+
+/**
+ * Privacy-safe context composition metadata. This never contains the system
+ * prompt, tool descriptions, schemas, or conversation text themselves.
+ */
+export interface ContextBreakdown {
+  source:
+    | "cursor-prompt-token-breakdown"
+    | "claude-cowork-metadata"
+    | "codex-rollout"
+    | "pi-mcp-results";
+  /** Whether values describe one snapshot, persisted setup, or observed artifacts. */
+  scope: "latest-snapshot" | "session-metadata" | "observed";
+  components: ContextComponentUsage[];
+  /** Provider-reported total for a token snapshot; not synthesized from byte counts. */
+  totalEstimatedTokens?: number;
+  /** Context limit associated with the same provider snapshot, when available. */
+  contextLimit?: number;
+}
+
 export function deriveTokenUsageMetrics(usage: TokenUsage): TokenUsageMetrics {
   const promptTokens = usage.inputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
   return {
@@ -430,6 +482,7 @@ export interface SessionInsight {
   // Cost
   tokenUsage?: TokenUsage;
   costEstimate?: number;
+  contextBreakdown?: ContextBreakdown;
 
   // Derived signals
   hasPR: boolean;
@@ -497,6 +550,7 @@ export interface SessionScanWireData {
   filesModified: Array<{ file: string; count: number }>;
   tokenUsage?: TokenUsage;
   costEstimate?: number;
+  contextBreakdown?: ContextBreakdown;
   subAgentCount: number;
   apiErrorCount: number;
   entrypoint?: string;
@@ -550,6 +604,8 @@ export interface ReplaySession {
     };
     /** Max context window tokens for the primary model (e.g. 200000 for Claude) */
     contextLimit?: number;
+    /** Aggregate context composition; never contains raw prompt or tool-definition text. */
+    contextBreakdown?: ContextBreakdown;
     /** Provider/session diagnostic events, kept separate from ordinary API errors. */
     diagnostics?: SessionDiagnostic[];
     /** Limitations or quality notes for interpreting diagnostic events. */

@@ -348,6 +348,7 @@ export function transformToReplay(
       ...(parsed.contextLimit || parsed.model
         ? { contextLimit: parsed.contextLimit || getModelContextLimit(parsed.model || "") }
         : {}),
+      ...(parsed.contextBreakdown ? { contextBreakdown: parsed.contextBreakdown } : {}),
       ...(parsed.diagnostics && parsed.diagnostics.length > 0
         ? { diagnostics: parsed.diagnostics }
         : {}),

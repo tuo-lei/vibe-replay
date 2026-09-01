@@ -1,6 +1,9 @@
 // Shared types — single source of truth
 export type {
   Annotation,
+  ContextBreakdown,
+  ContextComponentId,
+  ContextComponentUsage,
   DataSource,
   DataSourceInfo,
   InsightsStore,

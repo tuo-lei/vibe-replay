@@ -36,6 +36,7 @@ export function cachedReplaySummary(replay: ReplaySummary): CachedSourceRecord["
     startTime: replay.startTime,
     endTime: replay.endTime,
     stats: replay.stats,
+    contextBreakdown: replay.contextBreakdown,
     compactionCount: replay.compactionCount,
     compactions: replay.compactions,
     apiErrors: replay.apiErrors,

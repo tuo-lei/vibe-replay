@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useOutsideClick } from "../hooks/useOutsideClick";
 import { ALL_PROJECTS, usePanelFilters } from "../hooks/usePanelFilters";
 import type {
+  ContextBreakdown,
   SessionLocation,
   SessionSummary,
   SessionTranscriptStatus,
@@ -164,6 +165,7 @@ export interface SessionScanData {
     cacheCreationTokens: number;
     cacheReadTokens: number;
   };
+  contextBreakdown?: ContextBreakdown;
   subAgentCount: number;
   apiErrorCount: number;
   compactionCount: number;
@@ -186,6 +188,18 @@ export interface SessionScanData {
   gitBranches?: string[];
   dataSource?: string;
   dataQualityNotes?: string[];
+}
+
+function contextFootprintSummary(breakdown: ContextBreakdown): string | undefined {
+  if (breakdown.totalEstimatedTokens !== undefined) {
+    const limit = breakdown.contextLimit ? ` / ${formatTokens(breakdown.contextLimit)}` : "";
+    return `${formatTokens(breakdown.totalEstimatedTokens)}${limit} tokens`;
+  }
+  const bytes = breakdown.components.reduce(
+    (total, component) => total + (component.contentBytes || 0),
+    0,
+  );
+  return bytes > 0 ? `${formatSize(bytes)} metadata` : undefined;
 }
 
 export interface SessionScanIndex {
@@ -712,6 +726,8 @@ export function SessionDetailPopup({
     tokenMetrics && scanData?.tokenUsage
       ? tokenMetrics.promptTokens + scanData.tokenUsage.outputTokens
       : undefined;
+  const contextBreakdown = scanData?.contextBreakdown || s.replay?.contextBreakdown;
+  const contextFootprint = contextBreakdown ? contextFootprintSummary(contextBreakdown) : undefined;
   const startedAt = scanData?.startTime || s.timestamp;
 
   const handleSaveTitle = async () => {
@@ -938,6 +954,17 @@ export function SessionDetailPopup({
                     scanData?.tokenUsage
                       ? `Prompt: ${tokenMetrics?.promptTokens.toLocaleString()} / Input (uncached): ${scanData.tokenUsage.inputTokens.toLocaleString()} / Out: ${scanData.tokenUsage.outputTokens.toLocaleString()} / Cache write: ${scanData.tokenUsage.cacheCreationTokens.toLocaleString()} / Cache read: ${scanData.tokenUsage.cacheReadTokens.toLocaleString()} / Uncached or miss: ${tokenMetrics?.cacheMissTokens.toLocaleString()}`
                       : undefined
+                  }
+                />
+              )}
+              {contextFootprint && (
+                <InfoRow
+                  label="Context"
+                  value={contextFootprint}
+                  title={
+                    contextBreakdown?.scope === "latest-snapshot"
+                      ? "Provider-estimated latest context snapshot"
+                      : "Privacy-safe size of persisted context metadata"
                   }
                 />
               )}

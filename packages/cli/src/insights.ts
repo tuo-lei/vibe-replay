@@ -121,6 +121,7 @@ export function scanResultToInsight(scan: SessionScanResult): SessionInsight {
     filesModified: scan.filesModified?.length ? scan.filesModified : undefined,
     tokenUsage: scan.tokenUsage,
     costEstimate: scan.costEstimate,
+    contextBreakdown: scan.contextBreakdown,
     hasPR: !!(scan.prLinks && scan.prLinks.length > 0),
     prLinks: scan.prLinks,
     skillsUsed: scan.skillsUsed,

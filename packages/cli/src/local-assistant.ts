@@ -608,6 +608,7 @@ function sessionSummary(session: ReplaySession, record: AssistantSessionRecord) 
     startTime: session.meta.startTime,
     endTime: session.meta.endTime,
     stats: session.meta.stats,
+    contextBreakdown: session.meta.contextBreakdown,
     compactions: session.meta.compactions || [],
     diagnostics:
       (session.meta.diagnostics?.length ?? 0) > 0

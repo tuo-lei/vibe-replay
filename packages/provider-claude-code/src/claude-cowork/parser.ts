@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { parseClaudeCodeLines } from "../claude-code/parser.js";
 import { getTimestampBounds } from "@vibe-replay/provider-core/duration";
+import { jsonByteLength, utf8ByteLength } from "@vibe-replay/provider-core/utils";
 import type { ProviderParseResult, TokenUsage } from "@vibe-replay/provider-contract";
 import { addParseWarning } from "@vibe-replay/provider-contract/warnings";
 import type { SessionInfo } from "@vibe-replay/provider-contract";
@@ -251,38 +252,123 @@ function coworkRetryError(
   };
 }
 
-/**
- * Cowork names MCP tool calls `mcp__<serverUuid>__<tool>`, so usage analytics
- * would otherwise only ever show UUIDs. The sibling `local_{id}.json` carries
- * `remoteMcpServersConfig` with the human name for each server UUID.
- */
-async function readCoworkMcpServerNames(
-  auditPath?: string,
-): Promise<Record<string, string> | undefined> {
-  if (!auditPath) return undefined;
+interface CoworkSessionMetadata {
+  systemPrompt?: unknown;
+  enabledMcpTools?: unknown;
+  remoteMcpServersConfig?: unknown;
+}
+
+interface CoworkMetadataSummary {
+  mcpServerNames?: Record<string, string>;
+  contextBreakdown?: ProviderParseResult["contextBreakdown"];
+}
+
+function coworkServerEntries(servers: unknown): Array<{ key?: string; value: unknown }> {
+  return Array.isArray(servers)
+    ? servers.map((server) => ({ value: server }))
+    : servers && typeof servers === "object"
+      ? Object.entries(servers as Record<string, unknown>).map(([key, value]) => ({ key, value }))
+      : [];
+}
+
+function coworkContextBreakdown(
+  metadata: CoworkSessionMetadata,
+): ProviderParseResult["contextBreakdown"] {
+  const components: NonNullable<ProviderParseResult["contextBreakdown"]>["components"] = [];
+  if (typeof metadata.systemPrompt === "string" && metadata.systemPrompt.length > 0) {
+    components.push({
+      id: "system-prompt",
+      contentBytes: utf8ByteLength(metadata.systemPrompt),
+      itemCount: 1,
+    });
+  }
+
+  const serverEntries = coworkServerEntries(metadata.remoteMcpServersConfig);
+  const availableTools: Array<{ key?: string; tool: Record<string, unknown> }> = [];
+  for (const { key, value } of serverEntries) {
+    if (!value || typeof value !== "object") continue;
+    const server = value as Record<string, unknown>;
+    const uuid = typeof server.uuid === "string" && server.uuid ? server.uuid : key;
+    if (!Array.isArray(server.tools)) continue;
+    for (const rawTool of server.tools) {
+      if (!rawTool || typeof rawTool !== "object" || Array.isArray(rawTool)) continue;
+      const tool = rawTool as Record<string, unknown>;
+      const name = typeof tool.name === "string" ? tool.name : undefined;
+      const enabledKey = typeof tool.enabledKey === "string" ? tool.enabledKey : undefined;
+      availableTools.push({
+        key: enabledKey || (uuid && name ? `${uuid}:${name}` : undefined),
+        tool,
+      });
+    }
+  }
+
+  const enabled =
+    metadata.enabledMcpTools &&
+    typeof metadata.enabledMcpTools === "object" &&
+    !Array.isArray(metadata.enabledMcpTools)
+      ? (metadata.enabledMcpTools as Record<string, unknown>)
+      : undefined;
+  // Only count definitions explicitly marked enabled. The config can retain a
+  // much larger catalog, and treating that catalog as prompt context would
+  // substantially overstate older sessions that lack the enablement map.
+  const selectedTools = enabled
+    ? availableTools.filter(({ key }) => key && enabled[key] === true)
+    : [];
+  if (selectedTools.length > 0) {
+    let contentBytes = 0;
+    let descriptionBytes = 0;
+    let schemaBytes = 0;
+    for (const { tool } of selectedTools) {
+      const definition = {
+        ...(typeof tool.name === "string" ? { name: tool.name } : {}),
+        ...(typeof tool.description === "string" ? { description: tool.description } : {}),
+        ...(tool.inputSchema !== undefined ? { inputSchema: tool.inputSchema } : {}),
+      };
+      contentBytes += jsonByteLength(definition);
+      if (typeof tool.description === "string") {
+        descriptionBytes += utf8ByteLength(tool.description);
+      }
+      if (tool.inputSchema !== undefined) schemaBytes += jsonByteLength(tool.inputSchema);
+    }
+    components.push({
+      id: "mcp-tool-definitions",
+      contentBytes,
+      itemCount: selectedTools.length,
+      availableItemCount: availableTools.length,
+      descriptionBytes,
+      schemaBytes,
+    });
+  }
+
+  return components.length > 0
+    ? {
+        source: "claude-cowork-metadata",
+        scope: "session-metadata",
+        components,
+      }
+    : undefined;
+}
+
+/** Read safe aggregates plus the UUID-to-name map from Cowork's sibling metadata. */
+async function readCoworkMetadataSummary(auditPath?: string): Promise<CoworkMetadataSummary> {
+  if (!auditPath) return {};
   const metadataPath = `${dirname(auditPath)}.json`;
   let raw: string;
   try {
     raw = await readFile(metadataPath, "utf-8");
   } catch {
-    return undefined;
+    return {};
   }
 
-  let servers: unknown;
+  let metadata: CoworkSessionMetadata;
   try {
-    servers = (JSON.parse(raw) as { remoteMcpServersConfig?: unknown }).remoteMcpServersConfig;
+    metadata = JSON.parse(raw) as CoworkSessionMetadata;
   } catch {
-    return undefined;
+    return {};
   }
-  const serverEntries = Array.isArray(servers)
-    ? servers.map((server) => ({ key: undefined, value: server }))
-    : servers && typeof servers === "object"
-      ? Object.entries(servers as Record<string, unknown>).map(([key, value]) => ({ key, value }))
-      : [];
-  if (serverEntries.length === 0) return undefined;
 
   const names: Record<string, string> = {};
-  for (const { key, value } of serverEntries) {
+  for (const { key, value } of coworkServerEntries(metadata.remoteMcpServersConfig)) {
     const { uuid: rawUuid, name: rawName } = (value || {}) as {
       uuid?: unknown;
       name?: unknown;
@@ -293,7 +379,11 @@ async function readCoworkMcpServerNames(
       names[uuid] = name;
     }
   }
-  return Object.keys(names).length > 0 ? names : undefined;
+  const contextBreakdown = coworkContextBreakdown(metadata);
+  return {
+    ...(Object.keys(names).length > 0 ? { mcpServerNames: names } : {}),
+    ...(contextBreakdown ? { contextBreakdown } : {}),
+  };
 }
 
 /**
@@ -378,8 +468,11 @@ export async function parseClaudeCoworkSession(
     result.apiErrors = [...(result.apiErrors || []), ...retryErrors];
   }
 
-  const mcpServerNames = await readCoworkMcpServerNames(paths[0]);
-  if (mcpServerNames) result.mcpServerNames = mcpServerNames;
+  const metadataSummary = await readCoworkMetadataSummary(paths[0]);
+  if (metadataSummary.mcpServerNames) result.mcpServerNames = metadataSummary.mcpServerNames;
+  if (metadataSummary.contextBreakdown) {
+    result.contextBreakdown = metadataSummary.contextBreakdown;
+  }
 
   // Overlay metadata that audit.jsonl does not carry but the sibling JSON does.
   // Only fall back to the overlay — parsed values always win when present.
