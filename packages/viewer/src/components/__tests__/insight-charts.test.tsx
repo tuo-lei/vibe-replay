@@ -14,10 +14,8 @@ describe("InsightCharts", () => {
       />,
     );
 
-    expect(screen.getByText("prompt / turn")).toBeDefined();
-    expect(screen.getByText("~155")).toBeDefined();
-    expect(screen.getByText("output / turn")).toBeDefined();
-    expect(screen.getByText("~25")).toBeDefined();
+    expect(screen.getByText("~155 prompt/turn")).toBeDefined();
+    expect(screen.getByText("~25 output/turn")).toBeDefined();
   });
 
   it("renders duration percentiles alongside the turn distribution", () => {

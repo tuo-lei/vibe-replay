@@ -149,8 +149,12 @@ export function TokenBreakdownChart({
     turnCount && turnCount > 0 ? breakdown.output / turnCount : undefined;
 
   return (
-    <div className="space-y-4">
-      <div className="h-4 rounded-full bg-terminal-surface-2 overflow-hidden flex">
+    <div className="space-y-3">
+      <div className="flex items-center justify-between text-[10px] font-mono text-terminal-dimmer">
+        <span>Total</span>
+        <span className="font-bold text-terminal-text">{formatTokenCount(total)}</span>
+      </div>
+      <div className="h-3 rounded-full bg-terminal-surface-2 overflow-hidden flex">
         {visibleItems.map((item) => (
           <div
             key={item.key}
@@ -159,46 +163,23 @@ export function TokenBreakdownChart({
           />
         ))}
       </div>
-      <div className="grid grid-cols-2 gap-2 border-y border-terminal-border/20 py-3 sm:grid-cols-4">
-        <div title="Uncached input + cache writes. Providers do not expose a universal miss counter.">
-          <div className="text-[11px] font-mono font-bold text-terminal-context">
-            {formatTokenCount(tokenMetrics.cacheMissTokens)}
-          </div>
-          <div className="text-[10px] font-mono text-terminal-dimmer">uncached / miss</div>
-        </div>
-        <div title="Input + cache read + cache write tokens for the prompt context.">
-          <div className="text-[11px] font-mono font-bold text-terminal-user">
-            {formatTokenCount(tokenMetrics.promptTokens)}
-          </div>
-          <div className="text-[10px] font-mono text-terminal-dimmer">prompt footprint</div>
-        </div>
-        <div title="Tokens served from the provider cache.">
-          <div className="text-[11px] font-mono font-bold text-terminal-context">
-            {formatTokenCount(breakdown.cacheRead)}
-          </div>
-          <div className="text-[10px] font-mono text-terminal-dimmer">cache read</div>
-        </div>
-        <div title="Cache read divided by the prompt footprint; this is a cache-read share, not a provider billing guarantee.">
-          <div className="text-[11px] font-mono font-bold text-terminal-context">
-            {tokenMetrics.cacheReadShare !== undefined
-              ? `${Math.round(tokenMetrics.cacheReadShare * 1000) / 10}%`
-              : "—"}
-          </div>
-          <div className="text-[10px] font-mono text-terminal-dimmer">read share</div>
-        </div>
-      </div>
-      <div className="space-y-2">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
         {items.map((item) => (
-          <div key={item.key} className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className={`w-2.5 h-2.5 rounded-sm ${item.color}`} style={{ opacity: 0.7 }} />
-              <span className="text-[11px] font-mono text-terminal-dim">{item.label}</span>
+          <div
+            key={item.key}
+            className="min-w-0"
+            title={`${item.label}: ${formatTokenCount(item.value)} (${item.pct.toFixed(1)}%)`}
+          >
+            <div className="flex items-center gap-1.5">
+              <div
+                className={`h-2 w-2 shrink-0 rounded-sm ${item.color}`}
+                style={{ opacity: 0.7 }}
+              />
+              <span className="truncate text-[10px] font-mono text-terminal-dim">{item.label}</span>
             </div>
-            <div className="flex items-center gap-3">
-              <span className="text-[11px] font-mono text-terminal-text tabular-nums">
-                {formatTokenCount(item.value)}
-              </span>
-              <span className="text-[10px] font-mono text-terminal-dimmer tabular-nums w-10 text-right">
+            <div className="mt-0.5 text-[11px] font-mono text-terminal-text tabular-nums">
+              {formatTokenCount(item.value)}
+              <span className="ml-1 text-[9px] text-terminal-dimmer">
                 {item.value === 0
                   ? "0%"
                   : item.pct < 0.1
@@ -212,27 +193,15 @@ export function TokenBreakdownChart({
         ))}
       </div>
       {averagePromptPerTurn !== undefined && averageOutputPerTurn !== undefined && (
-        <div className="grid grid-cols-2 gap-2 rounded-lg border border-terminal-border/20 bg-terminal-surface-2/40 px-3 py-2.5">
-          <div title="Aggregate prompt footprint divided by recorded turns.">
-            <div className="text-[11px] font-mono font-bold text-terminal-context">
-              ~{formatTokenCount(averagePromptPerTurn)}
-            </div>
-            <div className="text-[9px] font-mono text-terminal-dimmer">prompt / turn</div>
-          </div>
-          <div title="Aggregate output tokens divided by recorded turns.">
-            <div className="text-[11px] font-mono font-bold text-terminal-response">
-              ~{formatTokenCount(averageOutputPerTurn)}
-            </div>
-            <div className="text-[9px] font-mono text-terminal-dimmer">output / turn</div>
-          </div>
+        <div className="flex gap-3 text-[9px] font-mono text-terminal-dimmer">
+          <span title="Aggregate prompt footprint divided by recorded turns.">
+            ~{formatTokenCount(averagePromptPerTurn)} prompt/turn
+          </span>
+          <span title="Aggregate output tokens divided by recorded turns.">
+            ~{formatTokenCount(averageOutputPerTurn)} output/turn
+          </span>
         </div>
       )}
-      <div className="flex items-center justify-between pt-2 border-t border-terminal-border/20">
-        <span className="text-[10px] font-mono text-terminal-dimmer">Total</span>
-        <span className="text-[11px] font-mono text-terminal-text font-bold tabular-nums">
-          {formatTokenCount(total)}
-        </span>
-      </div>
     </div>
   );
 }

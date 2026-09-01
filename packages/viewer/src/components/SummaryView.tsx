@@ -568,10 +568,7 @@ export default function SummaryView({ session }: Props) {
             <div className="ui-section-title">Per-Turn Metrics</div>
             {stats.tokenUsage && recordedTurnCount > 0 && (
               <div className="rounded-xl bg-terminal-surface p-4 shadow-layer-sm">
-                <div className="ui-section-title-strong mb-1">Turn Token Footprint</div>
-                <p className="mb-4 text-[10px] font-mono text-terminal-dimmer">
-                  Aggregate token usage with average prompt and output per recorded turn.
-                </p>
+                <div className="ui-section-title-strong mb-3">Tokens</div>
                 <TokenBreakdownChart
                   breakdown={{
                     input: stats.tokenUsage.inputTokens,
