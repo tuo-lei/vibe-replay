@@ -33,6 +33,7 @@ import {
   formatCost,
   formatDataSourceLabel,
   formatDate,
+  formatGenerationElapsed,
   formatSize,
   formatTokens,
   fetchWithRetry,
@@ -1277,6 +1278,7 @@ function ReplayCard({
   onRawData,
   isDeleting: _isDeleting,
   isRegenerating,
+  generationInProgress = false,
   isArchived,
 }: {
   summary: SessionSummary;
@@ -1289,6 +1291,7 @@ function ReplayCard({
   onRawData?: () => void;
   isDeleting?: boolean;
   isRegenerating?: boolean;
+  generationInProgress?: boolean;
   isArchived?: boolean;
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -1680,9 +1683,15 @@ function ReplayCard({
                 e.stopPropagation();
                 onRegenerate();
               }}
-              disabled={isRegenerating}
+              disabled={isRegenerating || generationInProgress}
               className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50"
-              title="Redo"
+              title={
+                isRegenerating
+                  ? "Regenerating replay"
+                  : generationInProgress
+                    ? "Another replay is being regenerated"
+                    : "Redo"
+              }
             >
               {isRegenerating ? (
                 <span className="animate-pulse">...</span>
@@ -2214,6 +2223,8 @@ function SessionsPanel() {
   );
 
   const [generatingSessionKey, setGeneratingSessionKey] = useState<string | null>(null);
+  const [generationStartedAt, setGenerationStartedAt] = useState<number | null>(null);
+  const [generationElapsedMs, setGenerationElapsedMs] = useState(0);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const [selectedSessionKey, setSelectedSessionKey] = useState<string | null>(null);
@@ -2226,6 +2237,8 @@ function SessionsPanel() {
     usageBackfillKey: "none",
     revision: undefined as number | undefined,
   });
+  const activeGenerationRequestRef = useRef<number | null>(null);
+  const nextGenerationRequestIdRef = useRef(0);
   // When another panel (Projects → Timeline / Hot Files) opens a session via
   // the `vibe-open-session` event, route the slug into the popup. Two paths:
   //   1. If SessionsPanel just mounted (e.g. tab switched from Projects),
@@ -2309,6 +2322,23 @@ function SessionsPanel() {
     : legacySelectedSlugMatches.length === 1
       ? legacySelectedSlugMatches[0]
       : null;
+  const generatingSource = generatingSessionKey
+    ? (sources.find((source) => sessionIdentityKey(source) === generatingSessionKey) ?? null)
+    : null;
+  const generatingTitle = generatingSource
+    ? sourceSuggestedTitle(generatingSource)
+    : "selected session";
+
+  useEffect(() => {
+    if (generationStartedAt === null) {
+      setGenerationElapsedMs(0);
+      return;
+    }
+    const updateElapsed = () => setGenerationElapsedMs(Date.now() - generationStartedAt);
+    updateElapsed();
+    const timer = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(timer);
+  }, [generationStartedAt]);
 
   const selectSession = (session: SourceSession) => {
     setSelectedSlug(session.slug);
@@ -2501,6 +2531,7 @@ function SessionsPanel() {
   };
 
   const submitGenerate = async (source: SourceSession, title: string) => {
+    if (activeGenerationRequestRef.current !== null) return;
     if (source.transcriptStatus) {
       setGenerateError(
         transcriptStatusDescription(source.transcriptStatus) || "Replay unavailable",
@@ -2509,7 +2540,10 @@ function SessionsPanel() {
     }
     setSelectedSlug(null);
     setSelectedSessionKey(null);
+    const requestId = ++nextGenerationRequestIdRef.current;
+    activeGenerationRequestRef.current = requestId;
     setGeneratingSessionKey(sessionIdentityKey(source));
+    setGenerationStartedAt(Date.now());
     setGenerateError(null);
 
     try {
@@ -2539,7 +2573,11 @@ function SessionsPanel() {
     } catch (err) {
       setGenerateError(getFriendlyErrorMessage(err));
     } finally {
-      setGeneratingSessionKey(null);
+      if (activeGenerationRequestRef.current === requestId) {
+        activeGenerationRequestRef.current = null;
+        setGeneratingSessionKey(null);
+        setGenerationStartedAt(null);
+      }
     }
   };
 
@@ -3540,6 +3578,13 @@ function SessionsPanel() {
           />
         ) : null}
 
+        {generatingSessionKey && (
+          <SessionLoadingBanner
+            title="Generating replay"
+            description={`${generatingTitle} — parsing the session and building the replay. Large sessions may take a while. Elapsed ${formatGenerationElapsed(generationElapsedMs)}. The replay will open automatically when it is ready.`}
+          />
+        )}
+
         {/* Error toast */}
         {refreshError && (
           <div className="mx-4 mb-2 flex items-center gap-2 bg-terminal-orange-subtle rounded-lg px-3 py-2.5 text-xs font-mono text-terminal-orange shrink-0 shadow-layer-sm">
@@ -4079,10 +4124,12 @@ function SessionsPanel() {
                                 e.stopPropagation();
                                 selectSession(s);
                               }}
-                              disabled={
-                                generatingSessionKey === sessionIdentityKey(s) || !!transcriptStatus
+                              disabled={generatingSessionKey !== null || !!transcriptStatus}
+                              title={
+                                generatingSessionKey !== null
+                                  ? "Another replay is being generated"
+                                  : transcriptStatusHelp
                               }
-                              title={transcriptStatusHelp}
                               className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200 ease-material disabled:opacity-50"
                             >
                               {generatingSessionKey === sessionIdentityKey(s)
@@ -4114,10 +4161,12 @@ function SessionsPanel() {
                               e.stopPropagation();
                               selectSession(s);
                             }}
-                            disabled={
-                              generatingSessionKey === sessionIdentityKey(s) || !!transcriptStatus
+                            disabled={generatingSessionKey !== null || !!transcriptStatus}
+                            title={
+                              generatingSessionKey !== null
+                                ? "Another replay is being generated"
+                                : transcriptStatusHelp
                             }
-                            title={transcriptStatusHelp}
                             className="h-7 px-2.5 text-xs font-sans font-semibold rounded-md bg-terminal-blue-subtle text-terminal-blue hover:bg-terminal-blue-emphasis transition-all duration-200 ease-material flex items-center justify-center gap-1 disabled:opacity-50"
                           >
                             {generatingSessionKey === sessionIdentityKey(s) ? (
@@ -4186,6 +4235,7 @@ function SessionsPanel() {
             onDeleteReplay={handleDeleteReplay}
             onRawData={openRawSourceJson}
             isGenerating={generatingSessionKey === sessionIdentityKey(selectedSession)}
+            generationInProgress={generatingSessionKey !== null}
             isArchived={archivedSlugs.has(sourceArchiveKey(selectedSession))}
           />
         )}
@@ -4218,7 +4268,29 @@ function ReplaysPanel() {
   const [archivedSlugs, setArchivedSlugs] = useState<Set<string>>(new Set());
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [regeneratingSessionKey, setRegeneratingSessionKey] = useState<string | null>(null);
+  const [regenerationStartedAt, setRegenerationStartedAt] = useState<number | null>(null);
+  const [regenerationElapsedMs, setRegenerationElapsedMs] = useState(0);
   const [rawReplayTarget, setRawReplayTarget] = useState<SessionSummary | null>(null);
+  const activeRegenerationRequestRef = useRef<number | null>(null);
+  const nextRegenerationRequestIdRef = useRef(0);
+
+  const regeneratingReplay = regeneratingSessionKey
+    ? (sessions.find((session) => sessionIdentityKey(session) === regeneratingSessionKey) ?? null)
+    : null;
+  const regeneratingTitle = regeneratingReplay
+    ? regeneratingReplay.title || regeneratingReplay.sourceSlug || regeneratingReplay.slug
+    : "selected replay";
+
+  useEffect(() => {
+    if (regenerationStartedAt === null) {
+      setRegenerationElapsedMs(0);
+      return;
+    }
+    const updateElapsed = () => setRegenerationElapsedMs(Date.now() - regenerationStartedAt);
+    updateElapsed();
+    const timer = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(timer);
+  }, [regenerationStartedAt]);
 
   const {
     selectedProject,
@@ -4438,8 +4510,12 @@ function ReplaysPanel() {
   };
 
   const handleRegenerate = async (s: SessionSummary) => {
+    if (activeRegenerationRequestRef.current !== null) return;
     const sessionKey = sessionIdentityKey(s);
+    const requestId = ++nextRegenerationRequestIdRef.current;
+    activeRegenerationRequestRef.current = requestId;
     setRegeneratingSessionKey(sessionKey);
+    setRegenerationStartedAt(Date.now());
     try {
       const resp = await fetchWithRetry("/api/generate", {
         method: "POST",
@@ -4463,7 +4539,11 @@ function ReplaysPanel() {
     } catch (err) {
       console.error("Regenerate error:", getErrorMessage(err));
     } finally {
-      setRegeneratingSessionKey(null);
+      if (activeRegenerationRequestRef.current === requestId) {
+        activeRegenerationRequestRef.current = null;
+        setRegeneratingSessionKey(null);
+        setRegenerationStartedAt(null);
+      }
     }
   };
 
@@ -5289,6 +5369,13 @@ function ReplaysPanel() {
           </div>
         )}
 
+        {regeneratingSessionKey && (
+          <SessionLoadingBanner
+            title="Regenerating replay"
+            description={`${regeneratingTitle} — parsing the session and rebuilding the replay. Large sessions may take a while. Elapsed ${formatGenerationElapsed(regenerationElapsedMs)}. The replay will open automatically when it is ready.`}
+          />
+        )}
+
         {/* Error toast */}
         {deleteError && (
           <div className="mx-4 mb-2 flex items-center gap-2 bg-terminal-red-subtle rounded-lg px-3 py-2.5 text-xs font-mono text-terminal-red shrink-0 shadow-layer-sm">
@@ -5335,6 +5422,7 @@ function ReplaysPanel() {
                     onArchive={() => toggleArchive(s.sourceSlug || s.slug, s.location)}
                     onRawData={() => setRawReplayTarget(s)}
                     isRegenerating={regeneratingSessionKey === sessionIdentityKey(s)}
+                    generationInProgress={regeneratingSessionKey !== null}
                     isArchived={isArchived}
                   />
                 );

@@ -9,11 +9,13 @@
  */
 import { type ChildProcess, execSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { cp, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Browser, chromium } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { killProcessTree, spawnPnpm } from "../scripts/dev-utils.mjs";
+import { generateTestReplay } from "./helpers.ts";
 
 const HAS_DEV_VARS = existsSync("cloudflare/.dev.vars");
 
@@ -224,7 +226,7 @@ describeWorker("File serve via wrangler dev", () => {
 
 describe("Full flow via editor BFF", () => {
   const AUTH_PATH = join(homedir(), ".config", "vibe-replay", "auth.json");
-  const hasAuth = existsSync(AUTH_PATH);
+  const hasAuth = process.env.VIBE_REPLAY_E2E_CLOUD === "1" && existsSync(AUTH_PATH);
 
   let serverProcess: ChildProcess | null = null;
   let serverPort: number;
@@ -340,10 +342,20 @@ describe("Viewer export UI", () => {
   let serverProcess: ChildProcess | null = null;
   let serverPort: number;
   let browser: Browser;
+  let testHome: string | null = null;
 
   beforeAll(async () => {
+    const generated = await generateTestReplay();
+    testHome = await mkdtemp(join(tmpdir(), "vibe-replay-e2e-home-"));
+    const replayDir = join(testHome, ".vibe-replay", generated.session.meta.slug || "test-session");
+    await mkdir(join(testHome, ".vibe-replay"), { recursive: true });
+    await cp(join(generated.tmpDir, generated.session.meta.slug || "test-session"), replayDir, {
+      recursive: true,
+    });
+    await rm(generated.tmpDir, { recursive: true, force: true });
+
     serverProcess = spawn(process.execPath, ["packages/cli/dist/index.js", "-d"], {
-      env: { ...process.env, VIBE_REPLAY_NO_AUTO_OPEN: "1" },
+      env: { ...process.env, HOME: testHome, VIBE_REPLAY_NO_AUTO_OPEN: "1" },
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -370,6 +382,7 @@ describe("Viewer export UI", () => {
   afterAll(async () => {
     await browser?.close();
     if (serverProcess) await killProcessTree(serverProcess);
+    if (testHome) await rm(testHome, { recursive: true, force: true });
   });
 
   it("export tab shows generate button for GIF+SVG", async () => {
@@ -381,7 +394,7 @@ describe("Viewer export UI", () => {
 
     // In dashboard mode, go to session detail with view=editor to open editor mode
     await page.goto(`http://localhost:${serverPort}/?session=${sessions[0].slug}`, {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
     });
     await page.waitForTimeout(1500);
 
@@ -434,7 +447,7 @@ describe("Viewer export UI", () => {
 
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     await page.goto(`http://localhost:${serverPort}/?session=${sessions[0].slug}`, {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
     });
 
     // Navigate to export tab

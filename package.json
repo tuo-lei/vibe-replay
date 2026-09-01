@@ -27,8 +27,8 @@
     "prepare": "lefthook install"
   },
   "devDependencies": {
-    "@hono/node-server": "^2.0.8",
-    "hono": "^4.12.26",
+    "@hono/node-server": "^2.0.10",
+    "hono": "^4.12.34",
     "lefthook": "^2.1.9",
     "oxfmt": "^0.54.0",
     "oxlint": "^1.69.0",
@@ -45,7 +45,8 @@
     "overrides": {
       "vite": "npm:rolldown-vite@^7.3.1",
       "undici": "^7.25.0",
-      "kysely": "^0.28.16",
+      "kysely": "^0.28.17",
+      "ws": "^8.21.0",
       "picomatch@2": "^2.3.2",
       "picomatch@4": "^4.0.4",
       "defu": "^6.1.7",

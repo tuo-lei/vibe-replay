@@ -50,6 +50,10 @@ pnpm verify           # Sequential pre-PR validation
 pnpm start            # Full build + run (simulates real user flow)
 ```
 
+The end-to-end suite is local and hermetic by default. Set
+`VIBE_REPLAY_E2E_CLOUD=1` only when you intentionally want to run the opt-in
+tests that use the authenticated cloud account in `~/.config/vibe-replay/auth.json`.
+
 **Testing viewer hooks/components**: most viewer tests run in the default node
 environment (pure engine/util logic). Tests that render React (hooks via
 `renderHook`, components via `render` from `@testing-library/react`) opt into a
