@@ -322,9 +322,24 @@ export function useAiProviderSettings(enabled: boolean): AiProviderSettingsActio
   const setAiProviderId = enabled
     ? (providerId: string) => {
         const provider = providersRef.current.find((candidate) => candidate.id === providerId);
+        const current = selectionRef.current;
+        const currentModelStillAvailable =
+          current.providerId === providerId &&
+          current.modelId &&
+          provider?.models.some((model) => model.id === current.modelId);
+        const defaultModelId = defaultSelection?.modelId;
+        const defaultModelForProvider =
+          providerId === defaultSelection?.providerId &&
+          defaultModelId &&
+          provider?.models.some((model) => model.id === defaultModelId)
+            ? defaultModelId
+            : null;
         updateDraftSelection({
           providerId,
-          modelId: provider?.models[0]?.id || null,
+          // Keep the current draft when the user re-selects the same provider.
+          // When switching providers, prefer that provider's current default;
+          // do not silently pick the first catalog entry.
+          modelId: currentModelStillAvailable ? current.modelId : defaultModelForProvider,
         });
       }
     : null;
