@@ -12,7 +12,6 @@ const ACTIVITY_META: Record<
   TimedActivityKind,
   { label: string; color: string; textColor: string }
 > = {
-  "user-idle": { label: "User / idle", color: "bg-terminal-user", textColor: "text-terminal-user" },
   "llm-wait": {
     label: "LLM wait",
     color: "bg-terminal-response",
@@ -126,8 +125,8 @@ export default function TurnActivityTimeline({ scenes }: { scenes: readonly Scen
         <div>
           <div className="ui-section-title-strong">Activity timeline</div>
           <p id={descriptionId} className="mt-1 text-[10px] font-mono text-terminal-dimmer">
-            Timestamp gaps and provider-recorded tool runtimes, left to right. Gap roles are
-            inferred; exact TTFT and compaction duration are not persisted.
+            Timestamp gaps and provider-recorded tool runtimes, excluding user idle, left to right.
+            Gap roles are inferred; exact TTFT and compaction duration are not persisted.
           </p>
         </div>
         {timing.totalMs > 0 && (

@@ -11,7 +11,7 @@ export type ToolScope = "local" | "remote" | "unknown";
  * role is inferred from the surrounding replay events.
  */
 export interface ActivityInterval {
-  kind: "user-idle" | "llm-wait" | "response" | "tool" | "unknown";
+  kind: "llm-wait" | "response" | "tool" | "unknown";
   durationMs: number;
   sceneIndex: number;
   source: "timestamp-gap" | "tool-duration";
@@ -39,6 +39,8 @@ export interface ActivityTimingResult {
   thinkingCount: number;
   totalMs: number;
   timestampGapMs: number;
+  /** User-away gaps are intentionally excluded from the activity timeline. */
+  excludedIdleMs: number;
   toolDurationMs: number;
   toolCalls: number;
   recordedToolCalls: number;
@@ -176,7 +178,7 @@ function gapKind(
   scene: Scene,
   previous: PreviousEvent | undefined,
   hasUnmeasuredTool: boolean,
-): { kind: ActivityInterval["kind"]; note?: ActivityInterval["note"] } {
+): { kind: ActivityInterval["kind"] | "user-idle"; note?: ActivityInterval["note"] } {
   if (scene.type === "compaction-summary" || scene.type === "context-injection") {
     // The boundary timestamp proves that context changed, not how long the
     // compaction itself took. Keep the preceding gap unattributed.
@@ -205,6 +207,7 @@ export function buildActivityTiming(scenes: readonly Scene[]): ActivityTimingRes
   let cursorMs: number | undefined;
   let elapsedMs = 0;
   let timestampGapMs = 0;
+  let excludedIdleMs = 0;
   let toolDurationMs = 0;
   let thinkingCount = 0;
   let toolCalls = 0;
@@ -232,14 +235,21 @@ export function buildActivityTiming(scenes: readonly Scene[]): ActivityTimingRes
     if (atMs !== undefined && cursorMs !== undefined && atMs > cursorMs) {
       const durationMs = atMs - cursorMs;
       const gap = gapKind(scene, previous, hasUnmeasuredTool);
-      addInterval({
-        kind: gap.kind,
-        durationMs,
-        sceneIndex,
-        source: "timestamp-gap",
-        confidence: "inferred",
-        ...(gap.note ? { note: gap.note } : {}),
-      });
+      if (gap.kind === "user-idle") {
+        // Time between turns mostly measures how long the user was away from
+        // the computer, not how the agent spent the session. Keep the cursor
+        // moving but leave this interval out of the activity visualization.
+        excludedIdleMs += durationMs;
+      } else {
+        addInterval({
+          kind: gap.kind,
+          durationMs,
+          sceneIndex,
+          source: "timestamp-gap",
+          confidence: "inferred",
+          ...(gap.note ? { note: gap.note } : {}),
+        });
+      }
       cursorMs = atMs;
       hasUnmeasuredTool = false;
     }
@@ -291,6 +301,7 @@ export function buildActivityTiming(scenes: readonly Scene[]): ActivityTimingRes
     thinkingCount,
     totalMs: elapsedMs,
     timestampGapMs,
+    excludedIdleMs,
     toolDurationMs,
     toolCalls,
     recordedToolCalls,

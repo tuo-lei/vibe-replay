@@ -26,10 +26,10 @@ describe("buildActivityTiming", () => {
       ["tool", 2_000],
       ["llm-wait", 1_000],
       ["response", 1_000],
-      ["user-idle", 5_000],
     ]);
-    expect(result.totalMs).toBe(10_000);
-    expect(result.timestampGapMs).toBe(8_000);
+    expect(result.totalMs).toBe(5_000);
+    expect(result.timestampGapMs).toBe(3_000);
+    expect(result.excludedIdleMs).toBe(5_000);
     expect(result.toolDurationMs).toBe(2_000);
     expect(result.localToolMs).toBe(2_000);
     expect(result.toolCategories.test).toEqual({ durationMs: 2_000, count: 1 });
