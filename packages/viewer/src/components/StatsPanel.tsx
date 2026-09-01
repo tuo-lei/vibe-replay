@@ -188,7 +188,7 @@ export default function StatsPanel({ session }: Props) {
               </span>
             )}
             {meta.permissionMode === "bypassPermissions" && (
-              <span className="px-1 py-0.5 rounded bg-terminal-orange/20 text-terminal-orange">
+              <span className="px-1 py-0.5 rounded bg-terminal-tool-subtle text-terminal-tool">
                 dangerous
               </span>
             )}
@@ -213,10 +213,14 @@ export default function StatsPanel({ session }: Props) {
       </div>
 
       <div className="grid grid-cols-2 gap-2">
-        <StatCard label="Turns" value={stats.userPrompts} color="text-terminal-green" />
+        <StatCard label="Turns" value={stats.userPrompts} color="text-terminal-user" />
         <StatCard label="Scenes" value={stats.totalScenes} color="text-terminal-text" />
-        <StatCard label="Tool Calls" value={stats.toolCalls} color="text-terminal-orange" />
-        <StatCard label="Files Modified" value={stats.filesModified} color="text-terminal-blue" />
+        <StatCard label="Tool Calls" value={stats.toolCalls} color="text-terminal-tool" />
+        <StatCard
+          label="Files Modified"
+          value={stats.filesModified}
+          color="text-terminal-response"
+        />
       </div>
 
       {(stats.durationMs ||
@@ -275,19 +279,21 @@ export default function StatsPanel({ session }: Props) {
           <div className="text-terminal-dim leading-relaxed space-y-0.5">
             <div>
               Input:{" "}
-              <span className="text-terminal-blue">{fmtNum(stats.tokenUsage.inputTokens)}</span>
+              <span className="text-terminal-user">{fmtNum(stats.tokenUsage.inputTokens)}</span>
               {" / "}
               Out:{" "}
-              <span className="text-terminal-green">{fmtNum(stats.tokenUsage.outputTokens)}</span>
+              <span className="text-terminal-response">
+                {fmtNum(stats.tokenUsage.outputTokens)}
+              </span>
             </div>
             <div>
               Cache:{" "}
-              <span className="text-terminal-purple">
+              <span className="text-terminal-context">
                 {fmtNum(stats.tokenUsage.cacheReadTokens)}
               </span>{" "}
               read
               {" / "}
-              <span className="text-terminal-orange">
+              <span className="text-terminal-context">
                 {fmtNum(stats.tokenUsage.cacheCreationTokens)}
               </span>{" "}
               write
@@ -295,19 +301,19 @@ export default function StatsPanel({ session }: Props) {
             {stats.tokenMetrics && (
               <div className="pt-1 text-[10px] text-terminal-dimmer">
                 Prompt{" "}
-                <span className="text-terminal-blue">
+                <span className="text-terminal-context">
                   {fmtNum(stats.tokenMetrics.promptTokens)}
                 </span>
                 {" · "}
                 uncached/miss{" "}
-                <span className="text-terminal-orange">
+                <span className="text-terminal-tool">
                   {fmtNum(stats.tokenMetrics.cacheMissTokens)}
                 </span>
                 {stats.tokenMetrics.cacheReadShare !== undefined && (
                   <>
                     {" · "}
                     read share{" "}
-                    <span className="text-terminal-green">
+                    <span className="text-terminal-context">
                       {Math.round(stats.tokenMetrics.cacheReadShare * 1000) / 10}%
                     </span>
                   </>
@@ -322,7 +328,7 @@ export default function StatsPanel({ session }: Props) {
       {stats.peakContextTokens !== undefined && (
         <div className="text-terminal-dim">
           Reported prompt footprint:{" "}
-          <span className="text-terminal-cyan">{fmtNum(stats.peakContextTokens)}</span>
+          <span className="text-terminal-context">{fmtNum(stats.peakContextTokens)}</span>
           <span className="text-terminal-dimmer"> tokens</span>
           {meta.contextLimit && (
             <span className="text-terminal-dimmer">
@@ -354,7 +360,7 @@ export default function StatsPanel({ session }: Props) {
       {/* API Errors */}
       {meta.apiErrors && meta.apiErrors.length > 0 && (
         <div className="text-terminal-dim">
-          API errors: <span className="text-terminal-red">{meta.apiErrors.length}</span>
+          API errors: <span className="text-terminal-error">{meta.apiErrors.length}</span>
           {(() => {
             const types = new Map<string, number>();
             for (const e of meta.apiErrors) {
@@ -389,7 +395,7 @@ export default function StatsPanel({ session }: Props) {
             {stats.diagnosticSummary.successfulCompactions > 0 && (
               <div>
                 Compactions succeeded:{" "}
-                <span className="text-terminal-green">
+                <span className="text-terminal-context">
                   {fmtNum(stats.diagnosticSummary.successfulCompactions)}
                 </span>
               </div>
@@ -397,7 +403,7 @@ export default function StatsPanel({ session }: Props) {
             {stats.diagnosticSummary.automaticContextCompactions > 0 && (
               <div>
                 Automatic context:{" "}
-                <span className="text-terminal-cyan">
+                <span className="text-terminal-context">
                   {fmtNum(stats.diagnosticSummary.automaticContextCompactions)}
                 </span>
                 {stats.diagnosticSummary.inferredAutomaticCompactions > 0 && (
@@ -410,7 +416,7 @@ export default function StatsPanel({ session }: Props) {
             {stats.diagnosticSummary.unknownCompactions > 0 && (
               <div>
                 Unknown compaction trigger:{" "}
-                <span className="text-terminal-orange">
+                <span className="text-terminal-context">
                   {fmtNum(stats.diagnosticSummary.unknownCompactions)}
                 </span>
               </div>
@@ -418,7 +424,7 @@ export default function StatsPanel({ session }: Props) {
             {stats.diagnosticSummary.compactionFailures > 0 && (
               <div>
                 Compaction failures:{" "}
-                <span className="text-terminal-red">
+                <span className="text-terminal-error">
                   {fmtNum(stats.diagnosticSummary.compactionFailures)}
                 </span>
               </div>
@@ -426,7 +432,7 @@ export default function StatsPanel({ session }: Props) {
             {stats.diagnosticSummary.assistantApiErrors > 0 && (
               <div>
                 Assistant/API errors:{" "}
-                <span className="text-terminal-red">
+                <span className="text-terminal-error">
                   {fmtNum(stats.diagnosticSummary.assistantApiErrors)}
                 </span>
               </div>
@@ -471,11 +477,11 @@ export default function StatsPanel({ session }: Props) {
       )}
 
       <div className="text-terminal-dim leading-relaxed">
-        Chars: <span className="text-terminal-green">{fmtNum(stats.promptChars)}</span> prompt
+        Chars: <span className="text-terminal-user">{fmtNum(stats.promptChars)}</span> prompt
         {" / "}
-        <span className="text-terminal-purple">{fmtNum(stats.thinkingChars)}</span> thinking
+        <span className="text-terminal-thinking">{fmtNum(stats.thinkingChars)}</span> thinking
         {" / "}
-        <span className="text-terminal-blue">{fmtNum(stats.responseChars)}</span> response
+        <span className="text-terminal-response">{fmtNum(stats.responseChars)}</span> response
       </div>
 
       {stats.compactions && stats.compactions.length > 0 && (
@@ -489,7 +495,7 @@ export default function StatsPanel({ session }: Props) {
                 key={i}
                 className="text-terminal-dim text-xs flex items-baseline gap-1.5 flex-wrap"
               >
-                <span className="text-terminal-orange">●</span>
+                <span className="text-terminal-context">●</span>
                 <span>
                   {c.accuracy === "lower-bound" ? "at least " : ""}
                   {c.trigger === "pi" ? "recorded" : c.trigger}
@@ -512,7 +518,7 @@ export default function StatsPanel({ session }: Props) {
                 <span className="text-terminal-text shrink-0 w-20 text-right">{name}</span>
                 <div className="flex-1 h-2 rounded-full bg-terminal-surface overflow-hidden">
                   <div
-                    className="h-full rounded-full bg-terminal-orange"
+                    className="h-full rounded-full bg-terminal-tool"
                     style={{ width: `${(count / stats.topTools[0][1]) * 100}%` }}
                   />
                 </div>

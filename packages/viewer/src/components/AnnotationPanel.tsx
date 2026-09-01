@@ -2,6 +2,7 @@ import { marked } from "marked";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Annotation, Scene } from "../types";
 import { sanitizeHtml } from "../utils/sanitize";
+import { sceneToneTextClass } from "../utils/scene-colors";
 
 // Configure marked for short-form annotation text
 marked.setOptions({ breaks: true, gfm: true });
@@ -56,20 +57,7 @@ function scenePreview(scene: Scene): { label: string; text: string } {
 }
 
 function sceneLabelColor(scene: Scene): string {
-  switch (scene.type) {
-    case "user-prompt":
-      return "text-terminal-green";
-    case "compaction-summary":
-      return "text-terminal-dim";
-    case "context-injection":
-      return "text-blue-400";
-    case "thinking":
-      return "text-terminal-purple";
-    case "text-response":
-      return "text-terminal-blue";
-    case "tool-call":
-      return "text-terminal-orange";
-  }
+  return sceneToneTextClass(scene);
 }
 
 export default function AnnotationPanel({

@@ -29,14 +29,14 @@ export default memo(function BashBlock({
 
   return (
     <div
-      className={`bg-terminal-surface rounded-xl overflow-hidden shadow-layer-sm ${isError ? "ring-1 ring-red-500/40" : ""}`}
+      className={`bg-terminal-surface rounded-xl overflow-hidden shadow-layer-sm ${isError ? "ring-1 ring-terminal-error/40" : ""}`}
     >
       <button
         onClick={() => resultRecorded && setExpanded(!expanded)}
-        className={`w-full flex items-center gap-2 px-3 py-2 hover:bg-terminal-surface-hover transition-colors duration-200 ease-material text-left ${isError ? "bg-red-500/5" : ""}`}
+        className={`w-full flex items-center gap-2 px-3 py-2 hover:bg-terminal-surface-hover transition-colors duration-200 ease-material text-left ${isError ? "bg-terminal-error/5" : ""}`}
       >
         <span
-          className={`text-xs font-mono font-bold ${isError ? "text-red-400" : "text-terminal-orange"}`}
+          className={`text-xs font-mono font-bold ${isError ? "text-terminal-error" : "text-terminal-tool"}`}
         >
           $
         </span>
