@@ -539,6 +539,7 @@ function RecentSessionsList({
   onViewReplay,
   onSessionClick,
   generatingSessionKey,
+  generationInProgress,
   generateErrorSessionKey,
 }: {
   sessions: SourceSession[];
@@ -548,6 +549,7 @@ function RecentSessionsList({
   onViewReplay: (slug: string, location?: SessionLocation) => void;
   onSessionClick: (source: SourceSession) => void;
   generatingSessionKey: string | null;
+  generationInProgress: boolean;
   generateErrorSessionKey: string | null;
 }) {
   if (sessions.length === 0) {
@@ -564,6 +566,7 @@ function RecentSessionsList({
     const hasReplay = !!s.existingReplay;
     const identity = sessionIdentityKey(s);
     const isGenerating = generatingSessionKey === identity;
+    const anotherGenerationInProgress = generationInProgress && !isGenerating;
     const hasError = generateErrorSessionKey === identity;
     const transcriptStatus = s.transcriptStatus;
     const sizeClass = featured ? "h-8 px-3.5" : "h-7 px-3";
@@ -591,8 +594,12 @@ function RecentSessionsList({
           e.stopPropagation();
           onGenerate(s);
         }}
-        disabled={isGenerating || !!transcriptStatus}
-        title={transcriptStatusDescription(transcriptStatus)}
+        disabled={isGenerating || anotherGenerationInProgress || !!transcriptStatus}
+        title={
+          anotherGenerationInProgress
+            ? "Another replay is being generated"
+            : transcriptStatusDescription(transcriptStatus)
+        }
         className={`${sizeClass} text-xs font-sans font-semibold rounded-md transition-all duration-200 disabled:opacity-50 flex items-center gap-1 shrink-0 ${
           hasError
             ? "bg-terminal-red-subtle text-terminal-red"
@@ -998,6 +1005,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   const [, setTick] = useState(0);
   const [activityWindow, setActivityWindow] = useState<ActivityWindow>("today");
   const requestedEnrichmentSignatureRef = useRef("");
+  const activeGenerationRequestRef = useRef<number | null>(null);
   const syncPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const syncPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const legacySelectedSlugMatches = selectedSlug
@@ -1096,7 +1104,10 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   };
 
   const handleGenerate = async (source: SourceSession) => {
+    if (activeGenerationRequestRef.current !== null) return;
     const identity = sessionIdentityKey(source);
+    const requestId = Date.now();
+    activeGenerationRequestRef.current = requestId;
     setGeneratingSessionKey(identity);
     setGenerationStartedAt(Date.now());
     setGenerateErrorSessionKey(null);
@@ -1130,15 +1141,21 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
         2000,
       );
     } finally {
-      setGeneratingSessionKey(null);
-      setGenerationStartedAt(null);
+      if (activeGenerationRequestRef.current === requestId) {
+        activeGenerationRequestRef.current = null;
+        setGeneratingSessionKey(null);
+        setGenerationStartedAt(null);
+      }
     }
   };
 
   const submitGenerateFromPopup = async (source: SourceSession, title: string) => {
+    if (activeGenerationRequestRef.current !== null) return;
     setSelectedSlug(null);
     setSelectedSessionKey(null);
     const identity = sessionIdentityKey(source);
+    const requestId = Date.now();
+    activeGenerationRequestRef.current = requestId;
     setGeneratingSessionKey(identity);
     setGenerationStartedAt(Date.now());
     setGenerateErrorSessionKey(null);
@@ -1171,8 +1188,11 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
         2000,
       );
     } finally {
-      setGeneratingSessionKey(null);
-      setGenerationStartedAt(null);
+      if (activeGenerationRequestRef.current === requestId) {
+        activeGenerationRequestRef.current = null;
+        setGeneratingSessionKey(null);
+        setGenerationStartedAt(null);
+      }
     }
   };
 
@@ -1611,6 +1631,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
                   setSelectedSessionKey(sessionIdentityKey(s));
                 }}
                 generatingSessionKey={generatingSessionKey}
+                generationInProgress={generatingSessionKey !== null}
                 generateErrorSessionKey={generateErrorSessionKey}
               />
             </div>
@@ -1737,6 +1758,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
           onTitleSave={handleTitleSave}
           onDeleteReplay={handleDeleteReplay}
           isGenerating={generatingSessionKey === sessionIdentityKey(selectedSession)}
+          generationInProgress={generatingSessionKey !== null}
           isArchived={selectedIsArchived}
         />
       )}
