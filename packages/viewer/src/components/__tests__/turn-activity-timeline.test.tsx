@@ -51,4 +51,28 @@ describe("TurnActivityTimeline", () => {
     expect(screen.getAllByTitle(/LLM wait/)[0].className).toContain("bg-terminal-thinking");
     expect(screen.getByTitle(/Compaction boundary/).className).toContain("bg-terminal-context");
   });
+
+  it("shows whole-turn timing without pretending to split Cursor work", () => {
+    render(
+      <TurnActivityTimeline
+        provider="cursor"
+        turnStats={[{ turnIndex: 0, durationMs: 3_000 }]}
+        scenes={[
+          { type: "user-prompt", content: "Inspect", timestamp: "2026-08-31T00:00:00.000Z" },
+          {
+            type: "tool-call",
+            toolName: "run_terminal_command_v2",
+            input: { command: "pnpm test" },
+            result: "ok",
+            timestamp: "2026-08-31T00:00:01.000Z",
+          },
+          { type: "text-response", content: "Done", timestamp: "2026-08-31T00:00:10.000Z" },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("Agent turn (not split)")).toBeDefined();
+    expect(screen.getByText(/Whole-turn timing only/)).toBeDefined();
+    expect(screen.getByText(/whole-turn timing; not split/)).toBeDefined();
+  });
 });

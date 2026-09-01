@@ -560,7 +560,11 @@ export default function SummaryView({ session }: Props) {
         </div>
 
         {/* === Time Series Charts (grouped) === */}
-        <TurnActivityTimeline scenes={scenes} />
+        <TurnActivityTimeline
+          scenes={scenes}
+          provider={meta.provider}
+          turnStats={meta.stats.turnStats}
+        />
         {hasTokenUsage && (
           <div className="rounded-xl bg-terminal-surface p-4 shadow-layer-sm">
             <div className="ui-section-title-strong mb-3">Tokens</div>

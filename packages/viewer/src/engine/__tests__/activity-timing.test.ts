@@ -191,6 +191,34 @@ describe("buildActivityTiming", () => {
     expect(result.remoteToolMs).toBe(1_000);
   });
 
+  it("uses whole-turn timing instead of misleading unknown gaps for Cursor/Codex", () => {
+    const result = buildActivityTiming(
+      [
+        { type: "user-prompt", content: "Inspect", timestamp: timestamp(0) },
+        {
+          type: "tool-call",
+          toolName: "run_terminal_command_v2",
+          input: { command: "pnpm test" },
+          result: "ok",
+          timestamp: timestamp(1),
+        },
+        { type: "text-response", content: "Done", timestamp: timestamp(10) },
+      ],
+      { provider: "cursor", turnStats: [{ turnIndex: 0, durationMs: 3_000 }] },
+    );
+
+    expect(result.timingMode).toBe("provider-turns");
+    expect(result.providerTurnDurationMs).toBe(3_000);
+    expect(result.totalMs).toBe(3_000);
+    expect(result.intervals).toEqual([
+      expect.objectContaining({
+        kind: "agent-turn",
+        durationMs: 3_000,
+        source: "turn-duration",
+      }),
+    ]);
+  });
+
   it("keeps known tool time when no scene timestamps exist", () => {
     const result = buildActivityTiming([
       {
