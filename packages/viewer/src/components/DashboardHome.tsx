@@ -105,6 +105,11 @@ function RemoteSourceFailureNotice({ failures }: { failures: string[] }) {
   );
 }
 
+function formatGenerationElapsed(ms: number): string {
+  if (ms < 60_000) return `${Math.max(1, Math.floor(ms / 1000))}s`;
+  return formatCompactDuration(ms);
+}
+
 // ─── Data Fetching ───────────────────────────────────────────────────
 
 function useDashboardData() {
@@ -595,7 +600,7 @@ function RecentSessionsList({
         }`}
       >
         {isGenerating ? (
-          <span className="animate-pulse">{featured ? "Generating..." : "..."}</span>
+          <span className="animate-pulse">{featured ? "Generating..." : "Working..."}</span>
         ) : hasError ? (
           "Failed"
         ) : transcriptStatus ? (
@@ -979,6 +984,8 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   const insights = useMemo(() => computeInsights(sources, replays), [sources, replays]);
   const { userInsights } = useScanInsightsContext();
   const [generatingSessionKey, setGeneratingSessionKey] = useState<string | null>(null);
+  const [generationStartedAt, setGenerationStartedAt] = useState<number | null>(null);
+  const [generationElapsedMs, setGenerationElapsedMs] = useState(0);
   const [generateErrorSessionKey, setGenerateErrorSessionKey] = useState<string | null>(null);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const [selectedSessionKey, setSelectedSessionKey] = useState<string | null>(null);
@@ -1005,6 +1012,23 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     ? archiveSessionKey(selectedSession.slug, selectedSession.location)
     : null;
   const selectedIsArchived = selectedArchiveKey ? archivedSlugs.has(selectedArchiveKey) : false;
+  const generatingSource = generatingSessionKey
+    ? (sources.find((source) => sessionIdentityKey(source) === generatingSessionKey) ?? null)
+    : null;
+  const generatingTitle = generatingSource
+    ? sourceSuggestedTitle(generatingSource)
+    : "selected session";
+
+  useEffect(() => {
+    if (generationStartedAt === null) {
+      setGenerationElapsedMs(0);
+      return;
+    }
+    const updateElapsed = () => setGenerationElapsedMs(Date.now() - generationStartedAt);
+    updateElapsed();
+    const timer = setInterval(updateElapsed, 1000);
+    return () => clearInterval(timer);
+  }, [generationStartedAt]);
   useEffect(() => {
     let mounted = true;
     void fetch("/api/archived")
@@ -1074,6 +1098,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
   const handleGenerate = async (source: SourceSession) => {
     const identity = sessionIdentityKey(source);
     setGeneratingSessionKey(identity);
+    setGenerationStartedAt(Date.now());
     setGenerateErrorSessionKey(null);
     try {
       const title = sourceSuggestedTitle(source);
@@ -1106,6 +1131,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
       );
     } finally {
       setGeneratingSessionKey(null);
+      setGenerationStartedAt(null);
     }
   };
 
@@ -1114,6 +1140,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     setSelectedSessionKey(null);
     const identity = sessionIdentityKey(source);
     setGeneratingSessionKey(identity);
+    setGenerationStartedAt(Date.now());
     setGenerateErrorSessionKey(null);
     try {
       const resp = await fetchWithRetry("/api/generate", {
@@ -1145,6 +1172,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
       );
     } finally {
       setGeneratingSessionKey(null);
+      setGenerationStartedAt(null);
     }
   };
 
@@ -1548,6 +1576,13 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
                 ? "Home is using cached data while local providers refresh in the background."
                 : "Recent sessions will update in place as titles, prompt previews, counts, and metrics become available."
             }
+          />
+        )}
+
+        {generatingSessionKey && (
+          <SessionLoadingBanner
+            title="Generating replay"
+            description={`${generatingTitle} — parsing the session and building the replay. Large sessions may take a while. Elapsed ${formatGenerationElapsed(generationElapsedMs)}. The replay will open automatically when it is ready.`}
           />
         )}
 
