@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { estimateActiveDuration } from "@vibe-replay/provider-core/duration";
-import { shortenPath } from "@vibe-replay/provider-core/utils";
+import { jsonByteLength, shortenPath, utf8ByteLength } from "@vibe-replay/provider-core/utils";
 import type {
   ContentBlock,
   ParsedTurn,
@@ -167,6 +167,7 @@ export function parsePiLines(
   const branchSelection = selectActiveBranch(entries, byId);
   const branchEntries = branchSelection.entries;
   const toolResults = collectToolResults(branchEntries);
+  const contextBreakdown = piMcpContextBreakdown(branchEntries);
   const turns: ParsedTurn[] = [];
   const usageByMessageId = new Map<
     string,
@@ -412,6 +413,7 @@ export function parsePiLines(
     tokenUsage,
     ...(tokenUsageByModel ? { tokenUsageByModel } : {}),
     ...(turnStats.length > 0 ? { turnStats } : {}),
+    ...(contextBreakdown ? { contextBreakdown } : {}),
     ...(compactions.length > 0 ? { compactions } : {}),
     ...(apiErrors.length > 0 ? { apiErrors } : {}),
     ...(diagnostics.length > 0 ? { diagnostics } : {}),
@@ -702,6 +704,71 @@ function collectToolResults(entries: PiEntryBase[]): Map<string, ToolResultData>
     });
   }
   return results;
+}
+
+/**
+ * Pi extension tool results may retain a discovered MCP tool descriptor under
+ * `details.tool`. Keep only aggregate sizes and counts; descriptions and schemas
+ * must never be copied into replay metadata or the usage index.
+ */
+function piMcpContextBreakdown(entries: PiEntryBase[]): ProviderParseResult["contextBreakdown"] {
+  const seen = new Set<string>();
+  let itemCount = 0;
+  let contentBytes = 0;
+  let descriptionBytes = 0;
+  let schemaBytes = 0;
+
+  for (const entry of entries) {
+    if (entry.type !== "message") continue;
+    const message = (entry as PiMessageEntry).message;
+    if (message?.role !== "toolResult" || message.toolName?.toLowerCase() !== "mcp") continue;
+    if (!message.details || typeof message.details !== "object" || Array.isArray(message.details)) {
+      continue;
+    }
+    const rawTool = (message.details as Record<string, unknown>).tool;
+    if (!rawTool || typeof rawTool !== "object" || Array.isArray(rawTool)) continue;
+    const tool = rawTool as Record<string, unknown>;
+    if (
+      typeof tool.name !== "string" &&
+      typeof tool.originalName !== "string" &&
+      typeof tool.description !== "string" &&
+      tool.inputSchema === undefined
+    ) {
+      continue;
+    }
+
+    const definition = {
+      ...(typeof tool.name === "string" ? { name: tool.name } : {}),
+      ...(typeof tool.originalName === "string" ? { originalName: tool.originalName } : {}),
+      ...(typeof tool.description === "string" ? { description: tool.description } : {}),
+      ...(tool.inputSchema !== undefined ? { inputSchema: tool.inputSchema } : {}),
+    };
+    const fingerprint = JSON.stringify(definition);
+    if (seen.has(fingerprint)) continue;
+    seen.add(fingerprint);
+
+    itemCount++;
+    contentBytes += jsonByteLength(definition);
+    if (typeof tool.description === "string") {
+      descriptionBytes += utf8ByteLength(tool.description);
+    }
+    if (tool.inputSchema !== undefined) schemaBytes += jsonByteLength(tool.inputSchema);
+  }
+
+  if (itemCount === 0) return undefined;
+  return {
+    source: "pi-mcp-results",
+    scope: "observed",
+    components: [
+      {
+        id: "mcp-tool-definitions",
+        contentBytes,
+        itemCount,
+        ...(descriptionBytes > 0 ? { descriptionBytes } : {}),
+        ...(schemaBytes > 0 ? { schemaBytes } : {}),
+      },
+    ],
+  };
 }
 
 // Harness tools such as exec_command report failures through the result

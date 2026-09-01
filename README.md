@@ -85,6 +85,12 @@ provider-level precision for invocations, MCP calls, tokens, cache reads/writes,
 share one universal cache-miss counter. Cursor snapshot totals are marked estimated, and Cursor
 compactions are lower bounds because its local store can retain only the latest summary.
 
+When providers persist context-composition metadata, a replay's Insights view also breaks out the
+system prompt, tool definitions, rules, skills, MCP definitions, subagents, summaries, and
+conversation. Cursor supplies provider-estimated tokens for its latest snapshot; Cowork, Codex,
+and Pi expose privacy-safe byte/count aggregates from persisted metadata. Raw system prompts, tool
+descriptions, and schemas are never copied into this breakdown.
+
 ### Your AI coding wrapped
 
 GitHub-style activity heatmap, streaks, weekly trends, top projects, model usage, and cost tracking across all your sessions. See how your coding patterns evolve over time.

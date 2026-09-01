@@ -6,7 +6,14 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, posix, win32 } from "node:path";
 import { promisify } from "node:util";
-import type { CursorSidecars, PrLink, TokenUsage, TurnStat } from "@vibe-replay/types";
+import type {
+  ContextBreakdown,
+  ContextComponentId,
+  CursorSidecars,
+  PrLink,
+  TokenUsage,
+  TurnStat,
+} from "@vibe-replay/types";
 import { readFileCache, writeFileCache } from "@vibe-replay/provider-core/cache";
 import {
   buildTurnDurationIntervals,
@@ -981,6 +988,51 @@ function cursorComposerSidecarMetadata(composer: Record<string, any>): CursorSid
   return Object.keys(metadata).length > 0 ? metadata : undefined;
 }
 
+const CURSOR_CONTEXT_COMPONENT_IDS: Record<string, ContextComponentId> = {
+  system_prompt: "system-prompt",
+  tools: "tool-definitions",
+  rules: "rules",
+  skills: "skills",
+  mcp: "mcp-tool-definitions",
+  subagents: "subagent-definitions",
+  summarized_conversation: "summarized-conversation",
+  conversation: "conversation",
+};
+
+/** Parse Cursor's provider-estimated latest context composition snapshot. */
+function cursorContextBreakdown(composer: Record<string, any>): ContextBreakdown | undefined {
+  const raw = composer.promptTokenBreakdown;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const breakdown = raw as Record<string, unknown>;
+  if (!Array.isArray(breakdown.categories)) return undefined;
+
+  const values = new Map<ContextComponentId, number>();
+  for (const rawCategory of breakdown.categories) {
+    if (!rawCategory || typeof rawCategory !== "object" || Array.isArray(rawCategory)) continue;
+    const category = rawCategory as Record<string, unknown>;
+    if (typeof category.id !== "string") continue;
+    const estimatedTokens = optionalNonNegativeInt(category.estimatedTokens);
+    if (estimatedTokens === undefined) continue;
+    const id = Object.prototype.hasOwnProperty.call(CURSOR_CONTEXT_COMPONENT_IDS, category.id)
+      ? CURSOR_CONTEXT_COMPONENT_IDS[category.id]
+      : "other";
+    values.set(id, (values.get(id) || 0) + estimatedTokens);
+  }
+  if (values.size === 0) return undefined;
+
+  const totalEstimatedTokens = optionalNonNegativeInt(breakdown.totalUsedTokens);
+  const contextLimit =
+    optionalNonNegativeInt(breakdown.maxTokens) ??
+    optionalNonNegativeInt(composer.contextTokenLimit);
+  return {
+    source: "cursor-prompt-token-breakdown",
+    scope: "latest-snapshot",
+    components: [...values].map(([id, estimatedTokens]) => ({ id, estimatedTokens })),
+    ...(totalEstimatedTokens !== undefined ? { totalEstimatedTokens } : {}),
+    ...(contextLimit !== undefined ? { contextLimit } : {}),
+  };
+}
+
 function maxIsoTimestamp(values: Array<unknown>): string | undefined {
   let maxMs: number | undefined;
   for (const value of values) {
@@ -1028,6 +1080,17 @@ function toNonNegativeInt(value: unknown): number {
     if (Number.isFinite(parsed) && parsed >= 0) return Math.round(parsed);
   }
   return 0;
+}
+
+function optionalNonNegativeInt(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return Math.round(value);
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 0) return Math.round(parsed);
+  }
+  return undefined;
 }
 
 function toPositiveMs(value: unknown): number | undefined {
@@ -2869,6 +2932,8 @@ function mergeCursorParseResults(
   const mergedCompactions = mergeCursorCompactions(primary.compactions, enrichment.compactions);
   const mergedTokenUsage = primary.tokenUsage || enrichment.tokenUsage;
   const mergedTokenUsageByModel = primary.tokenUsageByModel || enrichment.tokenUsageByModel;
+  const mergedContextBreakdown = primary.contextBreakdown || enrichment.contextBreakdown;
+  const mergedContextLimit = primary.contextLimit ?? enrichment.contextLimit;
   const mergedTotalDurationMs =
     (preferEnrichmentDuration ? enrichment.totalDurationMs : undefined) ||
     primary.totalDurationMs ||
@@ -2888,6 +2953,8 @@ function mergeCursorParseResults(
     (!!mergedModel && mergedModel !== primary.model) ||
     mergedDuration ||
     mergedTokens ||
+    (!primary.contextBreakdown && !!enrichment.contextBreakdown) ||
+    (primary.contextLimit === undefined && enrichment.contextLimit !== undefined) ||
     (!!enrichment.gitBranch && !primary.gitBranch) ||
     (!!enrichment.gitBranches?.length && !primary.gitBranches?.length) ||
     (!!enrichment.prLinks?.length && !primary.prLinks?.length) ||
@@ -2926,6 +2993,8 @@ function mergeCursorParseResults(
     ...(mergedTotalDurationMs !== undefined ? { totalDurationMs: mergedTotalDurationMs } : {}),
     ...(mergedTokenUsage ? { tokenUsage: mergedTokenUsage } : {}),
     ...(mergedTokenUsageByModel ? { tokenUsageByModel: mergedTokenUsageByModel } : {}),
+    ...(mergedContextBreakdown ? { contextBreakdown: mergedContextBreakdown } : {}),
+    ...(mergedContextLimit !== undefined ? { contextLimit: mergedContextLimit } : {}),
     ...(mergedTurnStats ? { turnStats: mergedTurnStats } : {}),
     ...(mergedCompactions ? { compactions: mergedCompactions } : {}),
     ...(primary.gitBranch ? {} : enrichment.gitBranch ? { gitBranch: enrichment.gitBranch } : {}),
@@ -3470,6 +3539,7 @@ async function parseCursorGlobalStateDb(
     const prLinks = extractCursorPrLinks(bubbleEntries);
     const apiErrors = extractCursorApiErrors(bubbleEntries);
     const contextSummary = extractCursorContextSummary(bubbleEntries, requestContexts);
+    const contextBreakdown = cursorContextBreakdown(composer);
     const checkpointCount = await countCursorCheckpointEntries(resolvedGlobalStateDb, sessionId);
 
     const notes = ["cursorDiskKV keys: composerData:* + bubbleId:*"];
@@ -3490,6 +3560,9 @@ async function parseCursorGlobalStateDb(
       notes.push(
         "Cursor persisted a conversation summary; compaction count is a lower bound because older summaries may be overwritten.",
       );
+    }
+    if (contextBreakdown) {
+      notes.push("Context composition is Cursor's latest provider-estimated snapshot.");
     }
     if (metrics.totalDurationMs !== undefined) {
       notes.push(
@@ -3556,6 +3629,10 @@ async function parseCursorGlobalStateDb(
       ...(metrics.tokenUsage ? { tokenUsage: metrics.tokenUsage } : {}),
       ...(metrics.tokenUsageByModel ? { tokenUsageByModel: metrics.tokenUsageByModel } : {}),
       ...(metrics.turnStats ? { turnStats: metrics.turnStats } : {}),
+      ...(contextBreakdown ? { contextBreakdown } : {}),
+      ...(contextBreakdown?.contextLimit !== undefined
+        ? { contextLimit: contextBreakdown.contextLimit }
+        : {}),
       ...(compactions ? { compactions } : {}),
       ...(branchMeta.gitBranch ? { gitBranch: branchMeta.gitBranch } : {}),
       ...(branchMeta.gitBranches ? { gitBranches: branchMeta.gitBranches } : {}),
@@ -3757,6 +3834,7 @@ export const __testables = {
   extractCursorApiErrors,
   loadAgentKvBlobMessages,
   cursorComposerSidecarMetadata,
+  cursorContextBreakdown,
   composerHeaderBubbleIds,
   cursorCompactionCount,
   cursorCompactions,

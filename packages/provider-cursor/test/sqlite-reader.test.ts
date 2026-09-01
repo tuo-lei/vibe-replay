@@ -98,6 +98,63 @@ describe("Cursor compaction metadata", () => {
   });
 });
 
+describe("Cursor context composition metadata", () => {
+  it("maps the provider token snapshot into privacy-safe context categories", () => {
+    expect(
+      __testables.cursorContextBreakdown({
+        contextTokenLimit: 200_000,
+        promptTokenBreakdown: {
+          totalUsedTokens: 42_000,
+          maxTokens: 180_000,
+          categories: [
+            { id: "system_prompt", label: "System prompt", estimatedTokens: 3_000 },
+            { id: "tools", label: "Tool definitions", estimatedTokens: 9_000 },
+            { id: "mcp", label: "Private provider label", estimatedTokens: 2_500 },
+            { id: "future_category", label: "Private future label", estimatedTokens: 50 },
+            { id: "__proto__", label: "Prototype key", estimatedTokens: 25 },
+            { id: "toString", label: "Inherited key", estimatedTokens: 25 },
+          ],
+        },
+      }),
+    ).toEqual({
+      source: "cursor-prompt-token-breakdown",
+      scope: "latest-snapshot",
+      totalEstimatedTokens: 42_000,
+      contextLimit: 180_000,
+      components: [
+        { id: "system-prompt", estimatedTokens: 3_000 },
+        { id: "tool-definitions", estimatedTokens: 9_000 },
+        { id: "mcp-tool-definitions", estimatedTokens: 2_500 },
+        { id: "other", estimatedTokens: 100 },
+      ],
+    });
+  });
+
+  it("does not retain provider labels or malformed category values", () => {
+    const breakdown = __testables.cursorContextBreakdown({
+      promptTokenBreakdown: {
+        categories: [
+          { id: "tools", label: "Private tool label", estimatedTokens: -1 },
+          { id: "rules", label: "Private rules label", estimatedTokens: "invalid" },
+        ],
+      },
+    });
+
+    expect(breakdown).toBeUndefined();
+  });
+
+  it("preserves a provider-reported zero context limit", () => {
+    expect(
+      __testables.cursorContextBreakdown({
+        promptTokenBreakdown: {
+          maxTokens: 0,
+          categories: [{ id: "conversation", estimatedTokens: 10 }],
+        },
+      })?.contextLimit,
+    ).toBe(0);
+  });
+});
+
 describe("Cursor timestamp normalization", () => {
   it("does not treat request-relative timing as a 1970 session timestamp", () => {
     expect(
@@ -1344,6 +1401,65 @@ describe("cursor sqlite metrics helpers", () => {
 
     expect(merged.totalDurationMs).toBe(4200);
     expect(merged.turnStats?.[0]?.durationMs).toBe(4200);
+  });
+
+  it("merges global-state context composition into store-backed sessions", () => {
+    const contextBreakdown = {
+      source: "cursor-prompt-token-breakdown" as const,
+      scope: "latest-snapshot" as const,
+      totalEstimatedTokens: 42_000,
+      contextLimit: 180_000,
+      components: [{ id: "conversation" as const, estimatedTokens: 30_000 }],
+    };
+    const merged = __testables.mergeCursorParseResults(
+      {
+        sessionId: "sess-context",
+        slug: "sess-context",
+        cwd: "/workspace/project",
+        turns: [{ role: "user", blocks: [{ type: "text", text: "prompt" }] }],
+        dataSource: "sqlite",
+      },
+      {
+        sessionId: "sess-context",
+        slug: "sess-context",
+        cwd: "/workspace/project",
+        turns: [],
+        dataSource: "global-state",
+        contextBreakdown,
+        contextLimit: 180_000,
+      },
+    );
+
+    expect(merged.contextBreakdown).toEqual(contextBreakdown);
+    expect(merged.contextLimit).toBe(180_000);
+  });
+
+  it("preserves an explicitly reported zero context limit", () => {
+    const contextBreakdown = {
+      source: "cursor-prompt-token-breakdown" as const,
+      scope: "latest-snapshot" as const,
+      contextLimit: 0,
+      components: [{ id: "conversation" as const, estimatedTokens: 10 }],
+    };
+    const merged = __testables.mergeCursorParseResults(
+      {
+        sessionId: "sess-zero-limit",
+        slug: "sess-zero-limit",
+        cwd: "/workspace/project",
+        contextLimit: 0,
+        turns: [],
+      },
+      {
+        sessionId: "sess-zero-limit",
+        slug: "sess-zero-limit",
+        cwd: "/workspace/project",
+        contextLimit: 180_000,
+        contextBreakdown,
+        turns: [],
+      },
+    );
+
+    expect(merged.contextLimit).toBe(0);
   });
 
   it("does not add enrichment notes when primary metadata already exists", () => {

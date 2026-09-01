@@ -1,4 +1,5 @@
 import type {
+  ContextBreakdown,
   CursorSidecars,
   DataSource,
   DataSourceInfo,
@@ -18,7 +19,7 @@ import type {
   UsageCoverageReport,
 } from "@vibe-replay/types";
 
-export type { DataSource, DataSourceInfo, SessionLocation, TokenUsage };
+export type { ContextBreakdown, DataSource, DataSourceInfo, SessionLocation, TokenUsage };
 export type { SessionDiagnostic };
 export type { SessionTranscriptStatus };
 export type {
@@ -319,6 +320,8 @@ export interface ProviderParseResult {
   turnStats?: TurnStat[];
   /** Provider-reported context window limit for the primary model, if available */
   contextLimit?: number;
+  /** Aggregate context composition with all underlying content omitted. */
+  contextBreakdown?: ContextBreakdown;
   /** Provider/session diagnostic events, kept separate from ordinary API errors. */
   diagnostics?: SessionDiagnostic[];
   /** Limitations or quality notes for interpreting diagnostic events. */

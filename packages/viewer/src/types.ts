@@ -2,6 +2,9 @@
 export { INSIGHTS_SCHEMA_VERSION, REPLAY_SCHEMA_VERSION } from "@vibe-replay/types";
 export type {
   Annotation,
+  ContextBreakdown,
+  ContextComponentId,
+  ContextComponentUsage,
   DataSource,
   DataSourceInfo,
   FileDiff,
@@ -53,6 +56,7 @@ export interface SessionSummary {
   startTime: string;
   endTime?: string;
   stats: ReplaySession["meta"]["stats"];
+  contextBreakdown?: ReplaySession["meta"]["contextBreakdown"];
   compactionCount?: number;
   diagnostics?: SessionDiagnostic[];
   diagnosticNotes?: string[];

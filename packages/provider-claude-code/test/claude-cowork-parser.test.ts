@@ -129,6 +129,90 @@ describe("parseClaudeCoworkSession", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
+  it("summarizes Cowork system and enabled MCP definitions without retaining content", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-cowork-context-"));
+    const sessionDir = join(tempDir, "local_session");
+    await mkdir(sessionDir, { recursive: true });
+    const systemPrompt = "Private system prompt ✓";
+    const enabledTool = {
+      name: "search",
+      description: "Private search description",
+      inputSchema: {
+        type: "object",
+        properties: { query: { type: "string", description: "Private query hint" } },
+      },
+      enabledKey: "server-1:search",
+      annotations: { readOnlyHint: true },
+    };
+    await writeFile(
+      `${sessionDir}.json`,
+      JSON.stringify({
+        sessionId: "local_session",
+        systemPrompt,
+        enabledMcpTools: { "server-1:search": true, "server-1:write": false },
+        remoteMcpServersConfig: [
+          {
+            uuid: "server-1",
+            name: "Example",
+            tools: [
+              enabledTool,
+              {
+                name: "write",
+                description: "Disabled write description",
+                inputSchema: { type: "object" },
+                enabledKey: "server-1:write",
+              },
+            ],
+          },
+        ],
+      }),
+      "utf-8",
+    );
+    const auditPath = join(sessionDir, "audit.jsonl");
+    await writeFile(
+      auditPath,
+      JSON.stringify({
+        type: "assistant",
+        session_id: "session",
+        _audit_timestamp: "2026-01-01T00:00:00.000Z",
+        message: { role: "assistant", content: [{ type: "text", text: "hi" }] },
+      }),
+      "utf-8",
+    );
+
+    try {
+      const result = await parseClaudeCoworkSession(auditPath);
+      const definition = {
+        name: enabledTool.name,
+        description: enabledTool.description,
+        inputSchema: enabledTool.inputSchema,
+      };
+      expect(result.contextBreakdown).toEqual({
+        source: "claude-cowork-metadata",
+        scope: "session-metadata",
+        components: [
+          {
+            id: "system-prompt",
+            contentBytes: Buffer.byteLength(systemPrompt),
+            itemCount: 1,
+          },
+          {
+            id: "mcp-tool-definitions",
+            contentBytes: Buffer.byteLength(JSON.stringify(definition)),
+            itemCount: 1,
+            availableItemCount: 2,
+            descriptionBytes: Buffer.byteLength(enabledTool.description),
+            schemaBytes: Buffer.byteLength(JSON.stringify(enabledTool.inputSchema)),
+          },
+        ],
+      });
+      expect(JSON.stringify(result.contextBreakdown)).not.toContain("Private");
+      expect(JSON.stringify(result.contextBreakdown)).not.toContain("query hint");
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("skips Cowork replay echo user messages when the original is present", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "vibe-replay-cowork-replay-echo-"));
     const auditPath = join(tempDir, "audit.jsonl");

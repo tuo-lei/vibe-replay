@@ -2,6 +2,21 @@ import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
+/** UTF-8 byte size without retaining or exposing the underlying content. */
+export function utf8ByteLength(value: string): number {
+  return Buffer.byteLength(value, "utf-8");
+}
+
+/** UTF-8 byte size of a JSON payload. Unserializable values report zero. */
+export function jsonByteLength(value: unknown): number {
+  try {
+    const serialized = JSON.stringify(value);
+    return serialized === undefined ? 0 : utf8ByteLength(serialized);
+  } catch {
+    return 0;
+  }
+}
+
 /** Replace an OS home-directory prefix with `~` for display. */
 export function shortenPath(
   path: string,

@@ -98,6 +98,11 @@ describe("scanResultToInsight", () => {
             attribution: "explicit",
           },
         ],
+        contextBreakdown: {
+          source: "codex-rollout",
+          scope: "session-metadata",
+          components: [{ id: "system-prompt", contentBytes: 2048, itemCount: 1 }],
+        },
       }),
     );
 
@@ -116,6 +121,11 @@ describe("scanResultToInsight", () => {
       skillsUsed: ["replay"],
       usageSummary: { tools: { Read: 1 }, skills: { replay: 1 } },
       usageEvents: [{ kind: "tool", name: "Read", status: "success" }],
+      contextBreakdown: {
+        source: "codex-rollout",
+        scope: "session-metadata",
+        components: [{ id: "system-prompt", contentBytes: 2048, itemCount: 1 }],
+      },
       filesModified: [{ file: "src/app.ts", count: 1 }],
       dataSource: "jsonl",
     });

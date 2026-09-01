@@ -1,3 +1,5 @@
+import type { ContextBreakdown, ContextComponentId } from "../types";
+
 export interface TurnDurationHistogramData {
   buckets: Array<{ label: string; count: number; pct: number }>;
   percentiles: { p50Ms: number; p75Ms: number; p90Ms: number };
@@ -116,6 +118,131 @@ function formatTokenCount(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
   if (value >= 1_000) return `${Math.floor(value / 1_000)}k`;
   return value.toString();
+}
+
+function formatBytes(value: number): string {
+  if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MiB`;
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KiB`;
+  return `${value} B`;
+}
+
+const CONTEXT_COMPONENTS: Record<ContextComponentId, { label: string; color: string }> = {
+  "system-prompt": { label: "System prompt", color: "bg-terminal-blue" },
+  "developer-context": { label: "Developer context", color: "bg-terminal-purple" },
+  "tool-definitions": { label: "Tool definitions", color: "bg-terminal-tool" },
+  rules: { label: "Rules", color: "bg-terminal-green" },
+  skills: { label: "Skills", color: "bg-terminal-response" },
+  "mcp-tool-definitions": { label: "MCP & dynamic tools", color: "bg-terminal-orange" },
+  "subagent-definitions": { label: "Subagent definitions", color: "bg-terminal-thinking" },
+  "summarized-conversation": {
+    label: "Summarized conversation",
+    color: "bg-terminal-context-emphasis",
+  },
+  conversation: { label: "Conversation", color: "bg-terminal-context" },
+  other: { label: "Other", color: "bg-terminal-dimmer" },
+};
+
+function contextBreakdownNote(scope: ContextBreakdown["scope"]): string {
+  if (scope === "latest-snapshot") {
+    return "Provider-estimated latest context snapshot; this is not cumulative token usage.";
+  }
+  if (scope === "observed") {
+    return "Observed descriptor payloads only; tools that were never discovered may be missing.";
+  }
+  return "UTF-8 size from persisted session metadata; bytes are not model-token counts.";
+}
+
+export function ContextBreakdownChart({ breakdown }: { breakdown: ContextBreakdown }) {
+  const components = Array.isArray(breakdown.components) ? breakdown.components : [];
+  const useTokens = components.some((component) => component.estimatedTokens !== undefined);
+  const items = components
+    .map((component) => {
+      const presentation = CONTEXT_COMPONENTS[component.id] || CONTEXT_COMPONENTS.other;
+      return {
+        ...component,
+        ...presentation,
+        value: useTokens ? component.estimatedTokens : component.contentBytes,
+      };
+    })
+    .filter((component) => component.value !== undefined);
+  if (items.length === 0) return null;
+
+  const componentTotal = items.reduce((sum, component) => sum + (component.value || 0), 0);
+  const total = useTokens ? (breakdown.totalEstimatedTokens ?? componentTotal) : componentTotal;
+  const formatValue = useTokens ? formatTokenCount : formatBytes;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between text-[10px] font-mono text-terminal-dimmer">
+        <span>{breakdown.scope === "latest-snapshot" ? "Latest snapshot" : "Recorded size"}</span>
+        <span className="font-bold text-terminal-text">
+          {formatValue(total)} {useTokens ? "tokens" : ""}
+          {useTokens && breakdown.contextLimit
+            ? ` / ${formatTokenCount(breakdown.contextLimit)}`
+            : ""}
+        </span>
+      </div>
+      {componentTotal > 0 && (
+        <div className="h-3 rounded-full bg-terminal-surface-2 overflow-hidden flex">
+          {items
+            .filter((item) => (item.value || 0) > 0)
+            .map((item) => (
+              <div
+                key={item.id}
+                className={`h-full ${item.color} transition-all duration-500`}
+                style={{ width: `${((item.value || 0) / componentTotal) * 100}%`, opacity: 0.7 }}
+              />
+            ))}
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
+        {items.map((item) => {
+          const pct = componentTotal > 0 ? ((item.value || 0) / componentTotal) * 100 : 0;
+          const count = item.itemCount;
+          const available = item.availableItemCount;
+          return (
+            <div key={item.id} className="min-w-0">
+              <div className="flex items-center gap-1.5">
+                <div className={`h-2 w-2 shrink-0 rounded-sm ${item.color}`} />
+                <span className="truncate text-[10px] font-mono text-terminal-dim">
+                  {item.label}
+                </span>
+              </div>
+              <div className="mt-0.5 text-[11px] font-mono text-terminal-text tabular-nums">
+                {formatValue(item.value || 0)}
+                <span className="ml-1 text-[9px] text-terminal-dimmer">
+                  {pct > 0 && pct < 0.1 ? "<0.1%" : `${Math.round(pct)}%`}
+                </span>
+              </div>
+              {count !== undefined && (
+                <div className="text-[9px] font-mono text-terminal-dimmer">
+                  {count.toLocaleString()} item{count === 1 ? "" : "s"}
+                  {available !== undefined && available !== count
+                    ? ` / ${available.toLocaleString()} available`
+                    : ""}
+                </div>
+              )}
+              {(item.descriptionBytes !== undefined || item.schemaBytes !== undefined) && (
+                <div className="text-[9px] font-mono text-terminal-dimmer">
+                  {item.descriptionBytes !== undefined
+                    ? `${formatBytes(item.descriptionBytes)} descriptions`
+                    : ""}
+                  {item.descriptionBytes !== undefined && item.schemaBytes !== undefined
+                    ? " · "
+                    : ""}
+                  {item.schemaBytes !== undefined ? `${formatBytes(item.schemaBytes)} schemas` : ""}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div className="text-[9px] font-mono text-terminal-dimmer">
+        {contextBreakdownNote(breakdown.scope)} No prompt, description, schema, or conversation text
+        is stored in this breakdown.
+      </div>
+    </div>
+  );
 }
 
 export function TokenBreakdownChart({ breakdown }: { breakdown: TokenBreakdownData }) {

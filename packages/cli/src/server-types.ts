@@ -54,6 +54,7 @@ export interface ReplaySummary {
   startTime: string;
   endTime?: string;
   stats: ReplaySession["meta"]["stats"];
+  contextBreakdown?: ReplaySession["meta"]["contextBreakdown"];
   compactionCount?: number;
   compactions?: ReplaySession["meta"]["compactions"];
   apiErrors?: ReplaySession["meta"]["apiErrors"];

@@ -997,6 +997,51 @@ describe("Codex parser", () => {
     expect(replay.meta.stats.userPrompts).toBe(0);
   });
 
+  it("reports context sizes without retaining Codex instruction content", () => {
+    const baseInstructions = "Private base instructions";
+    const developerContext = "Private developer context";
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-04-26T10:31:00.000Z",
+          type: "session_meta",
+          payload: {
+            id: "codex-session-context-size",
+            cwd: "/Users/test/project",
+            base_instructions: { text: baseInstructions },
+          },
+        },
+        {
+          timestamp: "2026-04-26T10:31:01.000Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "developer",
+            content: [{ type: "input_text", text: developerContext }],
+          },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    expect(result.contextBreakdown).toEqual({
+      source: "codex-rollout",
+      scope: "session-metadata",
+      components: [
+        {
+          id: "system-prompt",
+          contentBytes: Buffer.byteLength(baseInstructions),
+          itemCount: 1,
+        },
+        {
+          id: "developer-context",
+          contentBytes: Buffer.byteLength(developerContext),
+          itemCount: 1,
+        },
+      ],
+    });
+    expect(JSON.stringify(result.contextBreakdown)).not.toContain("Private");
+  });
+
   it("does not align task durations against Codex context injections", () => {
     const result = parseCodexLines(
       [

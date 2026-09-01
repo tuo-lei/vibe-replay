@@ -100,12 +100,18 @@ describe("cached replay summaries", () => {
         },
         costEstimate: 0,
       },
+      contextBreakdown: {
+        source: "codex-rollout",
+        scope: "session-metadata",
+        components: [{ id: "system-prompt", contentBytes: 2048, itemCount: 1 }],
+      },
       replaySize: 100,
       replayOutdated: false,
       hasAnnotations: false,
       annotationCount: 0,
     };
     const previous = cachedReplaySummary(replay);
+    expect(previous.contextBreakdown).toEqual(replay.contextBreakdown);
     const regenerated = cachedReplaySummary({
       ...replay,
       stats: { ...replay.stats, userPrompts: 2 },

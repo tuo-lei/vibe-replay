@@ -16,7 +16,7 @@ import {
   getSessionDataQualityNotes,
   getSessionMetricQuality,
 } from "./DataQualityIndicator";
-import { TokenBreakdownChart } from "./InsightCharts";
+import { ContextBreakdownChart, TokenBreakdownChart } from "./InsightCharts";
 import { fmtNum, formatDuration, StatCard } from "./StatsPanel";
 import TurnActivityTimeline from "./TurnActivityTimeline";
 
@@ -576,6 +576,12 @@ export default function SummaryView({ session }: Props) {
                 cacheCreation: stats.tokenUsage!.cacheCreationTokens,
               }}
             />
+          </div>
+        )}
+        {meta.contextBreakdown && (
+          <div className="rounded-xl bg-terminal-surface p-4 shadow-layer-sm">
+            <div className="ui-section-title-strong mb-3">Context Composition</div>
+            <ContextBreakdownChart breakdown={meta.contextBreakdown} />
           </div>
         )}
         {hasTurnStats && (
