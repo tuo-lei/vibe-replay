@@ -23,6 +23,11 @@ const ACTIVITY_META: Record<
     textColor: "text-terminal-response",
   },
   tool: { label: "Tool execution", color: "bg-terminal-tool", textColor: "text-terminal-tool" },
+  context: {
+    label: "Compaction / context",
+    color: "bg-terminal-context",
+    textColor: "text-terminal-context",
+  },
   unknown: {
     label: "Unattributed gap",
     color: "bg-terminal-surface-2",
@@ -62,11 +67,13 @@ function intervalTitle(interval: ActivityInterval): string {
   const source =
     interval.source === "tool-duration"
       ? "provider-recorded tool duration"
-      : interval.note === "context-boundary"
-        ? "timestamp gap before context boundary; compaction duration unknown"
-        : interval.note === "unmeasured-tool"
-          ? "timestamp gap includes a tool with no recorded duration"
-          : "timestamp gap; activity role inferred";
+      : interval.note === "compaction-duration-estimate"
+        ? "timestamp gap to compaction record; duration estimated, start not persisted"
+        : interval.note === "context-boundary"
+          ? "timestamp gap before context boundary; compaction duration unknown"
+          : interval.note === "unmeasured-tool"
+            ? "timestamp gap includes a tool with no recorded duration"
+            : "timestamp gap; activity role inferred";
   const tool = interval.toolName
     ? ` · ${interval.toolName}${interval.toolCategory ? ` (${TOOL_CATEGORY_LABELS[interval.toolCategory]})` : ""}`
     : "";
@@ -85,13 +92,15 @@ function categorySummary(
 export default function TurnActivityTimeline({ scenes }: { scenes: readonly Scene[] }) {
   const descriptionId = useId();
   const timing = useMemo(() => buildActivityTiming(scenes), [scenes]);
-  const visibleKinds = useMemo(
-    () =>
-      (Object.keys(ACTIVITY_META) as TimedActivityKind[]).filter((kind) =>
-        timing.intervals.some((interval) => interval.kind === kind),
-      ),
-    [timing.intervals],
-  );
+  const visibleKinds = useMemo(() => {
+    const kinds = (Object.keys(ACTIVITY_META) as TimedActivityKind[]).filter((kind) =>
+      timing.intervals.some((interval) => interval.kind === kind),
+    );
+    if (timing.contextBoundaries.length > 0 && !kinds.includes("context")) {
+      kinds.push("context");
+    }
+    return kinds;
+  }, [timing.contextBoundaries.length, timing.intervals]);
   const toolCategorySummaries = (Object.keys(TOOL_CATEGORY_LABELS) as ToolCategory[])
     .map((category) =>
       categorySummary(
@@ -126,7 +135,7 @@ export default function TurnActivityTimeline({ scenes }: { scenes: readonly Scen
           <div className="ui-section-title-strong">Activity timeline</div>
           <p id={descriptionId} className="mt-1 text-[10px] font-mono text-terminal-dimmer">
             Timestamp gaps and provider-recorded tool runtimes, excluding user idle, left to right.
-            Gap roles are inferred; exact TTFT and compaction duration are not persisted.
+            Gap roles are inferred; compaction time is estimated from its preceding gap.
           </p>
         </div>
         {timing.totalMs > 0 && (
@@ -164,7 +173,11 @@ export default function TurnActivityTimeline({ scenes }: { scenes: readonly Scen
               style={{
                 left: `${timing.totalMs > 0 ? (boundary.elapsedMs / timing.totalMs) * 100 : 0}%`,
               }}
-              title={`${boundary.type === "compaction-summary" ? "Compaction" : "Context"} boundary; duration not persisted`}
+              title={
+                boundary.type === "compaction-summary" && boundary.durationMs !== undefined
+                  ? `Compaction boundary; ~${formatActivityDuration(boundary.durationMs)} estimated from the preceding timestamp gap`
+                  : `${boundary.type === "compaction-summary" ? "Compaction" : "Context"} boundary; duration not persisted`
+              }
             />
           ))}
         </div>
@@ -181,6 +194,7 @@ export default function TurnActivityTimeline({ scenes }: { scenes: readonly Scen
         {visibleKinds.map((kind) => {
           const meta = ACTIVITY_META[kind];
           const durationMs = totals.find((total) => total.kind === kind)?.durationMs || 0;
+          const contextMarkerOnly = kind === "context" && durationMs === 0;
           return (
             <div key={kind} className="min-w-0">
               <div className="flex items-center gap-1.5">
@@ -190,27 +204,20 @@ export default function TurnActivityTimeline({ scenes }: { scenes: readonly Scen
                 </span>
               </div>
               <div className="mt-1 text-[11px] font-mono text-terminal-text tabular-nums">
-                {formatActivityDuration(durationMs)}
-                <span className="ml-1 text-[9px] text-terminal-dimmer">
-                  {formatActivityPercent(durationMs, timing.totalMs)}
-                </span>
+                {contextMarkerOnly
+                  ? `${timing.contextBoundaries.length} marker${timing.contextBoundaries.length === 1 ? "" : "s"}`
+                  : kind === "context"
+                    ? `~${formatActivityDuration(durationMs)}`
+                    : formatActivityDuration(durationMs)}
+                {!contextMarkerOnly && (
+                  <span className="ml-1 text-[9px] text-terminal-dimmer">
+                    {formatActivityPercent(durationMs, timing.totalMs)}
+                  </span>
+                )}
               </div>
             </div>
           );
         })}
-        <div className="min-w-0">
-          <div className="flex items-center gap-1.5">
-            <span className="h-2 w-2 shrink-0 rounded-sm bg-terminal-context" />
-            <span className="truncate text-[10px] font-mono text-terminal-context">
-              Compaction / context
-            </span>
-          </div>
-          <div className="mt-1 text-[11px] font-mono text-terminal-text tabular-nums">
-            {timing.contextBoundaries.length > 0
-              ? `${timing.contextBoundaries.length} marker${timing.contextBoundaries.length === 1 ? "" : "s"}`
-              : "—"}
-          </div>
-        </div>
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
             <span className="h-2 w-2 shrink-0 rounded-sm bg-terminal-thinking" />
@@ -233,12 +240,19 @@ export default function TurnActivityTimeline({ scenes }: { scenes: readonly Scen
         {timing.remoteToolMs > 0 && (
           <span>remote tools {formatActivityDuration(timing.remoteToolMs)}</span>
         )}
+        {timing.compactionDurationMs > 0 && (
+          <span>
+            ~{formatActivityDuration(timing.compactionDurationMs)} estimated compaction time
+          </span>
+        )}
         {toolCategorySummaries.length > 0 && <span>{toolCategorySummaries.join(" · ")}</span>}
         {timing.unmeasuredToolCalls > 0 && (
           <span>{timing.unmeasuredToolCalls} tool calls without recorded duration</span>
         )}
         {timing.contextBoundaries.length > 0 && (
-          <span>{timing.contextBoundaries.length} context boundaries (marker only)</span>
+          <span>
+            {timing.contextBoundaries.length} context boundaries; exact start/end not persisted
+          </span>
         )}
       </div>
     </div>

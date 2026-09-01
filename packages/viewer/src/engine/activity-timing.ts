@@ -11,12 +11,12 @@ export type ToolScope = "local" | "remote" | "unknown";
  * role is inferred from the surrounding replay events.
  */
 export interface ActivityInterval {
-  kind: "llm-wait" | "response" | "tool" | "unknown";
+  kind: "llm-wait" | "response" | "tool" | "context" | "unknown";
   durationMs: number;
   sceneIndex: number;
   source: "timestamp-gap" | "tool-duration";
   confidence: "inferred" | "measured";
-  note?: "unmeasured-tool" | "context-boundary";
+  note?: "unmeasured-tool" | "context-boundary" | "compaction-duration-estimate";
   toolName?: string;
   toolCategory?: ToolCategory;
   toolScope?: ToolScope;
@@ -26,6 +26,8 @@ export interface ContextBoundary {
   sceneIndex: number;
   elapsedMs: number;
   type: "compaction-summary" | "context-injection";
+  /** Estimated from the preceding timestamp gap when this is a compaction. */
+  durationMs?: number;
 }
 
 export interface ToolCategoryTotal {
@@ -39,6 +41,8 @@ export interface ActivityTimingResult {
   thinkingCount: number;
   totalMs: number;
   timestampGapMs: number;
+  /** Estimated compaction time derived from timestamp gaps. */
+  compactionDurationMs: number;
   /** User-away gaps are intentionally excluded from the activity timeline. */
   excludedIdleMs: number;
   toolDurationMs: number;
@@ -179,16 +183,21 @@ function gapKind(
   previous: PreviousEvent | undefined,
   hasUnmeasuredTool: boolean,
 ): { kind: ActivityInterval["kind"] | "user-idle"; note?: ActivityInterval["note"] } {
-  if (scene.type === "compaction-summary" || scene.type === "context-injection") {
-    // The boundary timestamp proves that context changed, not how long the
-    // compaction itself took. Keep the preceding gap unattributed.
-    return { kind: "unknown", note: "context-boundary" };
-  }
   if (hasUnmeasuredTool) {
     // A gap after a tool without a provider duration may contain both tool
     // execution and the following model request. Do not call all of it LLM
     // latency or all of it local execution.
     return { kind: "unknown", note: "unmeasured-tool" };
+  }
+  if (scene.type === "compaction-summary") {
+    // Pi persists the completed compaction timestamp, but not a start event.
+    // The preceding gap is therefore useful as an estimate, not an exact
+    // compaction duration.
+    return { kind: "context", note: "compaction-duration-estimate" };
+  }
+  if (scene.type === "context-injection") {
+    // A context injection has no persisted processing interval of its own.
+    return { kind: "unknown", note: "context-boundary" };
   }
   if (scene.type === "user-prompt") return { kind: "user-idle" };
   if (previous === "assistant") return { kind: "response" };
@@ -208,6 +217,7 @@ export function buildActivityTiming(scenes: readonly Scene[]): ActivityTimingRes
   let elapsedMs = 0;
   let timestampGapMs = 0;
   let excludedIdleMs = 0;
+  let compactionDurationMs = 0;
   let toolDurationMs = 0;
   let thinkingCount = 0;
   let toolCalls = 0;
@@ -235,12 +245,14 @@ export function buildActivityTiming(scenes: readonly Scene[]): ActivityTimingRes
     if (atMs !== undefined && cursorMs !== undefined && atMs > cursorMs) {
       const durationMs = atMs - cursorMs;
       const gap = gapKind(scene, previous, hasUnmeasuredTool);
+      const compactionGapMs = gap.kind === "context" ? durationMs : undefined;
       if (gap.kind === "user-idle") {
         // Time between turns mostly measures how long the user was away from
         // the computer, not how the agent spent the session. Keep the cursor
         // moving but leave this interval out of the activity visualization.
         excludedIdleMs += durationMs;
       } else {
+        if (compactionGapMs !== undefined) compactionDurationMs += compactionGapMs;
         addInterval({
           kind: gap.kind,
           durationMs,
@@ -255,7 +267,19 @@ export function buildActivityTiming(scenes: readonly Scene[]): ActivityTimingRes
     }
 
     if (scene.type === "compaction-summary" || scene.type === "context-injection") {
-      contextBoundaries.push({ sceneIndex, elapsedMs, type: scene.type });
+      const precedingInterval = intervals.at(-1);
+      const durationMs =
+        scene.type === "compaction-summary" &&
+        precedingInterval?.sceneIndex === sceneIndex &&
+        precedingInterval.kind === "context"
+          ? precedingInterval.durationMs
+          : undefined;
+      contextBoundaries.push({
+        sceneIndex,
+        elapsedMs,
+        type: scene.type,
+        ...(durationMs !== undefined ? { durationMs } : {}),
+      });
       if (atMs !== undefined) cursorMs = Math.max(cursorMs ?? atMs, atMs);
       previous = "context";
     } else if (scene.type === "tool-call") {
@@ -302,6 +326,7 @@ export function buildActivityTiming(scenes: readonly Scene[]): ActivityTimingRes
     totalMs: elapsedMs,
     timestampGapMs,
     excludedIdleMs,
+    compactionDurationMs,
     toolDurationMs,
     toolCalls,
     recordedToolCalls,

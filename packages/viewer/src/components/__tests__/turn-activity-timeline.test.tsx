@@ -47,5 +47,6 @@ describe("TurnActivityTimeline", () => {
     expect(screen.getByText("Compaction / context")).toBeDefined();
     expect(screen.getByText(/from timestamp gaps/)).toBeDefined();
     expect(screen.getByText(/Timestamp gaps and provider-recorded tool runtimes/)).toBeDefined();
+    expect(screen.getByText(/estimated compaction time/)).toBeDefined();
   });
 });

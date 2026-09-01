@@ -35,7 +35,7 @@ describe("buildActivityTiming", () => {
     expect(result.toolCategories.test).toEqual({ durationMs: 2_000, count: 1 });
   });
 
-  it("does not pretend a context boundary has a duration", () => {
+  it("estimates compaction time from the preceding gap", () => {
     const result = buildActivityTiming([
       { type: "user-prompt", content: "Start", timestamp: timestamp(0) },
       { type: "text-response", content: "Before", timestamp: timestamp(1) },
@@ -44,15 +44,35 @@ describe("buildActivityTiming", () => {
     ]);
 
     expect(result.contextBoundaries).toEqual([
-      { sceneIndex: 2, elapsedMs: 5_000, type: "compaction-summary" },
+      { sceneIndex: 2, elapsedMs: 5_000, type: "compaction-summary", durationMs: 4_000 },
     ]);
     expect(
       result.intervals.map((interval) => [interval.kind, interval.durationMs, interval.note]),
     ).toEqual([
       ["llm-wait", 1_000, undefined],
-      ["unknown", 4_000, "context-boundary"],
+      ["context", 4_000, "compaction-duration-estimate"],
       ["llm-wait", 1_000, undefined],
     ]);
+    expect(result.compactionDurationMs).toBe(4_000);
+  });
+
+  it("keeps context injections as marker-only boundaries", () => {
+    const result = buildActivityTiming([
+      { type: "user-prompt", content: "Start", timestamp: timestamp(0) },
+      { type: "text-response", content: "Before", timestamp: timestamp(1) },
+      { type: "context-injection", content: "Injected context", timestamp: timestamp(5) },
+      { type: "text-response", content: "After", timestamp: timestamp(6) },
+    ]);
+
+    expect(result.contextBoundaries).toEqual([
+      { sceneIndex: 2, elapsedMs: 5_000, type: "context-injection" },
+    ]);
+    expect(result.compactionDurationMs).toBe(0);
+    expect(result.intervals[1]).toMatchObject({
+      kind: "unknown",
+      durationMs: 4_000,
+      note: "context-boundary",
+    });
   });
 
   it("does not double-count a gap after a tool with no recorded duration", () => {
