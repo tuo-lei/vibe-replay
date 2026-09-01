@@ -22,13 +22,13 @@ describe("scene semantic colors", () => {
     expect(sceneTone(scene({ type }))).toBe(tone);
   });
 
-  it("maps failed and truncated work to the error tone", () => {
+  it("maps failed work to error and truncated work to warning", () => {
     expect(
       sceneTone(
         scene({ type: "tool-call", toolName: "Bash", input: {}, result: "", isError: true }),
       ),
     ).toBe("error");
-    expect(sceneTone(scene({ type: "text-response", isTruncated: true }))).toBe("error");
+    expect(sceneTone(scene({ type: "text-response", isTruncated: true }))).toBe("warning");
   });
 
   it("keeps the normal context tone distinct from the error tone", () => {

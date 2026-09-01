@@ -655,16 +655,16 @@ function LiveStateCard({
     );
   }
 
-  // busy + unknown: same red pulsing UI
+  // busy + unknown: amber pulsing UI; red is reserved for failures.
   return (
     <div className="pt-10 pb-24 flex flex-col items-center justify-center select-none">
       <div className="h-px w-8 bg-terminal-border-subtle mb-5" />
-      <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-terminal-error-subtle/50 border border-terminal-error/20">
+      <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-full bg-terminal-tool-subtle/50 border border-terminal-tool/20">
         <span className="relative flex w-2 h-2">
-          <span className="absolute inline-flex h-full w-full rounded-full bg-terminal-error opacity-75 animate-ping" />
-          <span className="relative inline-flex rounded-full h-2 w-2 bg-terminal-error" />
+          <span className="absolute inline-flex h-full w-full rounded-full bg-terminal-tool opacity-75 animate-ping" />
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-terminal-tool" />
         </span>
-        <span className="text-[10px] font-mono font-bold text-terminal-error uppercase tracking-[0.25em]">
+        <span className="text-[10px] font-mono font-bold text-terminal-tool uppercase tracking-[0.25em]">
           Busy
         </span>
       </div>
@@ -1859,7 +1859,7 @@ const SceneBlock = memo(function SceneBlock({
             onHighlightClick={onHighlightClick}
           />
           {scene.isTruncated && (
-            <div className="mt-1 text-[10px] font-mono text-terminal-error/70 italic">
+            <div className="mt-1 text-[10px] font-mono text-terminal-tool/70 italic">
               Response truncated (max_tokens reached)
             </div>
           )}

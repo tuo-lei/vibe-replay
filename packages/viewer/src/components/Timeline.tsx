@@ -38,6 +38,7 @@ const TONE_PRIORITY: Record<SceneTone, number> = {
   error: 6,
   user: 5,
   tool: 4,
+  warning: 4,
   response: 3,
   context: 2,
   thinking: 1,
@@ -125,6 +126,16 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
     return dots;
   }, [scenes]);
 
+  const warningDots = useMemo(() => {
+    const dots: number[] = [];
+    for (let i = 0; i < scenes.length; i++) {
+      if (sceneTone(scenes[i]) === "warning") {
+        dots.push(((i + 0.5) / scenes.length) * 100);
+      }
+    }
+    return dots;
+  }, [scenes]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "ArrowRight" || e.key === "ArrowUp") {
@@ -160,7 +171,10 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
       tabIndex={0}
     >
       {/* Annotation, context, and error markers above timeline */}
-      {(annotationDots.length > 0 || compactionDots.length > 0 || errorDots.length > 0) && (
+      {(annotationDots.length > 0 ||
+        compactionDots.length > 0 ||
+        warningDots.length > 0 ||
+        errorDots.length > 0) && (
         <div className="relative h-2 mb-0.5">
           {annotationDots.map((pct, i) => (
             <div
@@ -195,6 +209,17 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
               style={{ left: `${pct}%`, top: "50%", transform: "translate(-50%, -50%)" }}
             />
           ))}
+          {warningDots.map((pct, i) => (
+            <div
+              key={`w-${i}`}
+              // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- styled marker dot; not an image file
+              role="img"
+              aria-label="Warning"
+              title="Warning"
+              className="absolute h-1.5 w-1.5 rounded-full bg-terminal-tool shadow-layer-sm"
+              style={{ left: `${pct}%`, top: "50%", transform: "translate(-50%, -50%)" }}
+            />
+          ))}
         </div>
       )}
       <div
@@ -223,6 +248,13 @@ export default function Timeline({ scenes, currentIndex, onSeek, annotatedScenes
           <div
             key={`el-${i}`}
             className="absolute top-0 bottom-0 w-px bg-terminal-error/70"
+            style={{ left: `${pct}%` }}
+          />
+        ))}
+        {warningDots.map((pct, i) => (
+          <div
+            key={`wl-${i}`}
+            className="absolute top-0 bottom-0 w-px bg-terminal-tool/70"
             style={{ left: `${pct}%` }}
           />
         ))}

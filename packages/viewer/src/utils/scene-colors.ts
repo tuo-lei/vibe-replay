@@ -1,7 +1,7 @@
 import type { Scene } from "../types";
 
 /** Semantic accents shared by replay cards, badges, search results, and the timeline. */
-export type SceneTone = "user" | "response" | "tool" | "context" | "thinking" | "error";
+export type SceneTone = "user" | "response" | "tool" | "context" | "thinking" | "warning" | "error";
 
 export interface SceneToneClasses {
   color: string;
@@ -52,6 +52,14 @@ export const SCENE_TONE_CLASSES: Record<SceneTone, SceneToneClasses> = {
     emphasis: "bg-terminal-thinking-emphasis",
     border: "border-terminal-thinking",
   },
+  // Warnings share the amber execution accent without implying a failure.
+  warning: {
+    color: "var(--accent-tool)",
+    text: "text-terminal-tool",
+    subtle: "bg-terminal-tool-subtle",
+    emphasis: "bg-terminal-tool-emphasis",
+    border: "border-terminal-tool",
+  },
   error: {
     color: "var(--accent-error)",
     text: "text-terminal-error",
@@ -63,7 +71,7 @@ export const SCENE_TONE_CLASSES: Record<SceneTone, SceneToneClasses> = {
 
 export function sceneTone(scene: Scene): SceneTone {
   if (scene.type === "tool-call" && scene.isError) return "error";
-  if (scene.type === "text-response" && scene.isTruncated) return "error";
+  if (scene.type === "text-response" && scene.isTruncated) return "warning";
   switch (scene.type) {
     case "user-prompt":
       return "user";
