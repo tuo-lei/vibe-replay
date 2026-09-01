@@ -197,6 +197,25 @@ describe("AiStudioPanel", () => {
     await waitFor(() => expect(authenticate).toHaveBeenCalledWith("openai", "api_key", "sk-test"));
   });
 
+  it("explains when an API key is configured by the environment", () => {
+    const actions = makeActions([provider({ authSource: "OPENAI_API_KEY" })]);
+
+    render(<AiStudioPanel {...actions} />);
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }));
+
+    const input = screen.getByLabelText("AI API key") as HTMLInputElement;
+    expect(input.value).toBe("");
+    expect(input.placeholder).toBe("Enter a new API key to replace it…");
+    expect(input.getAttribute("aria-describedby")).toBe("ai-api-key-help-openai");
+    expect(
+      screen.getByText(
+        "Using OPENAI_API_KEY. The key stays hidden; enter a new key below to replace it.",
+      ),
+    ).toBeDefined();
+    expect(screen.getByText("via OPENAI_API_KEY")).toBeDefined();
+    expect(screen.getByText("configured via OPENAI_API_KEY")).toBeDefined();
+  });
+
   it("offers cancellation while provider authentication is pending", async () => {
     let rejectAuthentication!: (reason: unknown) => void;
     const authenticate = vi.fn(
@@ -254,6 +273,36 @@ describe("AiStudioPanel", () => {
     );
   });
 
+  it("keeps a custom endpoint out of built-in API-key cards", () => {
+    const custom = provider({
+      id: "custom-openai",
+      name: "Local LiteLLM",
+      authSource: "custom endpoint",
+      custom: { baseUrl: "http://127.0.0.1:58788/v1" },
+      models: [
+        {
+          id: "local-model",
+          name: "Local model",
+          api: "openai-completions",
+          reasoning: false,
+          input: ["text"],
+        },
+      ],
+    });
+    const actions = makeActions([provider(), custom]);
+
+    render(<AiStudioPanel {...actions} />);
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }));
+
+    expect(screen.getByRole("heading", { name: "API keys" })).toBeDefined();
+    expect(screen.getAllByText("Local LiteLLM")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Use this provider" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: /Local LiteLLM.*API key/ })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Use this provider" }));
+    expect(actions.annotationActions.setAiProviderId).toHaveBeenCalledWith("custom-openai");
+  });
+
   it("filters the model picker and saves the selected model as the default", async () => {
     const saveDefault = vi.fn();
     const actions = makeActions([provider()], { saveAiSelectionAsDefault: saveDefault });
@@ -265,7 +314,7 @@ describe("AiStudioPanel", () => {
 
     expect(screen.getByRole("button", { name: /GPT Test/ })).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: /GPT Test/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Set default" }));
+    fireEvent.click(screen.getByRole("button", { name: "Set as default" }));
 
     expect(saveDefault).toHaveBeenCalledWith();
   });
@@ -300,6 +349,11 @@ describe("AiStudioPanel", () => {
 
     expect(screen.getByText("Default model")).toBeDefined();
     expect(screen.getByText("OpenAI · GPT Test")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }));
+    expect(screen.getByText("Draft model")).toBeDefined();
+    expect(screen.getByText("Default: OpenAI · GPT Test")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Use as default" })).toBeDefined();
   });
 
   it("closes the model picker before the provider modal on Escape", () => {

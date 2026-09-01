@@ -177,6 +177,49 @@ describe("useAiProviderSettings", () => {
     expect(result.current.aiProviderId).toBe("custom-openai");
   });
 
+  it("does not silently choose the first model when switching providers", async () => {
+    const secondProvider = {
+      ...providers[0],
+      id: "second-provider",
+      name: "Second Provider",
+      models: [
+        {
+          id: "second-first",
+          name: "Second first",
+          api: "openai-completions",
+          reasoning: false,
+          input: ["text"],
+        },
+        {
+          id: "second-default",
+          name: "Second default",
+          api: "openai-completions",
+          reasoning: false,
+          input: ["text"],
+        },
+      ],
+    };
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          providers: [providers[0], secondProvider],
+          defaultProvider: { id: "custom-openai", modelId: "model-a" },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    const { result } = renderHook(() => useAiProviderSettings(true));
+    await waitFor(() => expect(result.current.aiModelId).toBe("model-a"));
+
+    act(() => result.current.setAiProviderId?.("second-provider"));
+    expect(result.current.aiProviderId).toBe("second-provider");
+    expect(result.current.aiModelId).toBeNull();
+
+    act(() => result.current.setAiProviderId?.("custom-openai"));
+    expect(result.current.aiModelId).toBe("model-a");
+  });
+
   it("does not let an older refresh replace a newer provider catalog", async () => {
     let resolveFirst!: (response: Response) => void;
     let resolveSecond!: (response: Response) => void;

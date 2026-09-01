@@ -38,6 +38,10 @@ function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
+function authSourceLabel(source?: string): string {
+  return source === "stored credential" ? "saved key" : source || "API key";
+}
+
 function providerStatus(provider: AiProviderInfo, method?: AiAuthMethodInfo["type"]): string {
   if (!provider.configured || (method && provider.authType !== method)) return "not configured";
   if (provider.authType === "oauth") {
@@ -45,7 +49,28 @@ function providerStatus(provider: AiProviderInfo, method?: AiAuthMethodInfo["typ
       ? "subscription / OAuth"
       : "OAuth";
   }
-  return provider.authSource || "API key";
+  return provider.authSource
+    ? `configured via ${authSourceLabel(provider.authSource)}`
+    : "configured";
+}
+
+function providerCardStatus(provider: AiProviderInfo, method: AiAuthMethodInfo): string {
+  if (!provider.configured || provider.authType !== method.type) return "setup";
+  if (method.type === "api_key" && provider.authSource) {
+    return `via ${authSourceLabel(provider.authSource)}`;
+  }
+  return "configured";
+}
+
+function apiKeyHelpText(provider: AiProviderInfo): string | null {
+  if (!provider.configured || provider.authType !== "api_key") return null;
+  if (provider.authSource === "stored credential") {
+    return "A saved key is available, but it stays hidden. Enter a new key below to replace it.";
+  }
+  if (provider.authSource) {
+    return `Using ${provider.authSource}. The key stays hidden; enter a new key below to replace it.`;
+  }
+  return "A key is configured, but it stays hidden. Enter a new key below to replace it.";
 }
 
 function authMethodKind(method: AiAuthMethodInfo): string {
@@ -96,7 +121,7 @@ function ProviderAuthCard({
               configured ? "text-terminal-green" : "text-terminal-orange"
             }`}
           >
-            {configured ? "ready" : "setup"}
+            {providerCardStatus(provider, method)}
           </span>
         </div>
         <div className="mt-1 text-[10px] font-mono text-terminal-dimmer">
@@ -317,6 +342,8 @@ function ProviderModelSelection({
   disabled,
   saveAiSelectionAsDefault,
   isDefault,
+  defaultProvider,
+  defaultModel,
 }: {
   provider: AiProviderInfo;
   authConfigured: boolean;
@@ -326,13 +353,24 @@ function ProviderModelSelection({
   disabled: boolean;
   saveAiSelectionAsDefault: (() => void) | null;
   isDefault: boolean;
+  defaultProvider: AiProviderInfo | null;
+  defaultModel: AiModelInfo | null;
 }) {
   if (provider.models.length === 0) return null;
 
   return authConfigured ? (
     <div className="border-t border-terminal-border-subtle pt-3">
       <div className="flex items-center gap-2">
-        <span className="shrink-0 text-[10px] font-mono text-terminal-dim">Model</span>
+        <div className="min-w-0 shrink-0">
+          <div className="text-[10px] font-mono text-terminal-dim">
+            {isDefault ? "Default model" : "Draft model"}
+          </div>
+          {!isDefault && defaultProvider && defaultModel && (
+            <div className="mt-0.5 max-w-56 truncate text-[9px] font-mono text-terminal-dimmer">
+              Default: {defaultProvider.name} · {defaultModel.name || defaultModel.id}
+            </div>
+          )}
+        </div>
         <ModelPicker
           models={provider.models}
           value={modelId || ""}
@@ -350,7 +388,7 @@ function ProviderModelSelection({
                 : "bg-terminal-surface-2 text-terminal-dim hover:bg-terminal-purple-subtle hover:text-terminal-purple"
             }`}
           >
-            {isDefault ? "Default" : "Set default"}
+            {isDefault ? "Default" : defaultModel ? "Use as default" : "Set as default"}
           </button>
         )}
       </div>
@@ -411,16 +449,19 @@ export function AiProviderSettings({
   } | null>(null);
 
   const selectedProvider = providers.find((provider) => provider.id === providerId) || null;
-  const apiKeyProviders = providers.filter((provider) =>
-    provider.authMethods.some((method) => method.type === "api_key"),
+  const customProvider = providers.find((provider) => provider.id === "custom-openai") || null;
+  const apiKeyProviders = providers.filter(
+    (provider) =>
+      provider.id !== "custom-openai" &&
+      provider.authMethods.some((method) => method.type === "api_key"),
   );
   const accountProviders = providers.filter((provider) =>
     provider.authMethods.some((method) => method.type === "oauth"),
   );
-  const customProvider = providers.find((provider) => provider.id === "custom-openai") || null;
   const defaultProvider = providers.find((provider) => provider.id === defaultAiProviderId) || null;
   const defaultModel =
     defaultProvider?.models.find((model) => model.id === defaultAiModelId) || null;
+  const customProviderSelected = selectedProvider?.id === "custom-openai";
   const selectionLocked = busy || authRunning || customRunning;
 
   useEffect(() => {
@@ -571,6 +612,8 @@ export function AiProviderSettings({
     if (provider.id === "custom-openai") return null;
     const authConfigured = provider.configured && provider.authType === method.type;
     const status = providerStatus(provider, method.type);
+    const apiKeyHint = apiKeyHelpText(provider);
+    const apiKeyHintId = `ai-api-key-help-${provider.id}`;
 
     return (
       <div className="space-y-3">
@@ -588,26 +631,41 @@ export function AiProviderSettings({
         </div>
 
         {method.type === "api_key" && (
-          <div className="flex gap-2">
-            <input
-              aria-label="AI API key"
-              name={`ai-api-key-${provider.id}`}
-              type="password"
-              value={apiKey}
-              onChange={(event) => setApiKey(event.target.value)}
-              placeholder={authConfigured ? "Enter a new API key…" : "Paste API key…"}
-              autoComplete="off"
-              disabled={selectionLocked}
-              className={`min-w-0 flex-1 ${INPUT_CLASS}`}
-            />
-            <button
-              type="button"
-              onClick={() => (authRunning ? cancelAiAuthentication?.() : void handleAuthenticate())}
-              disabled={busy || (authRunning ? !cancelAiAuthentication : !apiKey.trim())}
-              className="shrink-0 cursor-pointer rounded-lg bg-terminal-purple-subtle px-2.5 py-1.5 text-[10px] font-mono font-semibold text-terminal-purple transition-colors hover:bg-terminal-purple/20 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-purple/60"
-            >
-              {authRunning ? "Cancel" : "Save key"}
-            </button>
+          <div className="space-y-2">
+            {apiKeyHint && (
+              <p
+                id={apiKeyHintId}
+                className="text-[10px] font-mono leading-relaxed text-terminal-dimmer"
+              >
+                {apiKeyHint}
+              </p>
+            )}
+            <div className="flex gap-2">
+              <input
+                aria-describedby={apiKeyHint ? apiKeyHintId : undefined}
+                aria-label="AI API key"
+                name={`ai-api-key-${provider.id}`}
+                type="password"
+                value={apiKey}
+                onChange={(event) => setApiKey(event.target.value)}
+                placeholder={
+                  authConfigured ? "Enter a new API key to replace it…" : "Paste API key…"
+                }
+                autoComplete="off"
+                disabled={selectionLocked}
+                className={`min-w-0 flex-1 ${INPUT_CLASS}`}
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  authRunning ? cancelAiAuthentication?.() : void handleAuthenticate()
+                }
+                disabled={busy || (authRunning ? !cancelAiAuthentication : !apiKey.trim())}
+                className="shrink-0 cursor-pointer rounded-lg bg-terminal-purple-subtle px-2.5 py-1.5 text-[10px] font-mono font-semibold text-terminal-purple transition-colors hover:bg-terminal-purple/20 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-purple/60"
+              >
+                {authRunning ? "Cancel" : "Save key"}
+              </button>
+            </div>
           </div>
         )}
 
@@ -663,6 +721,8 @@ export function AiProviderSettings({
           disabled={selectionLocked}
           saveAiSelectionAsDefault={saveAiSelectionAsDefault}
           isDefault={providerId === defaultAiProviderId && modelId === defaultAiModelId}
+          defaultProvider={defaultProvider}
+          defaultModel={defaultModel}
         />
       </div>
     );
@@ -675,9 +735,10 @@ export function AiProviderSettings({
           <h2 className="text-lg font-sans font-semibold text-terminal-text">AI providers</h2>
           <p className="mt-1 max-w-2xl text-[10px] font-sans leading-relaxed text-terminal-dim">
             Configure built-in providers or connect an OpenAI-compatible gateway. API keys and
-            account sign-ins are shown separately; credentials stay in the local store and are never
-            included in provider metadata. The default model is shown below and is shared by Ask
-            Replay and AI Studio.
+            account sign-ins are shown separately. Stored credentials stay in the local store;
+            environment-provided keys are detected but never displayed. Neither is included in
+            provider metadata. The default model is shown below and is shared by Ask Replay and AI
+            Studio.
           </p>
         </div>
         {refreshAiProviders && (
@@ -817,18 +878,51 @@ export function AiProviderSettings({
         </>
       )}
 
-      <div className="rounded-lg border border-terminal-purple/25 bg-terminal-bg p-3 space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-xs font-mono text-terminal-dim">Custom OpenAI-compatible</span>
-          {customProvider && (
-            <span className="text-[10px] font-mono text-terminal-green">configured</span>
-          )}
+      <div
+        className={`rounded-lg border bg-terminal-bg p-3 space-y-2 ${
+          customProviderSelected
+            ? "border-terminal-purple/50 bg-terminal-purple-subtle/20"
+            : "border-terminal-purple/25"
+        }`}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-xs font-mono text-terminal-dim">Custom OpenAI-compatible</div>
+            {customProvider && (
+              <div className="mt-1 truncate text-[10px] font-mono text-terminal-dimmer">
+                {customProvider.name}
+              </div>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {customProvider && (
+              <span className="text-[10px] font-mono text-terminal-green">connected</span>
+            )}
+            {customProvider && (
+              <button
+                type="button"
+                aria-pressed={customProviderSelected}
+                onClick={() => handleProviderChange("custom-openai")}
+                disabled={selectionLocked || customProviderSelected}
+                className={`cursor-pointer rounded-lg px-2 py-1 text-[10px] font-mono font-semibold transition-colors disabled:cursor-default disabled:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-purple/60 ${
+                  customProviderSelected
+                    ? "bg-terminal-purple-subtle text-terminal-purple"
+                    : "bg-terminal-surface-2 text-terminal-dim hover:bg-terminal-purple-subtle hover:text-terminal-purple"
+                }`}
+              >
+                {customProviderSelected ? "Selected" : "Use this provider"}
+              </button>
+            )}
+          </div>
         </div>
         <p className="text-[10px] font-mono leading-relaxed text-terminal-dimmer">
-          Discover models from <code>/models</code> (or <code>/model</code>) and use Chat
-          Completions. Any OpenAI-compatible gateway works — local LiteLLM / Ollama / vLLM or remote{" "}
-          <code>https://</code> endpoint. Plain <code>http://</code> is only allowed for loopback (
-          <code>127.0.0.1</code> / <code>localhost</code>).
+          {customProvider
+            ? customProviderSelected
+              ? "This connection is separate from built-in API-key providers. Choose a model below and make it the default when ready."
+              : "This connection is separate from built-in API-key providers. Select it to choose its model and make it the default."
+            : "Discover models from /models (or /model) and use Chat Completions. Any OpenAI-compatible gateway works — local LiteLLM / Ollama / vLLM or a remote HTTPS endpoint."}{" "}
+          Plain <code>http://</code> is only allowed for loopback (<code>127.0.0.1</code> /{" "}
+          <code>localhost</code>).
         </p>
         <input
           aria-label="Custom AI provider name"
@@ -896,12 +990,12 @@ export function AiProviderSettings({
             {customStatus.text}
           </div>
         )}
-        {selectedProvider?.id === "custom-openai" && (
+        {customProvider && customProviderSelected ? (
           <ProviderModelSelection
-            provider={selectedProvider}
+            provider={customProvider}
             authConfigured
             authMethod={
-              selectedProvider.authMethods[0] || {
+              customProvider.authMethods[0] || {
                 type: "api_key",
                 label: "Custom endpoint",
                 subscription: false,
@@ -912,8 +1006,14 @@ export function AiProviderSettings({
             disabled={selectionLocked}
             saveAiSelectionAsDefault={saveAiSelectionAsDefault}
             isDefault={providerId === defaultAiProviderId && modelId === defaultAiModelId}
+            defaultProvider={defaultProvider}
+            defaultModel={defaultModel}
           />
-        )}
+        ) : customProvider ? (
+          <div className="border-t border-terminal-border-subtle pt-3 text-[10px] font-mono text-terminal-dimmer">
+            Select “Use this provider” to choose a model for this endpoint.
+          </div>
+        ) : null}
       </div>
     </div>
   );
