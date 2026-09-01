@@ -62,6 +62,11 @@ function formatActivityPercent(value: number, total: number): string {
   return percent < 1 ? "<1%" : `${Math.round(percent)}%`;
 }
 
+function boundaryStyle(elapsedMs: number, totalMs: number): { left?: string; right?: number } {
+  if (totalMs <= 0 || elapsedMs >= totalMs) return { right: 0 };
+  return { left: `${Math.max(0, (elapsedMs / totalMs) * 100)}%` };
+}
+
 function intervalTitle(interval: ActivityInterval): string {
   const meta = ACTIVITY_META[interval.kind];
   const source =
@@ -125,7 +130,7 @@ export default function TurnActivityTimeline({ scenes }: { scenes: readonly Scen
         `${ACTIVITY_META[kind].label}: ${formatActivityDuration(durationMs)}`,
     ),
     `Compaction/context boundaries: ${timing.contextBoundaries.length}`,
-    `${timing.thinkingCount} thinking blocks folded into model activity`,
+    `${timing.thinkingCount} thinking blocks included in LLM wait; no separate duration persisted`,
   ].join(". ");
 
   return (
@@ -174,9 +179,7 @@ export default function TurnActivityTimeline({ scenes }: { scenes: readonly Scen
               key={`context-${boundary.sceneIndex}`}
               aria-hidden="true"
               className="absolute inset-y-0 w-0.5 bg-terminal-context"
-              style={{
-                left: `${timing.totalMs > 0 ? (boundary.elapsedMs / timing.totalMs) * 100 : 0}%`,
-              }}
+              style={boundaryStyle(boundary.elapsedMs, timing.totalMs)}
               title={
                 boundary.type === "compaction-summary" && boundary.durationMs !== undefined
                   ? `Compaction boundary; ~${formatActivityDuration(boundary.durationMs)} estimated from the preceding timestamp gap`
@@ -225,10 +228,15 @@ export default function TurnActivityTimeline({ scenes }: { scenes: readonly Scen
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
             <span className="h-2 w-2 shrink-0 rounded-sm bg-terminal-thinking" />
-            <span className="truncate text-[10px] font-mono text-terminal-thinking">Thinking</span>
+            <span
+              className="truncate text-[10px] font-mono text-terminal-thinking"
+              title="Thinking blocks are included in LLM wait; their separate wall-clock duration is not persisted."
+            >
+              Thinking blocks
+            </span>
           </div>
           <div className="mt-1 text-[11px] font-mono text-terminal-text tabular-nums">
-            {timing.thinkingCount > 0 ? `${timing.thinkingCount} folded` : "—"}
+            {timing.thinkingCount > 0 ? `${timing.thinkingCount} blocks` : "—"}
           </div>
         </div>
       </div>

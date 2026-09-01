@@ -1,5 +1,3 @@
-import { deriveTokenUsageMetrics } from "@vibe-replay/types";
-
 export interface TurnDurationHistogramData {
   buckets: Array<{ label: string; count: number; pct: number }>;
   percentiles: { p50Ms: number; p75Ms: number; p90Ms: number };
@@ -120,33 +118,15 @@ function formatTokenCount(value: number): string {
   return value.toString();
 }
 
-export function TokenBreakdownChart({
-  breakdown,
-  turnCount,
-}: {
-  breakdown: TokenBreakdownData;
-  /** Number of recorded turns used to calculate the optional average. */
-  turnCount?: number;
-}) {
+export function TokenBreakdownChart({ breakdown }: { breakdown: TokenBreakdownData }) {
   const total = breakdown.input + breakdown.output + breakdown.cacheRead + breakdown.cacheCreation;
   if (total === 0) return null;
-  const tokenMetrics = deriveTokenUsageMetrics({
-    inputTokens: breakdown.input,
-    outputTokens: breakdown.output,
-    cacheReadTokens: breakdown.cacheRead,
-    cacheCreationTokens: breakdown.cacheCreation,
-  });
-
   const items = TOKEN_COLORS.map((token) => ({
     ...token,
     value: breakdown[token.key],
     pct: (breakdown[token.key] / total) * 100,
   }));
   const visibleItems = items.filter((item) => item.value > 0);
-  const averagePromptPerTurn =
-    turnCount && turnCount > 0 ? tokenMetrics.promptTokens / turnCount : undefined;
-  const averageOutputPerTurn =
-    turnCount && turnCount > 0 ? breakdown.output / turnCount : undefined;
 
   return (
     <div className="space-y-3">
@@ -192,16 +172,6 @@ export function TokenBreakdownChart({
           </div>
         ))}
       </div>
-      {averagePromptPerTurn !== undefined && averageOutputPerTurn !== undefined && (
-        <div className="flex gap-3 text-[9px] font-mono text-terminal-dimmer">
-          <span title="Aggregate prompt footprint divided by recorded turns.">
-            ~{formatTokenCount(averagePromptPerTurn)} prompt/turn
-          </span>
-          <span title="Aggregate output tokens divided by recorded turns.">
-            ~{formatTokenCount(averageOutputPerTurn)} output/turn
-          </span>
-        </div>
-      )}
     </div>
   );
 }

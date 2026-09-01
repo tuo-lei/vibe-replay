@@ -83,26 +83,44 @@ const LOCAL_TOOL_NAMES = new Set([
   "glob",
   "grep",
   "ls",
+  "delete",
+  "delete_file",
   "multiedit",
+  "multi_edit",
+  "notebookedit",
+  "notebook_edit",
   "read",
+  "read_file",
   "run_in_terminal",
   "run_terminal_cmd",
   "shell",
   "terminal",
   "write",
+  "write_file",
 ]);
 
 const REMOTE_TOOL_PREFIXES = ["browser", "fetch", "http", "mcp", "search", "web"];
+const REMOTE_TOOL_NAMES = new Set(["webfetch", "websearch"]);
 
 const FILE_TOOL_NAMES = new Set([
   "apply_patch",
+  "cat",
+  "delete",
+  "delete_file",
   "edit",
   "file",
+  "find",
   "glob",
   "grep",
   "ls",
+  "multiedit",
+  "multi_edit",
+  "notebookedit",
+  "notebook_edit",
   "read",
+  "read_file",
   "write",
+  "write_file",
 ]);
 
 function emptyToolCategories(): Record<ToolCategory, ToolCategoryTotal> {
@@ -115,6 +133,19 @@ function timestampMs(scene: Scene): number | undefined {
   if (!scene.timestamp) return undefined;
   const parsed = Date.parse(scene.timestamp);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function activityStartMs(scene: Scene, atMs: number | undefined): number | undefined {
+  if (
+    scene.type === "tool-call" &&
+    scene.durationAnchor === "end" &&
+    scene.durationMs !== undefined &&
+    scene.durationMs > 0 &&
+    atMs !== undefined
+  ) {
+    return atMs - scene.durationMs;
+  }
+  return atMs;
 }
 
 function normalizedToolName(toolName: string): string {
@@ -155,7 +186,10 @@ function toolDescriptor(toolName: string, input: Record<string, any>): ToolDescr
       ...(command ? { command } : {}),
     };
   }
-  if (REMOTE_TOOL_PREFIXES.some((prefix) => name === prefix || name.startsWith(`${prefix}_`))) {
+  if (
+    REMOTE_TOOL_NAMES.has(name) ||
+    REMOTE_TOOL_PREFIXES.some((prefix) => name === prefix || name.startsWith(`${prefix}_`))
+  ) {
     return {
       category: commandCategory(toolName, input),
       scope: "remote",
@@ -183,6 +217,7 @@ function gapKind(
   previous: PreviousEvent | undefined,
   hasUnmeasuredTool: boolean,
 ): { kind: ActivityInterval["kind"] | "user-idle"; note?: ActivityInterval["note"] } {
+  if (scene.type === "user-prompt") return { kind: "user-idle" };
   if (hasUnmeasuredTool) {
     // A gap after a tool without a provider duration may contain both tool
     // execution and the following model request. Do not call all of it LLM
@@ -199,7 +234,6 @@ function gapKind(
     // A context injection has no persisted processing interval of its own.
     return { kind: "unknown", note: "context-boundary" };
   }
-  if (scene.type === "user-prompt") return { kind: "user-idle" };
   if (previous === "assistant") return { kind: "response" };
   return { kind: "llm-wait" };
 }
@@ -241,9 +275,10 @@ export function buildActivityTiming(scenes: readonly Scene[]): ActivityTimingRes
 
   for (const [sceneIndex, scene] of scenes.entries()) {
     const atMs = timestampMs(scene);
+    const startAtMs = activityStartMs(scene, atMs);
 
-    if (atMs !== undefined && cursorMs !== undefined && atMs > cursorMs) {
-      const durationMs = atMs - cursorMs;
+    if (startAtMs !== undefined && cursorMs !== undefined && startAtMs > cursorMs) {
+      const durationMs = startAtMs - cursorMs;
       const gap = gapKind(scene, previous, hasUnmeasuredTool);
       const compactionGapMs = gap.kind === "context" ? durationMs : undefined;
       if (gap.kind === "user-idle") {
@@ -262,7 +297,7 @@ export function buildActivityTiming(scenes: readonly Scene[]): ActivityTimingRes
           ...(gap.note ? { note: gap.note } : {}),
         });
       }
-      cursorMs = atMs;
+      cursorMs = startAtMs;
       hasUnmeasuredTool = false;
     }
 
@@ -289,28 +324,47 @@ export function buildActivityTiming(scenes: readonly Scene[]): ActivityTimingRes
 
       if (hasDuration) {
         const durationMs = scene.durationMs!;
-        const startMs = atMs !== undefined ? Math.max(cursorMs ?? atMs, atMs) : cursorMs;
-        addInterval({
-          kind: "tool",
-          durationMs,
-          sceneIndex,
-          source: "tool-duration",
-          confidence: "measured",
-          toolName: scene.toolName,
-          toolCategory: descriptor.category,
-          toolScope: descriptor.scope,
-        });
+        const endMs =
+          scene.durationAnchor === "end" && atMs !== undefined
+            ? atMs
+            : startAtMs !== undefined
+              ? startAtMs + durationMs
+              : undefined;
+        const representedStartMs =
+          startAtMs !== undefined ? Math.max(cursorMs ?? startAtMs, startAtMs) : undefined;
+        const representedDurationMs =
+          endMs !== undefined && representedStartMs !== undefined
+            ? Math.max(0, endMs - representedStartMs)
+            : durationMs;
+        if (representedDurationMs > 0) {
+          addInterval({
+            kind: "tool",
+            durationMs: representedDurationMs,
+            sceneIndex,
+            source: "tool-duration",
+            confidence: "measured",
+            toolName: scene.toolName,
+            toolCategory: descriptor.category,
+            toolScope: descriptor.scope,
+          });
+        }
         recordedToolCalls++;
-        addToolCategory(toolCategories, descriptor.category, durationMs);
-        if (descriptor.scope === "local") localToolMs += durationMs;
-        else if (descriptor.scope === "remote") remoteToolMs += durationMs;
-        else unknownToolMs += durationMs;
-        if (startMs !== undefined) cursorMs = startMs + durationMs;
+        addToolCategory(toolCategories, descriptor.category, representedDurationMs);
+        if (descriptor.scope === "local") localToolMs += representedDurationMs;
+        else if (descriptor.scope === "remote") remoteToolMs += representedDurationMs;
+        else unknownToolMs += representedDurationMs;
+        if (endMs !== undefined) {
+          cursorMs = Math.max(cursorMs ?? endMs, endMs);
+        } else if (cursorMs !== undefined) {
+          cursorMs += durationMs;
+        }
       } else {
         unmeasuredToolCalls++;
         hasUnmeasuredTool = true;
       }
-      if (atMs !== undefined) cursorMs = Math.max(cursorMs ?? atMs, atMs);
+      if (!hasDuration && atMs !== undefined) {
+        cursorMs = Math.max(cursorMs ?? atMs, atMs);
+      }
       previous = "tool";
     } else {
       if (scene.type === "thinking") thinkingCount++;

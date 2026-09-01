@@ -313,10 +313,8 @@ export default function SummaryView({ session }: Props) {
   }, [scenes, meta]);
 
   const hasTurnStats = meta.stats.turnStats && meta.stats.turnStats.length > 1;
-  const recordedTurnCount = useMemo(
-    () => new Set(meta.stats.turnStats?.map((turn) => turn.turnIndex)).size,
-    [meta.stats.turnStats],
-  );
+  const hasTokenUsage =
+    !!stats.tokenUsage && Object.values(stats.tokenUsage).some((value) => value > 0);
   // Build turn labels (user prompt snippets) for chart tooltips
   const turnLabels = useMemo(
     () => stats.turns.map((t) => t.text.slice(0, 60) + (t.text.length > 60 ? "…" : "")),
@@ -563,23 +561,22 @@ export default function SummaryView({ session }: Props) {
 
         {/* === Time Series Charts (grouped) === */}
         <TurnActivityTimeline scenes={scenes} />
+        {hasTokenUsage && (
+          <div className="rounded-xl bg-terminal-surface p-4 shadow-layer-sm">
+            <div className="ui-section-title-strong mb-3">Tokens</div>
+            <TokenBreakdownChart
+              breakdown={{
+                input: stats.tokenUsage!.inputTokens,
+                output: stats.tokenUsage!.outputTokens,
+                cacheRead: stats.tokenUsage!.cacheReadTokens,
+                cacheCreation: stats.tokenUsage!.cacheCreationTokens,
+              }}
+            />
+          </div>
+        )}
         {hasTurnStats && (
           <div className="space-y-5">
             <div className="ui-section-title">Per-Turn Metrics</div>
-            {stats.tokenUsage && recordedTurnCount > 0 && (
-              <div className="rounded-xl bg-terminal-surface p-4 shadow-layer-sm">
-                <div className="ui-section-title-strong mb-3">Tokens</div>
-                <TokenBreakdownChart
-                  breakdown={{
-                    input: stats.tokenUsage.inputTokens,
-                    output: stats.tokenUsage.outputTokens,
-                    cacheRead: stats.tokenUsage.cacheReadTokens,
-                    cacheCreation: stats.tokenUsage.cacheCreationTokens,
-                  }}
-                  turnCount={recordedTurnCount}
-                />
-              </div>
-            )}
             <TokenBurnCurve
               turnStats={meta.stats.turnStats!}
               costEstimate={meta.stats.costEstimate}

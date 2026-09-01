@@ -14,6 +14,7 @@ interface PendingTool {
   timestamp?: string;
   mcpServer?: string;
   mcpTool?: string;
+  durationAnchor?: "end";
 }
 
 interface ToolResult {
@@ -182,6 +183,7 @@ export function parseCodexLines(
             name: "exec_command",
             input: p.command || p.action || {},
             timestamp: obj.timestamp,
+            durationAnchor: "end",
           });
         }
         mergeToolResult(toolResults, p.call_id, {
@@ -451,6 +453,7 @@ export function parseCodexLines(
           ...(tr ? { _result: tr.result } : {}),
           ...(tr?.isError ? { _isError: true } : {}),
           ...(tr?.durationMs ? { _durationMs: tr.durationMs } : {}),
+          ...(tool.durationAnchor ? { _durationAnchor: tool.durationAnchor } : {}),
           ...(tool.mcpServer ? { _mcpServer: tool.mcpServer } : {}),
           ...(tool.mcpTool ? { _mcpTool: tool.mcpTool } : {}),
         },

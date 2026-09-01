@@ -6,16 +6,18 @@ import { TokenBreakdownChart, TurnDurationChart } from "../InsightCharts";
 afterEach(cleanup);
 
 describe("InsightCharts", () => {
-  it("shows average prompt and output tokens per recorded turn", () => {
+  it("shows a compact total and token category breakdown", () => {
     render(
       <TokenBreakdownChart
         breakdown={{ input: 100, output: 50, cacheRead: 200, cacheCreation: 10 }}
-        turnCount={2}
       />,
     );
 
-    expect(screen.getByText("~155 prompt/turn")).toBeDefined();
-    expect(screen.getByText("~25 output/turn")).toBeDefined();
+    expect(screen.getByText("Total")).toBeDefined();
+    expect(screen.getByText("Cache Read")).toBeDefined();
+    expect(screen.getByText("Cache Write")).toBeDefined();
+    expect(screen.getByText("Output")).toBeDefined();
+    expect(screen.getByText("Input (uncached)")).toBeDefined();
   });
 
   it("renders duration percentiles alongside the turn distribution", () => {

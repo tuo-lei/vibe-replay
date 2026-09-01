@@ -204,6 +204,8 @@ export type Scene =
       subAgent?: SubAgent;
       /** Tool execution duration in ms (assistant timestamp → tool_result timestamp) */
       durationMs?: number;
+      /** Whether durationMs is anchored at the tool start or result timestamp. */
+      durationAnchor?: "start" | "end";
       /**
        * Estimated tokens of the tool result that was injected back into the
        * model's context (chars/4 heuristic on the un-truncated result).

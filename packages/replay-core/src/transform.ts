@@ -255,6 +255,7 @@ export function transformToReplay(
         scene.isError = !!block._isError;
         scene.hasResult = block._hasResult ?? block._result !== undefined;
         if (block._durationMs) scene.durationMs = block._durationMs;
+        if (block._durationAnchor) scene.durationAnchor = block._durationAnchor;
         // Attach subagent data for Agent tool calls
         if (block.name === "Agent" && block._subAgent) {
           const sa = block._subAgent;
@@ -725,6 +726,7 @@ function redactSubAgentScene(s: Scene): Scene {
       timestamp: s.timestamp,
       isError: s.isError || false,
       ...(s.durationMs ? { durationMs: s.durationMs } : {}),
+      ...(s.durationAnchor ? { durationAnchor: s.durationAnchor } : {}),
       ...(resultTokens > 0 ? { resultTokens } : {}),
     };
 
