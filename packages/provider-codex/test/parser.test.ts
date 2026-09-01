@@ -182,6 +182,46 @@ describe("Codex parser", () => {
     });
   });
 
+  it("infers custom tool duration from paired call and output timestamps", () => {
+    const result = parseCodexLines(
+      [
+        {
+          timestamp: "2026-04-26T05:20:00.000Z",
+          type: "session_meta",
+          payload: { id: "codex-custom-duration", cwd: "/Users/test/project" },
+        },
+        {
+          timestamp: "2026-04-26T05:20:01.000Z",
+          type: "response_item",
+          payload: {
+            type: "custom_tool_call",
+            call_id: "custom-1",
+            name: "custom_local_tool",
+            input: { command: "pnpm test" },
+          },
+        },
+        {
+          timestamp: "2026-04-26T05:20:04.500Z",
+          type: "response_item",
+          payload: {
+            type: "custom_tool_call_output",
+            call_id: "custom-1",
+            output: "passed",
+          },
+        },
+      ].map((line) => JSON.stringify(line)),
+    );
+
+    const tool = result.turns
+      .flatMap((turn) => turn.blocks)
+      .find((block) => block.type === "tool_use");
+    expect(tool).toMatchObject({
+      type: "tool_use",
+      _durationMs: 3500,
+      _durationSource: "timestamp",
+    });
+  });
+
   it("records malformed JSONL lines as parse warnings", () => {
     const result = parseCodexLines([...lines.slice(0, 2), "{not-json", ...lines.slice(2)]);
 

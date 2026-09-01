@@ -2,9 +2,10 @@ import { useId, useMemo } from "react";
 import {
   buildActivityTiming,
   type ActivityInterval,
+  type ActivityTimingOptions,
   type ToolCategory,
 } from "../engine/activity-timing";
-import type { Scene } from "../types";
+import type { Scene, TurnStat } from "../types";
 
 type TimedActivityKind = ActivityInterval["kind"];
 
@@ -27,6 +28,11 @@ const ACTIVITY_META: Record<
     label: "Compaction / context",
     color: "bg-terminal-context",
     textColor: "text-terminal-context",
+  },
+  "agent-turn": {
+    label: "Agent turn (not split)",
+    color: "bg-terminal-surface-2",
+    textColor: "text-terminal-dim",
   },
   unknown: {
     label: "Unattributed gap",
@@ -71,14 +77,18 @@ function intervalTitle(interval: ActivityInterval): string {
   const meta = ACTIVITY_META[interval.kind];
   const source =
     interval.source === "tool-duration"
-      ? "provider-recorded tool duration"
+      ? interval.durationSource === "timestamp"
+        ? "call/output timestamp gap; duration inferred"
+        : "recorded tool duration"
       : interval.note === "compaction-duration-estimate"
         ? "timestamp gap to compaction record; duration estimated, start not persisted"
-        : interval.note === "context-boundary"
-          ? "timestamp gap before context boundary; compaction duration unknown"
-          : interval.note === "unmeasured-tool"
-            ? "timestamp gap includes a tool with no recorded duration"
-            : "timestamp gap; activity role inferred";
+        : interval.note === "provider-turn-duration"
+          ? "provider turn duration; local tool vs LLM time is not split"
+          : interval.note === "context-boundary"
+            ? "timestamp gap before context boundary; compaction duration unknown"
+            : interval.note === "unmeasured-tool"
+              ? "timestamp gap includes a tool with no recorded duration"
+              : "timestamp gap; activity role inferred";
   const tool = interval.toolName
     ? ` · ${interval.toolName}${interval.toolCategory ? ` (${TOOL_CATEGORY_LABELS[interval.toolCategory]})` : ""}`
     : "";
@@ -94,9 +104,21 @@ function categorySummary(
   return `${TOOL_CATEGORY_LABELS[category]} ${formatActivityDuration(durationMs)}`;
 }
 
-export default function TurnActivityTimeline({ scenes }: { scenes: readonly Scene[] }) {
+export default function TurnActivityTimeline({
+  scenes,
+  provider,
+  turnStats,
+}: {
+  scenes: readonly Scene[];
+  provider?: string;
+  turnStats?: readonly TurnStat[];
+}) {
   const descriptionId = useId();
-  const timing = useMemo(() => buildActivityTiming(scenes), [scenes]);
+  const timingOptions: ActivityTimingOptions = useMemo(
+    () => ({ provider, turnStats }),
+    [provider, turnStats],
+  );
+  const timing = useMemo(() => buildActivityTiming(scenes, timingOptions), [scenes, timingOptions]);
   const visibleKinds = useMemo(() => {
     const kinds = (Object.keys(ACTIVITY_META) as TimedActivityKind[]).filter((kind) =>
       timing.intervals.some((interval) => interval.kind === kind),
@@ -131,6 +153,9 @@ export default function TurnActivityTimeline({ scenes }: { scenes: readonly Scen
     ),
     `Compaction/context boundaries: ${timing.contextBoundaries.length}`,
     `${timing.thinkingCount} thinking blocks included in LLM wait; no separate duration persisted`,
+    ...(timing.timingMode === "provider-turns"
+      ? ["Only whole-turn timing is available; local tool and LLM time are not split"]
+      : []),
   ].join(". ");
 
   return (
@@ -139,8 +164,9 @@ export default function TurnActivityTimeline({ scenes }: { scenes: readonly Scen
         <div>
           <div className="ui-section-title-strong">Activity timeline</div>
           <p id={descriptionId} className="mt-1 text-[10px] font-mono text-terminal-dimmer">
-            Agent time only: user idle is excluded; prompt-to-assistant gaps are LLM wait. Other gap
-            roles are inferred; compaction time is estimated from its preceding gap.
+            {timing.timingMode === "provider-turns"
+              ? "Whole-turn timing only: local tool and LLM time cannot be split for this provider."
+              : "Agent time only: user idle is excluded; prompt-to-assistant gaps are LLM wait. Other gap roles are inferred; compaction time is estimated from its preceding gap."}
           </p>
         </div>
         {timing.totalMs > 0 && (
@@ -245,7 +271,12 @@ export default function TurnActivityTimeline({ scenes }: { scenes: readonly Scen
         <span>{timing.intervals.length} timed segments</span>
         <span>{timing.toolCalls} tool calls</span>
         <span>{formatActivityDuration(timing.timestampGapMs)} from timestamp gaps</span>
-        <span>{formatActivityDuration(timing.toolDurationMs)} provider-recorded tool time</span>
+        <span>{formatActivityDuration(timing.toolDurationMs)} recorded tool time</span>
+        {timing.timingMode === "provider-turns" && timing.providerTurnDurationMs > 0 && (
+          <span>
+            {formatActivityDuration(timing.providerTurnDurationMs)} whole-turn timing; not split
+          </span>
+        )}
         {timing.localToolMs > 0 && (
           <span>local tools {formatActivityDuration(timing.localToolMs)}</span>
         )}

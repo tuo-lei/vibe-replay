@@ -22,6 +22,7 @@ interface ToolResult {
   isError?: boolean;
   timestamp?: string;
   durationMs?: number;
+  durationSource?: "timestamp";
 }
 
 interface CodexTokenInfo {
@@ -177,6 +178,12 @@ export function parseCodexLines(
         continue;
       }
       if (p.type === "exec_command_end" && p.call_id) {
+        const existingTool = tools.get(p.call_id);
+        const explicitDurationMs = durationToMs(p.duration);
+        const inferredDurationMs =
+          explicitDurationMs === undefined && existingTool?.timestamp
+            ? durationBetweenTimestamps(existingTool.timestamp, obj.timestamp)
+            : undefined;
         if (!tools.has(p.call_id)) {
           tools.set(p.call_id, {
             id: p.call_id,
@@ -190,7 +197,11 @@ export function parseCodexLines(
           result: formatExecResult(p),
           isError: typeof p.exit_code === "number" ? p.exit_code !== 0 : undefined,
           timestamp: obj.timestamp,
-          durationMs: durationToMs(p.duration),
+          ...(explicitDurationMs !== undefined
+            ? { durationMs: explicitDurationMs }
+            : inferredDurationMs !== undefined
+              ? { durationMs: inferredDurationMs, durationSource: "timestamp" as const }
+              : {}),
         });
         continue;
       }
@@ -414,6 +425,11 @@ export function parseCodexLines(
       p.type === "tool_search_output"
     ) {
       if (p.call_id) {
+        const existingTool = tools.get(p.call_id);
+        const inferredDurationMs =
+          existingTool?.timestamp && obj.timestamp
+            ? durationBetweenTimestamps(existingTool.timestamp, obj.timestamp)
+            : undefined;
         if (!tools.has(p.call_id)) {
           // Preserve orphan completions as an unknown ordinary tool rather
           // than silently losing a concrete provider event.
@@ -430,6 +446,9 @@ export function parseCodexLines(
           {
             result: formatOutputPayload(p),
             timestamp: obj.timestamp,
+            ...(inferredDurationMs !== undefined
+              ? { durationMs: inferredDurationMs, durationSource: "timestamp" as const }
+              : {}),
           },
           { preferExistingResult: true },
         );
@@ -453,6 +472,7 @@ export function parseCodexLines(
           ...(tr ? { _result: tr.result } : {}),
           ...(tr?.isError ? { _isError: true } : {}),
           ...(tr?.durationMs ? { _durationMs: tr.durationMs } : {}),
+          ...(tr?.durationSource ? { _durationSource: tr.durationSource } : {}),
           ...(tool.durationAnchor ? { _durationAnchor: tool.durationAnchor } : {}),
           ...(tool.mcpServer ? { _mcpServer: tool.mcpServer } : {}),
           ...(tool.mcpTool ? { _mcpTool: tool.mcpTool } : {}),
@@ -755,7 +775,18 @@ function mergeToolResult(
         : next.result || previous.result,
     isError: next.isError ?? previous.isError,
     timestamp: next.timestamp || previous.timestamp,
-    durationMs: next.durationMs ?? previous.durationMs,
+    durationMs:
+      next.durationSource === "timestamp" &&
+      previous.durationMs !== undefined &&
+      previous.durationSource === undefined
+        ? previous.durationMs
+        : (next.durationMs ?? previous.durationMs),
+    durationSource:
+      next.durationSource === "timestamp" &&
+      previous.durationMs !== undefined &&
+      previous.durationSource === undefined
+        ? undefined
+        : (next.durationSource ?? previous.durationSource),
   });
 }
 
@@ -859,6 +890,13 @@ function durationToMs(duration: any): number | undefined {
   const nanos = typeof duration.nanos === "number" ? duration.nanos : 0;
   const ms = secs * 1000 + Math.round(nanos / 1_000_000);
   return ms > 0 ? ms : undefined;
+}
+
+function durationBetweenTimestamps(start: string, end: string): number | undefined {
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
+  const durationMs = endMs - startMs;
+  return durationMs > 0 && durationMs < 12 * 60 * 60 * 1000 ? durationMs : undefined;
 }
 
 function tokenUsageFromSnapshots(snapshots: CodexTokenSnapshot[]): TokenUsage | undefined {

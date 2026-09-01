@@ -2319,6 +2319,7 @@ function parseToolFormerBlock(
   const paramsRaw = parsedParams ?? toolFormerData.params ?? {};
   const result = extractToolResultText(toolFormerData.result);
   const hasResult = Object.prototype.hasOwnProperty.call(toolFormerData, "result");
+  const executionTimeMs = extractToolExecutionTimeMs(toolFormerData.result);
 
   return {
     type: "tool_use",
@@ -2329,6 +2330,7 @@ function parseToolFormerBlock(
     input: mapToolArgs(name, paramsRaw, result),
     _hasResult: hasResult,
     ...(hasResult ? { _result: result } : {}),
+    ...(executionTimeMs !== undefined ? { _durationMs: executionTimeMs } : {}),
     ...(hasToolError(toolFormerData.result) ? { _isError: true } : {}),
   };
 }

@@ -1,4 +1,4 @@
-import type { Scene } from "../types";
+import type { Scene, TurnStat } from "../types";
 
 /** Categories used to identify the local work represented by a tool call. */
 export type ToolCategory = "test" | "lint" | "build" | "check" | "file" | "other";
@@ -11,12 +11,17 @@ export type ToolScope = "local" | "remote" | "unknown";
  * role is inferred from the surrounding replay events.
  */
 export interface ActivityInterval {
-  kind: "llm-wait" | "response" | "tool" | "context" | "unknown";
+  kind: "llm-wait" | "response" | "tool" | "context" | "agent-turn" | "unknown";
   durationMs: number;
   sceneIndex: number;
-  source: "timestamp-gap" | "tool-duration";
+  source: "timestamp-gap" | "tool-duration" | "turn-duration";
   confidence: "inferred" | "measured";
-  note?: "unmeasured-tool" | "context-boundary" | "compaction-duration-estimate";
+  durationSource?: "provider" | "timestamp";
+  note?:
+    | "unmeasured-tool"
+    | "context-boundary"
+    | "compaction-duration-estimate"
+    | "provider-turn-duration";
   toolName?: string;
   toolCategory?: ToolCategory;
   toolScope?: ToolScope;
@@ -53,6 +58,13 @@ export interface ActivityTimingResult {
   remoteToolMs: number;
   unknownToolMs: number;
   toolCategories: Record<ToolCategory, ToolCategoryTotal>;
+  timingMode: "scene-events" | "provider-turns";
+  providerTurnDurationMs: number;
+}
+
+export interface ActivityTimingOptions {
+  provider?: string;
+  turnStats?: readonly TurnStat[];
 }
 
 type PreviousEvent = "user" | "assistant" | "tool" | "context";
@@ -243,7 +255,10 @@ function gapKind(
  * scenes. The function intentionally does not use playback heuristics for
  * response or user time: missing timestamps remain unassigned.
  */
-export function buildActivityTiming(scenes: readonly Scene[]): ActivityTimingResult {
+export function buildActivityTiming(
+  scenes: readonly Scene[],
+  options: ActivityTimingOptions = {},
+): ActivityTimingResult {
   const intervals: ActivityInterval[] = [];
   const contextBoundaries: ContextBoundary[] = [];
   const toolCategories = emptyToolCategories();
@@ -342,7 +357,8 @@ export function buildActivityTiming(scenes: readonly Scene[]): ActivityTimingRes
             durationMs: representedDurationMs,
             sceneIndex,
             source: "tool-duration",
-            confidence: "measured",
+            confidence: scene.durationSource === "timestamp" ? "inferred" : "measured",
+            ...(scene.durationSource ? { durationSource: scene.durationSource } : {}),
             toolName: scene.toolName,
             toolCategory: descriptor.category,
             toolScope: descriptor.scope,
@@ -373,6 +389,56 @@ export function buildActivityTiming(scenes: readonly Scene[]): ActivityTimingRes
     }
   }
 
+  const providerTurnIntervals = (options.turnStats || [])
+    .filter(
+      (turn): turn is TurnStat & { durationMs: number } =>
+        turn.durationMs !== undefined && turn.durationMs > 0,
+    )
+    .map<ActivityInterval>((turn, index) => ({
+      kind: "agent-turn",
+      durationMs: turn.durationMs,
+      sceneIndex: -(index + 1),
+      source: "turn-duration",
+      confidence: "inferred",
+      note: "provider-turn-duration",
+    }));
+  const providerTurnDurationMs = providerTurnIntervals.reduce(
+    (sum, interval) => sum + interval.durationMs,
+    0,
+  );
+  const unknownMs = intervals
+    .filter((interval) => interval.kind === "unknown")
+    .reduce((sum, interval) => sum + interval.durationMs, 0);
+  const useProviderTurnFallback =
+    (options.provider === "cursor" || options.provider === "codex") &&
+    providerTurnIntervals.length > 0 &&
+    toolDurationMs === 0 &&
+    (unknownMs > 0 || intervals.length === 0);
+
+  if (useProviderTurnFallback) {
+    return {
+      intervals: providerTurnIntervals,
+      // Scene timestamps cannot be safely aligned with these whole-turn
+      // durations, so do not position stale context markers against them.
+      contextBoundaries: [],
+      thinkingCount,
+      totalMs: providerTurnDurationMs,
+      timestampGapMs: 0,
+      excludedIdleMs,
+      compactionDurationMs: 0,
+      toolDurationMs: 0,
+      toolCalls,
+      recordedToolCalls: 0,
+      unmeasuredToolCalls,
+      localToolMs: 0,
+      remoteToolMs: 0,
+      unknownToolMs: 0,
+      toolCategories: emptyToolCategories(),
+      timingMode: "provider-turns",
+      providerTurnDurationMs,
+    };
+  }
+
   return {
     intervals,
     contextBoundaries,
@@ -389,5 +455,7 @@ export function buildActivityTiming(scenes: readonly Scene[]): ActivityTimingRes
     remoteToolMs,
     unknownToolMs,
     toolCategories,
+    timingMode: "scene-events",
+    providerTurnDurationMs,
   };
 }

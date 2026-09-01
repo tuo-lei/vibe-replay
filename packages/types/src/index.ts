@@ -204,6 +204,8 @@ export type Scene =
       subAgent?: SubAgent;
       /** Tool execution duration in ms (assistant timestamp → tool_result timestamp) */
       durationMs?: number;
+      /** Whether the duration came from an explicit provider value or timestamp inference. */
+      durationSource?: "provider" | "timestamp";
       /** Whether durationMs is anchored at the tool start or result timestamp. */
       durationAnchor?: "start" | "end";
       /**
