@@ -160,7 +160,11 @@ export default function TurnActivityTimeline({ scenes }: { scenes: readonly Scen
               className={`${ACTIVITY_META[interval.kind].color} min-w-0 transition-opacity hover:opacity-80`}
               style={{
                 flex: `${interval.durationMs} 1 0%`,
-                opacity: interval.confidence === "measured" ? 0.9 : 0.55,
+                // Keep the context role on one cyan/teal color. Its estimate
+                // status is conveyed by the ~ label and tooltip instead of a
+                // second, dimmer teal shade.
+                opacity:
+                  interval.kind === "context" ? 1 : interval.confidence === "measured" ? 0.9 : 0.55,
               }}
               title={intervalTitle(interval)}
             />
