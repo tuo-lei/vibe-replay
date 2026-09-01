@@ -562,7 +562,7 @@ export default function SummaryView({ session }: Props) {
         </div>
 
         {/* === Time Series Charts (grouped) === */}
-        <TurnActivityTimeline scenes={scenes} turnStats={meta.stats.turnStats} />
+        <TurnActivityTimeline scenes={scenes} />
         {hasTurnStats && (
           <div className="space-y-5">
             <div className="ui-section-title">Per-Turn Metrics</div>

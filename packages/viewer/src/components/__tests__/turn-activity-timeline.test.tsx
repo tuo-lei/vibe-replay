@@ -45,7 +45,7 @@ describe("TurnActivityTimeline", () => {
     expect(screen.getByRole("img", { name: /Activity timeline/ })).toBeDefined();
     expect(screen.getByText("Tool execution")).toBeDefined();
     expect(screen.getByText("Compaction / context")).toBeDefined();
-    expect(screen.getByText(/timestamp\/tool time/)).toBeDefined();
-    expect(screen.getByText(/Recorded event gaps and tool runtimes/)).toBeDefined();
+    expect(screen.getByText(/from timestamp gaps/)).toBeDefined();
+    expect(screen.getByText(/Timestamp gaps and provider-recorded tool runtimes/)).toBeDefined();
   });
 });
