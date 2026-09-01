@@ -889,7 +889,7 @@ const GroupCard = memo(function GroupCard({
             const barColor = !contextLimit
               ? "bg-terminal-context"
               : ratio >= 0.85
-                ? "bg-terminal-error"
+                ? "bg-terminal-tool"
                 : ratio >= 0.7
                   ? "bg-terminal-tool"
                   : ratio >= 0.5
@@ -898,7 +898,7 @@ const GroupCard = memo(function GroupCard({
             const textColor = !contextLimit
               ? "text-terminal-context"
               : ratio >= 0.85
-                ? "text-terminal-error"
+                ? "text-terminal-tool"
                 : ratio >= 0.7
                   ? "text-terminal-tool"
                   : "text-terminal-dim";

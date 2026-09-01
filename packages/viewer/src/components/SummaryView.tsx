@@ -1191,7 +1191,7 @@ function ContextWindowChart({
         <span>Reported Prompt Footprint</span>
         <span className="font-mono text-terminal-context">peak {fmtNum(peak)}</span>
         {limit && peak > limit && (
-          <span className="font-mono text-terminal-error">
+          <span className="font-mono text-terminal-tool">
             {Math.round((peak / limit) * 100)}% of configured limit
           </span>
         )}
