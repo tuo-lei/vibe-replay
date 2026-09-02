@@ -16,8 +16,7 @@ import { type Browser, chromium } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { killProcessTree, spawnPnpm } from "../scripts/dev-utils.mjs";
 import { generateTestReplay } from "./helpers.ts";
-
-const HAS_DEV_VARS = existsSync("cloudflare/.dev.vars");
+import { migrateLocalD1, wranglerDevArgs } from "./wrangler-test-utils.ts";
 
 const WORKER_URL = "http://localhost:8787";
 
@@ -30,30 +29,6 @@ function wranglerExec(sql: string) {
     `pnpm wrangler d1 execute vibe-replay-db --local --command="${sql.replace(/"/g, '\\"')}"`,
     { cwd: "cloudflare", stdio: "pipe" },
   );
-}
-
-/**
- * Run `pnpm db:migrate:local` with retries. miniflare's local D1 can transiently
- * report SQLITE_BUSY_RECOVERY when a stale WAL/SHM is present (e.g. after a
- * crashed `wrangler dev`); a short retry loop makes the suite robust to it.
- */
-async function migrateLocalD1(): Promise<void> {
-  const MAX_ATTEMPTS = 3;
-  let lastError: unknown;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    try {
-      execSync("pnpm db:migrate:local", { cwd: "cloudflare", stdio: "pipe" });
-      return;
-    } catch (err) {
-      lastError = err;
-      if (attempt < MAX_ATTEMPTS) {
-        console.warn(`db:migrate:local attempt ${attempt} failed — retrying`);
-        // Give a lingering D1 connection time to checkpoint/release the lock.
-        await new Promise((resolve) => setTimeout(resolve, 1_000));
-      }
-    }
-  }
-  throw lastError;
 }
 
 async function waitForWorker(url: string, timeout = 15_000) {
@@ -70,9 +45,7 @@ async function waitForWorker(url: string, timeout = 15_000) {
 
 // ─── WORKER SERVE TESTS (wrangler dev, no auth needed) ──────
 
-const describeWorker = HAS_DEV_VARS ? describe : describe.skip;
-
-describeWorker("File serve via wrangler dev", () => {
+describe("File serve via wrangler dev", () => {
   let wranglerProcess: ChildProcess;
 
   beforeAll(async () => {
@@ -132,7 +105,7 @@ describeWorker("File serve via wrangler dev", () => {
     unlinkSync(svgTmp);
 
     // Start wrangler dev
-    wranglerProcess = spawnPnpm(["wrangler", "dev", "--port", "8787"], {
+    wranglerProcess = spawnPnpm(wranglerDevArgs(8787), {
       cwd: "cloudflare",
       stdio: "pipe",
     });

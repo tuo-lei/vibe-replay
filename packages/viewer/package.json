@@ -29,7 +29,7 @@
     "linkedom": "^0.18.12",
     "tailwindcss": "^4.3.1",
     "typescript": "^6.0.3",
-    "vite": "npm:rolldown-vite@^7.3.1",
+    "vite": "^8.2.2",
     "vite-plugin-singlefile": "^2.3.3",
     "vitest": "^4.1.9"
   }

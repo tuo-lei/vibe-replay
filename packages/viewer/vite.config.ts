@@ -8,7 +8,9 @@ import { viteSingleFile } from "vite-plugin-singlefile";
 /** Read CLI package.json version at build time */
 function getCliVersion(): string {
   try {
-    const pkg = JSON.parse(readFileSync(resolve(__dirname, "../cli/package.json"), "utf-8"));
+    const pkg = JSON.parse(
+      readFileSync(resolve(import.meta.dirname, "../cli/package.json"), "utf-8"),
+    );
     return pkg.version || "dev";
   } catch {
     return "dev";
@@ -40,8 +42,8 @@ export default defineConfig({
     target: "es2022",
   },
   server: {
-    // Force IPv4 — rolldown-vite 7.3.x's default binds to [::1] on macOS but
-    // doesn't accept incoming connections, leaving curl/browsers hung at "Trying ::1".
+    // Force IPv4 — the default can bind to [::1] on macOS without accepting
+    // incoming connections, leaving curl/browsers hung at "Trying ::1".
     host: "127.0.0.1",
     port: process.env.VITE_PORT ? Number(process.env.VITE_PORT) : undefined,
     strictPort: !!process.env.VITE_PORT,

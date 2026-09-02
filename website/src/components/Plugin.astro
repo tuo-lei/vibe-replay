@@ -154,7 +154,10 @@ const capabilities = [
         input.value = text;
         document.body.appendChild(input);
         input.select();
-        try { document.execCommand("copy"); } catch (_) {}
+        try {
+          // Legacy fallback for browsers without navigator.clipboard.
+          document["execCommand"].call(document, "copy");
+        } catch (_) {}
         document.body.removeChild(input);
         showCheck();
       });

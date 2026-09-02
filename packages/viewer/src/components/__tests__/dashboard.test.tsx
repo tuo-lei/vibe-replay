@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ALL_PROJECTS } from "../../hooks/usePanelFilters";
 import type { SessionUsageSummary } from "../../types";
@@ -53,6 +53,26 @@ describe("Dashboard (smoke)", () => {
     // (The post-fetch view depends on each endpoint's exact response shape, so
     // asserting it is out of scope for this smoke test — the mount + load path
     // not throwing is the signal.)
+  });
+  it("keeps all dashboard tabs reachable through the mobile navigation", async () => {
+    window.__VIBE_REPLAY_EDITOR__ = true;
+    render(<Dashboard headerLeft={<span>Brand</span>} headerRight={<span>Actions</span>} />);
+
+    expect(screen.queryByRole("navigation", { name: "Dashboard navigation" })).toBeNull();
+    screen.getByRole("button", { name: "Open dashboard navigation" }).click();
+
+    const mobileNavigation = await waitFor(() =>
+      screen.getByRole("navigation", { name: "Dashboard navigation" }),
+    );
+    expect(within(mobileNavigation).getByRole("button", { name: "Projects" })).toBeTruthy();
+    expect(within(mobileNavigation).getByRole("button", { name: "Insights" })).toBeTruthy();
+    expect(within(mobileNavigation).getByRole("button", { name: "Settings" })).toBeTruthy();
+
+    within(mobileNavigation).getByRole("button", { name: "Settings" }).click();
+    expect(window.location.search).toContain("tab=settings");
+    await waitFor(() =>
+      expect(screen.queryByRole("navigation", { name: "Dashboard navigation" })).toBeNull(),
+    );
   });
 });
 
