@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { killProcessTree, spawnPnpm } from "../scripts/dev-utils.mjs";
 import { migrateLocalD1, wranglerDevArgs } from "./wrangler-test-utils.ts";
@@ -18,6 +21,7 @@ import { migrateLocalD1, wranglerDevArgs } from "./wrangler-test-utils.ts";
 
 const WORKER_URL = "http://localhost:8787";
 let wranglerProcess: ReturnType<typeof import("node:child_process").spawn>;
+let persistTo: string;
 
 async function waitForWorker(url: string, timeout = 60_000) {
   const start = Date.now();
@@ -36,10 +40,11 @@ async function waitForWorker(url: string, timeout = 60_000) {
 describe("Auth Worker E2E", () => {
   beforeAll(async () => {
     // Ensure local D1 has the schema (uses Drizzle-managed migrations)
-    await migrateLocalD1();
+    persistTo = await mkdtemp(join(tmpdir(), "vibe-replay-auth-worker-"));
+    await migrateLocalD1(persistTo);
 
     // Start wrangler dev in background
-    wranglerProcess = spawnPnpm(wranglerDevArgs(8787), {
+    wranglerProcess = spawnPnpm(wranglerDevArgs(8787, persistTo), {
       cwd: "cloudflare",
       stdio: "pipe",
     });
@@ -49,6 +54,7 @@ describe("Auth Worker E2E", () => {
 
   afterAll(async () => {
     if (wranglerProcess) await killProcessTree(wranglerProcess);
+    if (persistTo) await rm(persistTo, { recursive: true, force: true });
   });
 
   // -----------------------------------------------------------------------

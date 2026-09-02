@@ -18,7 +18,8 @@ import { killProcessTree, spawnPnpm } from "../scripts/dev-utils.mjs";
 import { generateTestReplay } from "./helpers.ts";
 import { migrateLocalD1, wranglerDevArgs } from "./wrangler-test-utils.ts";
 
-const WORKER_URL = "http://localhost:8787";
+const WORKER_URL = "http://localhost:8788";
+let persistTo: string;
 
 // Minimal valid GIF (1x1 transparent pixel)
 const VALID_GIF_B64 = "R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==";
@@ -26,7 +27,7 @@ const VALID_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1">
 
 function wranglerExec(sql: string) {
   execSync(
-    `pnpm wrangler d1 execute vibe-replay-db --local --command="${sql.replace(/"/g, '\\"')}"`,
+    `pnpm wrangler d1 execute vibe-replay-db --local --persist-to="${persistTo}" --command="${sql.replace(/"/g, '\\"')}"`,
     { cwd: "cloudflare", stdio: "pipe" },
   );
 }
@@ -49,7 +50,8 @@ describe("File serve via wrangler dev", () => {
   let wranglerProcess: ChildProcess;
 
   beforeAll(async () => {
-    await migrateLocalD1();
+    persistTo = await mkdtemp(join(tmpdir(), "vibe-replay-file-storage-"));
+    await migrateLocalD1(persistTo);
 
     // Seed test data directly into D1 + R2
     const gifBinary = Buffer.from(VALID_GIF_B64, "base64");
@@ -89,15 +91,15 @@ describe("File serve via wrangler dev", () => {
     writeFileSync(svgTmp, VALID_SVG);
 
     execSync(
-      `pnpm wrangler r2 object put vibe-replay-storage/files/test-gif-0001.gif --local --file="${gifTmp}"`,
+      `pnpm wrangler r2 object put vibe-replay-storage/files/test-gif-0001.gif --local --persist-to="${persistTo}" --file="${gifTmp}"`,
       { cwd: "cloudflare", stdio: "pipe" },
     );
     execSync(
-      `pnpm wrangler r2 object put vibe-replay-storage/files/test-svg-0001.svg --local --file="${svgTmp}"`,
+      `pnpm wrangler r2 object put vibe-replay-storage/files/test-svg-0001.svg --local --persist-to="${persistTo}" --file="${svgTmp}"`,
       { cwd: "cloudflare", stdio: "pipe" },
     );
     execSync(
-      `pnpm wrangler r2 object put vibe-replay-storage/files/test-priv-001.gif --local --file="${gifTmp}"`,
+      `pnpm wrangler r2 object put vibe-replay-storage/files/test-priv-001.gif --local --persist-to="${persistTo}" --file="${gifTmp}"`,
       { cwd: "cloudflare", stdio: "pipe" },
     );
 
@@ -105,7 +107,7 @@ describe("File serve via wrangler dev", () => {
     unlinkSync(svgTmp);
 
     // Start wrangler dev
-    wranglerProcess = spawnPnpm(wranglerDevArgs(8787), {
+    wranglerProcess = spawnPnpm(wranglerDevArgs(8788, persistTo), {
       cwd: "cloudflare",
       stdio: "pipe",
     });
@@ -114,6 +116,7 @@ describe("File serve via wrangler dev", () => {
 
   afterAll(async () => {
     if (wranglerProcess) await killProcessTree(wranglerProcess);
+    if (persistTo) await rm(persistTo, { recursive: true, force: true });
   });
 
   // ─── AUTH GUARDS ─────────────────────────────

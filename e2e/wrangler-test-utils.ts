@@ -15,8 +15,8 @@ function variableName(...parts: string[]): string {
  * are not present. The worker's unauthenticated and OAuth URL validation
  * paths only need bindings to exist; they never contact GitHub.
  */
-export function wranglerDevArgs(port: number): string[] {
-  const args = ["wrangler", "dev", "--port", String(port), "--local"];
+export function wranglerDevArgs(port: number, persistTo: string): string[] {
+  const args = ["wrangler", "dev", "--port", String(port), "--local", "--persist-to", persistTo];
   if (existsSync(DEV_VARS_PATH)) return args;
 
   return [
@@ -33,12 +33,15 @@ export function wranglerDevArgs(port: number): string[] {
 }
 
 /** Apply local D1 migrations while tolerating a stale Miniflare WAL. */
-export async function migrateLocalD1(): Promise<void> {
+export async function migrateLocalD1(persistTo: string): Promise<void> {
   const maxAttempts = 3;
   let lastError: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      execSync("pnpm db:migrate:local", { cwd: "cloudflare", stdio: "pipe" });
+      execSync(
+        `pnpm exec wrangler d1 migrations apply vibe-replay-db --local --persist-to "${persistTo}"`,
+        { cwd: "cloudflare", stdio: "pipe" },
+      );
       return;
     } catch (error) {
       lastError = error;
