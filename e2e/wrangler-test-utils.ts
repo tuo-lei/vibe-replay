@@ -1,10 +1,13 @@
 import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import { readdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 const DEV_VARS_PATH = "cloudflare/.dev.vars";
 const LOCAL_AUTH_SECRET = ["vibe", "replay", "local", "e2e"].join("-");
 const LOCAL_GITHUB_CLIENT_ID = ["vibe", "replay", "e2e", "client"].join("-");
 const LOCAL_GITHUB_CLIENT_SECRET = ["vibe", "replay", "e2e", "github"].join("-");
+const MIGRATIONS_DIR = join(import.meta.dirname, "..", "cloudflare", "drizzle");
 
 function variableName(...parts: string[]): string {
   return parts.join("_");
@@ -32,23 +35,21 @@ export function wranglerDevArgs(port: number, persistTo: string): string[] {
   ];
 }
 
-/** Apply local D1 migrations while tolerating a stale Miniflare WAL. */
+/** Initialize an isolated D1 from the checked-in Drizzle migrations. */
 export async function migrateLocalD1(persistTo: string): Promise<void> {
-  const maxAttempts = 3;
-  let lastError: unknown;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      execSync(
-        `pnpm exec wrangler d1 migrations apply vibe-replay-db --local --persist-to "${persistTo}"`,
-        { cwd: "cloudflare", stdio: "pipe" },
-      );
-      return;
-    } catch (error) {
-      lastError = error;
-      if (attempt < maxAttempts) {
-        await new Promise((resolve) => setTimeout(resolve, 1_000));
-      }
-    }
-  }
-  throw lastError;
+  const migrationFile = join(persistTo, "e2e-schema.sql");
+  const migrationNames = (await readdir(MIGRATIONS_DIR))
+    .filter((name) => name.endsWith(".sql"))
+    .sort();
+  const migrationSql = (
+    await Promise.all(migrationNames.map((name) => readFile(join(MIGRATIONS_DIR, name), "utf8")))
+  )
+    .join("\n")
+    .replaceAll(/-->\s*statement-breakpoint/g, "");
+  await writeFile(migrationFile, migrationSql, "utf8");
+
+  execSync(
+    `pnpm exec wrangler d1 execute vibe-replay-db --local --persist-to "${persistTo}" --file "${migrationFile}"`,
+    { cwd: "cloudflare", stdio: "pipe" },
+  );
 }
