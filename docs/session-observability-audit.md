@@ -18,7 +18,9 @@ separately in the **Insights → Coverage** section.
 - `cacheReadShare = cacheReadTokens / promptTokens`.
 - “Uncached / miss” is derived. There is no provider-independent cache-miss
   counter, so it must not be presented as an exact billing field.
-- Invocation counts are one event per concrete tool call. MCP calls are removed
+- Invocation counts are one event per concrete tool call or skill activation.
+  A concrete read of a provider's `SKILL.md` is skill activation evidence;
+  injected lists of available skills are not activations. MCP calls are removed
   from the ordinary-tool facet and counted under their server; named MCP tools
   are measured separately from server-only calls.
 - A completed index with zero invocations is valid evidence of zero calls. It is

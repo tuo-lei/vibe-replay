@@ -72,7 +72,8 @@ import { localDayKey, shortenPath } from "./utils.js";
 // v34: persist provider/session diagnostic events and Pi compaction evidence.
 // v35: retain Pi usage from assistant records without visible replay content.
 // v36: index privacy-safe provider context composition metadata.
-export const SCANNER_VERSION = 36;
+// v37: count concrete SKILL.md reads as skill activations across providers.
+export const SCANNER_VERSION = 37;
 
 // Keep per-invocation detail bounded in the durable insight store. The full
 // event set is still used to compute usageSummary below; only the retained
@@ -333,15 +334,85 @@ function parseMcpUsage(rawName: string, input?: Record<string, unknown>): McpUsa
   return undefined;
 }
 
+const SKILL_PATH_ROOTS = new Set(["skills", "skills-cursor"]);
+const SKILL_INPUT_KEYS = new Set([
+  "command",
+  "cmd",
+  "file_path",
+  "file_paths",
+  "filepath",
+  "filePath",
+  "path",
+  "paths",
+]);
+
+function skillNameFromPath(value: string): string | undefined {
+  const segments = value.replaceAll("\\", "/").split("/").filter(Boolean);
+  for (let index = segments.length - 1; index >= 0; index--) {
+    if (segments[index]?.toLowerCase() !== "skill.md") continue;
+
+    let candidateIndex = index - 1;
+    if (candidateIndex < 0) continue;
+    // rbx-skills snapshots store skills as skills/<name>/<commit>/SKILL.md.
+    if (/^[0-9a-f]{20,}$/i.test(segments[candidateIndex] || "")) candidateIndex--;
+    const candidate = segments[candidateIndex]?.trim();
+    if (
+      !candidate ||
+      candidate === "**" ||
+      candidate === "*" ||
+      candidate.startsWith("<") ||
+      candidate === "." ||
+      candidate === ".."
+    ) {
+      continue;
+    }
+
+    // Prefer the explicit skills root. This handles both normal installations
+    // and nested snapshot/backup directories without treating every README
+    // that happens to be named SKILL.md as a skill.
+    for (let rootIndex = candidateIndex - 1; rootIndex >= 0; rootIndex--) {
+      if (SKILL_PATH_ROOTS.has(segments[rootIndex]?.toLowerCase() || "")) return candidate;
+    }
+
+    // Glob patterns such as **/ros-cli/SKILL.md do not contain a skills root,
+    // but still name one concrete skill. Keep the fallback narrow so a bare
+    // **/SKILL.md search is not counted.
+    if (index - candidateIndex >= 1 && candidateIndex < index - 1) return candidate;
+    if (candidateIndex === index - 1 && candidateIndex > 0) {
+      const previous = segments[candidateIndex - 1];
+      if (previous === "**" || previous === "*") return candidate;
+    }
+  }
+  return undefined;
+}
+
+function skillNameFromInput(input: Record<string, unknown>): string | undefined {
+  for (const [key, value] of Object.entries(input)) {
+    if (!SKILL_INPUT_KEYS.has(key)) continue;
+    const values = Array.isArray(value) ? value : [value];
+    for (const candidate of values) {
+      if (typeof candidate !== "string") continue;
+      const skillName = skillNameFromPath(candidate);
+      if (skillName) return skillName;
+    }
+  }
+  return undefined;
+}
+
 function skillNameFromTool(block: Extract<ContentBlock, { type: "tool_use" }>): string | undefined {
   if (block._skillName?.trim()) return block._skillName.trim();
   const normalizedName = block.name.trim().toLowerCase();
-  if (normalizedName !== "skill" && normalizedName !== "skill_view") return undefined;
-  for (const key of ["name", "skill", "skillName", "skill_name", "slug"]) {
-    const value = block.input?.[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
+  if (normalizedName === "skill" || normalizedName === "skill_view") {
+    for (const key of ["name", "skill", "skillName", "skill_name", "slug"]) {
+      const value = block.input?.[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
   }
-  return undefined;
+  // Cursor, Codex, and Pi commonly activate a skill by reading its SKILL.md
+  // with their ordinary file/shell tools rather than emitting a provider-native
+  // Skill tool. The input is concrete invocation evidence; injected lists of
+  // available skills are not scanned here and therefore do not inflate counts.
+  return skillNameFromInput(block.input);
 }
 
 /** Results that still need the rich Cursor pass before usage facets are complete. */

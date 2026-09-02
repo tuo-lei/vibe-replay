@@ -541,6 +541,69 @@ describe("scanSession", () => {
     expect(JSON.stringify(result.usageEvents)).not.toContain("/secret/path.ts");
   });
 
+  it("counts concrete SKILL.md reads as skill activations", async () => {
+    const path = join(tmpDir, "usage-skill-reads.jsonl");
+    await writeFile(
+      path,
+      makeLine({
+        type: "assistant",
+        timestamp: "2025-03-20T10:00:00Z",
+        message: {
+          role: "assistant",
+          id: "skill-read-message",
+          content: [
+            {
+              type: "tool_use",
+              id: "skill-read-1",
+              name: "Read",
+              input: { file_path: "/Users/test/.claude/skills/ros-cli/SKILL.md" },
+            },
+            {
+              type: "tool_use",
+              id: "skill-read-2",
+              name: "Bash",
+              input: { command: "cat /Users/test/.pi/agent/skills/mcp-adaptor/SKILL.md" },
+            },
+            {
+              type: "tool_use",
+              id: "skill-read-3",
+              name: "Glob",
+              input: { glob_pattern: "**/replay/SKILL.md" },
+            },
+            {
+              type: "tool_use",
+              id: "skill-read-4",
+              name: "Read",
+              input: {
+                file_path:
+                  "/Users/test/.local/share/rbx-skills/snapshots/Roblox/skills/gdrive/0123456789abcdef0123456789abcdef01234567/SKILL.md",
+              },
+            },
+          ],
+        },
+      }),
+      "utf-8",
+    );
+
+    const result = await scanSession({
+      sessionId: "usage-skill-reads",
+      provider: "claude-code",
+      project: "~/test/project",
+      slug: "usage-skill-reads",
+      filePaths: [path],
+    });
+
+    // Locating a skill with a glob is still an ordinary tool call; only a
+    // concrete SKILL.md path read is counted as activation evidence.
+    expect(result.usageSummary?.tools).toEqual({ Glob: 1 });
+    expect(result.usageSummary?.skills).toEqual({
+      "mcp-adaptor": 1,
+      "ros-cli": 1,
+      gdrive: 1,
+    });
+    expect(result.usageEvents?.filter((event) => event.kind === "skill")).toHaveLength(3);
+  });
+
   it("preserves repeated rich-provider skill activations and MCP attribution", async () => {
     const path = join(tmpDir, "usage-rich-attribution.jsonl");
     await writeFile(
