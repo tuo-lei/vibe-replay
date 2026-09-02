@@ -858,9 +858,9 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                                 track is the visual bar; the bright segment marks
                                 the actual active interval, including right-anchored
                                 sessions and bars widened for readable hit targets. */}
-                            <span className="pointer-events-none absolute inset-x-0 bottom-0 h-[2px] bg-white/15">
+                            <span className="pointer-events-none absolute inset-x-0 bottom-0 h-[3px] bg-white/20">
                               <span
-                                className="absolute bottom-0 h-full rounded-full bg-white/75"
+                                className="absolute bottom-0 h-full min-w-[2px] rounded-full bg-white/85"
                                 style={{
                                   left: `${ts.actualStartFraction * 100}%`,
                                   right: `${(1 - ts.actualEndFraction) * 100}%`,
