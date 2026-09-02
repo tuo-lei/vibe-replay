@@ -63,8 +63,20 @@ jobs:
       - name: Smoke-test dev launcher
         shell: pwsh
         run: |
-          $env:VIBE_API_PORT = "13496"
-          $env:VIBE_VIEWER_PORT = "51996"
+          $apiListener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+          $apiListener.Start()
+          $apiPort = $apiListener.LocalEndpoint.Port
+          $apiListener.Stop()
+
+          do {
+            $viewerListener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+            $viewerListener.Start()
+            $viewerPort = $viewerListener.LocalEndpoint.Port
+            $viewerListener.Stop()
+          } while ($viewerPort -eq $apiPort)
+
+          $env:VIBE_API_PORT = "$apiPort"
+          $env:VIBE_VIEWER_PORT = "$viewerPort"
           $env:VIBE_REPLAY_NO_AUTO_OPEN = "1"
           $process = Start-Process `
             -FilePath "node.exe" `
