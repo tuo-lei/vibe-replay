@@ -57,7 +57,7 @@ import {
   resolveCursorLiveWatchPaths,
 } from "./providers/cursor/sqlite-reader.js";
 import { getAllProviders, getProvider } from "./providers/index.js";
-import { discoverProvidersSafely } from "./provider-discovery.js";
+import { discoverProvidersSafely, type SafeProviderDiscoveryResult } from "./provider-discovery.js";
 import { getApiUrl, loadSavedCloudInfo, publishCloudWithOverlays } from "./publishers/cloud.js";
 import {
   checkPublishStatus,
@@ -1172,6 +1172,42 @@ export async function startServer(
   let lastDiscoveredMergedSessions: SessionInfo[] = [];
   let latestSourceFailures: string[] | undefined;
   let remoteConfigChangedAt: number | undefined;
+  type DiscoverySubscriber = (session: SessionInfo) => Promise<void> | void;
+  let localDiscoveryRun: {
+    promise: Promise<SafeProviderDiscoveryResult>;
+    subscribers: Set<DiscoverySubscriber>;
+  } | null = null;
+
+  /** Share one local/SSH provider discovery across the dashboard and scanner. */
+  const discoverAllProviders = (
+    subscriber?: DiscoverySubscriber,
+  ): Promise<SafeProviderDiscoveryResult> => {
+    let run = localDiscoveryRun;
+    if (!run) {
+      const subscribers = new Set<DiscoverySubscriber>();
+      const promise = discoverProvidersSafely(getAllProviders(), async (session) => {
+        await Promise.all(
+          [...subscribers].map(async (listener) => {
+            try {
+              await listener(session);
+            } catch {
+              // A disconnected SSE client must not abort discovery for everyone else.
+            }
+          }),
+        );
+      }).finally(() => {
+        if (localDiscoveryRun?.promise === promise) localDiscoveryRun = null;
+      });
+      run = { promise, subscribers };
+      localDiscoveryRun = run;
+    }
+
+    if (subscriber) run.subscribers.add(subscriber);
+    const activeRun = run;
+    return activeRun.promise.finally(() => {
+      if (subscriber) activeRun.subscribers.delete(subscriber);
+    });
+  };
 
   const enrichCursorStatsInBackground = (
     merged: SessionInfo[],
@@ -1708,7 +1744,14 @@ export async function startServer(
     void (async () => {
       try {
         // Discover all sessions
-        const discovery = await discoverProvidersSafely(getAllProviders());
+        const discovery = await discoverAllProviders(async () => {
+          scanState = {
+            ...scanState,
+            phase: "discovering",
+            scanned: scanState.scanned + 1,
+            total: 0,
+          };
+        });
         const merged = mergeSameSessions(discovery.sessions);
         scanState.failedProviders = discovery.failedProviders;
 
@@ -1756,7 +1799,11 @@ export async function startServer(
           hints,
         );
 
-        scanState.total = scanInputs.length;
+        scanState = {
+          ...scanState,
+          scanned: 0,
+          total: scanInputs.length,
+        };
 
         const freshResults = await runBackgroundScan(scanInputs, (progress) => {
           scanState = {
@@ -2625,7 +2672,7 @@ export async function startServer(
 
   const getSourceSessions = async (c: Context) => {
     try {
-      const discovery = await discoverProvidersSafely(getAllProviders());
+      const discovery = await discoverAllProviders();
       latestSourceFailures = discovery.failedProviders;
       const merged = mergeSameSessions(discovery.sessions);
       lastDiscoveredMergedSessions = normalizeSessionProjectsForHome(merged, homedir());
@@ -2705,7 +2752,7 @@ export async function startServer(
     return streamSSE(c, async (stream) => {
       try {
         let scanned = 0;
-        const discovery = await discoverProvidersSafely(getAllProviders(), async () => {
+        const discovery = await discoverAllProviders(async () => {
           scanned++;
           // Emit progress every 5 sessions to avoid overwhelming the client
           if (scanned % 5 === 0 || scanned === 1) {
@@ -2857,7 +2904,7 @@ export async function startServer(
 
     // Discover all sessions across all providers and configured SSH sources.
     const allProviders = getAllProviders();
-    const allSessions = mergeSameSessions((await discoverProvidersSafely(allProviders)).sessions);
+    const allSessions = mergeSameSessions((await discoverAllProviders()).sessions);
 
     let entries: string[];
     try {
