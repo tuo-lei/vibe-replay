@@ -274,16 +274,13 @@ export function SessionLoadingRibbon({
   status,
   title,
   description,
-  progress,
 }: {
   status?: SourcesEnrichmentStatus | null;
   title: string;
   description: string;
-  progress?: { current: number; total?: number };
 }) {
-  const total = status?.total ?? progress?.total ?? 0;
-  const processed = status?.processed ?? progress?.current ?? 0;
-  const progressLabel = total > 0 ? `${processed}/${total}` : `${processed} discovered`;
+  const total = status?.total ?? 0;
+  const processed = status?.processed ?? 0;
 
   return (
     <div className="rounded-lg border border-terminal-blue/20 bg-terminal-blue-subtle/95 px-3 py-2 text-terminal-blue shadow-layer-md backdrop-blur-sm">
@@ -292,9 +289,9 @@ export function SessionLoadingRibbon({
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-3">
             <div className="text-xs font-mono truncate">{title}</div>
-            {(status || progress) && (
+            {total > 0 && (
               <div className="text-[10px] font-mono tabular-nums text-terminal-blue/75">
-                {progressLabel}
+                {processed}/{total}
               </div>
             )}
           </div>
@@ -322,7 +319,6 @@ export function SessionLoadingBanner(props: {
   status?: SourcesEnrichmentStatus | null;
   title: string;
   description: string;
-  progress?: { current: number; total?: number };
 }) {
   return (
     <div
