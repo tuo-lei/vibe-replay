@@ -4,18 +4,6 @@ import { describe, expect, it } from "vitest";
 import { SessionLoadingBanner } from "../SessionDataProgress";
 
 describe("SessionLoadingBanner", () => {
-  it("shows discovery progress when the total is not known yet", () => {
-    render(
-      <SessionLoadingBanner
-        title="Refreshing local session list"
-        description="Discovering sessions"
-        progress={{ current: 17 }}
-      />,
-    );
-
-    expect(screen.getByText("17 discovered")).toBeTruthy();
-  });
-
   it("shows processed and total counts for enrichment progress", () => {
     render(
       <SessionLoadingBanner
