@@ -18,7 +18,7 @@
     "dev:website": "node scripts/dev-website.mjs",
     "test": "pnpm --filter @vibe-replay/provider-contract test && pnpm --filter @vibe-replay/provider-core test && pnpm --filter @vibe-replay/provider-claude-code test && pnpm --filter @vibe-replay/provider-codex test && pnpm --filter @vibe-replay/provider-cursor test && pnpm --filter @vibe-replay/provider-hermes test && pnpm --filter @vibe-replay/provider-opencode test && pnpm --filter @vibe-replay/provider-pi test && pnpm --filter @vibe-replay/providers-default test && pnpm --filter @vibe-replay/replay-core test && pnpm --filter vibe-replay test && pnpm --filter @vibe-replay/viewer test",
     "test:cloudflare": "pnpm --filter @vibe-replay/cloudflare test",
-    "test:e2e": "vitest run --config e2e/vitest.config.ts",
+    "test:e2e": "vitest run --config e2e/vitest.config.mjs",
     "lint": "oxlint --fix packages/ scripts/ website/astro.config.mjs website/src cloudflare/src && oxfmt packages/ scripts/ website/astro.config.mjs website/src cloudflare/src",
     "lint:check": "oxlint packages/ scripts/ website/astro.config.mjs website/src cloudflare/src && oxfmt --check packages/ scripts/ website/astro.config.mjs website/src cloudflare/src",
     "typecheck": "tsc --noEmit -p packages/types/tsconfig.json && tsc --noEmit -p packages/provider-contract/tsconfig.json && tsc --noEmit -p packages/provider-core/tsconfig.json && tsc --noEmit -p packages/provider-claude-code/tsconfig.json && tsc --noEmit -p packages/provider-codex/tsconfig.json && tsc --noEmit -p packages/provider-cursor/tsconfig.json && tsc --noEmit -p packages/provider-hermes/tsconfig.json && tsc --noEmit -p packages/provider-opencode/tsconfig.json && tsc --noEmit -p packages/provider-pi/tsconfig.json && tsc --noEmit -p packages/providers-default/tsconfig.json && tsc --noEmit -p packages/replay-core/tsconfig.json && tsc --noEmit -p packages/cli/tsconfig.json && tsc --noEmit -p packages/viewer/tsconfig.json && tsc --noEmit -p cloudflare/tsconfig.json && pnpm --filter @vibe-replay/website check",
@@ -43,14 +43,22 @@
       "esbuild"
     ],
     "overrides": {
-      "vite": "npm:rolldown-vite@^7.3.1",
-      "undici": "^7.25.0",
+      "esbuild": "^0.28.2",
+      "vite": "^8.2.2",
+      "undici": "^7.29.0",
       "kysely": "^0.28.17",
       "ws": "^8.21.0",
       "picomatch@2": "^2.3.2",
       "picomatch@4": "^4.0.4",
       "defu": "^6.1.7",
-      "fast-xml-parser": "^5.7.2"
+      "fast-xml-parser": "^5.7.2",
+      "devalue": "^5.8.1",
+      "fast-uri": "^3.1.5",
+      "js-yaml": "^4.3.1",
+      "nanoid@3": "^3.3.18",
+      "postcss@8": "^8.5.18",
+      "sharp": "^0.35.0",
+      "svgo": "^4.0.2"
     }
   }
 }

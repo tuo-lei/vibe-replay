@@ -2992,7 +2992,7 @@ function SessionsPanel() {
         <div className="text-center space-y-2">
           <div className="text-terminal-dim font-mono text-sm">No AI sessions found</div>
           <div className="text-terminal-dimmer font-mono text-xs">
-            Start Claude, Cursor, or Codex, then come back here
+            Start Claude, Cursor, Codex, OpenCode, Hermes, or Pi, then come back here
           </div>
         </div>
       </div>
@@ -5575,12 +5575,22 @@ export default function Dashboard({
   }, [isEditor]);
 
   const [tab, setTab] = useState<Tab>(getTabFromUrl());
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
     const handler = () => setTab(getTabFromUrl());
     window.addEventListener("popstate", handler);
     return () => window.removeEventListener("popstate", handler);
   }, [getTabFromUrl]);
+
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileNavOpen(false);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [mobileNavOpen]);
 
   // Cross-panel "open this session in the Sessions popup" channel. Dispatched
   // from Projects → Timeline / Hot Files when the user clicks a session that
@@ -5602,6 +5612,7 @@ export default function Dashboard({
       if (!slug) return;
       const currentTab = new URLSearchParams(window.location.search).get("tab");
       setTab("sessions");
+      setMobileNavOpen(false);
       // SessionsPanel receives the same event when it is already mounted and
       // can select the exact location directly. Only route through the URL
       // when switching tabs, so the child handler cannot be left with a stale
@@ -5628,6 +5639,7 @@ export default function Dashboard({
 
   const handleTabChange = (id: Tab) => {
     setTab(id);
+    setMobileNavOpen(false);
     // Reset cross-tab list state to avoid landing on empty views due to stale project/filter params.
     navigateTo({
       tab: id,
@@ -5649,6 +5661,7 @@ export default function Dashboard({
   const tabButton = (id: Tab, label: string) => (
     <button
       key={id}
+      type="button"
       onClick={() => handleTabChange(id)}
       className={`px-3.5 py-1.5 text-xs font-sans font-semibold rounded-lg transition-all duration-200 ease-material ${
         tab === id
@@ -5660,14 +5673,30 @@ export default function Dashboard({
     </button>
   );
 
+  const mobileTabButton = (id: Tab, label: string) => (
+    <button
+      key={id}
+      type="button"
+      onClick={() => handleTabChange(id)}
+      aria-current={tab === id ? "page" : undefined}
+      className={`w-full rounded-lg px-3 py-2.5 text-left text-xs font-sans font-semibold transition-colors ${
+        tab === id
+          ? "bg-terminal-green-subtle text-terminal-green"
+          : "text-terminal-dim hover:bg-terminal-surface hover:text-terminal-text"
+      }`}
+    >
+      {label}
+    </button>
+  );
+
   return (
     <ScanInsightsProvider>
       <div className="flex-1 flex flex-col min-h-0">
         {/* Unified header: logo + tabs + actions in one row */}
         {isEditor && (
-          <div className="shrink-0 px-5 py-2 border-b border-terminal-border-subtle glass-effect z-40 safe-top flex items-center gap-4">
+          <div className="relative shrink-0 px-5 py-2 border-b border-terminal-border-subtle glass-effect z-40 safe-top flex items-center gap-4">
             {headerLeft}
-            <div className="inline-flex items-center rounded-xl bg-terminal-surface p-0.5 shadow-layer-sm shrink-0">
+            <div className="hidden md:inline-flex items-center rounded-xl bg-terminal-surface p-0.5 shadow-layer-sm shrink-0">
               {tabButton("home", "Home")}
               {tabButton("sessions", "Sessions")}
               {tabButton("replays", "Replays")}
@@ -5675,8 +5704,38 @@ export default function Dashboard({
               {tabButton("insights", "Insights")}
               {tabButton("settings", "Settings")}
             </div>
-            <div className="flex-1" />
-            {headerRight}
+            <div className="flex-1 min-w-0" />
+            <div className="hidden md:block">{headerRight}</div>
+            <button
+              type="button"
+              aria-label={
+                mobileNavOpen ? "Close dashboard navigation" : "Open dashboard navigation"
+              }
+              aria-expanded={mobileNavOpen}
+              aria-controls="dashboard-mobile-navigation"
+              onClick={() => setMobileNavOpen((open) => !open)}
+              className="md:hidden flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-terminal-surface text-sm text-terminal-dim transition-colors hover:bg-terminal-surface-hover hover:text-terminal-text"
+            >
+              {mobileNavOpen ? "×" : "☰"}
+            </button>
+            {mobileNavOpen && (
+              <div
+                id="dashboard-mobile-navigation"
+                className="absolute left-0 right-0 top-full z-50 border-b border-terminal-border-subtle bg-terminal-bg shadow-layer-xl md:hidden"
+              >
+                <nav aria-label="Dashboard navigation" className="space-y-1 p-3">
+                  {mobileTabButton("home", "Home")}
+                  {mobileTabButton("sessions", "Sessions")}
+                  {mobileTabButton("replays", "Replays")}
+                  {mobileTabButton("projects", "Projects")}
+                  {mobileTabButton("insights", "Insights")}
+                  {mobileTabButton("settings", "Settings")}
+                </nav>
+                {headerRight && (
+                  <div className="border-t border-terminal-border-subtle p-3">{headerRight}</div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
