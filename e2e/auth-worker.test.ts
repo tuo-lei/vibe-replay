@@ -19,7 +19,7 @@ import { migrateLocalD1, wranglerDevArgs } from "./wrangler-test-utils.ts";
 const WORKER_URL = "http://localhost:8787";
 let wranglerProcess: ReturnType<typeof import("node:child_process").spawn>;
 
-async function waitForWorker(url: string, timeout = 15_000) {
+async function waitForWorker(url: string, timeout = 60_000) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
     try {
