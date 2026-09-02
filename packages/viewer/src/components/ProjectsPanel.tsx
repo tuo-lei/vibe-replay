@@ -2,9 +2,9 @@
  * ProjectsPanel — full-page Projects tab.
  *
  * Layout mirrors Sessions / Replays: a left sidebar listing projects, and a
- * right pane showing the selected project's content. View tabs (Overview /
- * Timeline / Hot Files) live in the right pane and adapt to whether one
- * project is selected or "All projects".
+ * right pane showing the selected project's content. View tabs (Timeline /
+ * Overview / Hot Files) live in the right pane and keep the same navigation
+ * whether one project or "All projects" is selected.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -32,8 +32,8 @@ interface ProjectsPanelProps {
 type PanelMode = "overview" | "timeline" | "files";
 
 const PROJECT_VIEW_TABS: { id: PanelMode; label: string }[] = [
-  { id: "overview", label: "Overview" },
   { id: "timeline", label: "Timeline" },
+  { id: "overview", label: "Overview" },
   { id: "files", label: "Hot Files" },
 ];
 
@@ -465,7 +465,7 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
     loading: insightsLoading,
   } = useScanInsightsContext();
   const [selectedProjectKey, setSelectedProjectKey] = useState<string>(ALL_PROJECTS);
-  const [mode, setMode] = useState<PanelMode>("overview");
+  const [mode, setMode] = useState<PanelMode>("timeline");
   const [showAgentRuns, setShowAgentRuns] = useState(
     () => new URLSearchParams(window.location.search).get("agentRuns") === "true",
   );
@@ -567,12 +567,13 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
     lastActivity: p.lastActivity,
   }));
 
-  // Single-project Overview already embeds the timeline; the standalone tab
-  // is redundant and dropped. Hot Files stays as its own tab.
+  const selectProject = (projectKey: string) => {
+    setSelectedProjectKey(projectKey);
+    setMode("timeline");
+  };
+
   const isSingleProject = selectedProjectKey !== ALL_PROJECTS;
-  const visibleTabs = isSingleProject
-    ? PROJECT_VIEW_TABS.filter((t) => t.id !== "timeline")
-    : PROJECT_VIEW_TABS;
+  const visibleTabs = PROJECT_VIEW_TABS;
   const activeMode = visibleTabs.some((t) => t.id === mode) ? mode : "overview";
   const projectFilterArg = isSingleProject ? selectedProject : undefined;
 
@@ -582,10 +583,7 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
       <ProjectSidebar
         projects={sidebarProjects}
         selected={selectedProjectKey}
-        onSelect={(projectKey) => {
-          setSelectedProjectKey(projectKey);
-          setMode("overview");
-        }}
+        onSelect={selectProject}
       />
 
       {/* ─── Right pane: header + tabs + content ─── */}
@@ -596,8 +594,7 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
             aria-label="Select project"
             value={selectedProjectKey}
             onChange={(e) => {
-              setSelectedProjectKey(e.target.value);
-              setMode("overview");
+              selectProject(e.target.value);
             }}
             className="w-full bg-terminal-surface rounded-lg px-3 py-2.5 text-sm font-sans text-terminal-text outline-none shadow-layer-sm"
           >
@@ -632,7 +629,7 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
                 onClick={() => {
                   const next = !showAgentRuns;
                   setShowAgentRuns(next);
-                  setSelectedProjectKey(ALL_PROJECTS);
+                  selectProject(ALL_PROJECTS);
                   navigateTo({ agentRuns: next ? "true" : null }, { notify: false });
                 }}
                 className="mt-1 text-[10px] font-mono text-terminal-dimmer hover:text-terminal-text transition-colors"
@@ -666,7 +663,7 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
         {/* Tab content */}
         <div className="px-4 md:px-6 pb-6 space-y-4">
           {activeMode === "overview" && selectedProjectKey === ALL_PROJECTS && (
-            <ProjectsGrid projects={projects} onProjectClick={setSelectedProjectKey} />
+            <ProjectsGrid projects={projects} onProjectClick={selectProject} />
           )}
           {activeMode === "overview" && selectedInsight && (
             <>
@@ -676,11 +673,6 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
                 onOpenSessions={() => openSessionsForProject(selectedInsight.project)}
               />
               <ProjectPerformance insights={detailedInsight} loading={insightsLoading} />
-              <SessionRelationshipsView
-                view="timeline"
-                projectFilter={projectFilterArg}
-                projectLocation={selectedLocation}
-              />
             </>
           )}
           {activeMode === "timeline" && (

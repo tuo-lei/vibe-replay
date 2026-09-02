@@ -5,6 +5,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { matchesProjectFacet } from "../engine/dashboard-filtering";
 import { type ScanResultSession, useRelationshipData } from "../hooks/useRelationshipData";
 import { plural } from "../utils/format";
@@ -629,18 +630,26 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
       {/* Range selector + automated toggle */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="space-y-1">
-          <div className="text-sm font-sans font-semibold text-terminal-text">Work Timeline</div>
+          <div className="flex items-center gap-2">
+            <span className="h-1.5 w-1.5 rounded-full bg-terminal-green shadow-[0_0_8px_rgba(34,197,94,0.55)]" />
+            <div className="text-sm font-sans font-semibold text-terminal-text">Work Timeline</div>
+          </div>
           <div className="text-xs font-mono text-terminal-dimmer">
             {totalSessions} {plural(totalSessions, "session")} · rows are projects · bar position
             and width show active time
             {estimatedTimingCount > 0 ? ` · ${estimatedTimingCount} estimated` : ""}
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1 text-[10px] font-mono text-terminal-dimmer">
+            <span>Hover for details</span>
+            <span className="text-terminal-border">·</span>
+            <span>Click a session to inspect it</span>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[10px] font-mono">
           {hiddenAutomatedCount > 0 && !showAutomated && (
             <button
               onClick={() => setShowAutomated(true)}
-              className="text-terminal-dimmer hover:text-terminal-text transition-colors"
+              className="rounded-lg bg-terminal-orange-subtle px-2.5 py-1 text-terminal-orange transition-colors hover:bg-terminal-orange-emphasis"
               title="Scheduled / automated sessions are hidden by default"
             >
               + {hiddenAutomatedCount} automated hidden ▸
@@ -649,7 +658,7 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
           {showAutomated && (
             <button
               onClick={() => setShowAutomated(false)}
-              className="text-terminal-purple hover:underline"
+              className="rounded-lg bg-terminal-purple-subtle px-2.5 py-1 text-terminal-purple transition-colors hover:bg-terminal-purple-emphasis"
             >
               hide automated
             </button>
@@ -659,6 +668,8 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
               <button
                 key={opt.value}
                 onClick={() => setRange(opt.value)}
+                aria-pressed={range === opt.value}
+                title={`Show ${opt.label} timeline`}
                 className={`rounded-lg px-2.5 py-1 text-xs font-sans font-semibold transition-all duration-200 ease-material ${
                   range === opt.value
                     ? "bg-terminal-green-subtle text-terminal-green shadow-layer-sm"
@@ -719,8 +730,16 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                       className="flex flex-col justify-center shrink-0 py-1 pr-3 overflow-hidden"
                       style={{ width: LABEL_WIDTH, height: rowHeight }}
                     >
-                      <div className={`text-xs font-sans font-medium truncate ${color.text}`}>
-                        {projectDisplayName(p.project, p.sessions[0]?.session.projectIdentity)}
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <span
+                          className="h-1.5 w-1.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: accentColor }}
+                        />
+                        <div
+                          className={`min-w-0 text-xs font-sans font-medium truncate ${color.text}`}
+                        >
+                          {projectDisplayName(p.project, p.sessions[0]?.session.projectIdentity)}
+                        </div>
                       </div>
                       <div className="text-[9px] font-mono text-terminal-dimmer truncate">
                         {p.sessions.length} {plural(p.sessions.length, "session")}
@@ -860,70 +879,75 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
         </div>
       )}
 
-      {/* Tooltip */}
-      {tooltip && (
-        <div
-          className="fixed pointer-events-none w-80 rounded-xl border border-terminal-border bg-terminal-surface p-3 text-xs font-mono shadow-layer-xl"
-          style={{
-            // Keep the tooltip above hovered timeline bars.
-            zIndex: 1000,
-            left: Math.min(tooltip.x + 12, window.innerWidth - 336),
-            top: Math.max(8, Math.min(tooltip.y - 8, window.innerHeight - 200)),
-          }}
-        >
-          <div className="text-terminal-text font-medium mb-1.5 break-words leading-snug">
-            {sessionTitle(tooltip.session)}
-          </div>
-          <div className="mb-2 flex flex-wrap gap-1">
-            {sessionBadges(tooltip.session).map((badge) => (
-              <span
-                key={badge}
-                className="rounded-md bg-terminal-surface-2 px-1.5 py-0.5 text-[10px] text-terminal-dim"
-              >
-                {badge}
-              </span>
-            ))}
-          </div>
-          <div className="text-terminal-dimmer space-y-0.5">
-            {tooltip.session.startTime &&
-              (() => {
-                const startMs = new Date(tooltip.session.startTime).getTime();
-                const endMs = activeEndMs(startMs, tooltip.session);
-                const startISO = tooltip.session.startTime;
-                const endISO = new Date(endMs).toISOString();
-                const sameDay = fmtDate(startISO) === fmtDate(endISO);
-                return (
-                  <div>
-                    {fmtDate(startISO)} {fmtShortTime(startISO)}
-                    {endMs !== startMs && (
-                      <span>
-                        {" → "}
-                        {sameDay ? "" : `${fmtDate(endISO)} `}
-                        {fmtShortTime(endISO)}
-                      </span>
-                    )}
-                  </div>
-                );
-              })()}
-            {tooltip.session.durationMs && (
-              <div className="text-terminal-blue">{fmtDuration(tooltip.session.durationMs)}</div>
-            )}
-            <div>
-              {tooltip.session.promptCount}p · {tooltip.session.editCount}{" "}
-              {plural(tooltip.session.editCount, "edit")} · {tooltip.session.toolCallCount}{" "}
-              {plural(tooltip.session.toolCallCount, "tool")}
+      {/* Portal the fixed tooltip out of the scrollable timeline pane. A fixed
+          child can still expand an ancestor's scrollable overflow, which makes
+          the pane jump when hover state toggles. */}
+      {tooltip &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className="fixed pointer-events-none w-80 rounded-xl border border-terminal-border bg-terminal-surface p-3 text-xs font-mono shadow-layer-xl"
+            style={{
+              // Keep the tooltip above hovered timeline bars.
+              zIndex: 1000,
+              left: Math.min(tooltip.x + 12, window.innerWidth - 336),
+              top: Math.max(8, Math.min(tooltip.y - 8, window.innerHeight - 200)),
+            }}
+          >
+            <div className="text-terminal-text font-medium mb-1.5 break-words leading-snug">
+              {sessionTitle(tooltip.session)}
             </div>
-            {tooltip.session.gitBranch && (
-              <div className="text-terminal-purple">{tooltip.session.gitBranch}</div>
-            )}
-            {(tooltip.session.costEstimate ?? 0) > 0 && (
-              <div className="text-terminal-orange">
-                ${tooltip.session.costEstimate!.toFixed(3)}
+            <div className="mb-2 flex flex-wrap gap-1">
+              {sessionBadges(tooltip.session).map((badge) => (
+                <span
+                  key={badge}
+                  className="rounded-md bg-terminal-surface-2 px-1.5 py-0.5 text-[10px] text-terminal-dim"
+                >
+                  {badge}
+                </span>
+              ))}
+            </div>
+            <div className="text-terminal-dimmer space-y-0.5">
+              {tooltip.session.startTime &&
+                (() => {
+                  const startMs = new Date(tooltip.session.startTime).getTime();
+                  const endMs = activeEndMs(startMs, tooltip.session);
+                  const startISO = tooltip.session.startTime;
+                  const endISO = new Date(endMs).toISOString();
+                  const sameDay = fmtDate(startISO) === fmtDate(endISO);
+                  return (
+                    <div>
+                      {fmtDate(startISO)} {fmtShortTime(startISO)}
+                      {endMs !== startMs && (
+                        <span>
+                          {" → "}
+                          {sameDay ? "" : `${fmtDate(endISO)} `}
+                          {fmtShortTime(endISO)}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
+              {tooltip.session.durationMs && (
+                <div className="text-terminal-blue">{fmtDuration(tooltip.session.durationMs)}</div>
+              )}
+              <div>
+                {tooltip.session.promptCount}p · {tooltip.session.editCount}{" "}
+                {plural(tooltip.session.editCount, "edit")} · {tooltip.session.toolCallCount}{" "}
+                {plural(tooltip.session.toolCallCount, "tool")}
               </div>
-            )}
-          </div>
-        </div>
-      )}
+              {tooltip.session.gitBranch && (
+                <div className="text-terminal-purple">{tooltip.session.gitBranch}</div>
+              )}
+              {(tooltip.session.costEstimate ?? 0) > 0 && (
+                <div className="text-terminal-orange">
+                  ${tooltip.session.costEstimate!.toFixed(3)}
+                </div>
+              )}
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
