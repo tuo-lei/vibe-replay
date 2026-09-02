@@ -67,8 +67,13 @@ describe("ProjectsPanel project insights", () => {
     const timelineTab = screen.getByRole("button", { name: "Timeline" });
     expect(timelineTab.className).toContain("bg-terminal-green-subtle");
 
+    const overviewTab = screen.getByRole("button", { name: "Overview" });
+    fireEvent.click(overviewTab);
+    expect(overviewTab.className).toContain("bg-terminal-green-subtle");
+
     fireEvent.click(screen.getAllByRole("button", { name: /example/i })[0]);
 
+    expect(screen.getByRole("heading", { name: /example/i })).toBeDefined();
     expect(timelineTab.className).toContain("bg-terminal-green-subtle");
   });
 
