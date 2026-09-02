@@ -742,11 +742,10 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                   >
                     {/* Project label */}
                     <div
-                      className="flex shrink-0 flex-col justify-center overflow-hidden border-l-2 py-1 pr-3"
+                      className="flex shrink-0 flex-col justify-center overflow-hidden py-1 pr-3"
                       style={{
                         width: LABEL_WIDTH,
                         height: rowHeight,
-                        borderLeftColor: accentColor,
                         backgroundColor: hexToRgba(accentColor, 0.055),
                       }}
                     >
@@ -789,7 +788,7 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
 
                     {/* Lane area */}
                     <div
-                      className="relative flex-1 overflow-hidden rounded-r-xl border-l border-terminal-border/20 shadow-inner"
+                      className="relative flex-1 overflow-hidden rounded-r-xl shadow-inner"
                       style={{
                         height: rowHeight,
                         backgroundColor: hexToRgba(accentColor, 0.035),
