@@ -45,7 +45,7 @@ describe("Auth Worker E2E", () => {
     });
 
     await waitForWorker(WORKER_URL);
-  }, 20_000);
+  }, 60_000);
 
   afterAll(async () => {
     if (wranglerProcess) await killProcessTree(wranglerProcess);
