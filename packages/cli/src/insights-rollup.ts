@@ -1,6 +1,6 @@
 import type { ReplaySummary } from "./server-types.js";
 import type { SessionScanResult } from "./scanner.js";
-import type { ProjectIdentity, SessionLocation } from "@vibe-replay/types";
+import type { ProjectIdentity, SessionLocation, TurnMetric } from "@vibe-replay/types";
 
 export interface InsightsRollupSession {
   project: string;
@@ -22,6 +22,7 @@ export interface InsightsRollupSession {
     cacheCreationTokens: number;
   };
   turnDurations?: number[];
+  turnMetrics?: TurnMetric[];
 }
 
 export interface InsightsRollupReplay {
@@ -65,6 +66,7 @@ export function buildInsightsRollup(
         session.model = scan.model;
         session.tokenUsage = scan.tokenUsage;
         session.turnDurations = scan.turnDurations;
+        session.turnMetrics = scan.turnMetrics;
       }
       return session;
     }),

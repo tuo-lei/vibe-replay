@@ -35,7 +35,12 @@ import type {
 } from "../types";
 import { localDayKey } from "../utils/date";
 import { DataQualityIndicator } from "./DataQualityIndicator";
-import { TokenBreakdownChart, TurnDurationChart } from "./InsightCharts";
+import {
+  PerTurnDistributionChart,
+  SessionDistributionChart,
+  TokenBreakdownChart,
+  TurnDurationChart,
+} from "./InsightCharts";
 import {
   formatCompactAge,
   formatCompactDuration,
@@ -315,6 +320,14 @@ function rangeLabel(range: TimeRange): string {
   if (range === "30d") return "Last 30 Days";
   if (range === "90d") return "Last 90 Days";
   return "All Time";
+}
+
+/** Keep the legacy duration chart visible when per-turn timing is incomplete. */
+export function shouldShowLegacyTurnDuration(
+  perTurnDistributions: InsightsRangeBreakdown["perTurnDistributions"],
+  turnDurationHistogram: InsightsRangeBreakdown["turnDurationHistogram"],
+): boolean {
+  return Boolean(turnDurationHistogram && !perTurnDistributions?.durationMs);
 }
 
 type InsightsSectionId = "overview" | "activity" | "usage" | "coverage" | "workspace";
@@ -1876,10 +1889,11 @@ export default function InsightsPage() {
     };
   }, [userInsights, range, homePageCounts, insightsRollupPayload]);
 
-  const rangeBreakdown = useMemo<InsightsRangeBreakdown | null>(() => {
-    if (range === "all" || !insightsRollupPayload) return null;
+  const rollupBreakdown = useMemo<InsightsRangeBreakdown | null>(() => {
+    if (!insightsRollupPayload) return null;
     return rollupInsightsBreakdown(insightsRollupPayload, { since: rangeSince(range) });
   }, [insightsRollupPayload, range]);
+  const rangeBreakdown = range === "all" ? null : rollupBreakdown;
 
   const rolledTopProjects = useMemo(
     () => rollupTopProjects(userInsights?.topProjects || []),
@@ -1893,6 +1907,8 @@ export default function InsightsPage() {
     range === "all" ? userInsights?.tokenBreakdown : rangeBreakdown?.tokenBreakdown;
   const turnDurationHistogram =
     range === "all" ? userInsights?.turnDurationHistogram : rangeBreakdown?.turnDurationHistogram;
+  const sessionMetricDistributions = rollupBreakdown?.sessionMetricDistributions;
+  const perTurnDistributions = rollupBreakdown?.perTurnDistributions;
 
   const usagePayload = useUsageRollupSessions(
     scanStatus?.finishedAt,
@@ -1923,7 +1939,15 @@ export default function InsightsPage() {
     updateActiveSection();
     root.addEventListener("scroll", updateActiveSection, { passive: true });
     return () => root.removeEventListener("scroll", updateActiveSection);
-  }, [userInsights, range, usage.sessionCount, turnDurationHistogram, tokenBreakdown]);
+  }, [
+    userInsights,
+    range,
+    usage.sessionCount,
+    turnDurationHistogram,
+    tokenBreakdown,
+    sessionMetricDistributions,
+    perTurnDistributions,
+  ]);
 
   if (!userInsights && (loading || isInitialScan || scanStatus?.phase === "discovering")) {
     return (
@@ -2160,7 +2184,7 @@ export default function InsightsPage() {
               id="usage"
               eyebrow="03 / Usage"
               title="How your agents work"
-              description="Invocation counts are kept separate: ordinary tools, MCP servers and tools, and skill activations."
+              description="Compare per-session and per-turn duration, tools, and token usage by percentile, while keeping ordinary tools, MCP, and skills separate."
               meta={
                 usage.sessionCount > 0 ? (
                   <span className="text-[10px] font-mono tabular-nums text-terminal-dimmer">
@@ -2171,15 +2195,37 @@ export default function InsightsPage() {
               }
             >
               <div className="space-y-4">
-                {/* Turn Duration Distribution + Token Breakdown */}
-                {(turnDurationHistogram || tokenBreakdown) && (
+                {sessionMetricDistributions && (
+                  <div className={`${INSIGHTS_CARD_CLASS} p-5 md:p-6`}>
+                    <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
+                      <h3 className="ui-section-title-strong">Per-session distributions</h3>
+                      <span className="text-[10px] font-mono text-terminal-dimmer">
+                        P50 median · P95/P99 tail
+                      </span>
+                    </div>
+                    <SessionDistributionChart
+                      distributions={sessionMetricDistributions}
+                      totalSessions={stats.sessions}
+                    />
+                  </div>
+                )}
+
+                {/* Per-turn distributions + Token Breakdown */}
+                {(perTurnDistributions || turnDurationHistogram || tokenBreakdown) && (
                   <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-                    {turnDurationHistogram && (
+                    {perTurnDistributions ? (
+                      <div className={`${INSIGHTS_CARD_CLASS} p-5 md:p-6`}>
+                        <h3 className="ui-section-title-strong mb-4">Per-turn distributions</h3>
+                        <PerTurnDistributionChart distributions={perTurnDistributions} />
+                      </div>
+                    ) : null}
+                    {shouldShowLegacyTurnDuration(perTurnDistributions, turnDurationHistogram) &&
+                    turnDurationHistogram ? (
                       <div className={`${INSIGHTS_CARD_CLASS} p-5 md:p-6`}>
                         <h3 className="ui-section-title-strong mb-4">Turn Duration Distribution</h3>
                         <TurnDurationChart histogram={turnDurationHistogram} />
                       </div>
-                    )}
+                    ) : null}
                     {tokenBreakdown && (
                       <div className={`${INSIGHTS_CARD_CLASS} p-5 md:p-6`}>
                         <h3 className="ui-section-title-strong mb-4">Token Usage</h3>

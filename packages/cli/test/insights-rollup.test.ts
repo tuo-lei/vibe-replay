@@ -71,6 +71,10 @@ describe("buildInsightsRollup", () => {
         makeScan({
           model: "claude-sonnet-4",
           turnDurations: [10_000, 45_000],
+          turnMetrics: [
+            { durationMs: 10_000, toolCalls: 2, tokens: 100 },
+            { durationMs: 45_000, toolCalls: 3, tokens: 200 },
+          ],
         }),
       ],
       [],
@@ -87,6 +91,10 @@ describe("buildInsightsRollup", () => {
         cacheCreationTokens: 40,
       },
       turnDurations: [10_000, 45_000],
+      turnMetrics: [
+        { durationMs: 10_000, toolCalls: 2, tokens: 100 },
+        { durationMs: 45_000, toolCalls: 3, tokens: 200 },
+      ],
     });
     expect(JSON.stringify(payload)).not.toContain("private");
   });

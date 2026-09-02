@@ -44,6 +44,7 @@ import type {
   SessionTranscriptStatus,
   SessionUsageSummary,
   TokenUsage,
+  TurnMetric,
   UsageEvent,
 } from "./types.js";
 import { localDayKey, shortenPath } from "./utils.js";
@@ -73,7 +74,8 @@ import { localDayKey, shortenPath } from "./utils.js";
 // v35: retain Pi usage from assistant records without visible replay content.
 // v36: index privacy-safe provider context composition metadata.
 // v37: count concrete SKILL.md reads as skill activations across providers.
-export const SCANNER_VERSION = 37;
+// v38: retain compact per-turn duration/tool/token metrics for distributions.
+export const SCANNER_VERSION = 38;
 
 // Keep per-invocation detail bounded in the durable insight store. The full
 // event set is still used to compute usageSummary below; only the retained
@@ -144,6 +146,8 @@ export interface SessionScanResult {
   turnStatCount?: number;
   /** Per-turn durations in ms — used for median time-to-intervention */
   turnDurations?: number[];
+  /** Compact numeric metrics used for per-turn distributions. */
+  turnMetrics?: TurnMetric[];
 }
 
 interface ScanCacheEntry {
@@ -1576,6 +1580,80 @@ async function scanCursorSession(input: ScanInput): Promise<SessionScanResult> {
   return buildScanResultFromParsed(input, parsed);
 }
 
+function isMetricUserPrompt(turn: ProviderParseResult["turns"][number]): boolean {
+  if (turn.role !== "user" || turn.subtype) return false;
+  return turn.blocks.some(
+    (block) =>
+      (block.type === "text" && block.text.trim().length > 0) ||
+      (block.type === "_user_images" && block.images.length > 0),
+  );
+}
+
+function turnToolCallCount(blocks: ContentBlock[]): number {
+  let count = 0;
+  for (const block of blocks) {
+    if (block.type !== "tool_use") continue;
+    count++;
+    const subAgent = (
+      block as {
+        _subAgent?: {
+          usageEvents?: UsageEvent[];
+          scenes?: Array<{ type?: string }>;
+        };
+      }
+    )._subAgent;
+    const nestedEvents = subAgent?.usageEvents;
+    if (nestedEvents?.length) {
+      count += nestedEvents.filter((event) => event.kind === "tool").length;
+    } else if (subAgent?.scenes) {
+      count += subAgent.scenes.filter((scene) => scene.type === "tool-call").length;
+    }
+  }
+  return count;
+}
+
+function addTurnTokenTotal(metric: TurnMetric, usage: TokenUsage): void {
+  const total =
+    usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
+  metric.tokens = (metric.tokens || 0) + total;
+}
+
+export function buildTurnMetrics(
+  turns: ProviderParseResult["turns"],
+  turnStats: ProviderParseResult["turnStats"],
+): TurnMetric[] | undefined {
+  const metrics: TurnMetric[] = [];
+  let currentTurnIndex = -1;
+
+  const ensureMetric = (turnIndex: number): TurnMetric => {
+    while (metrics.length <= turnIndex) metrics.push({ toolCalls: 0 });
+    return metrics[turnIndex]!;
+  };
+
+  for (const turn of turns) {
+    if (isMetricUserPrompt(turn)) {
+      currentTurnIndex++;
+      ensureMetric(currentTurnIndex);
+      continue;
+    }
+    if (turn.role === "assistant" && currentTurnIndex >= 0) {
+      ensureMetric(currentTurnIndex).toolCalls += turnToolCallCount(turn.blocks);
+    }
+  }
+
+  for (const stat of turnStats || []) {
+    if (!Number.isInteger(stat.turnIndex) || stat.turnIndex < 0) continue;
+    if (stat.turnIndex >= metrics.length) continue;
+    const metric = ensureMetric(stat.turnIndex);
+    if (typeof stat.durationMs === "number" && stat.durationMs > 0) {
+      metric.durationMs = (metric.durationMs || 0) + stat.durationMs;
+    }
+    if (stat.tokenUsage) addTurnTokenTotal(metric, stat.tokenUsage);
+  }
+
+  return metrics.length > 0 ? metrics : undefined;
+}
+
 function buildLightweightCursorScanResult(input: ScanInput): SessionScanResult {
   const firstPrompt = scanFallbackPrompt(input);
   const hasPrompt = typeof firstPrompt === "string" && firstPrompt.trim().length > 0;
@@ -1871,6 +1949,7 @@ function buildScanResultFromParsed(
   const fallbackStart = parsed.startTime || input.timestamp;
   const durationMs = parsed.totalDurationMs;
   const normalizedEndTime = ensureEndCoversDuration(fallbackStart, parsed.endTime, durationMs);
+  const turnMetrics = buildTurnMetrics(parsed.turns, parsed.turnStats);
   const firstPrompt = input.transcriptStatus
     ? ""
     : firstUserPrompt(parsed.turns) || input.firstPrompt || parsed.title;
@@ -1948,6 +2027,7 @@ function buildScanResultFromParsed(
     turnDurations: parsed.turnStats
       ?.map((t) => t.durationMs)
       .filter((d): d is number => d != null && d > 0),
+    turnMetrics,
   };
 }
 

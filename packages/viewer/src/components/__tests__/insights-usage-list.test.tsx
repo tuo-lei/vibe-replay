@@ -8,9 +8,12 @@ import {
   TopProjectsList,
   CoverageAudit,
   formatCompactNum,
+  shouldShowLegacyTurnDuration,
   UsageBarList,
   UsageCoverage,
 } from "../InsightsPage";
+import { PerTurnDistributionChart, SessionDistributionChart } from "../InsightCharts";
+import type { SessionMetricDistributions } from "../../engine/insights-rollup";
 import { getInsightsRangeFromUrl, getMultiFromUrl } from "../../hooks/usePanelFilters";
 
 afterEach(() => {
@@ -123,6 +126,81 @@ describe("Insights sections", () => {
 
     fireEvent.click(usageButton);
     expect(onSelect).toHaveBeenCalledWith("usage");
+  });
+
+  it("renders session metric distributions with coverage-aware samples", () => {
+    const distribution: SessionMetricDistributions = {
+      durationMs: {
+        buckets: [{ label: "<30s", count: 2, pct: 100 }],
+        percentiles: { p25: 1_000, p50: 2_000, p75: 3_000, p95: 4_000, p99: 5_000 },
+        sampleCount: 2,
+      },
+      turns: {
+        buckets: [{ label: "1-2", count: 3, pct: 100 }],
+        percentiles: { p25: 1, p50: 1, p75: 2, p95: 2, p99: 2 },
+        sampleCount: 3,
+      },
+    };
+
+    render(<SessionDistributionChart distributions={distribution} totalSessions={3} />);
+
+    expect(screen.getByLabelText("Session duration distribution")).toBeDefined();
+    expect(screen.getByText("2/3 sessions")).toBeDefined();
+    expect(screen.getByLabelText("Turns distribution")).toBeDefined();
+    expect(screen.getAllByText("p95")).toHaveLength(2);
+    expect(screen.getAllByText("p99")).toHaveLength(2);
+  });
+
+  it("renders per-turn time, tool, and token distributions", () => {
+    const distribution: SessionMetricDistributions = {
+      durationMs: {
+        buckets: [{ label: "<30s", count: 2, pct: 100 }],
+        percentiles: { p25: 1, p50: 2, p75: 3, p95: 4, p99: 5 },
+        sampleCount: 2,
+      },
+      toolCalls: {
+        buckets: [{ label: "0", count: 2, pct: 100 }],
+        percentiles: { p25: 0, p50: 0, p75: 1, p95: 1, p99: 1 },
+        sampleCount: 2,
+      },
+      tokens: {
+        buckets: [{ label: "<1k", count: 2, pct: 100 }],
+        percentiles: { p25: 10, p50: 20, p75: 30, p95: 40, p99: 50 },
+        sampleCount: 2,
+      },
+    };
+
+    render(<PerTurnDistributionChart distributions={distribution} />);
+
+    expect(screen.getByLabelText("Time distribution")).toBeDefined();
+    expect(screen.getByLabelText("Tool calls distribution")).toBeDefined();
+    expect(screen.getByLabelText("Tokens distribution")).toBeDefined();
+  });
+
+  it("keeps legacy turn timing when per-turn timing is unavailable", () => {
+    const histogram = {
+      buckets: [],
+      percentiles: { p50Ms: 1_000, p75Ms: 2_000, p90Ms: 3_000 },
+      totalTurns: 2,
+    };
+    const partial = {
+      toolCalls: {
+        buckets: [],
+        percentiles: { p25: 0, p50: 1, p75: 2, p95: 3, p99: 4 },
+        sampleCount: 2,
+      },
+    };
+    const complete = {
+      ...partial,
+      durationMs: {
+        buckets: [],
+        percentiles: { p25: 1, p50: 2, p75: 3, p95: 4, p99: 5 },
+        sampleCount: 2,
+      },
+    };
+
+    expect(shouldShowLegacyTurnDuration(partial, histogram)).toBe(true);
+    expect(shouldShowLegacyTurnDuration(complete, histogram)).toBe(false);
   });
 
   it("communicates incomplete invocation-index coverage", () => {
