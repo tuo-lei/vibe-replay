@@ -572,6 +572,12 @@ describe("scanSession", () => {
             },
             {
               type: "tool_use",
+              id: "skill-read-echo",
+              name: "Bash",
+              input: { command: "echo /Users/test/.pi/agent/skills/not-a-skill/SKILL.md" },
+            },
+            {
+              type: "tool_use",
               id: "skill-read-4",
               name: "Read",
               input: {
@@ -595,7 +601,7 @@ describe("scanSession", () => {
 
     // Locating a skill with a glob is still an ordinary tool call; only a
     // concrete SKILL.md path read is counted as activation evidence.
-    expect(result.usageSummary?.tools).toEqual({ Glob: 1 });
+    expect(result.usageSummary?.tools).toEqual({ Bash: 1, Glob: 1 });
     expect(result.usageSummary?.skills).toEqual({
       "mcp-adaptor": 1,
       "ros-cli": 1,

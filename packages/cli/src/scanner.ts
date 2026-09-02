@@ -335,6 +335,7 @@ function parseMcpUsage(rawName: string, input?: Record<string, unknown>): McpUsa
 }
 
 const SKILL_PATH_ROOTS = new Set(["skills", "skills-cursor"]);
+const SKILL_READ_COMMANDS = new Set(["cat", "head", "less", "more", "sed", "tail"]);
 const SKILL_INPUT_KEYS = new Set([
   "command",
   "cmd",
@@ -386,13 +387,32 @@ function skillNameFromPath(value: string): string | undefined {
   return undefined;
 }
 
+function skillNameFromCommand(command: string): string | undefined {
+  const tokens = [...command.matchAll(/'([^']*)'|"([^"]*)"|([^\s]+)/g)].map(
+    (match) => match[1] ?? match[2] ?? match[3] ?? "",
+  );
+  const executable = tokens[0]?.split("/").pop()?.toLowerCase();
+  if (!executable || !SKILL_READ_COMMANDS.has(executable)) return undefined;
+
+  for (const token of tokens.slice(1)) {
+    const argument = token.replace(/^[;|&]+|[;|&]+$/g, "");
+    if (!argument || argument === "--" || argument.startsWith("-")) continue;
+    const skillName = skillNameFromPath(argument);
+    if (skillName) return skillName;
+  }
+  return undefined;
+}
+
 function skillNameFromInput(input: Record<string, unknown>): string | undefined {
   for (const [key, value] of Object.entries(input)) {
     if (!SKILL_INPUT_KEYS.has(key)) continue;
     const values = Array.isArray(value) ? value : [value];
     for (const candidate of values) {
       if (typeof candidate !== "string") continue;
-      const skillName = skillNameFromPath(candidate);
+      const skillName =
+        key === "command" || key === "cmd"
+          ? skillNameFromCommand(candidate)
+          : skillNameFromPath(candidate);
       if (skillName) return skillName;
     }
   }
