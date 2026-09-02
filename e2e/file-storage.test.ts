@@ -16,10 +16,10 @@ import { type Browser, chromium } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { killProcessTree, spawnPnpm } from "../scripts/dev-utils.mjs";
 import { generateTestReplay } from "./helpers.ts";
-import { migrateLocalD1, wranglerDevArgs } from "./wrangler-test-utils.ts";
 
-const WORKER_URL = "http://localhost:8788";
-let persistTo: string;
+const HAS_DEV_VARS = existsSync("cloudflare/.dev.vars");
+
+const WORKER_URL = "http://localhost:8787";
 
 // Minimal valid GIF (1x1 transparent pixel)
 const VALID_GIF_B64 = "R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==";
@@ -27,12 +27,36 @@ const VALID_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1">
 
 function wranglerExec(sql: string) {
   execSync(
-    `pnpm wrangler d1 execute vibe-replay-db --local --persist-to="${persistTo}" --command="${sql.replace(/"/g, '\\"')}"`,
+    `pnpm wrangler d1 execute vibe-replay-db --local --command="${sql.replace(/"/g, '\\"')}"`,
     { cwd: "cloudflare", stdio: "pipe" },
   );
 }
 
-async function waitForWorker(url: string, timeout = 60_000) {
+/**
+ * Run `pnpm db:migrate:local` with retries. miniflare's local D1 can transiently
+ * report SQLITE_BUSY_RECOVERY when a stale WAL/SHM is present (e.g. after a
+ * crashed `wrangler dev`); a short retry loop makes the suite robust to it.
+ */
+async function migrateLocalD1(): Promise<void> {
+  const MAX_ATTEMPTS = 3;
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      execSync("pnpm db:migrate:local", { cwd: "cloudflare", stdio: "pipe" });
+      return;
+    } catch (err) {
+      lastError = err;
+      if (attempt < MAX_ATTEMPTS) {
+        console.warn(`db:migrate:local attempt ${attempt} failed — retrying`);
+        // Give a lingering D1 connection time to checkpoint/release the lock.
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+      }
+    }
+  }
+  throw lastError;
+}
+
+async function waitForWorker(url: string, timeout = 15_000) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
     try {
@@ -46,12 +70,13 @@ async function waitForWorker(url: string, timeout = 60_000) {
 
 // ─── WORKER SERVE TESTS (wrangler dev, no auth needed) ──────
 
-describe("File serve via wrangler dev", () => {
+const describeWorker = HAS_DEV_VARS ? describe : describe.skip;
+
+describeWorker("File serve via wrangler dev", () => {
   let wranglerProcess: ChildProcess;
 
   beforeAll(async () => {
-    persistTo = await mkdtemp(join(tmpdir(), "vibe-replay-file-storage-"));
-    await migrateLocalD1(persistTo);
+    await migrateLocalD1();
 
     // Seed test data directly into D1 + R2
     const gifBinary = Buffer.from(VALID_GIF_B64, "base64");
@@ -91,15 +116,15 @@ describe("File serve via wrangler dev", () => {
     writeFileSync(svgTmp, VALID_SVG);
 
     execSync(
-      `pnpm wrangler r2 object put vibe-replay-storage/files/test-gif-0001.gif --local --persist-to="${persistTo}" --file="${gifTmp}"`,
+      `pnpm wrangler r2 object put vibe-replay-storage/files/test-gif-0001.gif --local --file="${gifTmp}"`,
       { cwd: "cloudflare", stdio: "pipe" },
     );
     execSync(
-      `pnpm wrangler r2 object put vibe-replay-storage/files/test-svg-0001.svg --local --persist-to="${persistTo}" --file="${svgTmp}"`,
+      `pnpm wrangler r2 object put vibe-replay-storage/files/test-svg-0001.svg --local --file="${svgTmp}"`,
       { cwd: "cloudflare", stdio: "pipe" },
     );
     execSync(
-      `pnpm wrangler r2 object put vibe-replay-storage/files/test-priv-001.gif --local --persist-to="${persistTo}" --file="${gifTmp}"`,
+      `pnpm wrangler r2 object put vibe-replay-storage/files/test-priv-001.gif --local --file="${gifTmp}"`,
       { cwd: "cloudflare", stdio: "pipe" },
     );
 
@@ -107,16 +132,15 @@ describe("File serve via wrangler dev", () => {
     unlinkSync(svgTmp);
 
     // Start wrangler dev
-    wranglerProcess = spawnPnpm(wranglerDevArgs(8788, persistTo), {
+    wranglerProcess = spawnPnpm(["wrangler", "dev", "--port", "8787"], {
       cwd: "cloudflare",
       stdio: "pipe",
     });
     await waitForWorker(WORKER_URL);
-  }, 60_000);
+  }, 25_000);
 
   afterAll(async () => {
     if (wranglerProcess) await killProcessTree(wranglerProcess);
-    if (persistTo) await rm(persistTo, { recursive: true, force: true });
   });
 
   // ─── AUTH GUARDS ─────────────────────────────

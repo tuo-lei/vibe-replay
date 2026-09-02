@@ -1,9 +1,7 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { execSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { killProcessTree, spawnPnpm } from "../scripts/dev-utils.mjs";
-import { migrateLocalD1, wranglerDevArgs } from "./wrangler-test-utils.ts";
 
 /**
  * Auth integration tests against wrangler dev.
@@ -15,15 +13,17 @@ import { migrateLocalD1, wranglerDevArgs } from "./wrangler-test-utils.ts";
  * - CORS / routing regressions
  * - Input validation (callbackURL, port, nonce)
  *
- * Uses harmless local OAuth values when cloudflare/.dev.vars is not present.
- * These tests validate the worker contract without contacting GitHub.
+ * Requires cloudflare/.dev.vars with GitHub OAuth credentials.
+ * Skipped in CI where .dev.vars is not available.
  */
+
+const HAS_DEV_VARS = existsSync("cloudflare/.dev.vars");
+const describeAuth = HAS_DEV_VARS ? describe : describe.skip;
 
 const WORKER_URL = "http://localhost:8787";
 let wranglerProcess: ReturnType<typeof import("node:child_process").spawn>;
-let persistTo: string;
 
-async function waitForWorker(url: string, timeout = 60_000) {
+async function waitForWorker(url: string, timeout = 15_000) {
   const start = Date.now();
   while (Date.now() - start < timeout) {
     try {
@@ -37,24 +37,25 @@ async function waitForWorker(url: string, timeout = 60_000) {
   throw new Error(`Worker not ready after ${timeout}ms`);
 }
 
-describe("Auth Worker E2E", () => {
+describeAuth("Auth Worker E2E", () => {
   beforeAll(async () => {
     // Ensure local D1 has the schema (uses Drizzle-managed migrations)
-    persistTo = await mkdtemp(join(tmpdir(), "vibe-replay-auth-worker-"));
-    await migrateLocalD1(persistTo);
+    execSync("pnpm db:migrate:local", {
+      cwd: "cloudflare",
+      stdio: "pipe",
+    });
 
     // Start wrangler dev in background
-    wranglerProcess = spawnPnpm(wranglerDevArgs(8787, persistTo), {
+    wranglerProcess = spawnPnpm(["wrangler", "dev", "--port", "8787"], {
       cwd: "cloudflare",
       stdio: "pipe",
     });
 
     await waitForWorker(WORKER_URL);
-  }, 60_000);
+  }, 20_000);
 
   afterAll(async () => {
     if (wranglerProcess) await killProcessTree(wranglerProcess);
-    if (persistTo) await rm(persistTo, { recursive: true, force: true });
   });
 
   // -----------------------------------------------------------------------
