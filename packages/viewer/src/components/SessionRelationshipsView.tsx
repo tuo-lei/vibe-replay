@@ -704,7 +704,7 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
           )}
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-2xl bg-terminal-bg/35 p-3 shadow-inner">
+        <div className="overflow-x-auto rounded-2xl bg-terminal-bg/35 py-3 shadow-inner">
           <div className="min-w-[760px]">
             {/* Time axis header */}
             <div className="flex" style={{ paddingLeft: LABEL_WIDTH }}>
@@ -742,7 +742,7 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                   >
                     {/* Project label */}
                     <div
-                      className="flex shrink-0 flex-col justify-center overflow-hidden py-1 pr-3"
+                      className="flex shrink-0 flex-col justify-center overflow-hidden py-1 pl-3 pr-3"
                       style={{
                         width: LABEL_WIDTH,
                         height: rowHeight,
