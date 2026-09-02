@@ -732,11 +732,23 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                 const rowHeight = p.totalRowHeightPx;
                 const accentColor = color.solid;
                 return (
-                  <div key={p.key} className="flex items-stretch rounded-xl group">
+                  <div
+                    key={p.key}
+                    className="group flex items-stretch overflow-hidden rounded-xl border transition-colors"
+                    style={{
+                      borderColor: hexToRgba(accentColor, 0.2),
+                      backgroundColor: hexToRgba(accentColor, 0.025),
+                    }}
+                  >
                     {/* Project label */}
                     <div
-                      className="flex flex-col justify-center shrink-0 py-1 pr-3 overflow-hidden"
-                      style={{ width: LABEL_WIDTH, height: rowHeight }}
+                      className="flex shrink-0 flex-col justify-center overflow-hidden border-l-2 py-1 pr-3"
+                      style={{
+                        width: LABEL_WIDTH,
+                        height: rowHeight,
+                        borderLeftColor: accentColor,
+                        backgroundColor: hexToRgba(accentColor, 0.055),
+                      }}
                     >
                       <div className="flex min-w-0 items-center gap-1.5">
                         <span
@@ -777,8 +789,11 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
 
                     {/* Lane area */}
                     <div
-                      className="relative flex-1 overflow-hidden rounded-xl bg-terminal-surface/45 shadow-layer-sm transition-colors group-hover:bg-terminal-surface-hover/70"
-                      style={{ height: rowHeight }}
+                      className="relative flex-1 overflow-hidden rounded-r-xl border-l border-terminal-border/20 shadow-inner"
+                      style={{
+                        height: rowHeight,
+                        backgroundColor: hexToRgba(accentColor, 0.035),
+                      }}
                     >
                       {/* Grid lines */}
                       {ticks.map((t, i) => (
@@ -836,7 +851,7 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                           >
                             {ts.heightPx >= LABEL_VISIBLE_MIN_HEIGHT_PX && (
                               <span
-                                className={`pointer-events-none block min-w-0 px-1.5 text-[10px] font-mono leading-tight ${color.text} ${
+                                className={`relative z-[1] pointer-events-none block min-w-0 px-1.5 text-[10px] font-mono leading-tight ${color.text} ${
                                   lineClamp === 1
                                     ? "truncate leading-[18px]"
                                     : "overflow-hidden pt-1"
@@ -858,7 +873,7 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                                 track is the visual bar; the bright segment marks
                                 the actual active interval, including right-anchored
                                 sessions and bars widened for readable hit targets. */}
-                            <span className="pointer-events-none absolute inset-x-0 bottom-0 h-[3px] bg-white/20">
+                            <span className="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-[3px] bg-white/20">
                               <span
                                 className="absolute bottom-0 h-full min-w-[2px] rounded-full bg-white/85"
                                 style={{
