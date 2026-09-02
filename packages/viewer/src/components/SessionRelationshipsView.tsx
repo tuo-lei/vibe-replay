@@ -104,8 +104,6 @@ function rangeEmptyLabel(range: TimelineRange): string {
       return "the last 7 days";
     case "30d":
       return "the last 30 days";
-    case "all":
-      return "this scan";
   }
 }
 
@@ -247,7 +245,9 @@ interface TimelineSession {
   heightPx: number;
   fillAlpha: number;
   opacity: number;
-  realDurationFraction: number;
+  /** Actual active interval within the rendered visual bar, 0–1. */
+  actualStartFraction: number;
+  actualEndFraction: number;
   /**
    * True when the bar would overflow the lane's right edge if rendered from
    * its leftPct. Right-anchored bars hug the right edge with their full
@@ -486,9 +486,17 @@ function buildTimeline(
       const leftPct = Math.max(0, rawLeftPct);
       const widthPct = Math.max(0, rawRightPct - leftPct);
       const minWidthPx = minWidthFor(it.score);
-      const realWidthPx = (widthPct / 100) * APPROX_TIMELINE_WIDTH_PX;
-      const visualWidthPx = Math.max(realWidthPx, minWidthPx);
-      const realDurationFraction = visualWidthPx > 0 ? Math.min(1, realWidthPx / visualWidthPx) : 1;
+      const visualStartMs = Math.max(it.startMs, rangeStart);
+      const visualEndMs = Math.min(it.endMs, rangeEnd);
+      const visualDurationMs = Math.max(1, visualEndMs - visualStartMs);
+      const actualStartFraction = Math.max(
+        0,
+        Math.min(1, (Math.max(it.realStartMs, visualStartMs) - visualStartMs) / visualDurationMs),
+      );
+      const actualEndFraction = Math.max(
+        actualStartFraction,
+        Math.min(1, (Math.min(it.realEndMs, visualEndMs) - visualStartMs) / visualDurationMs),
+      );
       tSessions.push({
         session: it.original,
         leftPct,
@@ -499,7 +507,8 @@ function buildTimeline(
         heightPx: heightFor(it.score),
         fillAlpha: fillAlphaFor(it.score),
         opacity: opacityFor(it.score),
-        realDurationFraction,
+        actualStartFraction,
+        actualEndFraction,
         rightAnchored: it.rightAnchored,
       });
     }
@@ -570,18 +579,17 @@ function buildTimeline(
   return { projects, ticks, minMs, maxMs, totalSessions, hiddenAutomatedCount };
 }
 
-type TimelineRange = "1d" | "7d" | "30d" | "all";
+type TimelineRange = "1d" | "7d" | "30d";
 
-const RANGE_OPTIONS: { value: TimelineRange; label: string; days?: number }[] = [
+const RANGE_OPTIONS: { value: TimelineRange; label: string; days: number }[] = [
   { value: "1d", label: "1D", days: 1 },
   { value: "7d", label: "7D", days: 7 },
   { value: "30d", label: "30D", days: 30 },
-  { value: "all", label: "All" },
 ];
 
 function rangeWindow(range: TimelineRange): { start?: number; end?: number } {
   const opt = RANGE_OPTIONS.find((o) => o.value === range);
-  if (!opt || opt.days == null) return {};
+  if (!opt) return {};
   const end = Date.now();
   const start = end - opt.days * 86400000;
   return { start, end };
@@ -686,12 +694,12 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
       {projects.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-40 gap-2 text-terminal-dimmer text-sm font-mono">
           <div>No sessions in {rangeEmptyLabel(range)}.</div>
-          {range !== "all" && (
+          {range !== "30d" && (
             <button
-              onClick={() => setRange("all")}
+              onClick={() => setRange("30d")}
               className="text-terminal-green hover:underline text-xs"
             >
-              Show all sessions →
+              Show 30 days →
             </button>
           )}
         </div>
@@ -794,10 +802,6 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                             (ts.heightPx - LABEL_VERTICAL_PADDING_PX) / LABEL_LINE_HEIGHT_PX,
                           ),
                         );
-                        // Right-anchored bars no longer have their left edge
-                        // at startTime, so a left-aligned wick would be
-                        // misleading. Use the tooltip for exact timing instead.
-                        const showWick = !ts.rightAnchored && ts.realDurationFraction < 0.85;
                         return (
                           <button
                             type="button"
@@ -850,23 +854,20 @@ function TimelineSwimlaneView({ groups }: { groups: ProjectGroup[] }) {
                                 {sessionTitle(ts.session)}
                               </span>
                             )}
-                            {showWick && (
-                              <>
-                                {/* Bottom strip + end-tick mark the actual session
-                                    duration inside the min-width-padded bar. */}
-                                <span
-                                  className="pointer-events-none absolute bottom-0 left-0 h-[2px] rounded-r-full bg-white/85"
-                                  style={{ width: `${ts.realDurationFraction * 100}%` }}
-                                  title="actual duration"
-                                />
-                                <span
-                                  className="pointer-events-none absolute bottom-0 h-[6px] w-[2px] bg-white/90"
-                                  style={{
-                                    left: `calc(${ts.realDurationFraction * 100}% - 2px)`,
-                                  }}
-                                />
-                              </>
-                            )}
+                            {/* Every bar gets the same duration rail. The muted
+                                track is the visual bar; the bright segment marks
+                                the actual active interval, including right-anchored
+                                sessions and bars widened for readable hit targets. */}
+                            <span className="pointer-events-none absolute inset-x-0 bottom-0 h-[2px] bg-white/15">
+                              <span
+                                className="absolute bottom-0 h-full rounded-full bg-white/75"
+                                style={{
+                                  left: `${ts.actualStartFraction * 100}%`,
+                                  right: `${(1 - ts.actualEndFraction) * 100}%`,
+                                }}
+                                title="actual duration"
+                              />
+                            </span>
                           </button>
                         );
                       })}

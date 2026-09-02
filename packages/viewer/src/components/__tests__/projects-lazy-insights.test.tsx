@@ -64,7 +64,7 @@ describe("ProjectsPanel project insights", () => {
 
     render(<ProjectsPanel onNavigate={vi.fn()} />);
 
-    const timelineTab = screen.getByRole("button", { name: "Timeline", exact: true });
+    const timelineTab = screen.getByRole("button", { name: "Timeline" });
     expect(timelineTab.className).toContain("bg-terminal-green-subtle");
 
     fireEvent.click(screen.getAllByRole("button", { name: /example/i })[0]);
