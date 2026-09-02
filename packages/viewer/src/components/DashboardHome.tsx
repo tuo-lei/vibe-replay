@@ -120,7 +120,7 @@ function useDashboardData() {
   const [loadingReplays, setLoadingReplays] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [failedRemoteSources, setFailedRemoteSources] = useState<string[]>([]);
-  const [, setScanProgress] = useState<number | null>(null);
+  const [discoveryProgress, setDiscoveryProgress] = useState<number | null>(null);
   const [enrichmentStatus, setEnrichmentStatus] = useState<SourcesEnrichmentStatus | null>(null);
   const wasEnrichingRef = useRef(false);
   const lastSourcesCachedAtRef = useRef<string | undefined>(undefined);
@@ -167,24 +167,24 @@ function useDashboardData() {
         // Use SSE stream for discovery with progress reporting
         refreshPromises.push(
           new Promise<void>((resolve) => {
-            setScanProgress(0);
+            setDiscoveryProgress(0);
             const es = new EventSource("/api/sources/stream");
             es.onmessage = (evt) => {
               try {
                 const msg = JSON.parse(evt.data);
                 if (msg.type === "progress") {
-                  setScanProgress(msg.scanned);
+                  setDiscoveryProgress(msg.scanned);
                 } else if (msg.type === "complete") {
                   setSources(msg.sessions);
                   setFailedRemoteSources(remoteSourceFailureLabels(msg));
-                  setScanProgress(null);
+                  setDiscoveryProgress(null);
                   es.close();
                   resolve();
                 } else if (msg.type === "error") {
                   if (!cachedSources?.sessions.length) {
                     setError(msg.message || "Failed to load sessions");
                   }
-                  setScanProgress(null);
+                  setDiscoveryProgress(null);
                   es.close();
                   resolve();
                 }
@@ -195,7 +195,7 @@ function useDashboardData() {
             es.onerror = () => {
               // SSE failed — fall back to regular fetch
               es.close();
-              setScanProgress(null);
+              setDiscoveryProgress(null);
               fetchWithRetry("/api/sources")
                 .then((r) => {
                   if (!r.ok) throw new Error("Failed to load sources");
@@ -303,6 +303,7 @@ function useDashboardData() {
     replays,
     loading,
     loadingSources,
+    discoveryProgress,
     loadingReplays,
     enrichmentStatus,
     error,
@@ -983,6 +984,7 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
     replays,
     loading,
     loadingSources,
+    discoveryProgress,
     loadingReplays,
     enrichmentStatus,
     error,
@@ -1593,8 +1595,15 @@ export default function DashboardHome({ onNavigate }: DashboardHomeProps) {
             }
             description={
               loadingSources
-                ? "Home is using cached data while local providers refresh in the background."
+                ? discoveryProgress === null
+                  ? "Home is using cached data while local providers refresh in the background."
+                  : `Discovered ${discoveryProgress} sessions so far. Home is using cached data while the refresh continues.`
                 : "Recent sessions will update in place as titles, prompt previews, counts, and metrics become available."
+            }
+            progress={
+              loadingSources && discoveryProgress !== null
+                ? { current: discoveryProgress }
+                : undefined
             }
           />
         )}

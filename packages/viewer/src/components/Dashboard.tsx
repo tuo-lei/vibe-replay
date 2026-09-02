@@ -5518,7 +5518,9 @@ function ScanToast() {
 
   const label =
     displayStatus.phase === "discovering"
-      ? "Discovering sessions..."
+      ? displayStatus.scanned > 0
+        ? `Discovering sessions (${displayStatus.scanned} found)...`
+        : "Discovering sessions..."
       : displayStatus.total > 0
         ? `Scanning ${displayStatus.scanned}/${displayStatus.total}`
         : "Preparing scan...";
