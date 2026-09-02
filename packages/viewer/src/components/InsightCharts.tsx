@@ -1,3 +1,8 @@
+import type {
+  PerTurnDistributions,
+  SessionMetricDistribution,
+  SessionMetricDistributions,
+} from "../engine/insights-rollup";
 import type { ContextBreakdown, ContextComponentId } from "../types";
 
 export interface TurnDurationHistogramData {
@@ -104,6 +109,188 @@ export function TurnDurationChart({ histogram }: { histogram: TurnDurationHistog
         Timing quality varies by provider; this combines recorded and estimated turn durations.
       </div>
     </div>
+  );
+}
+
+type DistributionKey = "durationMs" | "toolCalls" | "turns" | "tokens";
+type DistributionMap = Partial<Record<DistributionKey, SessionMetricDistribution>>;
+type PercentileKey = "p25" | "p50" | "p75" | "p95" | "p99";
+
+const PERCENTILES: PercentileKey[] = ["p25", "p50", "p75", "p95", "p99"];
+
+const SESSION_METRIC_PRESENTATION: Array<{
+  key: DistributionKey;
+  label: string;
+  color: string;
+}> = [
+  { key: "durationMs", label: "Session duration", color: "bg-terminal-response" },
+  { key: "toolCalls", label: "Tool calls", color: "bg-terminal-tool" },
+  { key: "turns", label: "Turns", color: "bg-terminal-green" },
+  { key: "tokens", label: "Tokens", color: "bg-terminal-context" },
+];
+
+const PER_TURN_METRIC_PRESENTATION: Array<{
+  key: DistributionKey;
+  label: string;
+  color: string;
+}> = [
+  { key: "durationMs", label: "Time", color: "bg-terminal-response" },
+  { key: "toolCalls", label: "Tool calls", color: "bg-terminal-tool" },
+  { key: "tokens", label: "Tokens", color: "bg-terminal-context" },
+];
+
+function formatCountPercentile(value: number): string {
+  return Number.isInteger(value) ? value.toLocaleString() : value.toFixed(1);
+}
+
+function formatDistributionValue(key: DistributionKey, value: number): string {
+  if (key === "durationMs") return formatDurationShort(value);
+  if (key === "tokens") return formatTokenCount(value);
+  return formatCountPercentile(value);
+}
+
+function formatSampleCount(
+  sampleCount: number,
+  totalSamples: number | undefined,
+  unit: string,
+): string {
+  if (totalSamples !== undefined && sampleCount < totalSamples) {
+    return `${sampleCount.toLocaleString()}/${totalSamples.toLocaleString()} ${unit}`;
+  }
+  return `${sampleCount.toLocaleString()} ${unit}`;
+}
+
+function DistributionMetricGrid({
+  distributions,
+  metrics,
+  totalSamples,
+  sampleUnit,
+}: {
+  distributions: DistributionMap;
+  metrics: Array<{ key: DistributionKey; label: string; color: string }>;
+  totalSamples?: number;
+  sampleUnit: string;
+}) {
+  const availableMetrics = metrics.flatMap((metric) => {
+    const distribution = distributions[metric.key];
+    return distribution ? [{ ...metric, distribution }] : [];
+  });
+
+  if (availableMetrics.length === 0) return null;
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 gap-x-6 gap-y-5 md:grid-cols-2">
+        {availableMetrics.map(({ key, label, color, distribution }) => {
+          const maxPct = Math.max(...distribution.buckets.map((bucket) => bucket.pct), 1);
+          return (
+            <div key={key} aria-label={`${label} distribution`} className="min-w-0">
+              <div className="mb-2 flex items-baseline justify-between gap-2">
+                <span className="text-xs font-sans font-semibold text-terminal-text">{label}</span>
+                <span className="shrink-0 text-[10px] font-mono text-terminal-dimmer">
+                  {formatSampleCount(distribution.sampleCount, totalSamples, sampleUnit)}
+                </span>
+              </div>
+              <div className="flex h-20 items-end gap-1">
+                {distribution.buckets.map((bucket) => {
+                  const heightPct = Math.max((bucket.pct / maxPct) * 100, bucket.count > 0 ? 7 : 0);
+                  return (
+                    <div
+                      key={bucket.label}
+                      className="group relative flex h-full min-w-0 flex-1 flex-col items-center justify-end"
+                      title={`${bucket.label}: ${bucket.count.toLocaleString()} ${sampleUnit} (${bucket.pct}%)`}
+                    >
+                      <div
+                        className={`w-full rounded-sm ${color} transition-opacity group-hover:opacity-100`}
+                        style={{
+                          height: `${heightPct}%`,
+                          minHeight: bucket.count > 0 ? "3px" : "0",
+                          opacity: bucket.count > 0 ? 0.7 : 0.12,
+                        }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-1 flex gap-1">
+                {distribution.buckets.map((bucket) => (
+                  <div
+                    key={bucket.label}
+                    className="min-w-0 flex-1 truncate text-center text-[9px] font-mono text-terminal-dimmer"
+                    title={bucket.label}
+                  >
+                    {bucket.label}
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 grid grid-cols-5 gap-1 border-t border-terminal-border/20 pt-2">
+                {PERCENTILES.map((percentile) => (
+                  <div key={percentile} className="min-w-0">
+                    <div
+                      className={`text-[10px] font-mono uppercase ${
+                        percentile === "p99"
+                          ? "text-terminal-orange"
+                          : percentile === "p95"
+                            ? "text-terminal-response"
+                            : "text-terminal-dimmer"
+                      }`}
+                    >
+                      {percentile}
+                    </div>
+                    <div
+                      className={`mt-0.5 truncate text-xs font-mono font-semibold tabular-nums ${
+                        percentile === "p99" ? "text-terminal-orange" : "text-terminal-text"
+                      }`}
+                    >
+                      {formatDistributionValue(key, distribution.percentiles[percentile])}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="text-[9px] font-mono leading-relaxed text-terminal-dimmer">
+        P50 is the median; P25/P75 bound the middle 50%; P95/P99 expose the long tail. Each cutoff
+        is the value at or below which that share of observations falls. P99 is most useful with a
+        larger sample. Missing duration or token observations are excluded; the sample count shows
+        coverage. Token values include input, output, cache read, and cache write.
+      </div>
+    </div>
+  );
+}
+
+export function SessionDistributionChart({
+  distributions,
+  totalSessions,
+}: {
+  distributions: SessionMetricDistributions;
+  totalSessions?: number;
+}) {
+  return (
+    <DistributionMetricGrid
+      distributions={distributions}
+      metrics={SESSION_METRIC_PRESENTATION}
+      totalSamples={totalSessions}
+      sampleUnit="sessions"
+    />
+  );
+}
+
+export function PerTurnDistributionChart({
+  distributions,
+}: {
+  distributions: PerTurnDistributions;
+}) {
+  const totalTurns = distributions.toolCalls?.sampleCount;
+  return (
+    <DistributionMetricGrid
+      distributions={distributions}
+      metrics={PER_TURN_METRIC_PRESENTATION}
+      totalSamples={totalTurns}
+      sampleUnit="turns"
+    />
   );
 }
 

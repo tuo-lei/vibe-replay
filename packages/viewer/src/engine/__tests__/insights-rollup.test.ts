@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildPerTurnDistributions,
+  buildSessionMetricDistributions,
   isInInsightsRange,
   rangeSince,
   rollupInsights,
@@ -344,5 +346,120 @@ describe("rollupInsights", () => {
   it("excludes undated sessions from bounded secondary breakdowns", () => {
     expect(isInInsightsRange(undefined, "2026-08-15T00:00:00Z")).toBe(false);
     expect(isInInsightsRange(undefined)).toBe(true);
+  });
+});
+
+describe("session metric distributions", () => {
+  it("computes per-session percentiles and keeps zero-count sessions", () => {
+    const distributions = buildSessionMetricDistributions([
+      {
+        project: "~/code/a",
+        durationMs: 100,
+        prompts: 1,
+        edits: 0,
+        toolCalls: 0,
+        tokenUsage: {
+          inputTokens: 25,
+          outputTokens: 25,
+          cacheReadTokens: 25,
+          cacheCreationTokens: 25,
+        },
+      },
+      {
+        project: "~/code/b",
+        durationMs: 200,
+        prompts: 3,
+        edits: 0,
+        toolCalls: 10,
+        tokenUsage: {
+          inputTokens: 75,
+          outputTokens: 75,
+          cacheReadTokens: 75,
+          cacheCreationTokens: 75,
+        },
+      },
+      {
+        project: "~/code/c",
+        prompts: 2,
+        edits: 0,
+        toolCalls: 5,
+      },
+    ]);
+
+    expect(distributions?.durationMs).toMatchObject({
+      sampleCount: 2,
+      percentiles: { p25: 125, p50: 150, p75: 175, p95: 195, p99: 199 },
+    });
+    expect(distributions?.toolCalls).toMatchObject({
+      sampleCount: 3,
+      percentiles: { p25: 2.5, p50: 5, p75: 7.5, p95: 9.5, p99: 9.9 },
+    });
+    expect(distributions?.turns?.sampleCount).toBe(3);
+    expect(distributions?.tokens).toMatchObject({
+      sampleCount: 2,
+      percentiles: { p25: 150, p50: 200, p75: 250, p95: 290, p99: 298 },
+    });
+  });
+
+  it("builds time, tool, and token distributions for turns", () => {
+    const distributions = buildPerTurnDistributions([
+      { durationMs: 100, toolCalls: 0, tokens: 100 },
+      { durationMs: 200, toolCalls: 4, tokens: 300 },
+      { toolCalls: 2 },
+    ]);
+
+    expect(distributions).toMatchObject({
+      durationMs: {
+        sampleCount: 2,
+        percentiles: { p50: 150, p99: 199 },
+      },
+      toolCalls: {
+        sampleCount: 3,
+        percentiles: { p50: 2, p99: 3.96 },
+      },
+      tokens: {
+        sampleCount: 2,
+        percentiles: { p50: 200, p99: 298 },
+      },
+    });
+  });
+
+  it("scopes distributions to the selected session range", () => {
+    const result = rollupInsightsBreakdown(
+      {
+        sessions: [
+          {
+            project: "~/code/recent",
+            startTime: "2026-08-20T12:00:00Z",
+            durationMs: 100,
+            prompts: 1,
+            edits: 0,
+            toolCalls: 2,
+            turnMetrics: [{ durationMs: 100, toolCalls: 2, tokens: 50 }],
+          },
+          {
+            project: "~/code/old",
+            startTime: "2026-01-01T00:00:00Z",
+            durationMs: 10_000,
+            prompts: 10,
+            edits: 0,
+            toolCalls: 20,
+          },
+        ],
+        replays: [],
+      },
+      { since: "2026-08-15T00:00:00Z" },
+    );
+
+    expect(result.sessionMetricDistributions).toMatchObject({
+      durationMs: { sampleCount: 1, percentiles: { p50: 100 } },
+      toolCalls: { sampleCount: 1, percentiles: { p50: 2 } },
+      turns: { sampleCount: 1, percentiles: { p50: 1 } },
+    });
+    expect(result.perTurnDistributions).toMatchObject({
+      durationMs: { sampleCount: 1, percentiles: { p50: 100 } },
+      toolCalls: { sampleCount: 1, percentiles: { p50: 2 } },
+      tokens: { sampleCount: 1, percentiles: { p50: 50 } },
+    });
   });
 });

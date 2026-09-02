@@ -219,6 +219,10 @@ describe("scanSession", () => {
     expect(result.title).toBe("Fix login bug in auth module");
     expect(result.startTime).toBe("2025-03-20T10:00:00Z");
     expect(result.model).toBe("claude-sonnet-4-20250514");
+    expect(result.turnMetrics).toMatchObject([
+      { durationMs: 9_000, toolCalls: 2 },
+      { toolCalls: 0 },
+    ]);
   });
 
   it("persists structured Pi compaction diagnostics in scan results", async () => {

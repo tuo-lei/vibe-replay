@@ -1,5 +1,5 @@
 import { mergeProjectIdentities, projectIdentityKey } from "@vibe-replay/types";
-import type { ProjectIdentity, SessionLocation } from "@vibe-replay/types";
+import type { ProjectIdentity, SessionLocation, TurnMetric } from "@vibe-replay/types";
 
 export interface InsightsMetricSession {
   project: string;
@@ -20,6 +20,7 @@ export interface InsightsMetricSession {
     cacheCreationTokens: number;
   };
   turnDurations?: number[];
+  turnMetrics?: TurnMetric[];
 }
 
 export interface InsightsReplayRef {
@@ -69,12 +70,41 @@ export interface InsightsRangeTurnDurationHistogram {
   totalTurns: number;
 }
 
+export interface SessionMetricDistribution {
+  buckets: Array<{ label: string; count: number; pct: number }>;
+  /** Linear-interpolated percentile cutoffs, in the metric's native unit. */
+  percentiles: { p25: number; p50: number; p75: number; p95: number; p99: number };
+  sampleCount: number;
+}
+
+export interface SessionMetricDistributions {
+  /** Total active duration for each session, in milliseconds. */
+  durationMs?: SessionMetricDistribution;
+  /** All provider-recorded tool invocations for each session. */
+  toolCalls?: SessionMetricDistribution;
+  /** User prompts (turns) for each session. */
+  turns?: SessionMetricDistribution;
+  /** Input + output + cache read/write tokens for each session. */
+  tokens?: SessionMetricDistribution;
+}
+
+export interface PerTurnDistributions {
+  /** Active/provider-recorded time for each turn, in milliseconds. */
+  durationMs?: SessionMetricDistribution;
+  /** All recorded tool invocations attributed to each turn. */
+  toolCalls?: SessionMetricDistribution;
+  /** Input + output + cache read/write tokens for each turn. */
+  tokens?: SessionMetricDistribution;
+}
+
 export interface InsightsRangeBreakdown {
   projects: InsightsRangeProject[];
   models: Record<string, number>;
   providers: Record<string, number>;
   tokenBreakdown?: InsightsRangeTokenBreakdown;
   turnDurationHistogram?: InsightsRangeTurnDurationHistogram;
+  sessionMetricDistributions?: SessionMetricDistributions;
+  perTurnDistributions?: PerTurnDistributions;
 }
 
 export type InsightsRange = "7d" | "30d" | "90d" | "all";
@@ -217,6 +247,143 @@ function buildTurnDurationHistogram(
   };
 }
 
+const SESSION_METRIC_BUCKETS = {
+  durationMs: [
+    { label: "<30s", max: 30_000 },
+    { label: "30s-1m", max: 60_000 },
+    { label: "1-2m", max: 120_000 },
+    { label: "2-5m", max: 300_000 },
+    { label: "5-10m", max: 600_000 },
+    { label: "10m+", max: Number.POSITIVE_INFINITY },
+  ],
+  toolCalls: [
+    { label: "0", max: 1 },
+    { label: "1-5", max: 6 },
+    { label: "6-10", max: 11 },
+    { label: "11-25", max: 26 },
+    { label: "26-50", max: 51 },
+    { label: "51-100", max: 101 },
+    { label: "100+", max: Number.POSITIVE_INFINITY },
+  ],
+  turns: [
+    { label: "0", max: 1 },
+    { label: "1-2", max: 3 },
+    { label: "3-5", max: 6 },
+    { label: "6-10", max: 11 },
+    { label: "11-20", max: 21 },
+    { label: "21-50", max: 51 },
+    { label: "50+", max: Number.POSITIVE_INFINITY },
+  ],
+  tokens: [
+    { label: "<1k", max: 1_000 },
+    { label: "1-10k", max: 10_000 },
+    { label: "10-50k", max: 50_000 },
+    { label: "50-100k", max: 100_000 },
+    { label: "100-250k", max: 250_000 },
+    { label: "250-500k", max: 500_000 },
+    { label: "500k+", max: Number.POSITIVE_INFINITY },
+  ],
+} as const;
+
+type SessionMetricKey = keyof typeof SESSION_METRIC_BUCKETS;
+
+const TURN_METRIC_BUCKETS = {
+  durationMs: SESSION_METRIC_BUCKETS.durationMs,
+  toolCalls: SESSION_METRIC_BUCKETS.toolCalls,
+  tokens: SESSION_METRIC_BUCKETS.tokens,
+} as const;
+
+function buildSessionMetricDistribution(
+  values: readonly number[],
+  buckets: readonly { label: string; max: number }[],
+): SessionMetricDistribution | undefined {
+  const sorted = values
+    .filter((value) => Number.isFinite(value) && value >= 0)
+    .sort((a, b) => a - b);
+  if (sorted.length === 0) return undefined;
+
+  const counts = buckets.map(() => 0);
+  for (const value of sorted) {
+    const bucketIndex = buckets.findIndex((bucket) => value < bucket.max);
+    if (bucketIndex >= 0) counts[bucketIndex]!++;
+  }
+
+  return {
+    buckets: buckets.map((bucket, index) => ({
+      label: bucket.label,
+      count: counts[index]!,
+      pct: Math.round((counts[index]! / sorted.length) * 1000) / 10,
+    })),
+    percentiles: {
+      p25: percentile(sorted, 25),
+      p50: percentile(sorted, 50),
+      p75: percentile(sorted, 75),
+      p95: percentile(sorted, 95),
+      p99: percentile(sorted, 99),
+    },
+    sampleCount: sorted.length,
+  };
+}
+
+export function buildSessionMetricDistributions(
+  sessions: readonly InsightsMetricSession[],
+): SessionMetricDistributions | undefined {
+  const values: Record<SessionMetricKey, number[]> = {
+    durationMs: [],
+    toolCalls: [],
+    turns: [],
+    tokens: [],
+  };
+
+  for (const session of sessions) {
+    if (session.durationMs !== undefined) values.durationMs.push(session.durationMs);
+    values.toolCalls.push(session.toolCalls);
+    values.turns.push(session.prompts);
+    if (session.tokenUsage) {
+      values.tokens.push(
+        session.tokenUsage.inputTokens +
+          session.tokenUsage.outputTokens +
+          session.tokenUsage.cacheReadTokens +
+          session.tokenUsage.cacheCreationTokens,
+      );
+    }
+  }
+
+  const distributions: SessionMetricDistributions = {};
+  for (const key of Object.keys(SESSION_METRIC_BUCKETS) as SessionMetricKey[]) {
+    const distribution = buildSessionMetricDistribution(values[key], SESSION_METRIC_BUCKETS[key]);
+    if (distribution) distributions[key] = distribution;
+  }
+
+  return Object.keys(distributions).length > 0 ? distributions : undefined;
+}
+
+type PerTurnMetricKey = keyof typeof TURN_METRIC_BUCKETS;
+
+export function buildPerTurnDistributions(
+  turnMetrics: readonly TurnMetric[],
+): PerTurnDistributions | undefined {
+  const values: Record<PerTurnMetricKey, number[]> = {
+    durationMs: [],
+    toolCalls: [],
+    tokens: [],
+  };
+
+  for (const turn of turnMetrics) {
+    if (turn.durationMs !== undefined) values.durationMs.push(turn.durationMs);
+    values.toolCalls.push(turn.toolCalls);
+    if (turn.tokens !== undefined) values.tokens.push(turn.tokens);
+  }
+
+  const distributions: PerTurnDistributions = {};
+  for (const key of Object.keys(TURN_METRIC_BUCKETS) as PerTurnMetricKey[]) {
+    const distribution = buildSessionMetricDistribution(values[key], TURN_METRIC_BUCKETS[key]);
+    if (distribution) distributions[key] = distribution;
+  }
+
+  return Object.keys(distributions).length > 0 ? distributions : undefined;
+}
+
 /**
  * Aggregate the non-additive Insights sections for a selected time range.
  * These fields are carried per session by the optional detail projection so
@@ -231,6 +398,7 @@ export function rollupInsightsBreakdown(
   const models: Record<string, number> = {};
   const providers: Record<string, number> = {};
   const durations: number[] = [];
+  const turnMetrics: TurnMetric[] = [];
   let input = 0;
   let output = 0;
   let cacheRead = 0;
@@ -281,6 +449,7 @@ export function rollupInsightsBreakdown(
       cacheCreation += session.tokenUsage.cacheCreationTokens;
     }
     if (session.turnDurations) durations.push(...session.turnDurations);
+    if (session.turnMetrics) turnMetrics.push(...session.turnMetrics);
   }
 
   const tokenTotal = input + output + cacheRead + cacheCreation;
@@ -303,5 +472,7 @@ export function rollupInsightsBreakdown(
           }
         : undefined,
     turnDurationHistogram: buildTurnDurationHistogram(durations),
+    sessionMetricDistributions: buildSessionMetricDistributions(sessions),
+    perTurnDistributions: buildPerTurnDistributions(turnMetrics),
   };
 }
