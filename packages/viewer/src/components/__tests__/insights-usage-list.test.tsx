@@ -8,6 +8,7 @@ import {
   TopProjectsList,
   CoverageAudit,
   formatCompactNum,
+  shouldShowLegacyTurnDuration,
   UsageBarList,
   UsageCoverage,
 } from "../InsightsPage";
@@ -174,6 +175,32 @@ describe("Insights sections", () => {
     expect(screen.getByLabelText("Time distribution")).toBeDefined();
     expect(screen.getByLabelText("Tool calls distribution")).toBeDefined();
     expect(screen.getByLabelText("Tokens distribution")).toBeDefined();
+  });
+
+  it("keeps legacy turn timing when per-turn timing is unavailable", () => {
+    const histogram = {
+      buckets: [],
+      percentiles: { p50Ms: 1_000, p75Ms: 2_000, p90Ms: 3_000 },
+      totalTurns: 2,
+    };
+    const partial = {
+      toolCalls: {
+        buckets: [],
+        percentiles: { p25: 0, p50: 1, p75: 2, p95: 3, p99: 4 },
+        sampleCount: 2,
+      },
+    };
+    const complete = {
+      ...partial,
+      durationMs: {
+        buckets: [],
+        percentiles: { p25: 1, p50: 2, p75: 3, p95: 4, p99: 5 },
+        sampleCount: 2,
+      },
+    };
+
+    expect(shouldShowLegacyTurnDuration(partial, histogram)).toBe(true);
+    expect(shouldShowLegacyTurnDuration(complete, histogram)).toBe(false);
   });
 
   it("communicates incomplete invocation-index coverage", () => {

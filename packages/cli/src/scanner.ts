@@ -1594,9 +1594,20 @@ function turnToolCallCount(blocks: ContentBlock[]): number {
   for (const block of blocks) {
     if (block.type !== "tool_use") continue;
     count++;
-    const nestedEvents = (block as { _subAgent?: { usageEvents?: UsageEvent[] } })._subAgent
-      ?.usageEvents;
-    if (nestedEvents) count += nestedEvents.filter((event) => event.kind === "tool").length;
+    const subAgent = (
+      block as {
+        _subAgent?: {
+          usageEvents?: UsageEvent[];
+          scenes?: Array<{ type?: string }>;
+        };
+      }
+    )._subAgent;
+    const nestedEvents = subAgent?.usageEvents;
+    if (nestedEvents?.length) {
+      count += nestedEvents.filter((event) => event.kind === "tool").length;
+    } else if (subAgent?.scenes) {
+      count += subAgent.scenes.filter((scene) => scene.type === "tool-call").length;
+    }
   }
   return count;
 }
@@ -1607,7 +1618,7 @@ function addTurnTokenTotal(metric: TurnMetric, usage: TokenUsage): void {
   metric.tokens = (metric.tokens || 0) + total;
 }
 
-function buildTurnMetrics(
+export function buildTurnMetrics(
   turns: ProviderParseResult["turns"],
   turnStats: ProviderParseResult["turnStats"],
 ): TurnMetric[] | undefined {
@@ -1632,6 +1643,7 @@ function buildTurnMetrics(
 
   for (const stat of turnStats || []) {
     if (!Number.isInteger(stat.turnIndex) || stat.turnIndex < 0) continue;
+    if (stat.turnIndex >= metrics.length) continue;
     const metric = ensureMetric(stat.turnIndex);
     if (typeof stat.durationMs === "number" && stat.durationMs > 0) {
       metric.durationMs = (metric.durationMs || 0) + stat.durationMs;

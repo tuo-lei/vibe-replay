@@ -322,6 +322,14 @@ function rangeLabel(range: TimeRange): string {
   return "All Time";
 }
 
+/** Keep the legacy duration chart visible when per-turn timing is incomplete. */
+export function shouldShowLegacyTurnDuration(
+  perTurnDistributions: InsightsRangeBreakdown["perTurnDistributions"],
+  turnDurationHistogram: InsightsRangeBreakdown["turnDurationHistogram"],
+): boolean {
+  return Boolean(turnDurationHistogram && !perTurnDistributions?.durationMs);
+}
+
 type InsightsSectionId = "overview" | "activity" | "usage" | "coverage" | "workspace";
 
 const INSIGHTS_SECTIONS: Array<{
@@ -2210,7 +2218,9 @@ export default function InsightsPage() {
                         <h3 className="ui-section-title-strong mb-4">Per-turn distributions</h3>
                         <PerTurnDistributionChart distributions={perTurnDistributions} />
                       </div>
-                    ) : turnDurationHistogram ? (
+                    ) : null}
+                    {shouldShowLegacyTurnDuration(perTurnDistributions, turnDurationHistogram) &&
+                    turnDurationHistogram ? (
                       <div className={`${INSIGHTS_CARD_CLASS} p-5 md:p-6`}>
                         <h3 className="ui-section-title-strong mb-4">Turn Duration Distribution</h3>
                         <TurnDurationChart histogram={turnDurationHistogram} />

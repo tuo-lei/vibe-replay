@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   aggregateProjectInsights,
   aggregateUserInsights,
+  buildTurnMetrics,
   countPendingCursorUsageIndexes,
   type SessionScanResult,
   isPartialScanResult,
@@ -184,6 +185,29 @@ describe("scanSession", () => {
     );
   });
 
+  it("counts fallback sub-agent scenes without expanding malformed turn indexes", () => {
+    const metrics = buildTurnMetrics(
+      [
+        { role: "user", blocks: [{ type: "text", text: "Delegate this" }] },
+        {
+          role: "assistant",
+          blocks: [
+            {
+              type: "tool_use",
+              id: "agent-1",
+              name: "Agent",
+              input: {},
+              _subAgent: { scenes: [{ type: "tool-call" }] },
+            } as any,
+          ],
+        },
+      ],
+      [{ turnIndex: 1_000_000 }],
+    );
+
+    expect(metrics).toEqual([{ toolCalls: 2 }]);
+  });
+
   it.each(["no-prompts", "unreadable"] as const)(
     "does not use a metadata title as a prompt for %s sources",
     async (transcriptStatus) => {
@@ -220,7 +244,7 @@ describe("scanSession", () => {
     expect(result.startTime).toBe("2025-03-20T10:00:00Z");
     expect(result.model).toBe("claude-sonnet-4-20250514");
     expect(result.turnMetrics).toMatchObject([
-      { durationMs: 9_000, toolCalls: 2 },
+      { durationMs: 9_000, toolCalls: 2, tokens: 10_700 },
       { toolCalls: 0 },
     ]);
   });
