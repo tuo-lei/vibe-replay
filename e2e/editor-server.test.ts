@@ -1,128 +1,140 @@
-import { readFile, rm, writeFile } from "node:fs/promises";
+import type { ChildProcess } from "node:child_process";
+import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { serve } from "@hono/node-server";
-import { Hono } from "hono";
+import { pathToFileURL } from "node:url";
 import { type Browser, chromium } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { killProcessTree, spawnTsx } from "../scripts/dev-utils.mjs";
 import { generateTestReplay } from "./helpers.ts";
 
 describe("Editor Server E2E", () => {
   let browser: Browser;
   let tmpDir: string;
   let serverPort: number;
-  let server: ReturnType<typeof serve>;
-  let viewerHtml: string;
+  let serverProcess: ChildProcess;
+  let slug: string;
+  let sessionId: string;
 
   beforeAll(async () => {
-    // Generate a replay to disk
-    const result = await generateTestReplay();
-    tmpDir = result.tmpDir;
+    const generated = await generateTestReplay();
+    tmpDir = generated.tmpDir;
+    slug = generated.session.meta.slug;
+    sessionId = generated.session.meta.sessionId;
 
-    // Load viewer HTML
-    viewerHtml = await readFile(
-      join(import.meta.dirname, "..", "packages/cli/assets/viewer.html"),
+    const serverModule = pathToFileURL(
+      join(import.meta.dirname, "..", "packages/cli/src/server.ts"),
+    ).href;
+    const bootstrapPath = join(tmpDir, "start-server.mjs");
+    await writeFile(
+      bootstrapPath,
+      [
+        `import { startServer } from ${JSON.stringify(serverModule)};`,
+        `await startServer(${JSON.stringify(tmpDir)}, { openDashboard: true });`,
+      ].join("\n"),
       "utf-8",
     );
 
-    // Build a minimal Hono app that mirrors the real server's key routes
-    const app = new Hono();
-
-    app.get("/", (c) => {
-      const flag = `<script>window.__VIBE_REPLAY_EDITOR__ = true;</script>`;
-      const headIdx = viewerHtml.lastIndexOf("</head>");
-      const html = `${viewerHtml.slice(0, headIdx) + flag}\n${viewerHtml.slice(headIdx)}`;
-      return c.html(html);
+    serverProcess = spawnTsx([bootstrapPath], {
+      cwd: join(import.meta.dirname, ".."),
+      env: {
+        ...process.env,
+        HOME: tmpDir,
+        USERPROFILE: tmpDir,
+        VIBE_REPLAY_NO_AUTO_OPEN: "1",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
     });
 
-    app.get("/api/sessions", async (c) => {
-      const { readdir } = await import("node:fs/promises");
-      const results: { slug: string; title?: string; provider?: string }[] = [];
-      try {
-        const entries = await readdir(tmpDir);
-        for (const entry of entries) {
-          try {
-            const raw = await readFile(join(tmpDir, entry, "replay.json"), "utf-8");
-            const session = JSON.parse(raw);
-            results.push({
-              slug: entry,
-              title: session.meta?.title,
-              provider: session.meta?.provider,
-            });
-          } catch {
-            /* not a session dir */
-          }
+    serverPort = await new Promise<number>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("server start timeout")), 20_000);
+      const onData = (chunk: Buffer) => {
+        const match = chunk.toString().match(/http:\/\/localhost:(\d+)/);
+        if (!match) return;
+        clearTimeout(timeout);
+        serverProcess.stdout?.off("data", onData);
+        resolve(Number(match[1]));
+      };
+      serverProcess.stdout?.on("data", onData);
+      serverProcess.stderr?.on("data", (chunk) => process.stderr.write(chunk));
+      serverProcess.once("exit", (code) => {
+        if (!serverPort) {
+          clearTimeout(timeout);
+          reject(new Error(`server exited before binding (code ${code})`));
         }
-      } catch {
-        /* empty */
-      }
-      return c.json(results);
+      });
     });
-
-    app.get("/api/session", async (c) => {
-      const slug = c.req.query("slug");
-      if (!slug) return c.json({ error: "slug required" }, 400);
-      try {
-        const raw = await readFile(join(tmpDir, slug, "replay.json"), "utf-8");
-        return c.json(JSON.parse(raw));
-      } catch {
-        return c.json({ error: "not found" }, 404);
-      }
-    });
-
-    // Start server on random port
-    serverPort = 19876 + Math.floor(Math.random() * 1000);
-    server = serve({ fetch: app.fetch, port: serverPort, hostname: "127.0.0.1" });
 
     browser = await chromium.launch({ headless: true });
-  });
+  }, 30_000);
 
   afterAll(async () => {
     await browser?.close();
-    server?.close();
-    await rm(tmpDir, { recursive: true, force: true });
+    if (serverProcess) await killProcessTree(serverProcess);
+    if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
   });
 
-  it("GET /api/sessions returns session list", async () => {
-    const resp = await fetch(`http://localhost:${serverPort}/api/sessions`);
-    expect(resp.status).toBe(200);
-    const data = (await resp.json()) as { slug: string }[];
-    expect(Array.isArray(data)).toBe(true);
-    expect(data.length).toBeGreaterThan(0);
-    expect(data[0]).toHaveProperty("slug");
+  it("serves the generated replay through the real server route graph", async () => {
+    const response = await fetch(`http://localhost:${serverPort}/api/sessions`);
+    expect(response.status).toBe(200);
+
+    const sessions = (await response.json()) as Array<{
+      slug: string;
+      sessionId: string;
+      stats: { sceneCount: number };
+    }>;
+    const matchingSessions = sessions.filter((session) => session.slug === slug);
+    expect(matchingSessions).toHaveLength(1);
+    expect(matchingSessions[0]).toMatchObject({
+      slug,
+      sessionId,
+      stats: { sceneCount: expect.any(Number) },
+    });
+
+    const replayResponse = await fetch(
+      `http://localhost:${serverPort}/api/session?slug=${encodeURIComponent(slug)}`,
+    );
+    expect(replayResponse.status).toBe(200);
+    const replay = (await replayResponse.json()) as {
+      meta: { sessionId: string; slug: string };
+      scenes: unknown[];
+    };
+    expect(replay.meta).toEqual(expect.objectContaining({ sessionId, slug }));
+    expect(replay.scenes).toHaveLength(matchingSessions[0].stats.sceneCount);
   });
 
-  it("GET /api/session?slug returns session data", async () => {
-    const listResp = await fetch(`http://localhost:${serverPort}/api/sessions`);
-    const sessions = (await listResp.json()) as { slug: string }[];
-    const testSlug = sessions[0].slug;
+  it("registers health, auth, and viewer routes in the real server", async () => {
+    const scanStatus = await fetch(`http://localhost:${serverPort}/api/scan/status`);
+    expect(scanStatus.status).toBe(200);
+    expect(await scanStatus.json()).toEqual(
+      expect.objectContaining({ running: expect.any(Boolean), total: expect.any(Number) }),
+    );
 
-    const resp = await fetch(`http://localhost:${serverPort}/api/session?slug=${testSlug}`);
-    expect(resp.status).toBe(200);
-    const session = (await resp.json()) as { meta: { sessionId: string }; scenes: unknown[] };
-    expect(session).toHaveProperty("meta");
-    expect(session.meta).toHaveProperty("sessionId");
-    expect(session).toHaveProperty("scenes");
-    expect(Array.isArray(session.scenes)).toBe(true);
-  });
+    const authStatus = await fetch(`http://localhost:${serverPort}/api/auth/status`);
+    expect(authStatus.status).toBe(200);
+    await expect(authStatus.json()).resolves.toEqual({ authenticated: false, user: null });
 
-  it("GET / serves viewer HTML with editor flag", async () => {
-    const resp = await fetch(`http://localhost:${serverPort}/`);
-    expect(resp.status).toBe(200);
-    const html = await resp.text();
+    const viewer = await fetch(`http://localhost:${serverPort}/?view=dashboard`);
+    expect(viewer.status).toBe(200);
+    const html = await viewer.text();
     expect(html).toContain("__VIBE_REPLAY_EDITOR__");
+    expect(html).toContain("vibe-replay");
     expect(html).toContain("</html>");
   });
 
-  it("viewer loads in browser from server", async () => {
+  it("loads the real editor shell in a browser", async () => {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-    await page.goto(`http://localhost:${serverPort}/`, { waitUntil: "networkidle" });
-    await page.waitForTimeout(1000);
-
-    // Verify the viewer loaded (not a blank page or server error)
-    const html = await page.content();
-    expect(html).toContain("vibe-replay");
-    expect(html).toContain("__VIBE_REPLAY_EDITOR__");
-
-    await page.close();
+    try {
+      await page.goto(`http://localhost:${serverPort}/?view=dashboard`, {
+        waitUntil: "domcontentloaded",
+      });
+      await page.waitForFunction(
+        () => document.body.textContent?.includes("vibe-replay") === true,
+        undefined,
+        { timeout: 15_000 },
+      );
+      expect(await page.locator("body").textContent()).toContain("vibe-replay");
+    } finally {
+      await page.close();
+    }
   });
 });
