@@ -13,7 +13,7 @@ License: MIT
 - [Homepage](https://vibe-replay.com/): Product overview, install instructions, feature list.
 - [Explore replays](https://vibe-replay.com/explore/): Public AI coding sessions shared by the community (Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, OpenCode, Hermes, and Pi).
 - [Insights dashboard](https://vibe-replay.com/insights/): Personal AI coding analytics — sessions, prompts, tool calls, costs, streaks across machines and providers.
-- [Blog](https://vibe-replay.com/blog/): Deep-dives on Claude Code, Cursor, and AI coding workflows.
+- [Blog](https://vibe-replay.com/blog/): Deep-dives on AI-agent local storage, coding workflows, and replayable sessions.
 
 ## What it does
 
@@ -41,6 +41,10 @@ License: MIT
 ## Blog posts
 
 - [Where Does Cursor's SDK Actually Store Your Agents? A Deep Dive into sdk-agent-store](https://vibe-replay.com/blog/cursor-sdk-deep-dive/): Inside the Cursor SDK's local storage layer — its own schema, event stream, and tool-result format.
+- [What Does OpenCode Store on Your Machine? A Deep Dive into opencode.db](https://vibe-replay.com/blog/opencode-local-storage/): How OpenCode's SQLite session, message, and part tables encode prompts, reasoning, tools, and compaction.
+- [What Does Hermes Store on Your Machine? A Deep Dive into state.db and Profiles](https://vibe-replay.com/blog/hermes-local-storage/): How Hermes stores profile-aware sessions, usage, tools, reasoning, costs, and compaction markers in SQLite.
+- [What Does Pi Coding Agent Store on Your Machine? A Deep Dive into Session JSONL](https://vibe-replay.com/blog/pi-local-storage/): How Pi's parent-linked JSONL tree represents branches, tool results, model changes, and compaction.
+- [What Does Codex Store on Your Machine? A Deep Dive into Rollout JSONL and state_5.sqlite](https://vibe-replay.com/blog/codex-local-storage/): How Codex combines rollout events, the thread catalog, and its append-only session-name index.
 - [Capturing Claude's Autonomous Agent Mode: A Deep Dive into Dispatch](https://vibe-replay.com/blog/dispatch-deep-dive/): How vibe-replay captures Claude Desktop Cowork / autonomous sessions, including the technical challenges and the parser changes required.
 - [878 Sessions, 52.9k Tool Calls — What a Year of Vibe Coding Looks Like](https://vibe-replay.com/blog/personal-insights/): Year-long usage breakdown: prompts, tool calls, model distribution, and what the data reveals about real AI coding habits.
 - [What Actually Happens When Claude Code /simplify Cleans Your Codebase](https://vibe-replay.com/blog/simplify-codebase-with-ai/): Behavioral analysis of Claude Code's `/simplify` slash command and the kinds of refactors it produces.
