@@ -72,12 +72,13 @@ https://your-host/viewer.html?url=https://example.com/replay.json
 | Provider | Status |
 |----------|--------|
 | Claude Code | Supported |
+| Claude Desktop | Supported |
+| Claude Cowork | Supported (agent-mode sessions) |
 | Cursor | Supported |
 | Codex | Supported |
 | OpenCode | Supported |
 | Hermes | Supported |
 | Pi | Supported |
-| Gemini CLI | Planned |
 
 ## Options
 
