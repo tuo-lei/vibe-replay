@@ -10,7 +10,7 @@ const exploreFaq = [
   },
   {
     q: "How do I share my own replay?",
-    a: "Run `npx vibe-replay --gist` (publishes to GitHub Gist) or `npx vibe-replay --cloud` (publishes to vibe-replay cloud). Both produce a public URL you can share. Replays show up here automatically.",
+    a: "Run `npx vibe-replay`, open the replay in the editor, and choose Publish to Gist, or run `npx vibe-replay share` for an unlisted cloud link. You can also use `npx vibe-replay --session <path> --github` for PR-ready markdown, GIF, and SVG artifacts. Public Gist replays appear here automatically.",
   },
   {
     q: "Which agents can I replay?",
@@ -93,10 +93,10 @@ const exploreJsonLd = [
         </p>
         <p class="mt-3">
           Want to share your own? Run
-          <code class="font-mono text-accent bg-surface-2 px-1.5 py-0.5 rounded">npx vibe-replay --gist</code>
-          or
-          <code class="font-mono text-accent bg-surface-2 px-1.5 py-0.5 rounded">npx vibe-replay --cloud</code>
-          and your replay will appear here.
+          <code class="font-mono text-accent bg-surface-2 px-1.5 py-0.5 rounded">npx vibe-replay</code>
+          and publish from the editor, or use
+          <code class="font-mono text-accent bg-surface-2 px-1.5 py-0.5 rounded">npx vibe-replay share</code>
+          for a cloud link.
         </p>
       </section>
 
@@ -110,9 +110,9 @@ const exploreJsonLd = [
         <div class="rounded-xl border border-border bg-surface-1 p-10 max-w-md mx-auto">
           <div class="text-4xl mb-4">&#9654;</div>
           <h2 class="text-lg font-semibold text-text-primary mb-2">No replays yet</h2>
-          <p class="text-text-muted text-sm mb-6">Be the first to share a replay!</p>
+          <p class="text-text-muted text-sm mb-6">Be the first to share a replay from the editor.</p>
           <div class="font-mono text-sm bg-surface-2 rounded-lg px-4 py-3 text-text-secondary">
-            <span class="text-accent">$</span> npx vibe-replay --gist
+            <span class="text-accent">$</span> npx vibe-replay
           </div>
         </div>
       </div>
@@ -285,4 +285,3 @@ const exploreJsonLd = [
 
   // Auth is handled by Nav component
 </script>
-

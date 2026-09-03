@@ -1,8 +1,8 @@
 # vibe-replay
 
-> vibe-replay turns your AI coding sessions — Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, OpenCode, Hermes, and Pi — into interactive, shareable web replays as single self-contained HTML files. One command, no account, free and open source.
+> vibe-replay turns your AI coding sessions — Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, OpenCode, Hermes, and Pi — into local-first interactive, shareable web replays. Then use Insights, embedded AI Studio, and Ask Replay to understand what happened. One command for local use, no account required, free and open source.
 
-vibe-replay is a CLI (npm package: `vibe-replay`) that reads your local AI agent session data (Claude Code `~/.claude/`, Cursor `~/.cursor/` + SQLite stores, Codex, OpenCode `~/.local/share/opencode/opencode.db`, Hermes `~/.hermes/state.db`, Pi `~/.pi/agent/sessions/`), then renders it as a scrubbable timeline showing every prompt, AI response, tool call, file diff, and thinking block. Output is a single HTML file with all assets inlined — no server, no external requests.
+vibe-replay is a CLI (npm package: `vibe-replay`) that reads your local AI agent session data (Claude Code `~/.claude/`, Cursor `~/.cursor/` + SQLite stores, Codex, OpenCode `~/.local/share/opencode/opencode.db`, Hermes `~/.hermes/state.db`, Pi `~/.pi/agent/sessions/`), then renders it as a scrubbable timeline showing every prompt, AI response, tool call, file diff, and thinking block. The local dashboard adds searchable session discovery, usage facets, project analytics, and personal Insights. Output is a single HTML file with all assets inlined — no server, no external requests.
 
 Install: `npx vibe-replay`
 Source: https://github.com/tuo-lei/vibe-replay
@@ -21,9 +21,12 @@ License: MIT
 - **Full replay**: step through every prompt, thinking block, tool call, and code diff with All/Compact/Custom view modes, outline navigation, search, and playback controls.
 - **Session insights**: per-session analytics — token burn and cost per turn, context window usage, cache hit rates, tool call distribution, model breakdown, and data-quality hints.
 - **Personal insights**: GitHub-style activity heatmap, streaks, weekly trends, top projects, model usage, provider breakdown, and cost tracking across all sessions.
+- **AI Studio**: embedded Pi runtime for replay analysis, translation, and tone adjustment with the provider/model selected by the user, including OpenAI-compatible endpoints.
+- **Ask Replay**: a read-only local assistant for sessions, scenes, annotations, overlays, usage, coverage, projects, and Insights. It returns stable navigation permalinks and never performs a mutation itself.
+- **Remote SSH sources**: optionally index Codex, Claude Code, and Pi sessions from OpenSSH-compatible hosts. Remote data is cached locally, remote Live mode is disabled, and remote aggregates stay out of cloud insight sync.
 - **Share & export**: self-contained HTML, animated SVG, GIF, or markdown summary. Publish to GitHub Gist for a shareable link, or upload to the cloud. Secret redaction built in.
 - **Claude Code plugin**: install from the plugin marketplace so your agent generates replays automatically during PR creation. A portable Agent Skills `SKILL.md` is also included for Cursor, Codex, and other compatible agents.
-- **Live mode**: `vibe-replay live` streams a running Claude Code or Codex session into the viewer, pinned to the latest turn as it lands on disk.
+- **Live mode**: `vibe-replay live` follows a running local session as new turns land on disk; SSH-backed live mode is intentionally unavailable.
 
 ## Supported providers
 

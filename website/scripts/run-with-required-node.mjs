@@ -81,7 +81,7 @@ function resolveNodeBinary() {
   if (best) return best.candidate;
 
   throw new Error(
-    `Website scripts require Node.js >= ${MIN_NODE_VERSION} (Astro 6). ` +
+    `Website scripts require Node.js >= ${MIN_NODE_VERSION} (Astro 7). ` +
       "Run: cd website && nvm install 22.12.0 && nvm use 22.12.0",
   );
 }
