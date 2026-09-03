@@ -332,6 +332,8 @@ export function shouldShowLegacyTurnDuration(
 
 type InsightsSectionId = "overview" | "activity" | "usage" | "coverage" | "workspace";
 
+export const INSIGHTS_SECTION_PARAM = "insightsSection";
+
 const INSIGHTS_SECTIONS: Array<{
   id: InsightsSectionId;
   label: string;
@@ -363,6 +365,13 @@ const INSIGHTS_SECTIONS: Array<{
     description: "Projects and models",
   },
 ];
+
+function insightsSectionFromUrl(): InsightsSectionId {
+  const value = new URLSearchParams(window.location.search).get(INSIGHTS_SECTION_PARAM);
+  return INSIGHTS_SECTIONS.some((section) => section.id === value)
+    ? (value as InsightsSectionId)
+    : "overview";
+}
 
 const INSIGHTS_CARD_CLASS =
   "rounded-xl bg-terminal-surface border border-terminal-border-subtle shadow-layer-sm";
@@ -1794,7 +1803,8 @@ export default function InsightsPage() {
   const { userInsights, loading, scanStatus } = useScanInsightsContext();
   const homePageCounts = useHomePageCounts();
   const [range, setRange] = useState<TimeRange>(getInsightsRangeFromUrl);
-  const [activeSection, setActiveSection] = useState<InsightsSectionId>("overview");
+  const [activeSection, setActiveSection] = useState<InsightsSectionId>(insightsSectionFromUrl);
+  const programmaticSectionRef = useRef<{ section: InsightsSectionId; until: number } | null>(null);
   const contentRef = useRef<HTMLElement>(null);
   const handleRangeChange = useCallback((next: TimeRange) => {
     setRange(next);
@@ -1802,16 +1812,43 @@ export default function InsightsPage() {
   }, []);
   const handleSectionSelect = useCallback((section: InsightsSectionId) => {
     setActiveSection(section);
+    programmaticSectionRef.current = { section, until: Date.now() + 1_000 };
+    navigateTo({ [INSIGHTS_SECTION_PARAM]: section }, { notify: false });
     const target = document.getElementById(`insights-${section}`);
     if (target && typeof target.scrollIntoView === "function") {
       target.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   }, []);
   useEffect(() => {
-    const handlePopState = () => setRange(getInsightsRangeFromUrl());
+    const handlePopState = () => {
+      setRange(getInsightsRangeFromUrl());
+      const section = insightsSectionFromUrl();
+      setActiveSection(section);
+      programmaticSectionRef.current = { section, until: Date.now() + 1_000 };
+      window.setTimeout(() => {
+        document.getElementById(`insights-${section}`)?.scrollIntoView({
+          behavior: "auto",
+          block: "start",
+        });
+      }, 0);
+    };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
+  useEffect(() => {
+    if (!userInsights) return;
+    const section = insightsSectionFromUrl();
+    if (section === "overview") return;
+    programmaticSectionRef.current = { section, until: Date.now() + 1_000 };
+    setActiveSection(section);
+    const timer = window.setTimeout(() => {
+      document.getElementById(`insights-${section}`)?.scrollIntoView({
+        behavior: "auto",
+        block: "start",
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [userInsights]);
   const {
     payload: insightsRollupPayload,
     loading: insightsRollupLoading,
@@ -1925,6 +1962,16 @@ export default function InsightsPage() {
     if (!root || !userInsights) return;
 
     const updateActiveSection = () => {
+      const programmatic = programmaticSectionRef.current;
+      if (programmatic) {
+        if (Date.now() < programmatic.until) {
+          setActiveSection((current) =>
+            current === programmatic.section ? current : programmatic.section,
+          );
+          return;
+        }
+        programmaticSectionRef.current = null;
+      }
       const rootTop = root.getBoundingClientRect().top;
       let next: InsightsSectionId = "overview";
       for (const section of INSIGHTS_SECTIONS) {
@@ -1933,7 +1980,14 @@ export default function InsightsPage() {
           next = section.id;
         }
       }
-      setActiveSection((current) => (current === next ? current : next));
+      setActiveSection((current) => {
+        if (current === next) return current;
+        navigateTo(
+          { [INSIGHTS_SECTION_PARAM]: next === "overview" ? null : next },
+          { replace: true, notify: false },
+        );
+        return next;
+      });
     };
 
     updateActiveSection();

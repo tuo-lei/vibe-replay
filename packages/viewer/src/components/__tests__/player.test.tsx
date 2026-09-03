@@ -12,6 +12,7 @@ beforeEach(stubBrowserAPIs);
 
 afterEach(() => {
   cleanup();
+  window.history.replaceState({}, "", "/");
   vi.unstubAllGlobals();
 });
 
@@ -82,5 +83,23 @@ describe("Player (smoke)", () => {
         />,
       ),
     ).not.toThrow();
+  });
+
+  it("opens and closes the comments drawer from a permalink", () => {
+    window.history.replaceState({}, "", "/?drawer=comments");
+    render(
+      <Player
+        session={makeSession()}
+        viewPrefs={VIEW_PREFS}
+        activeView="replay"
+        setActiveView={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByText(/Watch Replay/i)[0]);
+    const close = screen.getByTitle("Close comments");
+    expect(close).toBeDefined();
+    fireEvent.click(close);
+    expect(new URLSearchParams(window.location.search).get("drawer")).toBeNull();
   });
 });

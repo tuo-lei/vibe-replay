@@ -13,12 +13,14 @@ type AssistantContext = {
     provider: string;
     title?: string;
     targetId?: string;
+    sceneIndex?: number;
   };
 };
 
 type Citation = {
   type: "session" | "scene" | "insight";
   label: string;
+  permalink?: string;
   slug?: string;
   provider?: string;
   sessionId?: string;
@@ -35,13 +37,35 @@ type Action =
       slug: string;
       targetId?: string;
       sceneIndex?: number;
+      view?: "replay" | "summary" | "export";
+      drawer?: "comments" | "ai";
+      permalink?: string;
     }
   | {
       type: "open_dashboard";
       label: string;
-      tab: "home" | "sessions" | "replays" | "projects" | "insights";
+      tab: "home" | "sessions" | "replays" | "projects" | "insights" | "settings";
       project?: string;
       targetId?: string;
+      selected?: string;
+      selectedProvider?: string;
+      selectedSessionId?: string;
+      selectedTargetId?: string;
+      settingsSection?: "ai" | "remote" | "more";
+      projectView?: "timeline" | "overview" | "files";
+      insightsSection?: "overview" | "activity" | "usage" | "coverage" | "workspace";
+      query?: string;
+      providers?: string[];
+      repos?: string[];
+      tools?: string[];
+      mcpServers?: string[];
+      mcpTools?: string[];
+      skills?: string[];
+      compacted?: boolean;
+      archived?: boolean;
+      agentRuns?: boolean;
+      insightsRange?: "7d" | "30d" | "90d" | "all";
+      permalink?: string;
     };
 
 type ToolEvent = { toolName: string; summary?: string; error?: boolean };
@@ -262,6 +286,10 @@ function toolLabel(name: string): string {
     get_session_summary: "Reading session summary",
     get_session_content: "Reading replay scenes",
     get_scene: "Reading replay scene",
+    get_session_annotations: "Reading replay annotations",
+    get_session_overlays: "Reading replay AI edits",
+    get_data_status: "Checking local data status",
+    prepare_user_action: "Preparing a user action link",
     get_insights: "Reading local insights",
     get_usage_breakdown: "Reading usage breakdown",
     get_compaction_diagnostics: "Diagnosing compaction events",
@@ -278,7 +306,7 @@ function isAction(value: unknown): value is Action {
   return (
     action.type === "open_dashboard" &&
     typeof action.tab === "string" &&
-    ["home", "sessions", "replays", "projects", "insights"].includes(action.tab)
+    ["home", "sessions", "replays", "projects", "insights", "settings"].includes(action.tab)
   );
 }
 
@@ -302,11 +330,17 @@ function AssistantMarkdown({ content }: { content: string }) {
 }
 
 function navigateAction(action: Action): void {
+  if (action.permalink) {
+    navigateToPermalink(action.permalink);
+    return;
+  }
   if (action.type === "open_replay") {
     navigateTo({
       session: action.slug,
       targetId: action.targetId || null,
       s: action.sceneIndex === undefined ? null : String(action.sceneIndex),
+      v: action.view && action.view !== "replay" ? action.view : null,
+      drawer: action.drawer || null,
     });
     return;
   }
@@ -316,10 +350,44 @@ function navigateAction(action: Action): void {
     tab: action.tab,
     project: action.project || null,
     targetId: action.targetId || null,
+    selected: action.selected || null,
+    selectedProvider: action.selectedProvider || null,
+    selectedSessionId: action.selectedSessionId || null,
+    selectedTargetId: action.selectedTargetId || null,
+    settingsSection: action.settingsSection || null,
+    projectView: action.projectView || null,
+    insightsSection: action.insightsSection || null,
+    q: action.query || null,
+    provider: action.providers?.length ? action.providers : null,
+    repo: action.repos?.length ? action.repos : null,
+    tool: action.tools?.length ? action.tools : null,
+    mcp: action.mcpServers?.length ? action.mcpServers : null,
+    mcpTool: action.mcpTools?.length ? action.mcpTools : null,
+    skill: action.skills?.length ? action.skills : null,
+    compacted: action.compacted ? "true" : null,
+    archived: action.archived ? "true" : null,
+    agentRuns: action.agentRuns ? "true" : null,
+    insightsRange:
+      action.insightsRange && action.insightsRange !== "all" ? action.insightsRange : null,
   });
 }
 
+function navigateToPermalink(permalink: string): void {
+  try {
+    const target = new URL(permalink, window.location.href);
+    if (target.origin !== window.location.origin) return;
+    window.history.pushState({}, "", target.href);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  } catch {
+    // Ignore malformed tool-provided links; the structured action remains safe.
+  }
+}
+
 function navigateCitation(citation: Citation): void {
+  if (citation.permalink) {
+    navigateToPermalink(citation.permalink);
+    return;
+  }
   if (citation.type === "session") {
     if (citation.replayAvailable !== false && citation.slug) {
       navigateTo({
@@ -607,6 +675,17 @@ export default function LocalChatAssistant({ context }: Props) {
           allowRemoteData: remoteDataEnabled,
           tab: params.get("tab") || undefined,
           project: params.get("project") || undefined,
+          currentSession: context.currentSession
+            ? {
+                ...context.currentSession,
+                sceneIndex: (() => {
+                  const value = Number(params.get("s"));
+                  return Number.isInteger(value) && value >= 0
+                    ? value
+                    : context.currentSession?.sceneIndex;
+                })(),
+              }
+            : undefined,
         },
         ...(chatProviderId ? { providerId: chatProviderId } : {}),
         ...(chatModelId ? { modelId: chatModelId } : {}),
@@ -875,7 +954,9 @@ export default function LocalChatAssistant({ context }: Props) {
                     {[
                       "Find my most recent sessions",
                       "Why was my last session expensive?",
-                      "Show sessions with compaction",
+                      "Which sessions used MCP or tools?",
+                      "How complete are my Insights for the last 30 days?",
+                      "Show comments and AI edits in this replay",
                     ].map((suggestion) => (
                       <button
                         key={suggestion}
@@ -968,6 +1049,7 @@ export default function LocalChatAssistant({ context }: Props) {
                           key={`${action.type}-${actionIndex}`}
                           type="button"
                           onClick={() => navigateAction(action)}
+                          title={action.permalink || undefined}
                           className="cursor-pointer rounded-lg bg-terminal-green px-2.5 py-1.5 text-[10px] font-semibold text-terminal-bg transition-colors hover:bg-terminal-green/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-terminal-green/50"
                         >
                           {action.label}

@@ -9,6 +9,7 @@ vi.mock("../SessionRelationshipsView", () => ({ default: () => null }));
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  window.history.replaceState({}, "", "/");
 });
 
 function contextValue(): ReturnType<typeof InsightsPanel.useScanInsightsContext> {

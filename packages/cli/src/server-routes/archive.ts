@@ -70,7 +70,7 @@ async function readReplayArchiveAliases(baseDir: string): Promise<Map<string, Re
   return aliases;
 }
 
-async function getArchivedSlugs(baseDir: string): Promise<Set<string>> {
+export async function getArchivedSlugs(baseDir: string): Promise<Set<string>> {
   try {
     const entries = await readdir(join(baseDir, ARCHIVE_DIR));
     const targets = await loadRemoteSourceConfigs();

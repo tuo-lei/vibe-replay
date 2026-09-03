@@ -457,6 +457,7 @@ export function navigateTo(
   if (isCurrentlyDashboard) {
     const dashboardState: Record<string, string | string[]> = {};
     DASHBOARD_PARAMS.forEach((p) => {
+      if (DASHBOARD_TRANSIENT_PARAMS.has(p)) return;
       const values = url.searchParams.getAll(p);
       if (values.length === 1) dashboardState[p] = values[0]!;
       else if (values.length > 1) dashboardState[p] = values;
@@ -478,6 +479,9 @@ export function navigateTo(
     // Also remove 'view' if we are going to a session
     if (params.view === undefined) {
       url.searchParams.delete("view");
+    }
+    if (params.drawer === undefined) {
+      url.searchParams.delete("drawer");
     }
   }
 
@@ -509,6 +513,7 @@ export function navigateTo(
     // Clean up viewer params when going back to dashboard
     url.searchParams.delete("v");
     url.searchParams.delete("s");
+    url.searchParams.delete("drawer");
   }
 
   for (const [key, value] of Object.entries(params)) {
@@ -537,7 +542,13 @@ export function navigateTo(
 export const DASHBOARD_PARAMS = [
   "tab",
   "settingsSection",
+  "selected",
+  "selectedProvider",
+  "selectedSessionId",
+  "selectedTargetId",
   "project",
+  "projectView",
+  "insightsSection",
   "targetId",
   "q",
   "archived",
@@ -552,6 +563,18 @@ export const DASHBOARD_PARAMS = [
   "insightsRange",
   "replay",
 ] as const;
+
+/**
+ * Selection links are stable permalinks while visible, but must not be
+ * restored after leaving the dashboard via sessionStorage. Otherwise a
+ * harmless dashboard navigation could reopen an old source-session modal.
+ */
+const DASHBOARD_TRANSIENT_PARAMS = new Set([
+  "selected",
+  "selectedProvider",
+  "selectedSessionId",
+  "selectedTargetId",
+]);
 
 /**
  * Navigate to live mode for a running source session.

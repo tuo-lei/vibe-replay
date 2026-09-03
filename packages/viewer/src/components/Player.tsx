@@ -54,6 +54,13 @@ interface SelectionAnnotatePrompt extends CommentTarget {
   left: number;
 }
 
+type PlayerDrawer = "comments" | "ai";
+
+function playerDrawerFromUrl(): PlayerDrawer | null {
+  const value = new URLSearchParams(window.location.search).get("drawer");
+  return value === "comments" || value === "ai" ? value : null;
+}
+
 function getElementFromSelectionNode(node: Node): HTMLElement | null {
   return node instanceof HTMLElement ? node : node.parentElement;
 }
@@ -145,8 +152,9 @@ export default function Player({
         const url = new URL(window.location.href);
         if (url.searchParams.has("s")) {
           url.searchParams.delete("s");
-          window.history.replaceState({}, "", url.toString());
         }
+        if (url.searchParams.has("drawer")) url.searchParams.delete("drawer");
+        window.history.replaceState({}, "", url.toString());
       };
       return () => {
         returnToLandingRef.current = null;
@@ -154,8 +162,12 @@ export default function Player({
     }
   }, [returnToLandingRef]);
   const [navFocusIndex, setNavFocusIndex] = useState<number | undefined>(undefined);
-  const [commentDrawerOpen, setCommentDrawerOpen] = useState(false);
-  const [studioDrawerOpen, setStudioDrawerOpen] = useState(false);
+  const [commentDrawerOpen, setCommentDrawerOpen] = useState(
+    () => playerDrawerFromUrl() === "comments",
+  );
+  const [studioDrawerOpen, setStudioDrawerOpen] = useState(
+    () => viewerMode === "editor" && playerDrawerFromUrl() === "ai",
+  );
   const [commentTarget, setCommentTarget] = useState<CommentTarget | null>(null);
   const [focusedAnnotationId, setFocusedAnnotationId] = useState<string | null>(null);
   const [selectionAnnotatePrompt, setSelectionAnnotatePrompt] =
@@ -165,6 +177,41 @@ export default function Player({
   const overlayActions = useOverlays(session, viewerMode);
   const { effectiveSession } = overlayActions;
   const { annotations } = annotationActions;
+
+  const setPlayerDrawer = useCallback((drawer: PlayerDrawer | null) => {
+    const url = new URL(window.location.href);
+    if (drawer) url.searchParams.set("drawer", drawer);
+    else url.searchParams.delete("drawer");
+    window.history.replaceState({}, "", url.toString());
+  }, []);
+  const openCommentDrawer = useCallback(() => {
+    setCommentDrawerOpen(true);
+    setStudioDrawerOpen(false);
+    setPlayerDrawer("comments");
+  }, [setPlayerDrawer]);
+  const closeCommentDrawer = useCallback(() => {
+    setCommentDrawerOpen(false);
+    setPlayerDrawer(null);
+  }, [setPlayerDrawer]);
+  const openStudioDrawer = useCallback(() => {
+    setStudioDrawerOpen(true);
+    setCommentDrawerOpen(false);
+    setPlayerDrawer("ai");
+  }, [setPlayerDrawer]);
+  const closeStudioDrawer = useCallback(() => {
+    setStudioDrawerOpen(false);
+    setPlayerDrawer(null);
+  }, [setPlayerDrawer]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const drawer = playerDrawerFromUrl();
+      setCommentDrawerOpen(drawer === "comments");
+      setStudioDrawerOpen(viewerMode === "editor" && drawer === "ai");
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [viewerMode]);
 
   // Force "all" display mode in live — compact hides thinking and collapses
   // tools, which makes a streaming session look like nothing is happening
@@ -407,7 +454,7 @@ export default function Player({
           flashJumpTarget(highlight);
         }
       };
-      setCommentDrawerOpen(true);
+      openCommentDrawer();
       setFocusedAnnotationId(annotationId);
       setCommentTarget(null);
       setSelectionAnnotatePrompt(null);
@@ -418,7 +465,7 @@ export default function Player({
         if (!highlightFound) scrollToHighlight();
       }, 250);
     },
-    [annotationActions.annotations, seekFromNavigation, setActiveView],
+    [annotationActions.annotations, openCommentDrawer, seekFromNavigation, setActiveView],
   );
 
   // Auto-land if URL has ?s= deep-link (skip landing hero, seek + scroll directly)
@@ -763,7 +810,7 @@ export default function Player({
                 <button
                   onClick={() => {
                     setFocusedAnnotationId(null);
-                    setCommentDrawerOpen(true);
+                    openCommentDrawer();
                   }}
                   className="ui-caption-strong hidden md:flex items-center gap-1.5 hover:text-terminal-green transition-colors"
                   title="Open comments"
@@ -792,7 +839,7 @@ export default function Player({
                 <button
                   onClick={() => {
                     setFocusedAnnotationId(null);
-                    setCommentDrawerOpen(true);
+                    openCommentDrawer();
                   }}
                   className="md:hidden flex items-center gap-1 text-terminal-dim hover:text-terminal-text transition-colors"
                   title="Comments"
@@ -820,7 +867,7 @@ export default function Player({
                 {/* AI Studio button — desktop only */}
                 {hasAiStudio && (
                   <button
-                    onClick={() => setStudioDrawerOpen(true)}
+                    onClick={openStudioDrawer}
                     className="ui-pill-compact hidden md:flex pl-2 pr-3 rounded bg-[rgba(168,85,247,0.1)] hover:bg-[rgba(168,85,247,0.2)] border border-[rgba(168,85,247,0.3)] hover:border-[rgba(168,85,247,0.5)] text-terminal-purple transition-all relative overflow-hidden group shadow-sm"
                   >
                     <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
@@ -1027,7 +1074,7 @@ export default function Player({
                       isReadOnly
                         ? undefined
                         : (sceneIndex) => {
-                            setCommentDrawerOpen(true);
+                            openCommentDrawer();
                             setCommentTarget({ sceneIndex });
                             setFocusedAnnotationId(null);
                             setSelectionAnnotatePrompt(null);
@@ -1047,7 +1094,7 @@ export default function Player({
                         selectedTextStart: selectionAnnotatePrompt.selectedTextStart,
                         selectedTextEnd: selectionAnnotatePrompt.selectedTextEnd,
                       });
-                      setCommentDrawerOpen(true);
+                      openCommentDrawer();
                       setFocusedAnnotationId(null);
                       setSelectionAnnotatePrompt(null);
                       window.getSelection()?.removeAllRanges();
@@ -1119,7 +1166,7 @@ export default function Player({
       {/* Comment drawer (slides from right) */}
       <CommentDrawer
         open={commentDrawerOpen}
-        onClose={() => setCommentDrawerOpen(false)}
+        onClose={closeCommentDrawer}
         actions={annotationActions}
         scenes={effectiveSession.scenes}
         currentIndex={currentIndex}
@@ -1137,7 +1184,7 @@ export default function Player({
       {/* AI Studio drawer (slides from right) */}
       <AiStudioDrawer
         open={studioDrawerOpen}
-        onClose={() => setStudioDrawerOpen(false)}
+        onClose={closeStudioDrawer}
         annotationActions={annotationActions}
         overlayActions={overlayActions}
       />
