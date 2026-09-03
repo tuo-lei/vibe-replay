@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
+  <title id="title">Pi coding agent session tree</title>
+  <desc id="desc">Pi stores a parent-linked JSONL tree with an active branch, alternate branch, tool results, and compaction entries.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0b1018"/><stop offset="1" stop-color="#0b1820"/></linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#7d8590"/></marker>
+  </defs>
+  <rect width="1200" height="720" rx="24" fill="url(#bg)"/>
+  <path d="M0 120H1200" stroke="#30363d" opacity=".5"/>
+  <text x="64" y="68" fill="#e6edf3" font-family="Inter,system-ui,sans-serif" font-size="30" font-weight="700">Pi session JSONL is a tree</text>
+  <text x="64" y="101" fill="#7d8590" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16">Follow parentId to find the conversation the user left active</text>
+
+  <rect x="64" y="166" width="330" height="108" rx="16" fill="#161b22" stroke="#22d3ee" stroke-opacity=".65"/>
+  <text x="92" y="207" fill="#22d3ee" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14" font-weight="700">SESSION FILE</text>
+  <text x="92" y="242" fill="#e6edf3" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16">~/.pi/agent/sessions/</text>
+  <text x="92" y="266" fill="#7d8590" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14">&lt;project&gt;/*.jsonl</text>
+  <path d="M394 220H500" stroke="#7d8590" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="500" y="166" width="270" height="108" rx="16" fill="#111923" stroke="#3fb950" stroke-opacity=".65"/>
+  <text x="530" y="207" fill="#3fb950" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14" font-weight="700">HEADER</text>
+  <text x="530" y="242" fill="#e6edf3" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="15">id · timestamp · cwd</text>
+  <text x="530" y="266" fill="#7d8590" font-family="Inter,system-ui,sans-serif" font-size="13">versioned session boundary</text>
+  <path d="M770 220H878" stroke="#7d8590" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="878" y="166" width="258" height="108" rx="16" fill="#0d1117" stroke="#b392f0" stroke-opacity=".65"/>
+  <text x="908" y="207" fill="#b392f0" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14" font-weight="700">REPLAY</text>
+  <text x="908" y="242" fill="#e6edf3" font-family="Inter,system-ui,sans-serif" font-size="17">active branch</text>
+  <text x="908" y="266" fill="#7d8590" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="13">parentId → leaf</text>
+
+  <path d="M260 274V344M260 344H448M260 344H700" stroke="#7d8590" stroke-width="2" fill="none"/>
+  <circle cx="260" cy="344" r="5" fill="#7d8590"/>
+  <path d="M448 344V390M700 344V390" stroke="#7d8590" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="112" y="390" width="336" height="142" rx="16" fill="#111923" stroke="#3fb950" stroke-opacity=".65"/>
+  <circle cx="148" cy="427" r="7" fill="#3fb950"/>
+  <text x="170" y="433" fill="#3fb950" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="15" font-weight="700">ACTIVE PATH</text>
+  <text x="142" y="472" fill="#e6edf3" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="15">message → toolCall</text>
+  <text x="142" y="501" fill="#22d3ee" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="15">toolResult → next turn</text>
+  <text x="142" y="522" fill="#7d8590" font-family="Inter,system-ui,sans-serif" font-size="12">joined by id, rendered in order</text>
+
+  <rect x="532" y="390" width="336" height="142" rx="16" fill="#111923" stroke="#7d8590" stroke-opacity=".65"/>
+  <circle cx="568" cy="427" r="7" fill="#d29922"/>
+  <text x="590" y="433" fill="#d29922" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="15" font-weight="700">ALTERNATE BRANCH</text>
+  <text x="562" y="472" fill="#e6edf3" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="15">old parentId chain</text>
+  <text x="562" y="501" fill="#7d8590" font-family="Inter,system-ui,sans-serif" font-size="15">preserved in the file</text>
+  <text x="562" y="522" fill="#7d8590" font-family="Inter,system-ui,sans-serif" font-size="12">omitted from active replay, reported as abandoned</text>
+
+  <rect x="64" y="590" width="1072" height="1" fill="#30363d"/>
+  <text x="64" y="625" fill="#7d8590" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14">session_info · model_change · compaction · branch_summary · custom_message</text>
+  <text x="64" y="660" fill="#7d8590" font-family="Inter,system-ui,sans-serif" font-size="14">models.json can supply context-window metadata; it is separate from the transcript</text>
+</svg>
