@@ -147,6 +147,8 @@ export default function Player({
     if (returnToLandingRef) {
       returnToLandingRef.current = () => {
         setLanded(false);
+        setCommentDrawerOpen(false);
+        setStudioDrawerOpen(false);
         // Clear ?s= deep-link so the auto-land effect doesn't immediately re-land
         setHasUrlScene(false);
         const url = new URL(window.location.href);

@@ -1835,8 +1835,19 @@ export default function InsightsPage() {
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
+  const {
+    payload: insightsRollupPayload,
+    loading: insightsRollupLoading,
+    error: insightsRollupError,
+  } = useInsightsRollup(scanStatus?.finishedAt, scanStatus?.revision);
+
+  const isInitialScan = scanStatus?.running && !userInsights;
+
+  // A bounded range renders a loading state until the exact rollup arrives.
+  // Retry the deep-link after that payload is available so the target section
+  // exists before scrolling.
   useEffect(() => {
-    if (!userInsights) return;
+    if (!userInsights || (range !== "all" && !insightsRollupPayload)) return;
     const section = insightsSectionFromUrl();
     if (section === "overview") return;
     programmaticSectionRef.current = { section, until: Date.now() + 1_000 };
@@ -1848,14 +1859,7 @@ export default function InsightsPage() {
       });
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [userInsights]);
-  const {
-    payload: insightsRollupPayload,
-    loading: insightsRollupLoading,
-    error: insightsRollupError,
-  } = useInsightsRollup(scanStatus?.finishedAt, scanStatus?.revision);
-
-  const isInitialScan = scanStatus?.running && !userInsights;
+  }, [insightsRollupPayload, range, userInsights]);
 
   const {
     stats,

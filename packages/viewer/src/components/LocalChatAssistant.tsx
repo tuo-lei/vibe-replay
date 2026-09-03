@@ -2,7 +2,7 @@ import { marked } from "marked";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAiProviderSettings } from "../hooks/useAiProviderSettings";
 import { useRemoteDataConsent } from "../hooks/useRemoteDataConsent";
-import { navigateTo } from "./dashboard-utils";
+import { navigateTo, navigateToPermalink } from "./dashboard-utils";
 import { sanitizeHtml } from "../utils/sanitize";
 
 type AssistantContext = {
@@ -372,17 +372,6 @@ function navigateAction(action: Action): void {
   });
 }
 
-function navigateToPermalink(permalink: string): void {
-  try {
-    const target = new URL(permalink, window.location.href);
-    if (target.origin !== window.location.origin) return;
-    window.history.pushState({}, "", target.href);
-    window.dispatchEvent(new PopStateEvent("popstate"));
-  } catch {
-    // Ignore malformed tool-provided links; the structured action remains safe.
-  }
-}
-
 function navigateCitation(citation: Citation): void {
   if (citation.permalink) {
     navigateToPermalink(citation.permalink);
@@ -679,8 +668,9 @@ export default function LocalChatAssistant({ context }: Props) {
             ? {
                 ...context.currentSession,
                 sceneIndex: (() => {
-                  const value = Number(params.get("s"));
-                  return Number.isInteger(value) && value >= 0
+                  const rawValue = params.get("s");
+                  const value = Number(rawValue);
+                  return rawValue !== null && /^\d+$/.test(rawValue) && Number.isSafeInteger(value)
                     ? value
                     : context.currentSession?.sceneIndex;
                 })(),

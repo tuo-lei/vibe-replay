@@ -1939,9 +1939,8 @@ export async function startServer(
       getOverlays: (slug: string, targetId?: string) => loadOverlays(baseDir, slug, targetId),
       getScanResults: () => scanState.results,
       getArchivedKeys: async () => [...(await getArchivedSlugs(baseDir))],
-      getDataStatus: async () => {
+      getDataStatus: async (replayCount?: number) => {
         const cachedSources = await readSourcesCatalogCache();
-        const replays = await scanSessions(baseDir);
         const failedProviders = latestSourceFailures ?? cachedSources?.failedProviders ?? [];
         const staleProviders = await getStaleSourceProviders(cachedSources);
         return {
@@ -1972,7 +1971,7 @@ export async function startServer(
             staleProviders,
             failedProviders,
           },
-          replays: { count: replays.length },
+          replays: { count: replayCount ?? 0 },
           archivedCount: (await getArchivedSlugs(baseDir)).size,
         };
       },

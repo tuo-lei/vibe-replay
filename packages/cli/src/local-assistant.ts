@@ -65,7 +65,7 @@ export interface LocalAssistantData {
   /** Archive markers are optional so the assistant remains usable in tests and embedded mode. */
   getArchivedKeys?: () => Promise<readonly string[]>;
   /** A bounded status snapshot owned by the server, when available. */
-  getDataStatus?: () => Promise<LocalAssistantDataStatus>;
+  getDataStatus?: (replayCount?: number) => Promise<LocalAssistantDataStatus>;
 }
 
 export interface LocalAssistantDataStatus {
@@ -960,15 +960,32 @@ function sceneText(scene: Scene, index: number): string {
   }
 }
 
+type ReplayOverlay = SessionOverlays["overlays"][number];
+
+function latestOverlayByScene(overlays?: SessionOverlays): Map<number, ReplayOverlay> | undefined {
+  if (!overlays) return undefined;
+  const latest = new Map<number, ReplayOverlay>();
+  for (const overlay of overlays.overlays) {
+    const previous = latest.get(overlay.sceneIndex);
+    if (!previous || overlay.updatedAt > previous.updatedAt) {
+      latest.set(overlay.sceneIndex, overlay);
+    }
+  }
+  return latest;
+}
+
 function effectiveScene(
   session: ReplaySession,
   sceneIndex: number,
   overlays?: SessionOverlays,
+  latestByScene?: Map<number, ReplayOverlay>,
 ): Scene {
   const scene = session.scenes[sceneIndex]!;
-  const latest = overlays?.overlays
-    .filter((overlay) => overlay.sceneIndex === sceneIndex)
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+  const latest = latestByScene
+    ? latestByScene.get(sceneIndex)
+    : overlays?.overlays
+        .filter((overlay) => overlay.sceneIndex === sceneIndex)
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
   if (!latest || (scene.type !== "user-prompt" && scene.type !== "text-response")) return scene;
   return { ...scene, content: latest.modifiedValue };
 }
@@ -1003,9 +1020,10 @@ function sessionSummary(
   record: AssistantSessionRecord,
   overlays?: SessionOverlays,
 ) {
+  const latestByScene = latestOverlayByScene(overlays);
   const promptScenes = session.scenes
     .map((scene, index) => {
-      const effective = effectiveScene(session, index, overlays);
+      const effective = effectiveScene(session, index, overlays, latestByScene);
       return effective.type === "user-prompt"
         ? {
             index,
@@ -1289,14 +1307,14 @@ function activitySummary(sessionsPerDay: Record<string, number>) {
   let longestEnd: string | undefined;
   let currentLength = 0;
   let currentStart = "";
+  const previousLocalDayKey = (date: string): string | undefined => {
+    const cursor = new Date(`${date}T00:00:00`);
+    cursor.setDate(cursor.getDate() - 1);
+    return localDayKey(cursor);
+  };
   for (let index = 0; index < dates.length; index++) {
     const date = dates[index]!;
-    if (
-      index === 0 ||
-      new Date(`${date}T00:00:00`).getTime() -
-        new Date(`${dates[index - 1]}T00:00:00`).getTime() !==
-        86_400_000
-    ) {
+    if (index === 0 || previousLocalDayKey(date) !== dates[index - 1]) {
       if (currentLength > longest) {
         longest = currentLength;
         longestStart = currentStart;
@@ -1581,12 +1599,13 @@ export function createLocalAssistantTools(
       assertRecordAccess(record, context);
       const session = await data.getSession(args.slug, args.targetId);
       const overlays = await data.getOverlays?.(args.slug, args.targetId);
+      const latestByScene = latestOverlayByScene(overlays);
       const requestedQuery = args.query?.trim().toLowerCase();
       let indices: number[];
       if (requestedQuery) {
         indices = session.scenes
           .map((scene, index) =>
-            sceneText(effectiveScene(session, index, overlays), index)
+            sceneText(effectiveScene(session, index, overlays, latestByScene), index)
               .toLowerCase()
               .includes(requestedQuery)
               ? index
@@ -1621,7 +1640,7 @@ export function createLocalAssistantTools(
       let chars = 0;
       const scenes: Array<{ index: number; text: string; permalink: string }> = [];
       for (const index of indices) {
-        const text = sceneText(effectiveScene(session, index, overlays), index);
+        const text = sceneText(effectiveScene(session, index, overlays, latestByScene), index);
         const bounded = text.length > MAX_SCENE_CHARS ? `${text.slice(0, MAX_SCENE_CHARS)}…` : text;
         if (chars + bounded.length > MAX_CONTENT_CHARS) break;
         chars += bounded.length;
@@ -1670,11 +1689,12 @@ export function createLocalAssistantTools(
       assertRecordAccess(record, context);
       const session = await data.getSession(args.slug, args.targetId);
       const overlays = await data.getOverlays?.(args.slug, args.targetId);
+      const latestByScene = latestOverlayByScene(overlays);
       const sceneIndex = Math.floor(args.sceneIndex);
       if (sceneIndex < 0 || sceneIndex >= session.scenes.length) {
         throw new Error(`Scene index out of range: ${args.sceneIndex}`);
       }
-      const scene = effectiveScene(session, sceneIndex, overlays);
+      const scene = effectiveScene(session, sceneIndex, overlays, latestByScene);
       const payload = {
         slug: session.meta.slug,
         sceneIndex,
@@ -1861,7 +1881,10 @@ export function createLocalAssistantTools(
       const visibleRecords = allRecords.filter(
         (record) => includeRemote || !isRemoteRecord(record),
       );
-      const status = await data.getDataStatus?.();
+      const visibleReplayCount = visibleRecords.filter((record) =>
+        Boolean(recordRef(record)),
+      ).length;
+      const status = await data.getDataStatus?.(visibleReplayCount);
       const visibleScans = data
         .getScanResults()
         .filter((scan) => includeRemote || scan.location?.kind !== "ssh");
@@ -1872,7 +1895,7 @@ export function createLocalAssistantTools(
           ...status,
           permalink: dashboardPermalink({ tab: "insights" }),
           visibleSessions: visibleRecords.length,
-          visibleReplays: visibleRecords.filter((record) => Boolean(recordRef(record))).length,
+          visibleReplays: visibleReplayCount,
           visibleScanResults: visibleScans.length,
           remoteSessionsHidden: includeRemote
             ? undefined

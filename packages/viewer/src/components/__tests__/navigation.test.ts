@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { DASHBOARD_PARAMS, navigateTo } from "../dashboard-utils";
+import { DASHBOARD_PARAMS, navigateTo, navigateToPermalink } from "../dashboard-utils";
 
 afterEach(() => {
   window.history.replaceState({}, "", "/");
@@ -63,5 +63,22 @@ describe("dashboard permalinks", () => {
         "insightsSection",
       ]),
     );
+  });
+
+  it("persists dashboard filters before a permalink leaves for a replay", () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/?view=dashboard&tab=sessions&q=auth&tool=read&project=~/Code/app",
+    );
+    sessionStorage.clear();
+
+    expect(navigateToPermalink("?session=generated-replay")).toBe(true);
+    expect(JSON.parse(sessionStorage.getItem("vibe_dashboard_state") || "{}")).toMatchObject({
+      tab: "sessions",
+      q: "auth",
+      tool: "read",
+      project: "~/Code/app",
+    });
   });
 });

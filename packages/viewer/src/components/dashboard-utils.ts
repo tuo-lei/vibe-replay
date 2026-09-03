@@ -442,6 +442,47 @@ export function replaySuggestedTitle(s: SessionSummary): string {
 
 export type NavigationValue = string | readonly string[] | null;
 
+function isDashboardUrl(url: URL): boolean {
+  return (
+    url.searchParams.get("view") === "dashboard" ||
+    (!url.searchParams.has("session") &&
+      !url.searchParams.has("gist") &&
+      !url.searchParams.has("url"))
+  );
+}
+
+/** Persist navigable dashboard state before leaving it for a resource URL. */
+export function persistDashboardState(url = new URL(window.location.href)): void {
+  if (!isDashboardUrl(url)) return;
+  const dashboardState: Record<string, string | string[]> = {};
+  DASHBOARD_PARAMS.forEach((p) => {
+    if (DASHBOARD_TRANSIENT_PARAMS.has(p)) return;
+    const values = url.searchParams.getAll(p);
+    if (values.length === 1) dashboardState[p] = values[0]!;
+    else if (values.length > 1) dashboardState[p] = values;
+  });
+  if (Object.keys(dashboardState).length > 0) {
+    safeStorageSet(sessionStorage, "vibe_dashboard_state", JSON.stringify(dashboardState));
+  } else {
+    safeStorageRemove(sessionStorage, "vibe_dashboard_state");
+  }
+}
+
+/** Navigate to a same-origin permalink while preserving dashboard return state. */
+export function navigateToPermalink(permalink: string): boolean {
+  try {
+    const current = new URL(window.location.href);
+    const target = new URL(permalink, current.href);
+    if (target.origin !== current.origin) return false;
+    if (target.searchParams.has("session")) persistDashboardState(current);
+    window.history.pushState({}, "", target.href);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function navigateTo(
   params: Record<string, NavigationValue>,
   options: { replace?: boolean; notify?: boolean } = {},
@@ -449,25 +490,7 @@ export function navigateTo(
   const url = new URL(window.location.href);
 
   // 1. If we are currently on dashboard, capture its state to sessionStorage
-  const isCurrentlyDashboard =
-    url.searchParams.get("view") === "dashboard" ||
-    (!url.searchParams.has("session") &&
-      !url.searchParams.has("gist") &&
-      !url.searchParams.has("url"));
-  if (isCurrentlyDashboard) {
-    const dashboardState: Record<string, string | string[]> = {};
-    DASHBOARD_PARAMS.forEach((p) => {
-      if (DASHBOARD_TRANSIENT_PARAMS.has(p)) return;
-      const values = url.searchParams.getAll(p);
-      if (values.length === 1) dashboardState[p] = values[0]!;
-      else if (values.length > 1) dashboardState[p] = values;
-    });
-    if (Object.keys(dashboardState).length > 0) {
-      safeStorageSet(sessionStorage, "vibe_dashboard_state", JSON.stringify(dashboardState));
-    } else {
-      safeStorageRemove(sessionStorage, "vibe_dashboard_state");
-    }
-  }
+  persistDashboardState(url);
 
   // 2. If we are entering a session, remove dashboard params from URL
   if (params.session) {
