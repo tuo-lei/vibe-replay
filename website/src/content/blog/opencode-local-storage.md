@@ -1,8 +1,9 @@
 ---
-title: "What Does OpenCode Store on Your Machine? A Deep Dive into opencode.db"
-excerpt: "OpenCode stores sessions, messages, and tool parts in SQLite instead of a folder of JSONL files. Here's the schema, the compaction trap, and how to read it safely."
+title: "What Does OpenCode Store Locally? opencode.db Explained"
+excerpt: "OpenCode stores sessions, messages, and tool parts in SQLite—not JSONL. Here's the schema, the compaction trap, and how to read it safely."
 cover: "/blog/opencode-storage/storage-map.png"
 date: 2026-08-03
+updated: 2026-09-03
 readTime: "7 min read"
 ---
 
@@ -192,3 +193,5 @@ sqlite3 "$DB" \
 Do not paste the result into a public issue without checking it. Titles, directories, prompts, tool arguments, and file contents can all be sensitive. Generate a reviewed replay instead of sharing the database.
 
 If Claude Code’s one-file JSONL model is the simple case, OpenCode is the database case: structured, queryable, and more version-sensitive. Once you follow the session → message → part chain, the storage stops looking mysterious — and the replay can preserve the details that a flat session list leaves out.
+
+For the same storage question in other providers, compare the profile-aware [Hermes `state.db`](/blog/hermes-local-storage/) and the branch-aware [Pi session JSONL](/blog/pi-local-storage/) layouts.

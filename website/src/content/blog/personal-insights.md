@@ -3,16 +3,17 @@ title: "What AI Coding Insights Reveal Over Time"
 excerpt: "vibe-replay tracks AI coding activity across machines and tools. Explore GitHub-style heatmaps, streaks, model usage, and privacy-aware shareable profiles."
 cover: "/blog/personal-insights/insights-hero.png"
 date: 2026-04-09
+updated: 2026-09-03
 readTime: "5 min read"
 ---
 
-[![Example personal insights dashboard showing sessions, prompts, tool calls, and activity trends](/blog/personal-insights/insights-hero.png)](/insights/)
+[![Synthetic personal insights dashboard showing sessions, prompts, tool calls, and activity trends](/blog/personal-insights/insights-hero.png)](/insights/)
 
 **[Explore Insights](https://vibe-replay.com/insights/)**
 
-After enough AI-assisted coding sessions, patterns emerge — which models you use, which days are most productive, and whether your workflow is speeding up or slowing down.
+After enough AI-assisted coding sessions, patterns emerge — which models you use, which days are busiest, and whether a workflow is speeding up or slowing down.
 
-Now I do. vibe-replay's new **Personal Insights** feature turns your local AI session history into a full analytics dashboard — synced across machines, with optional public sharing.
+vibe-replay's **Personal Insights** feature turns local AI session history into an analytics dashboard. Optional sync can combine metrics across machines, and optional public sharing lets you choose what to reveal.
 
 ---
 
@@ -26,42 +27,42 @@ The dashboard keeps the numbers concrete: sessions, prompts, tool calls, file ed
 
 ## The contribution heatmap
 
-![GitHub-style contribution heatmap showing 52 weeks of vibe coding activity, with streak stats and weekly trends](/blog/personal-insights/insights-activity.png)
+![Synthetic GitHub-style contribution heatmap showing 52 weeks of AI coding activity, with streak stats and weekly trends](/blog/personal-insights/insights-activity.png)
 
 If you've used GitHub, this looks familiar. Each cell is a day, colored by how many sessions you ran. The full year view reveals patterns that individual sessions hide:
 
-- The sparse July–December 2025 stretch is misleading — I was actively vibe coding with Claude Code during that period, but **Claude Code only retains JSONL files for 30 days**. By the time I started capturing data with vibe-replay in March 2026, months of sessions had already been cleaned up. The Cursor sessions from that era survived because Cursor stores them in SQLite databases that persist indefinitely.
-- Activity appears to ramp up around October 2025 — partly real (that's when I started building vibe-replay), partly an artifact of data loss
-- The densest weeks are in February–March 2026, with multiple high-intensity days — this is the period where I had full coverage from both providers
-- Saturday is consistently the quietest day (54 sessions vs. Thursday's 173)
+- A sparse period may reflect missing source files, not low activity. Provider retention and cleanup behavior vary, so the heatmap is only as complete as the data that was captured.
+- A sudden ramp can be real, or it can reflect a new provider, a new machine, or the first time a local store was scanned.
+- The densest weeks are useful for comparing workflow phases, but they should not be treated as a productivity score.
+- Day-of-week patterns are descriptive, not prescriptive: a quiet Saturday can mean fewer sessions, a different schedule, or missing data.
 
-This is exactly why the persistent local store matters. Once vibe-replay captures your session metrics, they're safe — even after Claude Code's 30-day cleanup or Cursor's transcript deletion.
+This is why the persistent local store matters. Once vibe-replay captures aggregate session metrics, those metrics can remain available after a provider removes or rotates its source files. The local store does not recover data that was never scanned.
 
-The streak cards below the heatmap add context: **9-day current streak**, best of 19 days, averaging 6.1 sessions on active days. The peak day — March 6, 2026 — had **36 sessions** in a single day.
+The streak cards add context: current streak, best streak, and average sessions on active days. They describe activity patterns; they do not measure code quality.
 
 ---
 
 ## Weekly trends and day-of-week patterns
 
-![Weekly trend bar chart showing acceleration through March, and day-of-week distribution showing Thursday as the most active day](/blog/personal-insights/insights-trends.png)
+![Synthetic weekly trend bar chart showing acceleration and day-of-week distribution](/blog/personal-insights/insights-trends.png)
 
 The weekly trend chart tells a story the heatmap compresses. You can see activity building through February and peaking in mid-March. The "Slowing down" label is auto-generated — it compares the last two weeks against your 90-day average.
 
-The day-of-week breakdown confirms what I suspected: weekdays are roughly equal (138–173 sessions), but **Saturday drops to a third of Thursday's volume**. Sunday is even lower. Vibe coding is, for me at least, a weekday activity.
+The day-of-week breakdown can reveal whether a workflow clusters around workdays, weekends, or a release cadence. Treat it as a description of the selected data range, not a recommendation about when to code.
 
 ---
 
 ## Which models do you actually use?
 
-![Model usage breakdown showing 20+ models across Claude and GPT families, and provider split of 79% Cursor vs 21% Claude Code](/blog/personal-insights/insights-models-providers.png)
+![Synthetic model usage breakdown showing Claude and GPT families, plus a provider split](/blog/personal-insights/insights-models-providers.png)
 
-This was the most surprising section. I expected to be a Claude-heavy user. The data says otherwise:
+This section answers a practical question: which models and providers actually appear in the selected history?
 
-- **c-opus-4-6** leads with 179 sessions — my primary Claude Code model
-- **gpt-5.3-codex-high** is a close second at 168 — Cursor's default workhorse
-- The long tail is remarkable: 20+ distinct models across Claude, GPT, and Gemini families
+- Model names are grouped from the provider records that were discovered locally.
+- The long tail can show experiments, fallbacks, and provider defaults that are easy to forget.
+- A provider split is meaningful only when the same date range and comparable source coverage are selected.
 
-The provider split makes it clear: **79% Cursor, 21% Claude Code**. I use Cursor for quick edits and exploratory work, Claude Code for heavy-lifting sessions that need agentic depth. The insights page makes this split visible for the first time.
+The Insights page makes that split visible without requiring conversation text. It also keeps incomplete usage and source coverage distinct from zero activity.
 
 ---
 
@@ -69,7 +70,7 @@ The provider split makes it clear: **79% Cursor, 21% Claude Code**. I use Cursor
 
 Personal Insights operates in three layers:
 
-**Local store** — Every time you run `npx vibe-replay`, session metrics are persisted to `~/.vibe-replay/insights/store.json`. Claude Code deletes JSONL files after 30 days. Cursor can lose transcripts across updates. I learned this the hard way — months of Claude Code sessions from mid-2025 are gone forever because I didn't have a persistent store yet. The local insights store solves this: once captured, your data survives regardless of what the AI tools do with their own files.
+**Local store** — Every time you run `npx vibe-replay`, session metrics are persisted to `~/.vibe-replay/insights/store.json`. Provider retention and cleanup behavior can vary, so the local store preserves the aggregate metrics that were captured before source files changed. It cannot reconstruct sessions that were never scanned.
 
 **Cloud sync** — If you sign in, daily aggregates sync to a lightweight time-series store (one row per machine per day). Delta sync means only new or modified days are uploaded. Multi-machine usage merges automatically.
 
@@ -79,7 +80,7 @@ Personal Insights operates in three layers:
 
 ## Share your vibe coding profile
 
-Every user gets a shareable URL: `vibe-replay.com/shared-insights/?s=your-slug` (or the short form `vibe-replay.com/i/your-slug`).
+You can create a shareable URL such as `vibe-replay.com/shared-insights/?s=your-slug` (or the short form `vibe-replay.com/i/your-slug`).
 
 The privacy defaults are conservative — dollar amounts are hidden (model names and session counts are still visible), projects are visible but can be blurred, and you can toggle every section independently. Think of it as a GitHub contribution graph, but for AI-assisted coding.
 
@@ -91,6 +92,8 @@ The privacy defaults are conservative — dollar amounts are hidden (model names
 npx vibe-replay
 ```
 
-Sign in from the dashboard, and your insights page builds automatically from your local session history. No manual tracking, no configuration. If you've been vibe coding with Claude Code or Cursor, the data is already on your machine — insights just surfaces it.
+Sign in from the dashboard, and your insights page builds automatically from your local session history. No manual tracking, no configuration. If you've been using a supported provider, the source data may already be on your machine — Insights surfaces the aggregate without requiring conversation export.
 
 **[Explore Insights](https://vibe-replay.com/insights/)** · **[GitHub](https://github.com/tuo-lei/vibe-replay)** · **[Explore public replays](/explore/)**
+
+For the underlying local sources, see the storage guides for [Claude Code](/blog/claude-code-local-storage/) and [Cursor](/blog/cursor-local-storage/).

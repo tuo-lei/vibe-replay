@@ -6,9 +6,11 @@ interface Props {
   description?: string;
   canonicalPath?: string;
   ogImage?: string;
+  ogImageAlt?: string;
   ogType?: "website" | "article";
   article?: {
     publishedTime: string;
+    modifiedTime?: string;
     author: string;
   };
   jsonLd?: Record<string, unknown> | Record<string, unknown>[];
@@ -20,6 +22,7 @@ const {
   description = "vibe-replay turns Claude Code, Claude Desktop, Claude Cowork, Cursor, Codex, OpenCode, Hermes, and Pi sessions into local-first interactive replays, insights, AI Studio analyses, and shareable self-contained HTML files.",
   canonicalPath,
   ogImage: ogImageProp,
+  ogImageAlt = "vibe-replay — AI coding session replays",
   ogType = "website",
   article,
   jsonLd: jsonLdProp,
@@ -61,16 +64,17 @@ function stringifyJsonLd(value: Record<string, unknown>): string {
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:type" content="image/png" />
-    <meta property="og:image:alt" content="vibe-replay — AI coding session replays" />
+    <meta property="og:image:alt" content={ogImageAlt} />
     <meta property="og:site_name" content="vibe-replay" />
     <meta property="og:locale" content="en_US" />
     {article && <meta property="article:published_time" content={article.publishedTime} />}
+    {article?.modifiedTime && <meta property="article:modified_time" content={article.modifiedTime} />}
     {article && <meta property="article:author" content={article.author} />}
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={ogImage} />
-    <meta name="twitter:image:alt" content="vibe-replay — AI coding session replays" />
+    <meta name="twitter:image:alt" content={ogImageAlt} />
 
     <!-- Structured Data -->
     {(() => {

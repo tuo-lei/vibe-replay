@@ -1,8 +1,9 @@
 ---
-title: "What Does Codex Store on Your Machine? A Deep Dive into Rollout JSONL and state_5.sqlite"
+title: "What Does Codex Store Locally? Rollout JSONL + state_5.sqlite"
 excerpt: "Codex keeps the replay in rollout JSONL, the /resume metadata in SQLite, and renamed threads in an append-only index. Here's how the pieces fit together."
 cover: "/blog/codex-storage/storage-map.png"
 date: 2026-04-27
+updated: 2026-09-03
 readTime: "7 min read"
 ---
 
@@ -138,7 +139,7 @@ vibe-replay merges the three local surfaces instead of choosing one and pretendi
 
 The result is a self-contained replay that can show both the conversation and the context around it: model changes, task boundaries, compactions, tool calls, and data-quality notes.
 
-You can compare this with the simpler one-file mental model in [What Does Claude Code Store on Your Machine?](/blog/claude-code-local-storage/), or with Cursor's multi-store design in [What Does Cursor Store on Your Machine?](/blog/cursor-local-storage/).
+You can compare this with the simpler one-file mental model in [What Does Claude Code Store Locally?](/blog/claude-code-local-storage/), or with Cursor's multi-store design in [What Does Cursor Store Locally?](/blog/cursor-local-storage/).
 
 ## A privacy note before you inspect the files
 

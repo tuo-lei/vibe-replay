@@ -1,16 +1,17 @@
 ---
-title: "Capturing Claude's Autonomous Agent Mode: A Deep Dive into Dispatch"
-excerpt: "I ran a long autonomous task in Cowork mode, then tried to replay it — and vibe-replay couldn't see the session at all. Here's what it took to fix that."
+title: "How Claude Cowork Stores Autonomous Agent Sessions"
+excerpt: "Claude Desktop's Cowork mode writes its audit trail separately from Claude Code. Here's how Dispatch sessions are stored and replayed."
 cover: "/blog/dispatch-deep-dive/dashboard.png"
 date: 2026-04-25
+updated: 2026-09-03
 readTime: "8 min read"
 ---
 
-I ran a long research and planning task in autonomous mode. Six hours, 125 prompts, and 364 tool calls were chained together while I went about my day. When I came back, I wanted to replay it.
+Long-running autonomous work exposes a storage problem quickly: a session can run for hours, issue many prompts and tool calls, and still be invisible to a tool that only scans terminal transcripts.
 
-vibe-replay couldn't see the session.
+That was the original failure mode for Cowork sessions in vibe-replay.
 
-[![Sanitized Cowork session landing page showing an example replay](/blog/dispatch-deep-dive/cowork-landing.png)](/blog/dispatch-deep-dive/cowork-landing.png)
+[![Synthetic Cowork session landing page showing an example replay](/blog/dispatch-deep-dive/cowork-landing.png)](/blog/dispatch-deep-dive/cowork-landing.png)
 
 It now can. This is what it took.
 
@@ -20,7 +21,7 @@ It now can. This is what it took.
 
 Claude Desktop is actually two AI experiences sharing a window. The **Code tab** is Claude Code in a managed wrapper — the same CLI, the same JSONL transcripts, the same tool calls you'd see in your terminal. The **Cowork tab** is something else entirely: an autonomous agent mode where Claude runs in an isolated sandbox VM, orchestrates multi-step plans on its own, and writes its transcript to a completely different place on disk.
 
-Anthropic internally calls the orchestrator behind Cowork **Dispatch** — and the name fits. Each Cowork session spins up a sandboxed VM with a codename like `hopeful-awesome-feynman` or `zealous-wonderful-meitner`, mounts your real folders into a fake filesystem rooted at `/sessions/{processName}/`, and writes its full audit trail into:
+Anthropic internally calls the orchestrator behind Cowork **Dispatch**. Each Cowork session spins up a sandboxed VM, mounts folders into a session-scoped filesystem rooted at `/sessions/{processName}/`, and writes its audit trail into:
 
 ```
 ~/Library/Application Support/Claude/local-agent-mode-sessions/.../audit.jsonl
@@ -28,7 +29,7 @@ Anthropic internally calls the orchestrator behind Cowork **Dispatch** — and t
 
 That's nowhere near `~/.claude/projects/`, which is what vibe-replay had been scanning since day one.
 
-That answered the surface question — *why didn't vibe-replay see the session?* But once I actually opened those audit files, two deeper things mattered.
+That answers the surface question — *why did vibe-replay miss the session?* Opening the audit files also reveals two deeper details.
 
 ---
 
@@ -66,7 +67,7 @@ The `cliSessionId` in a Cowork session is the UUID of the **inner Claude Code su
 
 The right key is the metadata's `sessionId` field (with the `local_` prefix stripped). That's the stable, outer-loop identity of the Cowork session itself.
 
-I learned this the long way. Future me, reading this post, gets to skip that.
+That distinction is easy to miss because the field name sounds like the outer session identity.
 
 ---
 
@@ -92,15 +93,15 @@ claude-cowork → claude-desktop → claude-code → cursor
 
 A Cowork session in the player:
 
-[![Sanitized replay player showing a long-running autonomous task — prompt outline on left, conversation in center, tool use tags visible](/blog/dispatch-deep-dive/cowork-player.png)](/blog/dispatch-deep-dive/cowork-player.png)
+[![Synthetic replay player showing a long-running autonomous task — prompt outline on left, conversation in center, tool use tags visible](/blog/dispatch-deep-dive/cowork-player.png)](/blog/dispatch-deep-dive/cowork-player.png)
 
 Left panel: outline of every user prompt — useful when there are 125 of them. Center: the conversation, with tool-use tags inline (the parser normalizes Cowork's `mcp__workspace__*` names into recognizable tags like `gmail_read_message` and `Claude_in_Chrome`).
 
 Code-tab sessions running through Desktop pick up metadata the raw JSONL never sees — the human-readable title Desktop inferred, the permission mode, the git worktree branch:
 
-[![Claude Desktop session landing showing 'A Claude Desktop session replay' with worktree branch and dangerous mode badge](/blog/dispatch-deep-dive/desktop-session-landing.png)](/blog/dispatch-deep-dive/desktop-session-landing.png)
+[![Synthetic Claude Desktop session landing showing a replay title, worktree metadata, and permission badge](/blog/dispatch-deep-dive/desktop-session-landing.png)](/blog/dispatch-deep-dive/desktop-session-landing.png)
 
-(That session is literally the implementation of the Cowork provider itself. The first prompt: *"Add support for Cowork (Dispatch) sessions to vibe-replay…"* The `dangerous mode` badge and `claude/crazy-ishizaka-06a286` branch name come from Desktop's metadata.)
+(The screenshot uses synthetic session metadata. In a real export, the title, permission mode, worktree branch, and prompts may all contain private project information; review them before sharing.)
 
 [![Synthetic vibe-replay dashboard showing provider-aware recent sessions, replays, and activity heatmaps](/blog/dispatch-deep-dive/dashboard.png)](/blog/dispatch-deep-dive/dashboard.png)
 
@@ -110,7 +111,7 @@ Code-tab sessions running through Desktop pick up metadata the raw JSONL never s
 
 ## Try it
 
-If you've used Cowork at all, you have audit files sitting on disk right now:
+If you've used Cowork, there may be audit files on disk:
 
 ```bash
 npx vibe-replay
@@ -124,8 +125,12 @@ Or surface them all at once:
 npx vibe-replay --dashboard
 ```
 
-The foundation is in place. Every audit.jsonl Claude produces — Code, Desktop, Cowork — is now fair game.
+Cowork audit files can contain prompts, tool arguments, sandbox paths, and imported content. Treat them as private application data and review the generated replay before sharing it.
+
+The foundation is in place. Supported `audit.jsonl` sources from Code, Desktop, and Cowork can now be discovered without treating them as one identical provider.
 
 ---
 
 *vibe-replay is open source. The providers discussed here landed in [PR #187](https://github.com/tuo-lei/vibe-replay/pull/187).*
+
+The same local-first principle applies to the other providers: start with the [Claude Code storage guide](/blog/claude-code-local-storage/) before opening raw session files.

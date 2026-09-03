@@ -1,8 +1,9 @@
 ---
-title: "What Does Claude Code Store on Your Machine? A Deep Dive into ~/.claude/"
-excerpt: "858 MB in three weeks. Every prompt, every tool call, every file edit — all stored as plain text in ~/.claude/. Here's what's inside."
+title: "What Does Claude Code Store Locally? A ~/.claude/ Deep Dive"
+excerpt: "Claude Code stores session history, tool calls, file snapshots, and usage data under ~/.claude/. Here's where the files live and how to inspect them safely."
 cover: "/blog/claude-storage/dashboard.png"
 date: 2026-03-24
+updated: 2026-09-03
 readTime: "8 min read"
 ---
 
@@ -12,15 +13,15 @@ Run this right now:
 du -sh ~/.claude/
 ```
 
-Mine says **858 MB**. Three weeks of usage. 129 sessions (plus hundreds of sub-agent files), 1,642 prompts, 17,487 tool calls — all stored as plain text on my local machine.
+The result is machine-specific. A busy installation can grow quickly because the directory may contain transcripts, tool results, file snapshots, images, and indexes. The examples in this post are synthetic; use the commands against your own data instead of treating any number here as a benchmark.
 
-Most [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) users never look inside this directory. I did, because I needed to parse it for [vibe-replay](/blog/introducing-vibe-replay/). What I found was more than I expected — a complete record of every AI coding session, with data that reveals things Claude Code's own UI never shows you.
+Most [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview) users never look inside this directory. It is worth inspecting when you need to understand retention, recover a file version, or build analytics that the terminal UI does not provide. [vibe-replay](/blog/introducing-vibe-replay/) reads these local sources and turns them into a navigable replay.
 
 ---
 
 ## Where are Claude Code sessions stored?
 
-Every Claude Code session lives in `~/.claude/projects/` as a plain-text JSONL file. Each file contains the full conversation: every prompt you typed, every tool Claude called, every file it edited, even its internal thinking process.
+Every Claude Code session is typically represented under `~/.claude/projects/` as a plain-text JSONL file. Depending on the release and session type, a record can include prompts, tool calls, file edits, images, metadata, and reasoning or thinking blocks when those are persisted.
 
 Claude Code has a built-in `/resume` command that lets you browse past sessions and continue them. And `/stats` gives you a quick overview of your usage history. But both are scoped to the current terminal — you can't search across sessions, compare them, or see what happened inside.
 
@@ -36,17 +37,16 @@ From here you can click into any session to replay it turn by turn, or drill int
 
 Claude Code has `/cost` to show token usage for the current session, and `/usage` to show your plan limits. Both are useful in the moment.
 
-But every response also logs exact token counts to the JSONL — input, output, cache creation, and cache read. Aggregate them across all sessions and you get a picture neither command shows you:
+Assistant records often include token counts in the JSONL — input, output, cache creation, and cache read. Aggregate the records across sessions and you get a picture neither command shows you:
 
-| Metric | Value |
-|--------|-------|
-| Cache read tokens | **3.25 billion** |
-| Cache hit rate | **97.8%** |
-| API-equivalent cost (Opus pricing) | ~$7,900 |
-| API-equivalent cost without caching | ~$50,200 |
-| **Saved by prompt caching** | **~$42,300** |
+| Metric | Why it matters |
+|--------|----------------|
+| Cache read tokens | Shows how much input was served from the prompt cache |
+| Cache hit rate | Helps explain why repeated context can be cheaper than fresh input |
+| API-equivalent cost | A model- and pricing-dependent estimate, not a subscription bill |
+| Cost without caching | A useful counterfactual for understanding cache impact |
 
-To be clear: if you're on Claude Max ($100 or $200/month), you're not actually paying $7,900 — that's the API-equivalent cost based on per-token Opus pricing. But the caching ratio is real and remarkable: 97.8% of input tokens come from cache, which is what makes flat-rate subscriptions viable.
+Do not confuse an API-equivalent estimate with an invoice or a subscription charge. Pricing changes, model aliases differ, and some records are incomplete. Treat the cache ratio as an observation from the stored usage fields, and label any derived cost as an estimate.
 
 In vibe-replay, the Insights tab calculates this per session automatically — cost per turn, cumulative token burn, cache hit rate, and context window growth:
 
@@ -70,9 +70,9 @@ jq -s '[.[] | select(.type=="assistant") | .message.usage // empty] |
 
 Claude Code gives you `/context` to see a colored grid of how full your context window is right now, and `/compact` to manually trigger compaction when you feel the context getting stale.
 
-But neither tells you what happened historically. In vibe-replay's Insights panel, you can watch it visually — the context window chart shows steady growth, then a sharp drop at compaction. You can see exactly how many tokens were in the window before compression (in my data: up to **167,142 tokens**).
+But neither tells you what happened historically. In vibe-replay's Insights panel, you can watch it visually — the context window chart shows steady growth, then a sharp drop at compaction. When a provider records pre-compaction usage, the replay can show that boundary without pretending the number is the model's exact internal context size.
 
-Across my 129 sessions, I found **51 compaction events**. Now I can see exactly when and why Claude lost context.
+Across a collection of sessions, the same view makes compaction events easier to compare. A compaction boundary explains that context was summarized; it does not by itself prove that the model “forgot” a particular fact.
 
 **The CLI way:**
 
@@ -86,18 +86,17 @@ jq 'select(.type=="system" and .subtype=="compact_boundary")
 
 ## What tools does Claude Code use most?
 
-I assumed Claude Code mostly reads and edits files. The data tells a different story:
+It is easy to assume Claude Code mostly reads and edits files. The data tells a different story:
 
-| Tool | Calls | Share |
-|------|-------|-------|
-| **Bash** | **7,452** | **43%** |
-| Read | 3,806 | 22% |
-| Edit | 3,025 | 17% |
-| Grep | 1,043 | 6% |
-| Write | 506 | 3% |
-| Agent (sub-agent) | 287 | 2% |
+| Tool family | What it often represents |
+|-------------|---------------------------|
+| **Bash** | Shell inspection, tests, builds, and version-control commands |
+| Read | File and directory inspection |
+| Edit / Write | Applying source changes |
+| Grep | Searching the codebase |
+| Agent | Delegated work in a separate context |
 
-**Bash dominates.** Nearly half of everything Claude Code does is running shell commands — `git status`, `pnpm build`, `ls`, `cat`. The read-edit-write loop accounts for another 42%.
+In many agent-heavy sessions, Bash is one of the largest categories because the model uses shell commands for discovery, tests, builds, and version-control checks. The exact distribution depends on the task, permissions, and enabled tools, so compare sessions rather than treating one histogram as a universal benchmark.
 
 In the vibe-replay replay view, you can watch this play out in real time — what command Claude ran, what the output was, what it decided to do next:
 
@@ -117,33 +116,33 @@ jq -r 'select(.type=="assistant") | .message.content[]?
 
 When Claude Code spawns a sub-agent (via the `Agent` tool), you see a spinner and then a result. But behind that spinner, the sub-agent might run 50+ tools — reading files, searching code, running commands — all in its own context window.
 
-Those 287 `Agent` calls in my data spawned **567 sub-agent files**, each with its own JSONL conversation and a metadata file:
+A sub-agent can create its own JSONL conversation and a small metadata record:
 
 ```json
 {
   "agentType": "general-purpose",
-  "description": "Research blog SEO best practices"
+  "description": "Review a module for duplicated logic"
 }
 ```
 
-In vibe-replay, sub-agent work is expandable inline — you can open one up and see its entire internal conversation: what it was tasked with, what tools it ran, what it found. It's a whole hidden layer of work that's normally invisible.
+In vibe-replay, sub-agent work is expandable inline — you can open one up and see what it was tasked with, which tools it ran, and what it returned. It is a hidden layer of work that a final diff normally leaves out.
 
 ---
 
 ## Does Claude Code record every prompt you type?
 
-Yes. `~/.claude/history.jsonl` is a **global index of every prompt across all projects**:
+Often, but do not treat it as a guaranteed audit log. `~/.claude/history.jsonl` is a **global prompt index across projects**:
 
 ```json
 {
-  "display": "Fix the authentication bug in login.ts",
+  "display": "Review the authentication flow",
   "timestamp": 1772598497513,
-  "project": "/Users/you/Code/myapp",
-  "sessionId": "f79f8cf8-..."
+  "project": "/home/example/project",
+  "sessionId": "session-demo-..."
 }
 ```
 
-My file has **1,642 entries** across 12 projects. It's a complete chronological diary of your AI-assisted work — what you asked, when, and in which project. If you pasted something, that's recorded too (large pastes get saved separately in `~/.claude/paste-cache/`).
+This index can become a chronological record of AI-assisted work — what you asked, when, and in which project. It may be incomplete or shaped by provider version and cleanup behavior. If you pasted something, that may be recorded too; large pastes can be stored separately in `~/.claude/paste-cache/`. Treat both locations as sensitive.
 
 ```bash
 # Try it — how many prompts have you typed?
@@ -168,23 +167,23 @@ file-history/<session-uuid>/
 ├── 12e0d72e037caf5f@v3    # before third edit
 ```
 
-The filename is SHA-256 of the file's absolute path, truncated to 16 hex chars. You can locate snapshots for any file directly:
+In the observed layout, the filename is a truncated SHA-256 of the file's absolute path. You can locate snapshots for any file directly, but treat the naming rule as an implementation detail:
 
 ```bash
-HASH=$(echo -n "/Users/you/Code/myapp/src/auth.ts" | shasum -a 256 | cut -c1-16)
+HASH=$(echo -n "/home/example/project/src/auth.ts" | shasum -a 256 | cut -c1-16)
 ls ~/.claude/file-history/*/${HASH}@*
 ```
 
-Across my sessions, that's **36 MB of invisible undo history**. Even if `/rewind` doesn't go far enough, or you've already started a new session — these snapshots are still on disk.
+These snapshots can preserve earlier file contents even after a conversation moves on. Retention and cleanup behavior can vary, so do not treat them as a guaranteed backup.
 
 ---
 
 ## What else is in ~/.claude/?
 
-- **Shell snapshots** (`shell-snapshots/`) — your complete shell environment captured periodically (~148 KB each): every function, alias, env var, and PATH entry. This is how Claude Code runs commands in your exact environment.
-- **Extended thinking** — Claude's full internal reasoning is stored verbatim in every session JSONL, with cryptographic signatures verifying the content. I have 2,130 thinking blocks across my sessions — you can read every step of Claude's decision-making process.
-- **343 embedded screenshots** — base64 PNG stored inside the JSONL. Every image you paste or Claude captures is preserved.
-- **118 PR links** — Claude records every PR it creates. Find them all: `jq 'select(.type=="pr-link")' ~/.claude/projects/*/*.jsonl`
+- **Shell snapshots** (`shell-snapshots/`) — periodic snapshots of shell state used to reproduce the command environment. They can contain sensitive environment values.
+- **Reasoning and thinking blocks** — some sessions persist model reasoning or thinking metadata. The presence, completeness, and format depend on the provider and version; never assume a transcript contains the full internal process.
+- **Embedded images** — images may be stored as data inside session records, which can make a transcript much larger than its text suggests.
+- **Pull-request metadata** — sessions can include links or records for repository actions. Review these before sharing an export.
 
 ---
 
@@ -198,8 +197,8 @@ For the full picture — token burn over time, context window growth, tool distr
 npx vibe-replay
 ```
 
-One command. It discovers your Claude Code (and Cursor) sessions, you pick one, and it generates a self-contained HTML replay. No server, no account, no external requests. Open it in any browser, share it with your team, or [publish it to the cloud](/explore/).
+One command. It discovers supported local providers, you pick a session, and it generates a self-contained HTML replay. No server, no account, no external requests. Open it in any browser, share it with your team, or [publish it to the cloud](/explore/).
 
 Your `~/.claude/` directory is a goldmine. Stop grepping through JSONL.
 
-**[Try it on your own sessions](https://github.com/tuo-lei/vibe-replay)** · **[Watch a live demo](https://vibe-replay.com/view/?gist=586f3f56d9e6c82e3b60b42ea13b341e)** · **[Explore public replays](/explore/)**
+**[Try it on your own sessions](https://github.com/tuo-lei/vibe-replay)** · **[Explore public replays](/explore/)**
