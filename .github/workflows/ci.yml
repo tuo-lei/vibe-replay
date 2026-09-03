@@ -34,6 +34,31 @@ jobs:
       - run: pnpm test
       - run: pnpm test:cloudflare
 
+  database-migrations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Check migration journal and schema drift
+        working-directory: cloudflare
+        run: |
+          pnpm db:check
+          pnpm db:generate
+          if [ -n "$(git -C .. status --short --untracked-files=all -- cloudflare/drizzle)" ]; then
+            echo "Generated or modified migration files are not committed. Run pnpm db:generate locally and commit the result."
+            git -C .. status --short --untracked-files=all -- cloudflare/drizzle
+            exit 1
+          fi
+      - name: Apply all migrations to a clean local D1 database
+        run: pnpm --filter @vibe-replay/cloudflare db:migrate:local
+      - name: Verify a second migration pass is a no-op
+        run: pnpm --filter @vibe-replay/cloudflare db:migrate:local
+
   windows-smoke:
     runs-on: windows-latest
     steps:
