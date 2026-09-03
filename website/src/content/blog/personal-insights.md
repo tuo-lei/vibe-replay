@@ -1,16 +1,16 @@
 ---
-title: "878 Sessions, 52.9k Tool Calls — What a Year of Vibe Coding Looks Like"
-excerpt: "vibe-replay now tracks your AI coding activity across machines and tools. GitHub-style heatmaps, streak tracking, model usage breakdowns — and shareable public profiles."
+title: "What AI Coding Insights Reveal Over Time"
+excerpt: "vibe-replay tracks AI coding activity across machines and tools. Explore GitHub-style heatmaps, streaks, model usage, and privacy-aware shareable profiles."
 cover: "/blog/personal-insights/insights-hero.png"
 date: 2026-04-09
 readTime: "5 min read"
 ---
 
-[![Personal insights dashboard showing 878 sessions, 6,046 prompts, and 52.9k tool calls across 399 days](/blog/personal-insights/insights-hero.png)](https://vibe-replay.com/shared-insights/?s=tuo-lei)
+[![Example personal insights dashboard showing sessions, prompts, tool calls, and activity trends](/blog/personal-insights/insights-hero.png)](/insights/)
 
-**[See the live insights page](https://vibe-replay.com/shared-insights/?s=tuo-lei)**
+**[Explore Insights](https://vibe-replay.com/insights/)**
 
-I've been vibe coding for 399 days. 878 sessions across Claude Code and Cursor. Until recently, I had no idea what my patterns looked like — which models I gravitate toward, which days I'm most productive, whether I'm speeding up or slowing down.
+After enough AI-assisted coding sessions, patterns emerge — which models you use, which days are most productive, and whether your workflow is speeding up or slowing down.
 
 Now I do. vibe-replay's new **Personal Insights** feature turns your local AI session history into a full analytics dashboard — synced across machines, with optional public sharing.
 
@@ -20,17 +20,7 @@ Now I do. vibe-replay's new **Personal Insights** feature turns your local AI se
 
 The top of the insights page shows your aggregate stats: total sessions, prompts, tool calls, time spent, and file edits. Below that, a mini heatmap shows your last 4 weeks of activity — a quick pulse check before you scroll into the details.
 
-My numbers after 399 days:
-
-| Metric | Value |
-|--------|-------|
-| Sessions | 878 |
-| Prompts | 6,046 |
-| Tool calls | 52.9k |
-| File edits | 9,852 |
-| Total coding time | 4 days, 1 hour |
-
-That's roughly 7 prompts per session, averaging about 7 minutes each. Short, focused bursts — not marathon sessions.
+The dashboard keeps the numbers concrete: sessions, prompts, tool calls, file edits, coding time, projects, model usage, and estimated cost. You can inspect the aggregate without exporting conversation content.
 
 ---
 
@@ -103,4 +93,4 @@ npx vibe-replay
 
 Sign in from the dashboard, and your insights page builds automatically from your local session history. No manual tracking, no configuration. If you've been vibe coding with Claude Code or Cursor, the data is already on your machine — insights just surfaces it.
 
-**[See my insights](https://vibe-replay.com/shared-insights/?s=tuo-lei)** · **[GitHub](https://github.com/tuo-lei/vibe-replay)** · **[Explore public replays](/explore/)**
+**[Explore Insights](https://vibe-replay.com/insights/)** · **[GitHub](https://github.com/tuo-lei/vibe-replay)** · **[Explore public replays](/explore/)**
