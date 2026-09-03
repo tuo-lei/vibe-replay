@@ -26,7 +26,7 @@ Claude Code has a built-in `/resume` command that lets you browse past sessions 
 
 [vibe-replay](https://github.com/tuo-lei/vibe-replay) reads these same files and turns them into a browsable dashboard — organized by project, with activity charts, tool call counts, and cost estimates:
 
-![vibe-replay dashboard showing 152 sessions across 14 projects, 30-day activity chart, 27,699 total tool calls, and recent sessions list](/blog/claude-storage/dashboard.png)
+![Synthetic vibe-replay dashboard showing recent sessions, activity heatmaps, project shortcuts, and replay actions](/blog/claude-storage/dashboard.png)
 
 From here you can click into any session to replay it turn by turn, or drill into a project to see aggregated stats across all its sessions.
 
@@ -50,7 +50,7 @@ To be clear: if you're on Claude Max ($100 or $200/month), you're not actually p
 
 In vibe-replay, the Insights tab calculates this per session automatically — cost per turn, cumulative token burn, cache hit rate, and context window growth:
 
-![vibe-replay Insights showing token burn chart, 100% cache hit rate, context window usage growing to 203K tokens, and tool calls per turn](/blog/claude-storage/insights-charts.png)
+![Synthetic vibe-replay Insights view showing activity timing, token composition, context composition, and per-turn metrics](/blog/claude-storage/insights-charts.png)
 
 **The CLI way** (aggregate across all sessions — requires `jq`):
 
@@ -101,7 +101,7 @@ I assumed Claude Code mostly reads and edits files. The data tells a different s
 
 In the vibe-replay replay view, you can watch this play out in real time — what command Claude ran, what the output was, what it decided to do next:
 
-![vibe-replay All mode showing Claude's tool calls with bash commands, responses, and thinking blocks inline](/blog/claude-storage/all-mode-tools.png)
+![Synthetic vibe-replay replay showing prompts, assistant responses, tool badges, and the outline sidebar](/blog/claude-storage/all-mode-tools.png)
 
 **The CLI way:**
 
