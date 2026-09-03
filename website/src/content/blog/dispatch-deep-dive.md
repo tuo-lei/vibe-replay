@@ -1,16 +1,16 @@
 ---
 title: "Capturing Claude's Autonomous Agent Mode: A Deep Dive into Dispatch"
-excerpt: "I let Claude plan a 6-hour Japan trip in Cowork mode. Then I tried to replay it — and vibe-replay couldn't see the session at all. Here's what it took to fix that."
+excerpt: "I ran a long autonomous task in Cowork mode, then tried to replay it — and vibe-replay couldn't see the session at all. Here's what it took to fix that."
 cover: "/blog/dispatch-deep-dive/dashboard.png"
 date: 2026-04-25
 readTime: "8 min read"
 ---
 
-I let Claude plan a Japan spring break trip in autonomous mode. 6 hours, 125 prompts, 364 tool calls — Gmail searches, browser sessions, calendar checks, all chained together while I went about my day. When I came back, I wanted to replay it.
+I ran a long research and planning task in autonomous mode. Six hours, 125 prompts, and 364 tool calls were chained together while I went about my day. When I came back, I wanted to replay it.
 
 vibe-replay couldn't see the session.
 
-[![Cowork session landing page showing 'A Claude Cowork session replay by vibe-replay' — 125 turns, $71.07 cost](/blog/dispatch-deep-dive/cowork-landing.png)](/blog/dispatch-deep-dive/cowork-landing.png)
+[![Sanitized Cowork session landing page showing an example replay](/blog/dispatch-deep-dive/cowork-landing.png)](/blog/dispatch-deep-dive/cowork-landing.png)
 
 It now can. This is what it took.
 
@@ -92,7 +92,7 @@ claude-cowork → claude-desktop → claude-code → cursor
 
 A Cowork session in the player:
 
-[![The replay player showing the Japan trip planning session — prompt outline on left, conversation in center, tool use tags visible](/blog/dispatch-deep-dive/cowork-player.png)](/blog/dispatch-deep-dive/cowork-player.png)
+[![Sanitized replay player showing a long-running autonomous task — prompt outline on left, conversation in center, tool use tags visible](/blog/dispatch-deep-dive/cowork-player.png)](/blog/dispatch-deep-dive/cowork-player.png)
 
 Left panel: outline of every user prompt — useful when there are 125 of them. Center: the conversation, with tool-use tags inline (the parser normalizes Cowork's `mcp__workspace__*` names into recognizable tags like `gmail_read_message` and `Claude_in_Chrome`).
 
