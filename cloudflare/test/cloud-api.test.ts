@@ -1,7 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Miniflare } from "miniflare";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker";
 
 const TEST_USER_ID = "user-test-1";
@@ -177,6 +177,100 @@ describe("Cloud API integration", () => {
   beforeEach(async () => {
     await resetDb();
     await clearR2();
+  });
+
+  it("keeps Better Auth account writes compatible with the issuer migration", async () => {
+    await env.DB.prepare(
+      `INSERT INTO account (id, account_id, provider_id, user_id) VALUES (?, ?, ?, ?)`,
+    )
+      .bind("account-test-1", "github-user-1", "github", TEST_USER_ID)
+      .run();
+
+    const row = await env.DB.prepare("SELECT issuer FROM account WHERE id = ?")
+      .bind("account-test-1")
+      .first<{ issuer: string }>();
+    expect(row?.issuer).toBe("local:oauth:github");
+  });
+
+  it("completes a GitHub OAuth callback against the migrated account schema", async () => {
+    const start = await worker.fetch(
+      new Request("http://localhost/api/auth/sign-in/social", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: "http://localhost" },
+        body: JSON.stringify({ provider: "github", callbackURL: "/auth/success" }),
+      }),
+      env,
+      createCtx(),
+    );
+    expect(start.status).toBe(200);
+
+    const startBody = (await start.json()) as { url: string };
+    const state = new URL(startBody.url).searchParams.get("state");
+    const stateCookie = start.headers.get("set-cookie")?.split(";", 1)[0];
+    expect(state).toBeTruthy();
+    expect(stateCookie).toMatch(/^better-auth\.state=/);
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url =
+        typeof input === "string" ? input : input instanceof Request ? input.url : input.toString();
+      if (url === "https://github.com/login/oauth/access_token") {
+        return new Response(
+          JSON.stringify({
+            access_token: "fake-access-token",
+            token_type: "bearer",
+            scope: "read:user, user:email, gist",
+          }),
+          { headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url === "https://api.github.com/user") {
+        return new Response(
+          JSON.stringify({
+            id: 424242,
+            login: "demo-user",
+            name: "Demo User",
+            email: "github-test-user",
+            avatar_url: "https://avatars.example/demo",
+          }),
+          { headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (url === "https://api.github.com/user/emails") {
+        return new Response(
+          JSON.stringify([
+            { email: "github-test-user", primary: true, verified: true, visibility: "private" },
+          ]),
+          { headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response("Not Found", { status: 404 });
+    });
+
+    try {
+      const callback = await worker.fetch(
+        new Request(
+          `http://localhost/api/auth/callback/github?code=fake-code&state=${encodeURIComponent(state!)}`,
+          { headers: { Cookie: stateCookie!, Origin: "http://localhost" } },
+        ),
+        env,
+        createCtx(),
+      );
+      expect(callback.status).toBe(302);
+      expect(callback.headers.get("location")).toBe("/auth/success");
+
+      const accountRow = await env.DB.prepare(
+        "SELECT issuer, account_id, provider_id FROM account WHERE account_id = ?",
+      )
+        .bind("424242")
+        .first<{ issuer: string; account_id: string; provider_id: string }>();
+      expect(accountRow).toEqual({
+        issuer: "local:oauth:github",
+        account_id: "424242",
+        provider_id: "github",
+      });
+    } finally {
+      fetchMock.mockRestore();
+    }
   });
 
   it("uploads, reads, lists, updates, and deletes an R2-backed replay", async () => {
