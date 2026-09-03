@@ -203,10 +203,12 @@ The CLI auto-discovers sessions on your machine, parses conversation data from a
   headless CLI is required. You can also add an OpenAI-compatible proxy (including LiteLLM) in
   the editor; AI Studio discovers models from its `/models` endpoint and sends Chat Completions
   requests to the configured local or remote API root.
-- **Ask Replay** — ask read-only questions about local sessions, replay scenes, usage, and
-  insights from the Dashboard or Editor. Answers include citations and explicit navigation actions;
-  SSH-backed data stays hidden unless you enable it in Settings. The setting is browser-local and
-  can be changed at any time.
+- **Ask Replay** — ask read-only questions about local sessions, replay scenes, comments, AI Studio
+  overlays, usage, coverage, projects, and Insights ranges from the Dashboard or Editor. It mirrors
+  the explorer's provider/repository/tool/MCP/skill/compaction filters and returns stable permalinks
+  for resources and user-reviewed mutation handoffs; it never performs a mutation itself. SSH-backed
+  data stays hidden unless you enable it in Settings. The setting is browser-local and can be changed
+  at any time.
 - **Quick preview** — open in browser instantly
 - **Publish to Gist** — shareable link on [vibe-replay.com](https://vibe-replay.com)
 - **Export for GitHub** — markdown + animated SVG for PRs

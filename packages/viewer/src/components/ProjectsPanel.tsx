@@ -7,7 +7,7 @@
  * whether one project or "All projects" is selected.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ALL_PROJECTS } from "../hooks/usePanelFilters";
 import { localDayKey } from "../utils/date";
 import { plural, timeAgo } from "../utils/format";
@@ -31,11 +31,26 @@ interface ProjectsPanelProps {
 
 type PanelMode = "overview" | "timeline" | "files";
 
+export const PROJECT_VIEW_PARAM = "projectView";
+
 const PROJECT_VIEW_TABS: { id: PanelMode; label: string }[] = [
   { id: "timeline", label: "Timeline" },
   { id: "overview", label: "Overview" },
   { id: "files", label: "Hot Files" },
 ];
+
+function projectViewFromUrl(): PanelMode {
+  const value = new URLSearchParams(window.location.search).get(PROJECT_VIEW_PARAM);
+  return value === "overview" || value === "files" ? value : "timeline";
+}
+
+function projectFromUrl(): { project?: string; targetId?: string } {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    project: params.get("project") || undefined,
+    targetId: params.get("targetId") || undefined,
+  };
+}
 
 // ─── Activity sparkline (compact) ───────────────────────────────────
 
@@ -465,7 +480,7 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
     loading: insightsLoading,
   } = useScanInsightsContext();
   const [selectedProjectKey, setSelectedProjectKey] = useState<string>(ALL_PROJECTS);
-  const [mode, setMode] = useState<PanelMode>("timeline");
+  const [mode, setMode] = useState<PanelMode>(projectViewFromUrl);
   const [showAgentRuns, setShowAgentRuns] = useState(
     () => new URLSearchParams(window.location.search).get("agentRuns") === "true",
   );
@@ -492,6 +507,40 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
     sorted.sort((a, b) => (b.lastActivity || "").localeCompare(a.lastActivity || ""));
     return sorted;
   }, [userInsights, showAgentRuns]);
+
+  const syncProjectUrl = useCallback(() => {
+    const requested = projectFromUrl();
+    if (!requested.project) {
+      setSelectedProjectKey(ALL_PROJECTS);
+      return;
+    }
+    const match = projects.find((project) => {
+      const sameTarget =
+        requested.targetId === (project.location?.kind === "ssh" ? project.location.id : undefined);
+      return (
+        sameTarget &&
+        (project.project === requested.project ||
+          projectSelectionKey(project) === requested.project ||
+          project.projectIdentity?.key === requested.project)
+      );
+    });
+    setSelectedProjectKey(match ? projectSelectionKey(match) : ALL_PROJECTS);
+  }, [projects]);
+
+  useEffect(() => {
+    syncProjectUrl();
+    setMode(projectViewFromUrl());
+  }, [syncProjectUrl]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      syncProjectUrl();
+      setMode(projectViewFromUrl());
+      setShowAgentRuns(new URLSearchParams(window.location.search).get("agentRuns") === "true");
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [syncProjectUrl]);
 
   const selectedInsight =
     selectedProjectKey === ALL_PROJECTS
@@ -570,6 +619,18 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
   const selectProject = (projectKey: string) => {
     setSelectedProjectKey(projectKey);
     setMode("timeline");
+    const selected = projects.find((project) => projectSelectionKey(project) === projectKey);
+    navigateTo(
+      {
+        view: "dashboard",
+        session: null,
+        tab: "projects",
+        project: selected?.project || null,
+        targetId: selected?.location?.kind === "ssh" ? selected.location.id : null,
+        [PROJECT_VIEW_PARAM]: "timeline",
+      },
+      { notify: false },
+    );
   };
 
   const isSingleProject = selectedProjectKey !== ALL_PROJECTS;
@@ -647,7 +708,10 @@ export default function ProjectsPanel({ onNavigate }: ProjectsPanelProps) {
             {visibleTabs.map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setMode(tab.id)}
+                onClick={() => {
+                  setMode(tab.id);
+                  navigateTo({ [PROJECT_VIEW_PARAM]: tab.id }, { notify: false });
+                }}
                 className={`rounded-lg px-3.5 py-1.5 text-xs font-sans font-semibold transition-all duration-200 ease-material ${
                   activeMode === tab.id
                     ? "bg-terminal-green-subtle text-terminal-green shadow-layer-sm"

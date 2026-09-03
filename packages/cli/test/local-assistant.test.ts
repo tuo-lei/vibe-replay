@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createLocalAssistantTools } from "../src/local-assistant.js";
+import { createLocalAssistantTools, type LocalAssistantData } from "../src/local-assistant.js";
+import type { SessionScanResult } from "../src/scanner.js";
 import type { ReplaySession } from "../src/types.js";
 
 function makeReplay(): ReplaySession {
@@ -44,7 +45,7 @@ function makeReplay(): ReplaySession {
   };
 }
 
-function makeData(replay: ReplaySession) {
+function makeData(replay: ReplaySession): LocalAssistantData {
   return {
     listSources: async () => [],
     listReplays: async () => [
@@ -97,6 +98,56 @@ function makeRemoteData(replay: ReplaySession) {
         annotationCount: 0,
       },
     ],
+  };
+}
+
+function makeScan(): SessionScanResult {
+  return {
+    sessionId: "session-1",
+    provider: "pi",
+    project: "~/Code/app",
+    slug: "fix-auth",
+    title: "Fix authentication redirect",
+    firstPrompt: "Fix the authentication redirect in the login callback.",
+    startTime: "2026-05-10T10:00:00.000Z",
+    endTime: "2026-05-10T10:04:00.000Z",
+    durationMs: 240_000,
+    model: "test-model",
+    promptCount: 1,
+    toolCallCount: 1,
+    editCount: 1,
+    filesModified: [{ file: "src/auth.ts", count: 1 }],
+    tokenUsage: {
+      inputTokens: 100,
+      outputTokens: 40,
+      cacheReadTokens: 20,
+      cacheCreationTokens: 10,
+    },
+    subAgentCount: 0,
+    apiErrorCount: 0,
+    compactionCount: 1,
+    usageIndexed: true,
+    usageSummary: {
+      tools: { read: 2 },
+      mcpServers: { browser: 1 },
+      mcpTools: { "browser/open": 1 },
+      skills: { replay: 1 },
+      successCount: 3,
+      errorCount: 0,
+      totalDurationMs: 1200,
+      durationCount: 2,
+    },
+    usageEvents: [
+      {
+        kind: "tool",
+        name: "read",
+        status: "success",
+        timestamp: "2026-05-10T10:01:00.000Z",
+        durationMs: 600,
+        attribution: "explicit",
+      },
+    ],
+    turnMetrics: [{ turnIndex: 0, durationMs: 240_000, toolCalls: 2, tokens: 170 }],
   };
 }
 
@@ -429,5 +480,161 @@ describe("local assistant tools", () => {
     expect(text).not.toContain(fakeKey);
     expect(text).not.toContain("super-secret-value");
     expect(text).toContain("[REDACTED]");
+  });
+
+  it("matches explorer facets and exposes sortable session metadata", async () => {
+    const replay = makeReplay();
+    const data = makeData(replay);
+    data.getScanResults = () => [makeScan()];
+    data.getArchivedKeys = async () => ["not-this-session"];
+    const tools = createLocalAssistantTools(data, { mode: "dashboard" });
+    const search = tools.find((tool) => tool.name === "search_sessions");
+
+    const result = await search!.execute("facet-search", {
+      tool: "read",
+      mcpServer: "browser",
+      mcpTool: "open",
+      skill: "replay",
+      compacted: true,
+      sortBy: "cost",
+    });
+    const payload = JSON.parse((result.content[0] as { text: string }).text) as {
+      results: Array<{
+        tools?: string[];
+        mcpServers?: string[];
+        archived?: boolean;
+        permalink?: string;
+      }>;
+      sortBy: string;
+    };
+
+    expect(payload.sortBy).toBe("cost");
+    expect(payload.results[0]).toMatchObject({
+      tools: ["read"],
+      mcpServers: ["browser"],
+      archived: false,
+    });
+    expect(payload.results[0]?.permalink).toContain("session=fix-auth");
+  });
+
+  it("returns range-aware insights, usage coverage, and percentile metrics", async () => {
+    const replay = makeReplay();
+    const data = makeData(replay);
+    data.getScanResults = () => [makeScan()];
+    const tools = createLocalAssistantTools(data, { mode: "dashboard" });
+    const insights = tools.find((tool) => tool.name === "get_insights");
+
+    const result = await insights!.execute("insights", { scope: "user", range: "all" });
+    const payload = JSON.parse((result.content[0] as { text: string }).text) as {
+      usage: { tools: Array<{ name: string; calls: number }> };
+      coverage: { totalSessions: number; invocationCalls: number };
+      sessionMetricDistributions?: { toolCalls?: { percentiles: { p50: number } } };
+      perTurnDistributions?: { tokens?: { percentiles: { p50: number } } };
+    };
+
+    expect(payload.usage.tools).toEqual([{ name: "read", calls: 2 }]);
+    expect(payload.coverage).toMatchObject({ totalSessions: 1, invocationCalls: 4 });
+    expect(payload.sessionMetricDistributions?.toolCalls?.percentiles.p50).toBe(1);
+    expect(payload.perTurnDistributions?.tokens?.percentiles.p50).toBe(170);
+  });
+
+  it("reads annotations, overlays, data status, and filtered navigation actions", async () => {
+    const replay = makeReplay();
+    replay.annotations = [
+      {
+        id: "note-1",
+        sceneIndex: 1,
+        body: "Check this file choice",
+        author: "user",
+        createdAt: "2026-05-10T10:01:00.000Z",
+        updatedAt: "2026-05-10T10:01:00.000Z",
+        resolved: false,
+      },
+    ];
+    const data = makeData(replay);
+    data.getOverlays = async () => ({
+      version: 1,
+      overlays: [
+        {
+          id: "overlay-1",
+          sceneIndex: 2,
+          field: "content",
+          originalValue: "The callback now preserves the return URL.",
+          modifiedValue: "The callback preserves the return URL.",
+          source: { type: "tone", params: { style: "professional" } },
+          createdAt: "2026-05-10T10:03:00.000Z",
+          updatedAt: "2026-05-10T10:03:00.000Z",
+        },
+      ],
+    });
+    data.getDataStatus = async () => ({
+      scan: { running: false, resultCount: 1, usageIndexPending: 0 },
+      sources: { count: 1, stale: false },
+      replays: { count: 1 },
+    });
+    const tools = createLocalAssistantTools(data, { mode: "replay" });
+    const annotations = tools.find((tool) => tool.name === "get_session_annotations");
+    const overlays = tools.find((tool) => tool.name === "get_session_overlays");
+    const status = tools.find((tool) => tool.name === "get_data_status");
+    const dashboard = tools.find((tool) => tool.name === "open_dashboard");
+    const openReplay = tools.find((tool) => tool.name === "open_replay");
+    const prepareAction = tools.find((tool) => tool.name === "prepare_user_action");
+
+    const annotationResult = await annotations!.execute("annotations", { slug: "fix-auth" });
+    const overlayResult = await overlays!.execute("overlays", { slug: "fix-auth" });
+    const statusResult = await status!.execute("status", {});
+    const dashboardResult = await dashboard!.execute("dashboard", {
+      tab: "sessions",
+      tools: ["read"],
+      compacted: true,
+    });
+    const openReplayResult = await openReplay!.execute("open-summary", {
+      slug: "fix-auth",
+      view: "summary",
+    });
+    const prepareResult = await prepareAction!.execute("prepare-delete", {
+      slug: "fix-auth",
+      intent: "delete_replay",
+    });
+
+    expect(annotationResult.details).toMatchObject({
+      citations: [{ type: "scene", sceneIndex: 1 }],
+      actions: [{ type: "open_replay", sceneIndex: 1 }],
+    });
+    expect(overlayResult.content[0]).toMatchObject({
+      type: "text",
+      text: expect.stringContaining('"modifiedValue":"The callback preserves the return URL."'),
+    });
+    expect(statusResult.content[0]).toMatchObject({
+      type: "text",
+      text: expect.stringContaining('"usageIndexPending":0'),
+    });
+    expect(dashboardResult.details).toMatchObject({
+      actions: [{ type: "open_dashboard", tab: "sessions", tools: ["read"], compacted: true }],
+    });
+    expect(openReplayResult.details).toMatchObject({
+      actions: [
+        {
+          type: "open_replay",
+          slug: "fix-auth",
+          view: "summary",
+          permalink: expect.stringContaining("v=summary"),
+        },
+      ],
+    });
+    expect(prepareResult.details).toMatchObject({
+      actions: [
+        {
+          type: "open_dashboard",
+          tab: "sessions",
+          selected: "fix-auth",
+          permalink: expect.stringContaining("selected=fix-auth"),
+        },
+      ],
+    });
+    expect(prepareResult.content[0]).toMatchObject({
+      type: "text",
+      text: expect.stringContaining('"requiresUserClick":true'),
+    });
   });
 });
