@@ -27,15 +27,15 @@
     "prepare": "lefthook install"
   },
   "devDependencies": {
-    "@hono/node-server": "^2.0.10",
-    "hono": "^4.12.34",
-    "lefthook": "^2.1.9",
-    "oxfmt": "^0.54.0",
-    "oxlint": "^1.69.0",
-    "playwright": "^1.58.2",
-    "tsx": "^4.22.4",
+    "@hono/node-server": "^2.1.1",
+    "hono": "^4.13.5",
+    "lefthook": "^2.1.12",
+    "oxfmt": "^0.66.0",
+    "oxlint": "^1.70.0",
+    "playwright": "^1.62.1",
+    "tsx": "^4.23.13",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.11"
   },
   "packageManager": "pnpm@10.24.0+sha512.01ff8ae71b4419903b65c60fb2dc9d34cf8bb6e06d03bde112ef38f7a34d6904c424ba66bea5cdcf12890230bf39f9580473140ed9c946fef328b6e5238a345a",
   "pnpm": {

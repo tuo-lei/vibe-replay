@@ -6,7 +6,14 @@ import { cors } from "hono/cors";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { nanoid } from "nanoid";
 import { type AuthEnv, createAuth, DEV_ORIGINS, PROD_ORIGINS } from "./auth";
-import { cloudReplays, dailyInsights, insightProfiles, replays, userFiles } from "./db/schema";
+import {
+  account,
+  cloudReplays,
+  dailyInsights,
+  insightProfiles,
+  replays,
+  userFiles,
+} from "./db/schema";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -735,11 +742,20 @@ app.post("/api/gists", async (c) => {
 
   // Get GitHub access token via Better Auth
   const auth = createAuth(c.env);
+  const db = drizzle(c.env.DB);
   let accessToken: string;
   try {
+    const [githubAccount] = await db
+      .select({ id: account.id })
+      .from(account)
+      .where(and(eq(account.userId, userId), eq(account.providerId, "github")))
+      .limit(1);
+    if (!githubAccount) {
+      return c.json({ error: "GitHub account not linked" }, 400);
+    }
     const result = await auth.api.getAccessToken({
       headers: c.req.raw.headers,
-      body: { providerId: "github" },
+      body: { accountId: githubAccount.id, userId },
     });
     if (!result?.accessToken) {
       return c.json({ error: "GitHub account not linked" }, 400);
@@ -790,7 +806,6 @@ app.post("/api/gists", async (c) => {
   const viewerUrl = `${getBaseUrl(c)}/view/?gist=${gistId}`;
 
   // Extract replay metadata from content and write to cloud_replays
-  const db = drizzle(c.env.DB);
   const replayMeta = extractMetaFromJson(body.content);
   // Migrate viewCount from legacy replays table if this gist was previously visited
   const [legacyRow] = await db
@@ -850,11 +865,20 @@ app.patch("/api/gists/:gistId", async (c) => {
   }
 
   const auth = createAuth(c.env);
+  const db = drizzle(c.env.DB);
   let accessToken: string;
   try {
+    const [githubAccount] = await db
+      .select({ id: account.id })
+      .from(account)
+      .where(and(eq(account.userId, userId), eq(account.providerId, "github")))
+      .limit(1);
+    if (!githubAccount) {
+      return c.json({ error: "GitHub account not linked" }, 400);
+    }
     const result = await auth.api.getAccessToken({
       headers: c.req.raw.headers,
-      body: { providerId: "github" },
+      body: { accountId: githubAccount.id, userId },
     });
     if (!result?.accessToken) {
       return c.json({ error: "GitHub account not linked" }, 400);
@@ -865,7 +889,6 @@ app.patch("/api/gists/:gistId", async (c) => {
   }
 
   // Verify ownership — check cloud_replays record
-  const db = drizzle(c.env.DB);
   const [existing] = await db
     .select({ userId: cloudReplays.userId })
     .from(cloudReplays)
@@ -2086,9 +2109,7 @@ function getBaseUrl(c: Context<HonoEnv>): string {
 function validateReplaySchema(replay: any): string | null {
   if (
     replay?.schemaVersion !== undefined &&
-    (!Number.isInteger(replay.schemaVersion) ||
-      replay.schemaVersion < 1 ||
-      replay.schemaVersion > 1)
+    (!Number.isInteger(replay.schemaVersion) || replay.schemaVersion !== 1)
   ) {
     return `Unsupported replay schema version: ${String(replay.schemaVersion)}`;
   }

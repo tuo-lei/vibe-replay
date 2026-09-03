@@ -10,13 +10,13 @@
     "check": "node ./scripts/run-with-required-node.mjs check"
   },
   "devDependencies": {
-    "@astrojs/check": "^0.9.9",
+    "@astrojs/check": "^0.9.10",
     "@astrojs/rss": "^4.0.19",
-    "@astrojs/sitemap": "^3.7.3",
-    "@tailwindcss/typography": "^0.5.19",
-    "@tailwindcss/vite": "^4.3.1",
-    "astro": "^6.4.8",
-    "tailwindcss": "^4.3.1",
+    "@astrojs/sitemap": "^3.7.4",
+    "@tailwindcss/typography": "^0.5.20",
+    "@tailwindcss/vite": "^4.3.3",
+    "astro": "^7.2.10",
+    "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3"
   }
 }
