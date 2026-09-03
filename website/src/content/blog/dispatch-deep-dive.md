@@ -102,9 +102,9 @@ Code-tab sessions running through Desktop pick up metadata the raw JSONL never s
 
 (That session is literally the implementation of the Cowork provider itself. The first prompt: *"Add support for Cowork (Dispatch) sessions to vibe-replay…"* The `dangerous mode` badge and `claude/crazy-ishizaka-06a286` branch name come from Desktop's metadata.)
 
-[![vibe-replay dashboard: 279 sessions — Claude Code 224, Claude Cowork 47, Cursor 6, Claude Desktop 2, plus activity heatmap](/blog/dispatch-deep-dive/dashboard.png)](/blog/dispatch-deep-dive/dashboard.png)
+[![Synthetic vibe-replay dashboard showing provider-aware recent sessions, replays, and activity heatmaps](/blog/dispatch-deep-dive/dashboard.png)](/blog/dispatch-deep-dive/dashboard.png)
 
-[![Sessions list showing CLAUDE, COWORK, and DESKTOP provider badges](/blog/dispatch-deep-dive/sessions-list.png)](/blog/dispatch-deep-dive/sessions-list.png)
+[![Synthetic sessions view showing provider-aware session rows and replay actions](/blog/dispatch-deep-dive/sessions-list.png)](/blog/dispatch-deep-dive/sessions-list.png)
 
 ---
 

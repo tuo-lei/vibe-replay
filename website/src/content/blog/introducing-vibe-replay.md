@@ -6,7 +6,7 @@ date: 2026-03-05
 readTime: "5 min read"
 ---
 
-[![The interactive replay of vibe-replay's origin session — 53 minutes, 8 prompts, 447 tool calls](/blog/replay-landing.png)](https://vibe-replay.com/view/?gist=586f3f56d9e6c82e3b60b42ea13b341e)
+[![Synthetic vibe-replay replay landing page showing a prompt, assistant response, session stats, and Watch Replay action](/blog/replay-landing.png)](https://vibe-replay.com/view/?gist=586f3f56d9e6c82e3b60b42ea13b341e)
 
 **[Watch the full interactive replay](https://vibe-replay.com/view/?gist=586f3f56d9e6c82e3b60b42ea13b341e)**
 
@@ -42,7 +42,7 @@ The full session has 663 scenes, but the story is concentrated in three turning 
 
 This is a full product vision, not "write me a function." Claude's response wasn't to start writing code either — it first researched competitors, searched for tools like asciinema and claudebin, analyzed their strengths and weaknesses, and only then proposed an architecture.
 
-![The vibe-replay player showing Claude Code's plan after the first prompt — research first, then build](/blog/replay-first-prompt.png)
+![Synthetic vibe-replay player showing the first prompt, assistant response, tool badges, and outline navigation](/blog/replay-first-prompt.png)
 
 ### 2. Knowing when to stop AI from building (Scene 218)
 
@@ -52,7 +52,7 @@ By this point, the core functionality was mostly working. But I noticed Claude C
 
 This is a crucial pattern in vibe coding: **AI's execution speed is a double-edged sword. The human's most important role isn't writing code — it's steering direction.**
 
-![Pulling the brakes on Claude Code — asking for competitor research before building more](/blog/replay-brakes.png)
+![Synthetic vibe-replay compact replay view showing the conversation outline and condensed assistant cards](/blog/replay-brakes.png)
 
 ### 3. Ten UX improvements in a single prompt (Scene 334)
 
@@ -65,7 +65,7 @@ This is a crucial pattern in vibe coding: **AI's execution speed is a double-edg
 
 One prompt drove changes across dozens of files. This is vibe coding at peak efficiency: **humans make UX decisions, AI handles implementation.** One prompt, 56 tool calls.
 
-![Ten UX improvements in a single prompt — Claude Code systematically implements each one](/blog/replay-ten-improvements.png)
+![Synthetic vibe-replay Insights view showing session overview, activity timeline, token composition, and context composition](/blog/replay-ten-improvements.png)
 
 ---
 
