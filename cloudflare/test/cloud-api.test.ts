@@ -241,6 +241,25 @@ describe("Cloud API integration", () => {
       );
       expect(callback.status).toBe(302);
       expect(callback.headers.get("location")).toBe("/auth/success");
+      const sessionCookie = callback.headers
+        .get("set-cookie")
+        ?.split(/,\s*(?=[^;=]+=[^;]+)/)
+        .map((cookie) => cookie.split(";", 1)[0])
+        .find((cookie) => cookie.startsWith("better-auth.session_token="));
+      expect(sessionCookie).toMatch(/^better-auth\.session_token=/);
+
+      const authenticatedApi = await worker.fetch(
+        new Request("http://localhost/api/cloud-replays", {
+          headers: { Cookie: sessionCookie!, Origin: "http://localhost" },
+        }),
+        env,
+        createCtx(),
+      );
+      expect(authenticatedApi.status).toBe(200);
+      await expect(authenticatedApi.json()).resolves.toMatchObject({
+        replays: [],
+        storage: { used: 0, limit: 20 * 1024 * 1024 },
+      });
 
       const accountRow = await env.DB.prepare(
         "SELECT issuer, account_id, provider_id FROM account WHERE account_id = ?",
