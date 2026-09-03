@@ -105,8 +105,6 @@ Code-tab sessions running through Desktop pick up metadata the raw JSONL never s
 
 [![Synthetic vibe-replay dashboard showing provider-aware recent sessions, replays, and activity heatmaps](/blog/dispatch-deep-dive/dashboard.png)](/blog/dispatch-deep-dive/dashboard.png)
 
-[![Synthetic sessions view showing provider-aware session rows and replay actions](/blog/dispatch-deep-dive/sessions-list.png)](/blog/dispatch-deep-dive/sessions-list.png)
-
 ---
 
 ## Try it
