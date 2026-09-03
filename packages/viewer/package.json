@@ -12,25 +12,25 @@
   "dependencies": {
     "@vibe-replay/types": "workspace:*",
     "diff": "^9.0.0",
-    "marked": "^17.0.4",
+    "marked": "^18.0.11",
     "prism-react-renderer": "^2.4.1",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.3.1",
+    "@tailwindcss/vite": "^4.3.3",
     "@testing-library/dom": "^10.4.1",
-    "@testing-library/react": "^16.3.2",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.0.0",
-    "@vitejs/plugin-react": "^6.0.2",
-    "@vitest/coverage-v8": "4.1.9",
-    "jsdom": "^26.1.0",
-    "linkedom": "^0.18.12",
-    "tailwindcss": "^4.3.1",
+    "@testing-library/react": "^16.3.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^6.1.1",
+    "@vitest/coverage-v8": "4.1.11",
+    "jsdom": "^30.0.1",
+    "linkedom": "^0.18.13",
+    "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
     "vite": "^8.2.2",
     "vite-plugin-singlefile": "^2.3.3",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.11"
   }
 }

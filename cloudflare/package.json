@@ -11,17 +11,17 @@
     "db:migrate:remote": "wrangler d1 migrations apply vibe-replay-db --remote"
   },
   "dependencies": {
-    "better-auth": "^1.6.22",
+    "better-auth": "^1.7.2",
     "drizzle-orm": "^0.45.2",
-    "hono": "^4.12.34",
-    "nanoid": "^5.1.16"
+    "hono": "^4.13.5",
+    "nanoid": "^6.0.1"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260615.1",
-    "@types/node": "^25.9.3",
-    "drizzle-kit": "^0.31.0",
-    "miniflare": "^4.20260611.0",
-    "vitest": "^4.1.9",
-    "wrangler": "^4.100.0"
+    "@cloudflare/workers-types": "^5.20260903.1",
+    "@types/node": "^26.4.1",
+    "drizzle-kit": "^0.31.10",
+    "miniflare": "4.20260617.1",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.128.0"
   }
 }

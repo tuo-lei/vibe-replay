@@ -1918,6 +1918,7 @@ function FacetSection({
               <button
                 key={value}
                 aria-pressed={active}
+                aria-label={`${labelFor(value)} ${count}`}
                 onClick={() => onToggle(value)}
                 title={`${titleFor?.(value) || labelFor(value)} · ${count}`}
                 className={`max-w-full inline-flex items-center gap-1.5 rounded-full border px-2 py-1 transition-all duration-200 ease-material ${
@@ -1941,6 +1942,7 @@ function FacetSection({
             <button
               key={value}
               aria-pressed={active}
+              aria-label={`${labelFor(value)} ${count}`}
               onClick={() => onToggle(value)}
               title={titleFor?.(value) || labelFor(value)}
               className={`w-full text-left px-3 py-2 rounded-lg transition-all duration-200 ease-material flex items-center justify-between gap-2 group ${
