@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { type FSWatcher, watch as fsWatch } from "node:fs";
-import { mkdir, open as fsOpen, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, open as fsOpen, readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { serve } from "@hono/node-server";
@@ -22,9 +22,9 @@ import {
   type LocalAssistantContext,
   type LocalAssistantToolDetails,
 } from "./local-assistant.js";
-import { generateOutput, injectDataScript, loadViewerHtml } from "./generator.js";
+import { injectDataScript, loadViewerHtml } from "./generator.js";
 import { mergeInsights, readInsightsStore, writeInsightsStore } from "./insights.js";
-import { loadOverlays, sessionForExternalOutput } from "./overlays.js";
+import { loadOverlays } from "./overlays.js";
 import { parseClaudeCodeLines } from "./providers/claude-code/parser.js";
 import { parseCodexLines } from "./providers/codex/parser.js";
 import { parsePiLines } from "./providers/pi/parser.js";
@@ -37,17 +37,9 @@ import { discoverProvidersSafely, type SafeProviderDiscoveryResult } from "./pro
 import { getApiUrl, loadSavedCloudInfo } from "./publishers/cloud.js";
 import { loadSavedGistInfo, type SavedGistInfo } from "./publishers/gist.js";
 import { mergeSameSessions } from "./session-merge.js";
-import {
-  getRemoteHome,
-  loadRemoteSourceConfigs,
-  normalizeRemoteSourceConfig,
-  saveRemoteSourceConfigs,
-  testRemoteSourceConnection,
-  type RemoteSourceConfig,
-} from "./remote.js";
+import { getRemoteHome } from "./remote.js";
 import {
   type EnrichmentHints,
-  enrichmentHintsFromBody,
   mergeEnrichmentHints,
   pickSourceRecordForSession,
   providerSessionKey,
@@ -85,12 +77,13 @@ import { registerAiRoutes } from "./server-routes/ai.js";
 import { registerCloudProxyRoutes } from "./server-routes/cloud.js";
 import { registerGenerationRoutes } from "./server-routes/generation.js";
 import { registerInsightsRoutes } from "./server-routes/insights.js";
+import { registerReplayRoutes } from "./server-routes/replays.js";
 import { registerSessionAssetRoutes } from "./server-routes/session-assets.js";
 import { registerSessionOutputRoutes } from "./server-routes/session-output.js";
+import { registerSourceRoutes } from "./server-routes/sources.js";
 import {
   buildInsightsSyncBatches,
   getErrorMessage,
-  requireSlug,
   safeSlug,
   safeTargetId,
 } from "./server-core.js";
@@ -119,32 +112,6 @@ export { resolveGenerateInputs } from "./server-core.js";
 // Re-exported for tests that import it from "../src/server.js" (kept stable
 // after the type moved to server-types.ts).
 export type { SourceSummaryRecord } from "./server-types.js";
-
-function parseRemoteSourcesSettingsBody(
-  body: unknown,
-): { sources: RemoteSourceConfig[] } | { error: string } {
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return { error: "Request body must be an object" };
-  }
-  const rawSources = (body as { remoteSources?: unknown }).remoteSources;
-  if (!Array.isArray(rawSources)) {
-    return { error: "remoteSources must be an array" };
-  }
-  if (rawSources.length > 32) {
-    return { error: "At most 32 SSH sources can be configured" };
-  }
-
-  const sources: RemoteSourceConfig[] = [];
-  const ids = new Set<string>();
-  for (const rawSource of rawSources) {
-    const source = normalizeRemoteSourceConfig(rawSource);
-    if (!source) return { error: "Each SSH source must have a valid id and sshHost" };
-    if (ids.has(source.id)) return { error: `Duplicate SSH source id: ${source.id}` };
-    ids.add(source.id);
-    sources.push(source);
-  }
-  return { sources };
-}
 
 function isSameOriginSettingsRequest(c: Context): boolean {
   const origin = c.req.header("Origin");
@@ -1960,18 +1927,13 @@ export async function startServer(
     return c.html(html);
   });
 
-  // --- Session data (requires slug) ---
-  app.get("/api/session", async (c) => {
-    const result = requireSlug(c.req.query("slug"));
-    if ("error" in result) return c.json({ error: result.error }, 400);
-    const targetId = safeTargetId(c.req.query("targetId"));
-    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
-    try {
-      const session = await loadSessionFromDisk(baseDir, result.slug, targetId);
-      return c.json(sessionForExternalOutput(session));
-    } catch {
-      return c.json({ error: `Session not found: ${result.slug}` }, 404);
-    }
+  registerReplayRoutes(app, {
+    baseDir,
+    scanReplays: () => scanSessions(baseDir),
+    refreshReplaysCache,
+    syncSourcesCacheWithReplays,
+    replaysCacheKey,
+    loadSession: (slug, targetId) => loadSessionFromDisk(baseDir, slug, targetId),
   });
 
   // --- Live: stream a session as it's being written to disk ---
@@ -2418,288 +2380,33 @@ export async function startServer(
     });
   });
 
-  // --- Dashboard: list generated replays (legacy /api/sessions routes) ---
-  const getCachedReplays = async (c: Context) => {
-    const cached = await readFileCache<any[]>(replaysCacheKey);
-    return c.json({
-      sessions: cached?.data || [],
-      cachedAt: cached?.updatedAt,
-    });
-  };
-
-  app.get("/api/sessions/cached", getCachedReplays);
-  app.get("/api/replays/cached", getCachedReplays);
-
-  const getReplays = async (c: Context) => {
-    const sessions = await scanSessions(baseDir);
-    await writeFileCache(replaysCacheKey, sessions);
-    return c.json(sessions);
-  };
-
-  app.get("/api/sessions", getReplays);
-  app.get("/api/replays", getReplays);
-
-  // --- Dashboard: update title ---
-  const patchReplay = async (c: Context) => {
-    const slug = safeSlug(c.req.param("slug"));
-    if (!slug) return c.json({ error: "invalid slug" }, 400);
-    const targetId = safeTargetId(c.req.query("targetId"));
-    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
-
-    let body: { title?: unknown };
-    try {
-      body = await c.req.json<{ title?: unknown }>();
-    } catch {
-      return c.json({ error: "invalid JSON body" }, 400);
-    }
-    if (typeof body.title !== "string") {
-      return c.json({ error: "title field required" }, 400);
-    }
-
-    try {
-      const target = await loadSessionFromDisk(baseDir, slug, targetId);
-      target.meta.title = normalizeTitle(body.title);
-
-      const targetDir = join(baseDir, slug);
-      await writeFile(join(targetDir, "replay.json"), JSON.stringify(target), "utf-8");
-      await generateOutput(target, targetDir);
-      const updatedReplays = await refreshReplaysCache();
-      if (updatedReplays) await syncSourcesCacheWithReplays(updatedReplays);
-
-      return c.json({ ok: true, title: target.meta.title });
-    } catch (err) {
-      return c.json({ error: getErrorMessage(err) }, 500);
-    }
-  };
-
-  app.patch("/api/sessions/:slug", patchReplay);
-  app.patch("/api/replays/:slug", patchReplay);
-
-  // --- Dashboard: delete session ---
-  const deleteReplay = async (c: Context) => {
-    const slug = safeSlug(c.req.param("slug"));
-    if (!slug) return c.json({ error: "invalid slug" }, 400);
-    const targetId = safeTargetId(c.req.query("targetId"));
-    if (targetId === null) return c.json({ error: "invalid targetId" }, 400);
-    try {
-      await loadSessionFromDisk(baseDir, slug, targetId);
-      const { rm } = await import("node:fs/promises");
-      await rm(join(baseDir, slug), { recursive: true });
-      const updatedReplays = await refreshReplaysCache();
-      if (updatedReplays) await syncSourcesCacheWithReplays(updatedReplays);
-      return c.json({ ok: true });
-    } catch (err) {
-      return c.json({ error: getErrorMessage(err) }, 500);
-    }
-  };
-
-  app.delete("/api/sessions/:slug", deleteReplay);
-  app.delete("/api/replays/:slug", deleteReplay);
-
   registerArchiveRoutes(app, { baseDir });
-
-  // --- Source sessions: discover raw AI coding sessions from all providers ---
-  const getCachedSourceSessions = async (c: Context) => {
-    const cached = await readSourcesCatalogCache();
-    const remoteSources = await loadRemoteSourceConfigs();
-    const staleProviders = await getStaleSourceProviders(cached);
-    const failedProviders = latestSourceFailures ?? cached?.failedProviders ?? [];
-    const discoveredAtMs = cached?.discoveredAt ? Date.parse(cached.discoveredAt) : Number.NaN;
-    const configStale =
-      remoteConfigChangedAt !== undefined &&
-      (!Number.isFinite(discoveredAtMs) || discoveredAtMs < remoteConfigChangedAt);
-    const allStaleProviders = [
-      ...new Set([...staleProviders, ...failedProviders, ...(configStale ? ["ssh-config"] : [])]),
-    ];
-    return c.json({
-      sessions: cached?.sessions || [],
-      cachedAt: cached?.cachedAt,
-      discoveredAt: cached?.discoveredAt,
-      remoteSources,
-      stale: allStaleProviders.length > 0,
-      staleProviders: allStaleProviders,
-      failedProviders,
-    });
-  };
-
-  app.get("/api/sources/cached", getCachedSourceSessions);
-  app.get("/api/source-sessions/cached", getCachedSourceSessions);
-
-  const getSourceSessionsEnrichmentStatus = async (c: Context) => {
-    return c.json(sourcesEnrichmentStatus);
-  };
-
-  app.get("/api/sources/enrichment-status", getSourceSessionsEnrichmentStatus);
-  app.get("/api/source-sessions/enrichment-status", getSourceSessionsEnrichmentStatus);
-
-  const postSourceSessionsEnrich = async (c: Context) => {
-    const hints = enrichmentHintsFromBody(await c.req.json().catch(() => undefined));
-    const cached = await readSourcesCatalogCache();
-    if (!cached?.sessions.length) {
-      return c.json({ ok: false, message: "No sources cache available" }, 404);
-    }
-    const cursorProvider = getProvider("cursor");
-    if (!cursorProvider) return c.json({ ok: false, message: "Cursor provider unavailable" }, 404);
-
-    const home = homedir();
-    let cursorSessions = lastDiscoveredMergedSessions.filter(
-      (session) => session.provider === "cursor",
-    );
-    if (cursorSessions.length === 0) {
-      cursorSessions = normalizeSessionProjectsForHome(
-        mergeSameSessions(await cursorProvider.discover()),
-        home,
-      );
-      lastDiscoveredMergedSessions = [
-        ...lastDiscoveredMergedSessions.filter((session) => session.provider !== "cursor"),
-        ...cursorSessions,
-      ];
-    }
-    const wasRunning = sourcesEnrichmentStatus.running;
-    enrichCursorStatsInBackground(cursorSessions, cached.sessions, hints);
-    return c.json({
-      ok: true,
-      running: sourcesEnrichmentStatus.running,
-      queued: wasRunning,
-    });
-  };
-
-  app.post("/api/sources/enrich", postSourceSessionsEnrich);
-  app.post("/api/source-sessions/enrich", postSourceSessionsEnrich);
-
-  const getSourceSessions = async (c: Context) => {
-    try {
-      const discovery = await discoverAllProviders();
-      latestSourceFailures = discovery.failedProviders;
-      const merged = mergeSameSessions(discovery.sessions);
-      lastDiscoveredMergedSessions = normalizeSessionProjectsForHome(merged, homedir());
-      const previous = await readSourcesCatalogCache();
-      const result = await buildSourcesResult(
-        merged,
-        baseDir,
-        homedir(),
-        previous?.sessions || [],
-        cleanupPeriodDays,
-      );
-
-      const catalog = await writeDiscoveredSourcesCatalog(
-        result,
-        previous,
-        discovery.failedProviders,
-      );
-      enrichCursorStatsInBackground(merged, result);
-      const remoteSources = await loadRemoteSourceConfigs();
-      return c.json({
-        sessions: catalog.sessions,
-        cleanupPeriodDays,
-        discoveredAt: catalog.discoveredAt,
-        remoteSources,
-        stale: discovery.failedProviders.length > 0,
-        staleProviders: discovery.failedProviders,
-        failedProviders: discovery.failedProviders,
-      });
-    } catch (err) {
-      return c.json({ error: getErrorMessage(err) }, 500);
-    }
-  };
-
-  app.get("/api/sources", getSourceSessions);
-  app.get("/api/source-sessions", getSourceSessions);
-
-  // --- Local settings: user-managed SSH sources ---
-  app.get("/api/settings", async (c) => {
-    try {
-      return c.json({ remoteSources: await loadRemoteSourceConfigs() });
-    } catch (err) {
-      return c.json({ error: getErrorMessage(err) }, 500);
-    }
+  registerSourceRoutes(app, {
+    baseDir,
+    cleanupPeriodDays,
+    readSourcesCatalogCache,
+    writeDiscoveredSourcesCatalog,
+    getStaleSourceProviders,
+    discoverAllProviders,
+    buildSourcesResult,
+    normalizeSessionProjectsForHome,
+    enrichCursorStatsInBackground,
+    getSourcesEnrichmentStatus: () => sourcesEnrichmentStatus,
+    getLastDiscoveredMergedSessions: () => lastDiscoveredMergedSessions,
+    setLastDiscoveredMergedSessions: (sessions) => {
+      lastDiscoveredMergedSessions = sessions;
+    },
+    getLatestSourceFailures: () => latestSourceFailures,
+    setLatestSourceFailures: (failures) => {
+      latestSourceFailures = failures;
+    },
+    getRemoteConfigChangedAt: () => remoteConfigChangedAt,
+    setRemoteConfigChangedAt: (value) => {
+      remoteConfigChangedAt = value;
+    },
+    requestBackgroundScan,
+    isSameOriginSettingsRequest,
   });
-
-  app.put("/api/settings/remote-sources", async (c) => {
-    if (!isSameOriginSettingsRequest(c)) {
-      return c.json({ error: "Settings requests must be same-origin" }, 403);
-    }
-    const parsed = parseRemoteSourcesSettingsBody(await c.req.json().catch(() => undefined));
-    if ("error" in parsed) return c.json({ error: parsed.error }, 400);
-
-    try {
-      await saveRemoteSourceConfigs(parsed.sources);
-      remoteConfigChangedAt = Date.now();
-      const queued = requestBackgroundScan();
-      return c.json({ ok: true, queued, remoteSources: parsed.sources });
-    } catch (err) {
-      return c.json({ error: getErrorMessage(err) }, 500);
-    }
-  });
-
-  app.post("/api/settings/remote-sources/test", async (c) => {
-    if (!isSameOriginSettingsRequest(c)) {
-      return c.json({ ok: false, message: "Settings requests must be same-origin" }, 403);
-    }
-    const body = await c.req.json().catch(() => undefined);
-    const value =
-      body && typeof body === "object" && !Array.isArray(body)
-        ? (body as { remoteSource?: unknown }).remoteSource
-        : undefined;
-    return c.json(await testRemoteSourceConnection(value));
-  });
-
-  // --- Source sessions SSE: stream discovery progress to the dashboard ---
-  const streamSourceSessions = (c: Context) => {
-    return streamSSE(c, async (stream) => {
-      try {
-        let scanned = 0;
-        const discovery = await discoverAllProviders(async () => {
-          scanned++;
-          // Emit progress every 5 sessions to avoid overwhelming the client
-          if (scanned % 5 === 0 || scanned === 1) {
-            await stream.writeSSE({
-              data: JSON.stringify({ type: "progress", scanned }),
-            });
-          }
-        });
-        latestSourceFailures = discovery.failedProviders;
-
-        const merged = mergeSameSessions(discovery.sessions);
-        lastDiscoveredMergedSessions = normalizeSessionProjectsForHome(merged, homedir());
-        const previous = await readSourcesCatalogCache();
-        const result = await buildSourcesResult(
-          merged,
-          baseDir,
-          homedir(),
-          previous?.sessions || [],
-          cleanupPeriodDays,
-        );
-
-        const catalog = await writeDiscoveredSourcesCatalog(
-          result,
-          previous,
-          discovery.failedProviders,
-        );
-        enrichCursorStatsInBackground(merged, result);
-        const remoteSources = await loadRemoteSourceConfigs();
-        await stream.writeSSE({
-          data: JSON.stringify({
-            type: "complete",
-            sessions: catalog.sessions,
-            cleanupPeriodDays,
-            discoveredAt: catalog.discoveredAt,
-            remoteSources,
-            stale: discovery.failedProviders.length > 0,
-            staleProviders: discovery.failedProviders,
-            failedProviders: discovery.failedProviders,
-          }),
-        });
-      } catch (err) {
-        await stream.writeSSE({
-          data: JSON.stringify({ type: "error", message: getErrorMessage(err) }),
-        });
-      }
-    });
-  };
-
-  app.get("/api/sources/stream", streamSourceSessions);
-  app.get("/api/source-sessions/stream", streamSourceSessions);
 
   registerGenerationRoutes(app, {
     baseDir,
